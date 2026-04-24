@@ -267,6 +267,139 @@ func TestLowerFileStatefulListChecksUntilStopSetBeforeParsingNextItem(t *testing
 	}
 }
 
+func TestLowerFileStatefulFlatRepeatTermFlattensNestedLists(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    group(state: mutable ParserState&) -> darray[Token]:
+        values = list(token(TokenKind.IDENT), until(";", token(TokenKind.EOF)))
+        return values
+    groups(state: mutable ParserState&) -> darray[Token]:
+        values = flatrepeat(group(), until("end", token(TokenKind.EOF)))
+        return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"flatrepeat_group",
+		"flatrepeat_index",
+		".count",
+		".push(",
+		"state.current_token().kind == token_kind_for_text(\"end\")",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered flatrepeat production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if !strings.Contains(formatted, "def groups(state: mutable ParserState&) -> darray[Token]:") {
+		t.Fatalf("expected lowered groups production, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulRequiredTermRecordsSpecificParseError(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    ident(state: mutable ParserState&) -> Token:
+        name = required(.IDENT, ParseMessageKey.ExpectedProgramName)
+        required(")", ParseMessageKey.ExpectedRightParen)
+        return name
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.record_parse_error(ParseMessageKey.ExpectedProgramName)",
+		"state.record_parse_error(ParseMessageKey.ExpectedRightParen)",
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect(\")\")",
+		"return (true, __grammar_committed_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered required-term production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulDelimitedTermPreservesBodyValueAndRecordsCloseError(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    atom(state: mutable ParserState&) -> Token:
+        value = delimited("(", .IDENT, ")", ParseMessageKey.ExpectedRightParen)
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect(\"(\")",
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.record_parse_error(ParseMessageKey.ExpectedRightParen)",
+		"return (true, __grammar_committed_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered delimited-term production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulSeqTermWorksInsideOptionalAndReturnsLastValue(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    else_clause(state: mutable ParserState&) -> Token:
+        value = optional(seq("else", required(.IDENT, ParseMessageKey.ExpectedProgramName)))
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect(\"else\")",
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.record_parse_error(ParseMessageKey.ExpectedProgramName)",
+		"__grammar_seq_matched_",
+		"return (true, __grammar_committed_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered seq-term production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulSeqTermSupportsBindingsAndAssignments(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    atom(state: mutable ParserState&) -> Token:
+        value = seq(.IDENT(token), span <- expr(token.span), expr(token))
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"token = __grammar_token_",
+		"token.span",
+		"__grammar_seq_matched_",
+		"return (true, __grammar_committed_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered seq-term binding production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulLookaheadTermRestoresCursor(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor state
+    atom() -> Token:
+        lookahead(.IDENT)
+        .IDENT(current)
+        return current
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_lookahead_cursor_",
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.cursor <- __grammar_lookahead_cursor_",
+		"return (true, __grammar_committed_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered lookahead production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulSeparatedTermBuildsListLoop(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     args(state: mutable ParserState&) -> darray[Token]:
@@ -283,6 +416,30 @@ func TestLowerFileStatefulSeparatedTermBuildsListLoop(t *testing.T) {
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered separated-term production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulOptionalAndRepeatSuffixShorthandLowerThroughExistingTerms(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	    cursor state
+	    items() -> darray[Token]:
+	        values = .IDENT* until(")", token(TokenKind.EOF))
+	        return values
+	    maybe_item() -> Token:
+	        value = .IDENT?
+	        return value
+	`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.current_token().kind == token_kind_for_text(\")\")",
+		"__grammar_optional_cursor_",
+		"def maybe_item(state: mutable ParserState&) -> Token:",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered shorthand production to contain %q, got:\n%s", want, formatted)
 		}
 	}
 }
@@ -605,6 +762,86 @@ extend grammar PascalFrontend:
 	}
 	if strings.Count(formatted, "def expr(parser: mutable ParserState&) -> Token:") != 1 {
 		t.Fatalf("expected merged grammar lowering to emit expr exactly once, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulProductionAugmentationBuildsSingleMergedProduction(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalStmtGrammar over Token using ParserState:
+    cursor state
+    statement() -> Token:
+        .IDENT(tok)
+        return tok
+
+extend grammar PascalStmtGrammar:
+    statement +=
+        .INTEGER(tok)
+        return tok
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if strings.Count(formatted, "def statement(state: mutable ParserState&) -> Token:") != 1 {
+		t.Fatalf("expected exactly one merged statement production, got:\n%s", formatted)
+	}
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.INTEGER)",
+		"__grammar_augment_statement_base_0",
+		"__grammar_augment_statement_append_1",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected augmented lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulGroupedProductionAugmentationBuildsMergedProduction(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalStmtGrammar over Token using ParserState:
+    cursor state
+    statement() -> Token:
+        .IDENT(tok)
+        return tok
+
+extend grammar PascalStmtGrammar:
+    statement +=:
+        .INTEGER(tok)
+		pass
+		|
+        .STRING(tok)
+        return tok
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if strings.Count(formatted, "def statement(state: mutable ParserState&) -> Token:") != 1 {
+		t.Fatalf("expected exactly one merged statement production, got:\n%s", formatted)
+	}
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.INTEGER)",
+		"state.expect_kind(TokenKind.STRING)",
+		"__grammar_augment_statement_base_0",
+		"__grammar_augment_statement_append_1",
+		"__grammar_augment_statement_append_2",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected grouped augmented lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulTokenAliasesRewriteLiteralTokensToKinds(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor state
+    token .PROGRAM "program"
+    program() -> Token:
+        "program"
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "state.expect_kind(TokenKind.PROGRAM)") {
+		t.Fatalf("expected token alias lowering to prefer expect_kind for aliased literal, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, `state.expect("program")`) {
+		t.Fatalf("expected token alias lowering to avoid raw string match for aliased literal, got:\n%s", formatted)
 	}
 }
 

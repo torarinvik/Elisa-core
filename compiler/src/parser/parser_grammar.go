@@ -41,6 +41,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	var errorType ast.TypeExpr
 	var cursorExpr ast.Expr
 	var allocExpr ast.Expr
+	tokenAliases := make([]ast.GrammarTokenAliasDecl, 0)
 	channels := make([]ast.GrammarChannelDecl, 0)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
@@ -57,6 +58,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			cursorExpr = p.parseGrammarValueHeaderDecl("cursor")
 		case p.peekIdentText("alloc"):
 			allocExpr = p.parseGrammarValueHeaderDecl("alloc")
+		case p.peekIdentText("token"):
+			tokenAliases = append(tokenAliases, p.parseGrammarTokenAliasDecl())
 		case p.peekIdentText("channel"):
 			channels = append(channels, p.parseGrammarChannelDecl())
 		default:
@@ -70,7 +73,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		productions = append(productions, p.parseGrammarProductionDecl())
+		productions = append(productions, p.parseGrammarProductionDecls()...)
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
@@ -90,6 +93,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		ErrorType:        errorType,
 		CursorExpr:       cursorExpr,
 		AllocExpr:        allocExpr,
+		TokenAliases:     tokenAliases,
 		Channels:         channels,
 		Productions:      productions,
 	}
@@ -107,7 +111,7 @@ func (p *Parser) peekGrammarHeaderDecl() bool {
 	}
 	next := p.tokens[p.pos+1].Kind
 	switch p.cur().Text {
-	case "cursor", "alloc", "channel":
+	case "cursor", "alloc", "token", "channel":
 		return next != lexer.TOKEN_LPAREN
 	default:
 		return false
@@ -138,6 +142,19 @@ func (p *Parser) parseGrammarValueHeaderDecl(keyword string) ast.Expr {
 	return value
 }
 
+func (p *Parser) parseGrammarTokenAliasDecl() ast.GrammarTokenAliasDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("token")
+	term := p.parseGrammarTokenKindTerm()
+	alias := ast.GrammarTokenAliasDecl{Position: pos, Kind: term.Kind}
+	if p.peek() == lexer.TOKEN_STRING_LIT {
+		alias.Literal = p.advance().Text
+		alias.HasLiteral = true
+	}
+	p.expectNewline()
+	return alias
+}
+
 func (p *Parser) parseGrammarChannelDecl() ast.GrammarChannelDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("channel")
@@ -154,13 +171,27 @@ func (p *Parser) parseGrammarChannelDecl() ast.GrammarChannelDecl {
 	return ast.GrammarChannelDecl{Position: pos, Name: name, Type: typeExpr, Default: defaultExpr}
 }
 
-func (p *Parser) parseGrammarProductionDecl() ast.GrammarProductionDecl {
+func (p *Parser) parseGrammarProductionDecls() []ast.GrammarProductionDecl {
 	pos := p.cur().Pos
 	public := p.peekIdentText("pub") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT
 	if public {
 		p.expectIdentText("pub")
 	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	if p.match(lexer.TOKEN_PLUSEQ) {
+		if p.match(lexer.TOKEN_COLON) {
+			p.expectNewline()
+			groupedTerms := p.parseGroupedGrammarAppendTermBlocks()
+			productions := make([]ast.GrammarProductionDecl, 0, len(groupedTerms))
+			for _, terms := range groupedTerms {
+				productions = append(productions, ast.GrammarProductionDecl{Position: pos, Public: public, Append: true, Name: name, Terms: terms})
+			}
+			return productions
+		}
+		p.expectNewline()
+		terms := p.parseGrammarTermBlock()
+		return []ast.GrammarProductionDecl{{Position: pos, Public: public, Append: true, Name: name, Terms: terms}}
+	}
 	hasParamList := p.match(lexer.TOKEN_LPAREN)
 	params := make([]ast.ParamDecl, 0)
 	if hasParamList {
@@ -182,7 +213,47 @@ func (p *Parser) parseGrammarProductionDecl() ast.GrammarProductionDecl {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	terms := p.parseGrammarTermBlock()
-	return ast.GrammarProductionDecl{Position: pos, Public: public, Name: name, HasParamList: hasParamList, Params: params, ReturnType: retType, RecoverMsg: recoverMsg, RecoverUntil: recoverUntil, RecoverValue: recoverValue, Terms: terms}
+	return []ast.GrammarProductionDecl{{Position: pos, Public: public, Name: name, HasParamList: hasParamList, Params: params, ReturnType: retType, RecoverMsg: recoverMsg, RecoverUntil: recoverUntil, RecoverValue: recoverValue, Terms: terms}}
+}
+
+func (p *Parser) parseGroupedGrammarAppendTermBlocks() [][]ast.GrammarTerm {
+	p.expect(lexer.TOKEN_INDENT)
+	groups := make([][]ast.GrammarTerm, 0, p.estimateIndentedItemCount())
+	current := make([]ast.GrammarTerm, 0, p.estimateIndentedItemCount())
+	lastWasSeparator := false
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		for p.peek() == lexer.TOKEN_NEWLINE {
+			p.advance()
+		}
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		if p.peek() == lexer.TOKEN_PIPE {
+			if len(current) == 0 {
+				p.errorf("expected grouped append arm before '|' separator")
+			}
+			p.advance()
+			p.expectNewline()
+			if len(current) != 0 {
+				groups = append(groups, current)
+				current = make([]ast.GrammarTerm, 0, p.estimateIndentedItemCount())
+			}
+			lastWasSeparator = true
+			continue
+		}
+		term := p.parseGrammarTerm()
+		if term != nil {
+			current = append(current, term)
+			lastWasSeparator = false
+		}
+	}
+	if len(current) != 0 {
+		groups = append(groups, current)
+	} else if lastWasSeparator {
+		p.errorf("expected grouped append arm after '|' separator")
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return groups
 }
 
 func (p *Parser) parseGrammarRecoverClause() (ast.Expr, []ast.GrammarTerm, ast.Expr) {
@@ -291,6 +362,32 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 	return term
 }
 
+func (p *Parser) parseGrammarNestedTerm() ast.GrammarTerm {
+	if p.peek() == lexer.TOKEN_PASS {
+		pos := p.cur().Pos
+		p.advance()
+		return &ast.GrammarPassTerm{Position: pos}
+	}
+	if p.peekGrammarTokenKindBinding() {
+		return p.parseGrammarTokenKindBinding()
+	}
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LARROW {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_LARROW)
+		term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
+		return &ast.GrammarAssignTerm{Position: pos, Name: name, Term: term}
+	}
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_ASSIGN)
+		term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
+		return &ast.GrammarBindTerm{Position: pos, Name: name, Term: term}
+	}
+	return p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
+}
+
 func (p *Parser) parseGrammarRecoverableTermValue() ast.GrammarTerm {
 	return p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
 }
@@ -300,6 +397,31 @@ func (p *Parser) peekGrammarBlockTerm(name string) bool {
 }
 
 func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
+	term := p.parseGrammarAtomicTermValue()
+	if p.peek() == lexer.TOKEN_PIPE {
+		options := []ast.GrammarTerm{term}
+		for p.match(lexer.TOKEN_PIPE) {
+			options = append(options, p.parseGrammarAtomicTermValue())
+		}
+		term = &ast.GrammarChoiceTerm{Position: term.Pos(), Options: options}
+	}
+	for {
+		switch {
+		case p.match(lexer.TOKEN_QUESTION):
+			term = &ast.GrammarOptionalTerm{Position: term.Pos(), Term: term}
+		case p.match(lexer.TOKEN_STAR):
+			var until []ast.GrammarTerm
+			if p.peekIdentText("until") {
+				until = p.parseGrammarUntilClause()
+			}
+			term = &ast.GrammarRepeatTerm{Position: term.Pos(), Elem: term, Until: until}
+		default:
+			return term
+		}
+	}
+}
+
+func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	pos := p.cur().Pos
 	if p.peek() == lexer.TOKEN_STRING_LIT {
 		lit := p.advance()
@@ -323,6 +445,18 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 	if p.peekIdentText("when") {
 		return p.parseGrammarWhenTerm()
 	}
+	if p.peekIdentText("required") {
+		return p.parseGrammarRequiredTerm()
+	}
+	if p.peekIdentText("delimited") {
+		return p.parseGrammarDelimitedTerm()
+	}
+	if p.peekIdentText("seq") {
+		return p.parseGrammarSeqTerm()
+	}
+	if p.peekIdentText("lookahead") {
+		return p.parseGrammarLookaheadTerm()
+	}
 	if p.peekIdentText("expr") {
 		return p.parseGrammarExprTerm()
 	}
@@ -340,6 +474,9 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 	}
 	if p.peekIdentText("list") {
 		return p.parseGrammarListTerm()
+	}
+	if p.peekIdentText("flatrepeat") {
+		return p.parseGrammarFlatRepeatTerm()
 	}
 	if p.peekIdentText("repeat") {
 		return p.parseGrammarRepeatTerm()
@@ -418,6 +555,58 @@ func (p *Parser) parseGrammarWhenTerm() ast.GrammarTerm {
 	return &ast.GrammarWhenTerm{Position: pos, Cond: cond, Then: thenTerm, Else: elseTerm}
 }
 
+func (p *Parser) parseGrammarRequiredTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("required")
+	p.expect(lexer.TOKEN_LPAREN)
+	term := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_COMMA)
+	message := p.parseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarRequiredTerm{Position: pos, Term: term, Message: message}
+}
+
+func (p *Parser) parseGrammarDelimitedTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("delimited")
+	p.expect(lexer.TOKEN_LPAREN)
+	open := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_COMMA)
+	body := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_COMMA)
+	close := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_COMMA)
+	message := p.parseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarDelimitedTerm{Position: pos, Open: open, Body: body, Close: close, Message: message}
+}
+
+func (p *Parser) parseGrammarSeqTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("seq")
+	p.expect(lexer.TOKEN_LPAREN)
+	terms := make([]ast.GrammarTerm, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			terms = append(terms, p.parseGrammarNestedTerm())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarSeqTerm{Position: pos, Terms: terms}
+}
+
+func (p *Parser) parseGrammarLookaheadTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("lookahead")
+	p.expect(lexer.TOKEN_LPAREN)
+	term := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarLookaheadTerm{Position: pos, Term: term}
+}
+
 func (p *Parser) parseGrammarExprTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("expr")
@@ -492,6 +681,19 @@ func (p *Parser) parseGrammarRepeatTerm() ast.GrammarTerm {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarRepeatTerm{Position: pos, Elem: elem, Until: until}
+}
+
+func (p *Parser) parseGrammarFlatRepeatTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("flatrepeat")
+	p.expect(lexer.TOKEN_LPAREN)
+	elem := p.parseGrammarRecoverableTermValue()
+	var until []ast.GrammarTerm
+	if p.match(lexer.TOKEN_COMMA) {
+		until = p.parseGrammarUntilClause()
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarFlatRepeatTerm{Position: pos, Elem: elem, Until: until}
 }
 
 func (p *Parser) parseGrammarSeparatedTerm() ast.GrammarTerm {

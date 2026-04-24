@@ -299,6 +299,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.AllocExpr != nil {
 			f.writeLine(level+1, "alloc "+formatExpr(n.AllocExpr))
 		}
+		for _, alias := range n.TokenAliases {
+			line := "token ." + alias.Kind
+			if alias.HasLiteral {
+				line += " " + strconv.Quote(alias.Literal)
+			}
+			f.writeLine(level+1, line)
+		}
 		for _, channel := range n.Channels {
 			line := "channel " + channel.Name
 			if channel.Type != nil {
@@ -309,8 +316,28 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 			f.writeLine(level+1, line)
 		}
-		for _, production := range n.Productions {
+		for index := 0; index < len(n.Productions); {
+			production := n.Productions[index]
+			if !production.Append {
+				f.writeGrammarProduction(level+1, production)
+				index++
+				continue
+			}
+			end := index + 1
+			for end < len(n.Productions) {
+				next := n.Productions[end]
+				if !next.Append || next.Name != production.Name || next.Public != production.Public {
+					break
+				}
+				end++
+			}
+			if end-index > 1 {
+				f.writeGroupedGrammarAppendProductions(level+1, n.Productions[index:end])
+				index = end
+				continue
+			}
 			f.writeGrammarProduction(level+1, production)
+			index++
 		}
 	case *ast.StructDecl:
 		f.writeAnnotations(level, n.Annotations)
@@ -451,6 +478,14 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 		header += "pub "
 	}
 	header += production.Name
+	if production.Append {
+		header += " +="
+		f.writeLine(level, header)
+		for _, term := range production.Terms {
+			f.writeGrammarTerm(level+1, term)
+		}
+		return
+	}
 	if production.HasParamList || len(production.Params) != 0 {
 		header += "(" + formatParamList(production.Params) + ")"
 	}
@@ -464,6 +499,26 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 	f.writeLine(level, header)
 	for _, term := range production.Terms {
 		f.writeGrammarTerm(level+1, term)
+	}
+}
+
+func (f *formatter) writeGroupedGrammarAppendProductions(level int, productions []ast.GrammarProductionDecl) {
+	if len(productions) == 0 {
+		return
+	}
+	header := ""
+	if productions[0].Public {
+		header += "pub "
+	}
+	header += productions[0].Name + " +=:"
+	f.writeLine(level, header)
+	for index, production := range productions {
+		if index > 0 {
+			f.writeLine(level+1, "|")
+		}
+		for _, term := range production.Terms {
+			f.writeGrammarTerm(level+1, term)
+		}
 	}
 }
 
@@ -669,6 +724,18 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "choice(" + strings.Join(options, ", ") + ")"
 	case *ast.GrammarWhenTerm:
 		return "when(" + formatExpr(n.Cond) + ", " + formatGrammarTerm(n.Then) + ", " + formatGrammarTerm(n.Else) + ")"
+	case *ast.GrammarRequiredTerm:
+		return "required(" + formatGrammarTerm(n.Term) + ", " + formatExpr(n.Message) + ")"
+	case *ast.GrammarDelimitedTerm:
+		return "delimited(" + formatGrammarTerm(n.Open) + ", " + formatGrammarTerm(n.Body) + ", " + formatGrammarTerm(n.Close) + ", " + formatExpr(n.Message) + ")"
+	case *ast.GrammarSeqTerm:
+		parts := make([]string, 0, len(n.Terms))
+		for _, term := range n.Terms {
+			parts = append(parts, formatGrammarTerm(term))
+		}
+		return "seq(" + strings.Join(parts, ", ") + ")"
+	case *ast.GrammarLookaheadTerm:
+		return "lookahead(" + formatGrammarTerm(n.Term) + ")"
 	case *ast.GrammarExprTerm:
 		return "expr(" + formatExpr(n.Expr) + ")"
 	case *ast.GrammarRecoverTerm:
@@ -704,6 +771,16 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
 		}
 		return "repeat(" + strings.Join(parts, ", ") + ")"
+	case *ast.GrammarFlatRepeatTerm:
+		parts := []string{formatGrammarTerm(n.Elem)}
+		if len(n.Until) != 0 {
+			untilParts := make([]string, 0, len(n.Until))
+			for _, stop := range n.Until {
+				untilParts = append(untilParts, formatGrammarTerm(stop))
+			}
+			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
+		}
+		return "flatrepeat(" + strings.Join(parts, ", ") + ")"
 	case *ast.GrammarSeparatedTerm:
 		parts := []string{formatGrammarTerm(n.Elem), formatGrammarTerm(n.Separator)}
 		if len(n.Until) != 0 {

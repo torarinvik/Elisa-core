@@ -78,6 +78,8 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
     error PascalFrontendError
     cursor parser
     alloc arena
+	token .PROGRAM "program"
+	token .IDENT
     channel node
 	channel span: PascalSpan = span($start, $end)
     channel checksum: i64
@@ -107,6 +109,15 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 	if got := formatExprForTest(t, decl.AllocExpr); got != "arena" {
 		t.Fatalf("expected alloc expr arena, got %q", got)
 	}
+	if len(decl.TokenAliases) != 2 {
+		t.Fatalf("expected two token aliases, got %d", len(decl.TokenAliases))
+	}
+	if decl.TokenAliases[0].Kind != "PROGRAM" || !decl.TokenAliases[0].HasLiteral || decl.TokenAliases[0].Literal != "program" {
+		t.Fatalf("expected first token alias to be .PROGRAM \"program\", got %#v", decl.TokenAliases[0])
+	}
+	if decl.TokenAliases[1].Kind != "IDENT" || decl.TokenAliases[1].HasLiteral {
+		t.Fatalf("expected second token alias to be bare .IDENT, got %#v", decl.TokenAliases[1])
+	}
 	if len(decl.Channels) != 3 {
 		t.Fatalf("expected three channels, got %d", len(decl.Channels))
 	}
@@ -128,6 +139,8 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 		"error PascalFrontendError",
 		"cursor parser",
 		"alloc arena",
+		"token .PROGRAM \"program\"",
+		"token .IDENT",
 		"channel node",
 		"channel span: PascalSpan = span($start, $end)",
 		"channel checksum: i64",
@@ -136,6 +149,129 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
 		}
+	}
+}
+
+func TestParseGrammarDeclAllowsProductionAugmentationSyntax(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
+    statement() -> Token:
+        .IDENT(tok)
+        return tok
+
+extend grammar PascalStmtGrammar:
+    statement +=
+        .INTEGER(tok)
+        return tok
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 2 {
+		t.Fatalf("expected two grammar decls, got %d", len(file.Decls))
+	}
+	extDecl, ok := file.Decls[1].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected extension grammar decl, got %T", file.Decls[1])
+	}
+	if len(extDecl.Productions) != 1 {
+		t.Fatalf("expected one augmented production, got %d", len(extDecl.Productions))
+	}
+	production := extDecl.Productions[0]
+	if !production.Append {
+		t.Fatal("expected production augmentation to set Append")
+	}
+	if production.Name != "statement" || len(production.Terms) != 2 {
+		t.Fatalf("unexpected augmented production shape: %#v", production)
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "statement +=") {
+		t.Fatalf("expected formatted output to preserve += production header, got:\n%s", formatted)
+	}
+}
+
+func TestParseGrammarDeclAllowsGroupedProductionAugmentationSyntax(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
+    statement() -> Token:
+        .IDENT(tok)
+        return tok
+
+extend grammar PascalStmtGrammar:
+    statement +=:
+        .INTEGER(tok)
+		pass
+		|
+        .STRING(tok)
+        return tok
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 2 {
+		t.Fatalf("expected two grammar decls, got %d", len(file.Decls))
+	}
+	extDecl, ok := file.Decls[1].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected extension grammar decl, got %T", file.Decls[1])
+	}
+	if len(extDecl.Productions) != 2 {
+		t.Fatalf("expected grouped augmentation to expand into two productions, got %d", len(extDecl.Productions))
+	}
+	for index, production := range extDecl.Productions {
+		if !production.Append {
+			t.Fatalf("expected grouped production %d to set Append", index)
+		}
+		if production.Name != "statement" || len(production.Terms) != 2 {
+			t.Fatalf("unexpected grouped production %d shape: %#v", index, production)
+		}
+	}
+	formatted := unparse.FormatFile(file)
+	if strings.Count(formatted, "statement +=:") != 1 {
+		t.Fatalf("expected formatted output to use grouped +=: form once, got:\n%s", formatted)
+	}
+	for _, want := range []string{".INTEGER(tok)", ".STRING(tok)", "|"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclRequiresPipeToSplitGroupedProductionAugmentationArms(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
+    statement() -> Token:
+        .IDENT(tok)
+        return tok
+
+extend grammar PascalStmtGrammar:
+    statement +=:
+        .INTEGER(tok)
+        return tok
+
+        .STRING(tok)
+        return tok
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	extDecl, ok := file.Decls[1].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected extension grammar decl, got %T", file.Decls[1])
+	}
+	if len(extDecl.Productions) != 1 {
+		t.Fatalf("expected grouped append without '|' to stay a single production, got %d", len(extDecl.Productions))
+	}
+	production := extDecl.Productions[0]
+	if !production.Append {
+		t.Fatal("expected grouped append production to set Append")
+	}
+	if len(production.Terms) != 4 {
+		t.Fatalf("expected missing '|' case to keep all terms in one append arm, got %d", len(production.Terms))
+	}
+	formatted := unparse.FormatFile(file)
+	if strings.Contains(formatted, "statement +=:") {
+		t.Fatalf("expected formatter to avoid grouped +=: form when only one append arm remains, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, "|") {
+		t.Fatalf("expected formatter output to omit pipe separators when none were parsed, got:\n%s", formatted)
 	}
 }
 
@@ -420,6 +556,42 @@ func TestParseGrammarChoiceOptionalAndListTerms(t *testing.T) {
 	}
 }
 
+func TestParseGrammarChoicePipeShorthandDesugarsToChoiceTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalExprGrammar over Token using ParserState:
+	operator() -> Token:
+		op = "*" | "/" | "div"
+		return op
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be a binding, got %T", decl.Productions[0].Terms[0])
+	}
+	choice, ok := bind.Term.(*ast.GrammarChoiceTerm)
+	if !ok {
+		t.Fatalf("expected pipe shorthand to parse as choice term, got %T", bind.Term)
+	}
+	if len(choice.Options) != 3 {
+		t.Fatalf("expected three choice options, got %d", len(choice.Options))
+	}
+	for index, want := range []string{"*", "/", "div"} {
+		token, ok := choice.Options[index].(*ast.GrammarTokenTerm)
+		if !ok || token.Value != want {
+			t.Fatalf("expected option %d to be %q token term, got %T %#v", index, want, choice.Options[index], choice.Options[index])
+		}
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, `op = choice("*", "/", "div")`) {
+		t.Fatalf("expected formatted output to contain canonical choice form, got:\n%s", formatted)
+	}
+}
+
 func TestParseGrammarListTermAllowsUntilStopSets(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     block(state: mutable ParserState&) -> Pascal.Block:
@@ -511,6 +683,60 @@ func TestParseGrammarRepeatAndSeparatedTerms(t *testing.T) {
 	for _, want := range []string{
 		"items = repeat(state.statement(), until(\"end\", token(TokenKind.EOF)))",
 		"values = separated(state.expression(), \",\", until(\")\", token(TokenKind.EOF)))",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsOptionalAndRepeatSuffixShorthand(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	items() -> darray[Token]:
+		many = .IDENT* until(")", token(TokenKind.EOF))
+		maybe = .IDENT?
+		return many
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.Productions) != 1 || len(decl.Productions[0].Terms) != 3 {
+		t.Fatalf("expected one production with three terms, got %#v", decl.Productions)
+	}
+	manyBind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	manyRepeat, ok := manyBind.Term.(*ast.GrammarRepeatTerm)
+	if !ok {
+		t.Fatalf("expected first binding to use repeat shorthand, got %T", manyBind.Term)
+	}
+	if _, ok := manyRepeat.Elem.(*ast.GrammarTokenKindTerm); !ok {
+		t.Fatalf("expected repeat shorthand elem to stay token kind term, got %T", manyRepeat.Elem)
+	}
+	if len(manyRepeat.Until) != 2 {
+		t.Fatalf("expected repeat shorthand to preserve until stop set, got %d stops", len(manyRepeat.Until))
+	}
+	maybeBind, ok := decl.Productions[0].Terms[1].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected second term to be binding, got %T", decl.Productions[0].Terms[1])
+	}
+	maybeOptional, ok := maybeBind.Term.(*ast.GrammarOptionalTerm)
+	if !ok {
+		t.Fatalf("expected second binding to use optional shorthand, got %T", maybeBind.Term)
+	}
+	if tokenKind, ok := maybeOptional.Term.(*ast.GrammarTokenKindTerm); !ok || tokenKind.Kind != "IDENT" {
+		t.Fatalf("expected optional shorthand inner term to be .IDENT, got %T %#v", maybeOptional.Term, maybeOptional.Term)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"many = repeat(.IDENT, until(\")\", token(TokenKind.EOF)))",
+		"maybe = optional(.IDENT)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
@@ -818,6 +1044,79 @@ func TestParseGrammarDeclAllowsSuffixTerm(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsSuffixTermWithPipeTokenKinds(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+    condition() -> Pascal.Expr:
+        node = suffix(left = expression()):
+            op = .EQ | .NOTEQ | .LTEQ | .LT | .GTEQ | .GT right = expression() -> build_condition(left, op, right)
+        return node
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be suffix binding, got %T", decl.Productions[0].Terms[0])
+	}
+	suffix, ok := bind.Term.(*ast.GrammarSuffixTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be suffix, got %T", bind.Term)
+	}
+	if len(suffix.Arms) != 1 {
+		t.Fatalf("expected one suffix arm, got %d", len(suffix.Arms))
+	}
+	choice, ok := suffix.Arms[0].Op.(*ast.GrammarChoiceTerm)
+	if !ok {
+		t.Fatalf("expected suffix arm operator to be a choice term, got %T", suffix.Arms[0].Op)
+	}
+	if len(choice.Options) != 6 {
+		t.Fatalf("expected six relational operator choices, got %d", len(choice.Options))
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "op = choice(.EQ, .NOTEQ, .LTEQ, .LT, .GTEQ, .GT) right = expression() -> build_condition(left, op, right)") {
+		t.Fatalf("expected formatted output to contain canonical suffix-arm choice form, got:\n%s", formatted)
+	}
+}
+
+func TestParseGrammarDeclAllowsFlatRepeatTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    groups(state: mutable ParserState&) -> darray[Token]:
+        values = flatrepeat(state.group(), until("end", token(TokenKind.EOF)))
+        return values
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be flatrepeat binding, got %T", decl.Productions[0].Terms[0])
+	}
+	flat, ok := bind.Term.(*ast.GrammarFlatRepeatTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be flatrepeat, got %T", bind.Term)
+	}
+	if len(flat.Until) != 2 {
+		t.Fatalf("expected two until stop terms, got %d", len(flat.Until))
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"values = flatrepeat(state.group(), until(\"end\", token(TokenKind.EOF)))",
+		"return values",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsExprTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Token:
@@ -882,6 +1181,200 @@ func TestParseGrammarDeclAllowsWhenTerm(t *testing.T) {
 	for _, want := range []string{
 		"node = when((tok.kind == TokenKind.THEN), state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed as Pascal.Stmt), when(is_statement_start(state.current_token().kind), state.statement_core(), expr(zeroed as Pascal.Stmt)))",
 		"return node",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsRequiredTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    ident(state: mutable ParserState&) -> Token:
+        name = required(.IDENT, ParseMessageKey.ExpectedProgramName)
+        required(")", ParseMessageKey.ExpectedRightParen)
+        return name
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be required binding, got %T", decl.Productions[0].Terms[0])
+	}
+	required, ok := bind.Term.(*ast.GrammarRequiredTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be required, got %T", bind.Term)
+	}
+	if _, ok := required.Term.(*ast.GrammarTokenKindTerm); !ok {
+		t.Fatalf("expected required inner term to be token kind, got %T", required.Term)
+	}
+	if _, ok := decl.Productions[0].Terms[1].(*ast.GrammarRequiredTerm); !ok {
+		t.Fatalf("expected second term to be required, got %T", decl.Productions[0].Terms[1])
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"name = required(.IDENT, ParseMessageKey.ExpectedProgramName)",
+		"required(\")\", ParseMessageKey.ExpectedRightParen)",
+		"return name",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsDelimitedTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    atom(state: mutable ParserState&) -> Token:
+        value = delimited("(", .IDENT, ")", ParseMessageKey.ExpectedRightParen)
+        return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be delimited binding, got %T", decl.Productions[0].Terms[0])
+	}
+	delimited, ok := bind.Term.(*ast.GrammarDelimitedTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be delimited, got %T", bind.Term)
+	}
+	if _, ok := delimited.Open.(*ast.GrammarTokenTerm); !ok {
+		t.Fatalf("expected delimited open term to be token, got %T", delimited.Open)
+	}
+	if _, ok := delimited.Body.(*ast.GrammarTokenKindTerm); !ok {
+		t.Fatalf("expected delimited body term to be token kind, got %T", delimited.Body)
+	}
+	if _, ok := delimited.Close.(*ast.GrammarTokenTerm); !ok {
+		t.Fatalf("expected delimited close term to be token, got %T", delimited.Close)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"value = delimited(\"(\", .IDENT, \")\", ParseMessageKey.ExpectedRightParen)",
+		"return value",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsSeqTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    else_clause(state: mutable ParserState&) -> Token:
+        value = seq("else", .IDENT recover(ParseMessageKey.ExpectedProgramName, until(";", token(TokenKind.EOF)), expr(state.current_token())))
+        return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be seq binding, got %T", decl.Productions[0].Terms[0])
+	}
+	seq, ok := bind.Term.(*ast.GrammarSeqTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be seq, got %T", bind.Term)
+	}
+	if len(seq.Terms) != 2 {
+		t.Fatalf("expected seq to contain 2 terms, got %d", len(seq.Terms))
+	}
+	if _, ok := seq.Terms[0].(*ast.GrammarTokenTerm); !ok {
+		t.Fatalf("expected seq open term to be token, got %T", seq.Terms[0])
+	}
+	if _, ok := seq.Terms[1].(*ast.GrammarRecoverTerm); !ok {
+		t.Fatalf("expected seq second term to be recover term, got %T", seq.Terms[1])
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"value = seq(\"else\", .IDENT recover(ParseMessageKey.ExpectedProgramName, until(\";\", token(TokenKind.EOF)), expr(state.current_token())))",
+		"return value",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsSeqBindingsAndAssignments(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    atom(state: mutable ParserState&) -> Token:
+        value = seq(.IDENT(token), span <- expr(token.span), expr(token))
+        return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be seq binding, got %T", decl.Productions[0].Terms[0])
+	}
+	seq, ok := bind.Term.(*ast.GrammarSeqTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be seq, got %T", bind.Term)
+	}
+	if _, ok := seq.Terms[0].(*ast.GrammarBindTerm); !ok {
+		t.Fatalf("expected seq first term to be bind term, got %T", seq.Terms[0])
+	}
+	if _, ok := seq.Terms[1].(*ast.GrammarAssignTerm); !ok {
+		t.Fatalf("expected seq second term to be assign term, got %T", seq.Terms[1])
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"value = seq(.IDENT(token), span <- expr(token.span), expr(token))",
+		"return value",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsLookaheadTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+	atom(state: mutable ParserState&) -> Token:
+		lookahead(choice(":=", "."))
+		.IDENT(token)
+		value = expr(token)
+		return token
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	lookahead, ok := decl.Productions[0].Terms[0].(*ast.GrammarLookaheadTerm)
+	if !ok {
+		t.Fatalf("expected first term to be lookahead, got %T", decl.Productions[0].Terms[0])
+	}
+	if _, ok := lookahead.Term.(*ast.GrammarChoiceTerm); !ok {
+		t.Fatalf("expected lookahead inner term to be choice, got %T", lookahead.Term)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"lookahead(choice(\":=\", \".\"))",
+		".IDENT(token)",
+		"value = expr(token)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)

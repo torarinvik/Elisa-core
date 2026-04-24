@@ -9005,12 +9005,19 @@ func (a *Analyzer) mergeTrackedNamedStateValueTypes(dst Type, src Type) (Type, b
 }
 
 func (a *Analyzer) cloneSpecializedValueTypeBindings() map[*Symbol]Type {
-	if a.currentSpecializedValueTypes == nil {
+	return a.cloneTrackedValueTypeMapWithSeen(a.currentSpecializedValueTypes, map[Type]Type{})
+}
+
+func (a *Analyzer) cloneTrackedValueTypeMapWithSeen(src map[*Symbol]Type, seen map[Type]Type) map[*Symbol]Type {
+	if src == nil {
 		return nil
 	}
-	cloned := make(map[*Symbol]Type, len(a.currentSpecializedValueTypes))
-	for sym, typ := range a.currentSpecializedValueTypes {
-		cloned[sym] = a.cloneTrackedValueType(typ)
+	if seen == nil {
+		seen = map[Type]Type{}
+	}
+	cloned := make(map[*Symbol]Type, len(src))
+	for sym, typ := range src {
+		cloned[sym] = a.cloneTrackedValueTypeWithSeen(typ, seen)
 	}
 	return cloned
 }
@@ -9256,28 +9263,34 @@ type specializedTypeMergeKey struct {
 }
 
 func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
-	return a.mergeSpecializedValueTypesWithSeen(dst, src, map[specializedTypeMergeKey]bool{})
+	return a.mergeSpecializedValueTypesWithSeen(dst, src, map[specializedTypeMergeKey]Type{}, map[Type]Type{})
 }
 
-func (a *Analyzer) mergeSpecializedValueTypesWithSeen(dst Type, src Type, active map[specializedTypeMergeKey]bool) (Type, bool) {
+func (a *Analyzer) mergeSpecializedValueTypesWithSeen(dst Type, src Type, seen map[specializedTypeMergeKey]Type, cloneSeen map[Type]Type) (Type, bool) {
 	if merged, ok := a.mergeTrackedNamedStateValueTypes(dst, src); ok {
 		return merged, true
 	}
 	if dst == nil || src == nil || !SameType(dst, src) {
 		return nil, false
 	}
-	key := specializedTypeMergeKey{dst: dst, src: src}
-	if active[key] {
-		return a.cloneTrackedValueType(dst), true
+	if cloneSeen == nil {
+		cloneSeen = map[Type]Type{}
 	}
-	active[key] = true
-	defer delete(active, key)
+	key := specializedTypeMergeKey{dst: dst, src: src}
+	if merged, ok := seen[key]; ok {
+		return merged, true
+	}
 	if dstFunc, ok := dst.(*FuncType); ok {
 		srcFunc, ok := src.(*FuncType)
 		if !ok {
 			return nil, false
 		}
-		return a.mergeFunctionValueTypes(dstFunc, srcFunc)
+		merged, ok := a.mergeFunctionValueTypes(dstFunc, srcFunc)
+		if !ok {
+			return nil, false
+		}
+		seen[key] = merged
+		return merged, true
 	}
 	switch tt := dst.(type) {
 	case *StructType:
@@ -9286,127 +9299,163 @@ func (a *Analyzer) mergeSpecializedValueTypesWithSeen(dst Type, src Type, active
 			return nil, false
 		}
 		fields := cloneStructFields(tt.Fields)
+		mergedStruct := cloneStructTypeWithFields(tt, fields)
+		seen[key] = mergedStruct
 		for name, field := range tt.Fields {
 			srcField, ok := srcStruct.Fields[name]
 			if !ok {
 				continue
 			}
-			mergedFieldType, ok := a.mergeSpecializedValueTypesWithSeen(field.Type, srcField.Type, active)
+			mergedFieldType, ok := a.mergeSpecializedValueTypesWithSeen(field.Type, srcField.Type, seen, cloneSeen)
 			if !ok {
 				continue
 			}
 			field.Type = mergedFieldType
 			fields[name] = field
 		}
-		return cloneStructTypeWithFields(tt, fields), true
+		return mergedStruct, true
 	case *GenericInstanceType:
 		srcInstance, ok := src.(*GenericInstanceType)
 		if !ok {
 			return nil, false
 		}
-		mergedBase, ok := a.mergeSpecializedValueTypesWithSeen(tt.Base, srcInstance.Base, active)
-		if !ok {
+		if len(tt.Args) != len(srcInstance.Args) {
 			return nil, false
 		}
-		args := make([]Type, 0, len(tt.Args))
-		for _, arg := range tt.Args {
-			args = append(args, a.cloneTrackedValueType(arg))
-		}
 		cloned := *tt
-		cloned.Args = args
-		cloned.Base = mergedBase
-		return &cloned, true
+		cloned.Args = make([]Type, len(tt.Args))
+		mergedInstance := &cloned
+		seen[key] = mergedInstance
+		mergedBase, ok := a.mergeSpecializedValueTypesWithSeen(tt.Base, srcInstance.Base, seen, cloneSeen)
+		if !ok {
+			delete(seen, key)
+			return nil, false
+		}
+		mergedInstance.Base = mergedBase
+		for i := range tt.Args {
+			mergedArg, ok := a.mergeSpecializedValueTypesWithSeen(tt.Args[i], srcInstance.Args[i], seen, cloneSeen)
+			if !ok {
+				mergedInstance.Args[i] = a.cloneTrackedValueTypeWithSeen(tt.Args[i], cloneSeen)
+				continue
+			}
+			mergedInstance.Args[i] = mergedArg
+		}
+		return mergedInstance, true
 	case *RefType:
 		srcRef, ok := src.(*RefType)
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcRef.Elem, active)
+		cloned := *tt
+		mergedRef := &cloned
+		seen[key] = mergedRef
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcRef.Elem, seen, cloneSeen)
 		if !ok {
+			delete(seen, key)
 			return nil, false
 		}
-		cloned := *tt
-		cloned.Elem = mergedElem
-		return &cloned, true
+		mergedRef.Elem = mergedElem
+		return mergedRef, true
 	case *ArrayType:
 		srcArray, ok := src.(*ArrayType)
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcArray.Elem, active)
+		cloned := *tt
+		mergedArray := &cloned
+		seen[key] = mergedArray
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcArray.Elem, seen, cloneSeen)
 		if !ok {
+			delete(seen, key)
 			return nil, false
 		}
-		cloned := *tt
-		cloned.Elem = mergedElem
-		return &cloned, true
+		mergedArray.Elem = mergedElem
+		return mergedArray, true
 	case *DArrayType:
 		srcArray, ok := src.(*DArrayType)
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcArray.Elem, active)
+		cloned := *tt
+		mergedArray := &cloned
+		seen[key] = mergedArray
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcArray.Elem, seen, cloneSeen)
 		if !ok {
+			delete(seen, key)
 			return nil, false
 		}
-		cloned := *tt
-		cloned.Elem = mergedElem
-		return &cloned, true
+		mergedArray.Elem = mergedElem
+		return mergedArray, true
 	case *OptionalType:
 		srcOpt, ok := src.(*OptionalType)
 		if !ok {
 			return nil, false
 		}
-		mergedValue, ok := a.mergeSpecializedValueTypesWithSeen(tt.Value, srcOpt.Value, active)
+		cloned := *tt
+		mergedOptional := &cloned
+		seen[key] = mergedOptional
+		mergedValue, ok := a.mergeSpecializedValueTypesWithSeen(tt.Value, srcOpt.Value, seen, cloneSeen)
 		if !ok {
+			delete(seen, key)
 			return nil, false
 		}
-		cloned := *tt
-		cloned.Value = mergedValue
-		return &cloned, true
+		mergedOptional.Value = mergedValue
+		return mergedOptional, true
 	case *ViewType:
 		srcView, ok := src.(*ViewType)
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcView.Elem, active)
+		cloned := *tt
+		mergedView := &cloned
+		seen[key] = mergedView
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcView.Elem, seen, cloneSeen)
 		if !ok {
+			delete(seen, key)
 			return nil, false
 		}
-		cloned := *tt
-		cloned.Elem = mergedElem
-		return &cloned, true
+		mergedView.Elem = mergedElem
+		return mergedView, true
 	case *DArrayViewType:
 		srcView, ok := src.(*DArrayViewType)
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcView.Elem, active)
+		cloned := *tt
+		mergedView := &cloned
+		seen[key] = mergedView
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcView.Elem, seen, cloneSeen)
 		if !ok {
+			delete(seen, key)
 			return nil, false
 		}
-		cloned := *tt
-		cloned.Elem = mergedElem
-		return &cloned, true
+		mergedView.Elem = mergedElem
+		return mergedView, true
 	case *DictType:
 		srcDict, ok := src.(*DictType)
 		if !ok {
 			return nil, false
 		}
-		mergedKey, ok := a.mergeSpecializedValueTypesWithSeen(tt.Key, srcDict.Key, active)
-		if !ok {
-			return nil, false
-		}
-		mergedValue, ok := a.mergeSpecializedValueTypesWithSeen(tt.Value, srcDict.Value, active)
-		if !ok {
-			return nil, false
-		}
 		cloned := *tt
-		cloned.Key = mergedKey
-		cloned.Value = mergedValue
-		return &cloned, true
+		mergedDict := &cloned
+		seen[key] = mergedDict
+		mergedKey, ok := a.mergeSpecializedValueTypesWithSeen(tt.Key, srcDict.Key, seen, cloneSeen)
+		if !ok {
+			delete(seen, key)
+			return nil, false
+		}
+		mergedValue, ok := a.mergeSpecializedValueTypesWithSeen(tt.Value, srcDict.Value, seen, cloneSeen)
+		if !ok {
+			delete(seen, key)
+			return nil, false
+		}
+		mergedDict.Key = mergedKey
+		mergedDict.Value = mergedValue
+		return mergedDict, true
 	default:
-		return a.cloneTrackedValueType(dst), true
+		cloned := a.cloneTrackedValueTypeWithSeen(dst, cloneSeen)
+		seen[key] = cloned
+		return cloned, true
 	}
 }
 
@@ -9415,6 +9464,7 @@ func (a *Analyzer) mergeSpecializedValueTypeBindings(dst map[*Symbol]Type, src m
 		return nil
 	}
 	merged := make(map[*Symbol]Type, len(dst))
+	seen := map[Type]Type{}
 	for sym, typ := range dst {
 		srcType, ok := src[sym]
 		if !ok {
@@ -9428,20 +9478,13 @@ func (a *Analyzer) mergeSpecializedValueTypeBindings(dst map[*Symbol]Type, src m
 			merged[sym] = normalized
 			continue
 		}
-		merged[sym] = a.cloneTrackedValueType(mergedType)
+		merged[sym] = a.cloneTrackedValueTypeWithSeen(mergedType, seen)
 	}
 	return merged
 }
 
 func (a *Analyzer) cloneSpecializedValueTypeMap(src map[*Symbol]Type) map[*Symbol]Type {
-	if src == nil {
-		return nil
-	}
-	cloned := make(map[*Symbol]Type, len(src))
-	for sym, typ := range src {
-		cloned[sym] = a.cloneTrackedValueType(typ)
-	}
-	return cloned
+	return a.cloneTrackedValueTypeMapWithSeen(src, map[Type]Type{})
 }
 
 func (a *Analyzer) intersectSpecializedValueTypeFlows(flows ...map[*Symbol]Type) (map[*Symbol]Type, bool) {

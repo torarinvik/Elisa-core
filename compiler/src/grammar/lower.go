@@ -104,6 +104,7 @@ func cloneGrammarDecl(decl *ast.GrammarDecl) *ast.GrammarDecl {
 	cloned.PermissionParams = append([]string(nil), decl.PermissionParams...)
 	cloned.GenericParams = append([]ast.GenericParam(nil), decl.GenericParams...)
 	cloned.Uses = append([]ast.TypeExpr(nil), decl.Uses...)
+	cloned.TokenAliases = append([]ast.GrammarTokenAliasDecl(nil), decl.TokenAliases...)
 	cloned.Channels = append([]ast.GrammarChannelDecl(nil), decl.Channels...)
 	cloned.Productions = append([]ast.GrammarProductionDecl(nil), decl.Productions...)
 	return &cloned
@@ -154,6 +155,7 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	if merged.AllocExpr == nil {
 		merged.AllocExpr = extra.AllocExpr
 	}
+	merged.TokenAliases = append(merged.TokenAliases, extra.TokenAliases...)
 	merged.Channels = append(merged.Channels, extra.Channels...)
 	merged.Productions = append(merged.Productions, extra.Productions...)
 	merged.Extend = false
@@ -273,11 +275,221 @@ func normalizeGrammarDeclForLowering(decl *ast.GrammarDecl) *ast.GrammarDecl {
 		return nil
 	}
 	normalized := *decl
+	normalized.TokenAliases = append([]ast.GrammarTokenAliasDecl(nil), decl.TokenAliases...)
+	aliasByLiteral := grammarTokenAliasLiteralMap(decl.TokenAliases)
 	normalized.Productions = make([]ast.GrammarProductionDecl, 0, len(decl.Productions))
 	for _, production := range decl.Productions {
-		normalized.Productions = append(normalized.Productions, normalizeGrammarProductionForLowering(decl, production))
+		rewritten := rewriteGrammarProductionTokenAliases(production, aliasByLiteral)
+		normalized.Productions = append(normalized.Productions, rewritten)
 	}
+	normalized.Productions = expandAugmentedGrammarProductions(normalized.Productions)
+	finalProductions := make([]ast.GrammarProductionDecl, 0, len(normalized.Productions))
+	for _, production := range normalized.Productions {
+		finalProductions = append(finalProductions, normalizeGrammarProductionForLowering(&normalized, production))
+	}
+	normalized.Productions = finalProductions
 	return &normalized
+}
+
+func grammarTokenAliasLiteralMap(aliases []ast.GrammarTokenAliasDecl) map[string]string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	byLiteral := make(map[string]string, len(aliases))
+	for _, alias := range aliases {
+		if alias.HasLiteral && alias.Literal != "" {
+			byLiteral[alias.Literal] = alias.Kind
+		}
+	}
+	if len(byLiteral) == 0 {
+		return nil
+	}
+	return byLiteral
+}
+
+func rewriteGrammarProductionTokenAliases(production ast.GrammarProductionDecl, aliases map[string]string) ast.GrammarProductionDecl {
+	if len(aliases) == 0 {
+		return production
+	}
+	production.RecoverUntil = rewriteGrammarTermListTokenAliases(production.RecoverUntil, aliases)
+	terms := make([]ast.GrammarTerm, 0, len(production.Terms))
+	for _, term := range production.Terms {
+		terms = append(terms, rewriteGrammarTermTokenAliases(term, aliases))
+	}
+	production.Terms = terms
+	return production
+}
+
+func rewriteGrammarTermListTokenAliases(terms []ast.GrammarTerm, aliases map[string]string) []ast.GrammarTerm {
+	if len(terms) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarTerm, 0, len(terms))
+	for _, term := range terms {
+		rewritten = append(rewritten, rewriteGrammarTermTokenAliases(term, aliases))
+	}
+	return rewritten
+}
+
+func rewriteGrammarBindingsTokenAliases(bindings []*ast.GrammarBindTerm, aliases map[string]string) []*ast.GrammarBindTerm {
+	if len(bindings) == 0 {
+		return nil
+	}
+	rewritten := make([]*ast.GrammarBindTerm, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		rewritten = append(rewritten, &ast.GrammarBindTerm{Position: binding.Position, Name: binding.Name, Term: rewriteGrammarTermTokenAliases(binding.Term, aliases)})
+	}
+	return rewritten
+}
+
+func rewriteGrammarPostfixArmsTokenAliases(arms []ast.GrammarPostfixArm, aliases map[string]string) []ast.GrammarPostfixArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarPostfixArm, 0, len(arms))
+	for _, arm := range arms {
+		rewritten = append(rewritten, ast.GrammarPostfixArm{Position: arm.Position, OpName: arm.OpName, Op: rewriteGrammarTermTokenAliases(arm.Op, aliases), Bindings: rewriteGrammarBindingsTokenAliases(arm.Bindings, aliases), Value: arm.Value})
+	}
+	return rewritten
+}
+
+func rewriteGrammarPrecedenceArmsTokenAliases(arms []ast.GrammarPrecedenceArm, aliases map[string]string) []ast.GrammarPrecedenceArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarPrecedenceArm, 0, len(arms))
+	for _, arm := range arms {
+		rewritten = append(rewritten, ast.GrammarPrecedenceArm{Position: arm.Position, OpName: arm.OpName, Op: rewriteGrammarTermTokenAliases(arm.Op, aliases), Bindings: rewriteGrammarBindingsTokenAliases(arm.Bindings, aliases), Value: arm.Value})
+	}
+	return rewritten
+}
+
+func rewriteGrammarPrecedenceLevelsTokenAliases(levels []ast.GrammarPrecedenceLevel, aliases map[string]string) []ast.GrammarPrecedenceLevel {
+	if len(levels) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarPrecedenceLevel, 0, len(levels))
+	for _, level := range levels {
+		rewritten = append(rewritten, ast.GrammarPrecedenceLevel{Position: level.Position, Name: level.Name, LeftName: level.LeftName, Seed: rewriteGrammarTermTokenAliases(level.Seed, aliases), Arms: rewriteGrammarPrecedenceArmsTokenAliases(level.Arms, aliases)})
+	}
+	return rewritten
+}
+
+func rewriteGrammarTermTokenAliases(term ast.GrammarTerm, aliases map[string]string) ast.GrammarTerm {
+	if len(aliases) == 0 || term == nil {
+		return term
+	}
+	switch n := term.(type) {
+	case *ast.GrammarTokenTerm:
+		if kind, ok := aliases[n.Value]; ok {
+			return &ast.GrammarTokenKindTerm{Position: n.Position, Kind: kind}
+		}
+		return n
+	case *ast.GrammarBindTerm:
+		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: rewriteGrammarTermTokenAliases(n.Term, aliases)}
+	case *ast.GrammarAssignTerm:
+		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: rewriteGrammarTermTokenAliases(n.Term, aliases)}
+	case *ast.GrammarChoiceTerm:
+		return &ast.GrammarChoiceTerm{Position: n.Position, Options: rewriteGrammarTermListTokenAliases(n.Options, aliases)}
+	case *ast.GrammarOptionalTerm:
+		return &ast.GrammarOptionalTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases)}
+	case *ast.GrammarWhenTerm:
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: rewriteGrammarTermTokenAliases(n.Then, aliases), Else: rewriteGrammarTermTokenAliases(n.Else, aliases)}
+	case *ast.GrammarRecoverTerm:
+		return &ast.GrammarRecoverTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases), RecoverMsg: n.RecoverMsg, RecoverUntil: rewriteGrammarTermListTokenAliases(n.RecoverUntil, aliases), RecoverValue: n.RecoverValue}
+	case *ast.GrammarRequiredTerm:
+		return &ast.GrammarRequiredTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases), Message: n.Message}
+	case *ast.GrammarDelimitedTerm:
+		return &ast.GrammarDelimitedTerm{Position: n.Position, Open: rewriteGrammarTermTokenAliases(n.Open, aliases), Body: rewriteGrammarTermTokenAliases(n.Body, aliases), Close: rewriteGrammarTermTokenAliases(n.Close, aliases), Message: n.Message}
+	case *ast.GrammarSeqTerm:
+		return &ast.GrammarSeqTerm{Position: n.Position, Terms: rewriteGrammarTermListTokenAliases(n.Terms, aliases)}
+	case *ast.GrammarLookaheadTerm:
+		return &ast.GrammarLookaheadTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases)}
+	case *ast.GrammarListTerm:
+		return &ast.GrammarListTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Separator: rewriteGrammarTermTokenAliases(n.Separator, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
+	case *ast.GrammarRepeatTerm:
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
+	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
+	case *ast.GrammarSeparatedTerm:
+		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Separator: rewriteGrammarTermTokenAliases(n.Separator, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
+	case *ast.GrammarSuffixTerm:
+		return &ast.GrammarSuffixTerm{Position: n.Position, LeftName: n.LeftName, Seed: rewriteGrammarTermTokenAliases(n.Seed, aliases), Arms: rewriteGrammarPostfixArmsTokenAliases(n.Arms, aliases)}
+	case *ast.GrammarPostfixTerm:
+		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: rewriteGrammarTermTokenAliases(n.Seed, aliases), Arms: rewriteGrammarPostfixArmsTokenAliases(n.Arms, aliases)}
+	case *ast.GrammarPrecedenceTerm:
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Result: n.Result, Levels: rewriteGrammarPrecedenceLevelsTokenAliases(n.Levels, aliases), LeftName: n.LeftName, Seed: rewriteGrammarTermTokenAliases(n.Seed, aliases), Arms: rewriteGrammarPrecedenceArmsTokenAliases(n.Arms, aliases)}
+	default:
+		return term
+	}
+}
+
+func expandAugmentedGrammarProductions(productions []ast.GrammarProductionDecl) []ast.GrammarProductionDecl {
+	if len(productions) == 0 {
+		return nil
+	}
+	appendByName := make(map[string][]ast.GrammarProductionDecl)
+	baseList := make([]ast.GrammarProductionDecl, 0, len(productions))
+	for _, production := range productions {
+		if production.Append {
+			appendByName[production.Name] = append(appendByName[production.Name], production)
+			continue
+		}
+		baseList = append(baseList, production)
+	}
+	if len(appendByName) == 0 {
+		return append([]ast.GrammarProductionDecl(nil), productions...)
+	}
+	out := make([]ast.GrammarProductionDecl, 0, len(productions)*2)
+	for _, base := range baseList {
+		appends := appendByName[base.Name]
+		if len(appends) == 0 {
+			out = append(out, base)
+			continue
+		}
+		merged, helpers := buildAugmentedGrammarProduction(base, appends)
+		out = append(out, merged)
+		out = append(out, helpers...)
+	}
+	return out
+}
+
+func buildAugmentedGrammarProduction(base ast.GrammarProductionDecl, appends []ast.GrammarProductionDecl) (ast.GrammarProductionDecl, []ast.GrammarProductionDecl) {
+	helperBaseName := grammarAugmentHelperProductionName(base.Name, "base", 0)
+	helpers := make([]ast.GrammarProductionDecl, 0, len(appends)+1)
+	helpers = append(helpers, ast.GrammarProductionDecl{Position: base.Position, Name: helperBaseName, HasParamList: base.HasParamList || len(base.Params) != 0, Params: append([]ast.ParamDecl(nil), base.Params...), ReturnType: base.ReturnType, Terms: append([]ast.GrammarTerm(nil), base.Terms...)})
+	options := []ast.GrammarTerm{grammarAugmentHelperCall(base.Position, helperBaseName, base.Params)}
+	for index, appendProduction := range appends {
+		helperName := grammarAugmentHelperProductionName(base.Name, "append", index+1)
+		helpers = append(helpers, ast.GrammarProductionDecl{Position: appendProduction.Position, Name: helperName, HasParamList: base.HasParamList || len(base.Params) != 0, Params: append([]ast.ParamDecl(nil), base.Params...), ReturnType: base.ReturnType, Terms: append([]ast.GrammarTerm(nil), appendProduction.Terms...)})
+		options = append(options, grammarAugmentHelperCall(appendProduction.Position, helperName, base.Params))
+	}
+	merged := base
+	if base.ReturnType != nil {
+		resultName := grammarAugmentResultName(base.Name)
+		merged.Terms = []ast.GrammarTerm{
+			&ast.GrammarBindTerm{Position: base.Position, Name: resultName, Term: &ast.GrammarChoiceTerm{Position: base.Position, Options: options}},
+			&ast.GrammarReturnTerm{Position: base.Position, Value: &ast.Ident{Position: base.Position, Name: resultName}},
+		}
+	} else {
+		merged.Terms = []ast.GrammarTerm{&ast.GrammarChoiceTerm{Position: base.Position, Options: options}}
+	}
+	return merged, helpers
+}
+
+func grammarAugmentHelperProductionName(baseName string, kind string, index int) string {
+	return "__grammar_augment_" + sanitizeGrammarHelperName(baseName) + "_" + kind + "_" + itoa(index)
+}
+
+func grammarAugmentResultName(baseName string) string {
+	return "__grammar_augment_result_" + sanitizeGrammarHelperName(baseName)
+}
+
+func grammarAugmentHelperCall(pos lexer.Pos, helperName string, params []ast.ParamDecl) ast.GrammarTerm {
+	return &ast.GrammarCallTerm{Position: pos, Name: helperName, Explicit: true, Args: grammarProductionParamArgs(params)}
 }
 
 func normalizeGrammarProductionForLowering(grammarDecl *ast.GrammarDecl, production ast.GrammarProductionDecl) ast.GrammarProductionDecl {
@@ -432,6 +644,31 @@ func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProduc
 	case *ast.GrammarOptionalTerm:
 		rewritten, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Term, counter)
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: rewritten}, helpers
+	case *ast.GrammarRequiredTerm:
+		rewritten, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Term, counter)
+		return &ast.GrammarRequiredTerm{Position: n.Position, Term: rewritten, Message: n.Message}, helpers
+	case *ast.GrammarDelimitedTerm:
+		open, openHelpers := desugarNamedPrecedenceTerm(grammarName, production, n.Open, counter)
+		body, bodyHelpers := desugarNamedPrecedenceTerm(grammarName, production, n.Body, counter)
+		closeTerm, closeHelpers := desugarNamedPrecedenceTerm(grammarName, production, n.Close, counter)
+		helperCount := len(openHelpers) + len(bodyHelpers) + len(closeHelpers)
+		helpers := make([]ast.GrammarProductionDecl, 0, helperCount)
+		helpers = append(helpers, openHelpers...)
+		helpers = append(helpers, bodyHelpers...)
+		helpers = append(helpers, closeHelpers...)
+		return &ast.GrammarDelimitedTerm{Position: n.Position, Open: open, Body: body, Close: closeTerm, Message: n.Message}, helpers
+	case *ast.GrammarSeqTerm:
+		terms := make([]ast.GrammarTerm, 0, len(n.Terms))
+		helpers := make([]ast.GrammarProductionDecl, 0)
+		for _, term := range n.Terms {
+			rewritten, extra := desugarNamedPrecedenceTerm(grammarName, production, term, counter)
+			terms = append(terms, rewritten)
+			helpers = append(helpers, extra...)
+		}
+		return &ast.GrammarSeqTerm{Position: n.Position, Terms: terms}, helpers
+	case *ast.GrammarLookaheadTerm:
+		rewritten, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Term, counter)
+		return &ast.GrammarLookaheadTerm{Position: n.Position, Term: rewritten}, helpers
 	case *ast.GrammarListTerm:
 		elem, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Elem, counter)
 		var separator ast.GrammarTerm
@@ -456,6 +693,15 @@ func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProduc
 			helpers = append(helpers, extra...)
 		}
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: elem, Until: until}, helpers
+	case *ast.GrammarFlatRepeatTerm:
+		elem, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Elem, counter)
+		until := make([]ast.GrammarTerm, 0, len(n.Until))
+		for _, stop := range n.Until {
+			rewritten, extra := desugarNamedPrecedenceTerm(grammarName, production, stop, counter)
+			until = append(until, rewritten)
+			helpers = append(helpers, extra...)
+		}
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: elem, Until: until}, helpers
 	case *ast.GrammarSeparatedTerm:
 		elem, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Elem, counter)
 		separator, extra := desugarNamedPrecedenceTerm(grammarName, production, n.Separator, counter)
@@ -591,6 +837,18 @@ func rewriteNamedPrecedenceHelperCalls(term ast.GrammarTerm, helperNames map[str
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: options}
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: rewriteNamedPrecedenceHelperCalls(n.Term, helperNames, paramArgs)}
+	case *ast.GrammarRequiredTerm:
+		return &ast.GrammarRequiredTerm{Position: n.Position, Term: rewriteNamedPrecedenceHelperCalls(n.Term, helperNames, paramArgs), Message: n.Message}
+	case *ast.GrammarDelimitedTerm:
+		return &ast.GrammarDelimitedTerm{Position: n.Position, Open: rewriteNamedPrecedenceHelperCalls(n.Open, helperNames, paramArgs), Body: rewriteNamedPrecedenceHelperCalls(n.Body, helperNames, paramArgs), Close: rewriteNamedPrecedenceHelperCalls(n.Close, helperNames, paramArgs), Message: n.Message}
+	case *ast.GrammarSeqTerm:
+		terms := make([]ast.GrammarTerm, 0, len(n.Terms))
+		for _, term := range n.Terms {
+			terms = append(terms, rewriteNamedPrecedenceHelperCalls(term, helperNames, paramArgs))
+		}
+		return &ast.GrammarSeqTerm{Position: n.Position, Terms: terms}
+	case *ast.GrammarLookaheadTerm:
+		return &ast.GrammarLookaheadTerm{Position: n.Position, Term: rewriteNamedPrecedenceHelperCalls(n.Term, helperNames, paramArgs)}
 	case *ast.GrammarListTerm:
 		var separator ast.GrammarTerm
 		if n.Separator != nil {
@@ -607,6 +865,12 @@ func rewriteNamedPrecedenceHelperCalls(term ast.GrammarTerm, helperNames map[str
 			until = append(until, rewriteNamedPrecedenceHelperCalls(stop, helperNames, paramArgs))
 		}
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Until: until}
+	case *ast.GrammarFlatRepeatTerm:
+		until := make([]ast.GrammarTerm, 0, len(n.Until))
+		for _, stop := range n.Until {
+			until = append(until, rewriteNamedPrecedenceHelperCalls(stop, helperNames, paramArgs))
+		}
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Until: until}
 	case *ast.GrammarSeparatedTerm:
 		until := make([]ast.GrammarTerm, 0, len(n.Until))
 		for _, stop := range n.Until {
@@ -1173,6 +1437,23 @@ func listPushStmt(pos lexer.Pos, targetName string, value ast.Expr) ast.Stmt {
 	}
 }
 
+func listPushIndexedItemsStmts(ctx *statefulLowerContext, pos lexer.Pos, targetName string, sourceName string) []ast.Stmt {
+	indexName := ctx.fresh("flatrepeat_index")
+	indexIdent := &ast.Ident{Position: pos, Name: indexName}
+	sourceIdent := &ast.Ident{Position: pos, Name: sourceName}
+	return []ast.Stmt{
+		&ast.VarDeclStmt{Position: pos, Name: indexName, Mutable: true, Type: builtinTypeExpr(pos, "usize"), Value: &ast.IntLit{Position: pos, Value: "0"}},
+		&ast.WhileStmt{
+			Position: pos,
+			Cond:     &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LT, Left: indexIdent, Right: &ast.FieldExpr{Position: pos, Object: sourceIdent, Field: "count"}},
+			Body: []ast.Stmt{
+				listPushStmt(pos, targetName, &ast.IndexExpr{Position: pos, Object: sourceIdent, Index: indexIdent}),
+				&ast.AugAssignStmt{Position: pos, Op: lexer.TOKEN_PLUSEQ, Target: indexIdent, Value: &ast.IntLit{Position: pos, Value: "1"}},
+			},
+		},
+	}
+}
+
 func grammarTokenMatchExpr(pos lexer.Pos, tokenExpr ast.Expr, value string) ast.Expr {
 	return grammarTokenKindMatchExpr(pos, tokenExpr, &ast.CallExpr{
 		Position: pos,
@@ -1330,6 +1611,19 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return true
 	case *ast.GrammarWhenTerm:
 		return ctx.termCanFail(n.Then) || ctx.termCanFail(n.Else)
+	case *ast.GrammarRequiredTerm:
+		return false
+	case *ast.GrammarDelimitedTerm:
+		return ctx.termCanFail(n.Open) || ctx.termCanFail(n.Body)
+	case *ast.GrammarSeqTerm:
+		for _, term := range n.Terms {
+			if ctx.termCanFail(term) {
+				return true
+			}
+		}
+		return false
+	case *ast.GrammarLookaheadTerm:
+		return ctx.termCanFail(n.Term)
 	case *ast.GrammarExprTerm:
 		return false
 	case *ast.GrammarGuardTerm:
@@ -1343,6 +1637,8 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 	case *ast.GrammarListTerm:
 		return false
 	case *ast.GrammarRepeatTerm:
+		return false
+	case *ast.GrammarFlatRepeatTerm:
 		return false
 	case *ast.GrammarSeparatedTerm:
 		return false
@@ -1469,6 +1765,14 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return ctx.lowerChoiceAttempt(n)
 	case *ast.GrammarWhenTerm:
 		return ctx.lowerWhenAttempt(n)
+	case *ast.GrammarRequiredTerm:
+		return ctx.lowerRequiredAttempt(n)
+	case *ast.GrammarDelimitedTerm:
+		return ctx.lowerDelimitedAttempt(n)
+	case *ast.GrammarSeqTerm:
+		return ctx.lowerSeqAttempt(n)
+	case *ast.GrammarLookaheadTerm:
+		return ctx.lowerLookaheadAttempt(n)
 	case *ast.GrammarExprTerm:
 		valueName := ctx.fresh("value")
 		return loweredAttempt{
@@ -1515,6 +1819,8 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return ctx.lowerListAttempt(n)
 	case *ast.GrammarRepeatTerm:
 		return ctx.lowerListAttempt(repeatTermAsList(n))
+	case *ast.GrammarFlatRepeatTerm:
+		return ctx.lowerFlatRepeatAttempt(n)
 	case *ast.GrammarSeparatedTerm:
 		return ctx.lowerListAttempt(separatedTermAsList(n))
 	case *ast.GrammarSuffixTerm:
@@ -1576,6 +1882,202 @@ func (ctx *statefulLowerContext) lowerWhenAttempt(term *ast.GrammarWhenTerm) low
 		Committed: &ast.Ident{Position: term.Position, Name: committedName},
 		Value:     valueIdent,
 	}
+}
+
+func (ctx *statefulLowerContext) lowerDelimitedAttempt(term *ast.GrammarDelimitedTerm) loweredAttempt {
+	if term == nil || ctx.cursorReceiver == "" || ctx.cursorField == "" {
+		if term == nil {
+			return loweredAttempt{Matched: &ast.BoolLit{Position: ctx.production.Position, Value: false}, Committed: &ast.BoolLit{Position: ctx.production.Position, Value: false}, Value: &ast.ZeroedLit{Position: ctx.production.Position}}
+		}
+		return ctx.lowerAttempt(term.Body)
+	}
+	openAttempt := ctx.lowerAttempt(term.Open)
+	bodyAttempt := ctx.lowerAttempt(term.Body)
+	closeAttempt := ctx.lowerRequiredAttempt(&ast.GrammarRequiredTerm{Position: term.Position, Term: term.Close, Message: term.Message})
+	termType := ctx.inferTermType(term.Body)
+	if termType == nil {
+		termType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
+	}
+	bodyValue := bodyAttempt.Value
+	if bodyValue == nil {
+		bodyValue = zeroedCastExpr(term.Position, termType)
+	}
+	snapshotName := ctx.fresh("delimited_cursor")
+	matchedName := ctx.fresh("delimited_matched")
+	committedName := ctx.fresh("delimited_committed")
+	valueName := ctx.fresh("delimited_value")
+	valueIdent := &ast.Ident{Position: term.Position, Name: valueName}
+	closeSuccess := append([]ast.Stmt{}, closeAttempt.Stmts...)
+	closeSuccess = append(closeSuccess, markCommittedStmts(committedName, term.Position, closeAttempt.Committed)...)
+	closeSuccess = append(closeSuccess, &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.BoolLit{Position: term.Position, Value: true}})
+	bodySuccess := append([]ast.Stmt{}, bodyAttempt.Stmts...)
+	bodySuccess = append(bodySuccess, markCommittedStmts(committedName, term.Position, bodyAttempt.Committed)...)
+	bodySuccess = append(bodySuccess,
+		&ast.AssignStmt{Position: term.Position, Target: valueIdent, Value: bodyValue},
+		&ast.IfStmt{Position: term.Position, Cond: bodyAttempt.Matched, Then: closeSuccess, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, term.Position)}},
+	)
+	stms := []ast.Stmt{
+		&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: zeroedCastExpr(term.Position, termType)},
+	}
+	stms = append(stms, openAttempt.Stmts...)
+	stms = append(stms, markCommittedStmts(committedName, term.Position, openAttempt.Committed)...)
+	stms = append(stms, &ast.IfStmt{Position: term.Position, Cond: openAttempt.Matched, Then: bodySuccess, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, term.Position)}})
+	return loweredAttempt{Stmts: stms, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: valueIdent}
+}
+
+func (ctx *statefulLowerContext) lowerSeqAttempt(term *ast.GrammarSeqTerm) loweredAttempt {
+	if term == nil || len(term.Terms) == 0 || ctx.cursorReceiver == "" || ctx.cursorField == "" {
+		pos := ctx.production.Position
+		if term != nil {
+			pos = term.Position
+			if len(term.Terms) != 0 {
+				return ctx.lowerAttempt(term.Terms[len(term.Terms)-1])
+			}
+		}
+		return loweredAttempt{Matched: &ast.BoolLit{Position: pos, Value: true}, Committed: &ast.BoolLit{Position: pos, Value: false}, Value: zeroedCastExpr(pos, grammarResolvedValueTypeExpr(pos, ctx.production.ReturnType))}
+	}
+	termType := ctx.inferTermType(term)
+	if termType == nil {
+		termType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
+	}
+	snapshotName := ctx.fresh("seq_cursor")
+	matchedName := ctx.fresh("seq_matched")
+	committedName := ctx.fresh("seq_committed")
+	valueName := ctx.fresh("seq_value")
+	valueIdent := &ast.Ident{Position: term.Position, Name: valueName}
+	stms := []ast.Stmt{
+		&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: zeroedCastExpr(term.Position, termType)},
+	}
+	seqCtx := *ctx
+	seqCtx.committedName = committedName
+	stms = append(stms, seqCtx.lowerSeqTerms(term.Terms, snapshotName, matchedName, valueIdent)...)
+	ctx.tempCounter = seqCtx.tempCounter
+	return loweredAttempt{Stmts: stms, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: valueIdent}
+}
+
+func (ctx *statefulLowerContext) lowerLookaheadAttempt(term *ast.GrammarLookaheadTerm) loweredAttempt {
+	if term == nil || ctx.cursorReceiver == "" || ctx.cursorField == "" {
+		if term == nil {
+			return loweredAttempt{Matched: &ast.BoolLit{Position: ctx.production.Position, Value: false}, Committed: &ast.BoolLit{Position: ctx.production.Position, Value: false}, Value: &ast.ZeroedLit{Position: ctx.production.Position}}
+		}
+		return ctx.lowerAttempt(term.Term)
+	}
+	inner := ctx.lowerAttempt(term.Term)
+	termType := ctx.inferTermType(term.Term)
+	if termType == nil {
+		termType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
+	}
+	value := inner.Value
+	if value == nil {
+		value = zeroedCastExpr(term.Position, termType)
+	}
+	snapshotName := ctx.fresh("lookahead_cursor")
+	matchedName := ctx.fresh("lookahead_matched")
+	valueName := ctx.fresh("lookahead_value")
+	valueIdent := &ast.Ident{Position: term.Position, Name: valueName}
+	stms := []ast.Stmt{
+		&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: zeroedCastExpr(term.Position, termType)},
+	}
+	stms = append(stms, inner.Stmts...)
+	thenBranch := []ast.Stmt{
+		&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: inner.Matched},
+		&ast.AssignStmt{Position: term.Position, Target: valueIdent, Value: value},
+	}
+	stms = append(stms,
+		&ast.IfStmt{Position: term.Position, Cond: inner.Matched, Then: thenBranch},
+		restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, term.Position),
+	)
+	return loweredAttempt{Stmts: stms, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.BoolLit{Position: term.Position, Value: false}, Value: valueIdent}
+}
+
+func (ctx *statefulLowerContext) lowerSeqTerms(terms []ast.GrammarTerm, snapshotName string, matchedName string, valueTarget ast.Expr) []ast.Stmt {
+	if len(terms) == 0 {
+		return []ast.Stmt{&ast.AssignStmt{Position: ctx.production.Position, Target: &ast.Ident{Position: ctx.production.Position, Name: matchedName}, Value: &ast.BoolLit{Position: ctx.production.Position, Value: true}}}
+	}
+	current := terms[0]
+	if pass, ok := current.(*ast.GrammarPassTerm); ok {
+		if len(terms) == 1 {
+			return []ast.Stmt{&ast.AssignStmt{Position: pass.Position, Target: &ast.Ident{Position: pass.Position, Name: matchedName}, Value: &ast.BoolLit{Position: pass.Position, Value: true}}}
+		}
+		return ctx.lowerSeqTerms(terms[1:], snapshotName, matchedName, valueTarget)
+	}
+	var (
+		pos        lexer.Pos
+		attempt    loweredAttempt
+		prefix     []ast.Stmt
+		thenBranch []ast.Stmt
+	)
+	switch n := current.(type) {
+	case *ast.GrammarBindTerm:
+		pos = n.Term.Pos()
+		attempt = ctx.lowerAttempt(n.Term)
+		prefix = append([]ast.Stmt{}, attempt.Stmts...)
+		thenBranch = append(ctx.markAttemptCommittedStmts(pos, attempt.Committed), &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Value: attempt.Value})
+	case *ast.GrammarAssignTerm:
+		pos = n.Term.Pos()
+		attempt = ctx.lowerAttempt(n.Term)
+		prefix = append([]ast.Stmt{}, attempt.Stmts...)
+		thenBranch = append(ctx.markAttemptCommittedStmts(pos, attempt.Committed), &ast.AssignStmt{Position: n.Position, Target: &ast.Ident{Position: n.Position, Name: n.Name}, Value: attempt.Value})
+		if flagName, ok := ctx.channelSetFlagName(n.Name); ok {
+			thenBranch = append(thenBranch, &ast.AssignStmt{Position: n.Position, Target: &ast.Ident{Position: n.Position, Name: flagName}, Value: &ast.BoolLit{Position: n.Position, Value: true}})
+		}
+	default:
+		pos = current.Pos()
+		attempt = ctx.lowerAttempt(current)
+		prefix = append([]ast.Stmt{}, attempt.Stmts...)
+		thenBranch = append(thenBranch, ctx.markAttemptCommittedStmts(pos, attempt.Committed)...)
+	}
+	if len(terms) == 1 {
+		thenBranch = append(thenBranch,
+			&ast.AssignStmt{Position: pos, Target: valueTarget, Value: attempt.Value},
+			&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: matchedName}, Value: &ast.BoolLit{Position: pos, Value: true}},
+		)
+	} else {
+		thenBranch = append(thenBranch, ctx.lowerSeqTerms(terms[1:], snapshotName, matchedName, valueTarget)...)
+	}
+	elseBranch := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, pos)}
+	prefix = append(prefix, &ast.IfStmt{Position: pos, Cond: attempt.Matched, Then: thenBranch, Else: elseBranch})
+	return prefix
+}
+
+func (ctx *statefulLowerContext) lowerRequiredAttempt(term *ast.GrammarRequiredTerm) loweredAttempt {
+	if term == nil || term.Message == nil || ctx.tokenReceiver == "" {
+		if term == nil {
+			return loweredAttempt{Matched: &ast.BoolLit{Position: ctx.production.Position, Value: true}, Committed: &ast.BoolLit{Position: ctx.production.Position, Value: false}, Value: &ast.ZeroedLit{Position: ctx.production.Position}}
+		}
+		return ctx.lowerAttempt(term.Term)
+	}
+	inner := ctx.lowerAttempt(term.Term)
+	value := inner.Value
+	if value == nil {
+		termType := ctx.inferTermType(term.Term)
+		if termType == nil {
+			termType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
+		}
+		value = zeroedCastExpr(term.Position, termType)
+	}
+	stms := append([]ast.Stmt{}, inner.Stmts...)
+	stms = append(stms, &ast.IfStmt{
+		Position: term.Position,
+		Cond:     &ast.UnaryExpr{Position: term.Position, Op: lexer.TOKEN_NOT, Operand: inner.Matched},
+		Then: []ast.Stmt{&ast.ExprStmt{
+			Position: term.Position,
+			Expr: &ast.CallExpr{
+				Position: term.Position,
+				Func:     &ast.FieldExpr{Position: term.Position, Object: &ast.Ident{Position: term.Position, Name: ctx.tokenReceiver}, Field: "record_parse_error"},
+				Args:     []ast.Expr{term.Message},
+			},
+		}},
+	})
+	return loweredAttempt{Stmts: stms, Matched: &ast.BoolLit{Position: term.Position, Value: true}, Committed: inner.Committed, Value: value}
 }
 
 func (ctx *statefulLowerContext) lowerRecoveredAttempt(term *ast.GrammarRecoverTerm) loweredAttempt {
@@ -1654,6 +2156,73 @@ func (ctx *statefulLowerContext) lowerChoiceAttempt(term *ast.GrammarChoiceTerm)
 	}
 	stmts = append(stmts, ctx.lowerChoiceOptions(term.Options, snapshotName, matchedName, committedName, valueName)...)
 	return loweredAttempt{Stmts: stmts, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: valueName}}
+}
+
+func (ctx *statefulLowerContext) lowerFlatRepeatAttempt(term *ast.GrammarFlatRepeatTerm) loweredAttempt {
+	resultType := ctx.inferTermType(term)
+	if resultType == nil {
+		resultType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
+	}
+	resultName := ctx.fresh("flatrepeat_value")
+	stopName := ctx.fresh("flatrepeat_stop")
+	matchedName := ctx.fresh("flatrepeat_matched")
+	committedName := ctx.fresh("flatrepeat_committed")
+	itemSnapshot := ctx.fresh("item_cursor")
+	itemAttempt := ctx.lowerAttempt(term.Elem)
+	loop := &ast.WhileStmt{
+		Position: term.Position,
+		Cond:     &ast.UnaryExpr{Position: term.Position, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: term.Position, Name: stopName}},
+		Body:     ctx.lowerFlatRepeatLoopBody(term, itemSnapshot, resultName, stopName, matchedName, committedName, itemAttempt),
+	}
+	loopStmt := ast.Stmt(loop)
+	resultInit := ast.Expr(&ast.ListLitExpr{Position: term.Position})
+	if ctx.allocExpr != nil {
+		resultInit = zeroedCastExpr(term.Position, resultType)
+		loopStmt = &ast.InStoreStmt{
+			Position: term.Position,
+			Store:    ctx.allocExpr,
+			Body: []ast.Stmt{
+				&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: resultName}, Value: &ast.ListLitExpr{Position: term.Position}},
+				loop,
+			},
+		}
+	}
+	body := []ast.Stmt{
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: true}},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: resultName, Mutable: true, Type: resultType, Value: resultInit},
+		&ast.VarDeclStmt{Position: term.Position, Name: stopName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		loopStmt,
+	}
+	return loweredAttempt{Stmts: body, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: resultName}}
+}
+
+func (ctx *statefulLowerContext) lowerFlatRepeatLoopBody(term *ast.GrammarFlatRepeatTerm, itemSnapshot string, resultName string, stopName string, matchedName string, committedName string, itemAttempt loweredAttempt) []ast.Stmt {
+	continueBody := []ast.Stmt{
+		&ast.VarDeclStmt{Position: term.Position, Name: itemSnapshot, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
+	}
+	continueBody = append(continueBody, itemAttempt.Stmts...)
+	continueBody = append(continueBody, markCommittedStmts(committedName, term.Position, itemAttempt.Committed)...)
+	groupName := ctx.fresh("flatrepeat_group")
+	continueBody = append(continueBody, &ast.IfStmt{
+		Position: term.Position,
+		Cond:     itemAttempt.Matched,
+		Then: append([]ast.Stmt{
+			&ast.VarDeclStmt{Position: term.Position, Name: groupName, Value: itemAttempt.Value},
+		}, listPushIndexedItemsStmts(ctx, term.Position, resultName, groupName)...),
+		Else: []ast.Stmt{&ast.IfStmt{Position: term.Position, Cond: itemAttempt.Committed, Then: []ast.Stmt{&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.BoolLit{Position: term.Position, Value: false}}, &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}}}, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, itemSnapshot, term.Position), &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}}}}},
+	})
+	if stopCond := ctx.lowerListUntilMatchExpr(term.Position, term.Until); stopCond != nil {
+		return []ast.Stmt{&ast.IfStmt{
+			Position: term.Position,
+			Cond:     stopCond,
+			Then: []ast.Stmt{
+				&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}},
+			},
+			Else: continueBody,
+		}}
+	}
+	return continueBody
 }
 
 func (ctx *statefulLowerContext) lowerChoiceOptions(options []ast.GrammarTerm, snapshotName string, matchedName string, committedName string, valueName string) []ast.Stmt {
@@ -2124,6 +2693,17 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 			return typ
 		}
 		return ctx.inferTermType(n.Else)
+	case *ast.GrammarRequiredTerm:
+		return ctx.inferTermType(n.Term)
+	case *ast.GrammarDelimitedTerm:
+		return ctx.inferTermType(n.Body)
+	case *ast.GrammarSeqTerm:
+		if len(n.Terms) == 0 {
+			return builtinTypeExpr(n.Position, "bool")
+		}
+		return ctx.inferTermType(n.Terms[len(n.Terms)-1])
+	case *ast.GrammarLookaheadTerm:
+		return ctx.inferTermType(n.Term)
 	case *ast.GrammarExprTerm:
 		return nil
 	case *ast.GrammarRecoverTerm:
@@ -2140,6 +2720,8 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
 	case *ast.GrammarRepeatTerm:
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
+	case *ast.GrammarFlatRepeatTerm:
+		return ctx.inferTermType(n.Elem)
 	case *ast.GrammarSeparatedTerm:
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
 	case *ast.GrammarSuffixTerm:
@@ -2374,6 +2956,17 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 		return lowerChoiceExpr(ctx, n.Position, n.Options)
 	case *ast.GrammarWhenTerm:
 		return &ast.TernaryExpr{Position: n.Position, Value: lowerTermExpr(ctx, n.Then), Cond: n.Cond, Alt: lowerTermExpr(ctx, n.Else)}
+	case *ast.GrammarRequiredTerm:
+		return lowerTermExpr(ctx, n.Term)
+	case *ast.GrammarDelimitedTerm:
+		return lowerTermExpr(ctx, n.Body)
+	case *ast.GrammarSeqTerm:
+		if len(n.Terms) == 0 {
+			return &ast.BoolLit{Position: n.Position, Value: true}
+		}
+		return lowerTermExpr(ctx, n.Terms[len(n.Terms)-1])
+	case *ast.GrammarLookaheadTerm:
+		return lowerTermExpr(ctx, n.Term)
 	case *ast.GrammarExprTerm:
 		return n.Expr
 	case *ast.GrammarRecoverTerm:
@@ -2403,6 +2996,8 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 			args = append(args, lowerGrammarUntilExpr(n.Position, n.Until))
 		}
 		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "repeat"}, Args: args}
+	case *ast.GrammarFlatRepeatTerm:
+		return lowerTermExpr(ctx, n.Elem)
 	case *ast.GrammarSeparatedTerm:
 		args := []ast.Expr{lowerTermExpr(ctx, n.Elem), lowerTermExpr(ctx, n.Separator)}
 		if len(n.Until) != 0 {

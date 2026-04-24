@@ -26,6 +26,21 @@ func nestedOptionalType(depth int) Type {
 	return current
 }
 
+func recursiveTrackedStructType() Type {
+	node := &StructType{Name: "TrackedNode", Fields: map[string]Field{}}
+	nodeRef := &RefType{Elem: node, Mutable: true, State: RefStateNonNull}
+	node.Fields["next"] = Field{Name: "next", Type: nodeRef}
+	return node
+}
+
+func recursiveTrackedStructTypePair() (Type, Type) {
+	left := &StructType{Name: "TrackedNode", Fields: map[string]Field{}}
+	right := &StructType{Name: "TrackedNode", Fields: map[string]Field{}}
+	left.Fields["next"] = Field{Name: "next", Type: &RefType{Elem: left, Mutable: true, State: RefStateNonNull}}
+	right.Fields["next"] = Field{Name: "next", Type: &RefType{Elem: right, Mutable: true, State: RefStateNonNull}}
+	return left, right
+}
+
 func requireSemanticHardeningError(t *testing.T, analyzer *Analyzer, want string) {
 	t.Helper()
 	if len(analyzer.diagnostics) == 0 {
@@ -56,6 +71,59 @@ func TestCloneTrackedValueTypeReportsRecursionLimit(t *testing.T) {
 		t.Fatalf("expected invalidType after tracked-type clone hardening, got %T", result)
 	}
 	requireSemanticHardeningError(t, analyzer, "tracked-type clone recursion limit")
+}
+
+func TestCloneSpecializedValueTypeMapReusesSharedRecursiveClone(t *testing.T) {
+	analyzer := newSemanticHardeningTestAnalyzer()
+	recursive := recursiveTrackedStructType()
+	left := &Symbol{Name: "left", Kind: SymbolLocal, Type: recursive}
+	right := &Symbol{Name: "right", Kind: SymbolLocal, Type: recursive}
+
+	cloned := analyzer.cloneSpecializedValueTypeMap(map[*Symbol]Type{
+		left:  recursive,
+		right: recursive,
+	})
+	if len(cloned) != 2 {
+		t.Fatalf("expected cloned map to preserve both bindings, got %d entries", len(cloned))
+	}
+	if IsInvalidType(cloned[left]) || IsInvalidType(cloned[right]) {
+		t.Fatalf("expected recursive tracked type clone to remain valid, got %#v and %#v", cloned[left], cloned[right])
+	}
+	if cloned[left] != cloned[right] {
+		t.Fatal("expected shared recursive tracked type clone to be memoized across map entries")
+	}
+	clonedStruct, ok := cloned[left].(*StructType)
+	if !ok {
+		t.Fatalf("expected cloned recursive tracked type to remain a struct, got %T", cloned[left])
+	}
+	nextRef, ok := clonedStruct.Fields["next"].Type.(*RefType)
+	if !ok {
+		t.Fatalf("expected cloned recursive field to remain a ref, got %T", clonedStruct.Fields["next"].Type)
+	}
+	if nextRef.Elem != cloned[left] {
+		t.Fatal("expected cloned recursive field to point at the memoized struct clone")
+	}
+}
+
+func TestMergeSpecializedValueTypesPreservesRecursiveStructCycles(t *testing.T) {
+	analyzer := newSemanticHardeningTestAnalyzer()
+	left, right := recursiveTrackedStructTypePair()
+
+	merged, ok := analyzer.mergeSpecializedValueTypes(left, right)
+	if !ok {
+		t.Fatal("expected recursive specialized struct types to merge successfully")
+	}
+	mergedStruct, ok := merged.(*StructType)
+	if !ok {
+		t.Fatalf("expected merged recursive type to remain a struct, got %T", merged)
+	}
+	nextRef, ok := mergedStruct.Fields["next"].Type.(*RefType)
+	if !ok {
+		t.Fatalf("expected merged recursive field to remain a ref, got %T", mergedStruct.Fields["next"].Type)
+	}
+	if nextRef.Elem != mergedStruct {
+		t.Fatal("expected merged recursive field to point at the merged struct placeholder")
+	}
 }
 
 func TestContainsAffineHandleValuesReportsRecursionLimit(t *testing.T) {

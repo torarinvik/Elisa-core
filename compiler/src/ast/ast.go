@@ -106,8 +106,16 @@ type GrammarDecl struct {
 	ErrorType        TypeExpr
 	CursorExpr       Expr
 	AllocExpr        Expr
+	TokenAliases     []GrammarTokenAliasDecl
 	Channels         []GrammarChannelDecl
 	Productions      []GrammarProductionDecl
+}
+
+type GrammarTokenAliasDecl struct {
+	Position   lexer.Pos
+	Kind       string
+	Literal    string
+	HasLiteral bool
 }
 
 type GrammarChannelDecl struct {
@@ -120,6 +128,7 @@ type GrammarChannelDecl struct {
 type GrammarProductionDecl struct {
 	Position     lexer.Pos
 	Public       bool
+	Append       bool
 	Name         string
 	HasParamList bool
 	Params       []ParamDecl
@@ -181,6 +190,30 @@ type GrammarRecoverTerm struct {
 	RecoverValue Expr
 }
 
+type GrammarRequiredTerm struct {
+	Position lexer.Pos
+	Term     GrammarTerm
+	Message  Expr
+}
+
+type GrammarDelimitedTerm struct {
+	Position lexer.Pos
+	Open     GrammarTerm
+	Body     GrammarTerm
+	Close    GrammarTerm
+	Message  Expr
+}
+
+type GrammarSeqTerm struct {
+	Position lexer.Pos
+	Terms    []GrammarTerm
+}
+
+type GrammarLookaheadTerm struct {
+	Position lexer.Pos
+	Term     GrammarTerm
+}
+
 type GrammarExprTerm struct {
 	Position lexer.Pos
 	Expr     Expr
@@ -208,6 +241,12 @@ type GrammarListTerm struct {
 }
 
 type GrammarRepeatTerm struct {
+	Position lexer.Pos
+	Elem     GrammarTerm
+	Until    []GrammarTerm
+}
+
+type GrammarFlatRepeatTerm struct {
 	Position lexer.Pos
 	Elem     GrammarTerm
 	Until    []GrammarTerm
@@ -1565,6 +1604,18 @@ func (n *GrammarWhenTerm) Pos() lexer.Pos {
 func (n *GrammarRecoverTerm) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *GrammarRequiredTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarDelimitedTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarSeqTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarLookaheadTerm) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GrammarExprTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1577,6 +1628,9 @@ func (n *GrammarAttemptTerm) Pos() lexer.Pos {
 func (n *GrammarCutTerm) Pos() lexer.Pos  { return n.Position }
 func (n *GrammarListTerm) Pos() lexer.Pos { return n.Position }
 func (n *GrammarRepeatTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarFlatRepeatTerm) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *GrammarSeparatedTerm) Pos() lexer.Pos {
@@ -1775,12 +1829,17 @@ func (*GrammarChoiceTerm) nodeTag()         {}
 func (*GrammarOptionalTerm) nodeTag()       {}
 func (*GrammarWhenTerm) nodeTag()           {}
 func (*GrammarRecoverTerm) nodeTag()        {}
+func (*GrammarRequiredTerm) nodeTag()       {}
+func (*GrammarDelimitedTerm) nodeTag()      {}
+func (*GrammarSeqTerm) nodeTag()            {}
+func (*GrammarLookaheadTerm) nodeTag()      {}
 func (*GrammarExprTerm) nodeTag()           {}
 func (*GrammarGuardTerm) nodeTag()          {}
 func (*GrammarAttemptTerm) nodeTag()        {}
 func (*GrammarCutTerm) nodeTag()            {}
 func (*GrammarListTerm) nodeTag()           {}
 func (*GrammarRepeatTerm) nodeTag()         {}
+func (*GrammarFlatRepeatTerm) nodeTag()     {}
 func (*GrammarSeparatedTerm) nodeTag()      {}
 func (*GrammarSuffixTerm) nodeTag()         {}
 func (*GrammarPostfixTerm) nodeTag()        {}
@@ -1958,12 +2017,17 @@ func (*GrammarChoiceTerm) grammarTermTag()     {}
 func (*GrammarOptionalTerm) grammarTermTag()   {}
 func (*GrammarRecoverTerm) grammarTermTag()    {}
 func (*GrammarWhenTerm) grammarTermTag()       {}
+func (*GrammarRequiredTerm) grammarTermTag()   {}
+func (*GrammarDelimitedTerm) grammarTermTag()  {}
+func (*GrammarSeqTerm) grammarTermTag()        {}
+func (*GrammarLookaheadTerm) grammarTermTag()  {}
 func (*GrammarExprTerm) grammarTermTag()       {}
 func (*GrammarGuardTerm) grammarTermTag()      {}
 func (*GrammarAttemptTerm) grammarTermTag()    {}
 func (*GrammarCutTerm) grammarTermTag()        {}
 func (*GrammarListTerm) grammarTermTag()       {}
 func (*GrammarRepeatTerm) grammarTermTag()     {}
+func (*GrammarFlatRepeatTerm) grammarTermTag() {}
 func (*GrammarSeparatedTerm) grammarTermTag()  {}
 func (*GrammarSuffixTerm) grammarTermTag()     {}
 func (*GrammarPostfixTerm) grammarTermTag()    {}
