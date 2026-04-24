@@ -198,6 +198,32 @@ def keep(owner: Arena) -> mutable Arena&:
 	requireExprTypeString(t, result, cast, "mutable Arena&")
 }
 
+func TestAnalyzeTernaryPropagatesExpectedDarrayTypeToEmptyListBranch(t *testing.T) {
+	src := `def choose(flag: bool) -> darray[i64]:
+    values: darray[i64] = [1] if flag else []
+    return values
+`
+
+	result, errs := parseAndAnalyze(t, "ternary_darray_inference.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	decl := requireFuncDecl(t, result, "choose")
+	varDecl, ok := decl.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl, got %T", decl.Body[0])
+	}
+	ter, ok := varDecl.Value.(*ast.TernaryExpr)
+	if !ok {
+		t.Fatalf("expected ternary initializer, got %T", varDecl.Value)
+	}
+	requireExprTypeString(t, result, ter, "darray[i64]")
+	if _, ok := ter.Alt.(*ast.ListLitExpr); !ok {
+		t.Fatalf("expected empty list literal branch, got %T", ter.Alt)
+	}
+	requireExprTypeString(t, result, ter.Alt, "darray[i64]")
+}
+
 func TestAnalyzeCatchExprOverErrorUnion(t *testing.T) {
 	src := `error FileError:
 	NotFound

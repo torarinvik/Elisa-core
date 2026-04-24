@@ -1072,6 +1072,173 @@ grammar PascalFrontend over Token using ParserState:
 	}
 }
 
+func TestLowerFileStatefulSynthesizesNamedTupleReturnFromChannels(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel item: i64 = 7
+	channel count: usize = 1
+	summary() -> (item: i64, count: usize):
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "def summary(parser: mutable ParserState&) -> (item: i64, count: usize):") {
+		t.Fatalf("expected public production to preserve named tuple return type, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "(item, count)") {
+		t.Fatalf("expected synthesized named tuple return to assemble channel fields, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulInfersUntypedChannelsFromNamedTupleReturnFields(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel item
+	channel count
+	summary() -> (item: i64, count: usize):
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"item: mutable i64 = zeroed.cast[i64]",
+		"count: mutable usize = zeroed.cast[usize]",
+		"return (true, __grammar_committed_",
+		"(item, count)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected named tuple channel inference lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "item: mutable (item: i64, count: usize)") || strings.Contains(formatted, "count: mutable (item: i64, count: usize)") {
+		t.Fatalf("expected tuple-field inference to avoid seeding channels with the whole tuple type, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulTypedExprTermInSeparatedListInfersElementType(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel param_name_ids
+	param_name_ids_core() -> darray[PascalNameId]:
+		param_name_ids <- separated required(seq(.IDENT(param_token), expr[PascalNameId](param_token.lexeme_key)), ParseMessageKey.ExpectedProgramParamName) by .COMMA until(.RPAREN, token(TokenKind.EOF))
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"param_name_ids: mutable darray[PascalNameId] = zeroed.cast[darray[PascalNameId]]",
+		"__grammar_list_value_",
+		"mutable PascalNameId = zeroed.cast[PascalNameId]",
+		".push(__grammar_seq_value_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected typed expr list lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "darray[void]") {
+		t.Fatalf("expected typed expr term to prevent void list inference, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulTypedExprTermCarriesDeclaredTypeForEmptyList(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel decls
+	empty_decls() -> darray[Pascal.Decl]:
+		decls <- expr[darray[Pascal.Decl]]([])
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_value_empty_decls_",
+		": darray[Pascal.Decl] = []",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected typed expr lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "zeroed as darray[Pascal.Decl]") {
+		t.Fatalf("expected typed expr lowering to avoid cast-based empty darray scaffolding, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulFlatMapListInfersElementTypeFromReturnType(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel decls
+	variable_decl_group(names: darray[Token], type_token: Token) -> darray[Pascal.Decl]:
+		decls <- flatmaplist(names, name_token, single_decl_list(build_var_decl(name_token, type_token)) if name_token.kind == TokenKind.IDENT else [])
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
+		"__grammar_maplist_value_",
+		": darray[Pascal.Decl] = (single_decl_list(build_var_decl(name_token, type_token)) if (name_token.kind == TokenKind.IDENT) else [])",
+		"(single_decl_list(build_var_decl(name_token, type_token)) if (name_token.kind == TokenKind.IDENT) else [])",
+		".push(__grammar_maplist_group_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected flatmaplist lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "darray[void]") {
+		t.Fatalf("expected flatmaplist to infer element type from production return type, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulConcatTermFlattensListOperands(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel decls
+	declarations() -> darray[Token]:
+		decls <- expr[darray[Token]]([]) + list(token(TokenKind.IDENT)) + expr[darray[Token]]([])
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"decls: mutable darray[Token] = zeroed.cast[darray[Token]]",
+		"__grammar_concat_value_",
+		"__grammar_concat_group_",
+		"parser.expect_kind(TokenKind.IDENT)",
+		".push(__grammar_concat_group_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected concat lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "darray[void]") {
+		t.Fatalf("expected concat lowering to preserve list element type, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulSynthesizesStructReturnFromNamespacedChannels(t *testing.T) {
+	file := parseGrammarTestFile(t, `namespace PascalFrontend:
+	struct BuiltSummary:
+		items: darray[i64]
+		checksum_total: i64
+		arg_count: usize
+		close_span: Span
+
+	grammar Parser over Token using ParserState:
+		cursor parser
+		channel items: darray[i64] = []
+		channel checksum_total: i64 = 0
+		channel arg_count: usize = 0
+		channel close_span: Span = $end.span
+		summary() -> BuiltSummary:
+			pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "BuiltSummary(items:, checksum_total:, arg_count:, close_span:)") {
+		t.Fatalf("expected namespaced struct return synthesis to use the local struct scope, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulTryWrapperCarriesProductionErrorUnion(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar ATPLFrontend:
     postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> ATPLExpr.Expr error[ATPLFrontendError]:

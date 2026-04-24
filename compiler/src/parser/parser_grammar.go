@@ -439,14 +439,7 @@ func (p *Parser) peekGrammarBlockTerm(name string) bool {
 }
 
 func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
-	term := p.parseGrammarAtomicTermValue()
-	if p.peek() == lexer.TOKEN_PIPE {
-		options := []ast.GrammarTerm{term}
-		for p.match(lexer.TOKEN_PIPE) {
-			options = append(options, p.parseGrammarAtomicTermValue())
-		}
-		term = &ast.GrammarChoiceTerm{Position: term.Pos(), Options: options}
-	}
+	term := p.parseGrammarChoiceTermValue()
 	for {
 		switch {
 		case p.match(lexer.TOKEN_QUESTION):
@@ -461,6 +454,30 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 			return term
 		}
 	}
+}
+
+func (p *Parser) parseGrammarChoiceTermValue() ast.GrammarTerm {
+	term := p.parseGrammarConcatTermValue()
+	if p.peek() == lexer.TOKEN_PIPE {
+		options := []ast.GrammarTerm{term}
+		for p.match(lexer.TOKEN_PIPE) {
+			options = append(options, p.parseGrammarConcatTermValue())
+		}
+		term = &ast.GrammarChoiceTerm{Position: term.Pos(), Options: options}
+	}
+	return term
+}
+
+func (p *Parser) parseGrammarConcatTermValue() ast.GrammarTerm {
+	term := p.parseGrammarAtomicTermValue()
+	if !p.match(lexer.TOKEN_PLUS) {
+		return term
+	}
+	terms := []ast.GrammarTerm{term, p.parseGrammarAtomicTermValue()}
+	for p.match(lexer.TOKEN_PLUS) {
+		terms = append(terms, p.parseGrammarAtomicTermValue())
+	}
+	return &ast.GrammarConcatTerm{Position: term.Pos(), Terms: terms}
 }
 
 func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
@@ -504,6 +521,12 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	}
 	if p.peekIdentText("expr") {
 		return p.parseGrammarExprTerm()
+	}
+	if p.peekIdentText("maplist") {
+		return p.parseGrammarMapListTerm(false)
+	}
+	if p.peekIdentText("flatmaplist") {
+		return p.parseGrammarMapListTerm(true)
 	}
 	if p.peekIdentText("guard") {
 		return p.parseGrammarGuardTerm()
@@ -692,10 +715,37 @@ func (p *Parser) parseGrammarLookaheadTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarExprTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("expr")
+	var typ ast.TypeExpr
+	if p.match(lexer.TOKEN_LBRACKET) {
+		typ = p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	expr := p.parseExpr()
 	p.expect(lexer.TOKEN_RPAREN)
-	return &ast.GrammarExprTerm{Position: pos, Expr: expr}
+	return &ast.GrammarExprTerm{Position: pos, Type: typ, Expr: expr}
+}
+
+func (p *Parser) parseGrammarMapListTerm(flatten bool) ast.GrammarTerm {
+	pos := p.cur().Pos
+	keyword := "maplist"
+	if flatten {
+		keyword = "flatmaplist"
+	}
+	p.expectIdentText(keyword)
+	var typ ast.TypeExpr
+	if p.match(lexer.TOKEN_LBRACKET) {
+		typ = p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+	}
+	p.expect(lexer.TOKEN_LPAREN)
+	source := p.parseExpr()
+	p.expect(lexer.TOKEN_COMMA)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COMMA)
+	value := p.parseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarMapListTerm{Position: pos, Type: typ, Source: source, Name: name, Value: value, Flatten: flatten}
 }
 
 func (p *Parser) parseGrammarGuardTerm() ast.GrammarTerm {

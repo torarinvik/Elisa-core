@@ -108,5 +108,6 @@ Use the pyramid deliberately:
 - low-level functions keep explicit parameters when allocation ownership, lifetime, or mutation must be obvious
 - helper functions use `with ParseCtx` or a smaller `with AllocCtx` when allocator threading is mechanical
 - grammar actions use canonical tree syntax such as `node[span = ...] Tree.Member(...)`
-- grammar channels are a good fit for parser result structs, and stateful grammar lowering can synthesize a struct-shaped success value from channel names when the production return type is a struct in scope
+- grammar channels are a good fit for parser result shapes; prefer named tuple returns for local helper results, and use structs when the shape is shared more broadly. Stateful grammar lowering can synthesize either tuple-shaped or struct-shaped success values from channel names.
+- when parser code already has a list value in hand, prefer `maplist` or `flatmaplist` over a one-off helper function that only loops, pushes, and returns a `darray`
 - static interfaces express parser-builder variability, not runtime dispatch

@@ -155,11 +155,17 @@ func registerBundleTypes() {
 		gob.Register(&ast.GrammarDelimitedTerm{})
 		gob.Register(&ast.GrammarSeqTerm{})
 		gob.Register(&ast.GrammarLookaheadTerm{})
+		gob.Register(&ast.GrammarExprTerm{})
+		gob.Register(&ast.GrammarMapListTerm{})
+		gob.Register(&ast.GrammarConcatTerm{})
 		gob.Register(&ast.GrammarListTerm{})
+		gob.Register(&ast.GrammarRepeatTerm{})
 		gob.Register(&ast.GrammarFlatRepeatTerm{})
+		gob.Register(&ast.GrammarSeparatedTerm{})
 		gob.Register(&ast.GrammarSuffixTerm{})
 		gob.Register(&ast.GrammarPrecedenceTerm{})
 		gob.Register(&ast.GrammarBindTerm{})
+		gob.Register(&ast.GrammarAssignTerm{})
 		gob.Register(&ast.GrammarReturnTerm{})
 
 		// Patterns.

@@ -25,6 +25,7 @@ compiler/.semantic-test.log
 /compiler/scripts/__pycache__
 Code/llcontext_atpl/
 Code/llcontext_pascal/
+Code/llcontext_sml/
 bin/atpl
 /compiler/cmd/atpl
 compiler/llcontext-compiler

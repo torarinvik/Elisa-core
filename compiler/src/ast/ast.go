@@ -223,7 +223,22 @@ type GrammarLookaheadTerm struct {
 
 type GrammarExprTerm struct {
 	Position lexer.Pos
+	Type     TypeExpr
 	Expr     Expr
+}
+
+type GrammarMapListTerm struct {
+	Position lexer.Pos
+	Type     TypeExpr
+	Source   Expr
+	Name     string
+	Value    Expr
+	Flatten  bool
+}
+
+type GrammarConcatTerm struct {
+	Position lexer.Pos
+	Terms    []GrammarTerm
 }
 
 type GrammarGuardTerm struct {
@@ -1632,6 +1647,12 @@ func (n *GrammarLookaheadTerm) Pos() lexer.Pos {
 func (n *GrammarExprTerm) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *GrammarMapListTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarConcatTerm) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GrammarGuardTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1847,6 +1868,8 @@ func (*GrammarDelimitedTerm) nodeTag()      {}
 func (*GrammarSeqTerm) nodeTag()            {}
 func (*GrammarLookaheadTerm) nodeTag()      {}
 func (*GrammarExprTerm) nodeTag()           {}
+func (*GrammarMapListTerm) nodeTag()        {}
+func (*GrammarConcatTerm) nodeTag()         {}
 func (*GrammarGuardTerm) nodeTag()          {}
 func (*GrammarAttemptTerm) nodeTag()        {}
 func (*GrammarCutTerm) nodeTag()            {}
@@ -2035,6 +2058,8 @@ func (*GrammarDelimitedTerm) grammarTermTag()  {}
 func (*GrammarSeqTerm) grammarTermTag()        {}
 func (*GrammarLookaheadTerm) grammarTermTag()  {}
 func (*GrammarExprTerm) grammarTermTag()       {}
+func (*GrammarMapListTerm) grammarTermTag()    {}
+func (*GrammarConcatTerm) grammarTermTag()     {}
 func (*GrammarGuardTerm) grammarTermTag()      {}
 func (*GrammarAttemptTerm) grammarTermTag()    {}
 func (*GrammarCutTerm) grammarTermTag()        {}

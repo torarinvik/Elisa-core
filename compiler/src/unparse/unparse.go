@@ -787,7 +787,25 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	case *ast.GrammarLookaheadTerm:
 		return "lookahead(" + formatGrammarTerm(n.Term) + ")"
 	case *ast.GrammarExprTerm:
+		if n.Type != nil {
+			return "expr[" + formatTypeExpr(n.Type) + "](" + formatExpr(n.Expr) + ")"
+		}
 		return "expr(" + formatExpr(n.Expr) + ")"
+	case *ast.GrammarMapListTerm:
+		keyword := "maplist"
+		if n.Flatten {
+			keyword = "flatmaplist"
+		}
+		if n.Type != nil {
+			return keyword + "[" + formatTypeExpr(n.Type) + "](" + formatExpr(n.Source) + ", " + n.Name + ", " + formatExpr(n.Value) + ")"
+		}
+		return keyword + "(" + formatExpr(n.Source) + ", " + n.Name + ", " + formatExpr(n.Value) + ")"
+	case *ast.GrammarConcatTerm:
+		parts := make([]string, 0, len(n.Terms))
+		for _, term := range n.Terms {
+			parts = append(parts, formatGrammarTerm(term))
+		}
+		return strings.Join(parts, " + ")
 	case *ast.GrammarRecoverTerm:
 		return formatGrammarTerm(n.Term) + formatGrammarRecoverClause(n.RecoverMsg, n.RecoverUntil, n.RecoverValue)
 	case *ast.GrammarGuardTerm:

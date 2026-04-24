@@ -353,10 +353,79 @@ Current header declarations:
 - grouped token entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal such as `LPAREN "("`
 - `channel name` declares a generated mutable channel with inferred/default behavior
 - `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
-- if a production falls through without an explicit `return` and its return type is a known struct in the current scope, lowering synthesizes a struct literal from channel names to matching fields
+- if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from channel names
+- `expr[T](value)` gives an inline grammar expression term an explicit result type, which lets `seq`, `separated`, and related list combinators keep transformed element types without introducing a one-off helper production
+- `maplist[T](source, item, value)` maps an existing list expression into a `darray[T]` without introducing a helper function
+- `flatmaplist[T](source, item, values)` maps an existing list expression into per-item lists and flattens them into one `darray[T]`; typed empty branches such as `else []` inherit the mapped list type
 - `uses OtherGrammar` imports productions and token aliases from another grammar
 
-Channel synthesis is useful for parser result shapes that want several tracked fields without repeating the final assembly step:
+Channel synthesis is useful for parser result shapes that want several tracked fields without repeating the final assembly step. For local helper results, the lightest form is a named tuple:
+
+```context
+grammar PascalAssignStmtGrammar over Token using ParserState:
+    cursor state
+    channel name_id: PascalNameId
+    channel value: Pascal.Expr
+    channel span: Span = $start.span + $end.span
+
+    assignment_spec() -> (name_id: PascalNameId, value: Pascal.Expr, span: Span):
+        .IDENT(name_token)
+        lookahead(.ASSIGN)
+        cut
+        name_id <- expr(name_token.lexeme_key)
+        required(.ASSIGN, ParseMessageKey.ExpectedAssignmentOperator)
+        value <- expression()
+        pass
+```
+
+That lowers through the normal grammar try/public wrappers and finishes with a synthesized success value shaped like `(name_id, value, span)`, so callers can keep using field-style access such as `spec.name_id` and `spec.span` without introducing a dedicated helper struct.
+
+Typed grammar expression terms are useful when a grammar wants to transform a parsed token into a richer value inline and keep that element type through a list combinator:
+
+```context
+grammar PascalProgramHeaderGrammar over Token using ParserState:
+    cursor state
+
+    program_header() -> (param_name_ids: darray[PascalNameId]):
+        param_name_ids <- delimited(
+            .LPAREN,
+            separated required(seq(.IDENT(param_token), expr[PascalNameId](param_token.lexeme_key)), ParseMessageKey.ExpectedProgramParamName) by .COMMA until(.RPAREN, token(TokenKind.EOF)),
+            .RPAREN,
+            ParseMessageKey.ExpectedProgramHeaderRightParen
+        )?
+        pass
+```
+
+Without the `[PascalNameId]` annotation, lowering only sees an untyped `expr(...)` term and list inference has to fall back to a helper production.
+
+Mapped list terms cover the next common parser-helper shape: take a list that was already parsed, transform each element, and optionally flatten per-item expansions without bouncing out to a hand-written helper.
+
+```context
+grammar PascalFrontend over Token using ParserState:
+    cursor state
+
+    variable_decl_group() -> darray[Pascal.Decl]:
+        header = variable_decl_header()
+        node <- when(
+            header.type_token.kind == TokenKind.IDENT,
+            flatmaplist[Pascal.Decl](
+                header.names,
+                name_token,
+                single_decl_list(
+                    node[span = name_token.span + header.type_token.span] Pascal.Decl.VarDecl(
+                        name_id: name_token.lexeme_key,
+                        type_name_id: header.type_token.lexeme_key
+                    )
+                ) if name_token.kind == TokenKind.IDENT else []
+            ),
+            expr[darray[Pascal.Decl]]([])
+        )
+        return node
+```
+
+Use `maplist` when each source item yields exactly one result value. Use `flatmaplist` when each source item may yield zero or more result values and you want the grammar surface to own the flattening.
+
+When the result shape is shared more broadly, the same mechanism also works for structs:
 
 ```context
 struct BuiltSummary:

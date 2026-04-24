@@ -8999,6 +8999,9 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 		a.recordAnalyzedExprType(lambda, result)
 		return result
 	}
+	if ternary, ok := expr.(*ast.TernaryExpr); ok && expected != nil {
+		return a.analyzeContextualTernaryExpr(ternary, expected)
+	}
 	if contextualExpected, ok := contextualIntLiteralType(expected); ok {
 		if contextualType, ok := a.analyzeContextualIntValueExpr(expr, contextualExpected); ok {
 			return contextualType
@@ -9274,6 +9277,10 @@ func (a *Analyzer) analyzeValueExprInAffineScopePrepared(expr ast.Expr, expected
 }
 
 func (a *Analyzer) analyzeContextualIntTernaryExpr(expr *ast.TernaryExpr, expected Type) Type {
+	return a.analyzeContextualTernaryExpr(expr, expected)
+}
+
+func (a *Analyzer) analyzeContextualTernaryExpr(expr *ast.TernaryExpr, expected Type) Type {
 	if expr == nil {
 		return invalidType
 	}
@@ -9303,32 +9310,7 @@ func (a *Analyzer) analyzeContextualIntTernaryExpr(expr *ast.TernaryExpr, expect
 }
 
 func (a *Analyzer) analyzeContextualFloatTernaryExpr(expr *ast.TernaryExpr, expected Type) Type {
-	if expr == nil {
-		return invalidType
-	}
-	condType := a.analyzeCondExpr(expr.Cond)
-	if !IsBoolType(condType) {
-		a.errorf(expr.Pos(), "ternary condition must be bool, got %s", condType)
-	}
-	mergedAffine := a.cloneAffineValueStates()
-	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-	left, leftSnapshot := a.analyzeValueExprInConditionAffineScope(expr.Value, expected, a.currentScope, expr.Cond, true)
-	right, rightSnapshot := a.analyzeValueExprInConditionAffineScope(expr.Alt, expected, a.currentScope, expr.Cond, false)
-	mergedAffine = mergeAffineValueStates(mergedAffine, leftSnapshot.Affine)
-	mergedAffine = mergeAffineValueStates(mergedAffine, rightSnapshot.Affine)
-	mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, leftSnapshot.BorrowedOwnerRefs)
-	mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, rightSnapshot.BorrowedOwnerRefs)
-	a.currentAffineValues = mergedAffine
-	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
-	if mergedFunctionValues, ok := a.intersectFunctionValueFlows(leftSnapshot.FunctionValues, rightSnapshot.FunctionValues); ok {
-		a.currentFunctionValues = mergedFunctionValues
-	}
-	merged := MergeTypes(left, right)
-	if IsInvalidType(merged) {
-		a.errorf(expr.Pos(), "ternary branches are incompatible: %s and %s", left, right)
-	}
-	a.recordAnalyzedExprType(expr, merged)
-	return merged
+	return a.analyzeContextualTernaryExpr(expr, expected)
 }
 
 func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expected Type) Type {
