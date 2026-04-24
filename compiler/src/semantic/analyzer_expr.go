@@ -3172,6 +3172,9 @@ func (a *Analyzer) analyzeSpanAlgebraExpr(expr *ast.BinaryExpr, left Type, right
 	if IsNumericType(left) || IsNumericType(right) || !SameType(left, right) {
 		return nil, false
 	}
+	if result, ok := a.analyzeSpanLikeProtocolExpr(expr, left); ok {
+		return result, true
+	}
 	helperName := ""
 	switch left.String() {
 	case "Span":
@@ -3197,6 +3200,67 @@ func (a *Analyzer) analyzeSpanAlgebraExpr(expr *ast.BinaryExpr, left Type, right
 	}
 	expr.LoweredCall = call
 	return result, true
+}
+
+func (a *Analyzer) analyzeSpanLikeProtocolExpr(expr *ast.BinaryExpr, spanType Type) (Type, bool) {
+	if a == nil || expr == nil || spanType == nil {
+		return nil, false
+	}
+	iface, interfaceName, ok := a.lookupVisibleStaticInterface("SpanLike")
+	if !ok || iface == nil {
+		return nil, false
+	}
+	impl, ok := LookupStaticImpl(a.staticImpls, interfaceName, spanType)
+	if !ok || impl == nil {
+		return nil, false
+	}
+	if _, ok := impl.Methods["combine"]; !ok {
+		return nil, false
+	}
+	typePath := staticTypeExprForType(expr.Position, spanType)
+	if typePath == nil {
+		return nil, false
+	}
+	field := &ast.FieldExpr{
+		Position: expr.Position,
+		Object:   typePath,
+		Field:    "combine",
+	}
+	call := &ast.CallExpr{
+		Position: expr.Position,
+		Func:     field,
+		Args:     []ast.Expr{expr.Left, expr.Right},
+	}
+	result := a.analyzeExpr(call)
+	if !IsInvalidType(result) && !AssignableTo(spanType, result) {
+		a.errorf(expr.Pos(), "SpanLike.combine returned %s, expected %s", result, spanType)
+		return invalidType, true
+	}
+	expr.LoweredCall = call
+	return result, true
+}
+
+func staticTypeExprForType(pos lexer.Pos, typ Type) ast.Expr {
+	if typ == nil {
+		return nil
+	}
+	name := typ.String()
+	if name == "" || strings.ContainsAny(name, "[]&*? ") {
+		return nil
+	}
+	parts := strings.Split(name, ".")
+	var expr ast.Expr
+	for _, part := range parts {
+		if part == "" {
+			return nil
+		}
+		if expr == nil {
+			expr = &ast.Ident{Position: pos, Name: part}
+			continue
+		}
+		expr = &ast.FieldExpr{Position: pos, Object: expr, Field: part}
+	}
+	return expr
 }
 
 func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {

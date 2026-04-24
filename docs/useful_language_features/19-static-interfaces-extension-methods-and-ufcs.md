@@ -28,8 +28,9 @@ def build[B: Builder](value: int) -> B.Node:
 
 Current rules:
 
-- `static interface Name:` declares a compile-time interface, not a runtime object type
-- legacy `interface Name:` still parses for compatibility, but formatted source emits `static interface`
+- `protocol Name:` declares a compile-time capability using the same implementation model as `static interface`
+- `static interface Name:` remains the explicit low-level spelling for the same compile-time mechanism
+- legacy `interface Name:` still parses for compatibility
 - interface members may include associated types and method signatures
 - `impl Name for Type:` provides the associated types and methods for one concrete type
 - generic parameters may be interface-bounded with `T: InterfaceName`
@@ -41,6 +42,37 @@ Current implementation model:
 - static interface use is resolved at compile time and lowered through specialization-style rewriting rather than a runtime vtable carrier
 - interface impl members may also carry annotations such as `@derive(...)`
 - `override def` is accepted inside impls when the source wants to mark an intended override explicitly
+
+## Span-like protocols
+
+Parser and tree code can make custom span/range types participate in `left.span + right.span` by providing a visible `SpanLike` static-interface impl.
+
+```context
+struct Span:
+    start: i64
+    end: i64
+
+protocol SpanLike:
+    type Range
+    def combine(left: Range, right: Range) -> Range
+
+impl SpanLike for Span:
+    type Range = Span
+
+    def combine(left: Span, right: Span) -> Span:
+        return Span{start: left.start, end: right.end}
+
+def binary_span(left: Span, right: Span) -> Span:
+    return left + right
+```
+
+Current rules:
+
+- `SpanLike` is a compile-time protocol, not a runtime trait object
+- the `+` span algebra surface only applies to same-type, non-numeric operands
+- if a visible `SpanLike` impl exists for that span type, `left + right` lowers to the impl's `combine(left, right)` method
+- legacy helper lookup remains accepted as a compatibility path for older frontends
+- the low-level explicit form remains available when desired: `Span.combine(left, right)` or `combine_span(left, right)`
 
 ## Generic call specialization
 

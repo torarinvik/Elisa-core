@@ -4,10 +4,10 @@ This note records the canonical direction for keeping llcontext low-level at the
 
 ## Interface spelling
 
-Compile-time interfaces are canonicalized as `static interface`.
+Compile-time interfaces are available as `protocol` for capability-style contracts and `static interface` for the explicit low-level spelling.
 
 ```llcontext
-static interface ParseBuilder:
+protocol ParseBuilder:
     type ExprNode
     type StmtNode
 
@@ -15,7 +15,7 @@ static interface ParseBuilder:
     def make_binary(span: Span, left: ExprNode, right: ExprNode) -> ExprNode
 ```
 
-The old `interface Name:` spelling remains accepted as a compatibility alias, but formatter output and new examples should use `static interface Name:`.
+`protocol` is compile-time only; it formats as `protocol` and uses the same implementation machinery as `static interface`. The old `interface Name:` spelling remains accepted as a compatibility alias.
 
 Runtime/dynamic interfaces are intentionally left unclaimed by this spelling. If llcontext grows vtable-like runtime interfaces later, they should use a separate explicit feature instead of overloading the current static system.
 
@@ -72,14 +72,14 @@ def generated_parser_step(alloc: mutable Arena&, token: Token) -> Pascal.Expr:
 
 ## Tree capability shape
 
-Tree frontends should compose small static interfaces instead of growing one monolithic builder contract when possible.
+Tree frontends should compose small protocols instead of growing one monolithic builder contract when possible.
 
 ```llcontext
-static interface SpanLike:
-    type Span
-    def combine(left: Span, right: Span) -> Span
+protocol SpanLike:
+    type Range
+    def combine(left: Range, right: Range) -> Range
 
-static interface TreeBuilder:
+protocol TreeBuilder:
     type Span
     type ExprNode
 
@@ -94,7 +94,7 @@ span: Span = left.span + right.span
 return node[span = span] Pascal.Expr.Binary(left: left, right: right)
 ```
 
-The low-level equivalent remains available:
+With a visible `SpanLike` impl for `Span`, that lowers to static-interface dispatch. The low-level equivalent remains available:
 
 ```llcontext
 span: Span = combine_span(left.span, right.span)
@@ -109,7 +109,11 @@ Use the pyramid deliberately:
 - helper functions use `with ParseCtx` or a smaller `with AllocCtx` when allocator threading is mechanical
 - grammar actions use canonical tree syntax such as `node[span = ...] Tree.Member(...)`
 - grammar channels are a good fit for parser result shapes; prefer named tuple returns for local helper results, and use structs when the shape is shared more broadly. Stateful grammar lowering can synthesize either tuple-shaped or struct-shaped success values from channel names.
+- production-local channels are preferred for helper tuple/struct productions so grammar-wide `node`/`span` channels stay focused on tree productions
+- reusable parser combinators that construct grammar fragments should use `grammar type` instead of plain `grammarfn`
 - grammar sequence results use `left + right` for list-producing parser values instead of one-off merge helpers
+- grammar list wrappers use `singleton[T](value)` instead of one-off helpers that allocate a `darray`, push one value, and return it
 - parser branches snapshot cursor-dependent values before trying alternatives that can consume input
+- helper productions that return plain structs can now live inside tree grammars more comfortably: struct synthesis requires channel names to match struct fields, so unrelated grammar-wide channels such as `node` do not accidentally shape non-tree results
 - when parser code already has a list value in hand, prefer `maplist` or `flatmaplist` over a one-off helper function that only loops, pushes, and returns a `darray`
-- static interfaces express parser-builder variability, not runtime dispatch
+- `protocol` / `static interface` express parser-builder variability, not runtime dispatch

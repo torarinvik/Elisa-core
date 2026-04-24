@@ -172,6 +172,7 @@ type GrammarTokenSetDecl struct {
 type GrammarFnDecl struct {
 	Position      lexer.Pos
 	Name          string
+	TypeCtor      bool
 	TypeParams    []string
 	GenericParams []GenericParam
 	Params        []GrammarFnParam
@@ -220,6 +221,7 @@ type GrammarProductionDecl struct {
 	RecoverMsg    Expr
 	RecoverUntil  []GrammarTerm
 	RecoverValue  Expr
+	Channels      []GrammarChannelDecl
 	Terms         []GrammarTerm
 }
 
@@ -314,6 +316,17 @@ type GrammarMapListTerm struct {
 	Flatten  bool
 }
 
+type GrammarSingletonTerm struct {
+	Position lexer.Pos
+	Type     TypeExpr
+	Value    Expr
+}
+
+type GrammarEmptyTerm struct {
+	Position lexer.Pos
+	Type     TypeExpr
+}
+
 type GrammarConcatTerm struct {
 	Position lexer.Pos
 	Terms    []GrammarTerm
@@ -370,6 +383,7 @@ type GrammarPostfixArm struct {
 	Position lexer.Pos
 	OpName   string
 	Op       GrammarTerm
+	Block    bool
 	Bindings []*GrammarBindTerm
 	Value    Expr
 }
@@ -378,6 +392,7 @@ type GrammarPrecedenceArm struct {
 	Position lexer.Pos
 	OpName   string
 	Op       GrammarTerm
+	Block    bool
 	Bindings []*GrammarBindTerm
 	Value    Expr
 }
@@ -417,9 +432,15 @@ type GrammarTokenSetRefTerm struct {
 	Name     string
 }
 
+type GrammarFirstTerm struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type GrammarApplyTerm struct {
 	Position lexer.Pos
 	Name     string
+	Direct   bool
 	Args     []GrammarApplyArg
 }
 
@@ -1759,6 +1780,12 @@ func (n *GrammarExprTerm) Pos() lexer.Pos {
 func (n *GrammarMapListTerm) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *GrammarSingletonTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarEmptyTerm) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GrammarConcatTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1792,6 +1819,9 @@ func (n *GrammarInfixTableTerm) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *GrammarTokenSetRefTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarFirstTerm) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *GrammarApplyTerm) Pos() lexer.Pos { return n.Position }
@@ -1986,6 +2016,8 @@ func (*GrammarSeqTerm) nodeTag()            {}
 func (*GrammarLookaheadTerm) nodeTag()      {}
 func (*GrammarExprTerm) nodeTag()           {}
 func (*GrammarMapListTerm) nodeTag()        {}
+func (*GrammarSingletonTerm) nodeTag()      {}
+func (*GrammarEmptyTerm) nodeTag()          {}
 func (*GrammarConcatTerm) nodeTag()         {}
 func (*GrammarGuardTerm) nodeTag()          {}
 func (*GrammarAttemptTerm) nodeTag()        {}
@@ -1999,6 +2031,7 @@ func (*GrammarPostfixTerm) nodeTag()        {}
 func (*GrammarPrecedenceTerm) nodeTag()     {}
 func (*GrammarInfixTableTerm) nodeTag()     {}
 func (*GrammarTokenSetRefTerm) nodeTag()    {}
+func (*GrammarFirstTerm) nodeTag()          {}
 func (*GrammarApplyTerm) nodeTag()          {}
 func (*GrammarBindTerm) nodeTag()           {}
 func (*GrammarAssignTerm) nodeTag()         {}
@@ -2180,6 +2213,8 @@ func (*GrammarSeqTerm) grammarTermTag()         {}
 func (*GrammarLookaheadTerm) grammarTermTag()   {}
 func (*GrammarExprTerm) grammarTermTag()        {}
 func (*GrammarMapListTerm) grammarTermTag()     {}
+func (*GrammarSingletonTerm) grammarTermTag()   {}
+func (*GrammarEmptyTerm) grammarTermTag()       {}
 func (*GrammarConcatTerm) grammarTermTag()      {}
 func (*GrammarGuardTerm) grammarTermTag()       {}
 func (*GrammarAttemptTerm) grammarTermTag()     {}
@@ -2193,6 +2228,7 @@ func (*GrammarPostfixTerm) grammarTermTag()     {}
 func (*GrammarPrecedenceTerm) grammarTermTag()  {}
 func (*GrammarInfixTableTerm) grammarTermTag()  {}
 func (*GrammarTokenSetRefTerm) grammarTermTag() {}
+func (*GrammarFirstTerm) grammarTermTag()       {}
 func (*GrammarApplyTerm) grammarTermTag()       {}
 func (*GrammarBindTerm) grammarTermTag()        {}
 func (*GrammarAssignTerm) grammarTermTag()      {}

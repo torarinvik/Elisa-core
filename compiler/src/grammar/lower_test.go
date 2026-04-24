@@ -183,6 +183,52 @@ func TestLowerDeclExpandsGrammarTokenSets(t *testing.T) {
 	}
 }
 
+func TestLowerDeclExpandsFirstTokenSets(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	token_kind TokenKind
+	token_field kind
+	current current_token
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	token:
+		IDENT
+		BEGIN "begin"
+		END "end"
+	tokenset StatementStart = first(statement)
+	tokenset StatementOrEnd:
+		StatementStart
+		END
+	statement() -> Pascal.Stmt:
+		choice:
+			seq:
+				.IDENT(name)
+				expr(name)
+			seq:
+				.BEGIN(begin_token)
+				expr(begin_token)
+	block() -> Pascal.Stmt:
+		lookahead(StatementStart)
+		values = separated statement() by .END until(StatementOrEnd)
+		return zeroed as Pascal.Stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.current_token().kind == TokenKind.IDENT",
+		"state.current_token().kind == TokenKind.BEGIN",
+		"state.current_token().kind == TokenKind.END",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "__grammar_choice_value_block_PascalFrontend_choice_value_11 <- first(statement)") {
+		t.Fatalf("expected lookahead lowering to resolve first() refs, got:\n%s", formatted)
+	}
+}
+
 func TestLowerDeclExpandsGrammarFns(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalArgsGrammar over Token using ParserState:
     cursor state
@@ -1517,6 +1563,118 @@ grammar PascalFrontend over Token using ParserState:
 	}
 }
 
+func TestLowerFileStatefulSynthesizesStructReturnOnlyFromMatchingChannels(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct Tail:
+	name_token: Token
+	close_token: Token
+
+grammar PerlFrontend over Token using ParserState:
+	cursor parser
+	channel node
+	member_tail() -> Tail:
+		token(TokenKind.IDENT)
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if strings.Contains(formatted, "Tail(node:)") {
+		t.Fatalf("expected non-matching tree channel not to synthesize struct literal, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "zeroed.cast[Tail]") {
+		t.Fatalf("expected unmatched struct channels to fall back to zeroed return value, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, "node: mutable Tail") {
+		t.Fatalf("expected bare non-field channel not to infer whole struct type, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulInfersUntypedChannelsFromStructReturnFields(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct Tail:
+	name_token: Token
+	close_token: Token
+
+grammar PerlFrontend over Token using ParserState:
+	cursor parser
+	channel name_token
+	channel close_token
+	member_tail() -> Tail:
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"name_token: mutable Token = zeroed.cast[Token]",
+		"close_token: mutable Token = zeroed.cast[Token]",
+		"Tail(name_token:, close_token:)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected struct field channel inference lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulUsesProductionLocalChannelsForStructSynthesis(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct Tail:
+	name_token: Token
+	close_token: Token
+
+grammar PerlFrontend over Token using ParserState:
+	cursor parser
+	channel node
+	member_tail() -> Tail:
+		channel name_token
+		channel close_token
+		name_token <- token(TokenKind.IDENT)
+		close_token <- expr(name_token)
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"name_token: mutable Token = zeroed.cast[Token]",
+		"close_token: mutable Token = zeroed.cast[Token]",
+		"Tail(name_token:, close_token:)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected production-local channel lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "node: mutable Tail") || strings.Contains(formatted, "Tail(node:") {
+		t.Fatalf("expected grammar-wide node channel not to shape helper struct, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulChoiceArmEndingInChannelAssignUsesProductionValue(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct Tail:
+	name_token: Token
+	close_token: Token
+
+grammar PerlFrontend over Token using ParserState:
+	cursor parser
+	member_tail() -> Tail:
+		channel name_token: Token
+		channel close_token: Token
+		choice:
+			seq:
+				name_token <- token(TokenKind.IDENT)
+				close_token <- expr(name_token)
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_seq_value_",
+		"zeroed.cast[Tail]",
+		"Tail(name_token:, close_token:)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected channel-ending seq lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "<- name_token") && strings.Contains(formatted, "mutable Tail") {
+		t.Fatalf("expected channel-ending seq to avoid assigning token channel as Tail value, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulSynthesizesNamedTupleReturnFromChannels(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
 	cursor parser
@@ -1613,7 +1771,7 @@ func TestLowerFileStatefulFlatMapListInfersElementTypeFromReturnType(t *testing.
 	cursor parser
 	channel decls
 	variable_decl_group(names: darray[Token], type_token: Token) -> darray[Pascal.Decl]:
-		decls <- flatmaplist(names, name_token, single_decl_list(build_var_decl(name_token, type_token)) if name_token.kind == TokenKind.IDENT else [])
+		decls <- flatmaplist(names, name_token, [build_var_decl(name_token, type_token)] if name_token.kind == TokenKind.IDENT else [])
 		pass
 `)
 	lowered := LowerFile(file)
@@ -1621,8 +1779,8 @@ func TestLowerFileStatefulFlatMapListInfersElementTypeFromReturnType(t *testing.
 	for _, want := range []string{
 		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
 		"__grammar_maplist_value_",
-		": darray[Pascal.Decl] = (single_decl_list(build_var_decl(name_token, type_token)) if (name_token.kind == TokenKind.IDENT) else [])",
-		"(single_decl_list(build_var_decl(name_token, type_token)) if (name_token.kind == TokenKind.IDENT) else [])",
+		": darray[Pascal.Decl] = ([build_var_decl(name_token, type_token)] if (name_token.kind == TokenKind.IDENT) else [])",
+		"([build_var_decl(name_token, type_token)] if (name_token.kind == TokenKind.IDENT) else [])",
 		".push(__grammar_maplist_group_",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -1631,6 +1789,57 @@ func TestLowerFileStatefulFlatMapListInfersElementTypeFromReturnType(t *testing.
 	}
 	if strings.Contains(formatted, "darray[void]") {
 		t.Fatalf("expected flatmaplist to infer element type from production return type, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulSingletonBuildsSingleItemList(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	alloc arena
+	channel decls
+	const_decl_group(decl: Pascal.Decl) -> darray[Pascal.Decl]:
+		decls <- singleton[Pascal.Decl](decl)
+		return decls
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
+		"__grammar_singleton_value_",
+		"in arena:",
+		".push(decl)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected singleton lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "single_decl_list") || strings.Contains(formatted, "darray[void]") {
+		t.Fatalf("expected singleton lowering to avoid helper calls and infer element type, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulEmptyBuildsTypedEmptyList(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel decls
+	empty_decls() -> darray[Pascal.Decl]:
+		decls <- empty[Pascal.Decl]
+		return decls
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
+		"__grammar_empty_value_",
+		": darray[Pascal.Decl] = []",
+		"decls <- __grammar_empty_value_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected empty lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "darray[void]") {
+		t.Fatalf("expected empty lowering to infer element type, got:\n%s", formatted)
 	}
 }
 

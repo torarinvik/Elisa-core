@@ -60,10 +60,31 @@ grammar PascalStmtGrammar over Token using ParserState:
         return statements
 ```
 
+Generated start sets can also be referenced with `first(production_name)`. Lowering computes the reachable first tokens for that production after grammar normalization, so a tokenset or recovery clause can stay tied to the actual production entry surface instead of manually duplicating its starter tokens.
+
+```context
+grammar PascalStmtGrammar over Token using ParserState:
+    token:
+        BEGIN "begin"
+        END "end"
+        IDENT
+
+    tokenset StatementStart = first(statement)
+    tokenset StatementOrEnd:
+        StatementStart
+        END
+
+    block() -> darray[Pascal.Stmt]:
+        lookahead(StatementStart)
+        statements = separated statement() by .END until(StatementOrEnd)
+        return statements
+```
+
 Current rules:
 
 - `tokenset Name:` declares a grammar-scoped set of stop terms
 - token set items can use bare token-kind names, other token-set names, `.TOKEN` terms, string token terms, or explicit `token(TokenKind.X)` matchers
+- `first(production_name)` is allowed anywhere a token-set item or `until(...)` stop term is allowed, and lowers to the production's reachable start-token choices
 - `tokenset Name = A, B, token(TokenKind.EOF)` is also accepted for compact one-line sets
 - bare `Name` inside `until(...)` or recovery `until Name` is parsed as a token-set reference
 - `lookahead(Name)` can reference a token set and lowers as lookahead over a choice of the set terms
@@ -80,7 +101,7 @@ grammar PascalListGrammar over Token using ParserState:
     token:
         COMMA ","
 
-    grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+    grammar type separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
         separated item by sep until(stop)
 
 grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
@@ -92,7 +113,7 @@ grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
         token(TokenKind.EOF)
 
     args() -> darray[Pascal.Expr]:
-        values = apply separated_by(item: expression(), stop: RParenSync)
+        values = separated_by(item: expression(), stop: RParenSync)
         return values
 ```
 
@@ -105,7 +126,7 @@ grammar RecoveryGrammar over Token using ParserState:
 
 grammar PascalStmtGrammar over Token using ParserState uses RecoveryGrammar:
     condition_or_invalid() -> Pascal.Expr:
-        node <- apply recovered(
+        node <- recovered(
             item: condition(),
             message: expr(ParseMessageKey.ExpectedConditionExpression),
             stop: ConditionSync,
@@ -121,8 +142,8 @@ Current rules:
 - parameters can declare grammar-term defaults, as in `sep: grammar = .COMMA`
 - expression parameters use `expr` in the signature and are passed with `expr(...)` at the call site
 - the body is ordinary grammar syntax; one term expands as that term, multiple terms expand as a `seq`
-- `apply Name(arg, ...)` expands the template at compile time
-- `apply Name(item: expression(), stop: RParenSync)` is the preferred call style once a helper has more than one argument
+- `Name(item: expression(), stop: RParenSync)` is the preferred direct call style once a helper has named arguments
+- `apply Name(arg, ...)` remains the explicit lower-level spelling, and is useful for positional experiments or when you want to emphasize compile-time expansion
 - positional and named arguments can be mixed only before the first named argument; missing parameters use defaults when present
 - arguments are grammar terms, so they can be productions, token terms, required/recoverable terms, lists, `seq`, or token-set references
 - typed parameters currently support `grammar`, `grammar -> T`, `tokenset`, and `expr`
@@ -407,7 +428,7 @@ Current rules:
 - `node Tree.Member(...)` is canonical sugar for tree construction through an in-scope `alloc` binding
 - `node[span = expr] Tree.Member(...)` injects the common `span` field without repeating it in the constructor arguments
 - `node[alloc = owner, span = expr] Tree.Member(...)` is the explicit-owner form for parser helpers that name the arena something other than `alloc`
-- `left.span + right.span` is the canonical span algebra form for span-like parser ranges; the low-level helper remains available when explicit control is clearer
+- `left.span + right.span` is the canonical span algebra form for span-like parser ranges; it first uses a visible `SpanLike` static-interface impl when present, then falls back to legacy helper functions such as `combine_span`
 - inside an exact `rewrite` arm, `default` rebuilds the current exact member using the already rewritten child results
 - `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
 - `default` also rebuilds `children` sequence fields, materializing fresh arrays in the active tree owner when needed
@@ -492,11 +513,18 @@ Current header declarations:
 - `record_error record_parse_error` tells recovery lowering where to report parse messages; it defaults to `record_parse_error`
 - `token:` declares token aliases for use as `.IDENT` inside the grammar
 - grouped token entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal such as `LPAREN "("`
-- `channel name` declares a generated mutable channel with inferred/default behavior
+- `channel name` in a grammar header declares a generated mutable channel shared by every production in that grammar
 - `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
+- `channel name` at the top of a production body declares a production-local channel, which is preferred for helper tuple/struct results
+- `grammar type Name[...]` declares a reusable higher-order grammar combinator with the same expansion model as `grammarfn`, but with a clearer “grammar constructor” intent
 - `infix table Name(result):` hoists a reusable named-precedence ladder into grammar header scope so productions can say `result = infix(Name)` instead of inlining every level
-- if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from channel names
+- if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from matching channel names
+- struct-return synthesis only uses channels that correspond to struct fields; unrelated grammar-wide channels such as `node` are ignored instead of producing invalid helper struct literals
+- if a nested `seq` arm ends by assigning a declared channel, the assignment is treated as channel state rather than the arm's semantic value; this keeps channel-synthesized helper productions from needing a trailing `pass`
 - `expr[T](value)` gives an inline grammar expression term an explicit result type, which lets `seq`, `separated`, and related list combinators keep transformed element types without introducing a one-off helper production
+- `singleton[T](value)` builds a one-item `darray[T]` inside grammar lowering, using the grammar allocator when one is configured
+- `empty[T]` builds a typed empty `darray[T]` in grammar space, so fallback branches do not need to escape to `expr[darray[T]]([])`
+- postfix, suffix, and precedence arms can use an indented block form when bindings would otherwise get cramped on one line
 - `maplist[T](source, item, value)` maps an existing list expression into a `darray[T]` without introducing a helper function
 
 ```llcontext
@@ -516,6 +544,21 @@ grammar SMLExprGrammar with SMLGrammarEnv:
     token:
         IDENT
         INTEGER
+    grammar type recovered_expr(stop: tokenset) -> grammar -> SML.Expr:
+        recovered(item: expression(), message: expr(ExpectedExpression), stop: stop, fallback: expr(invalid_expr_at(state.current_token().span)))
+
+extend grammar PerlExprGrammar:
+    postfix_expr() -> Perl.Expr:
+        node <- postfix(left = primary_expr()):
+            .ARROW:
+                member = member_tail()
+                -> make_perl_member_expr(left, member.name_token, member.close_token)
+
+    expression() -> Perl.Expr:
+        node <- precedence(left = term()):
+            op = .PLUS:
+                right = term()
+                -> make_perl_infix_expr(left, op, right)
 ```
 - `flatmaplist[T](source, item, values)` maps an existing list expression into per-item lists and flattens them into one `darray[T]`; typed empty branches such as `else []` inherit the mapped list type
 - `uses OtherGrammar` imports productions and grammar-scoped helper declarations from another grammar, including token aliases, recovery policies, and infix tables
@@ -539,9 +582,9 @@ When branching on parser state, snapshot cursor-dependent values before multiple
 ```context
 declarations() -> darray[Pascal.Decl]:
     kind = expr(state.current_token().kind)
-    const_decls = when(kind == TokenKind.CONST, const_prefixed_decl_sections(), expr[darray[Pascal.Decl]]([]))
-    type_decls = when(kind == TokenKind.TYPE, type_prefixed_decl_sections(), expr[darray[Pascal.Decl]]([]))
-    var_decls = when(kind == TokenKind.VAR, variable_decl_section(), expr[darray[Pascal.Decl]]([]))
+    const_decls = when(kind == TokenKind.CONST, const_prefixed_decl_sections(), empty[Pascal.Decl])
+    type_decls = when(kind == TokenKind.TYPE, type_prefixed_decl_sections(), empty[Pascal.Decl])
+    var_decls = when(kind == TokenKind.VAR, variable_decl_section(), empty[Pascal.Decl])
     node <- const_decls + type_decls + var_decls
     return node
 ```
@@ -585,11 +628,16 @@ grammar PascalProgramHeaderGrammar over Token using ParserState:
 
 Without the `[PascalNameId]` annotation, lowering only sees an untyped `expr(...)` term and list inference has to fall back to a helper production.
 
-Mapped list terms cover the next common parser-helper shape: take a list that was already parsed, transform each element, and optionally flatten per-item expansions without bouncing out to a hand-written helper.
+Singleton and mapped list terms cover the next common parser-helper shapes: wrap one parsed value in a list, transform each element from a parsed list, and optionally flatten per-item expansions without bouncing out to hand-written allocation helpers.
 
 ```context
 grammar PascalFrontend over Token using ParserState:
     cursor state
+
+    const_decl_group() -> darray[Pascal.Decl]:
+        spec = const_decl_spec()
+        node <- singleton[Pascal.Decl](build_const_decl(spec.name_token, spec.value))
+        return node
 
     variable_decl_group() -> darray[Pascal.Decl]:
         header = variable_decl_header()
@@ -598,19 +646,19 @@ grammar PascalFrontend over Token using ParserState:
             flatmaplist[Pascal.Decl](
                 header.names,
                 name_token,
-                single_decl_list(
+                [
                     node[span = name_token.span + header.type_token.span] Pascal.Decl.VarDecl(
                         name_id: name_token.lexeme_key,
                         type_name_id: header.type_token.lexeme_key
                     )
-                ) if name_token.kind == TokenKind.IDENT else []
+                ] if name_token.kind == TokenKind.IDENT else []
             ),
-            expr[darray[Pascal.Decl]]([])
+            empty[Pascal.Decl]
         )
         return node
 ```
 
-Use `maplist` when each source item yields exactly one result value. Use `flatmaplist` when each source item may yield zero or more result values and you want the grammar surface to own the flattening.
+Use `empty` when a branch produces no list items. Use `singleton` when a production produces exactly one list item. Use `maplist` when each source item yields exactly one result value. Use `flatmaplist` when each source item may yield zero or more result values and you want the grammar surface to own the flattening.
 
 When the result shape is shared more broadly, the same mechanism also works for structs:
 
@@ -830,7 +878,7 @@ Current implementation notes:
 - `prefix(...)` currently lowers to `seq(op = choice(...), operand = ..., expr(...))`
 - token aliases are rewritten before lowering, so `.IDENT` can map onto the real token kind expression
 - the grammar header can now decouple token value and token-kind names, for example `grammar SMLExprGrammar over SMLToken using SMLParserState:` with `token_kind SMLTokenKind` and `eof SMLTokenKind.EOF`
-- span algebra `left.span + right.span` recognizes the existing `Span`/`LuaSpan` helpers and can also use a visible `combine_span(left, right)` helper for frontend-specific span types such as `SMLSpan`
+- span algebra `left.span + right.span` resolves through a visible `protocol SpanLike` / `static interface SpanLike` impl when available, and still recognizes legacy helper functions such as `combine_span` or `lua_span_union` for compatibility
 - recovery and required terms depend on the grammar `cursor` declaration to restore or advance parser state correctly
 - tree AST construction remains ordinary llcontext code, so teams can use canonical `node[span = ...] Tree.Node(...)` sugar or drop to low-level `new[alloc] Tree.Node(span: ..., ...)` when exact control is clearer
 

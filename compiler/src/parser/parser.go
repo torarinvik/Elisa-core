@@ -145,6 +145,9 @@ func (p *Parser) ParseFile(filename string) *ast.File {
 }
 
 func (p *Parser) parseDecl() ast.Decl {
+	if p.peekIdentText("protocol") {
+		return p.parseInterfaceDecl()
+	}
 	if p.peekIdentText("interface") {
 		return p.parseInterfaceDecl()
 	}

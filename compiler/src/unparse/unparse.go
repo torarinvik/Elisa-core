@@ -337,14 +337,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 		}
 		for _, channel := range n.Channels {
-			line := "channel " + channel.Name
-			if channel.Type != nil {
-				line += ": " + formatTypeExpr(channel.Type)
-			}
-			if channel.Default != nil {
-				line += " = " + formatExpr(channel.Default)
-			}
-			f.writeLine(level+1, line)
+			f.writeGrammarChannelDecl(level+1, channel)
 		}
 		for _, tokenSet := range n.TokenSets {
 			f.writeGrammarTokenSetDecl(level+1, tokenSet)
@@ -445,7 +438,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeField(level+1, field)
 		}
 	case *ast.InterfaceDecl:
-		f.writeLine(level, "static interface "+n.Name+":")
+		header := "static interface "
+		if n.Protocol {
+			header = "protocol "
+		}
+		f.writeLine(level, header+n.Name+":")
 		for _, member := range n.Members {
 			switch m := member.(type) {
 			case *ast.AssociatedTypeDecl:
@@ -538,6 +535,17 @@ func (f *formatter) writeGrammarInfixTableDecl(level int, table ast.GrammarInfix
 	}
 }
 
+func (f *formatter) writeGrammarChannelDecl(level int, channel ast.GrammarChannelDecl) {
+	line := "channel " + channel.Name
+	if channel.Type != nil {
+		line += ": " + formatTypeExpr(channel.Type)
+	}
+	if channel.Default != nil {
+		line += " = " + formatExpr(channel.Default)
+	}
+	f.writeLine(level, line)
+}
+
 func (f *formatter) writeTreeMember(level int, member ast.TreeMemberDecl) {
 	if member == nil {
 		return
@@ -591,6 +599,9 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 	}
 	header += ":"
 	f.writeLine(level, header)
+	for _, channel := range production.Channels {
+		f.writeGrammarChannelDecl(level+1, channel)
+	}
 	for _, term := range production.Terms {
 		f.writeGrammarTerm(level+1, term)
 	}
@@ -656,6 +667,9 @@ func (f *formatter) writeGrammarFnDecl(level int, grammarFn ast.GrammarFnDecl) {
 		params = append(params, text)
 	}
 	line := "grammarfn " + grammarFn.Name
+	if grammarFn.TypeCtor {
+		line = "grammar type " + grammarFn.Name
+	}
 	line += formatGenericParams(grammarFn.GenericParams, grammarFn.TypeParams, nil, nil, nil, nil)
 	line += "(" + strings.Join(params, ", ") + ")"
 	if grammarFn.Return.Kind != "" {
@@ -686,6 +700,8 @@ func formatGrammarFnType(typ ast.GrammarFnType) string {
 
 func formatGrammarTokenSetItem(term ast.GrammarTerm) string {
 	switch n := term.(type) {
+	case *ast.GrammarFirstTerm:
+		return "first(" + n.Name + ")"
 	case *ast.GrammarTokenKindTerm:
 		return n.Kind
 	default:
@@ -963,6 +979,14 @@ func (f *formatter) writePrecedenceArm(level int, arm ast.GrammarPrecedenceArm) 
 	if arm.OpName != "" {
 		opText = arm.OpName + " = " + opText
 	}
+	if arm.Block {
+		f.writeLine(level, opText+":")
+		for _, binding := range arm.Bindings {
+			f.writeLine(level+1, formatGrammarBinding(binding))
+		}
+		f.writeLine(level+1, "-> "+formatExpr(arm.Value))
+		return
+	}
 	parts := []string{opText}
 	for _, binding := range arm.Bindings {
 		parts = append(parts, formatGrammarBinding(binding))
@@ -975,6 +999,14 @@ func (f *formatter) writePostfixArm(level int, arm ast.GrammarPostfixArm) {
 	opText := formatGrammarTerm(arm.Op)
 	if arm.OpName != "" {
 		opText = arm.OpName + " = " + opText
+	}
+	if arm.Block {
+		f.writeLine(level, opText+":")
+		for _, binding := range arm.Bindings {
+			f.writeLine(level+1, formatGrammarBinding(binding))
+		}
+		f.writeLine(level+1, "-> "+formatExpr(arm.Value))
+		return
 	}
 	parts := []string{opText}
 	for _, binding := range arm.Bindings {
@@ -1045,6 +1077,16 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			return keyword + "[" + formatTypeExpr(n.Type) + "](" + formatExpr(n.Source) + ", " + n.Name + ", " + formatExpr(n.Value) + ")"
 		}
 		return keyword + "(" + formatExpr(n.Source) + ", " + n.Name + ", " + formatExpr(n.Value) + ")"
+	case *ast.GrammarSingletonTerm:
+		if n.Type != nil {
+			return "singleton[" + formatTypeExpr(n.Type) + "](" + formatExpr(n.Value) + ")"
+		}
+		return "singleton(" + formatExpr(n.Value) + ")"
+	case *ast.GrammarEmptyTerm:
+		if n.Type != nil {
+			return "empty[" + formatTypeExpr(n.Type) + "]"
+		}
+		return "empty"
 	case *ast.GrammarConcatTerm:
 		parts := make([]string, 0, len(n.Terms))
 		for _, term := range n.Terms {
@@ -1104,6 +1146,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "infix(" + n.TableName + ")"
 	case *ast.GrammarTokenSetRefTerm:
 		return n.Name
+	case *ast.GrammarFirstTerm:
+		return "first(" + n.Name + ")"
 	case *ast.GrammarApplyTerm:
 		args := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
@@ -1112,6 +1156,9 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 				text = arg.Name + ": " + text
 			}
 			args = append(args, text)
+		}
+		if n.Direct {
+			return n.Name + "(" + strings.Join(args, ", ") + ")"
 		}
 		return "apply " + n.Name + "(" + strings.Join(args, ", ") + ")"
 	case *ast.GrammarBindTerm:

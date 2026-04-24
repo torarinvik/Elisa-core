@@ -54,6 +54,31 @@ def build[B: Builder]() -> B.State:
 	}
 }
 
+func TestAnalyzeSpanAlgebraUsesSpanLikeProtocol(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "spanlike_protocol.llcontext", `
+struct Span:
+    start: i64
+    end: i64
+
+static interface SpanLike:
+    type Range
+    def combine(left: Range, right: Range) -> Range
+
+impl SpanLike for Span:
+    type Range = Span
+
+    def combine(left: Span, right: Span) -> Span:
+        return Span{start: left.start, end: right.end}
+
+def join(left: Span, right: Span) -> Span:
+    return left + right
+`)
+
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", result.Errors())
+	}
+}
+
 func TestAnalyzeStaticInterfaceExplicitSpecializationWithBoundTypeParam(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "static_interface_bound_forward.llcontext", `
 struct BuilderTag:

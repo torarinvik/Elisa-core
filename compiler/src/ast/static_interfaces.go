@@ -5,6 +5,7 @@ import "llcontext/src/lexer"
 type InterfaceDecl struct {
 	Position lexer.Pos
 	Name     string
+	Protocol bool
 	Members  []InterfaceMember
 }
 
