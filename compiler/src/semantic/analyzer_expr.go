@@ -6313,7 +6313,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 		if expr.HasArgForward {
 			a.errorf(expr.ArgForwardPos, "call argument forwarding `..` is not supported for variadic function %q", ft.Name)
 		} else {
-			a.errorf(expr.Pos(), "named arguments and parameter-pack applications are not supported for variadic function %q", ft.Name)
+			a.errorf(expr.Pos(), "named arguments and explicit bundle applications are not supported for variadic function %q", ft.Name)
 		}
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
@@ -6357,11 +6357,11 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 	for _, item := range orderedCallArgItems(expr) {
 		if item.IsPack {
 			if sawPack {
-				a.errorf(item.Position, "call may specify at most one parameter-pack application")
+				a.errorf(item.Position, "call may specify at most one explicit bundle application")
 				ok = false
 			}
 			if sawNamed {
-				a.errorf(item.Position, "parameter-pack application must come before ordinary named arguments")
+				a.errorf(item.Position, "explicit bundle application must come before ordinary named arguments")
 				ok = false
 			}
 			sawPack = true

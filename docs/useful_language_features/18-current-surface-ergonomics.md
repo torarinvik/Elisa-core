@@ -146,6 +146,12 @@ def drive(width: i64) -> i64:
     alloc: i64 = 9
     with args(use Pair(left:), width:):
         return add(use Pair(right: 5, left:), right: width) + inner() with ParseCtx(..)
+
+def build(left: i64) -> i64:
+    bundle LocalPair explicit:
+        left: i64 = left
+        right: i64 = 9
+    return add(use LocalPair)
 ```
 
 Implicit bundle values have two call-site surfaces:
@@ -160,7 +166,7 @@ return inner() with ParseCtx(.., alloc = override_alloc)
 Current rules:
 
 - `bundle Name implicit:` declares an ambient dependency bundle
-- `bundle Name explicit:` declares a reusable explicit argument pack
+- `bundle Name explicit:` declares a reusable explicit argument pack and may appear at top level or as a local compile-time-only bundle inside a block
 - legacy `context Name:` and `params Name:` still parse, but the formatter emits canonical `bundle` declarations
 - `def f(...) with Name -> T` makes implicit bundle fields visible by field name inside the function body
 - `def f(use Name)` expands an explicit bundle into the function's explicit parameter set
@@ -185,6 +191,7 @@ Explicit bundle call rules:
 - explicit named arguments outside the pack may override values supplied by pack defaults or ambient `with args(...)` state
 - ambient args are compile-time call-resolution sugar, not runtime objects
 - top-level explicit bundle declarations are compile-time only and are ignored by code generation when emitting top-level declarations
+- local explicit bundles are visible only within the block that declares them, which makes them useful for parser/compiler helper packs without leaking names across the whole file
 
 ## Brace destructuring, field punning, and record updates
 
@@ -346,7 +353,30 @@ Current header declarations:
 - grouped token entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal such as `LPAREN "("`
 - `channel name` declares a generated mutable channel with inferred/default behavior
 - `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
+- if a production falls through without an explicit `return` and its return type is a known struct in the current scope, lowering synthesizes a struct literal from channel names to matching fields
 - `uses OtherGrammar` imports productions and token aliases from another grammar
+
+Channel synthesis is useful for parser result shapes that want several tracked fields without repeating the final assembly step:
+
+```context
+struct BuiltSummary:
+    items: darray[i64]
+    checksum_total: i64
+    arg_count: usize
+    close_span: Span
+
+grammar ExprGrammar over Token using ParserState:
+    cursor parser
+    channel items: darray[i64] = []
+    channel checksum_total: i64 = 0
+    channel arg_count: usize = 0
+    channel close_span: Span = $end.span
+
+    arg_summary() -> BuiltSummary:
+        pass
+```
+
+That lowers through the normal grammar try/public wrappers and finishes with a synthesized success value shaped like `BuiltSummary(items:, checksum_total:, arg_count:, close_span:)`.
 
 `token:` is the canonical style for token aliases:
 

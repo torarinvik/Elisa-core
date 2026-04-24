@@ -1027,6 +1027,51 @@ func TestLowerFileStatefulAssignmentTermUpdatesChannelAndGuardsDefaultRefresh(t 
 	}
 }
 
+func TestLowerFileStatefulSynthesizesStructReturnFromChannels(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct BuiltSummary:
+	items: darray[i64]
+	checksum_total: i64
+	arg_count: usize
+	close_span: Span
+
+grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel items: darray[i64] = []
+	channel checksum_total: i64 = 0
+	channel arg_count: usize = 0
+	channel close_span: Span = $end.span
+	summary() -> BuiltSummary:
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "return (true, __grammar_committed_") {
+		t.Fatalf("expected synthesized struct return to produce success tuple, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "BuiltSummary(items:, checksum_total:, arg_count:, close_span:)") {
+		t.Fatalf("expected synthesized struct return to assemble channel fields, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulSynthesizesGenericStructReturnFromChannels(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct BuiltSummary[T]:
+	item: T
+	count: usize
+
+grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel item: i64 = 7
+	channel count: usize = 1
+	summary() -> BuiltSummary[i64]:
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "BuiltSummary[i64](item:, count:)") {
+		t.Fatalf("expected synthesized generic struct return to preserve type args, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulTryWrapperCarriesProductionErrorUnion(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar ATPLFrontend:
     postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> ATPLExpr.Expr error[ATPLFrontendError]:

@@ -46,25 +46,8 @@ func orderedArgsScopeItems(packs []ast.ParamPackUse, args []ast.WithArg, order [
 	return items
 }
 
-func cloneExplicitBindings(src map[string]ast.Expr) map[string]ast.Expr {
-	if len(src) == 0 {
-		return map[string]ast.Expr{}
-	}
-	out := make(map[string]ast.Expr, len(src))
-	for name, expr := range src {
-		out[name] = expr
-	}
-	return out
-}
-
 func (a *Analyzer) combinedExplicitBindings() map[string]ast.Expr {
-	merged := map[string]ast.Expr{}
-	for _, scope := range a.currentExplicitArgScopes {
-		for name, expr := range scope {
-			merged[name] = expr
-		}
-	}
-	return merged
+	return combineExprBindingScopes(a.currentExplicitArgScopes)
 }
 
 func isExplicitValueSymbolKind(kind SymbolKind) bool {
@@ -251,21 +234,5 @@ func (a *Analyzer) analyzeArgsScopeStmt(stmt *ast.ArgsScopeStmt) {
 	if len(tempStmts) != 0 {
 		stmt.Body = append(append(make([]ast.Stmt, 0, len(tempStmts)+len(originalBody)), tempStmts...), originalBody...)
 	}
-	scope := NewScope(a.currentScope)
-	savedScope := a.currentScope
-	a.currentScope = scope
-	for _, tempStmt := range tempStmts {
-		a.analyzeStmt(tempStmt)
-	}
-	a.currentScope = savedScope
-	savedExplicitScopes := a.currentExplicitArgScopes
-	a.currentExplicitArgScopes = append(append([]map[string]ast.Expr(nil), savedExplicitScopes...), cloneExplicitBindings(working))
-	a.currentScope = scope
-	a.withLocalParamPackFrame(func() {
-		for _, bodyStmt := range originalBody {
-			a.analyzeStmt(bodyStmt)
-		}
-	})
-	a.currentScope = savedScope
-	a.currentExplicitArgScopes = savedExplicitScopes
+	a.analyzeNestedStmtBodyWithExprBindings(&a.currentExplicitArgScopes, working, tempStmts, originalBody)
 }

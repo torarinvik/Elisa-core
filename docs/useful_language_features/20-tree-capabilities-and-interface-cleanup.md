@@ -40,6 +40,23 @@ return parse_atom[AstBuilder]() with ParseCtx(parser:, alloc:)
 return parse_atom[AstBuilder]() with ParseCtx(.., alloc = scratch.ref[mutable Arena&])
 ```
 
+Explicit bundles remain part of the same model, but they are call-shaping bundles rather than ambient ones. They can also be local to a block when the pack is only meaningful inside a narrow parser/helper region.
+
+```llcontext
+bundle Pair explicit:
+    left: i64
+    right: i64 = 7
+
+def add(use Pair) -> i64:
+    return left + right
+
+def build(left: i64) -> i64:
+    bundle LocalPair explicit:
+        left: i64 = left
+        right: i64 = 9
+    return add(use LocalPair)
+```
+
 When a call needs implicit parameters and no active implicit scope supplies them, the compiler may use same-named in-scope values as the ambient arguments. This is especially useful for generated parser functions that already have a low-level `alloc` parameter but should be able to call higher-level helpers declared `with AllocCtx`.
 
 ```llcontext
@@ -91,4 +108,5 @@ Use the pyramid deliberately:
 - low-level functions keep explicit parameters when allocation ownership, lifetime, or mutation must be obvious
 - helper functions use `with ParseCtx` or a smaller `with AllocCtx` when allocator threading is mechanical
 - grammar actions use canonical tree syntax such as `node[span = ...] Tree.Member(...)`
+- grammar channels are a good fit for parser result structs, and stateful grammar lowering can synthesize a struct-shaped success value from channel names when the production return type is a struct in scope
 - static interfaces express parser-builder variability, not runtime dispatch

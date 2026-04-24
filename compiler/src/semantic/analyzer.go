@@ -3869,7 +3869,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					}
 					savedBodyImplicitScopes := a.currentImplicitScopes
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
-						a.currentImplicitScopes = append(append([]map[string]ast.Expr(nil), savedBodyImplicitScopes...), cloneImplicitBindings(bindings))
+						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
 					a.withLocalParamPackFrame(func() {
 						for _, stmt := range fn.Body {

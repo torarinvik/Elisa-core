@@ -35,6 +35,7 @@ This document is now a landing page for the split design notes in `docs/useful_l
 - If you want the implemented surface syntax that landed more recently than many of the older proposal docs, including the grammar DSL used by Lua, ATPL, and Pascal-style frontends, section 18 is the practical reference to read next.
 - If you want the companion reference for static dispatch and receiver-style calls, section 19 covers static interfaces, extension methods, and UFCS.
 - If you want the current annotation, layout-hint, and codegen-hint surface, section 20 is the practical reference to read next.
+- If you want the canonical cleanup direction for bundles, tree construction, and parser-helper style, read [`20-tree-capabilities-and-interface-cleanup.md`](docs/useful_language_features/20-tree-capabilities-and-interface-cleanup.md) alongside sections 18 and 19.
 
 ## Current reference mutability rule
 

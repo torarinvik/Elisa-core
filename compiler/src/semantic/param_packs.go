@@ -137,7 +137,7 @@ func (a *Analyzer) expandExplicitParamSpecs(params []ast.ParamDecl, packs []ast.
 			return
 		}
 		if seen[spec.Decl.Name] {
-			a.errorf(pos, "duplicate explicit parameter %q after parameter-pack expansion on %q", spec.Decl.Name, ownerName)
+			a.errorf(pos, "duplicate explicit parameter %q after explicit bundle expansion on %q", spec.Decl.Name, ownerName)
 			return
 		}
 		seen[spec.Decl.Name] = true

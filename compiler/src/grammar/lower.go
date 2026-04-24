@@ -34,6 +34,7 @@ type statefulLowerContext struct {
 	channels       []ast.GrammarChannelDecl
 	production     ast.GrammarProductionDecl
 	productionMap  map[string]resolvedGrammarProduction
+	structScope    map[string]*ast.StructDecl
 	tempCounter    int
 }
 
@@ -45,10 +46,10 @@ func LowerFile(file *ast.File) *ast.File {
 }
 
 func lowerDeclList(decls []ast.Decl) []ast.Decl {
-	return lowerDeclListInScope(decls, grammarDeclScope(decls))
+	return lowerDeclListInScope(decls, grammarDeclScope(decls), structDeclScope(decls))
 }
 
-func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.GrammarDecl) []ast.Decl {
+func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.GrammarDecl, structScope map[string]*ast.StructDecl) []ast.Decl {
 	if len(decls) == 0 {
 		return nil
 	}
@@ -66,15 +67,30 @@ func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.Grammar
 			if merged == nil {
 				merged = n
 			}
-			lowered = append(lowered, lowerGrammarDecls(merged, grammarScope)...)
+			lowered = append(lowered, lowerGrammarDecls(merged, grammarScope, structScope)...)
 		case *ast.NamespaceDecl:
-			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls))}
+			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls), structDeclScope(n.Decls))}
 			lowered = append(lowered, cloned)
 		default:
 			lowered = append(lowered, decl)
 		}
 	}
 	return lowered
+}
+
+func structDeclScope(decls []ast.Decl) map[string]*ast.StructDecl {
+	if len(decls) == 0 {
+		return nil
+	}
+	scope := make(map[string]*ast.StructDecl)
+	for _, decl := range decls {
+		structDecl, ok := decl.(*ast.StructDecl)
+		if !ok || structDecl == nil || structDecl.Name == "" {
+			continue
+		}
+		scope[structDecl.Name] = structDecl
+	}
+	return scope
 }
 
 func grammarDeclScope(decls []ast.Decl) map[string]*ast.GrammarDecl {
@@ -162,7 +178,7 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	return merged
 }
 
-func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl) []ast.Decl {
+func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, structScope map[string]*ast.StructDecl) []ast.Decl {
 	if decl == nil {
 		return nil
 	}
@@ -197,6 +213,7 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 			channels:       append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
 			production:     production,
 			productionMap:  productionMap,
+			structScope:    structScope,
 		}
 		out = append(out, lowerStatefulPublicProduction(normalizedDecl, ctx))
 		out = append(out, lowerStatefulPublicTryProduction(normalizedDecl, ctx))
@@ -215,6 +232,7 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 			channels:       append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
 			production:     production,
 			productionMap:  productionMap,
+			structScope:    structScope,
 		}
 		out = append(out, lowerStatefulTryProduction(normalizedDecl, ctx))
 	}
@@ -1145,7 +1163,11 @@ func lowerStatefulTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLower
 	for _, term := range ctx.production.Terms {
 		body = append(body, ctx.lowerSequentialTerm(term, snapshotName)...)
 	}
-	body = append(body, ctx.successTupleReturnStmts(ctx.production.Position, zeroedCastExpr(ctx.production.Position, grammarResolvedValueTypeExpr(ctx.production.Position, ctx.production.ReturnType)))...)
+	successValue := zeroedCastExpr(ctx.production.Position, grammarResolvedValueTypeExpr(ctx.production.Position, ctx.production.ReturnType))
+	if synthesized, ok := ctx.synthesizedChannelReturnExpr(ctx.production.Position); ok {
+		successValue = synthesized
+	}
+	body = append(body, ctx.successTupleReturnStmts(ctx.production.Position, successValue)...)
 	return &ast.FuncDecl{
 		Position:         ctx.production.Position,
 		Name:             grammarTryFuncName(ctx.grammarName, ctx.production.Name),
@@ -1203,6 +1225,23 @@ func grammarResolvedValueTypeExpr(pos lexer.Pos, valueType ast.TypeExpr) ast.Typ
 		return resolved
 	}
 	return builtinTypeExpr(pos, "bool")
+}
+
+func grammarStructLiteralShape(valueType ast.TypeExpr, structScope map[string]*ast.StructDecl) (string, []ast.TypeExpr, bool) {
+	if len(structScope) == 0 {
+		return "", nil, false
+	}
+	switch n := grammarValueTypeExpr(valueType).(type) {
+	case *ast.NamedType:
+		if _, ok := structScope[n.Name]; ok {
+			return n.Name, nil, true
+		}
+	case *ast.GenericType:
+		if _, ok := structScope[n.Name]; ok {
+			return n.Name, append([]ast.TypeExpr(nil), n.Args...), true
+		}
+	}
+	return "", nil, false
 }
 
 func grammarErrorTypeExpr(valueType ast.TypeExpr) ast.TypeExpr {
@@ -1337,6 +1376,23 @@ func (ctx *statefulLowerContext) channelSetFlagName(name string) (string, bool) 
 func (ctx *statefulLowerContext) successTupleReturnStmts(pos lexer.Pos, value ast.Expr) []ast.Stmt {
 	stmts := ctx.lowerChannelFinalize(pos)
 	return append(stmts, successTupleReturnStmt(pos, ctx.currentCommittedExpr(pos), value))
+}
+
+func (ctx *statefulLowerContext) synthesizedChannelReturnExpr(pos lexer.Pos) (ast.Expr, bool) {
+	if ctx == nil || len(ctx.channels) == 0 {
+		return nil, false
+	}
+	name, typeArgs, ok := grammarStructLiteralShape(ctx.production.ReturnType, ctx.structScope)
+	if !ok {
+		return nil, false
+	}
+	args := make([]ast.Expr, 0, len(ctx.channels))
+	argNames := make([]string, 0, len(ctx.channels))
+	for _, channel := range ctx.channels {
+		args = append(args, &ast.Ident{Position: pos, Name: channel.Name})
+		argNames = append(argNames, channel.Name)
+	}
+	return &ast.StructLitExpr{Position: pos, Name: name, TypeArgs: typeArgs, Args: args, ArgNames: argNames}, true
 }
 
 func failureTupleReturnStmt(pos lexer.Pos, committed ast.Expr, valueType ast.TypeExpr) ast.Stmt {

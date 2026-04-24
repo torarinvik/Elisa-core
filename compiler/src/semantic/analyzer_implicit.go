@@ -22,17 +22,6 @@ func orderedWithItems(bundles []ast.WithBundleUse, args []ast.WithArg, order []a
 	return items
 }
 
-func cloneImplicitBindings(src map[string]ast.Expr) map[string]ast.Expr {
-	if len(src) == 0 {
-		return map[string]ast.Expr{}
-	}
-	out := make(map[string]ast.Expr, len(src))
-	for name, expr := range src {
-		out[name] = expr
-	}
-	return out
-}
-
 func (a *Analyzer) implicitBindingsForCurrentFunction(ft *FuncType) map[string]ast.Expr {
 	if a == nil || ft == nil || len(ft.ImplicitParamNames) == 0 || a.currentScope == nil {
 		return nil
@@ -55,13 +44,7 @@ func (a *Analyzer) implicitBindingsForCurrentFunction(ft *FuncType) map[string]a
 }
 
 func (a *Analyzer) combinedImplicitBindings() map[string]ast.Expr {
-	merged := map[string]ast.Expr{}
-	for _, scope := range a.currentImplicitScopes {
-		for name, expr := range scope {
-			merged[name] = expr
-		}
-	}
-	return merged
+	return combineExprBindingScopes(a.currentImplicitScopes)
 }
 
 func (a *Analyzer) lookupSameNameImplicitExpr(name string, working map[string]ast.Expr) (ast.Expr, bool) {
@@ -163,23 +146,7 @@ func (a *Analyzer) analyzeWithStmt(stmt *ast.WithStmt) {
 	if len(tempStmts) != 0 {
 		stmt.Body = append(append(make([]ast.Stmt, 0, len(tempStmts)+len(originalBody)), tempStmts...), originalBody...)
 	}
-	scope := NewScope(a.currentScope)
-	savedScope := a.currentScope
-	a.currentScope = scope
-	for _, tempStmt := range tempStmts {
-		a.analyzeStmt(tempStmt)
-	}
-	a.currentScope = savedScope
-	savedImplicitScopes := a.currentImplicitScopes
-	a.currentImplicitScopes = append(append([]map[string]ast.Expr(nil), savedImplicitScopes...), cloneImplicitBindings(working))
-	a.currentScope = scope
-	a.withLocalParamPackFrame(func() {
-		for _, bodyStmt := range originalBody {
-			a.analyzeStmt(bodyStmt)
-		}
-	})
-	a.currentScope = savedScope
-	a.currentImplicitScopes = savedImplicitScopes
+	a.analyzeNestedStmtBodyWithExprBindings(&a.currentImplicitScopes, working, tempStmts, originalBody)
 }
 
 func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string, permissionBindings map[string][]ast.PermissionRef) bool {
