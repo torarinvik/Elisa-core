@@ -349,6 +349,14 @@ Current header declarations:
 
 - `cursor state` tells lowering which parser-state value owns the current cursor
 - `alloc alloc` supplies the active tree/arena owner expression used by generated parser helpers
+- `token_kind MyTokenKind` tells lowering which enum/type owns dotted token aliases such as `.IDENT`; it defaults to `TokenKind`
+- `eof MyTokenKind.EOF` tells recovery loops which token-kind expression is EOF; it defaults to `TokenKind.EOF`
+- `token_field kind` tells lowering which field on the token stores its kind/tag; it defaults to `kind`
+- `current current_token` tells lowering which parser-state method returns the current token; it defaults to `current_token`
+- `advance advance_token` tells lowering which parser-state method advances recovery loops; it defaults to `advance_token`
+- `expect expect` tells lowering which parser-state method consumes a literal token; it defaults to `expect`
+- `expect_kind expect_kind` tells lowering which parser-state method consumes a token kind; it defaults to `expect_kind`
+- `record_error record_parse_error` tells recovery lowering where to report parse messages; it defaults to `record_parse_error`
 - `token:` declares token aliases for use as `.IDENT` inside the grammar
 - grouped token entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal such as `LPAREN "("`
 - `channel name` declares a generated mutable channel with inferred/default behavior
@@ -356,6 +364,20 @@ Current header declarations:
 - if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from channel names
 - `expr[T](value)` gives an inline grammar expression term an explicit result type, which lets `seq`, `separated`, and related list combinators keep transformed element types without introducing a one-off helper production
 - `maplist[T](source, item, value)` maps an existing list expression into a `darray[T]` without introducing a helper function
+
+```llcontext
+grammar SMLExprGrammar over SMLToken using SMLParserState:
+    cursor state
+    alloc alloc
+    token_kind SMLTokenKind
+    eof SMLTokenKind.EOF
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    record_error record_parse_error
+```
 - `flatmaplist[T](source, item, values)` maps an existing list expression into per-item lists and flattens them into one `darray[T]`; typed empty branches such as `else []` inherit the mapped list type
 - `uses OtherGrammar` imports productions and token aliases from another grammar
 
@@ -642,7 +664,8 @@ Current implementation notes:
 - grammar sugar lowers to existing AST terms where possible, rather than introducing runtime parser objects
 - `prefix(...)` currently lowers to `seq(op = choice(...), operand = ..., expr(...))`
 - token aliases are rewritten before lowering, so `.IDENT` can map onto the real token kind expression
-- the current grammar/runtime helper path is most battle-tested with canonical `Token`, `TokenKind`, `Span`, and local `combine_span(left, right)` names; frontends can still keep language-specific prefixes on parser state, AST trees, and helper functions
+- the grammar header can now decouple token value and token-kind names, for example `grammar SMLExprGrammar over SMLToken using SMLParserState:` with `token_kind SMLTokenKind` and `eof SMLTokenKind.EOF`
+- span algebra `left.span + right.span` recognizes the existing `Span`/`LuaSpan` helpers and can also use a visible `combine_span(left, right)` helper for frontend-specific span types such as `SMLSpan`
 - recovery and required terms depend on the grammar `cursor` declaration to restore or advance parser state correctly
 - tree AST construction remains ordinary llcontext code, so teams can use canonical `node[span = ...] Tree.Node(...)` sugar or drop to low-level `new[alloc] Tree.Node(span: ..., ...)` when exact control is clearer
 

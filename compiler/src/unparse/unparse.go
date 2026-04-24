@@ -299,6 +299,30 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.AllocExpr != nil {
 			f.writeLine(level+1, "alloc "+formatExpr(n.AllocExpr))
 		}
+		if n.TokenKindType != nil {
+			f.writeLine(level+1, "token_kind "+formatTypeExpr(n.TokenKindType))
+		}
+		if n.EOFExpr != nil {
+			f.writeLine(level+1, "eof "+formatExpr(n.EOFExpr))
+		}
+		if n.TokenKindField != "" {
+			f.writeLine(level+1, "token_field "+n.TokenKindField)
+		}
+		if n.CurrentFunc != "" {
+			f.writeLine(level+1, "current "+n.CurrentFunc)
+		}
+		if n.AdvanceFunc != "" {
+			f.writeLine(level+1, "advance "+n.AdvanceFunc)
+		}
+		if n.ExpectFunc != "" {
+			f.writeLine(level+1, "expect "+n.ExpectFunc)
+		}
+		if n.ExpectKindFunc != "" {
+			f.writeLine(level+1, "expect_kind "+n.ExpectKindFunc)
+		}
+		if n.RecordErrorFunc != "" {
+			f.writeLine(level+1, "record_error "+n.RecordErrorFunc)
+		}
 		if len(n.TokenAliases) != 0 {
 			f.writeLine(level+1, "token:")
 			for _, alias := range n.TokenAliases {

@@ -113,6 +113,14 @@ type GrammarDecl struct {
 	ErrorType        TypeExpr
 	CursorExpr       Expr
 	AllocExpr        Expr
+	TokenKindType    TypeExpr
+	EOFExpr          Expr
+	TokenKindField   string
+	CurrentFunc      string
+	AdvanceFunc      string
+	ExpectFunc       string
+	ExpectKindFunc   string
+	RecordErrorFunc  string
 	TokenAliases     []GrammarTokenAliasDecl
 	Channels         []GrammarChannelDecl
 	Productions      []GrammarProductionDecl

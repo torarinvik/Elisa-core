@@ -78,6 +78,14 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
     error PascalFrontendError
     cursor parser
     alloc arena
+    token_kind PascalTokenKind
+    eof PascalTokenKind.EOF
+    token_field tag
+    current peek_token
+    advance bump_token
+    expect expect_text
+    expect_kind expect_token
+    record_error note_error
 	token .PROGRAM "program"
 	token .IDENT
     channel node
@@ -109,6 +117,30 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 	if got := formatExprForTest(t, decl.AllocExpr); got != "arena" {
 		t.Fatalf("expected alloc expr arena, got %q", got)
 	}
+	if got := formatTypeExprForTest(t, decl.TokenKindType); got != "PascalTokenKind" {
+		t.Fatalf("expected token_kind type PascalTokenKind, got %q", got)
+	}
+	if got := formatExprForTest(t, decl.EOFExpr); got != "PascalTokenKind.EOF" {
+		t.Fatalf("expected eof expr PascalTokenKind.EOF, got %q", got)
+	}
+	if decl.TokenKindField != "tag" {
+		t.Fatalf("expected token_field tag, got %q", decl.TokenKindField)
+	}
+	if decl.CurrentFunc != "peek_token" {
+		t.Fatalf("expected current peek_token, got %q", decl.CurrentFunc)
+	}
+	if decl.AdvanceFunc != "bump_token" {
+		t.Fatalf("expected advance bump_token, got %q", decl.AdvanceFunc)
+	}
+	if decl.ExpectFunc != "expect_text" {
+		t.Fatalf("expected expect expect_text, got %q", decl.ExpectFunc)
+	}
+	if decl.ExpectKindFunc != "expect_token" {
+		t.Fatalf("expected expect_kind expect_token, got %q", decl.ExpectKindFunc)
+	}
+	if decl.RecordErrorFunc != "note_error" {
+		t.Fatalf("expected record_error note_error, got %q", decl.RecordErrorFunc)
+	}
 	if len(decl.TokenAliases) != 2 {
 		t.Fatalf("expected two token aliases, got %d", len(decl.TokenAliases))
 	}
@@ -139,6 +171,14 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 		"error PascalFrontendError",
 		"cursor parser",
 		"alloc arena",
+		"token_kind PascalTokenKind",
+		"eof PascalTokenKind.EOF",
+		"token_field tag",
+		"current peek_token",
+		"advance bump_token",
+		"expect expect_text",
+		"expect_kind expect_token",
+		"record_error note_error",
 		"token:",
 		"PROGRAM \"program\"",
 		"IDENT",

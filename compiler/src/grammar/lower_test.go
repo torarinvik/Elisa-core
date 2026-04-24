@@ -845,6 +845,56 @@ func TestLowerFileStatefulTokenAliasesRewriteLiteralTokensToKinds(t *testing.T) 
 	}
 }
 
+func TestLowerFileStatefulUsesConfiguredTokenEnvironment(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar SMLFrontend over SMLToken using SMLParserState:
+    cursor state
+    token_kind SMLTokenKind
+    eof SMLTokenKind.EOF
+    token_field tag
+    current peek_token
+    advance bump_token
+    expect expect_text
+    expect_kind expect_token
+    record_error note_error
+    token:
+        IDENT
+        END "end"
+    expr() -> Pascal.Stmt recover(SMLParseMessageKey.ExpectedExpression, until(.END, .EOF)):
+        token = .IDENT
+        "raw"
+        return zeroed as Pascal.Stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_token(SMLTokenKind.IDENT)",
+		"state.expect_text(\"raw\")",
+		"state.peek_token().tag == SMLTokenKind.END",
+		"state.peek_token().tag == SMLTokenKind.EOF",
+		"state.peek_token().tag != SMLTokenKind.EOF",
+		"state.bump_token()",
+		"state.note_error(SMLParseMessageKey.ExpectedExpression)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected configured token kind lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	for _, old := range []string{
+		"current_token()",
+		".kind",
+		"advance_token()",
+		"expect_kind(",
+		"record_parse_error(",
+	} {
+		if strings.Contains(formatted, old) {
+			t.Fatalf("expected configured token environment lowering to avoid %q, got:\n%s", old, formatted)
+		}
+	}
+	if strings.Contains(formatted, " TokenKind.") || strings.Contains(formatted, "(TokenKind.") || strings.Contains(formatted, "== TokenKind.") || strings.Contains(formatted, "!= TokenKind.") {
+		t.Fatalf("expected configured token environment lowering to avoid canonical TokenKind, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulAppliesHeaderErrorTypeToImplicitProductions(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor parser

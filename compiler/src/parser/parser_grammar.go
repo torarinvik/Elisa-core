@@ -41,6 +41,14 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	var errorType ast.TypeExpr
 	var cursorExpr ast.Expr
 	var allocExpr ast.Expr
+	var tokenKindType ast.TypeExpr
+	var eofExpr ast.Expr
+	var tokenKindField string
+	var currentFunc string
+	var advanceFunc string
+	var expectFunc string
+	var expectKindFunc string
+	var recordErrorFunc string
 	tokenAliases := make([]ast.GrammarTokenAliasDecl, 0)
 	channels := make([]ast.GrammarChannelDecl, 0)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
@@ -58,6 +66,22 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			cursorExpr = p.parseGrammarValueHeaderDecl("cursor")
 		case p.peekIdentText("alloc"):
 			allocExpr = p.parseGrammarValueHeaderDecl("alloc")
+		case p.peekIdentText("token_kind"):
+			tokenKindType = p.parseGrammarTypeHeaderDecl("token_kind")
+		case p.peekIdentText("eof"):
+			eofExpr = p.parseGrammarValueHeaderDecl("eof")
+		case p.peekIdentText("token_field"):
+			tokenKindField = p.parseGrammarNameHeaderDecl("token_field")
+		case p.peekIdentText("current"):
+			currentFunc = p.parseGrammarNameHeaderDecl("current")
+		case p.peekIdentText("advance"):
+			advanceFunc = p.parseGrammarNameHeaderDecl("advance")
+		case p.peekIdentText("expect"):
+			expectFunc = p.parseGrammarNameHeaderDecl("expect")
+		case p.peekIdentText("expect_kind"):
+			expectKindFunc = p.parseGrammarNameHeaderDecl("expect_kind")
+		case p.peekIdentText("record_error"):
+			recordErrorFunc = p.parseGrammarNameHeaderDecl("record_error")
 		case p.peekIdentText("token"):
 			tokenAliases = append(tokenAliases, p.parseGrammarTokenAliasDecls()...)
 		case p.peekIdentText("channel"):
@@ -93,6 +117,14 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		ErrorType:        errorType,
 		CursorExpr:       cursorExpr,
 		AllocExpr:        allocExpr,
+		TokenKindType:    tokenKindType,
+		EOFExpr:          eofExpr,
+		TokenKindField:   tokenKindField,
+		CurrentFunc:      currentFunc,
+		AdvanceFunc:      advanceFunc,
+		ExpectFunc:       expectFunc,
+		ExpectKindFunc:   expectKindFunc,
+		RecordErrorFunc:  recordErrorFunc,
 		TokenAliases:     tokenAliases,
 		Channels:         channels,
 		Productions:      productions,
@@ -111,7 +143,7 @@ func (p *Parser) peekGrammarHeaderDecl() bool {
 	}
 	next := p.tokens[p.pos+1].Kind
 	switch p.cur().Text {
-	case "cursor", "alloc", "token", "channel":
+	case "cursor", "alloc", "token_kind", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error", "token", "channel":
 		return next != lexer.TOKEN_LPAREN
 	default:
 		return false
@@ -140,6 +172,20 @@ func (p *Parser) parseGrammarValueHeaderDecl(keyword string) ast.Expr {
 	value := p.parseExpr()
 	p.expectNewline()
 	return value
+}
+
+func (p *Parser) parseGrammarTypeHeaderDecl(keyword string) ast.TypeExpr {
+	p.expectIdentText(keyword)
+	value := p.parseGrammarHeaderTypeExpr()
+	p.expectNewline()
+	return value
+}
+
+func (p *Parser) parseGrammarNameHeaderDecl(keyword string) string {
+	p.expectIdentText(keyword)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return name
 }
 
 func (p *Parser) parseGrammarTokenAliasDecls() []ast.GrammarTokenAliasDecl {

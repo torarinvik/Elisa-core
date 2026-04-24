@@ -3179,7 +3179,11 @@ func (a *Analyzer) analyzeSpanAlgebraExpr(expr *ast.BinaryExpr, left Type, right
 	case "LuaSpan":
 		helperName = "lua_span_union"
 	default:
-		return nil, false
+		if _, _, ok := a.lookupVisibleGlobal("combine_span"); ok {
+			helperName = "combine_span"
+		} else {
+			return nil, false
+		}
 	}
 	call := &ast.CallExpr{
 		Position: expr.Position,

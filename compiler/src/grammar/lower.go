@@ -7,9 +7,14 @@ import (
 )
 
 type lowerContext struct {
-	tokenReceiver string
-	returnType    ast.TypeExpr
-	tempCounter   *int
+	tokenReceiver  string
+	tokenKindType  ast.TypeExpr
+	tokenKindField string
+	expectFunc     string
+	expectKindFunc string
+	eofExpr        ast.Expr
+	returnType     ast.TypeExpr
+	tempCounter    *int
 }
 
 func (ctx lowerContext) fresh(prefix string) string {
@@ -33,19 +38,27 @@ type grammarStateReceiverInfo struct {
 }
 
 type statefulLowerContext struct {
-	grammarName    string
-	cursorReceiver string
-	cursorField    string
-	tokenReceiver  string
-	tokenType      ast.TypeExpr
-	allocName      string
-	allocExpr      ast.Expr
-	committedName  string
-	channels       []ast.GrammarChannelDecl
-	production     ast.GrammarProductionDecl
-	productionMap  map[string]resolvedGrammarProduction
-	structScope    map[string]*ast.StructDecl
-	tempCounter    int
+	grammarName     string
+	cursorReceiver  string
+	cursorField     string
+	tokenReceiver   string
+	tokenType       ast.TypeExpr
+	tokenKindType   ast.TypeExpr
+	tokenKindField  string
+	currentFunc     string
+	advanceFunc     string
+	expectFunc      string
+	expectKindFunc  string
+	recordErrorFunc string
+	eofExpr         ast.Expr
+	allocName       string
+	allocExpr       ast.Expr
+	committedName   string
+	channels        []ast.GrammarChannelDecl
+	production      ast.GrammarProductionDecl
+	productionMap   map[string]resolvedGrammarProduction
+	structScope     map[string]*ast.StructDecl
+	tempCounter     int
 }
 
 func LowerFile(file *ast.File) *ast.File {
@@ -181,6 +194,30 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	if merged.AllocExpr == nil {
 		merged.AllocExpr = extra.AllocExpr
 	}
+	if merged.TokenKindType == nil {
+		merged.TokenKindType = extra.TokenKindType
+	}
+	if merged.EOFExpr == nil {
+		merged.EOFExpr = extra.EOFExpr
+	}
+	if merged.TokenKindField == "" {
+		merged.TokenKindField = extra.TokenKindField
+	}
+	if merged.CurrentFunc == "" {
+		merged.CurrentFunc = extra.CurrentFunc
+	}
+	if merged.AdvanceFunc == "" {
+		merged.AdvanceFunc = extra.AdvanceFunc
+	}
+	if merged.ExpectFunc == "" {
+		merged.ExpectFunc = extra.ExpectFunc
+	}
+	if merged.ExpectKindFunc == "" {
+		merged.ExpectKindFunc = extra.ExpectKindFunc
+	}
+	if merged.RecordErrorFunc == "" {
+		merged.RecordErrorFunc = extra.RecordErrorFunc
+	}
 	merged.TokenAliases = append(merged.TokenAliases, extra.TokenAliases...)
 	merged.Channels = append(merged.Channels, extra.Channels...)
 	merged.Productions = append(merged.Productions, extra.Productions...)
@@ -213,17 +250,25 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 	for _, production := range rewrittenProductions {
 		receiver := grammarReceiverInfoForProduction(normalizedDecl, production)
 		ctx := &statefulLowerContext{
-			grammarName:    normalizedDecl.Name,
-			cursorReceiver: receiver.cursorReceiver,
-			cursorField:    receiver.cursorField,
-			tokenReceiver:  receiver.tokenReceiver,
-			tokenType:      grammarDeclTokenType(normalizedDecl, production.Position),
-			allocName:      grammarAllocNameForProduction(normalizedDecl, production),
-			allocExpr:      grammarAllocExprForProduction(normalizedDecl, production, receiver, production.Position),
-			channels:       append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
-			production:     production,
-			productionMap:  productionMap,
-			structScope:    structScope,
+			grammarName:     normalizedDecl.Name,
+			cursorReceiver:  receiver.cursorReceiver,
+			cursorField:     receiver.cursorField,
+			tokenReceiver:   receiver.tokenReceiver,
+			tokenType:       grammarDeclTokenType(normalizedDecl, production.Position),
+			tokenKindType:   grammarDeclTokenKindType(normalizedDecl, production.Position),
+			tokenKindField:  grammarDeclTokenKindField(normalizedDecl),
+			currentFunc:     grammarDeclCurrentFunc(normalizedDecl),
+			advanceFunc:     grammarDeclAdvanceFunc(normalizedDecl),
+			expectFunc:      grammarDeclExpectFunc(normalizedDecl),
+			expectKindFunc:  grammarDeclExpectKindFunc(normalizedDecl),
+			recordErrorFunc: grammarDeclRecordErrorFunc(normalizedDecl),
+			eofExpr:         grammarDeclEOFExpr(normalizedDecl, production.Position),
+			allocName:       grammarAllocNameForProduction(normalizedDecl, production),
+			allocExpr:       grammarAllocExprForProduction(normalizedDecl, production, receiver, production.Position),
+			channels:        append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
+			production:      production,
+			productionMap:   productionMap,
+			structScope:     structScope,
 		}
 		out = append(out, lowerStatefulPublicProduction(normalizedDecl, ctx))
 		out = append(out, lowerStatefulPublicTryProduction(normalizedDecl, ctx))
@@ -232,17 +277,25 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 	for _, production := range helperProductions {
 		receiver := grammarReceiverInfoForProduction(normalizedDecl, production)
 		ctx := &statefulLowerContext{
-			grammarName:    normalizedDecl.Name,
-			cursorReceiver: receiver.cursorReceiver,
-			cursorField:    receiver.cursorField,
-			tokenReceiver:  receiver.tokenReceiver,
-			tokenType:      grammarDeclTokenType(normalizedDecl, production.Position),
-			allocName:      grammarAllocNameForProduction(normalizedDecl, production),
-			allocExpr:      grammarAllocExprForProduction(normalizedDecl, production, receiver, production.Position),
-			channels:       append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
-			production:     production,
-			productionMap:  productionMap,
-			structScope:    structScope,
+			grammarName:     normalizedDecl.Name,
+			cursorReceiver:  receiver.cursorReceiver,
+			cursorField:     receiver.cursorField,
+			tokenReceiver:   receiver.tokenReceiver,
+			tokenType:       grammarDeclTokenType(normalizedDecl, production.Position),
+			tokenKindType:   grammarDeclTokenKindType(normalizedDecl, production.Position),
+			tokenKindField:  grammarDeclTokenKindField(normalizedDecl),
+			currentFunc:     grammarDeclCurrentFunc(normalizedDecl),
+			advanceFunc:     grammarDeclAdvanceFunc(normalizedDecl),
+			expectFunc:      grammarDeclExpectFunc(normalizedDecl),
+			expectKindFunc:  grammarDeclExpectKindFunc(normalizedDecl),
+			recordErrorFunc: grammarDeclRecordErrorFunc(normalizedDecl),
+			eofExpr:         grammarDeclEOFExpr(normalizedDecl, production.Position),
+			allocName:       grammarAllocNameForProduction(normalizedDecl, production),
+			allocExpr:       grammarAllocExprForProduction(normalizedDecl, production, receiver, production.Position),
+			channels:        append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
+			production:      production,
+			productionMap:   productionMap,
+			structScope:     structScope,
 		}
 		out = append(out, lowerStatefulTryProduction(normalizedDecl, ctx))
 	}
@@ -641,6 +694,62 @@ func grammarDeclTokenType(grammarDecl *ast.GrammarDecl, pos lexer.Pos) ast.TypeE
 		return grammarDecl.OverType
 	}
 	return builtinTypeExpr(pos, "Token")
+}
+
+func grammarDeclTokenKindType(grammarDecl *ast.GrammarDecl, pos lexer.Pos) ast.TypeExpr {
+	if grammarDecl != nil && grammarDecl.TokenKindType != nil {
+		return grammarDecl.TokenKindType
+	}
+	return builtinTypeExpr(pos, "TokenKind")
+}
+
+func grammarDeclEOFExpr(grammarDecl *ast.GrammarDecl, pos lexer.Pos) ast.Expr {
+	if grammarDecl != nil && grammarDecl.EOFExpr != nil {
+		return cloneHeaderExprAtPos(grammarDecl.EOFExpr, pos)
+	}
+	return &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: "TokenKind"}, Field: "EOF"}
+}
+
+func grammarDeclTokenKindField(grammarDecl *ast.GrammarDecl) string {
+	if grammarDecl != nil && grammarDecl.TokenKindField != "" {
+		return grammarDecl.TokenKindField
+	}
+	return "kind"
+}
+
+func grammarDeclCurrentFunc(grammarDecl *ast.GrammarDecl) string {
+	if grammarDecl != nil && grammarDecl.CurrentFunc != "" {
+		return grammarDecl.CurrentFunc
+	}
+	return "current_token"
+}
+
+func grammarDeclAdvanceFunc(grammarDecl *ast.GrammarDecl) string {
+	if grammarDecl != nil && grammarDecl.AdvanceFunc != "" {
+		return grammarDecl.AdvanceFunc
+	}
+	return "advance_token"
+}
+
+func grammarDeclExpectFunc(grammarDecl *ast.GrammarDecl) string {
+	if grammarDecl != nil && grammarDecl.ExpectFunc != "" {
+		return grammarDecl.ExpectFunc
+	}
+	return "expect"
+}
+
+func grammarDeclExpectKindFunc(grammarDecl *ast.GrammarDecl) string {
+	if grammarDecl != nil && grammarDecl.ExpectKindFunc != "" {
+		return grammarDecl.ExpectKindFunc
+	}
+	return "expect_kind"
+}
+
+func grammarDeclRecordErrorFunc(grammarDecl *ast.GrammarDecl) string {
+	if grammarDecl != nil && grammarDecl.RecordErrorFunc != "" {
+		return grammarDecl.RecordErrorFunc
+	}
+	return "record_parse_error"
 }
 
 func desugarNamedPrecedenceProduction(grammarName string, production ast.GrammarProductionDecl) (ast.GrammarProductionDecl, []ast.GrammarProductionDecl) {
@@ -1156,7 +1265,7 @@ func (ctx *statefulLowerContext) lowerRecoverBody(pos lexer.Pos, message ast.Exp
 			Position: pos,
 			Expr: &ast.CallExpr{
 				Position: pos,
-				Func:     &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ctx.tokenReceiver}, Field: "record_parse_error"},
+				Func:     &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ctx.tokenReceiver}, Field: ctx.recordErrorFunc},
 				Args:     []ast.Expr{message},
 			},
 		},
@@ -1169,12 +1278,12 @@ func (ctx *statefulLowerContext) lowerRecoverBody(pos lexer.Pos, message ast.Exp
 				Right: &ast.BinaryExpr{
 					Position: pos,
 					Op:       lexer.TOKEN_BANGEQ,
-					Left:     &ast.FieldExpr{Position: pos, Object: currentTokenExpr(ctx.tokenReceiver, pos), Field: "kind"},
-					Right:    &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: "TokenKind"}, Field: "EOF"},
+					Left:     tokenKindFieldExpr(pos, ctx.currentTokenExpr(pos), ctx.tokenKindField),
+					Right:    cloneHeaderExprAtPos(ctx.eofExpr, pos),
 				},
 			},
 			Body: []ast.Stmt{
-				&ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{Position: pos, Func: &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ctx.tokenReceiver}, Field: "advance_token"}}},
+				&ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{Position: pos, Func: &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ctx.tokenReceiver}, Field: ctx.advanceFunc}}},
 			},
 		},
 	}
@@ -1386,7 +1495,7 @@ func (ctx *statefulLowerContext) lowerChannelPrelude() []ast.Stmt {
 	}
 	stmts := make([]ast.Stmt, 0, len(ctx.channels)*2+2)
 	if ctx.tokenReceiver != "" {
-		startExpr := currentTokenExpr(ctx.tokenReceiver, ctx.production.Position)
+		startExpr := ctx.currentTokenExpr(ctx.production.Position)
 		stmts = append(stmts,
 			&ast.VarDeclStmt{Position: ctx.production.Position, Name: "$start", Type: ctx.tokenType, Value: startExpr},
 			&ast.VarDeclStmt{Position: ctx.production.Position, Name: "$end", Mutable: true, Type: ctx.tokenType, Value: &ast.Ident{Position: ctx.production.Position, Name: "$start"}},
@@ -1428,7 +1537,7 @@ func (ctx *statefulLowerContext) lowerChannelFinalize(pos lexer.Pos) []ast.Stmt 
 	}
 	stmts := make([]ast.Stmt, 0, len(ctx.channels)+1)
 	if ctx.tokenReceiver != "" {
-		stmts = append(stmts, &ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: "$end"}, Value: currentTokenExpr(ctx.tokenReceiver, pos)})
+		stmts = append(stmts, &ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: "$end"}, Value: ctx.currentTokenExpr(pos)})
 	}
 	for _, channel := range ctx.channels {
 		if channel.Default == nil {
@@ -1538,13 +1647,20 @@ func stateCursorExpr(receiverName string, fieldName string, pos lexer.Pos) ast.E
 	return &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: receiverName}, Field: fieldName}
 }
 
-func currentTokenExpr(stateName string, pos lexer.Pos) ast.Expr {
+func (ctx *statefulLowerContext) currentTokenExpr(pos lexer.Pos) ast.Expr {
+	return currentTokenExpr(ctx.tokenReceiver, ctx.currentFunc, pos)
+}
+
+func currentTokenExpr(stateName string, currentFunc string, pos lexer.Pos) ast.Expr {
+	if currentFunc == "" {
+		currentFunc = "current_token"
+	}
 	return &ast.CallExpr{
 		Position: pos,
 		Func: &ast.FieldExpr{
 			Position: pos,
 			Object:   &ast.Ident{Position: pos, Name: stateName},
-			Field:    "current_token",
+			Field:    currentFunc,
 		},
 	}
 }
@@ -1624,21 +1740,28 @@ func listPushIndexedItemsExprStmts(ctx lowerContext, pos lexer.Pos, targetName s
 	}
 }
 
-func grammarTokenMatchExpr(pos lexer.Pos, tokenExpr ast.Expr, value string) ast.Expr {
-	return grammarTokenKindMatchExpr(pos, tokenExpr, &ast.CallExpr{
+func grammarTokenMatchExpr(pos lexer.Pos, tokenExpr ast.Expr, tokenKindField string, value string) ast.Expr {
+	return grammarTokenKindMatchExpr(pos, tokenExpr, tokenKindField, &ast.CallExpr{
 		Position: pos,
 		Func:     &ast.Ident{Position: pos, Name: "token_kind_for_text"},
 		Args:     []ast.Expr{&ast.StringLit{Position: pos, Value: value}},
 	})
 }
 
-func grammarTokenKindMatchExpr(pos lexer.Pos, tokenExpr ast.Expr, kindExpr ast.Expr) ast.Expr {
+func grammarTokenKindMatchExpr(pos lexer.Pos, tokenExpr ast.Expr, tokenKindField string, kindExpr ast.Expr) ast.Expr {
 	return &ast.BinaryExpr{
 		Position: pos,
 		Op:       lexer.TOKEN_EQEQ,
-		Left:     &ast.FieldExpr{Position: pos, Object: tokenExpr, Field: "kind"},
+		Left:     tokenKindFieldExpr(pos, tokenExpr, tokenKindField),
 		Right:    kindExpr,
 	}
+}
+
+func tokenKindFieldExpr(pos lexer.Pos, tokenExpr ast.Expr, tokenKindField string) ast.Expr {
+	if tokenKindField == "" {
+		tokenKindField = "kind"
+	}
+	return &ast.FieldExpr{Position: pos, Object: tokenExpr, Field: tokenKindField}
 }
 
 func grammarTokenKindMatcher(term *ast.GrammarCallTerm) (ast.Expr, bool) {
@@ -1648,8 +1771,17 @@ func grammarTokenKindMatcher(term *ast.GrammarCallTerm) (ast.Expr, bool) {
 	return term.Args[0], true
 }
 
-func grammarTokenKindExpr(pos lexer.Pos, kind string) ast.Expr {
-	return &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: "TokenKind"}, Field: kind}
+func grammarTokenKindExpr(pos lexer.Pos, tokenKindType ast.TypeExpr, kind string) ast.Expr {
+	return &ast.FieldExpr{Position: pos, Object: grammarTokenKindTypeExpr(pos, tokenKindType), Field: kind}
+}
+
+func grammarTokenKindTypeExpr(pos lexer.Pos, tokenKindType ast.TypeExpr) ast.Expr {
+	switch n := tokenKindType.(type) {
+	case *ast.NamedType:
+		return &ast.Ident{Position: pos, Name: n.Name}
+	default:
+		return &ast.Ident{Position: pos, Name: "TokenKind"}
+	}
 }
 
 func grammarExpectFuncExpr(pos lexer.Pos, tokenReceiver string, name string) ast.Expr {
@@ -1666,7 +1798,16 @@ func (ctx *statefulLowerContext) fresh(prefix string) string {
 }
 
 func (ctx *statefulLowerContext) lowerExprContext() lowerContext {
-	return lowerContext{tokenReceiver: ctx.tokenReceiver, returnType: ctx.production.ReturnType, tempCounter: &ctx.tempCounter}
+	return lowerContext{
+		tokenReceiver:  ctx.tokenReceiver,
+		tokenKindType:  ctx.tokenKindType,
+		tokenKindField: ctx.tokenKindField,
+		expectFunc:     ctx.expectFunc,
+		expectKindFunc: ctx.expectKindFunc,
+		eofExpr:        ctx.eofExpr,
+		returnType:     ctx.production.ReturnType,
+		tempCounter:    &ctx.tempCounter,
+	}
 }
 
 func itoa(value int) string {
@@ -1849,7 +1990,7 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return loweredAttempt{
 			Stmts: []ast.Stmt{
 				&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: lowerTermExpr(ctx.lowerExprContext(), n)},
-				&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenMatchExpr(n.Position, valueIdent, n.Value)},
+				&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenMatchExpr(n.Position, valueIdent, ctx.tokenKindField, n.Value)},
 			},
 			Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
 			Committed: &ast.BoolLit{Position: n.Position, Value: false},
@@ -1859,11 +2000,11 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		valueName := ctx.fresh("token")
 		matchedName := ctx.fresh("matched")
 		valueIdent := &ast.Ident{Position: n.Position, Name: valueName}
-		kindExpr := grammarTokenKindExpr(n.Position, n.Kind)
+		kindExpr := grammarTokenKindExpr(n.Position, ctx.tokenKindType, n.Kind)
 		return loweredAttempt{
 			Stmts: []ast.Stmt{
 				&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: lowerTermExpr(ctx.lowerExprContext(), n)},
-				&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenKindMatchExpr(n.Position, valueIdent, kindExpr)},
+				&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenKindMatchExpr(n.Position, valueIdent, ctx.tokenKindField, kindExpr)},
 			},
 			Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
 			Committed: &ast.BoolLit{Position: n.Position, Value: false},
@@ -1877,7 +2018,7 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 			return loweredAttempt{
 				Stmts: []ast.Stmt{
 					&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: lowerTermExpr(ctx.lowerExprContext(), n)},
-					&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenKindMatchExpr(n.Position, valueIdent, kindExpr)},
+					&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenKindMatchExpr(n.Position, valueIdent, ctx.tokenKindField, kindExpr)},
 				},
 				Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
 				Committed: &ast.BoolLit{Position: n.Position, Value: false},
@@ -2259,7 +2400,7 @@ func (ctx *statefulLowerContext) lowerRequiredAttempt(term *ast.GrammarRequiredT
 			Position: term.Position,
 			Expr: &ast.CallExpr{
 				Position: term.Position,
-				Func:     &ast.FieldExpr{Position: term.Position, Object: &ast.Ident{Position: term.Position, Name: ctx.tokenReceiver}, Field: "record_parse_error"},
+				Func:     &ast.FieldExpr{Position: term.Position, Object: &ast.Ident{Position: term.Position, Name: ctx.tokenReceiver}, Field: ctx.recordErrorFunc},
 				Args:     []ast.Expr{term.Message},
 			},
 		}},
@@ -2941,10 +3082,10 @@ func (ctx *statefulLowerContext) lowerListUntilMatchExpr(pos lexer.Pos, stops []
 	if len(stops) == 0 || ctx.tokenReceiver == "" {
 		return nil
 	}
-	tokenExpr := currentTokenExpr(ctx.tokenReceiver, pos)
+	tokenExpr := ctx.currentTokenExpr(pos)
 	var combined ast.Expr
 	for _, stop := range stops {
-		stopExpr := lowerListUntilStopExpr(pos, tokenExpr, stop)
+		stopExpr := ctx.lowerListUntilStopExpr(pos, tokenExpr, stop)
 		if stopExpr == nil {
 			continue
 		}
@@ -2957,15 +3098,15 @@ func (ctx *statefulLowerContext) lowerListUntilMatchExpr(pos lexer.Pos, stops []
 	return combined
 }
 
-func lowerListUntilStopExpr(pos lexer.Pos, tokenExpr ast.Expr, stop ast.GrammarTerm) ast.Expr {
+func (ctx *statefulLowerContext) lowerListUntilStopExpr(pos lexer.Pos, tokenExpr ast.Expr, stop ast.GrammarTerm) ast.Expr {
 	switch n := stop.(type) {
 	case *ast.GrammarTokenTerm:
-		return grammarTokenMatchExpr(pos, tokenExpr, n.Value)
+		return grammarTokenMatchExpr(pos, tokenExpr, ctx.tokenKindField, n.Value)
 	case *ast.GrammarTokenKindTerm:
-		return grammarTokenKindMatchExpr(pos, tokenExpr, grammarTokenKindExpr(n.Position, n.Kind))
+		return grammarTokenKindMatchExpr(pos, tokenExpr, ctx.tokenKindField, grammarTokenKindExpr(n.Position, ctx.tokenKindType, n.Kind))
 	case *ast.GrammarCallTerm:
 		if kindExpr, ok := grammarTokenKindMatcher(n); ok {
-			return grammarTokenKindMatchExpr(pos, tokenExpr, kindExpr)
+			return grammarTokenKindMatchExpr(pos, tokenExpr, ctx.tokenKindField, kindExpr)
 		}
 	}
 	return nil
@@ -2984,7 +3125,7 @@ func lowerGrammarUntilStopSurfaceExpr(stop ast.GrammarTerm) ast.Expr {
 	case *ast.GrammarTokenTerm:
 		return &ast.StringLit{Position: n.Position, Value: n.Value}
 	case *ast.GrammarTokenKindTerm:
-		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "token"}, Args: []ast.Expr{grammarTokenKindExpr(n.Position, n.Kind)}}
+		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "token"}, Args: []ast.Expr{grammarTokenKindExpr(n.Position, nil, n.Kind)}}
 	case *ast.GrammarCallTerm:
 		if !n.Explicit && len(n.Args) == 0 {
 			return lowerQualifiedCalleeExpr(n.Position, n.Name)
@@ -2998,12 +3139,12 @@ func lowerGrammarUntilStopSurfaceExpr(stop ast.GrammarTerm) ast.Expr {
 func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExpr {
 	switch n := term.(type) {
 	case *ast.GrammarTokenTerm:
-		return &ast.NamedType{Position: n.Position, Name: "Token"}
+		return ctx.tokenType
 	case *ast.GrammarTokenKindTerm:
-		return &ast.NamedType{Position: n.Position, Name: "Token"}
+		return ctx.tokenType
 	case *ast.GrammarCallTerm:
 		if _, ok := grammarTokenKindMatcher(n); ok {
-			return &ast.NamedType{Position: n.Position, Name: "Token"}
+			return ctx.tokenType
 		}
 		_, production, ok := ctx.resolveGrammarProductionInfo(n)
 		if ok {
@@ -3186,7 +3327,16 @@ func LowerProduction(grammarDecl *ast.GrammarDecl, production ast.GrammarProduct
 	}
 	production = normalizeGrammarProductionForLowering(grammarDecl, production)
 	receiver := grammarReceiverInfoForProduction(grammarDecl, production)
-	ctx := lowerContext{tokenReceiver: receiver.tokenReceiver, returnType: production.ReturnType, tempCounter: new(int)}
+	ctx := lowerContext{
+		tokenReceiver:  receiver.tokenReceiver,
+		tokenKindType:  grammarDeclTokenKindType(grammarDecl, production.Position),
+		tokenKindField: grammarDeclTokenKindField(grammarDecl),
+		expectFunc:     grammarDeclExpectFunc(grammarDecl),
+		expectKindFunc: grammarDeclExpectKindFunc(grammarDecl),
+		eofExpr:        grammarDeclEOFExpr(grammarDecl, production.Position),
+		returnType:     production.ReturnType,
+		tempCounter:    new(int),
+	}
 	body := make([]ast.Stmt, 0, len(production.Terms)+1)
 	for _, term := range production.Terms {
 		body = append(body, lowerTermStmt(ctx, term))
@@ -3261,7 +3411,7 @@ func lowerTermStmt(ctx lowerContext, term ast.GrammarTerm) ast.Stmt {
 func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 	switch n := term.(type) {
 	case *ast.GrammarTokenTerm:
-		funcExpr := grammarExpectFuncExpr(n.Position, ctx.tokenReceiver, "expect")
+		funcExpr := grammarExpectFuncExpr(n.Position, ctx.tokenReceiver, ctx.expectFunc)
 		return &ast.CallExpr{
 			Position: n.Position,
 			Func:     funcExpr,
@@ -3270,14 +3420,14 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 	case *ast.GrammarTokenKindTerm:
 		return &ast.CallExpr{
 			Position: n.Position,
-			Func:     grammarExpectFuncExpr(n.Position, ctx.tokenReceiver, "expect_kind"),
-			Args:     []ast.Expr{grammarTokenKindExpr(n.Position, n.Kind)},
+			Func:     grammarExpectFuncExpr(n.Position, ctx.tokenReceiver, ctx.expectKindFunc),
+			Args:     []ast.Expr{grammarTokenKindExpr(n.Position, ctx.tokenKindType, n.Kind)},
 		}
 	case *ast.GrammarCallTerm:
 		if kindExpr, ok := grammarTokenKindMatcher(n); ok {
 			return &ast.CallExpr{
 				Position: n.Position,
-				Func:     grammarExpectFuncExpr(n.Position, ctx.tokenReceiver, "expect_kind"),
+				Func:     grammarExpectFuncExpr(n.Position, ctx.tokenReceiver, ctx.expectKindFunc),
 				Args:     []ast.Expr{kindExpr},
 			}
 		}
