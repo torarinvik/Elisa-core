@@ -603,6 +603,10 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 			f.writeLine(level, "."+tokenKind.Kind+"("+bind.Name+")")
 			return
 		}
+		if choice, ok := bind.Term.(*ast.GrammarChoiceTerm); ok && grammarChoiceUsesBlockForm(choice) {
+			f.writeBoundChoiceTerm(level, bind.Name, choice)
+			return
+		}
 		if seq, ok := bind.Term.(*ast.GrammarSeqTerm); ok {
 			f.writeBoundSeqTerm(level, bind.Name, seq)
 			return
@@ -621,10 +625,18 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 		}
 	}
 	if assign, ok := term.(*ast.GrammarAssignTerm); ok {
+		if choice, ok := assign.Term.(*ast.GrammarChoiceTerm); ok && grammarChoiceUsesBlockForm(choice) {
+			f.writeAssignedChoiceTerm(level, assign.Name, choice)
+			return
+		}
 		if seq, ok := assign.Term.(*ast.GrammarSeqTerm); ok {
 			f.writeAssignedSeqTerm(level, assign.Name, seq)
 			return
 		}
+	}
+	if choice, ok := term.(*ast.GrammarChoiceTerm); ok && grammarChoiceUsesBlockForm(choice) {
+		f.writeChoiceTerm(level, choice)
+		return
 	}
 	if seq, ok := term.(*ast.GrammarSeqTerm); ok {
 		f.writeSeqTerm(level, seq)
@@ -643,6 +655,55 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 		return
 	}
 	f.writeLine(level, formatGrammarTerm(term))
+}
+
+func grammarChoiceUsesBlockForm(choice *ast.GrammarChoiceTerm) bool {
+	if choice == nil {
+		return false
+	}
+	if len(choice.Options) > 4 {
+		return true
+	}
+	for _, option := range choice.Options {
+		switch option.(type) {
+		case *ast.GrammarSeqTerm, *ast.GrammarChoiceTerm, *ast.GrammarWhenTerm, *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
+			return true
+		}
+	}
+	return false
+}
+
+func (f *formatter) writeBoundChoiceTerm(level int, name string, choice *ast.GrammarChoiceTerm) {
+	if choice == nil {
+		f.writeLine(level, name+" = <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, name+" = choice:")
+	for _, option := range choice.Options {
+		f.writeGrammarTerm(level+1, option)
+	}
+}
+
+func (f *formatter) writeAssignedChoiceTerm(level int, name string, choice *ast.GrammarChoiceTerm) {
+	if choice == nil {
+		f.writeLine(level, name+" <- <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, name+" <- choice:")
+	for _, option := range choice.Options {
+		f.writeGrammarTerm(level+1, option)
+	}
+}
+
+func (f *formatter) writeChoiceTerm(level int, choice *ast.GrammarChoiceTerm) {
+	if choice == nil {
+		f.writeLine(level, "<invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, "choice:")
+	for _, option := range choice.Options {
+		f.writeGrammarTerm(level+1, option)
+	}
 }
 
 func (f *formatter) writeBoundSeqTerm(level int, name string, seq *ast.GrammarSeqTerm) {

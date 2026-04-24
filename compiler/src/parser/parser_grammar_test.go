@@ -701,6 +701,56 @@ func TestParseGrammarChoiceOptionalAndListTerms(t *testing.T) {
 	}
 }
 
+func TestParseGrammarChoiceBlockTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalExprGrammar over Token using ParserState:
+    expression() -> Expr:
+        atom = choice:
+            if_expr()
+            fn_expr()
+            let_expr()
+            list_expr()
+            paren_or_tuple_expr()
+            seq:
+                .IDENT(token)
+                expr(make_name_expr(token))
+        return atom
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	choice, ok := bind.Term.(*ast.GrammarChoiceTerm)
+	if !ok {
+		t.Fatalf("expected binding to use choice term, got %T", bind.Term)
+	}
+	if len(choice.Options) != 6 {
+		t.Fatalf("expected six choice options, got %d", len(choice.Options))
+	}
+	if _, ok := choice.Options[5].(*ast.GrammarSeqTerm); !ok {
+		t.Fatalf("expected final choice option to be a seq term, got %T", choice.Options[5])
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"atom = choice:",
+		"if_expr()",
+		"paren_or_tuple_expr()",
+		"seq:",
+		".IDENT(token)",
+		"expr(make_name_expr(token))",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarChoicePipeShorthandDesugarsToChoiceTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalExprGrammar over Token using ParserState:
 	operator() -> Token:

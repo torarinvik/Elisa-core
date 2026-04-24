@@ -535,14 +535,8 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_LARROW)
 		term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
-		if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
-			if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
-				if _, ok := term.(*ast.GrammarSuffixTerm); !ok {
-					if _, ok := term.(*ast.GrammarSeqTerm); !ok {
-						p.expectNewline()
-					}
-				}
-			}
+		if grammarTermNeedsTrailingNewline(term, p.peek()) {
+			p.expectNewline()
 		}
 		return &ast.GrammarAssignTerm{Position: pos, Name: name, Term: term}
 	}
@@ -551,28 +545,27 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
 		term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
-		if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
-			if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
-				if _, ok := term.(*ast.GrammarSuffixTerm); !ok {
-					if _, ok := term.(*ast.GrammarSeqTerm); !ok {
-						p.expectNewline()
-					}
-				}
-			}
+		if grammarTermNeedsTrailingNewline(term, p.peek()) {
+			p.expectNewline()
 		}
 		return &ast.GrammarBindTerm{Position: pos, Name: name, Term: term}
 	}
 	term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
-	if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
-		if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
-			if _, ok := term.(*ast.GrammarSuffixTerm); !ok {
-				if _, ok := term.(*ast.GrammarSeqTerm); !ok {
-					p.expectNewline()
-				}
-			}
-		}
+	if grammarTermNeedsTrailingNewline(term, p.peek()) {
+		p.expectNewline()
 	}
 	return term
+}
+
+func grammarTermNeedsTrailingNewline(term ast.GrammarTerm, next lexer.TokenKind) bool {
+	switch term.(type) {
+	case *ast.GrammarPrecedenceTerm, *ast.GrammarPostfixTerm, *ast.GrammarSuffixTerm, *ast.GrammarSeqTerm:
+		return false
+	case *ast.GrammarChoiceTerm:
+		return next == lexer.TOKEN_NEWLINE
+	default:
+		return true
+	}
 }
 
 func (p *Parser) parseGrammarNestedTerm() ast.GrammarTerm {
@@ -796,6 +789,16 @@ func (p *Parser) parseGrammarTokenKindBinding() *ast.GrammarBindTerm {
 func (p *Parser) parseGrammarChoiceTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("choice")
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		p.expect(lexer.TOKEN_INDENT)
+		options := make([]ast.GrammarTerm, 0, 4)
+		for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+			options = append(options, p.parseGrammarTerm())
+		}
+		p.expect(lexer.TOKEN_DEDENT)
+		return &ast.GrammarChoiceTerm{Position: pos, Options: options}
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	options := make([]ast.GrammarTerm, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.peek() != lexer.TOKEN_RPAREN {
@@ -1249,7 +1252,7 @@ func (p *Parser) parseGrammarPrecedenceLevel() ast.GrammarPrecedenceLevel {
 			assoc = ""
 		}
 		seed := p.parseGrammarRecoverableTermValue()
-		if _, ok := seed.(*ast.GrammarPrecedenceTerm); !ok {
+		if grammarTermNeedsTrailingNewline(seed, p.peek()) {
 			p.expectNewline()
 		}
 		return ast.GrammarPrecedenceLevel{Position: pos, Assoc: assoc, Name: name, Seed: seed}

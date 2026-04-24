@@ -487,6 +487,18 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "grammar_uses_shared_helpers",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_uses_shared_helpers.llcontext"),
+			checks: []string{
+				"%Token = type { i32 }",
+				"define %Token @grammar_uses_parse_statement(ptr",
+				"define %Token @grammar_uses_recovering_atom(ptr",
+				"@__grammar_try__StatementGrammar____grammar_precedence_StatementGrammar_statement_1_compare(",
+				"call void @record_parse_error(ptr",
+				"@__grammar_try__StatementGrammar__recovering_atom(",
+			},
+		},
+		{
 			name: "string_escapes",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "string_escapes.llcontext"),
 			checks: []string{
