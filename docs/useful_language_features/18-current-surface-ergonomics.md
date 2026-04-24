@@ -666,6 +666,7 @@ Current infix/precedence rules:
 - `infix table Name(result_level):` defines a reusable named-precedence ladder in grammar header scope
 - `infix(Name)` expands through the existing precedence lowering machinery, so it is grammar sugar rather than a separate parser path
 - `left`, `right`, and `nonassoc` may prefix looping levels to synthesize the common `right` operand automatically and control whether the level chains, recurses once, or stops after one match
+- one-off inline ladders use the same prefixes as `precedence left(left = atom()): ...`, which keeps the reusable and one-off surfaces aligned
 - the argument to `precedence(result_level)` names the level whose value is returned when you want an inline one-off ladder instead of a reusable table
 - `level = seed` defines a seed/helper level
 - `level(left = lower_level()): ...` defines a left-associative looping level

@@ -734,7 +734,11 @@ func (f *formatter) writeBoundPrecedenceTerm(level int, name string, precedence 
 		}
 		return
 	}
-	f.writeLine(level, name+" = precedence("+precedence.LeftName+" = "+formatGrammarTerm(precedence.Seed)+"):")
+	header := "precedence"
+	if precedence.Assoc != "" {
+		header += " " + precedence.Assoc
+	}
+	f.writeLine(level, name+" = "+header+"("+precedence.LeftName+" = "+formatGrammarTerm(precedence.Seed)+"):")
 	for _, arm := range precedence.Arms {
 		f.writePrecedenceArm(level+1, arm)
 	}
@@ -752,7 +756,11 @@ func (f *formatter) writePrecedenceTerm(level int, precedence *ast.GrammarPreced
 		}
 		return
 	}
-	f.writeLine(level, "precedence("+precedence.LeftName+" = "+formatGrammarTerm(precedence.Seed)+"):")
+	header := "precedence"
+	if precedence.Assoc != "" {
+		header += " " + precedence.Assoc
+	}
+	f.writeLine(level, header+"("+precedence.LeftName+" = "+formatGrammarTerm(precedence.Seed)+"):")
 	for _, arm := range precedence.Arms {
 		f.writePrecedenceArm(level+1, arm)
 	}
@@ -914,7 +922,11 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		if len(n.Levels) != 0 {
 			return "precedence(" + n.Result + "):"
 		}
-		return "precedence(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
+		header := "precedence"
+		if n.Assoc != "" {
+			header += " " + n.Assoc
+		}
+		return header + "(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarInfixTableTerm:
 		return "infix(" + n.TableName + ")"
 	case *ast.GrammarBindTerm:

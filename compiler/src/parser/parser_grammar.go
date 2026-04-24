@@ -516,7 +516,7 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		p.expectNewline()
 		return &ast.GrammarReturnTerm{Position: pos, Value: value}
 	}
-	if p.peekGrammarBlockTerm("precedence") {
+	if p.peekGrammarPrecedenceTerm() {
 		return p.parseGrammarPrecedenceTerm()
 	}
 	if p.peekGrammarBlockTerm("suffix") {
@@ -563,8 +563,14 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		return &ast.GrammarBindTerm{Position: pos, Name: name, Term: term}
 	}
 	term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
-	if _, ok := term.(*ast.GrammarSeqTerm); !ok {
-		p.expectNewline()
+	if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
+		if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
+			if _, ok := term.(*ast.GrammarSuffixTerm); !ok {
+				if _, ok := term.(*ast.GrammarSeqTerm); !ok {
+					p.expectNewline()
+				}
+			}
+		}
 	}
 	return term
 }
@@ -601,6 +607,23 @@ func (p *Parser) parseGrammarRecoverableTermValue() ast.GrammarTerm {
 
 func (p *Parser) peekGrammarBlockTerm(name string) bool {
 	return p.peekIdentText(name) && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN
+}
+
+func (p *Parser) peekGrammarPrecedenceTerm() bool {
+	if !p.peekIdentText("precedence") || p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos+1]
+	if next.Kind == lexer.TOKEN_LPAREN {
+		return true
+	}
+	if next.Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	if next.Text != ast.GrammarAssociativityLeft && next.Text != ast.GrammarAssociativityRight && next.Text != ast.GrammarAssociativityNonAssoc {
+		return false
+	}
+	return p.pos+2 < len(p.tokens) && p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN
 }
 
 func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
@@ -654,7 +677,7 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	if p.peekGrammarTokenKindTerm() && !p.peekGrammarTokenKindBinding() {
 		return p.parseGrammarTokenKindTerm()
 	}
-	if p.peekGrammarBlockTerm("precedence") {
+	if p.peekGrammarPrecedenceTerm() {
 		return p.parseGrammarPrecedenceTerm()
 	}
 	if p.peekGrammarBlockTerm("suffix") {
@@ -1166,6 +1189,11 @@ func (p *Parser) parseGrammarPostfixArm() ast.GrammarPostfixArm {
 func (p *Parser) parseGrammarPrecedenceTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("precedence")
+	assoc := ""
+	if p.peekIdentText(ast.GrammarAssociativityLeft) || p.peekIdentText(ast.GrammarAssociativityRight) || p.peekIdentText(ast.GrammarAssociativityNonAssoc) {
+		assoc = p.cur().Text
+		p.advance()
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	if p.match(lexer.TOKEN_ASSIGN) {
@@ -1183,7 +1211,10 @@ func (p *Parser) parseGrammarPrecedenceTerm() ast.GrammarTerm {
 			arms = append(arms, p.parseGrammarPrecedenceArm())
 		}
 		p.expect(lexer.TOKEN_DEDENT)
-		return &ast.GrammarPrecedenceTerm{Position: pos, LeftName: name, Seed: seed, Arms: arms}
+		return &ast.GrammarPrecedenceTerm{Position: pos, Assoc: assoc, LeftName: name, Seed: seed, Arms: arms}
+	}
+	if assoc != "" {
+		p.errorf("precedence associativity requires inline looping precedence")
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	p.expect(lexer.TOKEN_COLON)

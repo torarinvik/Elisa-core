@@ -1179,6 +1179,66 @@ func TestParseGrammarDeclAllowsPrecedenceTerm(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsAssociativeInlinePrecedenceTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    expression(state: mutable ParserState&) -> Pascal.Expr:
+        precedence left(left = state.term()):
+			op = choice("+", "-") -> build_binary(op, left, right)
+        return left
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.GrammarDecl)
+	precedence := decl.Productions[0].Terms[0].(*ast.GrammarPrecedenceTerm)
+	if precedence.Assoc != ast.GrammarAssociativityLeft {
+		t.Fatalf("expected inline precedence to be left-associative, got %q", precedence.Assoc)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"precedence left(left = state.term()):",
+		"op = choice(\"+\", \"-\") -> build_binary(op, left, right)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclRejectsAssociativityOnHelperLevel(t *testing.T) {
+	_, errs := parseSourceFile(t, `grammar PascalFrontend:
+    expression(state: mutable ParserState&) -> Pascal.Expr:
+		result = precedence(additive):
+			left atom = state.factor()
+			left additive(left = atom()):
+				"+" -> build_add(left, right)
+		return result
+`)
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for associativity on helper level")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "precedence associativity requires a looping level") {
+		t.Fatalf("expected helper-level associativity error, got %v", errs)
+	}
+}
+
+func TestParseGrammarDeclRejectsAssociativityOnNamedPrecedenceHeader(t *testing.T) {
+	_, errs := parseSourceFile(t, `grammar PascalFrontend:
+    expression(state: mutable ParserState&) -> Pascal.Expr:
+		result = precedence right(additive):
+			atom = state.factor()
+			left additive(left = atom()):
+				"+" -> build_add(left, right)
+		return result
+`)
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for associativity on named precedence header")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "precedence associativity requires inline looping precedence") {
+		t.Fatalf("expected named-header associativity error, got %v", errs)
+	}
+}
+
 func TestParseGrammarDeclAllowsInfixTableDeclAndUse(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     infix table ExprTable(additive):

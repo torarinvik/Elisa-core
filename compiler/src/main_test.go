@@ -476,6 +476,17 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "grammar_surface_precedence",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_surface_precedence.llcontext"),
+			checks: []string{
+				"%Token = type { i32 }",
+				"define %Token @grammar_surface_parse_expr(ptr",
+				"define %Token @grammar_surface_parse_one_off(ptr",
+				"@__grammar_try__Arithmetic____grammar_precedence_Arithmetic_expression_1_compare(",
+				"@__grammar_try__Arithmetic____grammar_precedence_Arithmetic_one_off_expression_1_inline(",
+			},
+		},
+		{
 			name: "string_escapes",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "string_escapes.llcontext"),
 			checks: []string{

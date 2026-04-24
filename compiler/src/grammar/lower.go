@@ -1100,8 +1100,19 @@ func desugarNamedPrecedenceProduction(grammarName string, production ast.Grammar
 func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProductionDecl, term ast.GrammarTerm, counter *int) (ast.GrammarTerm, []ast.GrammarProductionDecl) {
 	switch n := term.(type) {
 	case *ast.GrammarBindTerm:
+		if precedence, ok := n.Term.(*ast.GrammarPrecedenceTerm); ok && precedence != nil && precedence.Assoc != "" && len(precedence.Levels) == 0 {
+			rewritten, helpers := desugarAssociativeInlinePrecedenceTerm(grammarName, production, precedence, counter)
+			return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: rewritten}, helpers
+		}
 		rewritten, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Term, counter)
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: rewritten}, helpers
+	case *ast.GrammarAssignTerm:
+		if precedence, ok := n.Term.(*ast.GrammarPrecedenceTerm); ok && precedence != nil && precedence.Assoc != "" && len(precedence.Levels) == 0 {
+			rewritten, helpers := desugarAssociativeInlinePrecedenceTerm(grammarName, production, precedence, counter)
+			return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: rewritten}, helpers
+		}
+		rewritten, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Term, counter)
+		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: rewritten}, helpers
 	case *ast.GrammarChoiceTerm:
 		options := make([]ast.GrammarTerm, 0, len(n.Options))
 		helpers := make([]ast.GrammarProductionDecl, 0)
@@ -1198,6 +1209,10 @@ func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProduc
 		if len(n.Levels) != 0 {
 			return desugarNamedPrecedenceBlock(grammarName, production, n, counter)
 		}
+		if n.Assoc != "" {
+			rewritten, helpers := desugarAssociativeInlinePrecedenceTerm(grammarName, production, n, counter)
+			return &ast.GrammarBindTerm{Position: n.Position, Name: n.LeftName, Term: rewritten}, helpers
+		}
 		seed, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Seed, counter)
 		arms := make([]ast.GrammarPrecedenceArm, 0, len(n.Arms))
 		for _, arm := range n.Arms {
@@ -1253,6 +1268,27 @@ func desugarNamedPrecedenceBlock(grammarName string, production ast.GrammarProdu
 	}
 	topName := helperNames[term.Result]
 	return &ast.GrammarCallTerm{Position: term.Position, Name: topName, Explicit: true, Args: grammarProductionParamArgs(production.Params)}, helpers
+}
+
+func desugarAssociativeInlinePrecedenceTerm(grammarName string, production ast.GrammarProductionDecl, term *ast.GrammarPrecedenceTerm, counter *int) (ast.GrammarTerm, []ast.GrammarProductionDecl) {
+	if term == nil {
+		return nil, nil
+	}
+	*counter++
+	blockIndex := *counter
+	helperName := grammarPrecedenceHelperProductionName(grammarName, production.Name, blockIndex, "inline")
+	seed, helpers := desugarNamedPrecedenceTerm(grammarName, production, term.Seed, counter)
+	arms := make([]ast.GrammarPrecedenceArm, 0, len(term.Arms))
+	for _, arm := range term.Arms {
+		rewrittenArm, armHelpers := desugarNamedPrecedenceArm(grammarName, production, arm, counter)
+		arms = append(arms, rewrittenArm)
+		helpers = append(helpers, armHelpers...)
+	}
+	paramArgs := grammarProductionParamArgs(production.Params)
+	level := ast.GrammarPrecedenceLevel{Position: term.Position, Assoc: term.Assoc, Name: "inline", LeftName: term.LeftName, Seed: seed, Arms: arms}
+	level.Arms = applyNamedPrecedenceAssociativity(level, helperName, paramArgs, seed, level.Arms)
+	helpers = append(helpers, buildNamedPrecedenceHelperProduction(production, helperName, level, seed, level.Arms))
+	return &ast.GrammarCallTerm{Position: term.Position, Name: helperName, Explicit: true, Args: paramArgs}, helpers
 }
 
 func grammarPrecedenceHelperProductionName(grammarName string, productionName string, blockIndex int, levelName string) string {

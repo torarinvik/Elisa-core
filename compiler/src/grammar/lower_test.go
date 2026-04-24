@@ -713,6 +713,26 @@ func TestLowerFileStatefulInfixTableUseBuildsLoopAndAssignsLeft(t *testing.T) {
 	}
 }
 
+func TestLowerFileStatefulAssociativeInlinePrecedenceUsesGeneratedHelper(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    expression(state: mutable ParserState&) -> Token:
+        precedence right(left = token(TokenKind.IDENT)):
+            "^" -> right
+        return left
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def __grammar_try__PascalFrontend____grammar_precedence_PascalFrontend_expression_1_inline(state: mutable ParserState&)",
+		"left = __grammar_value_expression_PascalFrontend_value_",
+		"right = __grammar_value___grammar_precedence_PascalFrontend_expression_1_inline_PascalFrontend_value_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered associative inline precedence to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulAssociativityAnnotatedInfixTableSynthesizesRightBinding(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     infix table ExprTable(power):
