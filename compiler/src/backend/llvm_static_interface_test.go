@@ -17,7 +17,7 @@ struct AstNode:
 struct BuilderTag:
     tag: int
 
-interface Builder:
+static interface Builder:
     type Node
     def make(value: int) -> Node
     def value_of(node: Node) -> int
@@ -80,7 +80,7 @@ tree Lua:
 struct LuaAstBuilder:
 	tag: int
 
-interface LuaBuilder:
+static interface LuaBuilder:
 	type ExprNode
 	def make_integer(alloc: mutable Arena&, span: i64, value: i64) -> ExprNode
 	def make_binary(alloc: mutable Arena&, span: i64, left: ExprNode, right: ExprNode) -> ExprNode

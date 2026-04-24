@@ -144,6 +144,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("interface") {
 		return p.parseInterfaceDecl()
 	}
+	if p.peek() == lexer.TOKEN_STATIC && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "interface" {
+		return p.parseInterfaceDecl()
+	}
 	if p.peekIdentText("impl") {
 		return p.parseImplDecl()
 	}

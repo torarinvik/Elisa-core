@@ -696,6 +696,9 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	case *ast.ZeroedLit:
 		return VoidValue(), fmt.Errorf("zeroed literal requires typed context")
 	case *ast.BinaryExpr:
+		if n.LoweredCall != nil {
+			return i.evalExpr(frame, n.LoweredCall)
+		}
 		if n.Op == lexer.TOKEN_IS {
 			return i.evalIsExpr(frame, n)
 		}
@@ -1047,6 +1050,9 @@ func (i *Interpreter) evalDerivedStateExpr(frame *frame, expr ast.Expr, self Val
 		}
 		return evalUnaryOp(n.Op, operand)
 	case *ast.BinaryExpr:
+		if n.LoweredCall != nil {
+			return i.evalExpr(frame, n.LoweredCall)
+		}
 		left, err := i.evalDerivedStateExpr(frame, n.Left, self)
 		if err != nil {
 			return VoidValue(), err

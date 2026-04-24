@@ -168,6 +168,7 @@ Current rules:
 - `with args(...)` installs ambient explicit arguments for nested calls inside a block
 - calls auto-forward when the caller already has the same implicit context in scope
 - `with Name(..)` spreads same-named ambient values into the bundle, and explicit overrides win over the spread values
+- calls with implicit parameters also fall back to same-named in-scope values, which lets generated parser functions with an `alloc` parameter call helpers declared `with AllocCtx` without spelling the allocator repeatedly
 - the implicit bundle surface works as a statement block and as a trailing call bundle
 - implicit bundle fields do not accept parameter defaults
 - explicit bundle fields may declare defaults
@@ -247,7 +248,7 @@ def rotate_into(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.
     return new[alloc] node{left, right}
 
 def make_binary(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
-    return node[span = combine_span(left.span, right.span)] Lua.Expr.Binary(left: left, right: right)
+    return node[span = left.span + right.span] Lua.Expr.Binary(left: left, right: right)
 
 def simplify(node: Lua.Node) -> Lua.Node:
     in perm:
@@ -269,6 +270,7 @@ Current rules:
 - `node Tree.Member(...)` is canonical sugar for tree construction through an in-scope `alloc` binding
 - `node[span = expr] Tree.Member(...)` injects the common `span` field without repeating it in the constructor arguments
 - `node[alloc = owner, span = expr] Tree.Member(...)` is the explicit-owner form for parser helpers that name the arena something other than `alloc`
+- `left.span + right.span` is the canonical span algebra form for span-like parser ranges; the low-level helper remains available when explicit control is clearer
 - inside an exact `rewrite` arm, `default` rebuilds the current exact member using the already rewritten child results
 - `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
 - `default` also rebuilds `children` sequence fields, materializing fresh arrays in the active tree owner when needed
@@ -343,7 +345,7 @@ Current header declarations:
 - `token:` declares token aliases for use as `.IDENT` inside the grammar
 - grouped token entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal such as `LPAREN "("`
 - `channel name` declares a generated mutable channel with inferred/default behavior
-- `channel span: Span = combine_span($start.span, $end.span)` declares a typed channel with a default expression
+- `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
 - `uses OtherGrammar` imports productions and token aliases from another grammar
 
 `token:` is the canonical style for token aliases:

@@ -876,10 +876,11 @@ type ExprBlock struct {
 }
 
 type BinaryExpr struct {
-	Position lexer.Pos
-	Op       lexer.TokenKind
-	Left     Expr
-	Right    Expr
+	Position    lexer.Pos
+	Op          lexer.TokenKind
+	Left        Expr
+	Right       Expr
+	LoweredCall *CallExpr
 }
 
 type UnaryExpr struct {

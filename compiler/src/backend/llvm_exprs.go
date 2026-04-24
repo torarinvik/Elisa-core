@@ -1280,6 +1280,9 @@ func (s *functionState) emitNullLiteral() (C.LLVMValueRef, semantic.Type, error)
 }
 
 func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr.LoweredCall != nil {
+		return s.emitExpr(expr.LoweredCall, nil)
+	}
 	if expr.Op == lexer.TOKEN_IS {
 		return s.emitIsExpr(expr)
 	}

@@ -216,8 +216,12 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 		}
 		argExpr, ok := working[name]
 		if !ok || argExpr == nil {
-			a.errorf(expr.Pos(), "missing implicit argument %q for call to %q", name, ft.Name)
-			continue
+			if fallback, found := a.lookupSameNameImplicitExpr(name, working); found {
+				argExpr = fallback
+			} else {
+				a.errorf(expr.Pos(), "missing implicit argument %q for call to %q", name, ft.Name)
+				continue
+			}
 		}
 		expectedType := a.substituteType(ft.Params[paramIndex], bindings, shapeBindings, regionBindings, permissionBindings)
 		var actualType Type

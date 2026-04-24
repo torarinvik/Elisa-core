@@ -10,7 +10,7 @@ func TestAnalyzeStaticInterfaceZeroArgMethodCall(t *testing.T) {
 struct BuilderTag:
     tag: int
 
-interface Builder:
+static interface Builder:
     type State
     def state() -> State
 
@@ -34,7 +34,7 @@ func TestAnalyzeStaticInterfaceZeroArgMethodCallWithAssociatedLocal(t *testing.T
 struct BuilderTag:
     tag: int
 
-interface Builder:
+static interface Builder:
     type State
     def state() -> State
 
@@ -59,7 +59,7 @@ func TestAnalyzeStaticInterfaceExplicitSpecializationWithBoundTypeParam(t *testi
 struct BuilderTag:
     tag: int
 
-interface Builder:
+static interface Builder:
     type State
     def state() -> State
 
@@ -94,7 +94,7 @@ tree Lua:
 struct LuaAstBuilder:
     tag: int
 
-interface LuaBuilder:
+static interface LuaBuilder:
     type ExprNode
     def make_integer(alloc: mutable Arena&, span: i64, value: i64) -> ExprNode
     def make_binary(alloc: mutable Arena&, span: i64, left: ExprNode, right: ExprNode) -> ExprNode
@@ -130,7 +130,7 @@ func TestAnalyzeDerivedNullBuilderSynthesizesMissingMethods(t *testing.T) {
 struct SinkBuilder:
     tag: int
 
-interface Sink:
+static interface Sink:
     type Node
     def make(value: int) -> Node
     def touch(node: Node)
@@ -165,7 +165,7 @@ func TestAnalyzeStaticInterfaceTupleReturnAndDestructure(t *testing.T) {
 struct BuilderTag:
     tag: int
 
-interface Builder:
+static interface Builder:
     type Node
     def make(value: int) -> Node
 

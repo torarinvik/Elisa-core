@@ -363,7 +363,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeField(level+1, field)
 		}
 	case *ast.InterfaceDecl:
-		f.writeLine(level, "interface "+n.Name+":")
+		f.writeLine(level, "static interface "+n.Name+":")
 		for _, member := range n.Members {
 			switch m := member.(type) {
 			case *ast.AssociatedTypeDecl:

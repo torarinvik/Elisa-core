@@ -3135,6 +3135,9 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 			if rref, ok := right.(*RefType); ok && IsIntegralStorageType(left) {
 				return rref
 			}
+			if result, ok := a.analyzeSpanAlgebraExpr(expr, left, right); ok {
+				return result
+			}
 		}
 		if !IsNumericType(left) || !IsNumericType(right) {
 			a.errorf(expr.Pos(), "operator requires numeric operands")
@@ -3157,6 +3160,39 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func (a *Analyzer) analyzeSpanAlgebraExpr(expr *ast.BinaryExpr, left Type, right Type) (Type, bool) {
+	if expr == nil || expr.Op != lexer.TOKEN_PLUS {
+		return nil, false
+	}
+	if left == nil || right == nil {
+		return nil, false
+	}
+	if IsNumericType(left) || IsNumericType(right) || !SameType(left, right) {
+		return nil, false
+	}
+	helperName := ""
+	switch left.String() {
+	case "Span":
+		helperName = "combine_span"
+	case "LuaSpan":
+		helperName = "lua_span_union"
+	default:
+		return nil, false
+	}
+	call := &ast.CallExpr{
+		Position: expr.Position,
+		Func:     &ast.Ident{Position: expr.Position, Name: helperName},
+		Args:     []ast.Expr{expr.Left, expr.Right},
+	}
+	result := a.analyzeExpr(call)
+	if !IsInvalidType(result) && !AssignableTo(left, result) {
+		a.errorf(expr.Pos(), "span algebra helper %q returned %s, expected %s", helperName, result, left)
+		return invalidType, true
+	}
+	expr.LoweredCall = call
+	return result, true
 }
 
 func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {

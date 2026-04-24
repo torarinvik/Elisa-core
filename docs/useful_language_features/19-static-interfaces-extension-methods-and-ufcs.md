@@ -12,7 +12,7 @@ Static interfaces describe compile-time capabilities and associated types.
 struct BuilderTag:
     tag: int
 
-interface Builder:
+static interface Builder:
     type Node
     def make(value: int) -> Node
 
@@ -28,7 +28,8 @@ def build[B: Builder](value: int) -> B.Node:
 
 Current rules:
 
-- `interface Name:` declares a compile-time interface, not a runtime object type
+- `static interface Name:` declares a compile-time interface, not a runtime object type
+- legacy `interface Name:` still parses for compatibility, but formatted source emits `static interface`
 - interface members may include associated types and method signatures
 - `impl Name for Type:` provides the associated types and methods for one concrete type
 - generic parameters may be interface-bounded with `T: InterfaceName`

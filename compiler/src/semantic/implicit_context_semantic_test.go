@@ -377,3 +377,36 @@ def keep() -> i64:
 		t.Fatalf("expected missing ambient bundle field error, got: %v", errs)
 	}
 }
+
+func TestAnalyzeImplicitCallUsesSameNameAmbientFallback(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_same_name_fallback.llcontext", `bundle AllocCtx implicit:
+    alloc: i64
+
+def read_alloc() with AllocCtx -> i64:
+    return alloc
+
+def keep() -> i64:
+    alloc: i64 = 42
+    return read_alloc()
+`)
+
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", result.Errors())
+	}
+	fn := findImplicitContextTestFuncDecl(t, result, "keep")
+	ret, ok := fn.Body[len(fn.Body)-1].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", fn.Body[len(fn.Body)-1])
+	}
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call return value, got %T", ret.Value)
+	}
+	if len(call.ResolvedImplicitArgs) != 1 {
+		t.Fatalf("expected one resolved implicit arg, got %d", len(call.ResolvedImplicitArgs))
+	}
+	ident, ok := call.ResolvedImplicitArgs[0].(*ast.Ident)
+	if !ok || ident.Name != "alloc" {
+		t.Fatalf("expected same-name alloc fallback, got %#v", call.ResolvedImplicitArgs[0])
+	}
+}

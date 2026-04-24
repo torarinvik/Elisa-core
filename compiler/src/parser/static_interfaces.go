@@ -18,6 +18,9 @@ func (p *Parser) peekQualifiedDeclNameFollowedBy(text string) bool {
 
 func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_STATIC {
+		p.advance()
+	}
 	p.expectIdentText("interface")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
