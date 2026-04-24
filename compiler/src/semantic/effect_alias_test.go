@@ -10,9 +10,9 @@ func TestEffectAliasExpandsReturnAndPermissions(t *testing.T) {
 error ParseErr:
     Invalid
 
-effects FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
+effectalias FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
 
-def parse() -> int effects FrontendEffects:
+def parse() -> int effects[FrontendEffects]:
     return 1
 `)
 	sym, ok := result.GlobalScope.Lookup("parse")
@@ -41,11 +41,11 @@ def parse() -> int effects FrontendEffects:
 func TestEffectAliasResolvesThroughUsingAndFuncTypes(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "effect_alias_using.llcontext", `
 namespace frontend:
-    effects WorkerEffects = can[Abort.Panic]
+    effectalias WorkerEffects = can[Abort.Panic]
 
 using frontend
 
-def accept(callback: func() -> void effects WorkerEffects) -> void:
+def accept(callback: func() -> void effects[WorkerEffects]) -> void:
     callback()
 `)
 	sym, ok := result.GlobalScope.Lookup("accept")
@@ -64,12 +64,38 @@ def accept(callback: func() -> void effects WorkerEffects) -> void:
 
 func TestEffectAliasUnknownNameErrors(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "effect_alias_unknown.llcontext", `
-def parse() -> int effects MissingEffects:
+def parse() -> int effects[MissingEffects]:
     return 1
 `)
 	joined := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(joined, `unknown effects alias "MissingEffects"`) {
-		t.Fatalf("expected unknown alias error, got %v", result.Errors())
+	if !strings.Contains(joined, `unknown permission "MissingEffects"`) {
+		t.Fatalf("expected unknown effect item error, got %v", result.Errors())
+	}
+}
+
+func TestEffectsRowMixesAliasErrorsAndPermissions(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "effect_row.llcontext", `
+error ParseErr:
+    Invalid
+
+error IoErr:
+    Failed
+
+effectalias FrontendEffects = error[ParseErr] can[Abort.Panic]
+
+def parse() -> int effects[FrontendEffects, error IoErr, Memory.Allocate]:
+    return 1
+`)
+	sym, ok := result.GlobalScope.Lookup("parse")
+	if !ok {
+		t.Fatal("expected parse symbol")
+	}
+	fnType := sym.Type.(*FuncType)
+	if _, ok := fnType.Return.(*ErrorUnionType); !ok {
+		t.Fatalf("expected error union return, got %T", fnType.Return)
+	}
+	if got := PermissionRefsString(fnType.DeclaredPermissionRefs); got != " can[Abort.Panic, Memory.Allocate]" {
+		t.Fatalf("unexpected declared permissions: %q", got)
 	}
 }
 

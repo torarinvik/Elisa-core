@@ -840,6 +840,60 @@ func TestParseGrammarListFamilyReadableSugar(t *testing.T) {
 	}
 }
 
+func TestParseGrammarSeqBlockAndPrefixSugar(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    expression() -> Expr:
+        unary = prefix(.PLUS, .MINUS, .NOT) atom() -> build_unary(op, operand)
+        grouped = seq:
+            open = .LPAREN
+            value = expression()
+            close = .RPAREN
+            expr(value)
+        compact = seq(op = choice(.PLUS, .MINUS) operand = atom() expr(build_unary(op, operand)))
+        return unary
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.Productions) != 1 || len(decl.Productions[0].Terms) != 4 {
+		t.Fatalf("expected one production with four terms, got %#v", decl.Productions)
+	}
+	unaryBind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to bind prefix result, got %T", decl.Productions[0].Terms[0])
+	}
+	unarySeq, ok := unaryBind.Term.(*ast.GrammarSeqTerm)
+	if !ok || len(unarySeq.Terms) != 3 {
+		t.Fatalf("expected prefix sugar to desugar to three-term seq, got %#v", unaryBind.Term)
+	}
+	if opBind, ok := unarySeq.Terms[0].(*ast.GrammarBindTerm); !ok || opBind.Name != "op" {
+		t.Fatalf("expected prefix sugar to bind op, got %#v", unarySeq.Terms[0])
+	}
+	if operandBind, ok := unarySeq.Terms[1].(*ast.GrammarBindTerm); !ok || operandBind.Name != "operand" {
+		t.Fatalf("expected prefix sugar to bind operand, got %#v", unarySeq.Terms[1])
+	}
+	groupedBind, ok := decl.Productions[0].Terms[1].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected second term to bind grouped seq, got %T", decl.Productions[0].Terms[1])
+	}
+	groupedSeq, ok := groupedBind.Term.(*ast.GrammarSeqTerm)
+	if !ok || len(groupedSeq.Terms) != 4 {
+		t.Fatalf("expected seq block to parse four terms, got %#v", groupedBind.Term)
+	}
+	compactBind, ok := decl.Productions[0].Terms[2].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected third term to bind compact seq, got %T", decl.Productions[0].Terms[2])
+	}
+	compactSeq, ok := compactBind.Term.(*ast.GrammarSeqTerm)
+	if !ok || len(compactSeq.Terms) != 3 {
+		t.Fatalf("expected comma-free seq(...) to parse three terms, got %#v", compactBind.Term)
+	}
+}
+
 func TestParseGrammarProductionAllowsRecoverClause(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", "end", "else", token(TokenKind.EOF))):

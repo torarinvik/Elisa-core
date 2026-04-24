@@ -72,6 +72,21 @@ func cloneErrorSetExpr(expr *ast.ErrorSetExpr) *ast.ErrorSetExpr {
 	return &ast.ErrorSetExpr{Position: expr.Position, Tags: tags, HasEllipsis: expr.HasEllipsis}
 }
 
+func mergeErrorSetExpr(left, right *ast.ErrorSetExpr) *ast.ErrorSetExpr {
+	if left == nil {
+		return cloneErrorSetExpr(right)
+	}
+	merged := cloneErrorSetExpr(left)
+	if right == nil {
+		return merged
+	}
+	for _, tag := range right.Tags {
+		merged.Tags = append(merged.Tags, ast.ErrorTagExpr{Position: tag.Position, SetName: tag.SetName, Tag: tag.Tag})
+	}
+	merged.HasEllipsis = merged.HasEllipsis || right.HasEllipsis
+	return merged
+}
+
 func (a *Analyzer) expandEffectAlias(ret ast.TypeExpr, permissionRefs []ast.PermissionRef, effectAliasName string, effectAliasPos lexer.Pos) (ast.TypeExpr, []ast.PermissionRef) {
 	if effectAliasName == "" {
 		return ret, permissionRefs
@@ -100,4 +115,57 @@ func (a *Analyzer) expandEffectAlias(ret ast.TypeExpr, permissionRefs []ast.Perm
 		Value:    valueExpr,
 		Errors:   cloneErrorSetExpr(alias.Decl.ErrorEffects),
 	}, mergedPermissions
+}
+
+func (a *Analyzer) expandSignatureEffects(ret ast.TypeExpr, permissionRefs []ast.PermissionRef, effectAliasName string, effectAliasPos lexer.Pos, effects []ast.SignatureEffectItem) (ast.TypeExpr, []ast.PermissionRef) {
+	if len(effects) == 0 {
+		return a.expandEffectAlias(ret, permissionRefs, effectAliasName, effectAliasPos)
+	}
+	if effectAliasName != "" {
+		legacyAlias := ast.SignatureEffectItem{Position: effectAliasPos, Alias: effectAliasName}
+		effects = append([]ast.SignatureEffectItem{legacyAlias}, effects...)
+	}
+	_, hadExplicitReturnErrors := ret.(*ast.ErrorUnionTypeExpr)
+	addErrorEffects := func(pos lexer.Pos, label string, errorEffects *ast.ErrorSetExpr) {
+		if errorEffects == nil {
+			return
+		}
+		if hadExplicitReturnErrors {
+			a.errorf(pos, "effects[%s] cannot be combined with an explicit error[...] clause", label)
+			return
+		}
+		if union, ok := ret.(*ast.ErrorUnionTypeExpr); ok {
+			if existing, ok := union.Errors.(*ast.ErrorSetExpr); ok {
+				union.Errors = mergeErrorSetExpr(existing, errorEffects)
+			}
+			return
+		}
+		valueExpr := ret
+		if valueExpr == nil {
+			valueExpr = &ast.NamedType{Position: pos, Name: "void"}
+		}
+		ret = &ast.ErrorUnionTypeExpr{Position: valueExpr.Pos(), Value: valueExpr, Errors: cloneErrorSetExpr(errorEffects)}
+	}
+	for _, item := range effects {
+		if item.ErrorEffects != nil {
+			addErrorEffects(item.Position, "error", item.ErrorEffects)
+			continue
+		}
+		if item.Permission != nil {
+			permissionRefs = mergePermissionRefs(permissionRefs, []ast.PermissionRef{*item.Permission})
+			continue
+		}
+		if item.Alias == "" {
+			continue
+		}
+		if alias, _, ok := a.lookupVisibleEffectAlias(item.Alias); ok {
+			permissionRefs = mergePermissionRefs(permissionRefs, alias.Permissions)
+			if alias.Decl != nil {
+				addErrorEffects(item.Position, item.Alias, alias.Decl.ErrorEffects)
+			}
+			continue
+		}
+		permissionRefs = mergePermissionRefs(permissionRefs, []ast.PermissionRef{{Position: item.Position, Name: item.Alias}})
+	}
+	return ret, permissionRefs
 }

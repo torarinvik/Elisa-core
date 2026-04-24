@@ -5,8 +5,8 @@ struct Node:
 error MemoryError:
     OutOfMemory
 
-extern alloc_node() -> mutable heap Node&? can[Memory.Allocate]
-extern sfree_node(node: heap Node&) -> heap Node! can[Memory.Release]
+extern alloc_node() -> mutable heap Node&? effects[Memory.Allocate]
+extern sfree_node(node: heap Node&) -> heap Node! effects[Memory.Release]
 
 def require_node() -> mutable heap Node& error[MemoryError]:
     raw: heap Node&? = alloc_node() can Memory.Allocate

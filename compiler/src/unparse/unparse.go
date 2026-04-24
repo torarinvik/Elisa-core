@@ -224,7 +224,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeLine(level+1, tag)
 		}
 	case *ast.EffectsDecl:
-		line := "effects " + n.Name + " ="
+		line := "effectalias " + n.Name + " ="
 		if n.ErrorEffects != nil {
 			line += " " + formatTypeExpr(n.ErrorEffects)
 		}
@@ -366,7 +366,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			case *ast.AssociatedTypeDecl:
 				f.writeLine(level+1, "type "+m.Name)
 			case *ast.ExternFuncDecl:
-				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Permissions, m.Ensures, m.Variadic))
+				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Effects, m.Permissions, m.Ensures, m.Variadic))
 			}
 		}
 	case *ast.ImplDecl:
@@ -384,7 +384,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				f.writeLine(level+1, "type "+m.Name+" = "+formatTypeExpr(m.Type))
 			case *ast.FuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Permissions, m.Ensures, false)
+				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Effects, m.Permissions, m.Ensures, false)
 				if m.Override {
 					header = "override " + header
 				}
@@ -394,7 +394,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				}
 			case *ast.ExternFuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Permissions, m.Ensures, m.Variadic)
+				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Effects, m.Permissions, m.Ensures, m.Variadic)
 				if m.Override {
 					header = "override " + header
 				}
@@ -403,13 +403,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.FuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Permissions, n.Ensures, false))
+		f.writeLine(level, formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, false))
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
 	case *ast.ExternFuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Permissions, n.Ensures, n.Variadic))
+		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Variadic))
 	case *ast.ExternVarDecl:
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))
 	case *ast.ExternTypeDecl:
@@ -1266,13 +1266,13 @@ func formatAggregateStateSuffix(hasStateParam bool, stateParamCount int) string 
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, effectAlias string, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
-	line := formatImplMethodHeader(name, genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams, params, paramPacks, paramItemOrder, implicitParams, implicitBundles, implicitItemOrder, retType, effectAlias, permissions, ensures, variadic)
+func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, effectAlias string, effects []ast.SignatureEffectItem, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+	line := formatImplMethodHeader(name, genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams, params, paramPacks, paramItemOrder, implicitParams, implicitBundles, implicitItemOrder, retType, effectAlias, effects, permissions, ensures, variadic)
 	line += ":"
 	return line
 }
 
-func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, effectAlias string, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, effectAlias string, effects []ast.SignatureEffectItem, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "def " + name
 	line += formatGenericParams(genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams)
 	line += "(" + formatExplicitParamList(params, paramPacks, paramItemOrder, variadic) + ")"
@@ -1280,15 +1280,15 @@ func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeP
 	if retType != nil {
 		line += " -> " + formatTypeExpr(retType)
 	}
-	line += formatEffectAlias(effectAlias)
-	if effectAlias == "" {
+	line += formatSignatureEffects(effectAlias, effects)
+	if effectAlias == "" && len(effects) == 0 {
 		line += formatPermissionRefs(permissions)
 	}
 	line += formatEnsuresClauses(ensures)
 	return line
 }
 
-func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, effectAlias string, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, effectAlias string, effects []ast.SignatureEffectItem, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "extern " + name
 	line += formatGenericParams(genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams)
 	line += "(" + formatExplicitParamList(params, paramPacks, paramItemOrder, variadic) + ")"
@@ -1296,8 +1296,8 @@ func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeP
 	if retType != nil {
 		line += " -> " + formatTypeExpr(retType)
 	}
-	line += formatEffectAlias(effectAlias)
-	if effectAlias == "" {
+	line += formatSignatureEffects(effectAlias, effects)
+	if effectAlias == "" && len(effects) == 0 {
 		line += formatPermissionRefs(permissions)
 	}
 	line += formatEnsuresClauses(ensures)
@@ -1361,11 +1361,34 @@ func formatParamList(params []ast.ParamDecl) string {
 	return strings.Join(parts, ", ")
 }
 
-func formatEffectAlias(alias string) string {
-	if alias == "" {
+func formatSignatureEffects(alias string, effects []ast.SignatureEffectItem) string {
+	if len(effects) == 0 {
+		if alias == "" {
+			return ""
+		}
+		return " effects[" + alias + "]"
+	}
+	parts := make([]string, 0, len(effects)+1)
+	if alias != "" {
+		parts = append(parts, alias)
+	}
+	for _, effect := range effects {
+		if effect.ErrorEffects != nil {
+			parts = append(parts, formatTypeExpr(effect.ErrorEffects))
+			continue
+		}
+		if effect.Permission != nil {
+			parts = append(parts, formatPermissionRef(*effect.Permission))
+			continue
+		}
+		if effect.Alias != "" {
+			parts = append(parts, effect.Alias)
+		}
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	return " effects " + alias
+	return " effects[" + strings.Join(parts, ", ") + "]"
 }
 
 func formatWithSignatureClause(bundles []string, params []ast.ParamDecl, order []ast.ImplicitSigItem) string {
@@ -1488,13 +1511,16 @@ func formatPermissionRefs(refs []ast.PermissionRef) string {
 	}
 	parts := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		if ref.Member != "" {
-			parts = append(parts, ref.Name+"."+ref.Member)
-		} else {
-			parts = append(parts, ref.Name)
-		}
+		parts = append(parts, formatPermissionRef(ref))
 	}
 	return " can[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatPermissionRef(ref ast.PermissionRef) string {
+	if ref.Member != "" {
+		return ref.Name + "." + ref.Member
+	}
+	return ref.Name
 }
 
 func formatPermissionRefSurfaceList(refs []ast.PermissionRef) string {
@@ -1679,8 +1705,8 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		if n.Return != nil {
 			line += " -> " + formatTypeExpr(n.Return)
 		}
-		line += formatEffectAlias(n.EffectAlias)
-		if n.EffectAlias == "" {
+		line += formatSignatureEffects(n.EffectAlias, n.Effects)
+		if n.EffectAlias == "" && len(n.Effects) == 0 {
 			line += formatPermissionRefs(n.Permissions)
 		}
 		return line

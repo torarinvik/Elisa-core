@@ -9,8 +9,8 @@ import (
 )
 
 func TestParseEffectsDeclAndAliasUsage(t *testing.T) {
-	src := `effects FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
-def parse() -> int effects FrontendEffects:
+	src := `effectalias FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
+def parse() -> int effects[FrontendEffects]:
     return 1
 `
 	file, errs := parseSourceFile(t, src)
@@ -31,8 +31,8 @@ def parse() -> int effects FrontendEffects:
 	if !ok {
 		t.Fatalf("expected func decl, got %T", file.Decls[1])
 	}
-	if fn.EffectAlias != "FrontendEffects" {
-		t.Fatalf("expected func effect alias FrontendEffects, got %q", fn.EffectAlias)
+	if len(fn.Effects) != 1 || fn.Effects[0].Alias != "FrontendEffects" {
+		t.Fatalf("expected func effect alias FrontendEffects, got %#v", fn.Effects)
 	}
 	if len(fn.Permissions) != 0 {
 		t.Fatalf("expected alias-using function to have no explicit can clause, got %#v", fn.Permissions)
@@ -43,7 +43,7 @@ def parse() -> int effects FrontendEffects:
 }
 
 func TestParseFuncTypeWithEffectsAlias(t *testing.T) {
-	file, errs := parseSourceFile(t, "extern register(callback: func() -> void effects WorkerEffects) -> void\n")
+	file, errs := parseSourceFile(t, "extern register(callback: func() -> void effects[WorkerEffects]) -> void\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -52,8 +52,8 @@ func TestParseFuncTypeWithEffectsAlias(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected func type expr, got %T", decl.Params[0].Type)
 	}
-	if fnType.EffectAlias != "WorkerEffects" {
-		t.Fatalf("expected function type alias WorkerEffects, got %q", fnType.EffectAlias)
+	if len(fnType.Effects) != 1 || fnType.Effects[0].Alias != "WorkerEffects" {
+		t.Fatalf("expected function type alias WorkerEffects, got %#v", fnType.Effects)
 	}
 }
 
@@ -68,13 +68,30 @@ func TestParseEffectsAliasRejectsMixedExplicitClauses(t *testing.T) {
 	}
 }
 
-func TestUnparseEffectsAliasSyntax(t *testing.T) {
-	src := `effects FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
+func TestParseBracketedEffectsCanMixAliasErrorsAndPermissions(t *testing.T) {
+	src := `def parse() -> int effects[FrontendEffects, error ParseErr, Abort.Panic, Console.Write]:
+    return 1
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	if len(fn.Effects) != 4 {
+		t.Fatalf("expected 4 effect items, got %#v", fn.Effects)
+	}
+	if fn.Effects[0].Alias != "FrontendEffects" || fn.Effects[1].ErrorEffects == nil || fn.Effects[2].Permission == nil || fn.Effects[3].Permission == nil {
+		t.Fatalf("unexpected effect item shape: %#v", fn.Effects)
+	}
+}
 
-def parse() -> int effects FrontendEffects:
+func TestUnparseEffectsAliasSyntax(t *testing.T) {
+	src := `effectalias FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
+
+def parse() -> int effects[FrontendEffects]:
     return 1
 
-extern register(callback: func() -> void effects FrontendEffects) -> void
+extern register(callback: func() -> void effects[FrontendEffects]) -> void
 `
 	file, errs := parseSourceFile(t, src)
 	if len(errs) != 0 {

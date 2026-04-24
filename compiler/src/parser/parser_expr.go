@@ -123,9 +123,14 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 
 	effectAliasPos := lexer.Pos{}
 	effectAlias := ""
+	var effects []ast.SignatureEffectItem
 	if p.matchIdentText("effects") {
 		effectAliasPos = p.tokens[p.pos-1].Pos
-		effectAlias = p.parseQualifiedDeclName()
+		if p.peek() == lexer.TOKEN_LBRACKET {
+			effects = p.parseSignatureEffectsClause()
+		} else {
+			effectAlias = p.parseQualifiedDeclName()
+		}
 	}
 
 	var permissions []ast.PermissionRef
@@ -142,7 +147,7 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 		}
 	}
 
-	return &ast.FuncTypeExpr{Position: pos, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, Return: retType, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Variadic: variadic}
+	return &ast.FuncTypeExpr{Position: pos, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, Return: retType, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Variadic: variadic}
 }
 
 func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {

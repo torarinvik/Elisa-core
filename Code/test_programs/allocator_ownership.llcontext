@@ -21,11 +21,11 @@ error MemoryError:
 error FormatError:
     WriteFailed
 
-extern alloc_heap_pair_node() -> mutable heap HeapPairNode&? can[Memory.Allocate]
-extern sfree_heap_pair_node(node: heap HeapPairNode&) -> heap HeapPairNode! can[Memory.Release]
-extern alloc_bytes(size: usize) -> mutable heap u8&? can[Memory.Allocate]
-extern sfree_bytes(ptr: heap u8&) -> heap u8! can[Memory.Release]
-extern snprintf(buffer: mutable u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
+extern alloc_heap_pair_node() -> mutable heap HeapPairNode&? effects[Memory.Allocate]
+extern sfree_heap_pair_node(node: heap HeapPairNode&) -> heap HeapPairNode! effects[Memory.Release]
+extern alloc_bytes(size: usize) -> mutable heap u8&? effects[Memory.Allocate]
+extern sfree_bytes(ptr: heap u8&) -> heap u8! effects[Memory.Release]
+extern snprintf(buffer: mutable u8&?, buffer_size: usize, format: static u8&, ...) -> int effects[Console.Format]
 
 
 def require_heap_pair_node() -> mutable heap HeapPairNode& error[MemoryError]:

@@ -56,6 +56,13 @@ type EffectDecl struct {
 	Members  []string
 }
 
+type SignatureEffectItem struct {
+	Position     lexer.Pos
+	Alias        string
+	ErrorEffects *ErrorSetExpr
+	Permission   *PermissionRef
+}
+
 type PermissionDecl struct {
 	Position lexer.Pos
 	Name     string
@@ -561,6 +568,7 @@ type FuncDecl struct {
 	GenericParams     []GenericParam
 	EffectAliasPos    lexer.Pos
 	EffectAlias       string
+	Effects           []SignatureEffectItem
 	Permissions       []PermissionRef
 	Ensures           []EnsuresClause
 	Params            []ParamDecl
@@ -594,6 +602,7 @@ type ExternFuncDecl struct {
 	RegionParams      []string
 	EffectAliasPos    lexer.Pos
 	EffectAlias       string
+	Effects           []SignatureEffectItem
 	Permissions       []PermissionRef
 	Ensures           []EnsuresClause
 	Params            []ParamDecl
@@ -764,6 +773,7 @@ type FuncTypeExpr struct {
 	Return            TypeExpr
 	EffectAliasPos    lexer.Pos
 	EffectAlias       string
+	Effects           []SignatureEffectItem
 	Permissions       []PermissionRef
 	Variadic          bool
 }

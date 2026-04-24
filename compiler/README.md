@@ -28,9 +28,10 @@ For current annotations and compile-time hints, see `../docs/useful_language_fea
 That reference covers the currently implemented syntax for:
 
 - default and named arguments, including `..` forwarding
-- effect declarations, `signal`, local `can` grants, effects aliases, and implicit contexts
+- effect declarations, `signal`, local `can` grants, `effectalias` bundles, and implicit contexts
 - explicit argument packs via `params` and ambient `with args(...)` scopes
 - brace destructuring, field punning, record updates, and filtered iterable loops
+- grammar DSL parser features: `token:` blocks, `seq:` blocks, comma-free `seq(...)`, `prefix(...)`, readable list/repeat forms, recovery, lookahead/cut, and precedence/suffix/postfix helpers
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
 - cascade blocks and expressions, lambda literals, tree `rewrite`, and postfix cast hooks
 - static interfaces, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
@@ -45,7 +46,7 @@ effect FooEffect: pass
 return puts(text) can Console.Write
 can ConsoleEffect.Write:
   signal ConsoleEffect.Write
-effects FrontendEffects = error[ParseErr] can[Abort.Panic]
+effectalias FrontendEffects = error[ParseErr] can[Abort.Panic]
 context ParseCtx:
 with ParseCtx(.., alloc = scratch_alloc):
 params Pair:
@@ -69,6 +70,28 @@ return rewrite node as Expr:
     new[perm] Expr.Int(span: expr.span, value: expr.value)
   Expr.Add(expr, left, right):
     new[perm] Expr.Add(span: expr.span, left: left, right: right)
+```
+
+```text
+grammar ExprGrammar over Token using ParserState:
+  cursor state
+  alloc alloc
+  token:
+    IDENT
+    INTEGER
+    PLUS "+"
+    MINUS "-"
+    LPAREN "("
+    RPAREN ")"
+  expression() -> Expr:
+    result = precedence(additive):
+      atom = choice(
+        prefix(.PLUS, .MINUS) atom() -> make_unary(alloc, op, operand),
+        seq(.INTEGER(token) expr(make_int(alloc, token)))
+      )
+      additive(left = atom()):
+        op = .PLUS | .MINUS right = atom() -> make_binary(alloc, left, op, right)
+    return result
 ```
 
 ```text
@@ -123,7 +146,7 @@ Current rules:
 - `@fixture` marks a helper fixture surface
 - `@bench` marks a benchmark case
 - `@skip(reason)` and `@ignore(reason)` skip an annotated test case while preserving it in listing and runner output
-- `@test` functions may declare and infer ordinary `can[...]` effects, and the generated test runner carries the selected tests' required permissions into its wrapper surface
+- `@test` functions may declare and infer ordinary `effects[...]` signature effects, and the generated test runner carries the selected tests' required permissions into its wrapper surface
 
 Current test-oriented emit modes:
 

@@ -58,20 +58,23 @@ Current rules for `effect` and `signal`:
 - `signal Name` records use of a whole-family effect
 - `signal Name.Member` records use of one concrete member
 - `signal` participates in the same effect inference and local-grant checking as calls to effectful functions
-- family-level grants such as `can[ConsoleEffect]` satisfy member signals and calls from the same family
+- family-level signature effects such as `effects[ConsoleEffect]` satisfy member signals and calls from the same family
 - function bodies infer their callable permission surface from effectful operations and local grants
 - explicit signature permissions still matter on surfaces without bodies, such as `extern` declarations and function types
 - explicit signature permissions do not by themselves satisfy local-grant checking inside the body
 
-Top-level `effects` declarations still package an error-set clause and a permission clause into one reusable alias.
+Top-level `effectalias` declarations package an error-set clause and a permission clause into one reusable alias. Signatures use one bracketed `effects[...]` row, so aliases, direct errors, and direct capabilities can live in the same place.
 
 ```context
-effects FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
+effectalias FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
 
-def parse() -> i64 effects FrontendEffects:
+def parse() -> i64 effects[FrontendEffects]:
     return 1
 
-extern register(callback: func() -> void effects FrontendEffects) -> void
+def parse_debug() -> i64 effects[FrontendEffects, Console.Write]:
+    return 1
+
+extern register(callback: func() -> void effects[FrontendEffects]) -> void
 ```
 
 This is compile-time surface only. The alias expands during semantic analysis; it does not create a runtime object or LLVM artifact.
@@ -80,12 +83,12 @@ Current rules:
 
 - aliases may be used on function declarations and function types
 - aliases may bundle `error[...]`, `can[...]`, or both
-- a signature that uses `effects SomeAlias` must not also spell out explicit `error[...]` or `can[...]` clauses on the same surface
-- `effect` declarations and `effects` aliases are compile-time surface only; both lower into the existing semantic effect model rather than a runtime object
+- bracketed signature rows may include aliases, direct capability refs such as `Abort.Panic`, and direct errors such as `error ParseErr`
+- `effect` declarations and `effectalias` aliases are compile-time surface only; both lower into the existing semantic effect model rather than a runtime object
 
 ### Local `can` grants and formatter normalization
 
-Function types and other body-less surfaces use declaration syntax such as `can[Console.Write]`. Function declarations with bodies can usually omit signature permissions because effect inference records them from local grants and effectful operations. Inside a body, effectful use sites still need an explicit local grant.
+Function types and other body-less surfaces use declaration syntax such as `effects[Console.Write]`. Function declarations with bodies can usually omit signature permissions because effect inference records them from local grants and effectful operations. Inside a body, effectful use sites still need an explicit local grant.
 
 ```context
 def write_once(text: u8&) -> int:
@@ -105,7 +108,7 @@ Current rules for local grants:
 - local grants use surface syntax: inline `expr can Family.Member` or block `can Family, Family.Member:`
 - local grants are checked against the same effect families as effectful calls and `signal`
 - family grants such as `can ConsoleEffect` satisfy member uses such as `ConsoleEffect.Write`
-- inferred or explicit surface permissions on the enclosing function or alias (`can[...]` or `effects SomeAlias`) do not replace an explicit local grant at the use site
+- inferred or explicit surface permissions on the enclosing function or alias (`effects[...]`) do not replace an explicit local grant at the use site
 - `-emit fmt` always prints local grants in surface syntax rather than declaration syntax
 - the formatter conservatively inlines simple one-statement grant blocks into `... can ...` form for returns, assignments, declarations, tuple binds, discards, `as` rebinds, and expression statements
 - the formatter keeps block form for multi-statement regions and for statements it cannot safely rewrite, including statement-position `panic(...)`
@@ -274,6 +277,241 @@ Current rules:
 - `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
 - `default` also rebuilds `children` sequence fields, materializing fresh arrays in the active tree owner when needed
 
+## Grammar DSL for parsers and tree frontends
+
+The current grammar surface is aimed at handwritten recursive-descent frontends that still want a compact parser DSL for the repetitive parts: tokens, recovery, lists, precedence, postfix/suffix, and prefix forms.
+
+```context
+grammar PascalExprGrammar over Token using ParserState:
+    cursor state
+    alloc alloc
+    token:
+        IDENT
+        INTEGER
+        STRING
+        LPAREN "("
+        RPAREN ")"
+        PLUS "+"
+        MINUS "-"
+        STAR "*"
+        SLASH "/"
+        DIV "div"
+        MOD "mod"
+        AND "and"
+        NOT "not"
+        OR "or"
+        EQ "="
+        NOTEQ "<>"
+        LT "<"
+        LTEQ "<="
+        GT ">"
+        GTEQ ">="
+    channel span: Span
+    channel node
+    expression() -> Pascal.Expr:
+        result = precedence(additive):
+            atom = choice(
+                prefix(.PLUS, .MINUS, .NOT) atom() -> make_unary_expr(alloc, op, operand),
+                delimited(.LPAREN, expression(), .RPAREN, ParseMessageKey.ExpectedRightParen),
+                seq(.IDENT(token) expr(make_name_expr(alloc, token))),
+                seq(.INTEGER(token) expr(make_integer_expr(alloc, token))),
+                seq(.STRING(token) expr(make_string_expr(alloc, token)))
+            )
+            multiplicative(left = atom()):
+                op = .STAR | .SLASH | .DIV | .MOD | .AND right = atom() -> make_binary_expr(alloc, left, op, right)
+            additive(left = multiplicative()):
+                op = .PLUS | .MINUS | .OR right = multiplicative() -> make_binary_expr(alloc, left, op, right)
+        return result
+```
+
+### Grammar headers
+
+`grammar Name over Token using ParserState:` declares a grammar over a token value type and parser state type. `extend grammar Name:` adds productions or production alternatives later.
+
+Current header declarations:
+
+- `cursor state` tells lowering which parser-state value owns the current cursor
+- `alloc alloc` supplies the active tree/arena owner expression used by generated parser helpers
+- `token .IDENT` declares a token alias for use as `.IDENT` inside the grammar
+- `token .LPAREN "("` declares a token alias and a literal surface for diagnostics and string-token matching
+- `token:` is the grouped form; entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal
+- `channel name` declares a generated mutable channel with inferred/default behavior
+- `channel span: Span = combine_span($start.span, $end.span)` declares a typed channel with a default expression
+- `uses OtherGrammar` imports productions and token aliases from another grammar
+
+`token:` is pure surface sugar for repeated token declarations:
+
+```context
+token:
+    IDENT
+    INTEGER
+    LPAREN "("
+    RPAREN ")"
+```
+
+is equivalent to:
+
+```context
+token .IDENT
+token .INTEGER
+token .LPAREN "("
+token .RPAREN ")"
+```
+
+### Core grammar terms
+
+Grammar productions are ordinary named parser functions whose bodies contain grammar terms plus normal expressions.
+
+```context
+statement() -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(.SEMICOLON, .END, token(TokenKind.EOF))):
+    node <- statement_core()
+    return node
+
+assignment() -> Pascal.Stmt:
+    .IDENT(name_token)
+    lookahead(.ASSIGN)
+    cut
+    required(.ASSIGN, ParseMessageKey.ExpectedAssignmentOperator)
+    value = expression()
+    node <- expr(make_assign_stmt(alloc, name_token, value))
+    return node
+```
+
+Current core terms:
+
+- `.IDENT` matches a token alias and returns the matched token
+- `.IDENT(token)` matches and binds the token in one step
+- `"literal"` matches by token text/literal
+- `token(TokenKind.EOF)` matches by explicit token kind expression
+- `name = term` binds a successful grammar term result
+- `name <- term` assigns a grammar term result into an existing binding or channel
+- `expr(value)` injects an ordinary expression result into grammar flow
+- `guard(cond)` succeeds only when `cond` is true
+- `lookahead(term)` matches without consuming
+- `cut` commits the current alternative so later fallback alternatives are not attempted
+- `required(term, MessageKey)` records a parse error instead of failing when `term` is absent
+- `recover(MessageKey, until(...), fallback)` can be attached to terms or productions for synchronized error recovery
+
+### Choice, sequence, and prefix
+
+Choices can be written either with `choice(...)` or token/term pipes:
+
+```context
+op = .PLUS | .MINUS | .OR
+atom = choice(.IDENT(token), .INTEGER(token), grouped_expr())
+```
+
+Sequences have three accepted surfaces:
+
+```context
+pair = seq(.LPAREN, expression(), .RPAREN)
+pair = seq(.LPAREN expression() .RPAREN)
+pair = seq:
+    .LPAREN
+    value = expression()
+    .RPAREN
+    expr(value)
+```
+
+Current sequence rules:
+
+- comma-separated `seq(a, b, c)` remains valid
+- comma-free `seq(a b c)` is accepted for grammar-term adjacency
+- block `seq:` is preferred when a sequence needs bindings, recovery, or multiple readable steps
+- the value of a sequence is the value of its final term
+- if any non-recovered term fails, the sequence restores the cursor snapshot and fails
+
+Prefix operators have dedicated sugar:
+
+```context
+prefix(.PLUS, .MINUS, .NOT) atom() -> make_unary_expr(alloc, op, operand)
+```
+
+This desugars to the existing lower-level terms:
+
+```context
+seq:
+    op = choice(.PLUS, .MINUS, .NOT)
+    operand = atom()
+    expr(make_unary_expr(alloc, op, operand))
+```
+
+The generated names are currently `op` and `operand`; use those in the result expression.
+
+### Lists and delimiters
+
+The list-family helpers now have both function-style and readable DSL-style forms.
+
+```context
+statements = separated statement() by .SEMICOLON until(.END, token(TokenKind.EOF))
+names = separated required(.IDENT, ParseMessageKey.ExpectedDeclName) by .COMMA until(.COLON, token(TokenKind.EOF))
+decls = flatrepeat variable_decl_group() until(.BEGIN, token(TokenKind.EOF))
+args = delimited(.LPAREN, separated expression() by .COMMA until(.RPAREN, token(TokenKind.EOF)), .RPAREN, ParseMessageKey.ExpectedRightParen)?
+maybe_name = optional .IDENT
+```
+
+Current list-family terms:
+
+- `optional term` or `term?` succeeds with an optional result
+- `repeat term until(...)` parses zero or more items and returns the collected list
+- `flatrepeat term until(...)` parses zero or more list-producing items and flattens them
+- `list term separated by sep until(...)` is the general list form
+- `separated term by sep until(...)` is the compact separated-list form
+- `delimited(open, body, close, MessageKey)` parses `open`, returns `body`, and requires `close`
+- `until(...)` accepts token aliases, literal tokens, explicit `token(...)` terms, or other recoverable terms
+
+### Precedence, suffix, and postfix
+
+Named precedence blocks define a small expression parser without hand-writing loops.
+
+```context
+expression() -> Pascal.Expr:
+    result = precedence(additive):
+        atom = choice(integer(), name(), grouped())
+        multiplicative(left = atom()):
+            op = .STAR | .SLASH right = atom() -> make_binary_expr(alloc, left, op, right)
+        additive(left = multiplicative()):
+            op = .PLUS | .MINUS right = multiplicative() -> make_binary_expr(alloc, left, op, right)
+    return result
+```
+
+Current precedence rules:
+
+- the argument to `precedence(result_level)` names the level whose value is returned
+- `level = seed` defines a seed/helper level
+- `level(left = lower_level()): ...` defines a left-associative looping level
+- each arm parses an operator term, optional right-side bindings, and a `-> result` expression
+- arms are attempted in declaration order
+- recursive calls to named levels are resolved inside the precedence block
+
+Suffix and postfix are related loop surfaces for expression tails and statement-like continuations:
+
+```context
+condition() -> Pascal.Expr:
+    node <- suffix(left = expression()):
+        op = .EQ | .NOTEQ right = expression() -> make_binary_expr(alloc, left, op, right)
+    return node
+```
+
+Use `suffix` when the seed value should be repeatedly transformed by arms. Use `postfix` for postfix-tail parsing where that spelling better communicates the grammar role.
+
+### Lowering and inspection
+
+The grammar DSL lowers into ordinary llcontext functions. The compiler exposes inspection modes for debugging generated parser code:
+
+```sh
+go run ./src -emit lower path/to/file.llcontext
+go run ./src -emit grammar-lowered path/to/file.llcontext
+```
+
+Current implementation notes:
+
+- grammar sugar lowers to existing AST terms where possible, rather than introducing runtime parser objects
+- `prefix(...)` currently lowers to `seq(op = choice(...), operand = ..., expr(...))`
+- token aliases are rewritten before lowering, so `.IDENT` can map onto the real token kind expression
+- recovery and required terms depend on the grammar `cursor` declaration to restore or advance parser state correctly
+- tree AST construction remains ordinary llcontext code, so teams can use low-level `new[alloc] Tree.Node(...)` directly or wrap common span/child patterns in helpers such as `make_binary_expr(...)`
+
 ## Filtered iterable `for`
 
 Iterable loops may now include an inline filter after the source expression.
@@ -379,12 +617,12 @@ Current rules:
 The current explicit parallel loop surface is pool-scoped rather than implicit.
 
 ```context
-def visit(frozen: Expr.Store[Frozen]) -> void can[Pool.Submit, Pool.WaitAll]:
+def visit(frozen: Expr.Store[Frozen]) -> void effects[Pool.Submit, Pool.WaitAll]:
     pool workers(2u):
         parallel for node in frozen:
             pass
 
-def walk_tags(tags: dview[Expr.Tag]) -> void can[Pool.Submit, Pool.WaitAll]:
+def walk_tags(tags: dview[Expr.Tag]) -> void effects[Pool.Submit, Pool.WaitAll]:
     pool workers(2u):
         parallel for tag at i in tags:
             if tag == Expr.Tag.Add:

@@ -15,10 +15,10 @@ extern strcmp(lhs: u8&, rhs: u8&) -> int
 extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
 extern memcmp(lhs: void&, rhs: void&, n: usize) -> int
 extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
-extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int can[Console.Format]
-extern puts(s: u8&) -> int can[Console.Write]
-extern fprintf(stream: void&, fmt: u8&, ...) -> int can[Console]
-extern exit(code: int) can[Abort.Exit]
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
+extern puts(s: u8&) -> int effects[Console.Write]
+extern fprintf(stream: void&, fmt: u8&, ...) -> int effects[Console]
+extern exit(code: int) effects[Abort.Exit]
 extern stderr: void&
 
 # ------------------------------------------------------------

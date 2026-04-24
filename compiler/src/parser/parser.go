@@ -150,6 +150,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("permission") {
 		return p.parsePermissionDecl()
 	}
+	if p.peekIdentText("effectalias") {
+		return p.parseEffectsDecl()
+	}
 	if p.peekIdentText("effect") {
 		return p.parseEffectDecl()
 	}
@@ -410,7 +413,11 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 
 func (p *Parser) parseEffectsDecl() *ast.EffectsDecl {
 	pos := p.cur().Pos
-	p.expectIdentText("effects")
+	if p.peekIdentText("effectalias") {
+		p.expectIdentText("effectalias")
+	} else {
+		p.expectIdentText("effects")
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_ASSIGN)
 	errorEffects, permissions := p.parseEffectsSpec()
@@ -1200,6 +1207,43 @@ func (p *Parser) parseEffectsSpec() (*ast.ErrorSetExpr, []ast.PermissionRef) {
 	return errorEffects, permissions
 }
 
+func (p *Parser) parseSignatureEffectsClause() []ast.SignatureEffectItem {
+	p.expect(lexer.TOKEN_LBRACKET)
+	items := make([]ast.SignatureEffectItem, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+	for p.peek() != lexer.TOKEN_RBRACKET && p.peek() != lexer.TOKEN_EOF {
+		if p.peek() == lexer.TOKEN_ERROR {
+			items = append(items, ast.SignatureEffectItem{Position: p.cur().Pos, ErrorEffects: p.parseSignatureEffectErrorSet()})
+		} else {
+			items = append(items, p.parseSignatureEffectNameItem())
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return items
+}
+
+func (p *Parser) parseSignatureEffectErrorSet() *ast.ErrorSetExpr {
+	if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET {
+		return p.parseErrorSetExpr()
+	}
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_ERROR)
+	return &ast.ErrorSetExpr{Position: pos, Tags: []ast.ErrorTagExpr{p.parseErrorSetItem()}}
+}
+
+func (p *Parser) parseSignatureEffectNameItem() ast.SignatureEffectItem {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	if p.match(lexer.TOKEN_DOT) {
+		member := p.expect(lexer.TOKEN_IDENT).Text
+		ref := ast.PermissionRef{Position: pos, Name: name, Member: member}
+		return ast.SignatureEffectItem{Position: pos, Permission: &ref}
+	}
+	return ast.SignatureEffectItem{Position: pos, Alias: name}
+}
+
 func signatureHasExplicitErrorEffects(retType ast.TypeExpr) bool {
 	_, ok := retType.(*ast.ErrorUnionTypeExpr)
 	return ok
@@ -1321,9 +1365,14 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 
 	effectAliasPos := lexer.Pos{}
 	effectAlias := ""
+	var effects []ast.SignatureEffectItem
 	if p.matchIdentText("effects") {
 		effectAliasPos = p.tokens[p.pos-1].Pos
-		effectAlias = p.parseQualifiedDeclName()
+		if p.peek() == lexer.TOKEN_LBRACKET {
+			effects = p.parseSignatureEffectsClause()
+		} else {
+			effectAlias = p.parseQualifiedDeclName()
+		}
 	}
 
 	var permissions []ast.PermissionRef
@@ -1349,7 +1398,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseParamList(allowDefault bool) []ast.ParamDecl {
@@ -1508,9 +1557,14 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	effectAliasPos := lexer.Pos{}
 	effectAlias := ""
+	var effects []ast.SignatureEffectItem
 	if p.matchIdentText("effects") {
 		effectAliasPos = p.tokens[p.pos-1].Pos
-		effectAlias = p.parseQualifiedDeclName()
+		if p.peek() == lexer.TOKEN_LBRACKET {
+			effects = p.parseSignatureEffectsClause()
+		} else {
+			effectAlias = p.parseQualifiedDeclName()
+		}
 	}
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
@@ -1530,7 +1584,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseExportDecl() ast.Decl {

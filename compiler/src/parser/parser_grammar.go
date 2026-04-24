@@ -373,7 +373,9 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
 			if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
 				if _, ok := term.(*ast.GrammarSuffixTerm); !ok {
-					p.expectNewline()
+					if _, ok := term.(*ast.GrammarSeqTerm); !ok {
+						p.expectNewline()
+					}
 				}
 			}
 		}
@@ -387,14 +389,18 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
 			if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
 				if _, ok := term.(*ast.GrammarSuffixTerm); !ok {
-					p.expectNewline()
+					if _, ok := term.(*ast.GrammarSeqTerm); !ok {
+						p.expectNewline()
+					}
 				}
 			}
 		}
 		return &ast.GrammarBindTerm{Position: pos, Name: name, Term: term}
 	}
 	term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
-	p.expectNewline()
+	if _, ok := term.(*ast.GrammarSeqTerm); !ok {
+		p.expectNewline()
+	}
 	return term
 }
 
@@ -489,6 +495,9 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	}
 	if p.peekIdentText("seq") {
 		return p.parseGrammarSeqTerm()
+	}
+	if p.peekIdentText("prefix") {
+		return p.parseGrammarPrefixTerm()
 	}
 	if p.peekIdentText("lookahead") {
 		return p.parseGrammarLookaheadTerm()
@@ -620,18 +629,55 @@ func (p *Parser) parseGrammarDelimitedTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarSeqTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("seq")
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		return &ast.GrammarSeqTerm{Position: pos, Terms: p.parseGrammarTermBlock()}
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	terms := make([]ast.GrammarTerm, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.peek() != lexer.TOKEN_RPAREN {
-		for {
+		for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
 			terms = append(terms, p.parseGrammarNestedTerm())
-			if !p.match(lexer.TOKEN_COMMA) {
+			if p.match(lexer.TOKEN_COMMA) {
+				continue
+			}
+			if p.peek() == lexer.TOKEN_RPAREN || p.peek() == lexer.TOKEN_EOF {
 				break
 			}
 		}
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarSeqTerm{Position: pos, Terms: terms}
+}
+
+func (p *Parser) parseGrammarPrefixTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("prefix")
+	p.expect(lexer.TOKEN_LPAREN)
+	ops := make([]ast.GrammarTerm, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			ops = append(ops, p.parseGrammarRecoverableTermValue())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	operand := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_ARROW)
+	value := p.parseExpr()
+	var opTerm ast.GrammarTerm
+	if len(ops) == 1 {
+		opTerm = ops[0]
+	} else {
+		opTerm = &ast.GrammarChoiceTerm{Position: pos, Options: ops}
+	}
+	return &ast.GrammarSeqTerm{Position: pos, Terms: []ast.GrammarTerm{
+		&ast.GrammarBindTerm{Position: pos, Name: "op", Term: opTerm},
+		&ast.GrammarBindTerm{Position: operand.Pos(), Name: "operand", Term: operand},
+		&ast.GrammarExprTerm{Position: value.Pos(), Expr: value},
+	}}
 }
 
 func (p *Parser) parseGrammarLookaheadTerm() ast.GrammarTerm {
