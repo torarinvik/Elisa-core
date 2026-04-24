@@ -115,6 +115,10 @@ func (p *Parser) expectIdentText(text string) lexer.Token {
 
 func (p *Parser) errorf(format string, args ...interface{}) {
 	pos := p.cur().Pos
+	p.errorAt(pos, format, args...)
+}
+
+func (p *Parser) errorAt(pos lexer.Pos, format string, args ...interface{}) {
 	msg := fmt.Sprintf("%s: %s", pos, fmt.Sprintf(format, args...))
 	p.errors = append(p.errors, msg)
 }

@@ -73,6 +73,42 @@ func TestParseGrammarDeclWithGenericHeaderAndTerms(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsHelperOnlyGrammar(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalListGrammar over Token using ParserState:
+    token:
+        COMMA ","
+        SEMICOLON ";"
+    grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if decl.Name != "PascalListGrammar" {
+		t.Fatalf("expected helper grammar name, got %q", decl.Name)
+	}
+	if len(decl.Productions) != 0 {
+		t.Fatalf("expected no productions in helper grammar, got %d", len(decl.Productions))
+	}
+	if len(decl.GrammarFns) != 1 {
+		t.Fatalf("expected one helper grammar function, got %d", len(decl.GrammarFns))
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"grammar PascalListGrammar over Token using ParserState:",
+		"token:",
+		"grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted helper grammar to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalGrammar[B] over PascalToken using PascalParseCtx:
     error PascalFrontendError
@@ -297,6 +333,126 @@ func TestParseGrammarDeclAllowsTokenSets(t *testing.T) {
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsGrammarFns(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    token:
+        COMMA ","
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+    grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+    grammarfn recovered_expr[T](item: grammar -> T, message: expr, stop: tokenset, fallback: expr) -> grammar -> T:
+        item recover(message, until(stop), fallback)
+    args() -> darray[Pascal.Expr]:
+        values = apply separated_by(item: expression(), stop: RParenSync)
+        return values
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.GrammarFns) != 2 {
+		t.Fatalf("expected two grammarfns, got %d", len(decl.GrammarFns))
+	}
+	if decl.GrammarFns[0].Name != "separated_by" || len(decl.GrammarFns[0].Params) != 3 {
+		t.Fatalf("expected separated_by grammarfn with three params, got %#v", decl.GrammarFns[0])
+	}
+	if len(decl.GrammarFns[0].TypeParams) != 1 || decl.GrammarFns[0].TypeParams[0] != "T" {
+		t.Fatalf("expected grammarfn type param T, got %#v", decl.GrammarFns[0].TypeParams)
+	}
+	if decl.GrammarFns[0].Params[0].Type.Kind != "grammar" || formatTypeExprForTest(t, decl.GrammarFns[0].Params[0].Type.Result) != "T" {
+		t.Fatalf("expected first grammarfn param to be grammar -> T, got %#v", decl.GrammarFns[0].Params[0].Type)
+	}
+	if decl.GrammarFns[0].Params[1].Type.Kind != "tokenset" {
+		t.Fatalf("expected second grammarfn param to be tokenset, got %#v", decl.GrammarFns[0].Params[1].Type)
+	}
+	if decl.GrammarFns[0].Params[2].Default == nil {
+		t.Fatalf("expected third grammarfn param to have a default")
+	}
+	if decl.GrammarFns[0].Return.Kind != "grammar" || formatTypeExprForTest(t, decl.GrammarFns[0].Return.Result) != "darray[T]" {
+		t.Fatalf("expected grammarfn return grammar -> darray[T], got %#v", decl.GrammarFns[0].Return)
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first production term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	apply, ok := bind.Term.(*ast.GrammarApplyTerm)
+	if !ok {
+		t.Fatalf("expected binding term to be grammar apply, got %T", bind.Term)
+	}
+	if apply.Name != "separated_by" || len(apply.Args) != 2 {
+		t.Fatalf("expected separated_by apply with two args, got %#v", apply)
+	}
+	if apply.Args[0].Name != "item" || apply.Args[1].Name != "stop" {
+		t.Fatalf("expected named apply args, got %#v", apply.Args)
+	}
+	if _, ok := apply.Args[1].Term.(*ast.GrammarTokenSetRefTerm); !ok {
+		t.Fatalf("expected second apply arg to be token set ref, got %T", apply.Args[1].Term)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:",
+		"grammarfn recovered_expr[T](item: grammar -> T, message: expr, stop: tokenset, fallback: expr) -> grammar -> T:",
+		"separated item by sep until(stop)",
+		"values = apply separated_by(item: expression(), stop: RParenSync)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarFnApplyDiagnostics(t *testing.T) {
+	_, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    token:
+        COMMA ","
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+    grammarfn comma_list(item: grammar, stop: tokenset, sep: grammar = .COMMA):
+        separated item by .COMMA until(stop)
+    grammarfn recovered(item: grammar, message: expr):
+        item recover(message, until(RParenSync))
+    args() -> darray[Token]:
+        missing = apply comma_list(token(TokenKind.IDENT))
+        wrong = apply comma_list(RParenSync, token(TokenKind.EOF))
+        wrong_expr = apply recovered(token(TokenKind.IDENT), token(TokenKind.EOF))
+        unknown_arg = apply comma_list(item: token(TokenKind.IDENT), nope: RParenSync)
+        duplicate = apply comma_list(item: token(TokenKind.IDENT), item: token(TokenKind.STRING), stop: RParenSync)
+        late_positional = apply comma_list(item: token(TokenKind.IDENT), RParenSync)
+        too_many = apply comma_list(token(TokenKind.IDENT), RParenSync, .COMMA, .RPAREN)
+        unknown = apply not_a_helper(token(TokenKind.IDENT))
+        return missing
+`)
+	for _, want := range []string{
+		"missing argument \"stop\" for grammarfn comma_list",
+		"argument \"item\" expects grammar, got tokenset",
+		"argument \"stop\" expects tokenset, got grammar",
+		"argument \"message\" expects expr, got grammar",
+		"unknown argument \"nope\" for grammarfn comma_list",
+		"duplicate argument \"item\" for grammarfn comma_list",
+		"positional argument cannot follow named argument in grammarfn comma_list",
+		"too many positional arguments for grammarfn comma_list",
+		"unknown grammar function \"not_a_helper\"",
+	} {
+		found := false
+		for _, err := range errs {
+			if strings.Contains(err, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected parser errors to contain %q, got:\n%s", want, strings.Join(errs, "\n"))
 		}
 	}
 }

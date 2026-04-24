@@ -349,6 +349,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, tokenSet := range n.TokenSets {
 			f.writeGrammarTokenSetDecl(level+1, tokenSet)
 		}
+		for _, grammarFn := range n.GrammarFns {
+			f.writeGrammarFnDecl(level+1, grammarFn)
+		}
 		for _, recovery := range n.RecoveryPolicies {
 			f.writeGrammarRecoveryDecl(level+1, recovery)
 		}
@@ -634,6 +637,50 @@ func (f *formatter) writeGrammarTokenSetDecl(level int, tokenSet ast.GrammarToke
 	f.writeLine(level, "tokenset "+tokenSet.Name+":")
 	for _, term := range tokenSet.Terms {
 		f.writeLine(level+1, formatGrammarTokenSetItem(term))
+	}
+}
+
+func (f *formatter) writeGrammarFnDecl(level int, grammarFn ast.GrammarFnDecl) {
+	params := make([]string, 0, len(grammarFn.Params))
+	for _, param := range grammarFn.Params {
+		text := param.Name
+		if param.Type.Kind != "" {
+			text += ": " + formatGrammarFnType(param.Type)
+		}
+		if param.Default != nil {
+			text += " = " + formatGrammarTerm(param.Default)
+		}
+		if param.DefaultExpr != nil {
+			text += " = " + formatExpr(param.DefaultExpr)
+		}
+		params = append(params, text)
+	}
+	line := "grammarfn " + grammarFn.Name
+	line += formatGenericParams(grammarFn.GenericParams, grammarFn.TypeParams, nil, nil, nil, nil)
+	line += "(" + strings.Join(params, ", ") + ")"
+	if grammarFn.Return.Kind != "" {
+		line += " -> " + formatGrammarFnType(grammarFn.Return)
+	}
+	line += ":"
+	f.writeLine(level, line)
+	for _, term := range grammarFn.Terms {
+		f.writeGrammarTerm(level+1, term)
+	}
+}
+
+func formatGrammarFnType(typ ast.GrammarFnType) string {
+	switch typ.Kind {
+	case "grammar":
+		if typ.Result != nil {
+			return "grammar -> " + formatTypeExpr(typ.Result)
+		}
+		return "grammar"
+	case "tokenset":
+		return "tokenset"
+	case "expr":
+		return "expr"
+	default:
+		return typ.Kind
 	}
 }
 
@@ -1057,6 +1104,16 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "infix(" + n.TableName + ")"
 	case *ast.GrammarTokenSetRefTerm:
 		return n.Name
+	case *ast.GrammarApplyTerm:
+		args := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			text := formatGrammarTerm(arg.Term)
+			if arg.Name != "" {
+				text = arg.Name + ": " + text
+			}
+			args = append(args, text)
+		}
+		return "apply " + n.Name + "(" + strings.Join(args, ", ") + ")"
 	case *ast.GrammarBindTerm:
 		return formatGrammarBinding(n)
 	case *ast.GrammarAssignTerm:

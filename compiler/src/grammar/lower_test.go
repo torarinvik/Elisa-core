@@ -183,6 +183,131 @@ func TestLowerDeclExpandsGrammarTokenSets(t *testing.T) {
 	}
 }
 
+func TestLowerDeclExpandsGrammarFns(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    token:
+        COMMA ","
+        SEMICOLON ";"
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+    grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+    args() -> darray[Token]:
+        values = apply separated_by(item: token(TokenKind.IDENT), stop: RParenSync)
+        return values
+    semis() -> darray[Token]:
+        values = apply separated_by(token(TokenKind.IDENT), RParenSync, sep: .SEMICOLON)
+        return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.COMMA)",
+		"state.expect_kind(TokenKind.SEMICOLON)",
+		"state.current_token().kind == TokenKind.RPAREN",
+		"state.current_token().kind == TokenKind.EOF",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerDeclImportsGrammarFnsFromHelperOnlyGrammar(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalListGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    token:
+        COMMA ","
+        SEMICOLON ";"
+    grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+
+grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    token:
+        IDENT
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+    args() -> darray[Token]:
+        values = apply separated_by(item: token(TokenKind.IDENT), stop: RParenSync)
+        return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.COMMA)",
+		"state.current_token().kind == TokenKind.RPAREN",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected helper-only grammar import lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Count(formatted, "values = apply separated_by") != 1 {
+		t.Fatalf("expected helper grammar function call to remain only in the source grammar declaration, got:\n%s", formatted)
+	}
+}
+
+func TestLowerDeclExpandsGrammarFnExprParams(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalExprRecoveryGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    record_error record_parse_error
+    token:
+        IDENT
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+    grammarfn recovered_item[T](item: grammar -> T, message: expr, stop: tokenset, fallback: expr) -> grammar -> T:
+        item recover(message, until(stop), fallback)
+    name() -> Token:
+        value = apply recovered_item(item: token(TokenKind.IDENT), message: expr(ParseMessageKey.ExpectedName), stop: RParenSync, fallback: expr(state.current_token()))
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.record_parse_error(ParseMessageKey.ExpectedName)",
+		"__grammar_recover_value_name_PascalExprRecoveryGrammar_recover_value_",
+		"state.current_token()",
+		"state.current_token().kind == TokenKind.RPAREN",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected grammarfn expr-param lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclPreservesRepeatAndSeparatedAsOrdinaryCalls(t *testing.T) {
 	decl := parseGrammarTestDecl(t, `grammar PascalFrontend:
     block() -> darray[Pascal.Stmt]:

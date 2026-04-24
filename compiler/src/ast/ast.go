@@ -125,6 +125,7 @@ type GrammarDecl struct {
 	TokenAliases     []GrammarTokenAliasDecl
 	Channels         []GrammarChannelDecl
 	TokenSets        []GrammarTokenSetDecl
+	GrammarFns       []GrammarFnDecl
 	RecoveryPolicies []GrammarRecoveryDecl
 	InfixTables      []GrammarInfixTableDecl
 	Productions      []GrammarProductionDecl
@@ -166,6 +167,30 @@ type GrammarTokenSetDecl struct {
 	Position lexer.Pos
 	Name     string
 	Terms    []GrammarTerm
+}
+
+type GrammarFnDecl struct {
+	Position      lexer.Pos
+	Name          string
+	TypeParams    []string
+	GenericParams []GenericParam
+	Params        []GrammarFnParam
+	Return        GrammarFnType
+	Terms         []GrammarTerm
+}
+
+type GrammarFnParam struct {
+	Position    lexer.Pos
+	Name        string
+	Type        GrammarFnType
+	Default     GrammarTerm
+	DefaultExpr Expr
+}
+
+type GrammarFnType struct {
+	Position lexer.Pos
+	Kind     string
+	Result   TypeExpr
 }
 
 type GrammarRecoveryDecl struct {
@@ -390,6 +415,18 @@ type GrammarInfixTableTerm struct {
 type GrammarTokenSetRefTerm struct {
 	Position lexer.Pos
 	Name     string
+}
+
+type GrammarApplyTerm struct {
+	Position lexer.Pos
+	Name     string
+	Args     []GrammarApplyArg
+}
+
+type GrammarApplyArg struct {
+	Position lexer.Pos
+	Name     string
+	Term     GrammarTerm
 }
 
 type GrammarPostfixTerm struct {
@@ -1757,7 +1794,8 @@ func (n *GrammarInfixTableTerm) Pos() lexer.Pos {
 func (n *GrammarTokenSetRefTerm) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *GrammarBindTerm) Pos() lexer.Pos { return n.Position }
+func (n *GrammarApplyTerm) Pos() lexer.Pos { return n.Position }
+func (n *GrammarBindTerm) Pos() lexer.Pos  { return n.Position }
 func (n *GrammarAssignTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1961,6 +1999,7 @@ func (*GrammarPostfixTerm) nodeTag()        {}
 func (*GrammarPrecedenceTerm) nodeTag()     {}
 func (*GrammarInfixTableTerm) nodeTag()     {}
 func (*GrammarTokenSetRefTerm) nodeTag()    {}
+func (*GrammarApplyTerm) nodeTag()          {}
 func (*GrammarBindTerm) nodeTag()           {}
 func (*GrammarAssignTerm) nodeTag()         {}
 func (*GrammarReturnTerm) nodeTag()         {}
@@ -2154,6 +2193,7 @@ func (*GrammarPostfixTerm) grammarTermTag()     {}
 func (*GrammarPrecedenceTerm) grammarTermTag()  {}
 func (*GrammarInfixTableTerm) grammarTermTag()  {}
 func (*GrammarTokenSetRefTerm) grammarTermTag() {}
+func (*GrammarApplyTerm) grammarTermTag()       {}
 func (*GrammarBindTerm) grammarTermTag()        {}
 func (*GrammarAssignTerm) grammarTermTag()      {}
 func (*GrammarReturnTerm) grammarTermTag()      {}

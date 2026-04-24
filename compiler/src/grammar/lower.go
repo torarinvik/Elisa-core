@@ -164,6 +164,7 @@ func cloneGrammarDecl(decl *ast.GrammarDecl) *ast.GrammarDecl {
 	cloned.TokenAliases = append([]ast.GrammarTokenAliasDecl(nil), decl.TokenAliases...)
 	cloned.Channels = append([]ast.GrammarChannelDecl(nil), decl.Channels...)
 	cloned.TokenSets = append([]ast.GrammarTokenSetDecl(nil), decl.TokenSets...)
+	cloned.GrammarFns = append([]ast.GrammarFnDecl(nil), decl.GrammarFns...)
 	cloned.RecoveryPolicies = append([]ast.GrammarRecoveryDecl(nil), decl.RecoveryPolicies...)
 	cloned.InfixTables = append([]ast.GrammarInfixTableDecl(nil), decl.InfixTables...)
 	cloned.Productions = append([]ast.GrammarProductionDecl(nil), decl.Productions...)
@@ -245,6 +246,7 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	merged.TokenAliases = append(merged.TokenAliases, extra.TokenAliases...)
 	merged.Channels = append(merged.Channels, extra.Channels...)
 	merged.TokenSets = append(merged.TokenSets, extra.TokenSets...)
+	merged.GrammarFns = append(merged.GrammarFns, extra.GrammarFns...)
 	merged.RecoveryPolicies = append(merged.RecoveryPolicies, extra.RecoveryPolicies...)
 	merged.InfixTables = append(merged.InfixTables, extra.InfixTables...)
 	merged.Productions = append(merged.Productions, extra.Productions...)
@@ -367,7 +369,7 @@ func appendUsedGrammarProductions(resolved map[string]resolvedGrammarProduction,
 	}
 }
 
-func appendUsedGrammarSupportDecls(tokenAliases *[]ast.GrammarTokenAliasDecl, tokenSets *[]ast.GrammarTokenSetDecl, recoveryPolicies *[]ast.GrammarRecoveryDecl, infixTables *[]ast.GrammarInfixTableDecl, grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, seen map[string]bool) {
+func appendUsedGrammarSupportDecls(tokenAliases *[]ast.GrammarTokenAliasDecl, tokenSets *[]ast.GrammarTokenSetDecl, grammarFns *[]ast.GrammarFnDecl, recoveryPolicies *[]ast.GrammarRecoveryDecl, infixTables *[]ast.GrammarInfixTableDecl, grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, seen map[string]bool) {
 	if grammarDecl == nil || len(grammarDecl.Uses) == 0 || grammarScope == nil {
 		return
 	}
@@ -381,9 +383,10 @@ func appendUsedGrammarSupportDecls(tokenAliases *[]ast.GrammarTokenAliasDecl, to
 			continue
 		}
 		seen[usedName] = true
-		appendUsedGrammarSupportDecls(tokenAliases, tokenSets, recoveryPolicies, infixTables, usedDecl, grammarScope, seen)
+		appendUsedGrammarSupportDecls(tokenAliases, tokenSets, grammarFns, recoveryPolicies, infixTables, usedDecl, grammarScope, seen)
 		*tokenAliases = append(*tokenAliases, usedDecl.TokenAliases...)
 		*tokenSets = append(*tokenSets, usedDecl.TokenSets...)
+		*grammarFns = append(*grammarFns, usedDecl.GrammarFns...)
 		*recoveryPolicies = append(*recoveryPolicies, usedDecl.RecoveryPolicies...)
 		*infixTables = append(*infixTables, usedDecl.InfixTables...)
 	}
@@ -416,14 +419,16 @@ func normalizeGrammarDeclForLoweringInScope(decl *ast.GrammarDecl, grammarScope 
 	normalized := *normalizedDecl
 	normalized.TokenAliases = nil
 	normalized.TokenSets = nil
+	normalized.GrammarFns = nil
 	normalized.RecoveryPolicies = nil
 	normalized.InfixTables = nil
 	if len(decl.Uses) != 0 && grammarScope != nil {
 		seen := map[string]bool{decl.Name: true}
-		appendUsedGrammarSupportDecls(&normalized.TokenAliases, &normalized.TokenSets, &normalized.RecoveryPolicies, &normalized.InfixTables, decl, grammarScope, seen)
+		appendUsedGrammarSupportDecls(&normalized.TokenAliases, &normalized.TokenSets, &normalized.GrammarFns, &normalized.RecoveryPolicies, &normalized.InfixTables, decl, grammarScope, seen)
 	}
 	normalized.TokenAliases = append(normalized.TokenAliases, decl.TokenAliases...)
 	normalized.TokenSets = append(normalized.TokenSets, decl.TokenSets...)
+	normalized.GrammarFns = append(normalized.GrammarFns, decl.GrammarFns...)
 	normalized.RecoveryPolicies = append(normalized.RecoveryPolicies, decl.RecoveryPolicies...)
 	normalized.InfixTables = append(normalized.InfixTables, decl.InfixTables...)
 	aliasByLiteral := grammarTokenAliasLiteralMap(normalized.TokenAliases)
@@ -431,6 +436,7 @@ func normalizeGrammarDeclForLoweringInScope(decl *ast.GrammarDecl, grammarScope 
 	normalized.RecoveryPolicies = rewriteGrammarRecoveryPoliciesTokenAliases(normalized.RecoveryPolicies, aliasByLiteral)
 	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(normalized.InfixTables, aliasByLiteral)
 	tokenSets := grammarTokenSetMap(normalized.TokenSets)
+	grammarFns := grammarFnMap(normalized.GrammarFns)
 	normalized.TokenSets = resolveGrammarTokenSetsTokenSets(normalized.TokenSets, tokenSets)
 	tokenSets = grammarTokenSetMap(normalized.TokenSets)
 	normalized.RecoveryPolicies = resolveGrammarRecoveryPoliciesTokenSets(normalized.RecoveryPolicies, tokenSets)
@@ -438,7 +444,8 @@ func normalizeGrammarDeclForLoweringInScope(decl *ast.GrammarDecl, grammarScope 
 	infixTables := grammarInfixTableMap(normalized.InfixTables)
 	normalized.Productions = make([]ast.GrammarProductionDecl, 0, len(decl.Productions))
 	for _, production := range decl.Productions {
-		rewritten := rewriteGrammarProductionTokenAliases(production, aliasByLiteral)
+		rewritten := expandGrammarProductionGrammarFns(production, grammarFns)
+		rewritten = rewriteGrammarProductionTokenAliases(rewritten, aliasByLiteral)
 		rewritten = resolveGrammarProductionTokenSets(rewritten, tokenSets)
 		rewritten = resolveGrammarProductionRecoveryPolicies(rewritten, recoveryPolicies)
 		rewritten = resolveGrammarProductionInfixTables(rewritten, infixTables)
@@ -599,6 +606,23 @@ func grammarTokenSetMap(tokenSets []ast.GrammarTokenSetDecl) map[string]ast.Gram
 	return resolved
 }
 
+func grammarFnMap(grammarFns []ast.GrammarFnDecl) map[string]ast.GrammarFnDecl {
+	if len(grammarFns) == 0 {
+		return nil
+	}
+	resolved := make(map[string]ast.GrammarFnDecl, len(grammarFns))
+	for _, grammarFn := range grammarFns {
+		if grammarFn.Name == "" {
+			continue
+		}
+		resolved[grammarFn.Name] = grammarFn
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
+}
+
 func grammarRecoveryPolicyMap(policies []ast.GrammarRecoveryDecl) map[string]ast.GrammarRecoveryDecl {
 	if len(policies) == 0 {
 		return nil
@@ -631,6 +655,251 @@ func grammarInfixTableMap(tables []ast.GrammarInfixTableDecl) map[string]ast.Gra
 		return nil
 	}
 	return resolved
+}
+
+func expandGrammarProductionGrammarFns(production ast.GrammarProductionDecl, grammarFns map[string]ast.GrammarFnDecl) ast.GrammarProductionDecl {
+	if len(grammarFns) == 0 {
+		return production
+	}
+	production.RecoverUntil = expandGrammarTermListGrammarFns(production.RecoverUntil, grammarFns, nil)
+	terms := make([]ast.GrammarTerm, 0, len(production.Terms))
+	for _, term := range production.Terms {
+		terms = append(terms, expandGrammarTermGrammarFns(term, grammarFns, nil))
+	}
+	production.Terms = terms
+	return production
+}
+
+type grammarFnBindings struct {
+	terms map[string]ast.GrammarTerm
+	exprs map[string]ast.Expr
+}
+
+func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast.GrammarFnDecl, bindings *grammarFnBindings) ast.GrammarTerm {
+	if term == nil {
+		return nil
+	}
+	if bindings != nil {
+		switch n := term.(type) {
+		case *ast.GrammarCallTerm:
+			if !n.Explicit && len(n.Args) == 0 {
+				if replacement, ok := bindings.terms[n.Name]; ok {
+					return replacement
+				}
+			}
+		case *ast.GrammarTokenSetRefTerm:
+			if replacement, ok := bindings.terms[n.Name]; ok {
+				return replacement
+			}
+		}
+	}
+	switch n := term.(type) {
+	case *ast.GrammarApplyTerm:
+		expanded := expandGrammarApplyTerm(n, grammarFns)
+		if expanded == term {
+			return term
+		}
+		return expandGrammarTermGrammarFns(expanded, grammarFns, bindings)
+	case *ast.GrammarBindTerm:
+		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings)}
+	case *ast.GrammarAssignTerm:
+		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings)}
+	case *ast.GrammarChoiceTerm:
+		return &ast.GrammarChoiceTerm{Position: n.Position, Options: expandGrammarTermListGrammarFns(n.Options, grammarFns, bindings)}
+	case *ast.GrammarOptionalTerm:
+		return &ast.GrammarOptionalTerm{Position: n.Position, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings)}
+	case *ast.GrammarWhenTerm:
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: expandGrammarExprGrammarFns(n.Cond, bindings), Then: expandGrammarTermGrammarFns(n.Then, grammarFns, bindings), Else: expandGrammarTermGrammarFns(n.Else, grammarFns, bindings)}
+	case *ast.GrammarRecoverTerm:
+		return &ast.GrammarRecoverTerm{Position: n.Position, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings), RecoverPolicy: n.RecoverPolicy, RecoverMsg: expandGrammarExprGrammarFns(n.RecoverMsg, bindings), RecoverUntil: expandGrammarTermListGrammarFns(n.RecoverUntil, grammarFns, bindings), RecoverValue: expandGrammarExprGrammarFns(n.RecoverValue, bindings)}
+	case *ast.GrammarRequiredTerm:
+		return &ast.GrammarRequiredTerm{Position: n.Position, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings), Message: expandGrammarExprGrammarFns(n.Message, bindings)}
+	case *ast.GrammarDelimitedTerm:
+		return &ast.GrammarDelimitedTerm{Position: n.Position, Open: expandGrammarTermGrammarFns(n.Open, grammarFns, bindings), Body: expandGrammarTermGrammarFns(n.Body, grammarFns, bindings), Close: expandGrammarTermGrammarFns(n.Close, grammarFns, bindings), Message: expandGrammarExprGrammarFns(n.Message, bindings)}
+	case *ast.GrammarSeqTerm:
+		return &ast.GrammarSeqTerm{Position: n.Position, Terms: expandGrammarTermListGrammarFns(n.Terms, grammarFns, bindings)}
+	case *ast.GrammarLookaheadTerm:
+		return &ast.GrammarLookaheadTerm{Position: n.Position, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings)}
+	case *ast.GrammarConcatTerm:
+		return &ast.GrammarConcatTerm{Position: n.Position, Terms: expandGrammarTermListGrammarFns(n.Terms, grammarFns, bindings)}
+	case *ast.GrammarListTerm:
+		return &ast.GrammarListTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Separator: expandGrammarTermGrammarFns(n.Separator, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
+	case *ast.GrammarRepeatTerm:
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
+	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
+	case *ast.GrammarSeparatedTerm:
+		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Separator: expandGrammarTermGrammarFns(n.Separator, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
+	case *ast.GrammarSuffixTerm:
+		return &ast.GrammarSuffixTerm{Position: n.Position, LeftName: n.LeftName, Seed: expandGrammarTermGrammarFns(n.Seed, grammarFns, bindings), Arms: expandGrammarPostfixArmsGrammarFns(n.Arms, grammarFns, bindings)}
+	case *ast.GrammarPostfixTerm:
+		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: expandGrammarTermGrammarFns(n.Seed, grammarFns, bindings), Arms: expandGrammarPostfixArmsGrammarFns(n.Arms, grammarFns, bindings)}
+	case *ast.GrammarPrecedenceTerm:
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Assoc: n.Assoc, Result: n.Result, Levels: expandGrammarPrecedenceLevelsGrammarFns(n.Levels, grammarFns, bindings), LeftName: n.LeftName, Seed: expandGrammarTermGrammarFns(n.Seed, grammarFns, bindings), Arms: expandGrammarPrecedenceArmsGrammarFns(n.Arms, grammarFns, bindings)}
+	default:
+		return term
+	}
+}
+
+func expandGrammarApplyTerm(term *ast.GrammarApplyTerm, grammarFns map[string]ast.GrammarFnDecl) ast.GrammarTerm {
+	grammarFn, ok := grammarFns[term.Name]
+	if !ok || len(grammarFn.Terms) == 0 {
+		return term
+	}
+	resolved, ok := resolveGrammarApplyArgs(term, grammarFn)
+	if !ok {
+		return term
+	}
+	bindings := &grammarFnBindings{terms: make(map[string]ast.GrammarTerm, len(grammarFn.Params)), exprs: make(map[string]ast.Expr, len(grammarFn.Params))}
+	for index, param := range grammarFn.Params {
+		if resolved[index].Term != nil {
+			bindings.terms[param.Name] = resolved[index].Term
+		}
+		if resolved[index].Expr != nil {
+			bindings.exprs[param.Name] = resolved[index].Expr
+		}
+	}
+	terms := expandGrammarTermListGrammarFns(grammarFn.Terms, grammarFns, bindings)
+	if len(terms) == 1 {
+		return terms[0]
+	}
+	return &ast.GrammarSeqTerm{Position: grammarFn.Position, Terms: terms}
+}
+
+type resolvedGrammarApplyArg struct {
+	Term ast.GrammarTerm
+	Expr ast.Expr
+}
+
+func resolveGrammarApplyArgs(term *ast.GrammarApplyTerm, grammarFn ast.GrammarFnDecl) ([]resolvedGrammarApplyArg, bool) {
+	resolved := make([]resolvedGrammarApplyArg, len(grammarFn.Params))
+	filled := make([]bool, len(grammarFn.Params))
+	paramIndex := make(map[string]int, len(grammarFn.Params))
+	for index, param := range grammarFn.Params {
+		paramIndex[param.Name] = index
+	}
+
+	nextPositional := 0
+	seenNamed := false
+	for _, arg := range term.Args {
+		if arg.Name != "" {
+			seenNamed = true
+			index, found := paramIndex[arg.Name]
+			if !found || filled[index] {
+				return nil, false
+			}
+			resolved[index] = resolvedGrammarApplyArg{Term: arg.Term, Expr: grammarFnExprArg(arg.Term)}
+			filled[index] = true
+			continue
+		}
+		if seenNamed {
+			return nil, false
+		}
+		for nextPositional < len(filled) && filled[nextPositional] {
+			nextPositional++
+		}
+		if nextPositional >= len(grammarFn.Params) {
+			return nil, false
+		}
+		resolved[nextPositional] = resolvedGrammarApplyArg{Term: arg.Term, Expr: grammarFnExprArg(arg.Term)}
+		filled[nextPositional] = true
+		nextPositional++
+	}
+
+	for index, param := range grammarFn.Params {
+		if filled[index] {
+			continue
+		}
+		if param.Default != nil {
+			resolved[index] = resolvedGrammarApplyArg{Term: param.Default, Expr: grammarFnExprArg(param.Default)}
+			filled[index] = true
+			continue
+		}
+		if param.DefaultExpr != nil {
+			resolved[index] = resolvedGrammarApplyArg{Expr: param.DefaultExpr}
+			filled[index] = true
+			continue
+		}
+		return nil, false
+	}
+	return resolved, true
+}
+
+func grammarFnExprArg(term ast.GrammarTerm) ast.Expr {
+	if exprTerm, ok := term.(*ast.GrammarExprTerm); ok {
+		return exprTerm.Expr
+	}
+	return nil
+}
+
+func expandGrammarExprGrammarFns(expr ast.Expr, bindings *grammarFnBindings) ast.Expr {
+	if expr == nil || bindings == nil {
+		return expr
+	}
+	if ident, ok := expr.(*ast.Ident); ok {
+		if replacement, ok := bindings.exprs[ident.Name]; ok {
+			return replacement
+		}
+	}
+	return expr
+}
+
+func expandGrammarTermListGrammarFns(terms []ast.GrammarTerm, grammarFns map[string]ast.GrammarFnDecl, bindings *grammarFnBindings) []ast.GrammarTerm {
+	if len(terms) == 0 {
+		return nil
+	}
+	expanded := make([]ast.GrammarTerm, 0, len(terms))
+	for _, term := range terms {
+		expanded = append(expanded, expandGrammarTermGrammarFns(term, grammarFns, bindings))
+	}
+	return expanded
+}
+
+func expandGrammarPostfixArmsGrammarFns(arms []ast.GrammarPostfixArm, grammarFns map[string]ast.GrammarFnDecl, bindings *grammarFnBindings) []ast.GrammarPostfixArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	expanded := make([]ast.GrammarPostfixArm, 0, len(arms))
+	for _, arm := range arms {
+		expanded = append(expanded, ast.GrammarPostfixArm{Position: arm.Position, OpName: arm.OpName, Op: expandGrammarTermGrammarFns(arm.Op, grammarFns, bindings), Bindings: expandGrammarBindingsGrammarFns(arm.Bindings, grammarFns, bindings), Value: expandGrammarExprGrammarFns(arm.Value, bindings)})
+	}
+	return expanded
+}
+
+func expandGrammarBindingsGrammarFns(bindingsList []*ast.GrammarBindTerm, grammarFns map[string]ast.GrammarFnDecl, bindings *grammarFnBindings) []*ast.GrammarBindTerm {
+	if len(bindingsList) == 0 {
+		return nil
+	}
+	expanded := make([]*ast.GrammarBindTerm, 0, len(bindingsList))
+	for _, binding := range bindingsList {
+		if binding == nil {
+			continue
+		}
+		expanded = append(expanded, &ast.GrammarBindTerm{Position: binding.Position, Name: binding.Name, Term: expandGrammarTermGrammarFns(binding.Term, grammarFns, bindings)})
+	}
+	return expanded
+}
+
+func expandGrammarPrecedenceArmsGrammarFns(arms []ast.GrammarPrecedenceArm, grammarFns map[string]ast.GrammarFnDecl, bindings *grammarFnBindings) []ast.GrammarPrecedenceArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	expanded := make([]ast.GrammarPrecedenceArm, 0, len(arms))
+	for _, arm := range arms {
+		expanded = append(expanded, ast.GrammarPrecedenceArm{Position: arm.Position, OpName: arm.OpName, Op: expandGrammarTermGrammarFns(arm.Op, grammarFns, bindings), Bindings: expandGrammarBindingsGrammarFns(arm.Bindings, grammarFns, bindings), Value: expandGrammarExprGrammarFns(arm.Value, bindings)})
+	}
+	return expanded
+}
+
+func expandGrammarPrecedenceLevelsGrammarFns(levels []ast.GrammarPrecedenceLevel, grammarFns map[string]ast.GrammarFnDecl, bindings *grammarFnBindings) []ast.GrammarPrecedenceLevel {
+	if len(levels) == 0 {
+		return nil
+	}
+	expanded := make([]ast.GrammarPrecedenceLevel, 0, len(levels))
+	for _, level := range levels {
+		expanded = append(expanded, ast.GrammarPrecedenceLevel{Position: level.Position, Assoc: level.Assoc, Name: level.Name, LeftName: level.LeftName, Seed: expandGrammarTermGrammarFns(level.Seed, grammarFns, bindings), Arms: expandGrammarPrecedenceArmsGrammarFns(level.Arms, grammarFns, bindings)})
+	}
+	return expanded
 }
 
 func resolveGrammarProductionRecoveryPolicies(production ast.GrammarProductionDecl, policies map[string]ast.GrammarRecoveryDecl) ast.GrammarProductionDecl {

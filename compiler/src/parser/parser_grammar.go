@@ -57,6 +57,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	tokenAliases := make([]ast.GrammarTokenAliasDecl, 0)
 	channels := make([]ast.GrammarChannelDecl, 0)
 	tokenSets := make([]ast.GrammarTokenSetDecl, 0)
+	grammarFns := make([]ast.GrammarFnDecl, 0)
 	recoveryPolicies := make([]ast.GrammarRecoveryDecl, 0)
 	infixTables := make([]ast.GrammarInfixTableDecl, 0)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
@@ -96,6 +97,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			channels = append(channels, p.parseGrammarChannelDecl())
 		case p.peekIdentText("tokenset"):
 			tokenSets = append(tokenSets, p.parseGrammarTokenSetDecl())
+		case p.peekIdentText("grammarfn"):
+			grammarFns = append(grammarFns, p.parseGrammarFnDecl())
 		case p.peekIdentText("recovery"):
 			recoveryPolicies = append(recoveryPolicies, p.parseGrammarRecoveryDecl())
 		case p.peekGrammarInfixTableDecl():
@@ -115,6 +118,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	tokenSets = normalizeGrammarTokenSetItemNames(tokenSets)
+	p.validateGrammarFnApplications(grammarFns, tokenSets, productions)
 
 	return &ast.GrammarDecl{
 		Position:         pos,
@@ -144,6 +148,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		TokenAliases:     tokenAliases,
 		Channels:         channels,
 		TokenSets:        tokenSets,
+		GrammarFns:       grammarFns,
 		RecoveryPolicies: recoveryPolicies,
 		InfixTables:      infixTables,
 		Productions:      productions,
@@ -261,6 +266,8 @@ func (p *Parser) peekGrammarHeaderDecl() bool {
 	case "cursor", "alloc", "token_kind", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error", "token", "channel":
 		return next != lexer.TOKEN_LPAREN
 	case "tokenset":
+		return next == lexer.TOKEN_IDENT
+	case "grammarfn":
 		return next == lexer.TOKEN_IDENT
 	case "recovery":
 		return next == lexer.TOKEN_IDENT
@@ -435,6 +442,312 @@ func normalizeGrammarTokenSetItemNames(tokenSets []ast.GrammarTokenSetDecl) []as
 		normalized = append(normalized, tokenSet)
 	}
 	return normalized
+}
+
+func (p *Parser) parseGrammarFnDecl() ast.GrammarFnDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("grammarfn")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	typeParams, _, _, _, _, genericParams := p.parseFuncGenericParams()
+	p.expect(lexer.TOKEN_LPAREN)
+	params := make([]ast.GrammarFnParam, 0, 4)
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			paramPos := p.cur().Pos
+			paramName := p.expect(lexer.TOKEN_IDENT).Text
+			var paramType ast.GrammarFnType
+			if p.match(lexer.TOKEN_COLON) {
+				paramType = p.parseGrammarFnType()
+			}
+			var defaultTerm ast.GrammarTerm
+			var defaultExpr ast.Expr
+			if p.match(lexer.TOKEN_ASSIGN) {
+				if paramType.Kind == "expr" {
+					defaultExpr = p.parseExpr()
+				} else {
+					defaultTerm = p.parseGrammarUntilStopTerm()
+				}
+			}
+			params = append(params, ast.GrammarFnParam{Position: paramPos, Name: paramName, Type: paramType, Default: defaultTerm, DefaultExpr: defaultExpr})
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	var ret ast.GrammarFnType
+	if p.match(lexer.TOKEN_ARROW) {
+		ret = p.parseGrammarFnType()
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	terms := p.parseGrammarTermBlock()
+	return ast.GrammarFnDecl{Position: pos, Name: name, TypeParams: typeParams, GenericParams: genericParams, Params: params, Return: ret, Terms: terms}
+}
+
+func (p *Parser) parseGrammarFnType() ast.GrammarFnType {
+	pos := p.cur().Pos
+	kind := p.expect(lexer.TOKEN_IDENT).Text
+	typ := ast.GrammarFnType{Position: pos, Kind: kind}
+	switch kind {
+	case "grammar":
+		if p.match(lexer.TOKEN_ARROW) {
+			typ.Result = p.parseTypeExpr()
+		}
+	case "tokenset", "expr":
+	default:
+		p.errorAt(pos, "expected grammar function type `grammar`, `tokenset`, or `expr`, got %q", kind)
+	}
+	return typ
+}
+
+func (p *Parser) validateGrammarFnApplications(grammarFns []ast.GrammarFnDecl, tokenSets []ast.GrammarTokenSetDecl, productions []ast.GrammarProductionDecl) {
+	if len(grammarFns) == 0 {
+		return
+	}
+	fnMap := make(map[string]ast.GrammarFnDecl, len(grammarFns))
+	for _, grammarFn := range grammarFns {
+		if grammarFn.Name != "" {
+			fnMap[grammarFn.Name] = grammarFn
+		}
+	}
+	tokenSetNames := make(map[string]bool, len(tokenSets))
+	for _, tokenSet := range tokenSets {
+		if tokenSet.Name != "" {
+			tokenSetNames[tokenSet.Name] = true
+		}
+	}
+	for _, grammarFn := range grammarFns {
+		localTokenSetNames := tokenSetNames
+		copiedTokenSetNames := false
+		for _, param := range grammarFn.Params {
+			if param.Type.Kind != "tokenset" {
+				continue
+			}
+			if !copiedTokenSetNames {
+				localTokenSetNames = make(map[string]bool, len(tokenSetNames)+1)
+				for name, isTokenSet := range tokenSetNames {
+					localTokenSetNames[name] = isTokenSet
+				}
+				copiedTokenSetNames = true
+			}
+			localTokenSetNames[param.Name] = true
+		}
+		for _, param := range grammarFn.Params {
+			if param.Default != nil {
+				p.validateGrammarFnApplicationInTerm(param.Default, fnMap, localTokenSetNames)
+			}
+		}
+		p.validateGrammarFnApplicationsInTerms(grammarFn.Terms, fnMap, localTokenSetNames)
+	}
+	for _, production := range productions {
+		p.validateGrammarFnApplicationsInTerms(production.Terms, fnMap, tokenSetNames)
+		p.validateGrammarFnApplicationsInTerms(production.RecoverUntil, fnMap, tokenSetNames)
+	}
+}
+
+func (p *Parser) validateGrammarFnApplicationsInTerms(terms []ast.GrammarTerm, grammarFns map[string]ast.GrammarFnDecl, tokenSetNames map[string]bool) {
+	for _, term := range terms {
+		p.validateGrammarFnApplicationInTerm(term, grammarFns, tokenSetNames)
+	}
+}
+
+func (p *Parser) validateGrammarFnApplicationInTerm(term ast.GrammarTerm, grammarFns map[string]ast.GrammarFnDecl, tokenSetNames map[string]bool) {
+	switch n := term.(type) {
+	case *ast.GrammarApplyTerm:
+		grammarFn, ok := grammarFns[n.Name]
+		if !ok {
+			p.errorAt(n.Position, "unknown grammar function %q", n.Name)
+		} else {
+			resolved, ok := p.resolveGrammarFnApplyArgs(n, grammarFn)
+			if ok {
+				for index, arg := range resolved {
+					param := grammarFn.Params[index]
+					if param.Type.Kind == "" {
+						continue
+					}
+					argKind := grammarFnArgKind(arg.Term, tokenSetNames)
+					if param.Type.Kind == "tokenset" && argKind != "tokenset" {
+						p.errorAt(arg.Position, "grammarfn %s argument %q expects tokenset, got %s", n.Name, param.Name, argKind)
+					}
+					if param.Type.Kind == "grammar" && argKind == "tokenset" {
+						p.errorAt(arg.Position, "grammarfn %s argument %q expects grammar, got tokenset", n.Name, param.Name)
+					}
+					if param.Type.Kind == "expr" && argKind != "expr" {
+						p.errorAt(arg.Position, "grammarfn %s argument %q expects expr, got %s", n.Name, param.Name, argKind)
+					}
+				}
+			}
+		}
+		for _, arg := range n.Args {
+			p.validateGrammarFnApplicationInTerm(arg.Term, grammarFns, tokenSetNames)
+		}
+	case *ast.GrammarBindTerm:
+		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, tokenSetNames)
+	case *ast.GrammarAssignTerm:
+		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, tokenSetNames)
+	case *ast.GrammarChoiceTerm:
+		p.validateGrammarFnApplicationsInTerms(n.Options, grammarFns, tokenSetNames)
+	case *ast.GrammarOptionalTerm:
+		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, tokenSetNames)
+	case *ast.GrammarWhenTerm:
+		p.validateGrammarFnApplicationInTerm(n.Then, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationInTerm(n.Else, grammarFns, tokenSetNames)
+	case *ast.GrammarRecoverTerm:
+		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationsInTerms(n.RecoverUntil, grammarFns, tokenSetNames)
+	case *ast.GrammarRequiredTerm:
+		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, tokenSetNames)
+	case *ast.GrammarDelimitedTerm:
+		p.validateGrammarFnApplicationInTerm(n.Open, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationInTerm(n.Body, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationInTerm(n.Close, grammarFns, tokenSetNames)
+	case *ast.GrammarSeqTerm:
+		p.validateGrammarFnApplicationsInTerms(n.Terms, grammarFns, tokenSetNames)
+	case *ast.GrammarLookaheadTerm:
+		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, tokenSetNames)
+	case *ast.GrammarConcatTerm:
+		p.validateGrammarFnApplicationsInTerms(n.Terms, grammarFns, tokenSetNames)
+	case *ast.GrammarListTerm:
+		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationInTerm(n.Separator, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, tokenSetNames)
+	case *ast.GrammarRepeatTerm:
+		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, tokenSetNames)
+	case *ast.GrammarFlatRepeatTerm:
+		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, tokenSetNames)
+	case *ast.GrammarSeparatedTerm:
+		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationInTerm(n.Separator, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, tokenSetNames)
+	case *ast.GrammarSuffixTerm:
+		p.validateGrammarFnApplicationInTerm(n.Seed, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationsInPostfixArms(n.Arms, grammarFns, tokenSetNames)
+	case *ast.GrammarPostfixTerm:
+		p.validateGrammarFnApplicationInTerm(n.Seed, grammarFns, tokenSetNames)
+		p.validateGrammarFnApplicationsInPostfixArms(n.Arms, grammarFns, tokenSetNames)
+	case *ast.GrammarPrecedenceTerm:
+		p.validateGrammarFnApplicationInTerm(n.Seed, grammarFns, tokenSetNames)
+		for _, level := range n.Levels {
+			p.validateGrammarFnApplicationInTerm(level.Seed, grammarFns, tokenSetNames)
+			p.validateGrammarFnApplicationsInPrecedenceArms(level.Arms, grammarFns, tokenSetNames)
+		}
+		p.validateGrammarFnApplicationsInPrecedenceArms(n.Arms, grammarFns, tokenSetNames)
+	}
+}
+
+type grammarFnResolvedArg struct {
+	Position lexer.Pos
+	Term     ast.GrammarTerm
+	Expr     ast.Expr
+}
+
+func (p *Parser) resolveGrammarFnApplyArgs(term *ast.GrammarApplyTerm, grammarFn ast.GrammarFnDecl) ([]grammarFnResolvedArg, bool) {
+	resolved := make([]grammarFnResolvedArg, len(grammarFn.Params))
+	filled := make([]bool, len(grammarFn.Params))
+	paramIndex := make(map[string]int, len(grammarFn.Params))
+	for index, param := range grammarFn.Params {
+		paramIndex[param.Name] = index
+	}
+
+	ok := true
+	nextPositional := 0
+	seenNamed := false
+	for _, arg := range term.Args {
+		if arg.Name != "" {
+			seenNamed = true
+			index, found := paramIndex[arg.Name]
+			if !found {
+				p.errorAt(arg.Position, "unknown argument %q for grammarfn %s", arg.Name, term.Name)
+				ok = false
+				continue
+			}
+			if filled[index] {
+				p.errorAt(arg.Position, "duplicate argument %q for grammarfn %s", arg.Name, term.Name)
+				ok = false
+				continue
+			}
+			resolved[index] = grammarFnResolvedArg{Position: arg.Position, Term: arg.Term, Expr: grammarFnExprArg(arg.Term)}
+			filled[index] = true
+			continue
+		}
+		if seenNamed {
+			p.errorAt(arg.Position, "positional argument cannot follow named argument in grammarfn %s", term.Name)
+			ok = false
+			continue
+		}
+		for nextPositional < len(filled) && filled[nextPositional] {
+			nextPositional++
+		}
+		if nextPositional >= len(grammarFn.Params) {
+			p.errorAt(arg.Position, "too many positional arguments for grammarfn %s", term.Name)
+			ok = false
+			continue
+		}
+		resolved[nextPositional] = grammarFnResolvedArg{Position: arg.Position, Term: arg.Term, Expr: grammarFnExprArg(arg.Term)}
+		filled[nextPositional] = true
+		nextPositional++
+	}
+
+	for index, param := range grammarFn.Params {
+		if filled[index] {
+			continue
+		}
+		if param.Default != nil {
+			resolved[index] = grammarFnResolvedArg{Position: param.Default.Pos(), Term: param.Default, Expr: grammarFnExprArg(param.Default)}
+			filled[index] = true
+			continue
+		}
+		if param.DefaultExpr != nil {
+			resolved[index] = grammarFnResolvedArg{Position: param.DefaultExpr.Pos(), Expr: param.DefaultExpr}
+			filled[index] = true
+			continue
+		}
+		p.errorAt(term.Position, "missing argument %q for grammarfn %s", param.Name, term.Name)
+		ok = false
+	}
+	return resolved, ok
+}
+
+func (p *Parser) validateGrammarFnApplicationsInPostfixArms(arms []ast.GrammarPostfixArm, grammarFns map[string]ast.GrammarFnDecl, tokenSetNames map[string]bool) {
+	for _, arm := range arms {
+		p.validateGrammarFnApplicationInTerm(arm.Op, grammarFns, tokenSetNames)
+		for _, binding := range arm.Bindings {
+			if binding != nil {
+				p.validateGrammarFnApplicationInTerm(binding.Term, grammarFns, tokenSetNames)
+			}
+		}
+	}
+}
+
+func (p *Parser) validateGrammarFnApplicationsInPrecedenceArms(arms []ast.GrammarPrecedenceArm, grammarFns map[string]ast.GrammarFnDecl, tokenSetNames map[string]bool) {
+	for _, arm := range arms {
+		p.validateGrammarFnApplicationInTerm(arm.Op, grammarFns, tokenSetNames)
+		for _, binding := range arm.Bindings {
+			if binding != nil {
+				p.validateGrammarFnApplicationInTerm(binding.Term, grammarFns, tokenSetNames)
+			}
+		}
+	}
+}
+
+func grammarFnArgKind(term ast.GrammarTerm, tokenSetNames map[string]bool) string {
+	if _, ok := term.(*ast.GrammarExprTerm); ok {
+		return "expr"
+	}
+	if ref, ok := term.(*ast.GrammarTokenSetRefTerm); ok && tokenSetNames[ref.Name] {
+		return "tokenset"
+	}
+	return "grammar"
+}
+
+func grammarFnExprArg(term ast.GrammarTerm) ast.Expr {
+	if exprTerm, ok := term.(*ast.GrammarExprTerm); ok {
+		return exprTerm.Expr
+	}
+	return nil
 }
 
 func (p *Parser) parseGrammarRecoveryDecl() ast.GrammarRecoveryDecl {
@@ -878,6 +1191,9 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	if p.peekIdentText("attempt") {
 		return p.parseGrammarAttemptTerm()
 	}
+	if p.peekIdentText("apply") {
+		return p.parseGrammarApplyTerm()
+	}
 	if p.peekIdentText("cut") {
 		return p.parseGrammarCutTerm()
 	}
@@ -912,6 +1228,30 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 		p.expect(lexer.TOKEN_RPAREN)
 	}
 	return &ast.GrammarCallTerm{Position: pos, Name: name, Explicit: explicit, Args: args}
+}
+
+func (p *Parser) parseGrammarApplyTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("apply")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_LPAREN)
+	args := make([]ast.GrammarApplyArg, 0, 4)
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			argPos := p.cur().Pos
+			name := ""
+			if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+				name = p.advance().Text
+				p.expect(lexer.TOKEN_COLON)
+			}
+			args = append(args, ast.GrammarApplyArg{Position: argPos, Name: name, Term: p.parseGrammarUntilStopTerm()})
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarApplyTerm{Position: pos, Name: name, Args: args}
 }
 
 func (p *Parser) parseGrammarInfixTableTerm() ast.GrammarTerm {

@@ -168,6 +168,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.GrammarPrecedenceTerm{})
 		gob.Register(&ast.GrammarInfixTableTerm{})
 		gob.Register(&ast.GrammarTokenSetRefTerm{})
+		gob.Register(&ast.GrammarApplyTerm{})
 		gob.Register(&ast.GrammarBindTerm{})
 		gob.Register(&ast.GrammarAssignTerm{})
 		gob.Register(&ast.GrammarReturnTerm{})

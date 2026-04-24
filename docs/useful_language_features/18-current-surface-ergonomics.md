@@ -71,6 +71,69 @@ Current rules:
 - lowering expands token-set references into the existing explicit token checks, so there is no runtime token-set object
 - prefer token sets for recurring parser sync concepts such as `StatementSync`, `BlockEndSync`, `DeclSync`, and `ExprEndSync`
 
+## Grammar functions
+
+Grammar functions are compile-time grammar-term templates. They let a grammar name a reusable parser shape and pass grammar terms or token-set references into it.
+
+```context
+grammar PascalListGrammar over Token using ParserState:
+    token:
+        COMMA ","
+
+    grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+
+grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
+    token:
+        RPAREN ")"
+
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+
+    args() -> darray[Pascal.Expr]:
+        values = apply separated_by(item: expression(), stop: RParenSync)
+        return values
+```
+
+They can also accept expression parameters for the bits that should stay ordinary llcontext code, such as diagnostics and fallback AST construction:
+
+```context
+grammar RecoveryGrammar over Token using ParserState:
+    grammarfn recovered[T](item: grammar -> T, message: expr, stop: tokenset, fallback: expr) -> grammar -> T:
+        item recover(message, until(stop), fallback)
+
+grammar PascalStmtGrammar over Token using ParserState uses RecoveryGrammar:
+    condition_or_invalid() -> Pascal.Expr:
+        node <- apply recovered(
+            item: condition(),
+            message: expr(ParseMessageKey.ExpectedConditionExpression),
+            stop: ConditionSync,
+            fallback: expr(invalid_expr_at(state.current_token().span))
+        )
+        return node
+```
+
+Current rules:
+
+- `grammarfn Name(param, ...):` declares a grammar-scoped compile-time template
+- `grammarfn Name[T](item: grammar -> T, stop: tokenset) -> grammar -> darray[T]:` is the typed signature form
+- parameters can declare grammar-term defaults, as in `sep: grammar = .COMMA`
+- expression parameters use `expr` in the signature and are passed with `expr(...)` at the call site
+- the body is ordinary grammar syntax; one term expands as that term, multiple terms expand as a `seq`
+- `apply Name(arg, ...)` expands the template at compile time
+- `apply Name(item: expression(), stop: RParenSync)` is the preferred call style once a helper has more than one argument
+- positional and named arguments can be mixed only before the first named argument; missing parameters use defaults when present
+- arguments are grammar terms, so they can be productions, token terms, required/recoverable terms, lists, `seq`, or token-set references
+- typed parameters currently support `grammar`, `grammar -> T`, `tokenset`, and `expr`
+- the parser reports same-grammar bad calls such as unknown helpers, missing required arguments, unknown named arguments, duplicate named arguments, too many positional arguments, passing a token set where a grammar term is expected, passing a grammar term where a token set is expected, or passing a grammar term where an expression is expected
+- bare parameter names in grammar-term position are replaced by the matching argument
+- bare parameter names in `until(...)` position are also replaced, which makes token-set parameters natural
+- bare expression parameter names are replaced in grammar expression slots such as recovery messages, fallback values, required/delimited messages, `when` conditions, and precedence arm results
+- grammar functions from grammars listed in `uses` are available to the using grammar, matching token sets, recovery policies, and infix tables
+- grammars may be helper-only libraries with tokens, token sets, recovery policies, grammar functions, and infix tables but no productions
+- expansion happens before token aliases, token sets, recovery policies, and infix tables resolve, so grammar functions compose with those features instead of becoming a runtime feature
+
 ## Default arguments, named calls, and `..` forwarding
 
 Default values are supported on trailing parameters of ordinary functions and `extern` declarations.
