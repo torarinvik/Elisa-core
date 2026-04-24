@@ -14,9 +14,14 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	p.expectIdentText("grammar")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
+	var envType ast.TypeExpr
 	var overType ast.TypeExpr
 	var usingType ast.TypeExpr
 	uses := make([]ast.TypeExpr, 0)
+	if p.peek() == lexer.TOKEN_WITH {
+		p.expect(lexer.TOKEN_WITH)
+		envType = p.parseGrammarHeaderTypeExpr()
+	}
 	if p.peekIdentText("over") {
 		p.expectIdentText("over")
 		overType = p.parseGrammarHeaderTypeExpr()
@@ -51,6 +56,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	var recordErrorFunc string
 	tokenAliases := make([]ast.GrammarTokenAliasDecl, 0)
 	channels := make([]ast.GrammarChannelDecl, 0)
+	tokenSets := make([]ast.GrammarTokenSetDecl, 0)
 	recoveryPolicies := make([]ast.GrammarRecoveryDecl, 0)
 	infixTables := make([]ast.GrammarInfixTableDecl, 0)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
@@ -88,6 +94,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			tokenAliases = append(tokenAliases, p.parseGrammarTokenAliasDecls()...)
 		case p.peekIdentText("channel"):
 			channels = append(channels, p.parseGrammarChannelDecl())
+		case p.peekIdentText("tokenset"):
+			tokenSets = append(tokenSets, p.parseGrammarTokenSetDecl())
 		case p.peekIdentText("recovery"):
 			recoveryPolicies = append(recoveryPolicies, p.parseGrammarRecoveryDecl())
 		case p.peekGrammarInfixTableDecl():
@@ -106,6 +114,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		productions = append(productions, p.parseGrammarProductionDecls()...)
 	}
 	p.expect(lexer.TOKEN_DEDENT)
+	tokenSets = normalizeGrammarTokenSetItemNames(tokenSets)
 
 	return &ast.GrammarDecl{
 		Position:         pos,
@@ -117,6 +126,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		RegionParams:     regionParams,
 		PermissionParams: permissionParams,
 		GenericParams:    genericParams,
+		EnvType:          envType,
 		OverType:         overType,
 		UsingType:        usingType,
 		Uses:             uses,
@@ -133,6 +143,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		RecordErrorFunc:  recordErrorFunc,
 		TokenAliases:     tokenAliases,
 		Channels:         channels,
+		TokenSets:        tokenSets,
 		RecoveryPolicies: recoveryPolicies,
 		InfixTables:      infixTables,
 		Productions:      productions,
@@ -148,6 +159,88 @@ func (p *Parser) peekGrammarInfixTableDecl() bool {
 	}
 	next := p.tokens[p.pos+1]
 	return next.Kind == lexer.TOKEN_IDENT && next.Text == "table"
+}
+
+func (p *Parser) parseGrammarEnvDecl() *ast.GrammarEnvDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("grammarenv")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	var overType ast.TypeExpr
+	var usingType ast.TypeExpr
+	if p.peekIdentText("over") {
+		p.expectIdentText("over")
+		overType = p.parseGrammarHeaderTypeExpr()
+	}
+	if p.peekIdentText("using") {
+		p.expectIdentText("using")
+		usingType = p.parseGrammarHeaderTypeExpr()
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	var errorType ast.TypeExpr
+	var cursorExpr ast.Expr
+	var allocExpr ast.Expr
+	var tokenKindType ast.TypeExpr
+	var eofExpr ast.Expr
+	var tokenKindField string
+	var currentFunc string
+	var advanceFunc string
+	var expectFunc string
+	var expectKindFunc string
+	var recordErrorFunc string
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		switch {
+		case p.peek() == lexer.TOKEN_ERROR:
+			errorType = p.parseGrammarErrorHeaderDecl()
+		case p.peekIdentText("cursor"):
+			cursorExpr = p.parseGrammarValueHeaderDecl("cursor")
+		case p.peekIdentText("alloc"):
+			allocExpr = p.parseGrammarValueHeaderDecl("alloc")
+		case p.peekIdentText("token_kind"):
+			tokenKindType = p.parseGrammarTypeHeaderDecl("token_kind")
+		case p.peekIdentText("eof"):
+			eofExpr = p.parseGrammarValueHeaderDecl("eof")
+		case p.peekIdentText("token_field"):
+			tokenKindField = p.parseGrammarNameHeaderDecl("token_field")
+		case p.peekIdentText("current"):
+			currentFunc = p.parseGrammarNameHeaderDecl("current")
+		case p.peekIdentText("advance"):
+			advanceFunc = p.parseGrammarNameHeaderDecl("advance")
+		case p.peekIdentText("expect"):
+			expectFunc = p.parseGrammarNameHeaderDecl("expect")
+		case p.peekIdentText("expect_kind"):
+			expectKindFunc = p.parseGrammarNameHeaderDecl("expect_kind")
+		case p.peekIdentText("record_error"):
+			recordErrorFunc = p.parseGrammarNameHeaderDecl("record_error")
+		default:
+			p.errorf("expected grammarenv header declaration")
+			p.advance()
+		}
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return &ast.GrammarEnvDecl{
+		Position:        pos,
+		Name:            name,
+		OverType:        overType,
+		UsingType:       usingType,
+		ErrorType:       errorType,
+		CursorExpr:      cursorExpr,
+		AllocExpr:       allocExpr,
+		TokenKindType:   tokenKindType,
+		EOFExpr:         eofExpr,
+		TokenKindField:  tokenKindField,
+		CurrentFunc:     currentFunc,
+		AdvanceFunc:     advanceFunc,
+		ExpectFunc:      expectFunc,
+		ExpectKindFunc:  expectKindFunc,
+		RecordErrorFunc: recordErrorFunc,
+	}
 }
 
 func (p *Parser) peekGrammarHeaderDecl() bool {
@@ -167,6 +260,8 @@ func (p *Parser) peekGrammarHeaderDecl() bool {
 	switch p.cur().Text {
 	case "cursor", "alloc", "token_kind", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error", "token", "channel":
 		return next != lexer.TOKEN_LPAREN
+	case "tokenset":
+		return next == lexer.TOKEN_IDENT
 	case "recovery":
 		return next == lexer.TOKEN_IDENT
 	default:
@@ -277,6 +372,71 @@ func (p *Parser) parseGrammarChannelDecl() ast.GrammarChannelDecl {
 	return ast.GrammarChannelDecl{Position: pos, Name: name, Type: typeExpr, Default: defaultExpr}
 }
 
+func (p *Parser) parseGrammarTokenSetDecl() ast.GrammarTokenSetDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("tokenset")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	terms := make([]ast.GrammarTerm, 0, 4)
+	if p.match(lexer.TOKEN_ASSIGN) {
+		for {
+			terms = append(terms, p.parseGrammarTokenSetItem())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expectNewline()
+		return ast.GrammarTokenSetDecl{Position: pos, Name: name, Terms: terms}
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		terms = append(terms, p.parseGrammarTokenSetItem())
+		p.expectNewline()
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return ast.GrammarTokenSetDecl{Position: pos, Name: name, Terms: terms}
+}
+
+func (p *Parser) parseGrammarTokenSetItem() ast.GrammarTerm {
+	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_LPAREN {
+		return &ast.GrammarTokenSetRefTerm{Position: pos, Name: p.advance().Text}
+	}
+	return p.parseGrammarRecoverableTermValue()
+}
+
+func normalizeGrammarTokenSetItemNames(tokenSets []ast.GrammarTokenSetDecl) []ast.GrammarTokenSetDecl {
+	if len(tokenSets) == 0 {
+		return nil
+	}
+	setNames := make(map[string]bool, len(tokenSets))
+	for _, tokenSet := range tokenSets {
+		if tokenSet.Name != "" {
+			setNames[tokenSet.Name] = true
+		}
+	}
+	normalized := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
+	for _, tokenSet := range tokenSets {
+		terms := make([]ast.GrammarTerm, 0, len(tokenSet.Terms))
+		for _, term := range tokenSet.Terms {
+			ref, ok := term.(*ast.GrammarTokenSetRefTerm)
+			if !ok || setNames[ref.Name] {
+				terms = append(terms, term)
+				continue
+			}
+			terms = append(terms, &ast.GrammarTokenKindTerm{Position: ref.Position, Kind: ref.Name})
+		}
+		tokenSet.Terms = terms
+		normalized = append(normalized, tokenSet)
+	}
+	return normalized
+}
+
 func (p *Parser) parseGrammarRecoveryDecl() ast.GrammarRecoveryDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("recovery")
@@ -348,7 +508,7 @@ func (p *Parser) parseGrammarRecoveryUntilDecl() []ast.GrammarTerm {
 	}
 	terms := make([]ast.GrammarTerm, 0, 4)
 	for {
-		terms = append(terms, p.parseGrammarRecoverableTermValue())
+		terms = append(terms, p.parseGrammarUntilStopTerm())
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
@@ -910,7 +1070,7 @@ func (p *Parser) parseGrammarLookaheadTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("lookahead")
 	p.expect(lexer.TOKEN_LPAREN)
-	term := p.parseGrammarRecoverableTermValue()
+	term := p.parseGrammarUntilStopTerm()
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarLookaheadTerm{Position: pos, Term: term}
 }
@@ -1100,7 +1260,7 @@ func (p *Parser) parseGrammarUntilClauseBody() []ast.GrammarTerm {
 	p.expect(lexer.TOKEN_LPAREN)
 	if p.peek() != lexer.TOKEN_RPAREN {
 		for {
-			terms = append(terms, p.parseGrammarRecoverableTermValue())
+			terms = append(terms, p.parseGrammarUntilStopTerm())
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}
@@ -1108,6 +1268,17 @@ func (p *Parser) parseGrammarUntilClauseBody() []ast.GrammarTerm {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	return terms
+}
+
+func (p *Parser) parseGrammarUntilStopTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) {
+		switch p.tokens[p.pos+1].Kind {
+		case lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN, lexer.TOKEN_NEWLINE, lexer.TOKEN_DEDENT, lexer.TOKEN_EOF:
+			return &ast.GrammarTokenSetRefTerm{Position: pos, Name: p.advance().Text}
+		}
+	}
+	return p.parseGrammarRecoverableTermValue()
 }
 
 func (p *Parser) parseGrammarPostfixTerm() ast.GrammarTerm {

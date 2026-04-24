@@ -232,6 +232,75 @@ func TestParseGrammarDeclAllowsTokenAliasBlock(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsTokenSets(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
+    token:
+        SEMICOLON ";"
+        END "end"
+        ELSE "else"
+    tokenset StatementSync:
+        SEMICOLON
+        END
+        ELSE
+        token(TokenKind.EOF)
+    tokenset NestedSync:
+        StatementSync
+        RPAREN
+    recovery StatementRecovery:
+        message ParseMessageKey.ExpectedStatement
+        until StatementSync
+    statement() -> Pascal.Stmt recover StatementRecovery:
+        statements = separated statement_core() by .SEMICOLON until(StatementSync)
+        return zeroed as Pascal.Stmt
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.TokenSets) != 2 {
+		t.Fatalf("expected two token sets, got %d", len(decl.TokenSets))
+	}
+	if decl.TokenSets[0].Name != "StatementSync" || len(decl.TokenSets[0].Terms) != 4 {
+		t.Fatalf("expected StatementSync with four terms, got %#v", decl.TokenSets[0])
+	}
+	if _, ok := decl.RecoveryPolicies[0].Until[0].(*ast.GrammarTokenSetRefTerm); !ok {
+		t.Fatalf("expected recovery until to reference token set, got %T", decl.RecoveryPolicies[0].Until[0])
+	}
+	if _, ok := decl.TokenSets[1].Terms[0].(*ast.GrammarTokenSetRefTerm); !ok {
+		t.Fatalf("expected nested token set item to reference token set, got %T", decl.TokenSets[1].Terms[0])
+	}
+	if kind, ok := decl.TokenSets[1].Terms[1].(*ast.GrammarTokenKindTerm); !ok || kind.Kind != "RPAREN" {
+		t.Fatalf("expected non-set bare item to become token kind RPAREN, got %T %#v", decl.TokenSets[1].Terms[1], decl.TokenSets[1].Terms[1])
+	}
+	production := decl.Productions[0]
+	assign, ok := production.Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first production term to be binding, got %T", production.Terms[0])
+	}
+	separated, ok := assign.Term.(*ast.GrammarSeparatedTerm)
+	if !ok {
+		t.Fatalf("expected assignment term to be separated, got %T", assign.Term)
+	}
+	if _, ok := separated.Until[0].(*ast.GrammarTokenSetRefTerm); !ok {
+		t.Fatalf("expected separated until to reference token set, got %T", separated.Until[0])
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"tokenset StatementSync:",
+		"SEMICOLON",
+		"token(TokenKind.EOF)",
+		"until StatementSync",
+		"until(StatementSync)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsProductionAugmentationSyntax(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
     statement() -> Token:
@@ -393,6 +462,64 @@ func TestParseGrammarDeclAllowsUsesClauseAndPublicShorthandProduction(t *testing
 		"pub Stmt -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF))):",
 		"stmt = state.statement_core()",
 		"return stmt",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarEnvDeclAndGrammarWithEnv(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammarenv PascalEnv over Token using ParserState:
+    cursor state
+    alloc alloc
+    token_kind TokenKind
+    eof TokenKind.EOF
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    record_error record_parse_error
+
+grammar PascalExprGrammar with PascalEnv uses PascalCommonGrammar:
+    token:
+        IDENT
+    expr() -> Token:
+        token = .IDENT
+        return token
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	env, ok := file.Decls[0].(*ast.GrammarEnvDecl)
+	if !ok {
+		t.Fatalf("expected grammarenv decl, got %T", file.Decls[0])
+	}
+	if env.Name != "PascalEnv" {
+		t.Fatalf("expected env name PascalEnv, got %q", env.Name)
+	}
+	if got := formatTypeExprForTest(t, env.OverType); got != "Token" {
+		t.Fatalf("expected env over type Token, got %q", got)
+	}
+	if got := formatTypeExprForTest(t, env.UsingType); got != "ParserState" {
+		t.Fatalf("expected env using type ParserState, got %q", got)
+	}
+	decl, ok := file.Decls[1].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[1])
+	}
+	if got := formatTypeExprForTest(t, decl.EnvType); got != "PascalEnv" {
+		t.Fatalf("expected grammar env PascalEnv, got %q", got)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"grammarenv PascalEnv over Token using ParserState:",
+		"cursor state",
+		"record_error record_parse_error",
+		"grammar PascalExprGrammar with PascalEnv uses PascalCommonGrammar:",
+		"token:",
+		"IDENT",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)

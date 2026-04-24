@@ -349,6 +349,8 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		return nil
 	case *ast.GrammarDecl:
 		return nil
+	case *ast.GrammarEnvDecl:
+		return nil
 	case *ast.TypeAliasDecl:
 		return nil
 	case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
@@ -472,6 +474,8 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 	case *ast.ErrorDecl:
 		return nil
 	case *ast.GrammarDecl:
+		return nil
+	case *ast.GrammarEnvDecl:
 		return nil
 	case *ast.TypeAliasDecl:
 		return nil

@@ -31,6 +31,46 @@ Current rules:
 - `recover Name` works anywhere inline `recover(...)` already works, including production headers and term suffixes
 - lowering resolves named policies back into the existing inline recovery machinery, so they are purely compile-time grammar sugar
 
+## Grammar token sets
+
+Grammars can name reusable token/sync sets for repeated recovery and list boundaries.
+
+```context
+grammar PascalStmtGrammar over Token using ParserState:
+    token:
+        SEMICOLON ";"
+        END "end"
+        ELSE "else"
+
+    tokenset StatementSync:
+        SEMICOLON
+        END
+        ELSE
+
+    tokenset StatementOrFileSync:
+        StatementSync
+        token(TokenKind.EOF)
+
+    recovery StatementRecovery:
+        message ParseMessageKey.ExpectedStatement
+        until StatementOrFileSync
+
+    block() -> darray[Pascal.Stmt]:
+        statements = separated statement() by .SEMICOLON until(StatementOrFileSync)
+        return statements
+```
+
+Current rules:
+
+- `tokenset Name:` declares a grammar-scoped set of stop terms
+- token set items can use bare token-kind names, other token-set names, `.TOKEN` terms, string token terms, or explicit `token(TokenKind.X)` matchers
+- `tokenset Name = A, B, token(TokenKind.EOF)` is also accepted for compact one-line sets
+- bare `Name` inside `until(...)` or recovery `until Name` is parsed as a token-set reference
+- `lookahead(Name)` can reference a token set and lowers as lookahead over a choice of the set terms
+- token sets from grammars listed in `uses` are available to the using grammar, matching recovery policies and infix tables
+- lowering expands token-set references into the existing explicit token checks, so there is no runtime token-set object
+- prefer token sets for recurring parser sync concepts such as `StatementSync`, `BlockEndSync`, `DeclSync`, and `ExprEndSync`
+
 ## Default arguments, named calls, and `..` forwarding
 
 Default values are supported on trailing parameters of ordinary functions and `extern` declarations.
@@ -375,6 +415,8 @@ grammar PascalExprGrammar over Token using ParserState:
 
 Current header declarations:
 
+- `grammarenv Name over Token using ParserState:` declares reusable parser-environment defaults for grammars that share the same state/token surface
+- `grammar Name with EnvName:` applies those defaults while still allowing local grammar headers to override individual fields
 - `cursor state` tells lowering which parser-state value owns the current cursor
 - `alloc alloc` supplies the active tree/arena owner expression used by generated parser helpers
 - `token_kind MyTokenKind` tells lowering which enum/type owns dotted token aliases such as `.IDENT`; it defaults to `TokenKind`
@@ -395,7 +437,7 @@ Current header declarations:
 - `maplist[T](source, item, value)` maps an existing list expression into a `darray[T]` without introducing a helper function
 
 ```llcontext
-grammar SMLExprGrammar over SMLToken using SMLParserState:
+grammarenv SMLGrammarEnv over SMLToken using SMLParserState:
     cursor state
     alloc alloc
     token_kind SMLTokenKind
@@ -406,6 +448,11 @@ grammar SMLExprGrammar over SMLToken using SMLParserState:
     expect expect
     expect_kind expect_kind
     record_error record_parse_error
+
+grammar SMLExprGrammar with SMLGrammarEnv:
+    token:
+        IDENT
+        INTEGER
 ```
 - `flatmaplist[T](source, item, values)` maps an existing list expression into per-item lists and flattens them into one `darray[T]`; typed empty branches such as `else []` inherit the mapped list type
 - `uses OtherGrammar` imports productions and grammar-scoped helper declarations from another grammar, including token aliases, recovery policies, and infix tables

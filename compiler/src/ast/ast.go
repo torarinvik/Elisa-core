@@ -107,6 +107,7 @@ type GrammarDecl struct {
 	RegionParams     []string
 	PermissionParams []string
 	GenericParams    []GenericParam
+	EnvType          TypeExpr
 	OverType         TypeExpr
 	UsingType        TypeExpr
 	Uses             []TypeExpr
@@ -123,9 +124,28 @@ type GrammarDecl struct {
 	RecordErrorFunc  string
 	TokenAliases     []GrammarTokenAliasDecl
 	Channels         []GrammarChannelDecl
+	TokenSets        []GrammarTokenSetDecl
 	RecoveryPolicies []GrammarRecoveryDecl
 	InfixTables      []GrammarInfixTableDecl
 	Productions      []GrammarProductionDecl
+}
+
+type GrammarEnvDecl struct {
+	Position        lexer.Pos
+	Name            string
+	OverType        TypeExpr
+	UsingType       TypeExpr
+	ErrorType       TypeExpr
+	CursorExpr      Expr
+	AllocExpr       Expr
+	TokenKindType   TypeExpr
+	EOFExpr         Expr
+	TokenKindField  string
+	CurrentFunc     string
+	AdvanceFunc     string
+	ExpectFunc      string
+	ExpectKindFunc  string
+	RecordErrorFunc string
 }
 
 type GrammarTokenAliasDecl struct {
@@ -140,6 +160,12 @@ type GrammarChannelDecl struct {
 	Name     string
 	Type     TypeExpr
 	Default  Expr
+}
+
+type GrammarTokenSetDecl struct {
+	Position lexer.Pos
+	Name     string
+	Terms    []GrammarTerm
 }
 
 type GrammarRecoveryDecl struct {
@@ -359,6 +385,11 @@ const (
 type GrammarInfixTableTerm struct {
 	Position  lexer.Pos
 	TableName string
+}
+
+type GrammarTokenSetRefTerm struct {
+	Position lexer.Pos
+	Name     string
 }
 
 type GrammarPostfixTerm struct {
@@ -1651,6 +1682,7 @@ func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
 func (n *TreeDecl) Pos() lexer.Pos       { return n.Position }
 func (n *GrammarDecl) Pos() lexer.Pos    { return n.Position }
+func (n *GrammarEnvDecl) Pos() lexer.Pos { return n.Position }
 func (n *GrammarProductionDecl) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1720,6 +1752,9 @@ func (n *GrammarPrecedenceTerm) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *GrammarInfixTableTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarTokenSetRefTerm) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *GrammarBindTerm) Pos() lexer.Pos { return n.Position }
@@ -1897,6 +1932,7 @@ func (*UsingDecl) nodeTag()                 {}
 func (*EnumDecl) nodeTag()                  {}
 func (*TreeDecl) nodeTag()                  {}
 func (*GrammarDecl) nodeTag()               {}
+func (*GrammarEnvDecl) nodeTag()            {}
 func (*GrammarProductionDecl) nodeTag()     {}
 func (*GrammarPassTerm) nodeTag()           {}
 func (*GrammarTokenTerm) nodeTag()          {}
@@ -1924,6 +1960,7 @@ func (*GrammarSuffixTerm) nodeTag()         {}
 func (*GrammarPostfixTerm) nodeTag()        {}
 func (*GrammarPrecedenceTerm) nodeTag()     {}
 func (*GrammarInfixTableTerm) nodeTag()     {}
+func (*GrammarTokenSetRefTerm) nodeTag()    {}
 func (*GrammarBindTerm) nodeTag()           {}
 func (*GrammarAssignTerm) nodeTag()         {}
 func (*GrammarReturnTerm) nodeTag()         {}
@@ -2069,6 +2106,7 @@ func (*UsingDecl) declTag()        {}
 func (*EnumDecl) declTag()         {}
 func (*TreeDecl) declTag()         {}
 func (*GrammarDecl) declTag()      {}
+func (*GrammarEnvDecl) declTag()   {}
 func (*AttributeDecl) declTag()    {}
 func (*GlobalDecl) declTag()       {}
 func (*StructDecl) declTag()       {}
@@ -2089,35 +2127,36 @@ func (*TreeCategoryDecl) treeMemberDeclTag() {}
 func (*TreeBlockDecl) treeMemberDeclTag()    {}
 func (*TreeStructDecl) treeMemberDeclTag()   {}
 
-func (*GrammarPassTerm) grammarTermTag()       {}
-func (*GrammarTokenTerm) grammarTermTag()      {}
-func (*GrammarTokenKindTerm) grammarTermTag()  {}
-func (*GrammarCallTerm) grammarTermTag()       {}
-func (*GrammarChoiceTerm) grammarTermTag()     {}
-func (*GrammarOptionalTerm) grammarTermTag()   {}
-func (*GrammarRecoverTerm) grammarTermTag()    {}
-func (*GrammarWhenTerm) grammarTermTag()       {}
-func (*GrammarRequiredTerm) grammarTermTag()   {}
-func (*GrammarDelimitedTerm) grammarTermTag()  {}
-func (*GrammarSeqTerm) grammarTermTag()        {}
-func (*GrammarLookaheadTerm) grammarTermTag()  {}
-func (*GrammarExprTerm) grammarTermTag()       {}
-func (*GrammarMapListTerm) grammarTermTag()    {}
-func (*GrammarConcatTerm) grammarTermTag()     {}
-func (*GrammarGuardTerm) grammarTermTag()      {}
-func (*GrammarAttemptTerm) grammarTermTag()    {}
-func (*GrammarCutTerm) grammarTermTag()        {}
-func (*GrammarListTerm) grammarTermTag()       {}
-func (*GrammarRepeatTerm) grammarTermTag()     {}
-func (*GrammarFlatRepeatTerm) grammarTermTag() {}
-func (*GrammarSeparatedTerm) grammarTermTag()  {}
-func (*GrammarSuffixTerm) grammarTermTag()     {}
-func (*GrammarPostfixTerm) grammarTermTag()    {}
-func (*GrammarPrecedenceTerm) grammarTermTag() {}
-func (*GrammarInfixTableTerm) grammarTermTag() {}
-func (*GrammarBindTerm) grammarTermTag()       {}
-func (*GrammarAssignTerm) grammarTermTag()     {}
-func (*GrammarReturnTerm) grammarTermTag()     {}
+func (*GrammarPassTerm) grammarTermTag()        {}
+func (*GrammarTokenTerm) grammarTermTag()       {}
+func (*GrammarTokenKindTerm) grammarTermTag()   {}
+func (*GrammarCallTerm) grammarTermTag()        {}
+func (*GrammarChoiceTerm) grammarTermTag()      {}
+func (*GrammarOptionalTerm) grammarTermTag()    {}
+func (*GrammarRecoverTerm) grammarTermTag()     {}
+func (*GrammarWhenTerm) grammarTermTag()        {}
+func (*GrammarRequiredTerm) grammarTermTag()    {}
+func (*GrammarDelimitedTerm) grammarTermTag()   {}
+func (*GrammarSeqTerm) grammarTermTag()         {}
+func (*GrammarLookaheadTerm) grammarTermTag()   {}
+func (*GrammarExprTerm) grammarTermTag()        {}
+func (*GrammarMapListTerm) grammarTermTag()     {}
+func (*GrammarConcatTerm) grammarTermTag()      {}
+func (*GrammarGuardTerm) grammarTermTag()       {}
+func (*GrammarAttemptTerm) grammarTermTag()     {}
+func (*GrammarCutTerm) grammarTermTag()         {}
+func (*GrammarListTerm) grammarTermTag()        {}
+func (*GrammarRepeatTerm) grammarTermTag()      {}
+func (*GrammarFlatRepeatTerm) grammarTermTag()  {}
+func (*GrammarSeparatedTerm) grammarTermTag()   {}
+func (*GrammarSuffixTerm) grammarTermTag()      {}
+func (*GrammarPostfixTerm) grammarTermTag()     {}
+func (*GrammarPrecedenceTerm) grammarTermTag()  {}
+func (*GrammarInfixTableTerm) grammarTermTag()  {}
+func (*GrammarTokenSetRefTerm) grammarTermTag() {}
+func (*GrammarBindTerm) grammarTermTag()        {}
+func (*GrammarAssignTerm) grammarTermTag()      {}
+func (*GrammarReturnTerm) grammarTermTag()      {}
 
 func (*NamedType) typeExprTag()                 {}
 func (*RefType) typeExprTag()                   {}

@@ -622,6 +622,8 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, member := range n.Members {
 			printTreeMember(w, member, level+1)
 		}
+	case *ast.GrammarEnvDecl:
+		fmt.Fprintf(w, "%sgrammarenv %s\n", prefix, n.Name)
 	case *ast.StructDecl:
 		affine := ""
 		if n.Affine {

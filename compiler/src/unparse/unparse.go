@@ -275,6 +275,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			header = "extend grammar " + n.Name
 		}
 		header += formatGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams)
+		if n.EnvType != nil {
+			header += " with " + formatTypeExpr(n.EnvType)
+		}
 		if n.OverType != nil {
 			header += " over " + formatTypeExpr(n.OverType)
 		}
@@ -343,6 +346,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 			f.writeLine(level+1, line)
 		}
+		for _, tokenSet := range n.TokenSets {
+			f.writeGrammarTokenSetDecl(level+1, tokenSet)
+		}
 		for _, recovery := range n.RecoveryPolicies {
 			f.writeGrammarRecoveryDecl(level+1, recovery)
 		}
@@ -371,6 +377,49 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 			f.writeGrammarProduction(level+1, production)
 			index++
+		}
+	case *ast.GrammarEnvDecl:
+		header := "grammarenv " + n.Name
+		if n.OverType != nil {
+			header += " over " + formatTypeExpr(n.OverType)
+		}
+		if n.UsingType != nil {
+			header += " using " + formatTypeExpr(n.UsingType)
+		}
+		header += ":"
+		f.writeLine(level, header)
+		if n.ErrorType != nil {
+			f.writeLine(level+1, "error "+formatTypeExpr(n.ErrorType))
+		}
+		if n.CursorExpr != nil {
+			f.writeLine(level+1, "cursor "+formatExpr(n.CursorExpr))
+		}
+		if n.AllocExpr != nil {
+			f.writeLine(level+1, "alloc "+formatExpr(n.AllocExpr))
+		}
+		if n.TokenKindType != nil {
+			f.writeLine(level+1, "token_kind "+formatTypeExpr(n.TokenKindType))
+		}
+		if n.EOFExpr != nil {
+			f.writeLine(level+1, "eof "+formatExpr(n.EOFExpr))
+		}
+		if n.TokenKindField != "" {
+			f.writeLine(level+1, "token_field "+n.TokenKindField)
+		}
+		if n.CurrentFunc != "" {
+			f.writeLine(level+1, "current "+n.CurrentFunc)
+		}
+		if n.AdvanceFunc != "" {
+			f.writeLine(level+1, "advance "+n.AdvanceFunc)
+		}
+		if n.ExpectFunc != "" {
+			f.writeLine(level+1, "expect "+n.ExpectFunc)
+		}
+		if n.ExpectKindFunc != "" {
+			f.writeLine(level+1, "expect_kind "+n.ExpectKindFunc)
+		}
+		if n.RecordErrorFunc != "" {
+			f.writeLine(level+1, "record_error "+n.RecordErrorFunc)
 		}
 	case *ast.StructDecl:
 		f.writeAnnotations(level, n.Annotations)
@@ -578,6 +627,22 @@ func (f *formatter) writeGrammarRecoveryDecl(level int, recovery ast.GrammarReco
 	}
 	if recovery.Fallback != nil {
 		f.writeLine(level+1, "fallback "+formatExpr(recovery.Fallback))
+	}
+}
+
+func (f *formatter) writeGrammarTokenSetDecl(level int, tokenSet ast.GrammarTokenSetDecl) {
+	f.writeLine(level, "tokenset "+tokenSet.Name+":")
+	for _, term := range tokenSet.Terms {
+		f.writeLine(level+1, formatGrammarTokenSetItem(term))
+	}
+}
+
+func formatGrammarTokenSetItem(term ast.GrammarTerm) string {
+	switch n := term.(type) {
+	case *ast.GrammarTokenKindTerm:
+		return n.Kind
+	default:
+		return formatGrammarTerm(term)
 	}
 }
 
@@ -990,6 +1055,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return header + "(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarInfixTableTerm:
 		return "infix(" + n.TableName + ")"
+	case *ast.GrammarTokenSetRefTerm:
+		return n.Name
 	case *ast.GrammarBindTerm:
 		return formatGrammarBinding(n)
 	case *ast.GrammarAssignTerm:

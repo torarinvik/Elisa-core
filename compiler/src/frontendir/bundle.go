@@ -69,6 +69,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.UsingDecl{})
 		gob.Register(&ast.EnumDecl{})
 		gob.Register(&ast.GrammarDecl{})
+		gob.Register(&ast.GrammarEnvDecl{})
 		gob.Register(&ast.GlobalDecl{})
 		gob.Register(&ast.StructDecl{})
 		gob.Register(&ast.InterfaceDecl{})
@@ -146,6 +147,7 @@ func registerBundleTypes() {
 		// Grammar terms.
 		gob.Register(&ast.GrammarPassTerm{})
 		gob.Register(&ast.GrammarTokenTerm{})
+		gob.Register(&ast.GrammarTokenKindTerm{})
 		gob.Register(&ast.GrammarCallTerm{})
 		gob.Register(&ast.GrammarChoiceTerm{})
 		gob.Register(&ast.GrammarOptionalTerm{})
@@ -165,6 +167,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.GrammarSuffixTerm{})
 		gob.Register(&ast.GrammarPrecedenceTerm{})
 		gob.Register(&ast.GrammarInfixTableTerm{})
+		gob.Register(&ast.GrammarTokenSetRefTerm{})
 		gob.Register(&ast.GrammarBindTerm{})
 		gob.Register(&ast.GrammarAssignTerm{})
 		gob.Register(&ast.GrammarReturnTerm{})

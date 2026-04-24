@@ -144,6 +144,45 @@ func TestLowerDeclPreservesListUntilStopSetAsOrdinaryCall(t *testing.T) {
 	}
 }
 
+func TestLowerDeclExpandsGrammarTokenSets(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    token:
+        SEMICOLON ";"
+        END "end"
+    tokenset StatementSync:
+        SEMICOLON
+        END
+    tokenset StatementOrFileSync:
+        StatementSync
+        token(TokenKind.EOF)
+    recovery StatementRecovery:
+        message ParseMessageKey.ExpectedStatement
+        until StatementOrFileSync
+    statement() -> Pascal.Stmt recover StatementRecovery:
+        values = separated token(TokenKind.IDENT) by .SEMICOLON until(StatementOrFileSync)
+        return zeroed as Pascal.Stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.current_token().kind == TokenKind.SEMICOLON",
+		"state.current_token().kind == TokenKind.END",
+		"state.current_token().kind == TokenKind.EOF",
+		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclPreservesRepeatAndSeparatedAsOrdinaryCalls(t *testing.T) {
 	decl := parseGrammarTestDecl(t, `grammar PascalFrontend:
     block() -> darray[Pascal.Stmt]:
@@ -1015,6 +1054,52 @@ func TestLowerFileStatefulUsesConfiguredTokenEnvironment(t *testing.T) {
 	}
 	if strings.Contains(formatted, " TokenKind.") || strings.Contains(formatted, "(TokenKind.") || strings.Contains(formatted, "== TokenKind.") || strings.Contains(formatted, "!= TokenKind.") {
 		t.Fatalf("expected configured token environment lowering to avoid canonical TokenKind, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulAppliesGrammarEnvDefaults(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammarenv SMLGrammarEnv over SMLToken using SMLParserState:
+    cursor state
+    token_kind SMLTokenKind
+    eof SMLTokenKind.EOF
+    token_field tag
+    current peek_token
+    advance bump_token
+    expect expect_text
+    expect_kind expect_token
+    record_error note_error
+
+grammar SMLFrontend with SMLGrammarEnv:
+    expect_kind require_token
+    token:
+        IDENT
+        END "end"
+    expr() -> Pascal.Stmt recover(SMLParseMessageKey.ExpectedExpression, until(.END, .EOF)):
+        token = .IDENT
+        "raw"
+        return zeroed as Pascal.Stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if strings.Contains(formatted, "grammarenv SMLGrammarEnv") {
+		t.Fatalf("expected grammarenv declarations to be compile-time only in lowered output, got:\n%s", formatted)
+	}
+	for _, want := range []string{
+		"grammar SMLFrontend with SMLGrammarEnv:",
+		"def expr(state: mutable SMLParserState&) -> Pascal.Stmt",
+		"state.require_token(SMLTokenKind.IDENT)",
+		"state.expect_text(\"raw\")",
+		"state.peek_token().tag == SMLTokenKind.END",
+		"state.peek_token().tag != SMLTokenKind.EOF",
+		"state.bump_token()",
+		"state.note_error(SMLParseMessageKey.ExpectedExpression)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected grammarenv lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "state.expect_token(") {
+		t.Fatalf("expected local expect_kind header to override grammarenv default, got:\n%s", formatted)
 	}
 }
 

@@ -186,6 +186,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("grammar") {
 		return p.parseGrammarDecl()
 	}
+	if p.peekIdentText("grammarenv") {
+		return p.parseGrammarEnvDecl()
+	}
 	if p.peekIdentText("extend") {
 		return p.parseGrammarDecl()
 	}

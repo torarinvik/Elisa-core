@@ -69,10 +69,10 @@ func LowerFile(file *ast.File) *ast.File {
 }
 
 func lowerDeclList(decls []ast.Decl) []ast.Decl {
-	return lowerDeclListInScope(decls, grammarDeclScope(decls), structDeclScope(decls))
+	return lowerDeclListInScope(decls, grammarDeclScope(decls), grammarEnvDeclScope(decls), structDeclScope(decls))
 }
 
-func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.GrammarDecl, structScope map[string]*ast.StructDecl) []ast.Decl {
+func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl, structScope map[string]*ast.StructDecl) []ast.Decl {
 	if len(decls) == 0 {
 		return nil
 	}
@@ -90,9 +90,11 @@ func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.Grammar
 			if merged == nil {
 				merged = n
 			}
-			lowered = append(lowered, lowerGrammarDecls(merged, grammarScope, structScope)...)
+			lowered = append(lowered, lowerGrammarDecls(merged, grammarScope, envScope, structScope)...)
+		case *ast.GrammarEnvDecl:
+			continue
 		case *ast.NamespaceDecl:
-			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls), structDeclScope(n.Decls))}
+			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls), grammarEnvDeclScope(n.Decls), structDeclScope(n.Decls))}
 			lowered = append(lowered, cloned)
 		default:
 			lowered = append(lowered, decl)
@@ -131,6 +133,21 @@ func grammarDeclScope(decls []ast.Decl) map[string]*ast.GrammarDecl {
 	return scope
 }
 
+func grammarEnvDeclScope(decls []ast.Decl) map[string]*ast.GrammarEnvDecl {
+	if len(decls) == 0 {
+		return nil
+	}
+	scope := make(map[string]*ast.GrammarEnvDecl)
+	for _, decl := range decls {
+		envDecl, ok := decl.(*ast.GrammarEnvDecl)
+		if !ok || envDecl == nil || envDecl.Name == "" {
+			continue
+		}
+		scope[envDecl.Name] = envDecl
+	}
+	return scope
+}
+
 func cloneGrammarDecl(decl *ast.GrammarDecl) *ast.GrammarDecl {
 	if decl == nil {
 		return nil
@@ -142,9 +159,11 @@ func cloneGrammarDecl(decl *ast.GrammarDecl) *ast.GrammarDecl {
 	cloned.RegionParams = append([]string(nil), decl.RegionParams...)
 	cloned.PermissionParams = append([]string(nil), decl.PermissionParams...)
 	cloned.GenericParams = append([]ast.GenericParam(nil), decl.GenericParams...)
+	cloned.EnvType = decl.EnvType
 	cloned.Uses = append([]ast.TypeExpr(nil), decl.Uses...)
 	cloned.TokenAliases = append([]ast.GrammarTokenAliasDecl(nil), decl.TokenAliases...)
 	cloned.Channels = append([]ast.GrammarChannelDecl(nil), decl.Channels...)
+	cloned.TokenSets = append([]ast.GrammarTokenSetDecl(nil), decl.TokenSets...)
 	cloned.RecoveryPolicies = append([]ast.GrammarRecoveryDecl(nil), decl.RecoveryPolicies...)
 	cloned.InfixTables = append([]ast.GrammarInfixTableDecl(nil), decl.InfixTables...)
 	cloned.Productions = append([]ast.GrammarProductionDecl(nil), decl.Productions...)
@@ -179,6 +198,9 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	}
 	if len(merged.GenericParams) == 0 {
 		merged.GenericParams = append([]ast.GenericParam(nil), extra.GenericParams...)
+	}
+	if merged.EnvType == nil {
+		merged.EnvType = extra.EnvType
 	}
 	if merged.OverType == nil {
 		merged.OverType = extra.OverType
@@ -222,6 +244,7 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	}
 	merged.TokenAliases = append(merged.TokenAliases, extra.TokenAliases...)
 	merged.Channels = append(merged.Channels, extra.Channels...)
+	merged.TokenSets = append(merged.TokenSets, extra.TokenSets...)
 	merged.RecoveryPolicies = append(merged.RecoveryPolicies, extra.RecoveryPolicies...)
 	merged.InfixTables = append(merged.InfixTables, extra.InfixTables...)
 	merged.Productions = append(merged.Productions, extra.Productions...)
@@ -229,11 +252,11 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	return merged
 }
 
-func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, structScope map[string]*ast.StructDecl) []ast.Decl {
+func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl, structScope map[string]*ast.StructDecl) []ast.Decl {
 	if decl == nil {
 		return nil
 	}
-	normalizedDecl := normalizeGrammarDeclForLoweringInScope(decl, grammarScope)
+	normalizedDecl := normalizeGrammarDeclForLoweringInScope(decl, grammarScope, envScope)
 	if !grammarDeclIsStateful(normalizedDecl) {
 		public := LowerDecl(normalizedDecl)
 		out := make([]ast.Decl, 0, len(public))
@@ -249,7 +272,7 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 		rewrittenProductions = append(rewrittenProductions, rewritten)
 		helperProductions = append(helperProductions, helpers...)
 	}
-	productionMap := reachableGrammarProductionMap(normalizedDecl, grammarScope, rewrittenProductions, helperProductions)
+	productionMap := reachableGrammarProductionMap(normalizedDecl, grammarScope, envScope, rewrittenProductions, helperProductions)
 	out := make([]ast.Decl, 0, len(rewrittenProductions)*3+len(helperProductions))
 	for _, production := range rewrittenProductions {
 		receiver := grammarReceiverInfoForProduction(normalizedDecl, production)
@@ -306,7 +329,7 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 	return out
 }
 
-func reachableGrammarProductionMap(grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, localProductions []ast.GrammarProductionDecl, helperProductions []ast.GrammarProductionDecl) map[string]resolvedGrammarProduction {
+func reachableGrammarProductionMap(grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl, localProductions []ast.GrammarProductionDecl, helperProductions []ast.GrammarProductionDecl) map[string]resolvedGrammarProduction {
 	resolved := make(map[string]resolvedGrammarProduction, len(localProductions)+len(helperProductions))
 	for _, production := range localProductions {
 		resolved[production.Name] = resolvedGrammarProduction{GrammarName: grammarDecl.Name, Production: production, TryName: grammarTryFuncName(grammarDecl.Name, production.Name)}
@@ -315,11 +338,11 @@ func reachableGrammarProductionMap(grammarDecl *ast.GrammarDecl, grammarScope ma
 		resolved[production.Name] = resolvedGrammarProduction{GrammarName: grammarDecl.Name, Production: production, TryName: grammarTryFuncName(grammarDecl.Name, production.Name)}
 	}
 	seen := map[string]bool{grammarDecl.Name: true}
-	appendUsedGrammarProductions(resolved, grammarDecl, grammarScope, seen)
+	appendUsedGrammarProductions(resolved, grammarDecl, grammarScope, envScope, seen)
 	return resolved
 }
 
-func appendUsedGrammarProductions(resolved map[string]resolvedGrammarProduction, grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, seen map[string]bool) {
+func appendUsedGrammarProductions(resolved map[string]resolvedGrammarProduction, grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl, seen map[string]bool) {
 	if grammarDecl == nil || len(grammarDecl.Uses) == 0 || grammarScope == nil {
 		return
 	}
@@ -333,18 +356,18 @@ func appendUsedGrammarProductions(resolved map[string]resolvedGrammarProduction,
 			continue
 		}
 		seen[usedName] = true
-		normalizedUsed := normalizeGrammarDeclForLoweringInScope(usedDecl, grammarScope)
+		normalizedUsed := normalizeGrammarDeclForLoweringInScope(usedDecl, grammarScope, envScope)
 		for _, production := range normalizedUsed.Productions {
 			if _, exists := resolved[production.Name]; exists {
 				continue
 			}
 			resolved[production.Name] = resolvedGrammarProduction{GrammarName: normalizedUsed.Name, Production: production, TryName: grammarTryFuncName(normalizedUsed.Name, production.Name)}
 		}
-		appendUsedGrammarProductions(resolved, normalizedUsed, grammarScope, seen)
+		appendUsedGrammarProductions(resolved, normalizedUsed, grammarScope, envScope, seen)
 	}
 }
 
-func appendUsedGrammarSupportDecls(tokenAliases *[]ast.GrammarTokenAliasDecl, recoveryPolicies *[]ast.GrammarRecoveryDecl, infixTables *[]ast.GrammarInfixTableDecl, grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, seen map[string]bool) {
+func appendUsedGrammarSupportDecls(tokenAliases *[]ast.GrammarTokenAliasDecl, tokenSets *[]ast.GrammarTokenSetDecl, recoveryPolicies *[]ast.GrammarRecoveryDecl, infixTables *[]ast.GrammarInfixTableDecl, grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, seen map[string]bool) {
 	if grammarDecl == nil || len(grammarDecl.Uses) == 0 || grammarScope == nil {
 		return
 	}
@@ -358,8 +381,9 @@ func appendUsedGrammarSupportDecls(tokenAliases *[]ast.GrammarTokenAliasDecl, re
 			continue
 		}
 		seen[usedName] = true
-		appendUsedGrammarSupportDecls(tokenAliases, recoveryPolicies, infixTables, usedDecl, grammarScope, seen)
+		appendUsedGrammarSupportDecls(tokenAliases, tokenSets, recoveryPolicies, infixTables, usedDecl, grammarScope, seen)
 		*tokenAliases = append(*tokenAliases, usedDecl.TokenAliases...)
+		*tokenSets = append(*tokenSets, usedDecl.TokenSets...)
 		*recoveryPolicies = append(*recoveryPolicies, usedDecl.RecoveryPolicies...)
 		*infixTables = append(*infixTables, usedDecl.InfixTables...)
 	}
@@ -376,33 +400,46 @@ func grammarUseName(typ ast.TypeExpr) string {
 	}
 }
 
-func normalizeGrammarDeclForLowering(decl *ast.GrammarDecl) *ast.GrammarDecl {
-	return normalizeGrammarDeclForLoweringInScope(decl, nil)
+func grammarEnvName(typ ast.TypeExpr) string {
+	return grammarUseName(typ)
 }
 
-func normalizeGrammarDeclForLoweringInScope(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl) *ast.GrammarDecl {
+func normalizeGrammarDeclForLowering(decl *ast.GrammarDecl) *ast.GrammarDecl {
+	return normalizeGrammarDeclForLoweringInScope(decl, nil, nil)
+}
+
+func normalizeGrammarDeclForLoweringInScope(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl) *ast.GrammarDecl {
 	if decl == nil {
 		return nil
 	}
-	normalized := *decl
+	normalizedDecl := applyGrammarEnvDefaults(decl, envScope)
+	normalized := *normalizedDecl
 	normalized.TokenAliases = nil
+	normalized.TokenSets = nil
 	normalized.RecoveryPolicies = nil
 	normalized.InfixTables = nil
 	if len(decl.Uses) != 0 && grammarScope != nil {
 		seen := map[string]bool{decl.Name: true}
-		appendUsedGrammarSupportDecls(&normalized.TokenAliases, &normalized.RecoveryPolicies, &normalized.InfixTables, decl, grammarScope, seen)
+		appendUsedGrammarSupportDecls(&normalized.TokenAliases, &normalized.TokenSets, &normalized.RecoveryPolicies, &normalized.InfixTables, decl, grammarScope, seen)
 	}
 	normalized.TokenAliases = append(normalized.TokenAliases, decl.TokenAliases...)
+	normalized.TokenSets = append(normalized.TokenSets, decl.TokenSets...)
 	normalized.RecoveryPolicies = append(normalized.RecoveryPolicies, decl.RecoveryPolicies...)
 	normalized.InfixTables = append(normalized.InfixTables, decl.InfixTables...)
 	aliasByLiteral := grammarTokenAliasLiteralMap(normalized.TokenAliases)
+	normalized.TokenSets = rewriteGrammarTokenSetsTokenAliases(normalized.TokenSets, aliasByLiteral)
 	normalized.RecoveryPolicies = rewriteGrammarRecoveryPoliciesTokenAliases(normalized.RecoveryPolicies, aliasByLiteral)
 	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(normalized.InfixTables, aliasByLiteral)
+	tokenSets := grammarTokenSetMap(normalized.TokenSets)
+	normalized.TokenSets = resolveGrammarTokenSetsTokenSets(normalized.TokenSets, tokenSets)
+	tokenSets = grammarTokenSetMap(normalized.TokenSets)
+	normalized.RecoveryPolicies = resolveGrammarRecoveryPoliciesTokenSets(normalized.RecoveryPolicies, tokenSets)
 	recoveryPolicies := grammarRecoveryPolicyMap(normalized.RecoveryPolicies)
 	infixTables := grammarInfixTableMap(normalized.InfixTables)
 	normalized.Productions = make([]ast.GrammarProductionDecl, 0, len(decl.Productions))
 	for _, production := range decl.Productions {
 		rewritten := rewriteGrammarProductionTokenAliases(production, aliasByLiteral)
+		rewritten = resolveGrammarProductionTokenSets(rewritten, tokenSets)
 		rewritten = resolveGrammarProductionRecoveryPolicies(rewritten, recoveryPolicies)
 		rewritten = resolveGrammarProductionInfixTables(rewritten, infixTables)
 		normalized.Productions = append(normalized.Productions, rewritten)
@@ -414,6 +451,58 @@ func normalizeGrammarDeclForLoweringInScope(decl *ast.GrammarDecl, grammarScope 
 	}
 	normalized.Productions = finalProductions
 	return &normalized
+}
+
+func applyGrammarEnvDefaults(decl *ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl) *ast.GrammarDecl {
+	if decl == nil || decl.EnvType == nil || envScope == nil {
+		return decl
+	}
+	envName := grammarEnvName(decl.EnvType)
+	envDecl := envScope[envName]
+	if envDecl == nil {
+		return decl
+	}
+	applied := cloneGrammarDecl(decl)
+	if applied.OverType == nil {
+		applied.OverType = envDecl.OverType
+	}
+	if applied.UsingType == nil {
+		applied.UsingType = envDecl.UsingType
+	}
+	if applied.ErrorType == nil {
+		applied.ErrorType = envDecl.ErrorType
+	}
+	if applied.CursorExpr == nil {
+		applied.CursorExpr = envDecl.CursorExpr
+	}
+	if applied.AllocExpr == nil {
+		applied.AllocExpr = envDecl.AllocExpr
+	}
+	if applied.TokenKindType == nil {
+		applied.TokenKindType = envDecl.TokenKindType
+	}
+	if applied.EOFExpr == nil {
+		applied.EOFExpr = envDecl.EOFExpr
+	}
+	if applied.TokenKindField == "" {
+		applied.TokenKindField = envDecl.TokenKindField
+	}
+	if applied.CurrentFunc == "" {
+		applied.CurrentFunc = envDecl.CurrentFunc
+	}
+	if applied.AdvanceFunc == "" {
+		applied.AdvanceFunc = envDecl.AdvanceFunc
+	}
+	if applied.ExpectFunc == "" {
+		applied.ExpectFunc = envDecl.ExpectFunc
+	}
+	if applied.ExpectKindFunc == "" {
+		applied.ExpectKindFunc = envDecl.ExpectKindFunc
+	}
+	if applied.RecordErrorFunc == "" {
+		applied.RecordErrorFunc = envDecl.RecordErrorFunc
+	}
+	return applied
 }
 
 func grammarTokenAliasLiteralMap(aliases []ast.GrammarTokenAliasDecl) map[string]string {
@@ -478,6 +567,38 @@ func rewriteGrammarInfixTablesTokenAliases(tables []ast.GrammarInfixTableDecl, a
 	return rewritten
 }
 
+func rewriteGrammarTokenSetsTokenAliases(tokenSets []ast.GrammarTokenSetDecl, aliases map[string]string) []ast.GrammarTokenSetDecl {
+	if len(tokenSets) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
+	for _, tokenSet := range tokenSets {
+		rewritten = append(rewritten, ast.GrammarTokenSetDecl{
+			Position: tokenSet.Position,
+			Name:     tokenSet.Name,
+			Terms:    rewriteGrammarTermListTokenAliases(tokenSet.Terms, aliases),
+		})
+	}
+	return rewritten
+}
+
+func grammarTokenSetMap(tokenSets []ast.GrammarTokenSetDecl) map[string]ast.GrammarTokenSetDecl {
+	if len(tokenSets) == 0 {
+		return nil
+	}
+	resolved := make(map[string]ast.GrammarTokenSetDecl, len(tokenSets))
+	for _, tokenSet := range tokenSets {
+		if tokenSet.Name == "" {
+			continue
+		}
+		resolved[tokenSet.Name] = tokenSet
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
+}
+
 func grammarRecoveryPolicyMap(policies []ast.GrammarRecoveryDecl) map[string]ast.GrammarRecoveryDecl {
 	if len(policies) == 0 {
 		return nil
@@ -536,6 +657,196 @@ func resolveGrammarProductionInfixTables(production ast.GrammarProductionDecl, t
 	}
 	production.Terms = terms
 	return production
+}
+
+func resolveGrammarProductionTokenSets(production ast.GrammarProductionDecl, tokenSets map[string]ast.GrammarTokenSetDecl) ast.GrammarProductionDecl {
+	production.RecoverUntil = resolveGrammarTokenSetRefsInStopList(production.RecoverUntil, tokenSets)
+	if len(production.Terms) == 0 {
+		return production
+	}
+	terms := make([]ast.GrammarTerm, 0, len(production.Terms))
+	for _, term := range production.Terms {
+		terms = append(terms, resolveGrammarTermTokenSets(term, tokenSets))
+	}
+	production.Terms = terms
+	return production
+}
+
+func resolveGrammarRecoveryPoliciesTokenSets(policies []ast.GrammarRecoveryDecl, tokenSets map[string]ast.GrammarTokenSetDecl) []ast.GrammarRecoveryDecl {
+	if len(policies) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarRecoveryDecl, 0, len(policies))
+	for _, policy := range policies {
+		resolved = append(resolved, ast.GrammarRecoveryDecl{
+			Position: policy.Position,
+			Name:     policy.Name,
+			Message:  policy.Message,
+			Until:    resolveGrammarTokenSetRefsInStopList(policy.Until, tokenSets),
+			Fallback: policy.Fallback,
+		})
+	}
+	return resolved
+}
+
+func resolveGrammarTokenSetsTokenSets(tokenSets []ast.GrammarTokenSetDecl, setMap map[string]ast.GrammarTokenSetDecl) []ast.GrammarTokenSetDecl {
+	if len(tokenSets) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
+	for _, tokenSet := range tokenSets {
+		resolved = append(resolved, ast.GrammarTokenSetDecl{
+			Position: tokenSet.Position,
+			Name:     tokenSet.Name,
+			Terms:    resolveGrammarTokenSetRefsInStopList(tokenSet.Terms, setMap),
+		})
+	}
+	return resolved
+}
+
+func resolveGrammarTokenSetRefsInStopList(stops []ast.GrammarTerm, tokenSets map[string]ast.GrammarTokenSetDecl) []ast.GrammarTerm {
+	if len(stops) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarTerm, 0, len(stops))
+	for _, stop := range stops {
+		resolved = append(resolved, resolveGrammarTokenSetStop(stop, tokenSets, nil)...)
+	}
+	return resolved
+}
+
+func resolveGrammarTokenSetStop(stop ast.GrammarTerm, tokenSets map[string]ast.GrammarTokenSetDecl, seen map[string]bool) []ast.GrammarTerm {
+	ref, ok := stop.(*ast.GrammarTokenSetRefTerm)
+	if !ok || len(tokenSets) == 0 {
+		return []ast.GrammarTerm{stop}
+	}
+	tokenSet, ok := tokenSets[ref.Name]
+	if !ok {
+		return []ast.GrammarTerm{stop}
+	}
+	if seen == nil {
+		seen = make(map[string]bool)
+	}
+	if seen[ref.Name] {
+		return nil
+	}
+	seen[ref.Name] = true
+	resolved := make([]ast.GrammarTerm, 0, len(tokenSet.Terms))
+	for _, term := range tokenSet.Terms {
+		resolved = append(resolved, resolveGrammarTokenSetStop(term, tokenSets, seen)...)
+	}
+	delete(seen, ref.Name)
+	return resolved
+}
+
+func resolveGrammarTermTokenSets(term ast.GrammarTerm, tokenSets map[string]ast.GrammarTokenSetDecl) ast.GrammarTerm {
+	if term == nil {
+		return nil
+	}
+	switch n := term.(type) {
+	case *ast.GrammarTokenSetRefTerm:
+		terms := resolveGrammarTokenSetStop(n, tokenSets, nil)
+		if len(terms) == 1 && terms[0] == n {
+			return term
+		}
+		return &ast.GrammarChoiceTerm{Position: n.Position, Options: terms}
+	case *ast.GrammarBindTerm:
+		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
+	case *ast.GrammarAssignTerm:
+		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
+	case *ast.GrammarChoiceTerm:
+		return &ast.GrammarChoiceTerm{Position: n.Position, Options: resolveGrammarTermListTokenSets(n.Options, tokenSets)}
+	case *ast.GrammarOptionalTerm:
+		return &ast.GrammarOptionalTerm{Position: n.Position, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
+	case *ast.GrammarWhenTerm:
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: resolveGrammarTermTokenSets(n.Then, tokenSets), Else: resolveGrammarTermTokenSets(n.Else, tokenSets)}
+	case *ast.GrammarRecoverTerm:
+		return &ast.GrammarRecoverTerm{Position: n.Position, Term: resolveGrammarTermTokenSets(n.Term, tokenSets), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: resolveGrammarTokenSetRefsInStopList(n.RecoverUntil, tokenSets), RecoverValue: n.RecoverValue}
+	case *ast.GrammarRequiredTerm:
+		return &ast.GrammarRequiredTerm{Position: n.Position, Term: resolveGrammarTermTokenSets(n.Term, tokenSets), Message: n.Message}
+	case *ast.GrammarDelimitedTerm:
+		return &ast.GrammarDelimitedTerm{Position: n.Position, Open: resolveGrammarTermTokenSets(n.Open, tokenSets), Body: resolveGrammarTermTokenSets(n.Body, tokenSets), Close: resolveGrammarTermTokenSets(n.Close, tokenSets), Message: n.Message}
+	case *ast.GrammarSeqTerm:
+		return &ast.GrammarSeqTerm{Position: n.Position, Terms: resolveGrammarTermListTokenSets(n.Terms, tokenSets)}
+	case *ast.GrammarLookaheadTerm:
+		return &ast.GrammarLookaheadTerm{Position: n.Position, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
+	case *ast.GrammarConcatTerm:
+		return &ast.GrammarConcatTerm{Position: n.Position, Terms: resolveGrammarTermListTokenSets(n.Terms, tokenSets)}
+	case *ast.GrammarListTerm:
+		return &ast.GrammarListTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Separator: resolveGrammarTermTokenSets(n.Separator, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
+	case *ast.GrammarRepeatTerm:
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
+	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
+	case *ast.GrammarSeparatedTerm:
+		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Separator: resolveGrammarTermTokenSets(n.Separator, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
+	case *ast.GrammarSuffixTerm:
+		return &ast.GrammarSuffixTerm{Position: n.Position, LeftName: n.LeftName, Seed: resolveGrammarTermTokenSets(n.Seed, tokenSets), Arms: resolveGrammarPostfixArmsTokenSets(n.Arms, tokenSets)}
+	case *ast.GrammarPostfixTerm:
+		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: resolveGrammarTermTokenSets(n.Seed, tokenSets), Arms: resolveGrammarPostfixArmsTokenSets(n.Arms, tokenSets)}
+	case *ast.GrammarPrecedenceTerm:
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Assoc: n.Assoc, Result: n.Result, Levels: resolveGrammarPrecedenceLevelsTokenSets(n.Levels, tokenSets), LeftName: n.LeftName, Seed: resolveGrammarTermTokenSets(n.Seed, tokenSets), Arms: resolveGrammarPrecedenceArmsTokenSets(n.Arms, tokenSets)}
+	default:
+		return term
+	}
+}
+
+func resolveGrammarTermListTokenSets(terms []ast.GrammarTerm, tokenSets map[string]ast.GrammarTokenSetDecl) []ast.GrammarTerm {
+	if len(terms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarTerm, 0, len(terms))
+	for _, term := range terms {
+		resolved = append(resolved, resolveGrammarTermTokenSets(term, tokenSets))
+	}
+	return resolved
+}
+
+func resolveGrammarBindingsTokenSets(bindings []*ast.GrammarBindTerm, tokenSets map[string]ast.GrammarTokenSetDecl) []*ast.GrammarBindTerm {
+	if len(bindings) == 0 {
+		return nil
+	}
+	resolved := make([]*ast.GrammarBindTerm, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		resolved = append(resolved, &ast.GrammarBindTerm{Position: binding.Position, Name: binding.Name, Term: resolveGrammarTermTokenSets(binding.Term, tokenSets)})
+	}
+	return resolved
+}
+
+func resolveGrammarPostfixArmsTokenSets(arms []ast.GrammarPostfixArm, tokenSets map[string]ast.GrammarTokenSetDecl) []ast.GrammarPostfixArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPostfixArm, 0, len(arms))
+	for _, arm := range arms {
+		resolved = append(resolved, ast.GrammarPostfixArm{Position: arm.Position, OpName: arm.OpName, Op: resolveGrammarTermTokenSets(arm.Op, tokenSets), Bindings: resolveGrammarBindingsTokenSets(arm.Bindings, tokenSets), Value: arm.Value})
+	}
+	return resolved
+}
+
+func resolveGrammarPrecedenceArmsTokenSets(arms []ast.GrammarPrecedenceArm, tokenSets map[string]ast.GrammarTokenSetDecl) []ast.GrammarPrecedenceArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPrecedenceArm, 0, len(arms))
+	for _, arm := range arms {
+		resolved = append(resolved, ast.GrammarPrecedenceArm{Position: arm.Position, OpName: arm.OpName, Op: resolveGrammarTermTokenSets(arm.Op, tokenSets), Bindings: resolveGrammarBindingsTokenSets(arm.Bindings, tokenSets), Value: arm.Value})
+	}
+	return resolved
+}
+
+func resolveGrammarPrecedenceLevelsTokenSets(levels []ast.GrammarPrecedenceLevel, tokenSets map[string]ast.GrammarTokenSetDecl) []ast.GrammarPrecedenceLevel {
+	if len(levels) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPrecedenceLevel, 0, len(levels))
+	for _, level := range levels {
+		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Assoc: level.Assoc, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermTokenSets(level.Seed, tokenSets), Arms: resolveGrammarPrecedenceArmsTokenSets(level.Arms, tokenSets)})
+	}
+	return resolved
 }
 
 func resolveGrammarRecoveryPolicy(name string, message ast.Expr, until []ast.GrammarTerm, fallback ast.Expr, policies map[string]ast.GrammarRecoveryDecl) (ast.Expr, []ast.GrammarTerm, ast.Expr) {
@@ -3542,6 +3853,8 @@ func (ctx *statefulLowerContext) lowerListUntilStopExpr(pos lexer.Pos, tokenExpr
 		if kindExpr, ok := grammarTokenKindMatcher(n); ok {
 			return grammarTokenKindMatchExpr(pos, tokenExpr, ctx.tokenKindField, kindExpr)
 		}
+	case *ast.GrammarTokenSetRefTerm:
+		return nil
 	}
 	return nil
 }
@@ -3565,6 +3878,8 @@ func lowerGrammarUntilStopSurfaceExpr(stop ast.GrammarTerm) ast.Expr {
 			return lowerQualifiedCalleeExpr(n.Position, n.Name)
 		}
 		return &ast.CallExpr{Position: n.Position, Func: lowerQualifiedCalleeExpr(n.Position, n.Name), Args: append([]ast.Expr(nil), n.Args...)}
+	case *ast.GrammarTokenSetRefTerm:
+		return &ast.Ident{Position: n.Position, Name: n.Name}
 	default:
 		return lowerTermExpr(lowerContext{}, stop)
 	}
