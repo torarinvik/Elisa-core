@@ -400,6 +400,71 @@ func TestParseGrammarDeclAllowsUsesClauseAndPublicShorthandProduction(t *testing
 	}
 }
 
+func TestParseGrammarDeclAllowsNamedRecoveryPolicies(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	alloc scratch
+	recovery StatementRecovery:
+		message ParseMessageKey.ExpectedStatement
+		until .SEMICOLON, .END, token(TokenKind.EOF)
+		fallback zeroed as Pascal.Stmt
+	statement() -> Pascal.Stmt recover StatementRecovery:
+		stmt = state.statement_core() recover StatementRecovery
+		return stmt
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.RecoveryPolicies) != 1 {
+		t.Fatalf("expected one recovery policy, got %d", len(decl.RecoveryPolicies))
+	}
+	policy := decl.RecoveryPolicies[0]
+	if policy.Name != "StatementRecovery" {
+		t.Fatalf("expected policy name StatementRecovery, got %q", policy.Name)
+	}
+	if policy.Message == nil {
+		t.Fatal("expected recovery policy message")
+	}
+	if len(policy.Until) != 3 {
+		t.Fatalf("expected three recovery stop terms, got %d", len(policy.Until))
+	}
+	if policy.Fallback == nil {
+		t.Fatal("expected recovery policy fallback")
+	}
+	production := decl.Productions[0]
+	if production.RecoverPolicy != "StatementRecovery" {
+		t.Fatalf("expected production to use StatementRecovery, got %q", production.RecoverPolicy)
+	}
+	bind, ok := production.Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first production term to be binding, got %T", production.Terms[0])
+	}
+	recoverTerm, ok := bind.Term.(*ast.GrammarRecoverTerm)
+	if !ok {
+		t.Fatalf("expected binding inner term to be recover wrapper, got %T", bind.Term)
+	}
+	if recoverTerm.RecoverPolicy != "StatementRecovery" {
+		t.Fatalf("expected term to use StatementRecovery, got %q", recoverTerm.RecoverPolicy)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"recovery StatementRecovery:",
+		"message ParseMessageKey.ExpectedStatement",
+		"until .SEMICOLON, .END, token(TokenKind.EOF)",
+		"fallback zeroed as Pascal.Stmt",
+		"statement() -> Pascal.Stmt recover StatementRecovery:",
+		"stmt = state.statement_core() recover StatementRecovery",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseExtendGrammarDecl(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor state
@@ -1107,6 +1172,64 @@ func TestParseGrammarDeclAllowsPrecedenceTerm(t *testing.T) {
 		"\"+\" right = state.term() -> build_add(left, right)",
 		"\"-\" right = state.term() -> build_sub(left, right)",
 		"return left",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsInfixTableDeclAndUse(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    infix table ExprTable(additive):
+        atom = state.factor()
+        multiplicative(left = atom()):
+            op = choice("*", "/") right = atom() -> build_binary(op, left, right)
+        additive(left = multiplicative()):
+            op = choice("+", "-") right = multiplicative() -> build_binary(op, left, right)
+    expression(state: mutable ParserState&) -> Pascal.Expr:
+        result = infix(ExprTable)
+        return result
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.InfixTables) != 1 {
+		t.Fatalf("expected one infix table, got %d", len(decl.InfixTables))
+	}
+	table := decl.InfixTables[0]
+	if table.Name != "ExprTable" {
+		t.Fatalf("expected infix table name ExprTable, got %q", table.Name)
+	}
+	if table.Result != "additive" {
+		t.Fatalf("expected infix table result additive, got %q", table.Result)
+	}
+	if len(table.Levels) != 3 {
+		t.Fatalf("expected three infix table levels, got %d", len(table.Levels))
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first production term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	infixTerm, ok := bind.Term.(*ast.GrammarInfixTableTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be infix table use, got %T", bind.Term)
+	}
+	if infixTerm.TableName != "ExprTable" {
+		t.Fatalf("expected infix term to reference ExprTable, got %q", infixTerm.TableName)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"infix table ExprTable(additive):",
+		"atom = state.factor()",
+		"multiplicative(left = atom()):",
+		"op = choice(\"*\", \"/\") right = atom() -> build_binary(op, left, right)",
+		"additive(left = multiplicative()):",
+		"result = infix(ExprTable)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)

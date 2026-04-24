@@ -145,6 +145,8 @@ func cloneGrammarDecl(decl *ast.GrammarDecl) *ast.GrammarDecl {
 	cloned.Uses = append([]ast.TypeExpr(nil), decl.Uses...)
 	cloned.TokenAliases = append([]ast.GrammarTokenAliasDecl(nil), decl.TokenAliases...)
 	cloned.Channels = append([]ast.GrammarChannelDecl(nil), decl.Channels...)
+	cloned.RecoveryPolicies = append([]ast.GrammarRecoveryDecl(nil), decl.RecoveryPolicies...)
+	cloned.InfixTables = append([]ast.GrammarInfixTableDecl(nil), decl.InfixTables...)
 	cloned.Productions = append([]ast.GrammarProductionDecl(nil), decl.Productions...)
 	return &cloned
 }
@@ -220,6 +222,8 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	}
 	merged.TokenAliases = append(merged.TokenAliases, extra.TokenAliases...)
 	merged.Channels = append(merged.Channels, extra.Channels...)
+	merged.RecoveryPolicies = append(merged.RecoveryPolicies, extra.RecoveryPolicies...)
+	merged.InfixTables = append(merged.InfixTables, extra.InfixTables...)
 	merged.Productions = append(merged.Productions, extra.Productions...)
 	merged.Extend = false
 	return merged
@@ -358,9 +362,15 @@ func normalizeGrammarDeclForLowering(decl *ast.GrammarDecl) *ast.GrammarDecl {
 	normalized := *decl
 	normalized.TokenAliases = append([]ast.GrammarTokenAliasDecl(nil), decl.TokenAliases...)
 	aliasByLiteral := grammarTokenAliasLiteralMap(decl.TokenAliases)
+	normalized.RecoveryPolicies = rewriteGrammarRecoveryPoliciesTokenAliases(decl.RecoveryPolicies, aliasByLiteral)
+	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(decl.InfixTables, aliasByLiteral)
+	recoveryPolicies := grammarRecoveryPolicyMap(normalized.RecoveryPolicies)
+	infixTables := grammarInfixTableMap(normalized.InfixTables)
 	normalized.Productions = make([]ast.GrammarProductionDecl, 0, len(decl.Productions))
 	for _, production := range decl.Productions {
 		rewritten := rewriteGrammarProductionTokenAliases(production, aliasByLiteral)
+		rewritten = resolveGrammarProductionRecoveryPolicies(rewritten, recoveryPolicies)
+		rewritten = resolveGrammarProductionInfixTables(rewritten, infixTables)
 		normalized.Productions = append(normalized.Productions, rewritten)
 	}
 	normalized.Productions = expandAugmentedGrammarProductions(normalized.Productions)
@@ -399,6 +409,325 @@ func rewriteGrammarProductionTokenAliases(production ast.GrammarProductionDecl, 
 	}
 	production.Terms = terms
 	return production
+}
+
+func rewriteGrammarRecoveryPoliciesTokenAliases(policies []ast.GrammarRecoveryDecl, aliases map[string]string) []ast.GrammarRecoveryDecl {
+	if len(policies) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarRecoveryDecl, 0, len(policies))
+	for _, policy := range policies {
+		rewritten = append(rewritten, ast.GrammarRecoveryDecl{
+			Position: policy.Position,
+			Name:     policy.Name,
+			Message:  policy.Message,
+			Until:    rewriteGrammarTermListTokenAliases(policy.Until, aliases),
+			Fallback: policy.Fallback,
+		})
+	}
+	return rewritten
+}
+
+func rewriteGrammarInfixTablesTokenAliases(tables []ast.GrammarInfixTableDecl, aliases map[string]string) []ast.GrammarInfixTableDecl {
+	if len(tables) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarInfixTableDecl, 0, len(tables))
+	for _, table := range tables {
+		rewritten = append(rewritten, ast.GrammarInfixTableDecl{
+			Position: table.Position,
+			Name:     table.Name,
+			Result:   table.Result,
+			Levels:   rewriteGrammarPrecedenceLevelsTokenAliases(table.Levels, aliases),
+		})
+	}
+	return rewritten
+}
+
+func grammarRecoveryPolicyMap(policies []ast.GrammarRecoveryDecl) map[string]ast.GrammarRecoveryDecl {
+	if len(policies) == 0 {
+		return nil
+	}
+	resolved := make(map[string]ast.GrammarRecoveryDecl, len(policies))
+	for _, policy := range policies {
+		if policy.Name == "" {
+			continue
+		}
+		resolved[policy.Name] = policy
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
+}
+
+func grammarInfixTableMap(tables []ast.GrammarInfixTableDecl) map[string]ast.GrammarInfixTableDecl {
+	if len(tables) == 0 {
+		return nil
+	}
+	resolved := make(map[string]ast.GrammarInfixTableDecl, len(tables))
+	for _, table := range tables {
+		if table.Name == "" {
+			continue
+		}
+		resolved[table.Name] = table
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
+}
+
+func resolveGrammarProductionRecoveryPolicies(production ast.GrammarProductionDecl, policies map[string]ast.GrammarRecoveryDecl) ast.GrammarProductionDecl {
+	production.RecoverMsg, production.RecoverUntil, production.RecoverValue = resolveGrammarRecoveryPolicy(production.RecoverPolicy, production.RecoverMsg, production.RecoverUntil, production.RecoverValue, policies)
+	production.RecoverPolicy = ""
+	if len(production.Terms) == 0 {
+		return production
+	}
+	terms := make([]ast.GrammarTerm, 0, len(production.Terms))
+	for _, term := range production.Terms {
+		terms = append(terms, resolveGrammarTermRecoveryPolicies(term, policies))
+	}
+	production.Terms = terms
+	return production
+}
+
+func resolveGrammarProductionInfixTables(production ast.GrammarProductionDecl, tables map[string]ast.GrammarInfixTableDecl) ast.GrammarProductionDecl {
+	if len(production.Terms) == 0 {
+		return production
+	}
+	terms := make([]ast.GrammarTerm, 0, len(production.Terms))
+	for _, term := range production.Terms {
+		terms = append(terms, resolveGrammarTermInfixTables(term, tables))
+	}
+	production.Terms = terms
+	return production
+}
+
+func resolveGrammarRecoveryPolicy(name string, message ast.Expr, until []ast.GrammarTerm, fallback ast.Expr, policies map[string]ast.GrammarRecoveryDecl) (ast.Expr, []ast.GrammarTerm, ast.Expr) {
+	if name == "" || len(policies) == 0 {
+		return message, until, fallback
+	}
+	policy, ok := policies[name]
+	if !ok {
+		return message, until, fallback
+	}
+	return policy.Message, append([]ast.GrammarTerm(nil), policy.Until...), policy.Fallback
+}
+
+func resolveGrammarTermRecoveryPolicies(term ast.GrammarTerm, policies map[string]ast.GrammarRecoveryDecl) ast.GrammarTerm {
+	if term == nil {
+		return nil
+	}
+	switch n := term.(type) {
+	case *ast.GrammarBindTerm:
+		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies)}
+	case *ast.GrammarAssignTerm:
+		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies)}
+	case *ast.GrammarChoiceTerm:
+		return &ast.GrammarChoiceTerm{Position: n.Position, Options: resolveGrammarTermListRecoveryPolicies(n.Options, policies)}
+	case *ast.GrammarOptionalTerm:
+		return &ast.GrammarOptionalTerm{Position: n.Position, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies)}
+	case *ast.GrammarWhenTerm:
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: resolveGrammarTermRecoveryPolicies(n.Then, policies), Else: resolveGrammarTermRecoveryPolicies(n.Else, policies)}
+	case *ast.GrammarRecoverTerm:
+		message, until, fallback := resolveGrammarRecoveryPolicy(n.RecoverPolicy, n.RecoverMsg, n.RecoverUntil, n.RecoverValue, policies)
+		return &ast.GrammarRecoverTerm{Position: n.Position, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies), RecoverMsg: message, RecoverUntil: until, RecoverValue: fallback}
+	case *ast.GrammarRequiredTerm:
+		return &ast.GrammarRequiredTerm{Position: n.Position, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies), Message: n.Message}
+	case *ast.GrammarDelimitedTerm:
+		return &ast.GrammarDelimitedTerm{Position: n.Position, Open: resolveGrammarTermRecoveryPolicies(n.Open, policies), Body: resolveGrammarTermRecoveryPolicies(n.Body, policies), Close: resolveGrammarTermRecoveryPolicies(n.Close, policies), Message: n.Message}
+	case *ast.GrammarSeqTerm:
+		return &ast.GrammarSeqTerm{Position: n.Position, Terms: resolveGrammarTermListRecoveryPolicies(n.Terms, policies)}
+	case *ast.GrammarLookaheadTerm:
+		return &ast.GrammarLookaheadTerm{Position: n.Position, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies)}
+	case *ast.GrammarConcatTerm:
+		return &ast.GrammarConcatTerm{Position: n.Position, Terms: resolveGrammarTermListRecoveryPolicies(n.Terms, policies)}
+	case *ast.GrammarListTerm:
+		return &ast.GrammarListTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Separator: resolveGrammarTermRecoveryPolicies(n.Separator, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
+	case *ast.GrammarRepeatTerm:
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
+	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
+	case *ast.GrammarSeparatedTerm:
+		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Separator: resolveGrammarTermRecoveryPolicies(n.Separator, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
+	case *ast.GrammarSuffixTerm:
+		return &ast.GrammarSuffixTerm{Position: n.Position, LeftName: n.LeftName, Seed: resolveGrammarTermRecoveryPolicies(n.Seed, policies), Arms: resolveGrammarPostfixArmsRecoveryPolicies(n.Arms, policies)}
+	case *ast.GrammarPostfixTerm:
+		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: resolveGrammarTermRecoveryPolicies(n.Seed, policies), Arms: resolveGrammarPostfixArmsRecoveryPolicies(n.Arms, policies)}
+	case *ast.GrammarPrecedenceTerm:
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Result: n.Result, Levels: resolveGrammarPrecedenceLevelsRecoveryPolicies(n.Levels, policies), LeftName: n.LeftName, Seed: resolveGrammarTermRecoveryPolicies(n.Seed, policies), Arms: resolveGrammarPrecedenceArmsRecoveryPolicies(n.Arms, policies)}
+	default:
+		return term
+	}
+}
+
+func resolveGrammarTermInfixTables(term ast.GrammarTerm, tables map[string]ast.GrammarInfixTableDecl) ast.GrammarTerm {
+	if term == nil {
+		return nil
+	}
+	switch n := term.(type) {
+	case *ast.GrammarBindTerm:
+		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermInfixTables(n.Term, tables)}
+	case *ast.GrammarAssignTerm:
+		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermInfixTables(n.Term, tables)}
+	case *ast.GrammarChoiceTerm:
+		return &ast.GrammarChoiceTerm{Position: n.Position, Options: resolveGrammarTermListInfixTables(n.Options, tables)}
+	case *ast.GrammarOptionalTerm:
+		return &ast.GrammarOptionalTerm{Position: n.Position, Term: resolveGrammarTermInfixTables(n.Term, tables)}
+	case *ast.GrammarWhenTerm:
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: resolveGrammarTermInfixTables(n.Then, tables), Else: resolveGrammarTermInfixTables(n.Else, tables)}
+	case *ast.GrammarRecoverTerm:
+		return &ast.GrammarRecoverTerm{Position: n.Position, Term: resolveGrammarTermInfixTables(n.Term, tables), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: resolveGrammarTermListInfixTables(n.RecoverUntil, tables), RecoverValue: n.RecoverValue}
+	case *ast.GrammarRequiredTerm:
+		return &ast.GrammarRequiredTerm{Position: n.Position, Term: resolveGrammarTermInfixTables(n.Term, tables), Message: n.Message}
+	case *ast.GrammarDelimitedTerm:
+		return &ast.GrammarDelimitedTerm{Position: n.Position, Open: resolveGrammarTermInfixTables(n.Open, tables), Body: resolveGrammarTermInfixTables(n.Body, tables), Close: resolveGrammarTermInfixTables(n.Close, tables), Message: n.Message}
+	case *ast.GrammarSeqTerm:
+		return &ast.GrammarSeqTerm{Position: n.Position, Terms: resolveGrammarTermListInfixTables(n.Terms, tables)}
+	case *ast.GrammarLookaheadTerm:
+		return &ast.GrammarLookaheadTerm{Position: n.Position, Term: resolveGrammarTermInfixTables(n.Term, tables)}
+	case *ast.GrammarConcatTerm:
+		return &ast.GrammarConcatTerm{Position: n.Position, Terms: resolveGrammarTermListInfixTables(n.Terms, tables)}
+	case *ast.GrammarListTerm:
+		return &ast.GrammarListTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Separator: resolveGrammarTermInfixTables(n.Separator, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
+	case *ast.GrammarRepeatTerm:
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
+	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
+	case *ast.GrammarSeparatedTerm:
+		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Separator: resolveGrammarTermInfixTables(n.Separator, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
+	case *ast.GrammarSuffixTerm:
+		return &ast.GrammarSuffixTerm{Position: n.Position, LeftName: n.LeftName, Seed: resolveGrammarTermInfixTables(n.Seed, tables), Arms: resolveGrammarPostfixArmsInfixTables(n.Arms, tables)}
+	case *ast.GrammarPostfixTerm:
+		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: resolveGrammarTermInfixTables(n.Seed, tables), Arms: resolveGrammarPostfixArmsInfixTables(n.Arms, tables)}
+	case *ast.GrammarPrecedenceTerm:
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Result: n.Result, Levels: resolveGrammarPrecedenceLevelsInfixTables(n.Levels, tables), LeftName: n.LeftName, Seed: resolveGrammarTermInfixTables(n.Seed, tables), Arms: resolveGrammarPrecedenceArmsInfixTables(n.Arms, tables)}
+	case *ast.GrammarInfixTableTerm:
+		table, ok := tables[n.TableName]
+		if !ok {
+			return n
+		}
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Result: table.Result, Levels: resolveGrammarPrecedenceLevelsInfixTables(table.Levels, tables)}
+	default:
+		return term
+	}
+}
+
+func resolveGrammarTermListInfixTables(terms []ast.GrammarTerm, tables map[string]ast.GrammarInfixTableDecl) []ast.GrammarTerm {
+	if len(terms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarTerm, 0, len(terms))
+	for _, term := range terms {
+		resolved = append(resolved, resolveGrammarTermInfixTables(term, tables))
+	}
+	return resolved
+}
+
+func resolveGrammarBindingsInfixTables(bindings []*ast.GrammarBindTerm, tables map[string]ast.GrammarInfixTableDecl) []*ast.GrammarBindTerm {
+	if len(bindings) == 0 {
+		return nil
+	}
+	resolved := make([]*ast.GrammarBindTerm, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		resolved = append(resolved, &ast.GrammarBindTerm{Position: binding.Position, Name: binding.Name, Term: resolveGrammarTermInfixTables(binding.Term, tables)})
+	}
+	return resolved
+}
+
+func resolveGrammarPostfixArmsInfixTables(arms []ast.GrammarPostfixArm, tables map[string]ast.GrammarInfixTableDecl) []ast.GrammarPostfixArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPostfixArm, 0, len(arms))
+	for _, arm := range arms {
+		resolved = append(resolved, ast.GrammarPostfixArm{Position: arm.Position, OpName: arm.OpName, Op: resolveGrammarTermInfixTables(arm.Op, tables), Bindings: resolveGrammarBindingsInfixTables(arm.Bindings, tables), Value: arm.Value})
+	}
+	return resolved
+}
+
+func resolveGrammarPrecedenceArmsInfixTables(arms []ast.GrammarPrecedenceArm, tables map[string]ast.GrammarInfixTableDecl) []ast.GrammarPrecedenceArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPrecedenceArm, 0, len(arms))
+	for _, arm := range arms {
+		resolved = append(resolved, ast.GrammarPrecedenceArm{Position: arm.Position, OpName: arm.OpName, Op: resolveGrammarTermInfixTables(arm.Op, tables), Bindings: resolveGrammarBindingsInfixTables(arm.Bindings, tables), Value: arm.Value})
+	}
+	return resolved
+}
+
+func resolveGrammarPrecedenceLevelsInfixTables(levels []ast.GrammarPrecedenceLevel, tables map[string]ast.GrammarInfixTableDecl) []ast.GrammarPrecedenceLevel {
+	if len(levels) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPrecedenceLevel, 0, len(levels))
+	for _, level := range levels {
+		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermInfixTables(level.Seed, tables), Arms: resolveGrammarPrecedenceArmsInfixTables(level.Arms, tables)})
+	}
+	return resolved
+}
+
+func resolveGrammarTermListRecoveryPolicies(terms []ast.GrammarTerm, policies map[string]ast.GrammarRecoveryDecl) []ast.GrammarTerm {
+	if len(terms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarTerm, 0, len(terms))
+	for _, term := range terms {
+		resolved = append(resolved, resolveGrammarTermRecoveryPolicies(term, policies))
+	}
+	return resolved
+}
+
+func resolveGrammarBindingsRecoveryPolicies(bindings []*ast.GrammarBindTerm, policies map[string]ast.GrammarRecoveryDecl) []*ast.GrammarBindTerm {
+	if len(bindings) == 0 {
+		return nil
+	}
+	resolved := make([]*ast.GrammarBindTerm, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		resolved = append(resolved, &ast.GrammarBindTerm{Position: binding.Position, Name: binding.Name, Term: resolveGrammarTermRecoveryPolicies(binding.Term, policies)})
+	}
+	return resolved
+}
+
+func resolveGrammarPostfixArmsRecoveryPolicies(arms []ast.GrammarPostfixArm, policies map[string]ast.GrammarRecoveryDecl) []ast.GrammarPostfixArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPostfixArm, 0, len(arms))
+	for _, arm := range arms {
+		resolved = append(resolved, ast.GrammarPostfixArm{Position: arm.Position, OpName: arm.OpName, Op: resolveGrammarTermRecoveryPolicies(arm.Op, policies), Bindings: resolveGrammarBindingsRecoveryPolicies(arm.Bindings, policies), Value: arm.Value})
+	}
+	return resolved
+}
+
+func resolveGrammarPrecedenceArmsRecoveryPolicies(arms []ast.GrammarPrecedenceArm, policies map[string]ast.GrammarRecoveryDecl) []ast.GrammarPrecedenceArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPrecedenceArm, 0, len(arms))
+	for _, arm := range arms {
+		resolved = append(resolved, ast.GrammarPrecedenceArm{Position: arm.Position, OpName: arm.OpName, Op: resolveGrammarTermRecoveryPolicies(arm.Op, policies), Bindings: resolveGrammarBindingsRecoveryPolicies(arm.Bindings, policies), Value: arm.Value})
+	}
+	return resolved
+}
+
+func resolveGrammarPrecedenceLevelsRecoveryPolicies(levels []ast.GrammarPrecedenceLevel, policies map[string]ast.GrammarRecoveryDecl) []ast.GrammarPrecedenceLevel {
+	if len(levels) == 0 {
+		return nil
+	}
+	resolved := make([]ast.GrammarPrecedenceLevel, 0, len(levels))
+	for _, level := range levels {
+		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermRecoveryPolicies(level.Seed, policies), Arms: resolveGrammarPrecedenceArmsRecoveryPolicies(level.Arms, policies)})
+	}
+	return resolved
 }
 
 func rewriteGrammarTermListTokenAliases(terms []ast.GrammarTerm, aliases map[string]string) []ast.GrammarTerm {
@@ -480,7 +809,7 @@ func rewriteGrammarTermTokenAliases(term ast.GrammarTerm, aliases map[string]str
 	case *ast.GrammarWhenTerm:
 		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: rewriteGrammarTermTokenAliases(n.Then, aliases), Else: rewriteGrammarTermTokenAliases(n.Else, aliases)}
 	case *ast.GrammarRecoverTerm:
-		return &ast.GrammarRecoverTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases), RecoverMsg: n.RecoverMsg, RecoverUntil: rewriteGrammarTermListTokenAliases(n.RecoverUntil, aliases), RecoverValue: n.RecoverValue}
+		return &ast.GrammarRecoverTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: rewriteGrammarTermListTokenAliases(n.RecoverUntil, aliases), RecoverValue: n.RecoverValue}
 	case *ast.GrammarRequiredTerm:
 		return &ast.GrammarRequiredTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases), Message: n.Message}
 	case *ast.GrammarDelimitedTerm:

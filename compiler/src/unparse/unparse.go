@@ -343,6 +343,12 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 			f.writeLine(level+1, line)
 		}
+		for _, recovery := range n.RecoveryPolicies {
+			f.writeGrammarRecoveryDecl(level+1, recovery)
+		}
+		for _, table := range n.InfixTables {
+			f.writeGrammarInfixTableDecl(level+1, table)
+		}
 		for index := 0; index < len(n.Productions); {
 			production := n.Productions[index]
 			if !production.Append {
@@ -473,6 +479,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	}
 }
 
+func (f *formatter) writeGrammarInfixTableDecl(level int, table ast.GrammarInfixTableDecl) {
+	f.writeLine(level, "infix table "+table.Name+"("+table.Result+"):")
+	for _, levelDecl := range table.Levels {
+		f.writeNamedPrecedenceLevel(level+1, levelDecl)
+	}
+}
+
 func (f *formatter) writeTreeMember(level int, member ast.TreeMemberDecl) {
 	if member == nil {
 		return
@@ -519,7 +532,9 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 	if production.ReturnType != nil {
 		header += " -> " + formatTypeExpr(production.ReturnType)
 	}
-	if production.RecoverMsg != nil && len(production.RecoverUntil) != 0 {
+	if production.RecoverPolicy != "" {
+		header += formatGrammarRecoverPolicyUse(production.RecoverPolicy)
+	} else if production.RecoverMsg != nil && len(production.RecoverUntil) != 0 {
 		header += formatGrammarRecoverClause(production.RecoverMsg, production.RecoverUntil, production.RecoverValue)
 	}
 	header += ":"
@@ -549,6 +564,23 @@ func (f *formatter) writeGroupedGrammarAppendProductions(level int, productions 
 	}
 }
 
+func (f *formatter) writeGrammarRecoveryDecl(level int, recovery ast.GrammarRecoveryDecl) {
+	f.writeLine(level, "recovery "+recovery.Name+":")
+	if recovery.Message != nil {
+		f.writeLine(level+1, "message "+formatExpr(recovery.Message))
+	}
+	if len(recovery.Until) != 0 {
+		untilParts := make([]string, 0, len(recovery.Until))
+		for _, stop := range recovery.Until {
+			untilParts = append(untilParts, formatGrammarTerm(stop))
+		}
+		f.writeLine(level+1, "until "+strings.Join(untilParts, ", "))
+	}
+	if recovery.Fallback != nil {
+		f.writeLine(level+1, "fallback "+formatExpr(recovery.Fallback))
+	}
+}
+
 func formatGrammarRecoverClause(message ast.Expr, until []ast.GrammarTerm, fallback ast.Expr) string {
 	untilParts := make([]string, 0, len(until))
 	for _, stop := range until {
@@ -559,6 +591,10 @@ func formatGrammarRecoverClause(message ast.Expr, until []ast.GrammarTerm, fallb
 		text += ", " + formatExpr(fallback)
 	}
 	return text + ")"
+}
+
+func formatGrammarRecoverPolicyUse(name string) string {
+	return " recover " + name
 }
 
 func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
@@ -831,6 +867,9 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		}
 		return strings.Join(parts, " + ")
 	case *ast.GrammarRecoverTerm:
+		if n.RecoverPolicy != "" {
+			return formatGrammarTerm(n.Term) + formatGrammarRecoverPolicyUse(n.RecoverPolicy)
+		}
 		return formatGrammarTerm(n.Term) + formatGrammarRecoverClause(n.RecoverMsg, n.RecoverUntil, n.RecoverValue)
 	case *ast.GrammarGuardTerm:
 		return "guard(" + formatExpr(n.Cond) + ")"
@@ -872,6 +911,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			return "precedence(" + n.Result + "):"
 		}
 		return "precedence(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
+	case *ast.GrammarInfixTableTerm:
+		return "infix(" + n.TableName + ")"
 	case *ast.GrammarBindTerm:
 		return formatGrammarBinding(n)
 	case *ast.GrammarAssignTerm:

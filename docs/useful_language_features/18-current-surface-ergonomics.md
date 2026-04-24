@@ -4,6 +4,33 @@ This note documents implemented source-language features that landed after many 
 
 Unlike several of the earlier files here, this is not a forward-looking proposal. It is a practical reference for syntax the current compiler accepts today.
 
+## Grammar recovery policies
+
+Grammars can name reusable recovery policies once and apply them on productions or individual terms.
+
+```context
+grammar PascalStmtGrammar over Token using ParserState:
+    cursor state
+
+    recovery StatementRecovery:
+        message ParseMessageKey.ExpectedStatement
+        until .SEMICOLON, .END, token(TokenKind.EOF)
+        fallback zeroed as Pascal.Stmt
+
+    statement() -> Pascal.Stmt recover StatementRecovery:
+        stmt = statement_core() recover StatementRecovery
+        return stmt
+```
+
+Current rules:
+
+- `recovery Name:` declares a grammar-scoped recovery policy
+- `message ...` sets the diagnostic reported through the grammar's configured `record_error` hook
+- `until ...` uses the same stop-term surface as inline `until(...)`, but block declarations accept the readable comma-separated form without parentheses
+- `fallback ...` is optional and reuses ordinary expression syntax
+- `recover Name` works anywhere inline `recover(...)` already works, including production headers and term suffixes
+- lowering resolves named policies back into the existing inline recovery machinery, so they are purely compile-time grammar sugar
+
 ## Default arguments, named calls, and `..` forwarding
 
 Default values are supported on trailing parameters of ordinary functions and `extern` declarations.
@@ -284,7 +311,7 @@ Current rules:
 
 ## Grammar DSL for parsers and tree frontends
 
-The current grammar surface is aimed at handwritten recursive-descent frontends that still want a compact parser DSL for the repetitive parts: tokens, recovery, lists, precedence, postfix/suffix, and prefix forms.
+The current grammar surface is aimed at handwritten recursive-descent frontends that still want a compact parser DSL for the repetitive parts: tokens, recovery, lists, infix tables, precedence, postfix/suffix, and prefix forms.
 
 ```context
 grammar PascalExprGrammar over Token using ParserState:
@@ -313,19 +340,20 @@ grammar PascalExprGrammar over Token using ParserState:
         GTEQ ">="
     channel span: Span
     channel node
+    infix table ExprTable(additive):
+        atom = choice(
+            prefix(.PLUS, .MINUS, .NOT) atom() -> make_unary_expr(op, operand),
+            delimited(.LPAREN, expression(), .RPAREN, ParseMessageKey.ExpectedRightParen),
+            name_atom(),
+            integer_atom(),
+            string_atom()
+        )
+        multiplicative(left = atom()):
+            op = .STAR | .SLASH | .DIV | .MOD | .AND right = atom() -> make_binary_expr(left, op, right)
+        additive(left = multiplicative()):
+            op = .PLUS | .MINUS | .OR right = multiplicative() -> make_binary_expr(left, op, right)
     expression() -> Pascal.Expr:
-        result = precedence(additive):
-            atom = choice(
-                prefix(.PLUS, .MINUS, .NOT) atom() -> make_unary_expr(alloc, op, operand),
-                delimited(.LPAREN, expression(), .RPAREN, ParseMessageKey.ExpectedRightParen),
-                name_atom(),
-                integer_atom(),
-                string_atom()
-            )
-            multiplicative(left = atom()):
-                op = .STAR | .SLASH | .DIV | .MOD | .AND right = atom() -> make_binary_expr(alloc, left, op, right)
-            additive(left = multiplicative()):
-                op = .PLUS | .MINUS | .OR right = multiplicative() -> make_binary_expr(alloc, left, op, right)
+        result = infix(ExprTable)
         return result
     name_atom() -> Pascal.Expr:
         seq:
@@ -361,6 +389,7 @@ Current header declarations:
 - grouped token entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal such as `LPAREN "("`
 - `channel name` declares a generated mutable channel with inferred/default behavior
 - `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
+- `infix table Name(result):` hoists a reusable named-precedence ladder into grammar header scope so productions can say `result = infix(Name)` instead of inlining every level
 - if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from channel names
 - `expr[T](value)` gives an inline grammar expression term an explicit result type, which lets `seq`, `separated`, and related list combinators keep transformed element types without introducing a one-off helper production
 - `maplist[T](source, item, value)` maps an existing list expression into a `darray[T]` without introducing a helper function

@@ -123,6 +123,8 @@ type GrammarDecl struct {
 	RecordErrorFunc  string
 	TokenAliases     []GrammarTokenAliasDecl
 	Channels         []GrammarChannelDecl
+	RecoveryPolicies []GrammarRecoveryDecl
+	InfixTables      []GrammarInfixTableDecl
 	Productions      []GrammarProductionDecl
 }
 
@@ -140,18 +142,34 @@ type GrammarChannelDecl struct {
 	Default  Expr
 }
 
+type GrammarRecoveryDecl struct {
+	Position lexer.Pos
+	Name     string
+	Message  Expr
+	Until    []GrammarTerm
+	Fallback Expr
+}
+
+type GrammarInfixTableDecl struct {
+	Position lexer.Pos
+	Name     string
+	Result   string
+	Levels   []GrammarPrecedenceLevel
+}
+
 type GrammarProductionDecl struct {
-	Position     lexer.Pos
-	Public       bool
-	Append       bool
-	Name         string
-	HasParamList bool
-	Params       []ParamDecl
-	ReturnType   TypeExpr
-	RecoverMsg   Expr
-	RecoverUntil []GrammarTerm
-	RecoverValue Expr
-	Terms        []GrammarTerm
+	Position      lexer.Pos
+	Public        bool
+	Append        bool
+	Name          string
+	HasParamList  bool
+	Params        []ParamDecl
+	ReturnType    TypeExpr
+	RecoverPolicy string
+	RecoverMsg    Expr
+	RecoverUntil  []GrammarTerm
+	RecoverValue  Expr
+	Terms         []GrammarTerm
 }
 
 type GrammarTerm interface {
@@ -198,11 +216,12 @@ type GrammarWhenTerm struct {
 }
 
 type GrammarRecoverTerm struct {
-	Position     lexer.Pos
-	Term         GrammarTerm
-	RecoverMsg   Expr
-	RecoverUntil []GrammarTerm
-	RecoverValue Expr
+	Position      lexer.Pos
+	Term          GrammarTerm
+	RecoverPolicy string
+	RecoverMsg    Expr
+	RecoverUntil  []GrammarTerm
+	RecoverValue  Expr
 }
 
 type GrammarRequiredTerm struct {
@@ -327,6 +346,11 @@ type GrammarPrecedenceTerm struct {
 	LeftName string
 	Seed     GrammarTerm
 	Arms     []GrammarPrecedenceArm
+}
+
+type GrammarInfixTableTerm struct {
+	Position  lexer.Pos
+	TableName string
 }
 
 type GrammarPostfixTerm struct {
@@ -1687,6 +1711,9 @@ func (n *GrammarPostfixTerm) Pos() lexer.Pos {
 func (n *GrammarPrecedenceTerm) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *GrammarInfixTableTerm) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GrammarBindTerm) Pos() lexer.Pos { return n.Position }
 func (n *GrammarAssignTerm) Pos() lexer.Pos {
 	return n.Position
@@ -1888,6 +1915,7 @@ func (*GrammarSeparatedTerm) nodeTag()      {}
 func (*GrammarSuffixTerm) nodeTag()         {}
 func (*GrammarPostfixTerm) nodeTag()        {}
 func (*GrammarPrecedenceTerm) nodeTag()     {}
+func (*GrammarInfixTableTerm) nodeTag()     {}
 func (*GrammarBindTerm) nodeTag()           {}
 func (*GrammarAssignTerm) nodeTag()         {}
 func (*GrammarReturnTerm) nodeTag()         {}
@@ -2078,6 +2106,7 @@ func (*GrammarSeparatedTerm) grammarTermTag()  {}
 func (*GrammarSuffixTerm) grammarTermTag()     {}
 func (*GrammarPostfixTerm) grammarTermTag()    {}
 func (*GrammarPrecedenceTerm) grammarTermTag() {}
+func (*GrammarInfixTableTerm) grammarTermTag() {}
 func (*GrammarBindTerm) grammarTermTag()       {}
 func (*GrammarAssignTerm) grammarTermTag()     {}
 func (*GrammarReturnTerm) grammarTermTag()     {}

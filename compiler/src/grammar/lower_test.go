@@ -468,6 +468,30 @@ func TestLowerFileStatefulProductionWithRecoverClauseRecordsAndSynchronizes(t *t
 	}
 }
 
+func TestLowerFileStatefulProductionWithNamedRecoverPolicyRecordsAndSynchronizes(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    recovery StatementRecovery:
+        message ParseMessageKey.ExpectedStatement
+        until ";", "end", token(TokenKind.EOF)
+    statement(state: mutable ParserState&) -> Pascal.Stmt recover StatementRecovery:
+        stmt = choice(state.assignment(), state.compound_statement())
+        return stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
+		"state.current_token().kind == token_kind_for_text(\";\")",
+		"state.current_token().kind == token_kind_for_text(\"end\")",
+		"state.current_token().kind != TokenKind.EOF",
+		"state.advance_token()",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered named recover production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulProductionWithRecoverFallbackReturnsFallbackValue(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt):
@@ -527,6 +551,32 @@ func TestLowerFileStatefulTermLevelRecoverClauseRecordsAndContinues(t *testing.T
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered term-level recover production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulTermLevelNamedRecoverPolicyRecordsAndContinues(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	    cursor state
+	    recovery StatementRecovery:
+	        message ParseMessageKey.ExpectedStatement
+	        until ";", token(TokenKind.EOF)
+	        fallback zeroed as Token
+	    statement() -> Token:
+	        stmt = token(TokenKind.IDENT) recover StatementRecovery
+	        return stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
+		"state.current_token().kind == token_kind_for_text(\";\")",
+		"state.advance_token()",
+		"zeroed as Token",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered named term-level recover production to contain %q, got:\n%s", want, formatted)
 		}
 	}
 }
@@ -630,6 +680,36 @@ func TestLowerFileStatefulPrecedenceTermBuildsLoopAndAssignsLeft(t *testing.T) {
 	minusIndex := strings.Index(formatted, "state.expect(\"-\")")
 	if plusIndex < 0 || minusIndex < 0 || plusIndex >= minusIndex {
 		t.Fatalf("expected precedence arms to lower in declaration order, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulInfixTableUseBuildsLoopAndAssignsLeft(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    infix table ExprTable(additive):
+        atom = token(TokenKind.IDENT)
+        multiplicative(left = atom()):
+            op = choice("*", "/") right = atom() -> right
+        additive(left = multiplicative()):
+            op = choice("+", "-") right = multiplicative() -> right
+    expression(state: mutable ParserState&) -> Token:
+        result = infix(ExprTable)
+        return result
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"while (not __grammar_precedence_stop___grammar_precedence_PascalFrontend_expression_1_additive",
+		"state.expect(\"*\")",
+		"state.expect(\"+\")",
+		"state.expect_kind(TokenKind.IDENT)",
+		"result = __grammar_value_expression_PascalFrontend_",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered infix table production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if !strings.Contains(formatted, "def __grammar_try__PascalFrontend____grammar_precedence_PascalFrontend_expression_1_additive") {
+		t.Fatalf("expected infix table use to lower through generated precedence helpers, got:\n%s", formatted)
 	}
 }
 

@@ -51,6 +51,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	var recordErrorFunc string
 	tokenAliases := make([]ast.GrammarTokenAliasDecl, 0)
 	channels := make([]ast.GrammarChannelDecl, 0)
+	recoveryPolicies := make([]ast.GrammarRecoveryDecl, 0)
+	infixTables := make([]ast.GrammarInfixTableDecl, 0)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -86,6 +88,10 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			tokenAliases = append(tokenAliases, p.parseGrammarTokenAliasDecls()...)
 		case p.peekIdentText("channel"):
 			channels = append(channels, p.parseGrammarChannelDecl())
+		case p.peekIdentText("recovery"):
+			recoveryPolicies = append(recoveryPolicies, p.parseGrammarRecoveryDecl())
+		case p.peekGrammarInfixTableDecl():
+			infixTables = append(infixTables, p.parseGrammarInfixTableDecl())
 		default:
 			break
 		}
@@ -127,12 +133,28 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		RecordErrorFunc:  recordErrorFunc,
 		TokenAliases:     tokenAliases,
 		Channels:         channels,
+		RecoveryPolicies: recoveryPolicies,
+		InfixTables:      infixTables,
 		Productions:      productions,
 	}
 }
 
+func (p *Parser) peekGrammarInfixTableDecl() bool {
+	if !p.peekIdentText("infix") {
+		return false
+	}
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos+1]
+	return next.Kind == lexer.TOKEN_IDENT && next.Text == "table"
+}
+
 func (p *Parser) peekGrammarHeaderDecl() bool {
 	if p.peek() == lexer.TOKEN_ERROR {
+		return true
+	}
+	if p.peekGrammarInfixTableDecl() {
 		return true
 	}
 	if p.peek() != lexer.TOKEN_IDENT {
@@ -145,6 +167,8 @@ func (p *Parser) peekGrammarHeaderDecl() bool {
 	switch p.cur().Text {
 	case "cursor", "alloc", "token_kind", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error", "token", "channel":
 		return next != lexer.TOKEN_LPAREN
+	case "recovery":
+		return next == lexer.TOKEN_IDENT
 	default:
 		return false
 	}
@@ -253,6 +277,86 @@ func (p *Parser) parseGrammarChannelDecl() ast.GrammarChannelDecl {
 	return ast.GrammarChannelDecl{Position: pos, Name: name, Type: typeExpr, Default: defaultExpr}
 }
 
+func (p *Parser) parseGrammarRecoveryDecl() ast.GrammarRecoveryDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("recovery")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	decl := ast.GrammarRecoveryDecl{Position: pos, Name: name}
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		switch {
+		case p.peekIdentText("message"):
+			p.expectIdentText("message")
+			decl.Message = p.parseExpr()
+			p.expectNewline()
+		case p.peekIdentText("until"):
+			decl.Until = p.parseGrammarRecoveryUntilDecl()
+		case p.peekIdentText("fallback"):
+			p.expectIdentText("fallback")
+			decl.Fallback = p.parseExpr()
+			p.expectNewline()
+		default:
+			p.errorf("expected grammar recovery declaration item")
+			p.advance()
+		}
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	if decl.Message == nil {
+		p.errorf("expected recovery declaration message")
+	}
+	if len(decl.Until) == 0 {
+		p.errorf("expected recovery declaration until clause")
+	}
+	return decl
+}
+
+func (p *Parser) parseGrammarInfixTableDecl() ast.GrammarInfixTableDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("infix")
+	p.expectIdentText("table")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_LPAREN)
+	result := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	levels := make([]ast.GrammarPrecedenceLevel, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		levels = append(levels, p.parseGrammarPrecedenceLevel())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return ast.GrammarInfixTableDecl{Position: pos, Name: name, Result: result, Levels: levels}
+}
+
+func (p *Parser) parseGrammarRecoveryUntilDecl() []ast.GrammarTerm {
+	p.expectIdentText("until")
+	if p.peek() == lexer.TOKEN_LPAREN {
+		terms := p.parseGrammarUntilClauseBody()
+		p.expectNewline()
+		return terms
+	}
+	terms := make([]ast.GrammarTerm, 0, 4)
+	for {
+		terms = append(terms, p.parseGrammarRecoverableTermValue())
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expectNewline()
+	return terms
+}
+
 func (p *Parser) parseGrammarProductionDecls() []ast.GrammarProductionDecl {
 	pos := p.cur().Pos
 	public := p.peekIdentText("pub") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT
@@ -282,6 +386,7 @@ func (p *Parser) parseGrammarProductionDecls() []ast.GrammarProductionDecl {
 	}
 
 	var retType ast.TypeExpr
+	var recoverPolicy string
 	var recoverMsg ast.Expr
 	var recoverUntil []ast.GrammarTerm
 	var recoverValue ast.Expr
@@ -289,13 +394,13 @@ func (p *Parser) parseGrammarProductionDecls() []ast.GrammarProductionDecl {
 		retType = p.parseTypeExpr()
 	}
 	if p.peekIdentText("recover") {
-		recoverMsg, recoverUntil, recoverValue = p.parseGrammarRecoverClause()
+		recoverPolicy, recoverMsg, recoverUntil, recoverValue = p.parseGrammarRecoverSpec()
 	}
 
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	terms := p.parseGrammarTermBlock()
-	return []ast.GrammarProductionDecl{{Position: pos, Public: public, Name: name, HasParamList: hasParamList, Params: params, ReturnType: retType, RecoverMsg: recoverMsg, RecoverUntil: recoverUntil, RecoverValue: recoverValue, Terms: terms}}
+	return []ast.GrammarProductionDecl{{Position: pos, Public: public, Name: name, HasParamList: hasParamList, Params: params, ReturnType: retType, RecoverPolicy: recoverPolicy, RecoverMsg: recoverMsg, RecoverUntil: recoverUntil, RecoverValue: recoverValue, Terms: terms}}
 }
 
 func (p *Parser) parseGroupedGrammarAppendTermBlocks() [][]ast.GrammarTerm {
@@ -338,8 +443,21 @@ func (p *Parser) parseGroupedGrammarAppendTermBlocks() [][]ast.GrammarTerm {
 	return groups
 }
 
+func (p *Parser) parseGrammarRecoverSpec() (string, ast.Expr, []ast.GrammarTerm, ast.Expr) {
+	p.expectIdentText("recover")
+	if p.peek() != lexer.TOKEN_LPAREN {
+		return p.expect(lexer.TOKEN_IDENT).Text, nil, nil, nil
+	}
+	message, until, fallback := p.parseGrammarRecoverClauseBody()
+	return "", message, until, fallback
+}
+
 func (p *Parser) parseGrammarRecoverClause() (ast.Expr, []ast.GrammarTerm, ast.Expr) {
 	p.expectIdentText("recover")
+	return p.parseGrammarRecoverClauseBody()
+}
+
+func (p *Parser) parseGrammarRecoverClauseBody() (ast.Expr, []ast.GrammarTerm, ast.Expr) {
 	p.expect(lexer.TOKEN_LPAREN)
 	message := p.parseExpr()
 	p.expect(lexer.TOKEN_COMMA)
@@ -356,13 +474,14 @@ func (p *Parser) wrapGrammarRecoverTerm(term ast.GrammarTerm) ast.GrammarTerm {
 	if term == nil || !p.peekIdentText("recover") {
 		return term
 	}
-	message, until, fallback := p.parseGrammarRecoverClause()
+	policy, message, until, fallback := p.parseGrammarRecoverSpec()
 	return &ast.GrammarRecoverTerm{
-		Position:     term.Pos(),
-		Term:         term,
-		RecoverMsg:   message,
-		RecoverUntil: until,
-		RecoverValue: fallback,
+		Position:      term.Pos(),
+		Term:          term,
+		RecoverPolicy: policy,
+		RecoverMsg:    message,
+		RecoverUntil:  until,
+		RecoverValue:  fallback,
 	}
 }
 
@@ -544,6 +663,9 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	if p.peekGrammarBlockTerm("postfix") {
 		return p.parseGrammarPostfixTerm()
 	}
+	if p.peekGrammarBlockTerm("infix") {
+		return p.parseGrammarInfixTableTerm()
+	}
 	if p.peekIdentText("choice") {
 		return p.parseGrammarChoiceTerm()
 	}
@@ -614,6 +736,15 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 		p.expect(lexer.TOKEN_RPAREN)
 	}
 	return &ast.GrammarCallTerm{Position: pos, Name: name, Explicit: explicit, Args: args}
+}
+
+func (p *Parser) parseGrammarInfixTableTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("infix")
+	p.expect(lexer.TOKEN_LPAREN)
+	tableName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarInfixTableTerm{Position: pos, TableName: tableName}
 }
 
 func (p *Parser) peekGrammarTokenKindTerm() bool {
@@ -934,8 +1065,12 @@ func (p *Parser) parseGrammarSeparatedTerm() ast.GrammarTerm {
 }
 
 func (p *Parser) parseGrammarUntilClause() []ast.GrammarTerm {
-	terms := make([]ast.GrammarTerm, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	p.expectIdentText("until")
+	return p.parseGrammarUntilClauseBody()
+}
+
+func (p *Parser) parseGrammarUntilClauseBody() []ast.GrammarTerm {
+	terms := make([]ast.GrammarTerm, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	p.expect(lexer.TOKEN_LPAREN)
 	if p.peek() != lexer.TOKEN_RPAREN {
 		for {
