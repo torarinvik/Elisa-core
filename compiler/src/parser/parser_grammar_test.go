@@ -744,6 +744,63 @@ func TestParseGrammarDeclAllowsOptionalAndRepeatSuffixShorthand(t *testing.T) {
 	}
 }
 
+func TestParseGrammarListFamilyReadableSugar(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
+        statements = list statement() separated by .SEMICOLON until(.END, token(TokenKind.EOF))
+        declarations = flatrepeat variable_decl_group() until(.BEGIN, token(TokenKind.EOF))
+        values = separated expression() by .COMMA until(.RPAREN, token(TokenKind.EOF))
+        maybe = optional .IDENT
+        return statements
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.Productions) != 1 || len(decl.Productions[0].Terms) != 5 {
+		t.Fatalf("expected one production with five terms, got %#v", decl.Productions)
+	}
+	stmtsBind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	stmtsList, ok := stmtsBind.Term.(*ast.GrammarListTerm)
+	if !ok {
+		t.Fatalf("expected readable list sugar to produce GrammarListTerm, got %T", stmtsBind.Term)
+	}
+	if stmtsList.Separator == nil || len(stmtsList.Until) != 2 {
+		t.Fatalf("expected readable list sugar to preserve separator and stops, got %#v", stmtsList)
+	}
+	declsBind, ok := decl.Productions[0].Terms[1].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected second term to be binding, got %T", decl.Productions[0].Terms[1])
+	}
+	if _, ok := declsBind.Term.(*ast.GrammarFlatRepeatTerm); !ok {
+		t.Fatalf("expected readable flatrepeat sugar to produce GrammarFlatRepeatTerm, got %T", declsBind.Term)
+	}
+	valuesBind, ok := decl.Productions[0].Terms[2].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected third term to be binding, got %T", decl.Productions[0].Terms[2])
+	}
+	valuesSeparated, ok := valuesBind.Term.(*ast.GrammarSeparatedTerm)
+	if !ok {
+		t.Fatalf("expected readable separated sugar to produce GrammarSeparatedTerm, got %T", valuesBind.Term)
+	}
+	if valuesSeparated.Separator == nil || len(valuesSeparated.Until) != 2 {
+		t.Fatalf("expected readable separated sugar to preserve separator and stops, got %#v", valuesSeparated)
+	}
+	maybeBind, ok := decl.Productions[0].Terms[3].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected fourth term to be binding, got %T", decl.Productions[0].Terms[3])
+	}
+	if _, ok := maybeBind.Term.(*ast.GrammarOptionalTerm); !ok {
+		t.Fatalf("expected readable optional sugar to produce GrammarOptionalTerm, got %T", maybeBind.Term)
+	}
+}
+
 func TestParseGrammarProductionAllowsRecoverClause(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", "end", "else", token(TokenKind.EOF))):

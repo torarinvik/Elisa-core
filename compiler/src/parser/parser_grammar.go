@@ -643,6 +643,10 @@ func (p *Parser) parseGrammarCutTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarOptionalTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("optional")
+	if p.peek() != lexer.TOKEN_LPAREN {
+		term := p.parseGrammarRecoverableTermValue()
+		return &ast.GrammarOptionalTerm{Position: pos, Term: term}
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	term := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_RPAREN)
@@ -652,6 +656,20 @@ func (p *Parser) parseGrammarOptionalTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("list")
+	if p.peek() != lexer.TOKEN_LPAREN {
+		elem := p.parseGrammarRecoverableTermValue()
+		var separator ast.GrammarTerm
+		var until []ast.GrammarTerm
+		if p.peekIdentText("separated") {
+			p.expectIdentText("separated")
+			p.expectIdentText("by")
+			separator = p.parseGrammarRecoverableTermValue()
+		}
+		if p.peekIdentText("until") {
+			until = p.parseGrammarUntilClause()
+		}
+		return &ast.GrammarListTerm{Position: pos, Elem: elem, Separator: separator, Until: until}
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	elem := p.parseGrammarRecoverableTermValue()
 	var separator ast.GrammarTerm
@@ -673,6 +691,14 @@ func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarRepeatTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("repeat")
+	if p.peek() != lexer.TOKEN_LPAREN {
+		elem := p.parseGrammarRecoverableTermValue()
+		var until []ast.GrammarTerm
+		if p.peekIdentText("until") {
+			until = p.parseGrammarUntilClause()
+		}
+		return &ast.GrammarRepeatTerm{Position: pos, Elem: elem, Until: until}
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	elem := p.parseGrammarRecoverableTermValue()
 	var until []ast.GrammarTerm
@@ -686,6 +712,14 @@ func (p *Parser) parseGrammarRepeatTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarFlatRepeatTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("flatrepeat")
+	if p.peek() != lexer.TOKEN_LPAREN {
+		elem := p.parseGrammarRecoverableTermValue()
+		var until []ast.GrammarTerm
+		if p.peekIdentText("until") {
+			until = p.parseGrammarUntilClause()
+		}
+		return &ast.GrammarFlatRepeatTerm{Position: pos, Elem: elem, Until: until}
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	elem := p.parseGrammarRecoverableTermValue()
 	var until []ast.GrammarTerm
@@ -699,6 +733,16 @@ func (p *Parser) parseGrammarFlatRepeatTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarSeparatedTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("separated")
+	if p.peek() != lexer.TOKEN_LPAREN {
+		elem := p.parseGrammarRecoverableTermValue()
+		p.expectIdentText("by")
+		separator := p.parseGrammarRecoverableTermValue()
+		var until []ast.GrammarTerm
+		if p.peekIdentText("until") {
+			until = p.parseGrammarUntilClause()
+		}
+		return &ast.GrammarSeparatedTerm{Position: pos, Elem: elem, Separator: separator, Until: until}
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	elem := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_COMMA)
