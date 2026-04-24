@@ -359,6 +359,32 @@ Current header declarations:
 - `flatmaplist[T](source, item, values)` maps an existing list expression into per-item lists and flattens them into one `darray[T]`; typed empty branches such as `else []` inherit the mapped list type
 - `uses OtherGrammar` imports productions and token aliases from another grammar
 
+Inside grammar sequence result positions, `+` is the canonical way to compose list-producing grammar values. Prefer it over tiny helper functions whose only job is to allocate, append the left list, append the right list, and return the merged result.
+
+```context
+const_prefixed_decl_sections() -> darray[Pascal.Decl]:
+    node <- seq:
+        const_decls = const_decl_section()
+        type_decls = optional_type_decl_section()
+        var_decls = optional_variable_decl_section()
+        const_decls + type_decls + var_decls
+    return node
+```
+
+This is grammar DSL list composition, not a promise that general-purpose `darray + darray` is available in arbitrary expression code. Drop to explicit `in alloc:` plus `.push` / `.extend` when ownership, allocation, or mutation needs to be controlled directly.
+
+When branching on parser state, snapshot cursor-dependent values before multiple guarded branches if any branch could consume input. This keeps alternatives from accidentally observing a later cursor position.
+
+```context
+declarations() -> darray[Pascal.Decl]:
+    kind = expr(state.current_token().kind)
+    const_decls = when(kind == TokenKind.CONST, const_prefixed_decl_sections(), expr[darray[Pascal.Decl]]([]))
+    type_decls = when(kind == TokenKind.TYPE, type_prefixed_decl_sections(), expr[darray[Pascal.Decl]]([]))
+    var_decls = when(kind == TokenKind.VAR, variable_decl_section(), expr[darray[Pascal.Decl]]([]))
+    node <- const_decls + type_decls + var_decls
+    return node
+```
+
 Channel synthesis is useful for parser result shapes that want several tracked fields without repeating the final assembly step. For local helper results, the lightest form is a named tuple:
 
 ```context
@@ -616,6 +642,7 @@ Current implementation notes:
 - grammar sugar lowers to existing AST terms where possible, rather than introducing runtime parser objects
 - `prefix(...)` currently lowers to `seq(op = choice(...), operand = ..., expr(...))`
 - token aliases are rewritten before lowering, so `.IDENT` can map onto the real token kind expression
+- the current grammar/runtime helper path is most battle-tested with canonical `Token`, `TokenKind`, `Span`, and local `combine_span(left, right)` names; frontends can still keep language-specific prefixes on parser state, AST trees, and helper functions
 - recovery and required terms depend on the grammar `cursor` declaration to restore or advance parser state correctly
 - tree AST construction remains ordinary llcontext code, so teams can use canonical `node[span = ...] Tree.Node(...)` sugar or drop to low-level `new[alloc] Tree.Node(span: ..., ...)` when exact control is clearer
 

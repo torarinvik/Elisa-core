@@ -11,6 +11,10 @@ echo "=== Pascal frontend ==="
 bash "$SCRIPT_DIR/Code/llcontext_pascal/test/run_tests.sh"
 
 echo
+echo "=== SML frontend ==="
+bash "$SCRIPT_DIR/Code/llcontext_sml/test/run_tests.sh"
+
+echo
 echo "=== ATPL frontend ==="
 bash "$SCRIPT_DIR/Code/llcontext_atpl/test/run_tests.sh"
 

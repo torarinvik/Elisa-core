@@ -31,3 +31,6 @@ bin/atpl
 compiler/llcontext-compiler
 /compiler/temp_probe
 /compiler/vendor
+/Code/llcontext_ocaml
+/Code/llcontext_python
+/Code/llcontext_rust
