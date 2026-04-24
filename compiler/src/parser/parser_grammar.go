@@ -59,7 +59,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		case p.peekIdentText("alloc"):
 			allocExpr = p.parseGrammarValueHeaderDecl("alloc")
 		case p.peekIdentText("token"):
-			tokenAliases = append(tokenAliases, p.parseGrammarTokenAliasDecl())
+			tokenAliases = append(tokenAliases, p.parseGrammarTokenAliasDecls()...)
 		case p.peekIdentText("channel"):
 			channels = append(channels, p.parseGrammarChannelDecl())
 		default:
@@ -142,16 +142,52 @@ func (p *Parser) parseGrammarValueHeaderDecl(keyword string) ast.Expr {
 	return value
 }
 
-func (p *Parser) parseGrammarTokenAliasDecl() ast.GrammarTokenAliasDecl {
+func (p *Parser) parseGrammarTokenAliasDecls() []ast.GrammarTokenAliasDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("token")
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		p.expect(lexer.TOKEN_INDENT)
+		aliases := make([]ast.GrammarTokenAliasDecl, 0, p.estimateIndentedItemCount())
+		for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+			p.skipNewlines()
+			if p.peek() == lexer.TOKEN_DEDENT {
+				break
+			}
+			aliases = append(aliases, p.parseGrammarTokenAliasBlockItem())
+		}
+		p.expect(lexer.TOKEN_DEDENT)
+		return aliases
+	}
+	return []ast.GrammarTokenAliasDecl{p.parseGrammarTokenAliasLine(pos)}
+}
+
+func (p *Parser) parseGrammarTokenAliasLine(pos lexer.Pos) ast.GrammarTokenAliasDecl {
 	term := p.parseGrammarTokenKindTerm()
-	alias := ast.GrammarTokenAliasDecl{Position: pos, Kind: term.Kind}
+	alias := p.finishGrammarTokenAlias(pos, term.Kind)
+	p.expectNewline()
+	return alias
+}
+
+func (p *Parser) parseGrammarTokenAliasBlockItem() ast.GrammarTokenAliasDecl {
+	pos := p.cur().Pos
+	var kind string
+	if p.peek() == lexer.TOKEN_DOT {
+		kind = p.parseGrammarTokenKindTerm().Kind
+	} else {
+		kind = p.expect(lexer.TOKEN_IDENT).Text
+	}
+	alias := p.finishGrammarTokenAlias(pos, kind)
+	p.expectNewline()
+	return alias
+}
+
+func (p *Parser) finishGrammarTokenAlias(pos lexer.Pos, kind string) ast.GrammarTokenAliasDecl {
+	alias := ast.GrammarTokenAliasDecl{Position: pos, Kind: kind}
 	if p.peek() == lexer.TOKEN_STRING_LIT {
 		alias.Literal = p.advance().Text
 		alias.HasLiteral = true
 	}
-	p.expectNewline()
 	return alias
 }
 

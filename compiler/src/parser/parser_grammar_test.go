@@ -152,6 +152,45 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsTokenAliasBlock(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalGrammar over Token using ParserState:
+    token:
+        IDENT
+        INTEGER
+        LPAREN "("
+        .RPAREN ")"
+    program() -> Token:
+        token = .IDENT
+        return token
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.TokenAliases) != 4 {
+		t.Fatalf("expected four token aliases, got %d", len(decl.TokenAliases))
+	}
+	wants := []struct {
+		kind       string
+		literal    string
+		hasLiteral bool
+	}{
+		{kind: "IDENT"},
+		{kind: "INTEGER"},
+		{kind: "LPAREN", literal: "(", hasLiteral: true},
+		{kind: "RPAREN", literal: ")", hasLiteral: true},
+	}
+	for i, want := range wants {
+		alias := decl.TokenAliases[i]
+		if alias.Kind != want.kind || alias.Literal != want.literal || alias.HasLiteral != want.hasLiteral {
+			t.Fatalf("token alias %d: expected %#v, got %#v", i, want, alias)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsProductionAugmentationSyntax(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
     statement() -> Token:
