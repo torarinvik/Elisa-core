@@ -1,5 +1,7 @@
 package semantic
 
+import "strings"
+
 // FactClass names the orthogonal kinds of static knowledge the analyzer tracks
 // about values. The current compiler still stores these facts in specialized
 // structures such as GuardFactSet, OptimizationFacts, RefType, Shape, effects,
@@ -49,6 +51,53 @@ type FactTransform struct {
 	Target  string
 	Source  string
 	Reason  string
+}
+
+func FormatFactTransforms(transforms []FactTransform) string {
+	if len(transforms) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(transforms))
+	for _, transform := range transforms {
+		if text := FormatFactTransform(transform); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, "; ") + "]"
+}
+
+func FormatFactTransform(transform FactTransform) string {
+	if transform.Kind == "" {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString(transform.Kind.String())
+	if transform.Target != "" {
+		out.WriteByte(' ')
+		out.WriteString(transform.Target)
+	}
+	if len(transform.Classes) != 0 {
+		classes := make([]string, 0, len(transform.Classes))
+		for _, class := range transform.Classes {
+			classes = append(classes, class.String())
+		}
+		out.WriteString(" [")
+		out.WriteString(strings.Join(classes, ","))
+		out.WriteByte(']')
+	}
+	if transform.Source != "" {
+		out.WriteString(" <- ")
+		out.WriteString(transform.Source)
+	}
+	if transform.Reason != "" {
+		out.WriteString(" (")
+		out.WriteString(transform.Reason)
+		out.WriteByte(')')
+	}
+	return out.String()
 }
 
 func invalidatedRegionFactUseMessage(label string, name string, reason string) string {

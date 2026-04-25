@@ -40,3 +40,19 @@ func TestFactDiagnosticMessageVocabulary(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatFactTransforms(t *testing.T) {
+	got := FormatFactTransforms([]FactTransform{
+		{},
+		{Kind: FactTransformProduce, Classes: []FactClass{FactRepresentation, FactStorage}, Target: "node", Source: "store", Reason: "node construction"},
+		{Kind: FactTransformRebase, Classes: []FactClass{FactStoreDeps}, Target: "store", Reason: "freeze rebases store provenance"},
+	})
+	want := "[produce node [representation,storage] <- store (node construction); rebase store [store-deps] (freeze rebases store provenance)]"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+
+	if got := FormatFactTransforms([]FactTransform{{}}); got != "" {
+		t.Fatalf("expected empty transform list to format empty, got %q", got)
+	}
+}
