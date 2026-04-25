@@ -57,6 +57,9 @@ func generateSemanticReport(result *semantic.Result) string {
 		if analysis, ok := result.FunctionAnalysisByName(name); ok && analysis != nil {
 			fmt.Fprintf(&out, "  sink_params: %s\n", summarizeSinkParams(analysis.SinkParams))
 			fmt.Fprintf(&out, "  return_isolation: %s\n", summarizeReturnIsolation(analysis.ReturnIsolation))
+			if summary := summarizeFactTransforms(analysis.FactTransforms); summary != "" {
+				fmt.Fprintf(&out, "  fact_transforms: %s\n", summary)
+			}
 		}
 	}
 	if len(result.ExportedFuncs) != 0 || len(result.ExportedGlobals) != 0 || len(result.ExportedTypes) != 0 {
@@ -81,6 +84,34 @@ func generateSemanticReport(result *semantic.Result) string {
 		}
 	}
 	return out.String()
+}
+
+func summarizeFactTransforms(transforms []semantic.FactTransform) string {
+	if len(transforms) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(transforms))
+	for _, transform := range transforms {
+		if transform.Kind == "" {
+			continue
+		}
+		text := transform.Kind.String()
+		if transform.Target != "" {
+			text += " " + transform.Target
+		}
+		if len(transform.Classes) != 0 {
+			classes := make([]string, 0, len(transform.Classes))
+			for _, class := range transform.Classes {
+				classes = append(classes, class.String())
+			}
+			text += " [" + strings.Join(classes, ",") + "]"
+		}
+		if transform.Reason != "" {
+			text += " (" + transform.Reason + ")"
+		}
+		parts = append(parts, text)
+	}
+	return "[" + strings.Join(parts, "; ") + "]"
 }
 
 func summarizeSinkParams(sinkParams []bool) string {

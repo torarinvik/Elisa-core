@@ -21,6 +21,7 @@ type FunctionAnalysis struct {
 	CleanupPlan     CleanupPlan
 	SinkParams      []bool
 	ReturnIsolation ReturnIsolationSummary
+	FactTransforms  []FactTransform
 }
 
 type GraphPartitions struct {
@@ -850,8 +851,36 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 		CleanupPlan:     cleanupPlan,
 		SinkParams:      append([]bool(nil), fnType.SinkParams...),
 		ReturnIsolation: returnIsolation,
+		FactTransforms:  a.currentConservativeCallWideningTransforms(),
 	}
 	a.functionAnalyses[fn] = analysis
+}
+
+func (a *Analyzer) currentConservativeCallWideningTransforms() []FactTransform {
+	if a == nil || len(a.currentConservativeCallWidenings) == 0 {
+		return nil
+	}
+	transforms := make([]FactTransform, 0)
+	for root, paths := range a.currentConservativeCallWidenings {
+		if root == nil {
+			continue
+		}
+		for _, path := range paths {
+			transforms = append(transforms, FactTransform{
+				Kind:    FactTransformWiden,
+				Classes: []FactClass{FactTypestate},
+				Target:  namedStateTargetDisplayName(root, path),
+				Reason:  "ref call without matching ensures",
+			})
+		}
+	}
+	sort.Slice(transforms, func(i, j int) bool {
+		if transforms[i].Target != transforms[j].Target {
+			return transforms[i].Target < transforms[j].Target
+		}
+		return transforms[i].Reason < transforms[j].Reason
+	})
+	return transforms
 }
 
 func configureCFGParamLocations(cfg *CFG, fnType *FuncType) {

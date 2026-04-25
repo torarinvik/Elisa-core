@@ -59,6 +59,9 @@ def bad_finish(mutable job: ParseJob[Pending]&) -> void can[Abort] ensures job =
 	if !strings.Contains(errText, "cannot prove ensures job => Ready") {
 		t.Fatalf("expected named-state ensures proof failure, got:\n%s", errText)
 	}
+	if !strings.Contains(errText, "current tracked facts are ParseJob[Failed]") {
+		t.Fatalf("expected named-state ensures fact diagnostic, got:\n%s", errText)
+	}
 }
 
 func TestSemanticEnsuresRefStateCallRecovery(t *testing.T) {
@@ -139,6 +142,9 @@ def bad_preserve(mutable player: Player[Alive]&) -> void can[Abort] ensures play
 	errText := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(errText, "cannot prove ensures player => preserve") {
 		t.Fatalf("expected preserve proof failure, got:\n%s", errText)
+	}
+	if !strings.Contains(errText, "current tracked facts are Player[Dead]&") {
+		t.Fatalf("expected preserve tracked-facts diagnostic, got:\n%s", errText)
 	}
 }
 

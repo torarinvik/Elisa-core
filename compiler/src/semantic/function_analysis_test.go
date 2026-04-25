@@ -281,6 +281,35 @@ def fold(node: Lua.Expr) -> i64:
 	}
 }
 
+func TestAnalyzeFunctionAnalysisRecordsConservativeCallWidening(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "call_widening_fact_transform.llcontext", `struct Player[state Alive | Dead]:
+	health: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+extern unknown_update(mutable player: Player[Alive]&) -> void
+
+def use(mutable player: Player[Alive]&) -> void:
+	unknown_update(player)
+`)
+	analysis, ok := result.FunctionAnalysisByName("use")
+	if !ok || analysis == nil {
+		t.Fatal("expected analysis for use")
+	}
+	if len(analysis.FactTransforms) != 1 {
+		t.Fatalf("expected one fact transform, got %#v", analysis.FactTransforms)
+	}
+	transform := analysis.FactTransforms[0]
+	if transform.Kind != FactTransformWiden || transform.Target != "player" || transform.Reason != "ref call without matching ensures" {
+		t.Fatalf("unexpected fact transform: %#v", transform)
+	}
+	if len(transform.Classes) != 1 || transform.Classes[0] != FactTypestate {
+		t.Fatalf("expected typestate fact class, got %#v", transform.Classes)
+	}
+}
+
 func TestCreateTypeBoundOpsSynthesizesRecursiveCleanupOps(t *testing.T) {
 	threadPool := &StructType{Name: "ThreadPool", Builtin: true}
 	mutexGuardBase := &StructType{Name: "MutexGuard", Builtin: true}

@@ -3730,49 +3730,49 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 	targetName := poststateTargetDisplayName(sym.Name, poststate.Path)
 	currentTarget, ok := a.projectTrackedValueTypeAtPath(a.currentTrackedValueType(sym), poststate.Path)
 	if !ok || currentTarget == nil {
-		a.errorf(poststate.Position, "cannot prove ensures %s on function %q because the current tracked target cannot be resolved", targetName, a.currentFuncDecl.Name)
+		a.errorf(poststate.Position, ensureTargetUnresolvedMessage(targetName, a.currentFuncDecl.Name))
 		return
 	}
 	switch poststate.Kind {
 	case FuncPoststateKindPreserve:
 		for _, widenedPath := range a.currentConservativeCallWidenings[sym] {
 			if poststatePathsOverlap(widenedPath, poststate.Path) {
-				a.errorf(poststate.Position, "cannot prove ensures %s => preserve on function %q because a call may widen that path conservatively", targetName, a.currentFuncDecl.Name)
+				a.errorf(poststate.Position, ensurePreserveWidenedMessage(targetName, a.currentFuncDecl.Name))
 				return
 			}
 		}
 		originalTarget, ok := a.projectTrackedValueTypeAtPath(sym.Type, poststate.Path)
 		if !ok || originalTarget == nil {
-			a.errorf(poststate.Position, "cannot prove ensures %s => preserve on function %q because the incoming tracked target cannot be resolved", targetName, a.currentFuncDecl.Name)
+			a.errorf(poststate.Position, ensureIncomingTargetUnresolvedMessage(targetName, a.currentFuncDecl.Name))
 			return
 		}
 		if !SameType(currentTarget, originalTarget) {
-			a.errorf(poststate.Position, "cannot prove ensures %s => preserve on function %q; current poststate is %s", targetName, a.currentFuncDecl.Name, currentTarget)
+			a.errorf(poststate.Position, ensurePreserveMismatchMessage(targetName, a.currentFuncDecl.Name, currentTarget.String()))
 		}
 	case FuncPoststateKindNamedState:
 		actualTarget, ok := poststateNamedStateCurrentType(currentTarget)
 		if !ok || actualTarget == nil {
-			a.errorf(poststate.Position, "cannot prove ensures %s on function %q because the target is not currently a named-state-bearing value", targetName, a.currentFuncDecl.Name)
+			a.errorf(poststate.Position, ensureNamedStateTargetMessage(targetName, a.currentFuncDecl.Name))
 			return
 		}
 		base, ok := namedStateStructBase(actualTarget)
 		if !ok || base == nil {
-			a.errorf(poststate.Position, "cannot prove ensures %s on function %q because the target is not currently a named-state-bearing value", targetName, a.currentFuncDecl.Name)
+			a.errorf(poststate.Position, ensureNamedStateTargetMessage(targetName, a.currentFuncDecl.Name))
 			return
 		}
 		desired := newNamedStateType(base.Name, base.NamedStateCases, poststate.StateCases)
 		actualState, ok := namedStateCurrentArg(actualTarget)
 		if desired == nil || !ok || actualState == nil || !namedStateTypeAssignable(desired, actualState) {
-			a.errorf(poststate.Position, "cannot prove ensures %s => %s on function %q; current poststate is %s", targetName, strings.Join(poststate.StateCases, " | "), a.currentFuncDecl.Name, actualTarget)
+			a.errorf(poststate.Position, ensureNamedStateMismatchMessage(targetName, strings.Join(poststate.StateCases, " | "), a.currentFuncDecl.Name, actualTarget.String()))
 		}
 	case FuncPoststateKindRefState:
 		actualRef, ok := poststateRefTargetType(currentTarget)
 		if !ok || actualRef == nil {
-			a.errorf(poststate.Position, "cannot prove ensures %s on function %q because the target is not currently a ref", targetName, a.currentFuncDecl.Name)
+			a.errorf(poststate.Position, ensureRefStateTargetMessage(targetName, a.currentFuncDecl.Name))
 			return
 		}
 		if !refStateAssignable(poststate.RefState, actualRef.State) {
-			a.errorf(poststate.Position, "cannot prove ensures %s => %s on function %q; current poststate is %s", targetName, ast.RefStateMarker(ast.RefState(poststate.RefState)), a.currentFuncDecl.Name, currentTarget)
+			a.errorf(poststate.Position, ensureRefStateMismatchMessage(targetName, ast.RefStateMarker(ast.RefState(poststate.RefState)), a.currentFuncDecl.Name, currentTarget.String()))
 		}
 	}
 }

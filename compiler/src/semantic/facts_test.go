@@ -23,6 +23,16 @@ func TestFactDiagnosticMessageVocabulary(t *testing.T) {
 			got:  threadUnpublishedStoreDependencyMessage("pool_submit1", "Expr.Store[Local]"),
 			want: `argument to "pool_submit1" cannot cross thread boundary: store dependency facts require rebase to frozen/public store, got "Expr.Store[Local]"`,
 		},
+		{
+			name: "ensure widen",
+			got:  ensurePreserveWidenedMessage("job", "finish"),
+			want: `cannot prove ensures job => preserve on function "finish": target facts may have been widened conservatively by a call`,
+		},
+		{
+			name: "ensure named mismatch",
+			got:  ensureNamedStateMismatchMessage("job", "Ready", "finish", "ParseJob[Failed]"),
+			want: `cannot prove ensures job => Ready on function "finish": current tracked facts are ParseJob[Failed]`,
+		},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {

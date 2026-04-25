@@ -67,6 +67,38 @@ func threadUnpublishedStoreDependencyMessage(callName string, storeName string) 
 	return "argument to " + quoteFactTarget(callName) + " cannot cross thread boundary: store dependency facts require " + FactTransformRebase.String() + " to frozen/public store, got " + quoteFactTarget(storeName)
 }
 
+func ensureTargetUnresolvedMessage(targetName string, funcName string) string {
+	return "cannot prove ensures " + targetName + " on function " + quoteFactTarget(funcName) + ": " + FactTransformEnsure.String() + " fact target cannot be resolved from current tracked facts"
+}
+
+func ensurePreserveWidenedMessage(targetName string, funcName string) string {
+	return "cannot prove ensures " + targetName + " => preserve on function " + quoteFactTarget(funcName) + ": target facts may have been " + FactTransformWiden.String() + "ed conservatively by a call"
+}
+
+func ensureIncomingTargetUnresolvedMessage(targetName string, funcName string) string {
+	return "cannot prove ensures " + targetName + " => preserve on function " + quoteFactTarget(funcName) + ": incoming tracked facts cannot be resolved"
+}
+
+func ensurePreserveMismatchMessage(targetName string, funcName string, current string) string {
+	return "cannot prove ensures " + targetName + " => preserve on function " + quoteFactTarget(funcName) + ": current tracked facts are " + current
+}
+
+func ensureNamedStateTargetMessage(targetName string, funcName string) string {
+	return "cannot prove ensures " + targetName + " on function " + quoteFactTarget(funcName) + ": target is not currently a named-state fact-bearing value"
+}
+
+func ensureNamedStateMismatchMessage(targetName string, desired string, funcName string, current string) string {
+	return "cannot prove ensures " + targetName + " => " + desired + " on function " + quoteFactTarget(funcName) + ": current tracked facts are " + current
+}
+
+func ensureRefStateTargetMessage(targetName string, funcName string) string {
+	return "cannot prove ensures " + targetName + " on function " + quoteFactTarget(funcName) + ": target is not currently a refstate fact-bearing value"
+}
+
+func ensureRefStateMismatchMessage(targetName string, desired string, funcName string, current string) string {
+	return "cannot prove ensures " + targetName + " => " + desired + " on function " + quoteFactTarget(funcName) + ": current tracked facts are " + current
+}
+
 func quoteFactTarget(value string) string {
 	return `"` + value + `"`
 }

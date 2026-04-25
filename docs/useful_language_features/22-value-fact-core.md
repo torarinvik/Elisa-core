@@ -203,3 +203,5 @@ Current implementation foothold:
 - `compiler/src/semantic/facts.go` defines the shared fact class and transform names
 - region invalidation diagnostics now describe invalidated region dependency facts
 - local-region escape and thread-transfer diagnostics use the same provenance vocabulary
+- `ensures` proof failures now describe missing `ensure` proofs against current tracked facts, and conservative call precision loss uses the `widen` vocabulary
+- function analysis now records conservative call-site `widen` transforms for typestate facts; semantic reports can surface those transforms without turning normal valid code into warnings
