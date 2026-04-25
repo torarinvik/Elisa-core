@@ -1232,6 +1232,9 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	if p.peekIdentText("flatmaplist") {
 		return p.parseGrammarMapListTerm(true)
 	}
+	if p.peekIdentText("first") {
+		return p.parseGrammarFirstTerm()
+	}
 	if p.peekIdentText("singleton") {
 		return p.parseGrammarSingletonTerm()
 	}

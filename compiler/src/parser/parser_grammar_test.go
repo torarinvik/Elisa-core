@@ -478,6 +478,36 @@ func TestParseGrammarDeclAllowsFirstTokenSetItem(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsFirstTermLookahead(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
+    statement() -> Pascal.Stmt:
+        .IDENT(name)
+        return zeroed as Pascal.Stmt
+    block() -> Pascal.Stmt:
+        lookahead(first(statement))
+        return zeroed as Pascal.Stmt
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.GrammarDecl)
+	lookahead, ok := decl.Productions[1].Terms[0].(*ast.GrammarLookaheadTerm)
+	if !ok {
+		t.Fatalf("expected first block term to be lookahead, got %T", decl.Productions[1].Terms[0])
+	}
+	first, ok := lookahead.Term.(*ast.GrammarFirstTerm)
+	if !ok {
+		t.Fatalf("expected lookahead body to be first(...), got %T", lookahead.Term)
+	}
+	if first.Name != "statement" {
+		t.Fatalf("expected first() to reference statement, got %q", first.Name)
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "lookahead(first(statement))") {
+		t.Fatalf("expected first() lookahead to round-trip, got:\n%s", formatted)
+	}
+}
+
 func TestParseGrammarFnApplyDiagnostics(t *testing.T) {
 	_, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
     token:

@@ -229,6 +229,42 @@ func TestLowerDeclExpandsFirstTokenSets(t *testing.T) {
 	}
 }
 
+func TestLowerDeclExpandsFirstTermLookahead(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	token_kind TokenKind
+	token_field kind
+	current current_token
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	token:
+		IDENT
+		BEGIN "begin"
+	statement() -> Pascal.Stmt:
+		choice:
+			seq:
+				.IDENT(name)
+				expr(name)
+			seq:
+				.BEGIN(begin_token)
+				expr(begin_token)
+	block() -> Pascal.Stmt:
+		lookahead(first(statement))
+		return zeroed as Pascal.Stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.BEGIN)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclExpandsGrammarFns(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalArgsGrammar over Token using ParserState:
     cursor state

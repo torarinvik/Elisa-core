@@ -80,11 +80,21 @@ grammar PascalStmtGrammar over Token using ParserState:
         return statements
 ```
 
+The same `first(...)` form also works directly in grammar-term position when you want a one-off predictive probe without introducing a named token set first.
+
+```context
+block() -> Pascal.Stmt:
+    lookahead(first(statement))
+    statements = separated statement() by .END until(StatementOrEnd)
+    return zeroed as Pascal.Stmt
+```
+
 Current rules:
 
 - `tokenset Name:` declares a grammar-scoped set of stop terms
 - token set items can use bare token-kind names, other token-set names, `.TOKEN` terms, string token terms, or explicit `token(TokenKind.X)` matchers
 - `first(production_name)` is allowed anywhere a token-set item or `until(...)` stop term is allowed, and lowers to the production's reachable start-token choices
+- `first(production_name)` is also allowed in ordinary grammar-term position, which is most useful for one-off `lookahead(first(...))` probes
 - `tokenset Name = A, B, token(TokenKind.EOF)` is also accepted for compact one-line sets
 - bare `Name` inside `until(...)` or recovery `until Name` is parsed as a token-set reference
 - `lookahead(Name)` can reference a token set and lowers as lookahead over a choice of the set terms
@@ -121,7 +131,7 @@ They can also accept expression parameters for the bits that should stay ordinar
 
 ```context
 grammar RecoveryGrammar over Token using ParserState:
-    grammarfn recovered[T](item: grammar -> T, message: expr, stop: tokenset, fallback: expr) -> grammar -> T:
+    grammar type recovered[T](item: grammar -> T, message: expr, stop: tokenset, fallback: expr) -> grammar -> T:
         item recover(message, until(stop), fallback)
 
 grammar PascalStmtGrammar over Token using ParserState uses RecoveryGrammar:
@@ -742,6 +752,18 @@ Choices can be written either with `choice(...)` or token/term pipes:
 ```context
 op = .PLUS | .MINUS | .OR
 atom = choice(.IDENT(token), .INTEGER(token), grouped_expr())
+```
+
+For larger alternatives, block `choice:` is the preferred readable form:
+
+```context
+node <- choice:
+    seq:
+        .IDENT(name_token)
+        expr(build_name(name_token))
+    seq:
+        .INTEGER(int_token)
+        expr(build_int(int_token))
 ```
 
 Sequences use block form as the canonical style:
