@@ -189,6 +189,88 @@ func TestParseGrammarDeclAllowsBlockGrammarAliases(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsMultiTermBlockGrammarAliases(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalParenGrammar over Token using ParserState:
+    token:
+        LPAREN "("
+        RPAREN ")"
+    grammar alias parenthesized_atom:
+        .LPAREN
+        atom()
+        .RPAREN
+    atom() -> Token:
+        value = parenthesized_atom
+        return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	alias, ok := decl.GrammarAliases[0].Term.(*ast.GrammarSeqTerm)
+	if !ok {
+		t.Fatalf("expected multi-term grammar alias to be a seq, got %T", decl.GrammarAliases[0].Term)
+	}
+	if len(alias.Terms) != 3 {
+		t.Fatalf("expected three alias seq terms, got %d", len(alias.Terms))
+	}
+	formatted := unparse.FormatFile(file)
+	if strings.Contains(formatted, "grammar alias parenthesized_atom:\n        seq:") {
+		t.Fatalf("expected alias block to avoid redundant nested seq, got:\n%s", formatted)
+	}
+	for _, want := range []string{
+		"grammar alias parenthesized_atom:",
+		".LPAREN",
+		"atom()",
+		".RPAREN",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted multi-term grammar alias output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclRejectsRecursiveGrammarAliases(t *testing.T) {
+	_, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    grammar alias alpha = beta
+    grammar alias beta:
+        alpha
+    args() -> Token:
+        value = alpha
+        return value
+`)
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for recursive grammar aliases")
+	}
+	for _, err := range errs {
+		if strings.Contains(err, "recursive grammar alias") {
+			return
+		}
+	}
+	t.Fatalf("expected recursive grammar alias parser error, got:\n%s", strings.Join(errs, "\n"))
+}
+
+func TestParseGrammarDeclRejectsDuplicateGrammarAliases(t *testing.T) {
+	_, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    grammar alias arg_items = .IDENT
+    grammar alias arg_items = .INTEGER
+    args() -> Token:
+        value = arg_items
+        return value
+`)
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for duplicate grammar aliases")
+	}
+	for _, err := range errs {
+		if strings.Contains(err, "duplicate grammar alias \"arg_items\"") {
+			return
+		}
+	}
+	t.Fatalf("expected duplicate grammar alias parser error, got:\n%s", strings.Join(errs, "\n"))
+}
+
 func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalGrammar[B] over PascalToken using PascalParseCtx:
     error PascalFrontendError
@@ -1165,6 +1247,7 @@ func TestParseGrammarChoiceBlockTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalExprGrammar over Token using ParserState:
     expression() -> Expr:
         atom = choice:
+            prefix(.PLUS, .MINUS, .NOT) atom() -> build_unary(op, operand)
             if_expr()
             fn_expr()
             let_expr()
@@ -1190,15 +1273,19 @@ func TestParseGrammarChoiceBlockTerm(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected binding to use choice term, got %T", bind.Term)
 	}
-	if len(choice.Options) != 6 {
-		t.Fatalf("expected six choice options, got %d", len(choice.Options))
+	if len(choice.Options) != 7 {
+		t.Fatalf("expected seven choice options, got %d", len(choice.Options))
 	}
-	if _, ok := choice.Options[5].(*ast.GrammarSeqTerm); !ok {
-		t.Fatalf("expected final choice option to be a seq term, got %T", choice.Options[5])
+	if _, ok := choice.Options[0].(*ast.GrammarSeqTerm); !ok {
+		t.Fatalf("expected prefix choice option to desugar to a seq term, got %T", choice.Options[0])
+	}
+	if _, ok := choice.Options[6].(*ast.GrammarSeqTerm); !ok {
+		t.Fatalf("expected final choice option to be a seq term, got %T", choice.Options[6])
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"atom = choice:",
+		"prefix(.PLUS, .MINUS, .NOT) atom() -> build_unary(op, operand)",
 		"if_expr()",
 		"paren_or_tuple_expr()",
 		"seq:",

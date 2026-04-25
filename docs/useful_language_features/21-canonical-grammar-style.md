@@ -65,7 +65,34 @@ grammar ATPLPostfix:
         return step
 ```
 
+When a block alias contains several terms, the body itself is the sequence:
+
+```context
+grammar PascalParenGrammar:
+    grammar alias parenthesized_atom:
+        .LPAREN
+        atom()
+        .RPAREN
+```
+
 Aliases are compile-time grammar terms. They are imported through `uses`, may compose with `grammar type` constructors, and expand before lowering. Use them for named parser concepts such as `call_args`, `program_decls`, `tuple_tail_items`, and `block_statement_items`; do not use them just to hide a one-off expression that is clearer inline.
+
+Aliases also compose inside `infix table` declarations, which keeps expression tables from turning into dense one-line nests:
+
+```context
+grammar PascalExprGrammar:
+    grammar alias atom_choice:
+        choice:
+            prefix(.PLUS, .MINUS) atom() -> make_unary_expr(op, operand)
+            delimited(.LPAREN, expression(), .RPAREN, ExpectedRightParen)
+            name_atom()
+            integer_atom()
+
+    infix table ExprTable(additive):
+        atom = atom_choice
+        left additive(left = atom()):
+            op = .PLUS | .MINUS -> make_binary_expr(left, op, right)
+```
 
 ## Tokens And Sets
 

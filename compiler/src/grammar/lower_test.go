@@ -1075,6 +1075,63 @@ func TestLowerFileStatefulInfixTableUseBuildsLoopAndAssignsLeft(t *testing.T) {
 	}
 }
 
+func TestLowerFileStatefulInfixTableExpandsGrammarAliases(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    token:
+        IDENT
+        INTEGER
+    grammar alias atom_choice:
+        choice:
+            .IDENT
+            .INTEGER
+    infix table ExprTable(additive):
+        atom = atom_choice
+        left additive(left = atom()):
+            op = "+" -> right
+    expression(state: mutable ParserState&) -> Token:
+        result = infix(ExprTable)
+        return result
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.INTEGER)",
+		"state.expect(\"+\")",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected infix table alias expansion lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulInfixTableExpandsGrammarTypes(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    token:
+        IDENT
+    grammar type required_atom[T](item: grammar -> T, message: expr) -> grammar -> T:
+        required(item, message)
+    infix table ExprTable(additive):
+        atom = required_atom(item: .IDENT, message: expr(ParseMessageKey.ExpectedName))
+        left additive(left = atom()):
+            op = "+" -> right
+    expression(state: mutable ParserState&) -> Token:
+        result = infix(ExprTable)
+        return result
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.record_parse_error(ParseMessageKey.ExpectedName)",
+		"state.expect(\"+\")",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected infix table grammar type expansion lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulAssociativeInlinePrecedenceUsesGeneratedHelper(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Token:

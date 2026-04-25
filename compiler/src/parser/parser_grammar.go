@@ -123,6 +123,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	tokenSets = normalizeGrammarTokenSetItemNames(tokenSets)
+	p.validateGrammarAliasCycles(grammarAliases)
 	p.validateGrammarFnApplications(grammarFns, tokenSets, productions)
 
 	return &ast.GrammarDecl{
@@ -493,6 +494,159 @@ func (p *Parser) parseGrammarAliasDecl() ast.GrammarAliasDecl {
 	}
 	p.expectNewline()
 	return ast.GrammarAliasDecl{Position: pos, Name: name, Term: term}
+}
+
+func (p *Parser) validateGrammarAliasCycles(aliases []ast.GrammarAliasDecl) {
+	if len(aliases) == 0 {
+		return
+	}
+	aliasMap := make(map[string]ast.GrammarAliasDecl, len(aliases))
+	for _, alias := range aliases {
+		if alias.Name != "" {
+			if existing, exists := aliasMap[alias.Name]; exists {
+				p.errorAt(alias.Position, "duplicate grammar alias %q; first declared at %s", alias.Name, existing.Position)
+			}
+			aliasMap[alias.Name] = alias
+		}
+	}
+	for _, alias := range aliases {
+		p.validateGrammarAliasCycle(alias, aliasMap, nil)
+	}
+}
+
+func (p *Parser) validateGrammarAliasCycle(alias ast.GrammarAliasDecl, aliases map[string]ast.GrammarAliasDecl, stack []string) {
+	for _, name := range stack {
+		if name == alias.Name {
+			p.errorAt(alias.Position, "recursive grammar alias %q", alias.Name)
+			return
+		}
+	}
+	stack = append(stack, alias.Name)
+	for _, ref := range grammarAliasRefs(alias.Term, aliases) {
+		next, ok := aliases[ref]
+		if !ok {
+			continue
+		}
+		p.validateGrammarAliasCycle(next, aliases, stack)
+	}
+}
+
+func grammarAliasRefs(term ast.GrammarTerm, aliases map[string]ast.GrammarAliasDecl) []string {
+	refs := make([]string, 0, 2)
+	var walk func(ast.GrammarTerm)
+	walk = func(term ast.GrammarTerm) {
+		switch n := term.(type) {
+		case *ast.GrammarCallTerm:
+			if !n.Explicit && len(n.Args) == 0 {
+				if _, ok := aliases[n.Name]; ok {
+					refs = append(refs, n.Name)
+				}
+			}
+		case *ast.GrammarApplyTerm:
+			for _, arg := range n.Args {
+				walk(arg.Term)
+			}
+		case *ast.GrammarBindTerm:
+			walk(n.Term)
+		case *ast.GrammarAssignTerm:
+			walk(n.Term)
+		case *ast.GrammarChoiceTerm:
+			for _, option := range n.Options {
+				walk(option)
+			}
+		case *ast.GrammarOptionalTerm:
+			walk(n.Term)
+		case *ast.GrammarWhenTerm:
+			walk(n.Then)
+			walk(n.Else)
+		case *ast.GrammarRecoverTerm:
+			walk(n.Term)
+			for _, until := range n.RecoverUntil {
+				walk(until)
+			}
+		case *ast.GrammarRequiredTerm:
+			walk(n.Term)
+		case *ast.GrammarDelimitedTerm:
+			walk(n.Open)
+			walk(n.Body)
+			walk(n.Close)
+		case *ast.GrammarSeqTerm:
+			for _, item := range n.Terms {
+				walk(item)
+			}
+		case *ast.GrammarLookaheadTerm:
+			walk(n.Term)
+		case *ast.GrammarConcatTerm:
+			for _, item := range n.Terms {
+				walk(item)
+			}
+		case *ast.GrammarListTerm:
+			walk(n.Elem)
+			walk(n.Separator)
+			for _, until := range n.Until {
+				walk(until)
+			}
+		case *ast.GrammarRepeatTerm:
+			walk(n.Elem)
+			for _, until := range n.Until {
+				walk(until)
+			}
+		case *ast.GrammarFlatRepeatTerm:
+			walk(n.Elem)
+			for _, until := range n.Until {
+				walk(until)
+			}
+		case *ast.GrammarSeparatedTerm:
+			walk(n.Elem)
+			walk(n.Separator)
+			for _, until := range n.Until {
+				walk(until)
+			}
+		case *ast.GrammarSuffixTerm:
+			walk(n.Seed)
+			for _, arm := range n.Arms {
+				walk(arm.Op)
+				for _, binding := range arm.Bindings {
+					if binding != nil {
+						walk(binding.Term)
+					}
+				}
+			}
+		case *ast.GrammarPostfixTerm:
+			walk(n.Seed)
+			for _, arm := range n.Arms {
+				walk(arm.Op)
+				for _, binding := range arm.Bindings {
+					if binding != nil {
+						walk(binding.Term)
+					}
+				}
+			}
+		case *ast.GrammarPrecedenceTerm:
+			walk(n.Seed)
+			for _, level := range n.Levels {
+				walk(level.Seed)
+				for _, arm := range level.Arms {
+					walk(arm.Op)
+					for _, binding := range arm.Bindings {
+						if binding != nil {
+							walk(binding.Term)
+						}
+					}
+				}
+			}
+			for _, arm := range n.Arms {
+				walk(arm.Op)
+				for _, binding := range arm.Bindings {
+					if binding != nil {
+						walk(binding.Term)
+					}
+				}
+			}
+		}
+	}
+	walk(term)
+	return refs
 }
 
 func (p *Parser) parseGrammarFnDecl(typeCtor bool) ast.GrammarFnDecl {
@@ -1390,6 +1544,10 @@ func (p *Parser) parseGrammarChoiceTerm() ast.GrammarTerm {
 		p.expect(lexer.TOKEN_INDENT)
 		options := make([]ast.GrammarTerm, 0, 4)
 		for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+			p.skipNewlines()
+			if p.peek() == lexer.TOKEN_DEDENT {
+				break
+			}
 			options = append(options, p.parseGrammarTerm())
 		}
 		p.expect(lexer.TOKEN_DEDENT)

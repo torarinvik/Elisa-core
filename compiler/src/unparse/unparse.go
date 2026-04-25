@@ -657,6 +657,12 @@ func (f *formatter) writeGrammarTokenSetDecl(level int, tokenSet ast.GrammarToke
 func (f *formatter) writeGrammarAliasDecl(level int, alias ast.GrammarAliasDecl) {
 	if grammarTermUsesBlockForm(alias.Term) {
 		f.writeLine(level, "grammar alias "+alias.Name+":")
+		if seq, ok := alias.Term.(*ast.GrammarSeqTerm); ok {
+			for _, term := range seq.Terms {
+				f.writeGrammarTerm(level+1, term)
+			}
+			return
+		}
 		f.writeGrammarTerm(level+1, alias.Term)
 		return
 	}
@@ -779,6 +785,10 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 		return
 	}
 	if seq, ok := term.(*ast.GrammarSeqTerm); ok {
+		if prefix, ok := formatGrammarPrefixSugar(seq); ok {
+			f.writeLine(level, prefix)
+			return
+		}
 		f.writeSeqTerm(level, seq)
 		return
 	}
@@ -1053,6 +1063,36 @@ func formatGrammarBinding(binding *ast.GrammarBindTerm) string {
 	return binding.Name + " = " + formatGrammarTerm(binding.Term)
 }
 
+func formatGrammarPrefixSugar(seq *ast.GrammarSeqTerm) (string, bool) {
+	if seq == nil || len(seq.Terms) != 3 {
+		return "", false
+	}
+	opBind, ok := seq.Terms[0].(*ast.GrammarBindTerm)
+	if !ok || opBind.Name != "op" || opBind.Term == nil {
+		return "", false
+	}
+	operandBind, ok := seq.Terms[1].(*ast.GrammarBindTerm)
+	if !ok || operandBind.Name != "operand" || operandBind.Term == nil {
+		return "", false
+	}
+	value, ok := seq.Terms[2].(*ast.GrammarExprTerm)
+	if !ok || value == nil || value.Type != nil {
+		return "", false
+	}
+	return "prefix(" + formatGrammarPrefixOps(opBind.Term) + ") " + formatGrammarTerm(operandBind.Term) + " -> " + formatExpr(value.Expr), true
+}
+
+func formatGrammarPrefixOps(term ast.GrammarTerm) string {
+	if choice, ok := term.(*ast.GrammarChoiceTerm); ok {
+		parts := make([]string, 0, len(choice.Options))
+		for _, option := range choice.Options {
+			parts = append(parts, formatGrammarTerm(option))
+		}
+		return strings.Join(parts, ", ")
+	}
+	return formatGrammarTerm(term)
+}
+
 func formatGrammarTerm(term ast.GrammarTerm) string {
 	switch n := term.(type) {
 	case *ast.GrammarPassTerm:
@@ -1083,6 +1123,9 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	case *ast.GrammarDelimitedTerm:
 		return "delimited(" + formatGrammarTerm(n.Open) + ", " + formatGrammarTerm(n.Body) + ", " + formatGrammarTerm(n.Close) + ", " + formatExpr(n.Message) + ")"
 	case *ast.GrammarSeqTerm:
+		if prefix, ok := formatGrammarPrefixSugar(n); ok {
+			return prefix
+		}
 		parts := make([]string, 0, len(n.Terms))
 		for _, term := range n.Terms {
 			parts = append(parts, formatGrammarTerm(term))

@@ -463,8 +463,11 @@ func normalizeGrammarDeclBeforeFirstSetsInScope(decl *ast.GrammarDecl, grammarSc
 	grammarAliases := grammarAliasMap(normalized.GrammarAliases)
 	normalized.GrammarAliases = expandGrammarAliasesGrammarAliases(normalized.GrammarAliases, grammarAliases)
 	grammarAliases = grammarAliasMap(normalized.GrammarAliases)
+	normalized.InfixTables = expandGrammarInfixTablesGrammarAliases(normalized.InfixTables, grammarAliases)
 	normalized.GrammarFns = expandGrammarFnsGrammarAliases(normalized.GrammarFns, grammarAliases)
 	grammarFns := grammarFnMap(normalized.GrammarFns)
+	normalized.InfixTables = expandGrammarInfixTablesGrammarFns(normalized.InfixTables, grammarFns)
+	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(normalized.InfixTables, aliasByLiteral)
 	recoveryPolicies := grammarRecoveryPolicyMap(normalized.RecoveryPolicies)
 	infixTables := grammarInfixTableMap(normalized.InfixTables)
 	normalized.Productions = make([]ast.GrammarProductionDecl, 0, len(decl.Productions))
@@ -761,6 +764,18 @@ func expandGrammarProductionGrammarAliases(production ast.GrammarProductionDecl,
 	return production
 }
 
+func expandGrammarInfixTablesGrammarAliases(tables []ast.GrammarInfixTableDecl, aliases map[string]ast.GrammarAliasDecl) []ast.GrammarInfixTableDecl {
+	if len(tables) == 0 || len(aliases) == 0 {
+		return tables
+	}
+	expanded := make([]ast.GrammarInfixTableDecl, 0, len(tables))
+	for _, table := range tables {
+		table.Levels = expandGrammarPrecedenceLevelsGrammarAliases(table.Levels, aliases, nil)
+		expanded = append(expanded, table)
+	}
+	return expanded
+}
+
 func expandGrammarTermGrammarAliases(term ast.GrammarTerm, aliases map[string]ast.GrammarAliasDecl, seen map[string]bool) ast.GrammarTerm {
 	if term == nil || len(aliases) == 0 {
 		return term
@@ -900,6 +915,18 @@ func expandGrammarProductionGrammarFns(production ast.GrammarProductionDecl, gra
 	}
 	production.Terms = terms
 	return production
+}
+
+func expandGrammarInfixTablesGrammarFns(tables []ast.GrammarInfixTableDecl, grammarFns map[string]ast.GrammarFnDecl) []ast.GrammarInfixTableDecl {
+	if len(tables) == 0 || len(grammarFns) == 0 {
+		return tables
+	}
+	expanded := make([]ast.GrammarInfixTableDecl, 0, len(tables))
+	for _, table := range tables {
+		table.Levels = expandGrammarPrecedenceLevelsGrammarFns(table.Levels, grammarFns, nil)
+		expanded = append(expanded, table)
+	}
+	return expanded
 }
 
 type grammarFnBindings struct {
