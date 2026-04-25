@@ -288,6 +288,31 @@ func TestParseGrammarDeclAllowsParameterizedGrammarAliases(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsParameterizedAliasBodyToUseImportedHelper(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
+    token:
+        COMMA ","
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+    grammar alias expr_items(stop: tokenset, sep: grammar = .COMMA):
+        expression() |> separated_by(stop: stop, sep: sep)
+    args() -> darray[Pascal.Expr]:
+        values = expr_items(stop: RParenSync)
+        return values
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors for imported helper in alias body: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.Uses) != 1 {
+		t.Fatalf("expected PascalListGrammar use, got %#v", decl.Uses)
+	}
+}
+
 func TestParseGrammarDeclRejectsRecursiveGrammarAliases(t *testing.T) {
 	_, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
     grammar alias alpha = beta
