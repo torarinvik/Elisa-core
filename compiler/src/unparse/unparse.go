@@ -655,8 +655,12 @@ func (f *formatter) writeGrammarTokenSetDecl(level int, tokenSet ast.GrammarToke
 }
 
 func (f *formatter) writeGrammarAliasDecl(level int, alias ast.GrammarAliasDecl) {
+	name := alias.Name
+	if len(alias.Params) != 0 {
+		name += "(" + strings.Join(formatGrammarFnParams(alias.Params), ", ") + ")"
+	}
 	if grammarTermUsesBlockForm(alias.Term) {
-		f.writeLine(level, "grammar alias "+alias.Name+":")
+		f.writeLine(level, "grammar alias "+name+":")
 		if seq, ok := alias.Term.(*ast.GrammarSeqTerm); ok {
 			for _, term := range seq.Terms {
 				f.writeGrammarTerm(level+1, term)
@@ -666,24 +670,11 @@ func (f *formatter) writeGrammarAliasDecl(level int, alias ast.GrammarAliasDecl)
 		f.writeGrammarTerm(level+1, alias.Term)
 		return
 	}
-	f.writeLine(level, "grammar alias "+alias.Name+" = "+formatGrammarTerm(alias.Term))
+	f.writeLine(level, "grammar alias "+name+" = "+formatGrammarTerm(alias.Term))
 }
 
 func (f *formatter) writeGrammarFnDecl(level int, grammarFn ast.GrammarFnDecl) {
-	params := make([]string, 0, len(grammarFn.Params))
-	for _, param := range grammarFn.Params {
-		text := param.Name
-		if param.Type.Kind != "" {
-			text += ": " + formatGrammarFnType(param.Type)
-		}
-		if param.Default != nil {
-			text += " = " + formatGrammarTerm(param.Default)
-		}
-		if param.DefaultExpr != nil {
-			text += " = " + formatExpr(param.DefaultExpr)
-		}
-		params = append(params, text)
-	}
+	params := formatGrammarFnParams(grammarFn.Params)
 	line := "grammarfn " + grammarFn.Name
 	if grammarFn.TypeCtor {
 		line = "grammar type " + grammarFn.Name
@@ -698,6 +689,24 @@ func (f *formatter) writeGrammarFnDecl(level int, grammarFn ast.GrammarFnDecl) {
 	for _, term := range grammarFn.Terms {
 		f.writeGrammarTerm(level+1, term)
 	}
+}
+
+func formatGrammarFnParams(params []ast.GrammarFnParam) []string {
+	formatted := make([]string, 0, len(params))
+	for _, param := range params {
+		text := param.Name
+		if param.Type.Kind != "" {
+			text += ": " + formatGrammarFnType(param.Type)
+		}
+		if param.Default != nil {
+			text += " = " + formatGrammarTerm(param.Default)
+		}
+		if param.DefaultExpr != nil {
+			text += " = " + formatExpr(param.DefaultExpr)
+		}
+		formatted = append(formatted, text)
+	}
+	return formatted
 }
 
 func formatGrammarFnType(typ ast.GrammarFnType) string {
@@ -1219,6 +1228,17 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	case *ast.GrammarFirstTerm:
 		return "first(" + n.Name + ")"
 	case *ast.GrammarApplyTerm:
+		if n.Piped && len(n.Args) != 0 {
+			args := make([]string, 0, len(n.Args)-1)
+			for _, arg := range n.Args[1:] {
+				text := formatGrammarTerm(arg.Term)
+				if arg.Name != "" {
+					text = arg.Name + ": " + text
+				}
+				args = append(args, text)
+			}
+			return formatGrammarTerm(n.Args[0].Term) + " |> " + n.Name + "(" + strings.Join(args, ", ") + ")"
+		}
 		args := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
 			text := formatGrammarTerm(arg.Term)

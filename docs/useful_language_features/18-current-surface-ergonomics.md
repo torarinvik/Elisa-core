@@ -127,6 +127,35 @@ grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
         return values
 ```
 
+The same call can be written as a compile-time grammar pipeline when the first argument is the thing being transformed:
+
+```context
+grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
+    args() -> darray[Pascal.Expr]:
+        values = expression() |> separated_by(stop: RParenSync)
+        return values
+```
+
+Aliases can be parameterized when the call site needs a domain name but still wants to supply local grammar fragments, token sets, or expression values:
+
+```context
+grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
+    token:
+        COMMA ","
+        RPAREN ")"
+
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+
+    grammar alias expr_items(stop: tokenset, sep: grammar = .COMMA):
+        expression() |> separated_by(stop: stop, sep: sep)
+
+    args() -> darray[Pascal.Expr]:
+        values = expr_items(stop: RParenSync)
+        return values
+```
+
 They can also accept expression parameters for the bits that should stay ordinary llcontext code, such as diagnostics and fallback AST construction:
 
 ```context
@@ -153,8 +182,10 @@ Current rules:
 - expression parameters use `expr` in the signature and are passed with `expr(...)` at the call site
 - the body is ordinary grammar syntax; one term expands as that term, multiple terms expand as a `seq`
 - `Name(item: expression(), stop: RParenSync)` is the preferred direct call style once a helper has named arguments
+- `item |> Name(args...)` is pipeline sugar for passing `item` as the first positional grammar argument, which is useful for combinator-like helpers such as list builders and recovery wrappers
 - `apply Name(arg, ...)` remains the explicit lower-level spelling, and is useful for positional experiments or when you want to emphasize compile-time expansion
 - positional and named arguments can be mixed only before the first named argument; missing parameters use defaults when present
+- `grammar alias name(params...) = term` and block-form `grammar alias name(params...):` use the same parameter, default, and argument rules as grammar functions, but are intended for domain-named fragments and partial specializations rather than general constructors
 - arguments are grammar terms, so they can be productions, token terms, required/recoverable terms, lists, `seq`, or token-set references
 - typed parameters currently support `grammar`, `grammar -> T`, `tokenset`, and `expr`
 - the parser reports same-grammar bad calls such as unknown helpers, missing required arguments, unknown named arguments, duplicate named arguments, too many positional arguments, passing a token set where a grammar term is expected, passing a grammar term where a token set is expected, or passing a grammar term where an expression is expected
@@ -527,7 +558,7 @@ Current header declarations:
 - `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
 - `channel name` at the top of a production body declares a production-local channel, which is preferred for helper tuple/struct results
 - `grammar type Name[...]` declares a reusable higher-order grammar combinator with the same expansion model as `grammarfn`, but with a clearer “grammar constructor” intent
-- `grammar alias name = term` and block-form `grammar alias name:` give compile-time grammar terms reusable names, so call sites can say `args = call_args` or `statements = block_statement_items` while keeping the lower-level `separated_by(...)` or recovery shape available in the header
+- `grammar alias name = term`, `grammar alias name(params...) = term`, and their block forms give compile-time grammar terms reusable names, so call sites can say `args = call_args`, `args = expr_items(stop: RParenSync)`, or `statements = block_statement_items` while keeping the lower-level `separated_by(...)` or recovery shape available in the header
 - `infix table Name(result):` hoists a reusable named-precedence ladder into grammar header scope so productions can say `result = infix(Name)` instead of inlining every level
 - if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from matching channel names
 - struct-return synthesis only uses channels that correspond to struct fields; unrelated grammar-wide channels such as `node` are ignored instead of producing invalid helper struct literals
@@ -556,7 +587,7 @@ grammar SMLExprGrammar with SMLGrammarEnv:
         IDENT
         INTEGER
     grammar type recovered_expr(stop: tokenset) -> grammar -> SML.Expr:
-        recovered(item: expression(), message: expr(ExpectedExpression), stop: stop, fallback: expr(invalid_expr_at(state.current_token().span)))
+        expression() |> recovered(message: expr(ExpectedExpression), stop: stop, fallback: expr(invalid_expr_at(state.current_token().span)))
 
 extend grammar PerlExprGrammar:
     postfix_expr() -> Perl.Expr:

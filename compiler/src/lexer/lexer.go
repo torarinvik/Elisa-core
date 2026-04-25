@@ -761,6 +761,9 @@ func (l *Lexer) NextToken() Token {
 
 	case '|':
 		l.advance()
+		if l.match('>') {
+			return l.finishToken(Token{Kind: TOKEN_PIPEGT, Text: "|>", Pos: p})
+		}
 		if l.match('=') {
 			return l.finishToken(Token{Kind: TOKEN_PIPEEQ, Text: "|=", Pos: p})
 		}

@@ -173,6 +173,7 @@ type GrammarTokenSetDecl struct {
 type GrammarAliasDecl struct {
 	Position lexer.Pos
 	Name     string
+	Params   []GrammarFnParam
 	Term     GrammarTerm
 }
 
@@ -448,6 +449,7 @@ type GrammarApplyTerm struct {
 	Position lexer.Pos
 	Name     string
 	Direct   bool
+	Piped    bool
 	Args     []GrammarApplyArg
 }
 

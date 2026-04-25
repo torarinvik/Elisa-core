@@ -232,6 +232,62 @@ func TestParseGrammarDeclAllowsMultiTermBlockGrammarAliases(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsParameterizedGrammarAliases(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    token:
+        COMMA ","
+        SEMICOLON ";"
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+    grammar type separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+    grammar alias expr_items(stop: tokenset, sep: grammar = .COMMA):
+        expression() |> separated_by(stop: stop, sep: sep)
+    args() -> darray[Pascal.Expr]:
+        values = expr_items(stop: RParenSync, sep: .SEMICOLON)
+        return values
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.GrammarAliases) != 1 {
+		t.Fatalf("expected one grammar alias, got %d", len(decl.GrammarAliases))
+	}
+	alias := decl.GrammarAliases[0]
+	if alias.Name != "expr_items" || len(alias.Params) != 2 {
+		t.Fatalf("expected parameterized expr_items alias with two params, got %#v", alias)
+	}
+	if alias.Params[0].Type.Kind != "tokenset" || alias.Params[1].Type.Kind != "grammar" || alias.Params[1].Default == nil {
+		t.Fatalf("expected tokenset stop and defaulted grammar sep params, got %#v", alias.Params)
+	}
+	if _, ok := alias.Term.(*ast.GrammarApplyTerm); !ok {
+		t.Fatalf("expected alias body to be pipeline apply, got %T", alias.Term)
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected production binding, got %T", decl.Productions[0].Terms[0])
+	}
+	apply, ok := bind.Term.(*ast.GrammarApplyTerm)
+	if !ok || apply.Name != "expr_items" || len(apply.Args) != 2 {
+		t.Fatalf("expected expr_items apply with two args, got %#v", bind.Term)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"grammar alias expr_items(stop: tokenset, sep: grammar = .COMMA) = expression() |> separated_by(stop: stop, sep: sep)",
+		"expression() |> separated_by(stop: stop, sep: sep)",
+		"values = expr_items(stop: RParenSync, sep: .SEMICOLON)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted parameterized alias output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclRejectsRecursiveGrammarAliases(t *testing.T) {
 	_, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
     grammar alias alpha = beta
@@ -610,6 +666,55 @@ func TestParseGrammarDeclAllowsDirectNamedGrammarFnApply(t *testing.T) {
 	formatted := unparse.FormatFile(file)
 	if !strings.Contains(formatted, "values = separated_by(item: expression(), stop: RParenSync)") {
 		t.Fatalf("expected direct grammar apply to format without apply keyword, got:\n%s", formatted)
+	}
+}
+
+func TestParseGrammarDeclAllowsGrammarPipelineApply(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    token:
+        COMMA ","
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+    grammar type separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+    args() -> darray[Pascal.Expr]:
+        values = expression() |> separated_by(stop: RParenSync)
+        return values
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first production term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	apply, ok := bind.Term.(*ast.GrammarApplyTerm)
+	if !ok {
+		t.Fatalf("expected binding term to be grammar apply, got %T", bind.Term)
+	}
+	if !apply.Direct || !apply.Piped {
+		t.Fatalf("expected grammar pipeline to be preserved as direct piped apply, got %#v", apply)
+	}
+	if apply.Name != "separated_by" || len(apply.Args) != 2 {
+		t.Fatalf("expected separated_by piped apply with two args, got %#v", apply)
+	}
+	if apply.Args[0].Name != "" {
+		t.Fatalf("expected piped input to be an injected positional arg, got %#v", apply.Args[0])
+	}
+	if call, ok := apply.Args[0].Term.(*ast.GrammarCallTerm); !ok || call.Name != "expression" {
+		t.Fatalf("expected piped input to be expression(), got %#v", apply.Args[0].Term)
+	}
+	if apply.Args[1].Name != "stop" {
+		t.Fatalf("expected explicit named stop arg, got %#v", apply.Args[1])
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "values = expression() |> separated_by(stop: RParenSync)") {
+		t.Fatalf("expected grammar pipeline to round-trip, got:\n%s", formatted)
 	}
 }
 

@@ -126,6 +126,7 @@ const (
 	TOKEN_TO       // to
 	TOKEN_LBRACE   // {
 	TOKEN_RBRACE   // }
+	TOKEN_PIPEGT   // |>
 )
 
 var tokenNames = map[TokenKind]string{
@@ -240,6 +241,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_LSHIFT: "<<",
 	TOKEN_RSHIFT: ">>",
 	TOKEN_TILDE:  "~",
+	TOKEN_PIPEGT: "|>",
 }
 
 var keywords = map[string]TokenKind{

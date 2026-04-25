@@ -30,6 +30,15 @@ args = separated_by(item: expression(), stop: RParenSync)
 condition = recovered(item: condition(), message: expr(ExpectedCondition), stop: ConditionSync, fallback: expr(invalid_expr()))
 ```
 
+When the first argument is the grammar fragment being transformed, prefer the pipeline form:
+
+```context
+args = expression() |> separated_by(stop: RParenSync)
+condition = condition() |> recovered(message: expr(ExpectedCondition), stop: ConditionSync, fallback: expr(invalid_expr()))
+```
+
+Pipelines are compile-time grammar application sugar. They pass the left-hand term as the first positional argument to the grammar constructor and keep the remaining arguments named.
+
 Avoid the older explicit spelling unless you intentionally want to emphasize expansion or positional experiments:
 
 ```context
@@ -44,7 +53,7 @@ grammar PascalStmtGrammar with PascalTreeGrammarEnv uses PascalListGrammar:
         END
         token(TokenKind.EOF)
 
-    grammar alias block_statement_items = separated_by(item: statement(), stop: BlockEndSync, sep: .SEMICOLON)
+    grammar alias block_statement_items = statement() |> separated_by(stop: BlockEndSync, sep: .SEMICOLON)
 
     compound_statement() -> Pascal.Stmt:
         begin_token = .BEGIN
@@ -52,6 +61,20 @@ grammar PascalStmtGrammar with PascalTreeGrammarEnv uses PascalListGrammar:
         end_token = required(.END, ParseMessageKey.ExpectedBlockEnd)
         return make_compound_stmt(begin_token, statements, end_token)
 ```
+
+Use a parameterized alias when the named parser concept needs local stop sets, separators, or recovery expressions, but should still read as a domain construct at the call site:
+
+```context
+grammar PascalExprGrammar with PascalTreeGrammarEnv uses PascalListGrammar:
+    grammar alias expr_items(stop: tokenset, sep: grammar = .COMMA):
+        expression() |> separated_by(stop: stop, sep: sep)
+
+    call_args() -> darray[Pascal.Expr]:
+        args = expr_items(stop: RParenSync)
+        return args
+```
+
+Prefer `grammar type` when the abstraction is a reusable constructor such as `separated_by` or `recovered`. Prefer a parameterized `grammar alias` when the abstraction is a partial specialization with parser-domain meaning such as `expr_items`, `pattern_items`, or `statement_list_until`.
 
 Use the block form when the alias names a larger fragment:
 
@@ -232,14 +255,14 @@ Use postfix `?` for optional grammar terms:
 
 ```context
 else_stmt = else_clause()?
-args = delimited(.LPAREN, separated_by(item: expression(), stop: RParenSync), .RPAREN, ExpectedRightParen)?
+args = delimited(.LPAREN, expression() |> separated_by(stop: RParenSync), .RPAREN, ExpectedRightParen)?
 ```
 
 Use direct recovery constructors for repeated recovery shapes:
 
 ```context
 grammar type recovered_expr(stop: tokenset) -> grammar -> SML.Expr:
-    recovered(item: expression(), message: expr(SMLParseMessageKey.ExpectedExpression), stop: stop, fallback: expr(invalid_sml_expr_at(state.current_token().span)))
+    expression() |> recovered(message: expr(SMLParseMessageKey.ExpectedExpression), stop: stop, fallback: expr(invalid_sml_expr_at(state.current_token().span)))
 
 if_expr() -> SML.Expr:
     if_token = .IF

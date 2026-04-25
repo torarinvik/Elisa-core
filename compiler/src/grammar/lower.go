@@ -466,6 +466,7 @@ func normalizeGrammarDeclBeforeFirstSetsInScope(decl *ast.GrammarDecl, grammarSc
 	normalized.InfixTables = expandGrammarInfixTablesGrammarAliases(normalized.InfixTables, grammarAliases)
 	normalized.GrammarFns = expandGrammarFnsGrammarAliases(normalized.GrammarFns, grammarAliases)
 	grammarFns := grammarFnMap(normalized.GrammarFns)
+	grammarFns = addParameterizedGrammarAliasesToGrammarFnMap(grammarFns, normalized.GrammarAliases)
 	normalized.InfixTables = expandGrammarInfixTablesGrammarFns(normalized.InfixTables, grammarFns)
 	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(normalized.InfixTables, aliasByLiteral)
 	recoveryPolicies := grammarRecoveryPolicyMap(normalized.RecoveryPolicies)
@@ -668,6 +669,23 @@ func grammarFnMap(grammarFns []ast.GrammarFnDecl) map[string]ast.GrammarFnDecl {
 	return resolved
 }
 
+func addParameterizedGrammarAliasesToGrammarFnMap(grammarFns map[string]ast.GrammarFnDecl, aliases []ast.GrammarAliasDecl) map[string]ast.GrammarFnDecl {
+	if len(aliases) == 0 {
+		return grammarFns
+	}
+	resolved := grammarFns
+	for _, alias := range aliases {
+		if alias.Name == "" || len(alias.Params) == 0 {
+			continue
+		}
+		if resolved == nil {
+			resolved = make(map[string]ast.GrammarFnDecl)
+		}
+		resolved[alias.Name] = ast.GrammarFnDecl{Position: alias.Position, Name: alias.Name, Params: alias.Params, Terms: []ast.GrammarTerm{alias.Term}}
+	}
+	return resolved
+}
+
 func grammarAliasMap(aliases []ast.GrammarAliasDecl) map[string]ast.GrammarAliasDecl {
 	if len(aliases) == 0 {
 		return nil
@@ -725,7 +743,21 @@ func expandGrammarAliasesGrammarAliases(aliases []ast.GrammarAliasDecl, aliasMap
 	}
 	expanded := make([]ast.GrammarAliasDecl, 0, len(aliases))
 	for _, alias := range aliases {
-		alias.Term = expandGrammarTermGrammarAliases(alias.Term, aliasMap, map[string]bool{alias.Name: true})
+		seen := map[string]bool{alias.Name: true}
+		for _, param := range alias.Params {
+			seen[param.Name] = true
+		}
+		if len(alias.Params) != 0 {
+			params := make([]ast.GrammarFnParam, 0, len(alias.Params))
+			for _, param := range alias.Params {
+				if param.Default != nil {
+					param.Default = expandGrammarTermGrammarAliases(param.Default, aliasMap, seen)
+				}
+				params = append(params, param)
+			}
+			alias.Params = params
+		}
+		alias.Term = expandGrammarTermGrammarAliases(alias.Term, aliasMap, seen)
 		expanded = append(expanded, alias)
 	}
 	return expanded
@@ -783,7 +815,7 @@ func expandGrammarTermGrammarAliases(term ast.GrammarTerm, aliases map[string]as
 	switch n := term.(type) {
 	case *ast.GrammarCallTerm:
 		if !n.Explicit && len(n.Args) == 0 {
-			if alias, ok := aliases[n.Name]; ok && !seen[n.Name] {
+			if alias, ok := aliases[n.Name]; ok && len(alias.Params) == 0 && !seen[n.Name] {
 				nextSeen := copyGrammarAliasSeen(seen)
 				nextSeen[n.Name] = true
 				return expandGrammarTermGrammarAliases(alias.Term, aliases, nextSeen)
@@ -796,7 +828,7 @@ func expandGrammarTermGrammarAliases(term ast.GrammarTerm, aliases map[string]as
 			arg.Term = expandGrammarTermGrammarAliases(arg.Term, aliases, seen)
 			args = append(args, arg)
 		}
-		return &ast.GrammarApplyTerm{Position: n.Position, Name: n.Name, Direct: n.Direct, Args: args}
+		return &ast.GrammarApplyTerm{Position: n.Position, Name: n.Name, Direct: n.Direct, Piped: n.Piped, Args: args}
 	case *ast.GrammarBindTerm:
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: expandGrammarTermGrammarAliases(n.Term, aliases, seen)}
 	case *ast.GrammarAssignTerm:
@@ -945,10 +977,16 @@ func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast
 				if replacement, ok := bindings.terms[n.Name]; ok {
 					return replacement
 				}
+				if replacement, ok := bindings.exprs[n.Name]; ok {
+					return &ast.GrammarExprTerm{Position: n.Position, Expr: replacement}
+				}
 			}
 		case *ast.GrammarTokenSetRefTerm:
 			if replacement, ok := bindings.terms[n.Name]; ok {
 				return replacement
+			}
+			if replacement, ok := bindings.exprs[n.Name]; ok {
+				return &ast.GrammarExprTerm{Position: n.Position, Expr: replacement}
 			}
 		case *ast.GrammarFirstTerm:
 			if replacement, ok := bindings.terms[n.Name]; ok {
@@ -958,9 +996,18 @@ func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast
 	}
 	switch n := term.(type) {
 	case *ast.GrammarApplyTerm:
-		expanded := expandGrammarApplyTerm(n, grammarFns)
-		if expanded == term {
-			return term
+		apply := n
+		if bindings != nil && len(n.Args) != 0 {
+			args := make([]ast.GrammarApplyArg, 0, len(n.Args))
+			for _, arg := range n.Args {
+				arg.Term = expandGrammarTermGrammarFns(arg.Term, grammarFns, bindings)
+				args = append(args, arg)
+			}
+			apply = &ast.GrammarApplyTerm{Position: n.Position, Name: n.Name, Direct: n.Direct, Piped: n.Piped, Args: args}
+		}
+		expanded := expandGrammarApplyTerm(apply, grammarFns)
+		if expanded == apply {
+			return apply
 		}
 		return expandGrammarTermGrammarFns(expanded, grammarFns, bindings)
 	case *ast.GrammarBindTerm:
@@ -1041,16 +1088,20 @@ type resolvedGrammarApplyArg struct {
 }
 
 func resolveGrammarApplyArgs(term *ast.GrammarApplyTerm, grammarFn ast.GrammarFnDecl) ([]resolvedGrammarApplyArg, bool) {
-	resolved := make([]resolvedGrammarApplyArg, len(grammarFn.Params))
-	filled := make([]bool, len(grammarFn.Params))
-	paramIndex := make(map[string]int, len(grammarFn.Params))
-	for index, param := range grammarFn.Params {
+	return resolveGrammarApplyArgsForParams(term.Args, grammarFn.Params)
+}
+
+func resolveGrammarApplyArgsForParams(args []ast.GrammarApplyArg, params []ast.GrammarFnParam) ([]resolvedGrammarApplyArg, bool) {
+	resolved := make([]resolvedGrammarApplyArg, len(params))
+	filled := make([]bool, len(params))
+	paramIndex := make(map[string]int, len(params))
+	for index, param := range params {
 		paramIndex[param.Name] = index
 	}
 
 	nextPositional := 0
 	seenNamed := false
-	for _, arg := range term.Args {
+	for _, arg := range args {
 		if arg.Name != "" {
 			seenNamed = true
 			index, found := paramIndex[arg.Name]
@@ -1067,7 +1118,7 @@ func resolveGrammarApplyArgs(term *ast.GrammarApplyTerm, grammarFn ast.GrammarFn
 		for nextPositional < len(filled) && filled[nextPositional] {
 			nextPositional++
 		}
-		if nextPositional >= len(grammarFn.Params) {
+		if nextPositional >= len(params) {
 			return nil, false
 		}
 		resolved[nextPositional] = resolvedGrammarApplyArg{Term: arg.Term, Expr: grammarFnExprArg(arg.Term)}
@@ -1075,7 +1126,7 @@ func resolveGrammarApplyArgs(term *ast.GrammarApplyTerm, grammarFn ast.GrammarFn
 		nextPositional++
 	}
 
-	for index, param := range grammarFn.Params {
+	for index, param := range params {
 		if filled[index] {
 			continue
 		}
