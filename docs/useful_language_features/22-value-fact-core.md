@@ -204,4 +204,4 @@ Current implementation foothold:
 - region invalidation diagnostics now describe invalidated region dependency facts
 - local-region escape and thread-transfer diagnostics use the same provenance vocabulary
 - `ensures` proof failures now describe missing `ensure` proofs against current tracked facts, and conservative call precision loss uses the `widen` vocabulary
-- function analysis records control-flow guard `refine`, declaration postcondition `ensure`, and conservative call-site `widen` transforms; semantic reports can surface those transforms without turning normal valid code into warnings
+- function analysis records allocation/tree/store `produce`, control-flow guard and alias-class `refine`, conservative call-site `widen`, flow-instruction `recompute`/`consume`, region lifecycle `invalidate`, store-publication `rebase`, effect authority `require`, and declaration postcondition `ensure` transforms; semantic reports can surface those transforms without turning normal valid code into warnings

@@ -136,6 +136,7 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		if loc := flowLocationForExpr(n.Value); loc != "" {
 			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrAlias, Location: n.Name, Source: loc, Note: "var init alias"})
 		}
+		appendProduceFlowInstrForExpr(block, n.Name, n.Value)
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.TupleBindStmt:
 		appendBasicFlowExprInstrs(block, n.Value)
@@ -143,14 +144,17 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.AssignStmt:
 		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), "assign")
+		appendProduceFlowInstrForExpr(block, flowLocationForExpr(n.Target), n.Value)
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.AsRefAssignStmt:
 		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), "assign-as-ref")
+		appendProduceFlowInstrForExpr(block, flowLocationForExpr(n.Target), n.Value)
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.AugAssignStmt:
 		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), "aug-assign")
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.ReturnStmt:
+		appendProduceFlowInstrForExpr(block, "<return>", n.Value)
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrReturn, Note: "return"})
 	case *ast.ExprStmt:
@@ -159,8 +163,11 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Capacity)
 	case *ast.MarkStmt:
 	case *ast.RestoreStmt:
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.RegionName, Source: n.MarkName, Note: "restore region checkpoint"})
 	case *ast.ResetStmt:
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.Name, Note: "reset region"})
 	case *ast.DestroyStmt:
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.Name, Note: "destroy region"})
 	case *ast.PoolStmt:
 		appendBasicFlowExprInstrs(block, n.Workers)
 	case *ast.LockStmt:
@@ -221,6 +228,10 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrConsume, Location: loc, Note: "explicit move"})
 		}
 		appendBasicFlowExprInstrs(block, n.Operand)
+	case *ast.AllocExpr:
+		appendBasicFlowExprInstrs(block, n.Owner)
+		appendBasicFlowExprInstrs(block, n.Value)
+		appendBasicFlowExprInstrs(block, n.NodeSpan)
 	case *ast.AddrOfExpr:
 		appendBasicFlowExprInstrs(block, n.Operand)
 	case *ast.BinaryExpr:
@@ -229,6 +240,7 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 	case *ast.UnaryExpr:
 		appendBasicFlowExprInstrs(block, n.Operand)
 	case *ast.CallExpr:
+		appendRebaseFlowInstrForCall(block, n)
 		appendBasicFlowExprInstrs(block, n.Func)
 		for _, arg := range n.Args {
 			appendBasicFlowExprInstrs(block, arg)
@@ -301,6 +313,42 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 			appendBasicFlowExprInstrs(block, target)
 		}
 	}
+}
+
+func appendProduceFlowInstrForExpr(block *CFGBlock, target string, expr ast.Expr) {
+	if block == nil || target == "" || expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		appendProduceFlowInstrForExpr(block, target, n.Inner)
+	case *ast.CastExpr:
+		appendProduceFlowInstrForExpr(block, target, n.Operand)
+	case *ast.CanExpr:
+		appendProduceFlowInstrForExpr(block, target, n.Expr)
+	case *ast.AllocExpr:
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrProduce, Location: target, Source: flowLocationForExpr(n.Owner), Note: allocProduceFlowNote(n)})
+	case *ast.CallExpr:
+		if callIdentName(n) == "freeze" {
+			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrProduce, Location: target, Note: "freeze produces frozen store"})
+		}
+	}
+}
+
+func appendRebaseFlowInstrForCall(block *CFGBlock, call *ast.CallExpr) {
+	if block == nil || call == nil || callIdentName(call) != "freeze" || len(call.Args) != 1 {
+		return
+	}
+	if target := flowLocationForExpr(call.Args[0]); target != "" {
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrRebase, Location: target, Note: "freeze rebases store provenance"})
+	}
+}
+
+func allocProduceFlowNote(expr *ast.AllocExpr) string {
+	if expr != nil && expr.NodeSugar {
+		return "node construction"
+	}
+	return "allocation produces value"
 }
 
 func appendMutationFlowInstr(block *CFGBlock, location string, note string) {
@@ -847,7 +895,9 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 	fnType.ReturnIsolationKnown = true
 	factTransforms := a.currentConservativeCallWideningTransforms()
 	factTransforms = append(factTransforms, factTransformsFromCFGGuards(cfg)...)
+	factTransforms = append(factTransforms, factTransformsFromCFGFlowInstrs(cfg)...)
 	factTransforms = append(factTransforms, factTransformsFromPoststates(fnType)...)
+	factTransforms = append(factTransforms, factTransformsFromPermissions(fnType)...)
 	factTransforms = dedupeAndSortFactTransforms(factTransforms)
 	analysis := &FunctionAnalysis{
 		CFG:             cfg,
@@ -894,6 +944,100 @@ func factTransformsFromCFGGuards(cfg *CFG) []FactTransform {
 	return dedupeAndSortFactTransforms(transforms)
 }
 
+func factTransformsFromCFGFlowInstrs(cfg *CFG) []FactTransform {
+	if cfg == nil {
+		return nil
+	}
+	transforms := make([]FactTransform, 0)
+	for _, block := range cfg.Blocks {
+		for _, instr := range block.Instrs {
+			switch instr.Kind {
+			case FlowInstrAlias:
+				if instr.Location == "" || instr.Source == "" {
+					continue
+				}
+				transforms = append(transforms, FactTransform{
+					Kind:    FactTransformRefine,
+					Classes: []FactClass{FactAliasClass},
+					Target:  instr.Location,
+					Source:  instr.Source,
+					Reason:  flowInstrFactReason(instr, "alias fact"),
+				})
+			case FlowInstrInvalidate:
+				if instr.Location == "" {
+					continue
+				}
+				transforms = append(transforms, FactTransform{
+					Kind:    FactTransformInvalidate,
+					Classes: []FactClass{FactRegionDeps},
+					Target:  instr.Location,
+					Source:  flowInstrFactSource(instr, "control-flow instruction"),
+					Reason:  flowInstrFactReason(instr, "invalidate region dependencies"),
+				})
+			case FlowInstrProduce:
+				if instr.Location == "" {
+					continue
+				}
+				transforms = append(transforms, FactTransform{
+					Kind:    FactTransformProduce,
+					Classes: []FactClass{FactRepresentation, FactStorage},
+					Target:  instr.Location,
+					Source:  flowInstrFactSource(instr, "control-flow instruction"),
+					Reason:  flowInstrFactReason(instr, "produce value"),
+				})
+			case FlowInstrRebase:
+				if instr.Location == "" {
+					continue
+				}
+				transforms = append(transforms, FactTransform{
+					Kind:    FactTransformRebase,
+					Classes: []FactClass{FactStoreDeps},
+					Target:  instr.Location,
+					Source:  flowInstrFactSource(instr, "control-flow instruction"),
+					Reason:  flowInstrFactReason(instr, "rebase provenance"),
+				})
+			case FlowInstrConsume:
+				if instr.Location == "" {
+					continue
+				}
+				transforms = append(transforms, FactTransform{
+					Kind:    FactTransformConsume,
+					Classes: []FactClass{FactUsage},
+					Target:  instr.Location,
+					Source:  "control-flow instruction",
+					Reason:  flowInstrFactReason(instr, "consume value"),
+				})
+			case FlowInstrMutate:
+				if instr.Location == "" {
+					continue
+				}
+				transforms = append(transforms, FactTransform{
+					Kind:    FactTransformRecompute,
+					Classes: []FactClass{FactTypestate},
+					Target:  instr.Location,
+					Source:  "control-flow instruction",
+					Reason:  flowInstrFactReason(instr, "mutation recomputes derived facts"),
+				})
+			}
+		}
+	}
+	return dedupeAndSortFactTransforms(transforms)
+}
+
+func flowInstrFactSource(instr FlowInstr, fallback string) string {
+	if instr.Source != "" {
+		return instr.Source
+	}
+	return fallback
+}
+
+func flowInstrFactReason(instr FlowInstr, fallback string) string {
+	if instr.Note != "" {
+		return instr.Note
+	}
+	return fallback
+}
+
 func factTransformsFromPoststates(fnType *FuncType) []FactTransform {
 	if fnType == nil || len(fnType.Poststates) == 0 {
 		return nil
@@ -933,6 +1077,32 @@ func functionPoststateTargetName(fnType *FuncType, poststate FuncPoststate) stri
 		return ""
 	}
 	return base + borrowAnnotationPathSuffix(poststate.Path)
+}
+
+func factTransformsFromPermissions(fnType *FuncType) []FactTransform {
+	if fnType == nil {
+		return nil
+	}
+	refs := functionPermissionRefs(fnType)
+	if len(refs) == 0 {
+		return nil
+	}
+	refs = canonicalizePermissionRefs(refs)
+	transforms := make([]FactTransform, 0, len(refs))
+	for _, ref := range refs {
+		target := PermissionRefString(ref)
+		if target == "" {
+			continue
+		}
+		transforms = append(transforms, FactTransform{
+			Kind:    FactTransformRequire,
+			Classes: []FactClass{FactEffects},
+			Target:  target,
+			Source:  "function signature",
+			Reason:  "requires effect authority",
+		})
+	}
+	return dedupeAndSortFactTransforms(transforms)
 }
 
 func factTransformsFromGuardFactSet(guards GuardFactSet) []FactTransform {

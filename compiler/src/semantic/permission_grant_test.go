@@ -41,6 +41,16 @@ def build() -> i64:
 	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Abort.Panic, Memory.Allocate]" {
 		t.Fatalf("expected inferred build permissions, got %q", got)
 	}
+	analysis, ok := result.FunctionAnalysisByName("build")
+	if !ok || analysis == nil {
+		t.Fatal("expected build function analysis")
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRequire, FactEffects, "Abort.Panic", "requires effect authority") {
+		t.Fatalf("expected function analysis to expose Abort.Panic require transform, got %#v", analysis.FactTransforms)
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRequire, FactEffects, "Memory.Allocate", "requires effect authority") {
+		t.Fatalf("expected function analysis to expose Memory.Allocate require transform, got %#v", analysis.FactTransforms)
+	}
 }
 
 func TestDeclaredCallPermissionWithLocalGrantIsQuiet(t *testing.T) {

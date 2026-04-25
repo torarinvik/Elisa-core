@@ -339,6 +339,123 @@ def use(mutable player: Player[Alive]&) -> void:
 	}
 }
 
+func TestAnalyzeFunctionAnalysisRecordsConsumeAndRecomputeTransforms(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "flow_fact_transforms.llcontext", `struct Player[state Alive | Dead]:
+	health: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
+
+def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]:
+	player.health <- player.health + 1
+	return join(move thread)
+`)
+	analysis, ok := result.FunctionAnalysisByName("update")
+	if !ok || analysis == nil {
+		t.Fatal("expected update function analysis")
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRecompute, FactTypestate, "player.health", "assign") {
+		t.Fatalf("expected function analysis to expose assignment recompute transform, got %#v", analysis.FactTransforms)
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformConsume, FactUsage, "thread", "explicit move") {
+		t.Fatalf("expected function analysis to expose explicit move consume transform, got %#v", analysis.FactTransforms)
+	}
+}
+
+func TestAnalyzeFunctionAnalysisRecordsProduceAndRebaseTransforms(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "produce_rebase_fact_transforms.llcontext", `struct RegionNode:
+	next: RegionNode&?
+	value: i32
+
+packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def build_region(seed: i32) -> i32:
+	region scratch(1024)
+	first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
+	return first.value
+
+def freeze_expr_store(owner: Arena) -> Expr.Store[Frozen]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return frozen
+`)
+	regionAnalysis, ok := result.FunctionAnalysisByName("build_region")
+	if !ok || regionAnalysis == nil {
+		t.Fatal("expected build_region function analysis")
+	}
+	if !hasFactTransform(regionAnalysis.FactTransforms, FactTransformProduce, FactStorage, "first", "allocation produces value") {
+		t.Fatalf("expected function analysis to expose region allocation produce transform, got %#v", regionAnalysis.FactTransforms)
+	}
+	freezeAnalysis, ok := result.FunctionAnalysisByName("freeze_expr_store")
+	if !ok || freezeAnalysis == nil {
+		t.Fatal("expected freeze_expr_store function analysis")
+	}
+	if !hasFactTransform(freezeAnalysis.FactTransforms, FactTransformRebase, FactStoreDeps, "store", "freeze rebases store provenance") {
+		t.Fatalf("expected function analysis to expose store rebase transform, got %#v", freezeAnalysis.FactTransforms)
+	}
+	if !hasFactTransform(freezeAnalysis.FactTransforms, FactTransformProduce, FactStorage, "frozen", "freeze produces frozen store") {
+		t.Fatalf("expected function analysis to expose frozen store produce transform, got %#v", freezeAnalysis.FactTransforms)
+	}
+}
+
+func TestAnalyzeFunctionAnalysisRecordsRegionInvalidateTransforms(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "region_invalidate_fact_transforms.llcontext", `def checkpoint_demo(seed: i32) -> i32:
+	region scratch(1024)
+	mark scratch as cp
+	temp: scratch i32& = new[scratch] seed + 1
+	restore scratch from cp
+	reset scratch
+	return seed
+
+def destroy_demo() -> void:
+	region scratch(1024)
+	destroy scratch
+`)
+	checkpointAnalysis, ok := result.FunctionAnalysisByName("checkpoint_demo")
+	if !ok || checkpointAnalysis == nil {
+		t.Fatal("expected checkpoint_demo function analysis")
+	}
+	if !hasFactTransform(checkpointAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "restore region checkpoint") {
+		t.Fatalf("expected function analysis to expose restore invalidate transform, got %#v", checkpointAnalysis.FactTransforms)
+	}
+	if !hasFactTransform(checkpointAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "reset region") {
+		t.Fatalf("expected function analysis to expose reset invalidate transform, got %#v", checkpointAnalysis.FactTransforms)
+	}
+	destroyAnalysis, ok := result.FunctionAnalysisByName("destroy_demo")
+	if !ok || destroyAnalysis == nil {
+		t.Fatal("expected destroy_demo function analysis")
+	}
+	if !hasFactTransform(destroyAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "destroy region") {
+		t.Fatalf("expected function analysis to expose destroy invalidate transform, got %#v", destroyAnalysis.FactTransforms)
+	}
+}
+
+func TestAnalyzeFunctionAnalysisRecordsAliasClassTransforms(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "alias_fact_transforms.llcontext", `struct RegionNode:
+	next: RegionNode&?
+	value: i32
+
+def alias_region_ref(seed: i32) -> i32:
+	region scratch(1024)
+	first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
+	alias: RegionNode& = first
+	return alias.value
+`)
+	analysis, ok := result.FunctionAnalysisByName("alias_region_ref")
+	if !ok || analysis == nil {
+		t.Fatal("expected alias_region_ref function analysis")
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRefine, FactAliasClass, "alias", "var init alias") {
+		t.Fatalf("expected function analysis to expose alias-class refine transform, got %#v", analysis.FactTransforms)
+	}
+}
+
 func TestCreateTypeBoundOpsSynthesizesRecursiveCleanupOps(t *testing.T) {
 	threadPool := &StructType{Name: "ThreadPool", Builtin: true}
 	mutexGuardBase := &StructType{Name: "MutexGuard", Builtin: true}

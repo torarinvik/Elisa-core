@@ -9,10 +9,13 @@ import (
 type FlowInstrKind string
 
 const (
-	FlowInstrAlias   FlowInstrKind = "alias"
-	FlowInstrConsume FlowInstrKind = "consume"
-	FlowInstrMutate  FlowInstrKind = "mutate"
-	FlowInstrReturn  FlowInstrKind = "return"
+	FlowInstrAlias      FlowInstrKind = "alias"
+	FlowInstrConsume    FlowInstrKind = "consume"
+	FlowInstrInvalidate FlowInstrKind = "invalidate"
+	FlowInstrMutate     FlowInstrKind = "mutate"
+	FlowInstrProduce    FlowInstrKind = "produce"
+	FlowInstrRebase     FlowInstrKind = "rebase"
+	FlowInstrReturn     FlowInstrKind = "return"
 )
 
 type FlowInstr struct {
