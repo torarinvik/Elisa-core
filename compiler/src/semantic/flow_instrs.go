@@ -249,6 +249,9 @@ func appendRebaseFlowInstrForCall(block *CFGBlock, call *ast.CallExpr) {
 
 func allocProduceFlowNote(expr *ast.AllocExpr) string {
 	if expr != nil && expr.NodeSugar {
+		if expr.NodeSpan != nil {
+			return "node construction with span"
+		}
 		return "node construction"
 	}
 	return "allocation produces value"

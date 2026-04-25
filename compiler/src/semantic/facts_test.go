@@ -84,8 +84,27 @@ func TestNewFactPathBuildsTypedSteps(t *testing.T) {
 	if formatted := FormatFactPath(got); formatted != want {
 		t.Fatalf("expected %q, got %q", want, formatted)
 	}
+	if formatted := FormatFactPath(NewReturnFactPath()); formatted != "<return>.value{root=<return>,path=value,steps=result:value}" {
+		t.Fatalf("unexpected return path %q", formatted)
+	}
 	if got := NewFactPath("<return>"); got.Target != "" {
 		t.Fatalf("expected synthetic target to produce empty path, got %#v", got)
+	}
+}
+
+func TestCanonicalFactTransformsSortsAndDedupes(t *testing.T) {
+	input := []FactTransform{
+		{Kind: FactTransformWiden, Classes: []FactClass{FactTypestate}, Target: "player", Source: "call", Reason: "lost precision"},
+		{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", Reason: "required interface fact"},
+		{Kind: FactTransformWiden, Classes: []FactClass{FactTypestate}, Target: "player", Source: "call", Reason: "lost precision"},
+	}
+	got := CanonicalFactTransforms(input)
+	want := []FactTransform{
+		{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", Reason: "required interface fact"},
+		{Kind: FactTransformWiden, Classes: []FactClass{FactTypestate}, Target: "player", Source: "call", Reason: "lost precision"},
+	}
+	if len(got) != len(want) || FormatFactTransforms(got) != FormatFactTransforms(want) {
+		t.Fatalf("unexpected canonical transforms:\nwant %#v\n got %#v", want, got)
 	}
 }
 
@@ -112,7 +131,7 @@ func TestFormatFactTransformSummary(t *testing.T) {
 
 func TestFormatFactExplanationsDescribesWidening(t *testing.T) {
 	got := ExplainFactTransform(FactTransform{Kind: FactTransformWiden, Classes: []FactClass{FactTypestate}, Target: "player", Source: "unknown_update(player)", Details: []FactTransformDetail{{Name: "before", Value: "Player[Alive]"}, {Name: "after", Value: "Player[*]"}}, Reason: "ref call without matching ensures"})
-	want := "widen player from Player[Alive] to Player[*] after unknown_update(player) because ref call without matching ensures"
+	want := "widen typestate facts for player from Player[Alive] to Player[*] after unknown_update(player) because ref call without matching ensures"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}

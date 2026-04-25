@@ -116,7 +116,10 @@ supported filter keys. Current keyed filters include `function`, `kind`,
 `kind=`, `=widen`, or unknown keys are errors so scripts do not silently fall
 back to substring matching. `mode=summary` keeps the same contract line and
 per-function snapshots but replaces raw transform/explanation sections with a
-compact count summary.
+compact count summary. `mode=json` emits the same filtered functions as a
+machine-readable JSON document with `version`, `mode`, `filters`, `functions`,
+per-function snapshots, exits, aliases, effects, summary counts, transform
+objects, and a text summary for compatibility.
 
 The report surface is intentionally close to the catalog:
 
@@ -140,6 +143,7 @@ go run ./src -emit facts -filter 'function=parse_expr,mode=summary' path/to/fron
 go run ./src -emit facts -filter 'kind=recompute,class=store-deps,target=node' path/to/frontend.llcontext
 go run ./src -emit facts -filter 'region=scratch' path/to/frontend.llcontext
 go run ./src -emit facts -filter 'alias=alias-class#0' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'function=parse_expr,mode=json' path/to/frontend.llcontext
 ```
 
 Use `mode=summary` first to verify that the expected function has fact activity,
@@ -148,6 +152,19 @@ until the output is small enough to inspect. For grammar-lowered parsers, filter
 on the generated helper, for example
 `function=__grammar_try__PascalFrontend__expression`, to inspect parser-state
 paths such as `state.cursor{root=state,path=cursor,steps=field:cursor}`.
+
+Common recipes:
+
+- Alias debugging: start with `alias=alias-class#N`, then add `kind=recompute`
+    to see dependent-path recomputes after mutation.
+- Region debugging: use `region=name` and inspect `generation_before` /
+    `generation_after` details plus `region_deps=[name[before->after]]`.
+- Store debugging: use `store=store_name` to see `consume`, `rebase`, and
+    `produce` publication facts around `freeze(move store)`.
+- Effect debugging: use `effect=Console.Write` or `kind=require,class=effects`
+    to distinguish required authority from local grants.
+- Grammar debugging: use `function=__grammar_try__...` and `path=state.cursor`
+    to inspect generated parser-state mutations.
 
 ## Canonical Examples
 
@@ -369,10 +386,28 @@ snapshot/exits/aliases/effects/transforms/groups/explanations sections, and
 typed path-step formatting. Additive fields may be appended to existing records
 only when old filters and golden tests keep passing.
 
+Summary mode has stable omission rules: it keeps the contract line, function
+headers, snapshots, exits, aliases, and effects, then emits one `summary:` line;
+it omits raw `transforms:`, `groups:`, and `explanations:` sections. JSON mode
+is additive to v1 and does not change the text-mode contract.
+
 Declare `fact-trace-v2` before any change that renames a class, transform kind,
 filter key, section name, path-step syntax, or default ordering rule. Version
 boundaries should be paired with fixture updates and a migration note in this
 document.
+
+Current v2 backlog:
+
+- Replace Go default JSON field names for snapshot records with explicit
+    lowercase snake_case field tags.
+- Split `mode` into separate `mode` and `format` filter keys if more output
+    formats are added.
+- Encode source positions as structured `{file,line,column}` objects instead of
+    formatted strings.
+- Replace substring matching with explicit match operators if scripts need exact
+    vs contains semantics.
+- Consider promoting compile-server fact filter failures to a first-class
+    request field with `error_code=fact_trace_filter` responses.
 
 ## Regression and Overhead Checks
 
@@ -382,6 +417,7 @@ Fact-reporting changes should cover both behavior and cost:
 go test ./src/semantic ./src
 go test ./src -run 'TestRunCLIEmitsFactTrace|TestRunCLIRejectsMalformedFactTraceFilters'
 go test ./src -bench BenchmarkGenerateFactTraceReportSummary -benchmem
+go test ./src -bench 'BenchmarkGenerateFactTraceReport(LargeTransformStream|KeyedFilterLargeTransformStream)' -benchmem
 ```
 
 The benchmark is intentionally small. It is a smoke check for accidental large
@@ -457,6 +493,7 @@ Current implementation foothold:
 - fact-only traces are available with `-emit facts` / `-emit fact-trace`, begin
     with a `fact-trace-v1` contract line, and support keyed filters
 - `mode=summary` provides compact per-function fact counts for large traces
+- `mode=json` provides a machine-readable trace shape for tools and golden tests
 - keyed fact trace filters are validated and unknown/malformed keys are errors
 - conservative call widening stores source position, call-site source, and
     before/after type details

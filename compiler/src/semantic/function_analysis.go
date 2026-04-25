@@ -758,6 +758,7 @@ func buildFunctionFactSnapshot(fnType *FuncType, cfg *CFG, transforms []FactTran
 				snapshot.ErrorExits = append(snapshot.ErrorExits, transform.Reason)
 			} else if transform.Target == "<return>" {
 				snapshot.Returns = append(snapshot.Returns, transform.Source)
+				snapshot.PathFacts = append(snapshot.PathFacts, NewReturnFactPath())
 			} else {
 				snapshot.Produced = append(snapshot.Produced, transform.Target)
 				if hasFactClass(transform.Classes, FactStoreDeps) {

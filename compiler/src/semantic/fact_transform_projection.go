@@ -175,6 +175,9 @@ func flowInstrProduceDetails(instr FlowInstr) []FactTransformDetail {
 		if instr.Source != "" {
 			details = append(details, FactTransformDetail{Name: "store_deps", Value: instr.Source})
 		}
+		if strings.Contains(instr.Note, "span") {
+			details = append(details, FactTransformDetail{Name: "span", Value: "present"})
+		}
 	}
 	if strings.Contains(instr.Note, "freeze") {
 		details = append(details, FactTransformDetail{Name: "operation", Value: "freeze"})

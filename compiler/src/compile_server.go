@@ -24,12 +24,13 @@ type compileServerRequest struct {
 }
 
 type compileServerResponse struct {
-	OK     bool   `json:"ok"`
-	Output string `json:"output,omitempty"`
-	IR     string `json:"ir,omitempty"`
-	Value  string `json:"value,omitempty"`
-	Stderr string `json:"stderr,omitempty"`
-	Error  string `json:"error,omitempty"`
+	OK        bool   `json:"ok"`
+	Output    string `json:"output,omitempty"`
+	IR        string `json:"ir,omitempty"`
+	Value     string `json:"value,omitempty"`
+	Stderr    string `json:"stderr,omitempty"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
 }
 
 func serveCompileServer(addr string, stdout io.Writer, stderr io.Writer) error {
@@ -112,7 +113,7 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		}
 		facts, err := generateFactTraceReport(result, "")
 		if err != nil {
-			return compileServerResponse{OK: false, Error: err.Error(), Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+			return compileServerResponse{OK: false, Error: err.Error(), ErrorCode: "fact_trace_filter", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
 		response.Output = facts
 	case emitFmt:

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"llcontext/src/ast"
@@ -98,6 +99,47 @@ func TestFactTransformsFromGenericInterfaceBounds(t *testing.T) {
 	}
 }
 
+func TestFunctionFactSnapshotPreservesInterfaceFactsAcrossJoin(t *testing.T) {
+	transforms := []FactTransform{
+		{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", SourceKind: FactSourceSignature, Reason: "required interface fact"},
+		{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", SourceKind: FactSourceSignature, Reason: "required interface fact"},
+		{Kind: FactTransformRefine, Classes: []FactClass{FactOptimization}, Target: "branch", Source: "control-flow guard", SourceKind: FactSourceGuard, Reason: "join smoke"},
+	}
+	snapshot := buildFunctionFactSnapshot(&FuncType{Return: &BuiltinType{Name: "int"}}, nil, transforms, nil)
+	if !reflect.DeepEqual(snapshot.RequiredInterfaces, []string{"B:Builder"}) {
+		t.Fatalf("expected joined interface fact to be preserved once, got %#v", snapshot.RequiredInterfaces)
+	}
+}
+
+func TestFunctionFactSnapshotKeepsInterfaceFactsWhenTypestateWidens(t *testing.T) {
+	transforms := []FactTransform{
+		{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", SourceKind: FactSourceSignature, Reason: "required interface fact"},
+		{Kind: FactTransformWiden, Classes: []FactClass{FactTypestate}, Target: "player", Source: "unknown_update(player)", SourceKind: FactSourceCallWiden, Reason: "ref call without matching ensures"},
+	}
+	snapshot := buildFunctionFactSnapshot(&FuncType{Return: &BuiltinType{Name: "int"}}, nil, transforms, nil)
+	if !reflect.DeepEqual(snapshot.RequiredInterfaces, []string{"B:Builder"}) {
+		t.Fatalf("expected interface facts to survive typestate widening, got %#v", snapshot.RequiredInterfaces)
+	}
+	if !reflect.DeepEqual(snapshot.Widened, []string{"player"}) {
+		t.Fatalf("expected widened typestate target, got %#v", snapshot.Widened)
+	}
+}
+
+func TestFunctionFactExitSummarySeparatesInterfaceRequirementsFromExitFacts(t *testing.T) {
+	transforms := []FactTransform{
+		{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", SourceKind: FactSourceSignature, Reason: "required interface fact"},
+		{Kind: FactTransformEnsure, Classes: []FactClass{FactTypestate}, Target: "job", Source: "ensures always", SourceKind: FactSourceSignature, Reason: "ensures typestate Ready"},
+		{Kind: FactTransformProduce, Classes: []FactClass{FactErrorPath}, Target: "<error>", Source: "ParseError.Bad", SourceKind: FactSourceErrorPath, Reason: "raise error path"},
+	}
+	summary := buildFunctionFactExitSummary(transforms)
+	if len(summary.Normal) != 1 || !strings.Contains(summary.Normal[0], "ensure job [typestate]") {
+		t.Fatalf("expected normal ensure exit fact only, got %#v", summary.Normal)
+	}
+	if len(summary.Error) != 1 || !strings.Contains(summary.Error[0], "produce <error> [error-path]") {
+		t.Fatalf("expected error path fact only, got %#v", summary.Error)
+	}
+}
+
 func TestFactTransformsFromCFGFlowInstrsProjectsErrorAndReturnPaths(t *testing.T) {
 	cfg := &CFG{Blocks: []CFGBlock{{Instrs: []FlowInstr{
 		{Kind: FlowInstrErrorExit, Location: "<error>", Source: "checked", Note: "try propagates error path"},
@@ -111,5 +153,16 @@ func TestFactTransformsFromCFGFlowInstrsProjectsErrorAndReturnPaths(t *testing.T
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected error/return path transforms:\nwant %#v\n got %#v", want, got)
+	}
+}
+
+func TestFlowInstrProduceDetailsIncludeTreeSpanAndStoreProvenance(t *testing.T) {
+	transform, ok := factTransformFromFlowInstr(FlowInstr{Kind: FlowInstrProduce, Location: "node", Source: "expr_store", Note: "node construction with span"})
+	if !ok {
+		t.Fatal("expected node construction flow instruction to produce a fact transform")
+	}
+	wantDetails := []FactTransformDetail{{Name: "representation", Value: "handle"}, {Name: "store_deps", Value: "expr_store"}, {Name: "span", Value: "present"}}
+	if !reflect.DeepEqual(transform.Details, wantDetails) {
+		t.Fatalf("expected span and store provenance details\nwant %#v\n got %#v", wantDetails, transform.Details)
 	}
 }

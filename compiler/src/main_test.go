@@ -12,7 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"llcontext/src/ast"
 	"llcontext/src/backend"
+	"llcontext/src/semantic"
 )
 
 func TestMain(m *testing.M) {
@@ -1181,7 +1183,7 @@ func TestRunCLIEmitsFactTraceKeyedFilterSelectors(t *testing.T) {
 		{name: "kind", fixture: coreFixture, filter: "kind=consume", contains: []string{"consume store [usage]"}, omits: []string{"widen player"}},
 		{name: "sourcekind", fixture: coreFixture, filter: "sourcekind=store", contains: []string{"produce frozen [representation,storage,store-deps]", "rebase store [store-deps]"}},
 		{name: "target", fixture: coreFixture, filter: "target=alias.value", contains: []string{"recompute alias.value [typestate,shape,optimization]"}, omits: []string{"consume store"}},
-		{name: "path", fixture: coreFixture, filter: "path=alias.value", contains: []string{"path_facts=[alias{root=alias};", "recompute alias.value [typestate,shape,optimization]"}},
+		{name: "path", fixture: coreFixture, filter: "path=alias.value", contains: []string{"path_facts=[<return>.value{root=<return>,path=value,steps=result:value};", "alias.value{root=alias,path=value,steps=field:value}", "recompute alias.value [typestate,shape,optimization]"}},
 		{name: "alias", fixture: coreFixture, filter: "alias=alias-class#0", contains: []string{"alias-class#0: {alias, first} mutated", "recompute first [typestate,shape,optimization,store-deps]"}},
 		{name: "region", fixture: coreFixture, filter: "region=scratch", contains: []string{"region_deps=[scratch[1->0], scratch[1->1]]", "invalidate scratch [region-deps]"}},
 		{name: "store", fixture: coreFixture, filter: "store=store", contains: []string{"handle_store_deps=[frozen<-store]", "rebase store [store-deps]"}},
@@ -1230,6 +1232,103 @@ func TestRunCLIEmitsFactTraceFilterIntersections(t *testing.T) {
 	}
 }
 
+func TestRunCLIEmitsFactTraceSnapshotOnlyFilter(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=fact_core_rules,target=<return>.value,mode=summary", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"func fact_core_rules", "<return>.value{root=<return>,path=value,steps=result:value}", "summary: transforms=0"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected snapshot-only filter to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunCLIEmitsMixedRequireFactTrace(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=fact_interface_rules,kind=require", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"require B:FactBuilder [interface]", "require Console.Write [effects]", "required_effects=[Console.Write]", "required_interfaces=[B:FactBuilder]"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected mixed require trace to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunCLIEmitsPackedTreeStoreProvenanceFacts(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=build_frozen_expr_graph,store=store", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"func build_frozen_expr_graph", "produced=[frozen, left, right, root]", "handle_store_deps=[frozen<-store]", "{operation=freeze,store_deps=store}"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected packed/tree provenance trace to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunCLIEmitsFactTraceJSONShape(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=fact_interface_rules,class=interface,mode=json", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	var report struct {
+		Version   string   `json:"version"`
+		Mode      string   `json:"mode"`
+		Filters   []string `json:"filters"`
+		Functions []struct {
+			Name     string `json:"name"`
+			Snapshot struct {
+				RequiredInterfaces []string `json:"RequiredInterfaces"`
+			} `json:"snapshot"`
+			Transforms []struct {
+				Kind    string   `json:"kind"`
+				Classes []string `json:"classes"`
+				Target  string   `json:"target"`
+			} `json:"transforms"`
+		} `json:"functions"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON fact trace:\n%s\nerror: %v", stdout.String(), err)
+	}
+	if report.Version != "fact-trace-v1" || report.Mode != "json" {
+		t.Fatalf("unexpected JSON contract: %#v", report)
+	}
+	if len(report.Functions) != 1 || report.Functions[0].Name != "fact_interface_rules" {
+		t.Fatalf("expected one filtered function, got %#v", report.Functions)
+	}
+	if got := report.Functions[0].Snapshot.RequiredInterfaces; len(got) != 1 || got[0] != "B:FactBuilder" {
+		t.Fatalf("expected required interface snapshot, got %#v", got)
+	}
+	if len(report.Functions[0].Transforms) != 1 || report.Functions[0].Transforms[0].Kind != "require" || report.Functions[0].Transforms[0].Target != "B:FactBuilder" {
+		t.Fatalf("unexpected JSON transform shape: %#v", report.Functions[0].Transforms)
+	}
+}
+
 func TestRunCLIRejectsMalformedFactTraceFilters(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
@@ -1267,6 +1366,55 @@ func BenchmarkGenerateFactTraceReportSummary(b *testing.B) {
 		if _, err := generateFactTraceReport(result, "mode=summary"); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkGenerateFactTraceReportLargeTransformStream(b *testing.B) {
+	result := syntheticFactTraceResultForBenchmark(1000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := generateFactTraceReport(result, "mode=summary"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGenerateFactTraceReportKeyedFilterLargeTransformStream(b *testing.B) {
+	result := syntheticFactTraceResultForBenchmark(1000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := generateFactTraceReport(result, "kind=recompute,class=store-deps,target=node.99,mode=summary"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func syntheticFactTraceResultForBenchmark(count int) *semantic.Result {
+	transforms := make([]semantic.FactTransform, 0, count)
+	for i := 0; i < count; i++ {
+		classes := []semantic.FactClass{semantic.FactTypestate, semantic.FactShape, semantic.FactOptimization}
+		if i%3 == 0 {
+			classes = append(classes, semantic.FactStoreDeps)
+		}
+		transforms = append(transforms, semantic.FactTransform{
+			Kind:       semantic.FactTransformRecompute,
+			Classes:    classes,
+			Target:     fmt.Sprintf("node.%d", i),
+			Source:     "synthetic",
+			SourceKind: semantic.FactSourceFlowInstr,
+			Details:    []semantic.FactTransformDetail{{Name: "mutation", Value: "benchmark"}},
+			Reason:     "benchmark transform stream",
+		})
+	}
+	analysis := &semantic.FunctionAnalysis{FactTransforms: semantic.CanonicalFactTransforms(transforms)}
+	decl := &ast.FuncDecl{Name: "bench_facts"}
+	return &semantic.Result{
+		GlobalScope: &semantic.Scope{Symbols: map[string]*semantic.Symbol{
+			"bench_facts": {Kind: semantic.SymbolFunc, Type: &semantic.FuncType{Return: &semantic.BuiltinType{Name: "void"}}, Node: decl},
+		}},
+		FunctionAnalyses: map[*ast.FuncDecl]*semantic.FunctionAnalysis{decl: analysis},
 	}
 }
 

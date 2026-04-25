@@ -28,6 +28,8 @@ var SupportedFactTraceFilterKeys = []string{
 	"verb",
 }
 
+const FactTraceJSONMode = "json"
+
 // FactClass names the orthogonal kinds of static knowledge the analyzer tracks
 // about values. The current compiler still stores these facts in specialized
 // structures such as GuardFactSet, OptimizationFacts, RefType, Shape, effects,
@@ -301,7 +303,11 @@ func ExplainFactTransform(transform FactTransform) string {
 	case FactTransformWiden:
 		before := factTransformDetailValue(transform.Details, "before")
 		after := factTransformDetailValue(transform.Details, "after")
-		parts := []string{"widen " + transform.Target}
+		label := "widen " + transform.Target
+		if len(transform.Classes) != 0 {
+			label = "widen " + factClassListKey(transform.Classes) + " facts for " + transform.Target
+		}
+		parts := []string{label}
 		if before != "" || after != "" {
 			parts = append(parts, "from "+emptyFactDetailFallback(before, "<unknown>")+" to "+emptyFactDetailFallback(after, "<widened>"))
 		}
@@ -484,6 +490,10 @@ func NewFactPath(target string) FactPath {
 	}
 	path := strings.TrimPrefix(target[len(root):], ".")
 	return FactPath{Target: target, Root: root, Path: path, Steps: FactPathStepsFromPath(path)}
+}
+
+func NewReturnFactPath() FactPath {
+	return FactPath{Target: "<return>.value", Root: "<return>", Path: "value", Steps: []FactPathStep{{Kind: "result", Name: "value"}}}
 }
 
 func FactPathStepsFromPath(path string) []FactPathStep {
@@ -712,6 +722,10 @@ func ensureRefStateMismatchMessage(targetName string, desired string, funcName s
 
 func quoteFactTarget(value string) string {
 	return `"` + value + `"`
+}
+
+func CanonicalFactTransforms(transforms []FactTransform) []FactTransform {
+	return dedupeAndSortFactTransforms(transforms)
 }
 
 func (k FactTransformKind) String() string {
