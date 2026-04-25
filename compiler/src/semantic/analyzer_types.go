@@ -1186,7 +1186,7 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 				}
 			}
 			if !a.typeSatisfiesStaticInterface(resolved, iface) {
-				a.errorf(expr.Pos(), "type argument %q does not implement interface %q", resolved, iface.Name)
+				a.errorf(expr.Pos(), interfaceConformanceFactMessage(resolved.String(), iface.Name, "type argument"))
 				return invalidType
 			}
 		}

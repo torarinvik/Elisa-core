@@ -387,6 +387,9 @@ def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64
 	if !hasString(analysis.FactSnapshot.Consumed, "thread") || !hasString(analysis.FactSnapshot.RequiredEffects, "Thread.Join") {
 		t.Fatalf("expected fact snapshot to record consumed thread and required Thread.Join, got %#v", analysis.FactSnapshot)
 	}
+	if !hasString(analysis.EffectSummary.Required, "Thread.Join") {
+		t.Fatalf("expected effect summary to record required Thread.Join, got %#v", analysis.EffectSummary)
+	}
 	if len(analysis.BlockFactTransforms) == 0 || len(analysis.CFG.Blocks[analysis.CFG.Entry].FactTransforms) == 0 {
 		t.Fatalf("expected per-block fact transforms, got blocks=%#v cfg=%#v", analysis.BlockFactTransforms, analysis.CFG.Blocks)
 	}
@@ -491,6 +494,9 @@ def destroy_demo() -> void:
 	if !sawGenerationDetails {
 		t.Fatalf("expected invalidate transform to include region generation details, got %#v", checkpointAnalysis.FactTransforms)
 	}
+	if len(checkpointAnalysis.FactSnapshot.RegionDeps) == 0 {
+		t.Fatalf("expected snapshot to include region generation dependency keys, got %#v", checkpointAnalysis.FactSnapshot)
+	}
 	if !hasFactTransform(checkpointAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "reset region") {
 		t.Fatalf("expected function analysis to expose reset invalidate transform, got %#v", checkpointAnalysis.FactTransforms)
 	}
@@ -544,6 +550,9 @@ def alias_region_mutation(seed: i32) -> i32:
 	}
 	if !hasFactTransform(analysis.FactTransforms, FactTransformRecompute, FactAliasClass, "alias-class#0", "mutation recomputes facts for alias class") {
 		t.Fatalf("expected alias-class mutation recompute transform, got %#v", analysis.FactTransforms)
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRecompute, FactStoreDeps, "alias", "alias mutation recomputes dependent path facts") {
+		t.Fatalf("expected alias mutation to recompute dependent path facts, got %#v", analysis.FactTransforms)
 	}
 }
 

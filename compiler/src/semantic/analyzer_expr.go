@@ -5267,7 +5267,7 @@ func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, ord
 			}
 		}
 		if !a.typeSatisfiesStaticInterface(bound, iface) {
-			a.errorf(expr.Pos(), "type %q does not implement interface %q for call to %q", bound, iface.Name, ft.Name)
+			a.errorf(expr.Pos(), interfaceConformanceFactMessage(bound.String(), iface.Name, "call to "+quoteFactTarget(ft.Name)))
 		}
 	}
 	for _, name := range ft.RefStorageParams {

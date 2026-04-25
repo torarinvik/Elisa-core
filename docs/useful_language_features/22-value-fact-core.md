@@ -32,6 +32,7 @@ Every value can carry facts from several orthogonal classes:
 | Effects | ambient authority required | `effects[...]`, `can ...:` |
 | Error path | alternate failure/control exits | `raise`, `try`, nullable `else` recovery |
 | Optimization | readonly, exclusive, contiguous, exact extent | dense loops, frozen scans, parallel legality |
+| Interface | generic/static-interface conformance | `def f[T: Builder]`, static interfaces |
 
 These facts do not all need to be written by the programmer. The important rule
 is that they are all part of one model, not separate mini-languages.
@@ -66,22 +67,24 @@ carry enough provenance to answer three debugging questions:
 The current implementation deliberately exposes these facts in one shared place:
 
 - `compiler/src/semantic/facts.go` defines fact classes, transform kinds,
-    transform sources, source positions, details, snapshots, path facts, exit
-    summaries, alias sets, and formatting/explanation helpers.
+    transform sources, source positions, details, snapshots, typed path steps,
+    exit summaries, alias sets, effect summaries, trace contract metadata, and
+    formatting/explanation helpers.
 - `compiler/src/semantic/flow_ir.go` and `flow_instrs.go` attach source
     positions to CFG flow instructions so fact traces can point back to the
     producing operation.
 - `compiler/src/semantic/fact_transform_projection.go` converts CFG, signature,
-    permission, widening, alias, region, freeze, and return information into
-    fact transforms.
+    permission, generic interface-bound, widening, alias, region, freeze, and
+    return information into fact transforms.
 - `compiler/src/semantic/function_analysis.go` stores the deduped per-function
-    stream plus `FactSnapshot`, `FactExitSummary`, `AliasSets`, and block-local
-    transforms.
+    stream plus `FactSnapshot`, `FactExitSummary`, `AliasSets`, `EffectSummary`,
+    and block-local transforms.
 - `compiler/src/semantic_report.go` prints these fields in `-emit semantic` and
     provides a fact-only trace with `-emit facts` or `-emit fact-trace`.
 
-The executable fixture `Code/test_programs/fact_core_rules.llcontext` is the
-compile-checked smoke sample for the catalog.
+The executable fixtures `Code/test_programs/fact_core_rules.llcontext` and
+`Code/test_programs/fact_interface_rules.llcontext` are compile-checked smoke
+samples for the catalog.
 
 ## Reporting Surface
 
@@ -90,13 +93,23 @@ compile-checked smoke sample for the catalog.
 ```sh
 go run ./src -emit facts ../Code/test_programs/fact_core_rules.llcontext
 go run ./src -emit fact-trace -filter fact_core_rules ../Code/test_programs/fact_core_rules.llcontext
+go run ./src -emit facts -filter 'kind=widen,class=typestate' ../Code/test_programs/fact_core_rules.llcontext
+go run ./src -emit facts -filter 'class=interface' ../Code/test_programs/fact_interface_rules.llcontext
 ```
+
+The first non-heading line of a fact trace is a contract line such as
+`contract: version=fact-trace-v1 ...`. It records stable ordering and the
+supported filter keys. Current keyed filters include `function`, `kind`,
+`class`, `target`, `source`, `sourcekind`, `reason`, `detail`, `alias`,
+`effect`, `region`, and `store`.
 
 The report surface is intentionally close to the catalog:
 
 - `fact_snapshot` / `snapshot` summarize final per-function facts.
 - `fact_exits` / `exits` split normal-return facts from error-path facts.
 - `fact_aliases` / `aliases` list alias classes and mutated classes.
+- `fact_effects` / `effects` summarize required and provided effect authority.
+- `fact_transforms` / `transforms` expose the raw stable transform stream.
 - `fact_groups` / `groups` group transforms by verb and fact class.
 - `fact_blocks` shows the block-local projection.
 - `fact_explanations` / `explanations` renders human-readable provenance such as
@@ -134,6 +147,11 @@ produce tmp:
     RegionDeps = scratch after cp
 invalidate values with RegionDeps = scratch after cp
 ```
+
+Snapshots also expose region dependency keys such as `scratch[2->1]`, derived
+from `generation_before` and `generation_after` details. That gives reports a
+stable handle for region generation invalidation without forcing the region
+implementation to become stringly typed internally.
 
 ### Packed tree construction
 
@@ -190,6 +208,27 @@ local grant satisfies effect use at puts(text)
 Effects are authority facts. They should not replace typestate facts such as
 `MutexGuard[Held]`; they describe permission to perform an operation, not the
 protocol state of a value.
+
+### Generic interface bounds
+
+```llcontext
+static interface Builder:
+    type State
+    def state() -> State
+
+def build[B: Builder]() -> B.State:
+    return B.state()
+```
+
+Fact view:
+
+```text
+require B:Builder Interface <- generic parameter
+```
+
+Interface bounds are required conformance facts. Diagnostics should say a type
+is missing a required interface fact instead of treating generic/interface
+failures as a separate diagnostic universe.
 
 ### Ensures
 
@@ -259,10 +298,28 @@ Fact view:
 ```text
 refine alias AliasClass <- first
 recompute alias-class#0 AliasClass <- mutation
+recompute alias dependent path facts <- alias-class#0
 ```
 
 Alias classes are path facts. Reports should expose both the individual alias
 refinement and the equivalence class that must be recomputed after mutation.
+Mutated alias classes additionally emit dependent-path recomputes for typestate,
+shape, store-dependency, and optimization facts.
+
+### Grammar and tree sugar
+
+Grammar lowering and `node[...]` tree construction should be treated as normal
+fact-producing operations:
+
+```text
+require parser state and effect facts for recovery/reporting
+produce tree handle with store dependency facts
+produce or handle error-path facts for recovery alternatives
+```
+
+The frontend grammar DSL can keep concise syntax, but the lowered fact trace
+must expose parser-state mutation, recovery/error paths, tree handle production,
+and span/store dependencies.
 
 ## Surface Design Rule
 
@@ -294,7 +351,7 @@ rather than treating each subsystem as unrelated.
      adding surface syntax.
 3. When adding a diagnostic, prefer the shared vocabulary: consumed usage facts,
      nullable refstate requirements, missing effect authority facts, invalidated
-     region dependency facts, widened typestate facts.
+    region dependency facts, widened typestate facts, required interface facts.
 4. When adding a report field, make it path-aware when the fact belongs to a
      value path rather than the whole value.
 5. When a mutable reference may alias another location, update the alias class,
@@ -316,6 +373,7 @@ Current implementation foothold:
 - nullable recovery and optional-chain diagnostics mention refstate fact
     requirements
 - effect permission warnings end with `missing required effect facts`
+- generic/static-interface failures use `required interface fact` vocabulary
 - `ensures` proof failures describe missing `ensure` proofs against current
     tracked facts, and conservative call precision loss uses the `widen`
     vocabulary with source call text
@@ -326,10 +384,11 @@ Current implementation foothold:
     return exits, and error-path transforms
 - CFG blocks carry their own projected fact transforms, while function analysis
     keeps the deduped per-function stream
-- semantic reports include `fact_snapshot`, `fact_exits`, `fact_aliases`, flat
-    `fact_transforms`, grouped `fact_groups`, explanatory `fact_explanations`, and
-    per-block `fact_blocks`
-- fact-only traces are available with `-emit facts` / `-emit fact-trace`
+- semantic reports include `fact_snapshot`, `fact_exits`, `fact_aliases`,
+    `fact_effects`, flat `fact_transforms`, grouped `fact_groups`, explanatory
+    `fact_explanations`, and per-block `fact_blocks`
+- fact-only traces are available with `-emit facts` / `-emit fact-trace`, begin
+    with a `fact-trace-v1` contract line, and support keyed filters
 - conservative call widening stores source position, call-site source, and
     before/after type details
 - region invalidation transforms carry detail tags such as
@@ -337,3 +396,8 @@ Current implementation foothold:
     `generation_before=...`, and `generation_after=...`
 - return provenance snapshots surface explicit packed/tree store dependency
     labels such as `Expr.Store[Frozen]`
+- path facts include typed path steps, for example `field:health`
+- mutation facts split across typestate, shape, optimization, and store-deps
+    where applicable
+- generated module interfaces preserve signature-level fact surfaces such as
+    generic interface bounds, effects, permissions, and ensures clauses

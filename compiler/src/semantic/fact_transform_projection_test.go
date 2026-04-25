@@ -26,7 +26,7 @@ func TestFactTransformsFromCFGFlowInstrsProjectsAllCoreInstructionKinds(t *testi
 		{Kind: FactTransformInvalidate, Classes: []FactClass{FactRegionDeps}, Target: "scratch", Source: "cp", SourceKind: FactSourceRegion, Details: []FactTransformDetail{{Name: "operation", Value: "restore region checkpoint"}, {Name: "checkpoint", Value: "cp"}}, Reason: "restore region checkpoint"},
 		{Kind: FactTransformProduce, Classes: []FactClass{FactRepresentation, FactStorage}, Target: "first", Source: "scratch", SourceKind: FactSourceFlowInstr, Reason: "allocation produces value"},
 		{Kind: FactTransformRebase, Classes: []FactClass{FactStoreDeps}, Target: "store", Source: "control-flow instruction", SourceKind: FactSourceStore, Details: []FactTransformDetail{{Name: "operation", Value: "freeze"}, {Name: "before", Value: "store"}, {Name: "after", Value: "frozen/public store"}}, Reason: "freeze rebases store provenance"},
-		{Kind: FactTransformRecompute, Classes: []FactClass{FactTypestate}, Target: "player.health", Source: "control-flow instruction", SourceKind: FactSourceFlowInstr, Reason: "assign"},
+		{Kind: FactTransformRecompute, Classes: []FactClass{FactTypestate, FactShape, FactOptimization}, Target: "player.health", Source: "control-flow instruction", SourceKind: FactSourceFlowInstr, Details: []FactTransformDetail{{Name: "mutation", Value: "assign"}}, Reason: "assign"},
 		{Kind: FactTransformRefine, Classes: []FactClass{FactAliasClass}, Target: "alias", Source: "first", SourceKind: FactSourceFlowInstr, Details: []FactTransformDetail{{Name: "alias_member", Value: "first"}}, Reason: "var init alias"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -86,6 +86,15 @@ func TestFactTransformsFromFunctionSignatureProjectsPoststatesAndPermissions(t *
 	}}
 	if !reflect.DeepEqual(permissions, wantPermissions) {
 		t.Fatalf("unexpected permission transforms:\nwant %#v\n got %#v", wantPermissions, permissions)
+	}
+}
+
+func TestFactTransformsFromGenericInterfaceBounds(t *testing.T) {
+	fn := &ast.FuncDecl{Name: "build", GenericParams: []ast.GenericParam{{Kind: ast.GenericParamType, Name: "B", InterfaceBound: "Builder"}}}
+	got := factTransformsFromGenericInterfaceBounds(fn)
+	want := []FactTransform{{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", SourceKind: FactSourceSignature, Reason: "requires interface conformance fact"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected interface-bound fact transforms:\nwant %#v\n got %#v", want, got)
 	}
 }
 

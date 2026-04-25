@@ -36,6 +36,11 @@ func TestFactDiagnosticMessageVocabulary(t *testing.T) {
 			got:  ensureNamedStateMismatchMessage("job", "Ready", "finish", "ParseJob[Failed]"),
 			want: `cannot prove ensures job => Ready on function "finish": current tracked facts are ParseJob[Failed]`,
 		},
+		{
+			name: "interface conformance",
+			got:  interfaceConformanceFactMessage("Plain", "Builder", "call to \"build\""),
+			want: `type "Plain" does not satisfy required interface fact "Builder" for call to "build"`,
+		},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {
@@ -48,14 +53,27 @@ func TestFormatFactSnapshotIncludesPathAndHandleFacts(t *testing.T) {
 	snapshot := FactSnapshot{
 		Parameters:      []string{"player"},
 		Widened:         []string{"player.health"},
-		PathFacts:       []FactPath{{Target: "player.health", Root: "player", Path: "health"}},
+		PathFacts:       []FactPath{{Target: "player.health", Root: "player", Path: "health", Steps: []FactPathStep{{Kind: "field", Name: "health"}}}},
 		AliasClasses:    []string{"alias-class#0"},
 		HandleStoreDeps: []string{"node<-store"},
+		RegionDeps:      []string{"scratch[2->1]"},
 	}
 	got := FormatFactSnapshot(snapshot)
-	for _, want := range []string{"params=[player]", "widened=[player.health]", "path_facts=[player.health{root=player,path=health}]", "alias_classes=[alias-class#0]", "handle_store_deps=[node<-store]"} {
+	for _, want := range []string{"params=[player]", "widened=[player.health]", "path_facts=[player.health{root=player,path=health,steps=field:health}]", "alias_classes=[alias-class#0]", "handle_store_deps=[node<-store]", "region_deps=[scratch[2->1]]"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected snapshot %q to contain %q", got, want)
+		}
+	}
+}
+
+func TestFormatFactTraceContractAndEffectSummary(t *testing.T) {
+	if got := FormatFactTraceContract(); !strings.Contains(got, FactTraceFormatVersion) || !strings.Contains(got, "filters=") {
+		t.Fatalf("expected trace contract to include version and filters, got %q", got)
+	}
+	got := FormatFactEffectSummary(FactEffectSummary{Required: []string{"Memory.Allocate", "Abort.Panic"}, Provided: []string{"Console.Write"}})
+	for _, want := range []string{"required=[Abort.Panic, Memory.Allocate]", "provided=[Console.Write]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected effect summary %q to contain %q", got, want)
 		}
 	}
 }

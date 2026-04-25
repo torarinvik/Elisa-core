@@ -132,7 +132,7 @@ func factTransformFromFlowInstr(instr FlowInstr) (FactTransform, bool) {
 		if instr.Location == "" {
 			return FactTransform{}, false
 		}
-		return FactTransform{Kind: FactTransformRecompute, Classes: []FactClass{FactTypestate}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourcePos: instr.Position, SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "mutation recomputes derived facts")}, true
+		return FactTransform{Kind: FactTransformRecompute, Classes: flowInstrMutationClasses(instr), Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourcePos: instr.Position, SourceKind: FactSourceFlowInstr, Details: flowInstrMutationDetails(instr), Reason: flowInstrFactReason(instr, "mutation recomputes derived facts")}, true
 	case FlowInstrErrorExit:
 		if instr.Location == "" {
 			return FactTransform{}, false
@@ -143,6 +143,21 @@ func factTransformFromFlowInstr(instr FlowInstr) (FactTransform, bool) {
 	default:
 		return FactTransform{}, false
 	}
+}
+
+func flowInstrMutationClasses(instr FlowInstr) []FactClass {
+	classes := []FactClass{FactTypestate, FactShape, FactOptimization}
+	if strings.Contains(instr.Note, "as-ref") || strings.Contains(instr.Note, "store") {
+		classes = append(classes, FactStoreDeps)
+	}
+	return classes
+}
+
+func flowInstrMutationDetails(instr FlowInstr) []FactTransformDetail {
+	if instr.Note == "" {
+		return nil
+	}
+	return []FactTransformDetail{{Name: "mutation", Value: instr.Note}}
 }
 
 func flowInstrProduceClasses(instr FlowInstr) []FactClass {
@@ -279,6 +294,28 @@ func factTransformsFromPermissions(fnType *FuncType) []FactTransform {
 			Source:     "function signature",
 			SourceKind: FactSourcePermission,
 			Reason:     "requires effect authority",
+		})
+	}
+	return dedupeAndSortFactTransforms(transforms)
+}
+
+func factTransformsFromGenericInterfaceBounds(fn *ast.FuncDecl) []FactTransform {
+	if fn == nil || len(fn.GenericParams) == 0 {
+		return nil
+	}
+	transforms := make([]FactTransform, 0, len(fn.GenericParams))
+	for _, param := range fn.GenericParams {
+		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" || param.Name == "" {
+			continue
+		}
+		transforms = append(transforms, FactTransform{
+			Kind:       FactTransformRequire,
+			Classes:    []FactClass{FactInterface},
+			Target:     param.Name + ":" + param.InterfaceBound,
+			Source:     "generic parameter",
+			SourcePos:  param.Position,
+			SourceKind: FactSourceSignature,
+			Reason:     "requires interface conformance fact",
 		})
 	}
 	return dedupeAndSortFactTransforms(transforms)

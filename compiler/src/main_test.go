@@ -496,6 +496,15 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "fact_interface_rules",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext"),
+			checks: []string{
+				"define i64 @__impl__FactBuilder__semantic.StructType_FactBuilderTag__state()",
+				"define i64 @fact_interface_rules__FactBuilderTag(",
+				"define i64 @fact_interface_concrete(",
+			},
+		},
+		{
 			name: "grammar_uses_shared_helpers",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_uses_shared_helpers.llcontext"),
 			checks: []string{
@@ -752,7 +761,7 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "module_interface_fixture.llcontext")
 	interfacePath := filepath.Join(fixtureDir, "module_interface_fixture.llcontexti")
-	src := "struct Box[T]:\n    value: T\n\nglobal counter: int = 0\n\ndef identity[T](value: T) -> T:\n    return value\n\nnamespace util:\n    def inc(value: int) -> int:\n        return value + 1\n"
+	src := "struct Box[T]:\n    value: T\n\nglobal counter: int = 0\n\nstatic interface Builder:\n    type State\n    def state() -> State\n\ndef identity[T](value: T) -> T:\n    return value\n\ndef needs_builder[B: Builder]() -> B.State can[Console.Write]:\n    can Console.Write:\n        signal Console.Write\n    return B.state()\n\nnamespace util:\n    def inc(value: int) -> int:\n        return value + 1\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write interface fixture: %v", err)
 	}
@@ -778,6 +787,8 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 		"struct Box[T]:",
 		"extern counter: int",
 		"extern identity[T](value: T) -> T",
+		"static interface Builder:",
+		"extern needs_builder[B: Builder]() -> B.State can[Console.Write]",
 		"namespace util:",
 		"extern inc(value: int) -> int",
 	} {
@@ -800,7 +811,7 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("expected generated interface parse to be warning-free, got:\n%s", stderr.String())
 	}
-	for _, check := range []string{"extern identity[T](1 params) -> T", "extern counter: int"} {
+	for _, check := range []string{"extern identity[T](1 params) -> T", "extern needs_builder[B: Builder](0 params) -> B.State can[Console.Write]", "extern counter: int"} {
 		if !strings.Contains(stdout.String(), check) {
 			t.Fatalf("expected generated interface AST to contain %q, got:\n%s", check, stdout.String())
 		}
@@ -1064,9 +1075,46 @@ func TestRunCLIEmitsFactTraceReport(t *testing.T) {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
 	output := stdout.String()
-	for _, want := range []string{"=== facts ===", "func fact_core_rules", "snapshot:", "groups:", "explanations:", "widen player"} {
+	for _, want := range []string{"=== facts ===", "contract: version=fact-trace-v1", "func fact_core_rules", "snapshot:", "transforms:", "groups:", "explanations:", "widen player"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected fact trace report to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunCLIEmitsFilteredFactTraceReport(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "fact-trace", "-filter", "kind=widen,class=typestate", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "widen player [typestate]") {
+		t.Fatalf("expected filtered fact trace to contain typestate widening, got:\n%s", output)
+	}
+	if strings.Contains(output, "consume store") {
+		t.Fatalf("expected filtered fact trace to omit consume transforms, got:\n%s", output)
+	}
+}
+
+func TestRunCLIEmitsInterfaceFactTraceReport(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "class=interface", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"func fact_interface_rules", "require B:FactBuilder [interface]", "required_interfaces=[B:FactBuilder]"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected interface fact trace to contain %q, got:\n%s", want, output)
 		}
 	}
 }

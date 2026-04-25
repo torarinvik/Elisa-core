@@ -27,6 +27,7 @@ type FunctionAnalysis struct {
 	FactSnapshot        FactSnapshot
 	FactExitSummary     FactExitSummary
 	AliasSets           []FactAliasSet
+	EffectSummary       FactEffectSummary
 }
 
 type FactBlockTransforms struct {
@@ -165,7 +166,7 @@ func (p *GraphPartitions) AliasSets() []FactAliasSet {
 	})
 	out := make([]FactAliasSet, 0, len(ordered))
 	for i, group := range ordered {
-		out = append(out, FactAliasSet{ID: "alias-class#" + strconv.Itoa(i), Members: group.members, Mutated: group.mutated})
+		out = append(out, FactAliasSet{ID: "alias-class#" + strconv.Itoa(i), Members: group.members, AffectedPaths: group.members, Mutated: group.mutated})
 	}
 	return out
 }
@@ -685,12 +686,14 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 	factTransforms = append(factTransforms, a.currentRegionFactTransforms...)
 	factTransforms = append(factTransforms, factTransformsFromPoststates(fnType)...)
 	factTransforms = append(factTransforms, factTransformsFromPermissions(fnType)...)
+	factTransforms = append(factTransforms, factTransformsFromGenericInterfaceBounds(fn)...)
 	aliasSets := partitions.AliasSets()
 	factTransforms = append(factTransforms, factTransformsFromAliasSets(aliasSets)...)
 	factTransforms = dedupeAndSortFactTransforms(factTransforms)
 	blockFactTransforms := collectCFGBlockFactTransforms(cfg)
 	factSnapshot := buildFunctionFactSnapshot(fnType, cfg, factTransforms, aliasSets)
 	factExitSummary := buildFunctionFactExitSummary(factTransforms)
+	effectSummary := buildFunctionFactEffectSummary(factTransforms)
 	analysis := &FunctionAnalysis{
 		CFG:                 cfg,
 		Partitions:          partitions,
@@ -702,6 +705,7 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 		FactSnapshot:        factSnapshot,
 		FactExitSummary:     factExitSummary,
 		AliasSets:           aliasSets,
+		EffectSummary:       effectSummary,
 	}
 	a.functionAnalyses[fn] = analysis
 }
@@ -735,7 +739,12 @@ func buildFunctionFactSnapshot(fnType *FuncType, cfg *CFG, transforms []FactTran
 		}
 		switch transform.Kind {
 		case FactTransformRequire:
-			snapshot.RequiredEffects = append(snapshot.RequiredEffects, transform.Target)
+			if hasFactClass(transform.Classes, FactEffects) {
+				snapshot.RequiredEffects = append(snapshot.RequiredEffects, transform.Target)
+			}
+			if hasFactClass(transform.Classes, FactInterface) {
+				snapshot.RequiredInterfaces = append(snapshot.RequiredInterfaces, transform.Target)
+			}
 		case FactTransformEnsure:
 			snapshot.Ensured = append(snapshot.Ensured, transform.Target)
 		case FactTransformRefine:
@@ -759,6 +768,11 @@ func buildFunctionFactSnapshot(fnType *FuncType, cfg *CFG, transforms []FactTran
 			}
 		case FactTransformInvalidate:
 			snapshot.InvalidatedRegions = append(snapshot.InvalidatedRegions, transform.Target)
+			if hasFactClass(transform.Classes, FactRegionDeps) {
+				if key := regionDependencyKey(transform.Target, factTransformDetailValue(transform.Details, "generation_before"), factTransformDetailValue(transform.Details, "generation_after")); key != "" {
+					snapshot.RegionDeps = append(snapshot.RegionDeps, key)
+				}
+			}
 		case FactTransformRebase:
 			snapshot.RebasedStores = append(snapshot.RebasedStores, transform.Target)
 		}
@@ -775,6 +789,7 @@ func buildFunctionFactSnapshot(fnType *FuncType, cfg *CFG, transforms []FactTran
 	snapshot.InvalidatedRegions = canonicalStringList(snapshot.InvalidatedRegions)
 	snapshot.RebasedStores = canonicalStringList(snapshot.RebasedStores)
 	snapshot.RequiredEffects = canonicalStringList(snapshot.RequiredEffects)
+	snapshot.RequiredInterfaces = canonicalStringList(snapshot.RequiredInterfaces)
 	snapshot.Ensured = canonicalStringList(snapshot.Ensured)
 	snapshot.Refined = canonicalStringList(snapshot.Refined)
 	snapshot.Widened = canonicalStringList(snapshot.Widened)
@@ -783,7 +798,25 @@ func buildFunctionFactSnapshot(fnType *FuncType, cfg *CFG, transforms []FactTran
 	snapshot.PathFacts = canonicalFactPaths(snapshot.PathFacts)
 	snapshot.AliasClasses = canonicalStringList(snapshot.AliasClasses)
 	snapshot.HandleStoreDeps = canonicalStringList(snapshot.HandleStoreDeps)
+	snapshot.RegionDeps = canonicalStringList(snapshot.RegionDeps)
 	return snapshot
+}
+
+func buildFunctionFactEffectSummary(transforms []FactTransform) FactEffectSummary {
+	summary := FactEffectSummary{}
+	for _, transform := range transforms {
+		if hasFactClass(transform.Classes, FactEffects) {
+			switch transform.Kind {
+			case FactTransformRequire:
+				summary.Required = append(summary.Required, transform.Target)
+			case FactTransformProduce, FactTransformEnsure:
+				summary.Provided = append(summary.Provided, transform.Target)
+			}
+		}
+	}
+	summary.Required = canonicalStringList(summary.Required)
+	summary.Provided = canonicalStringList(summary.Provided)
+	return summary
 }
 
 func buildFunctionFactExitSummary(transforms []FactTransform) FactExitSummary {
@@ -815,7 +848,26 @@ func factPathFromTarget(target string) FactPath {
 		return FactPath{}
 	}
 	path := strings.TrimPrefix(target[len(root):], ".")
-	return FactPath{Target: target, Root: root, Path: path}
+	return FactPath{Target: target, Root: root, Path: path, Steps: factPathStepsFromPath(path)}
+}
+
+func factPathStepsFromPath(path string) []FactPathStep {
+	if path == "" {
+		return nil
+	}
+	parts := strings.Split(path, ".")
+	steps := make([]FactPathStep, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		kind := "field"
+		if strings.Contains(part, "[") {
+			kind = "index"
+		}
+		steps = append(steps, FactPathStep{Kind: kind, Name: part})
+	}
+	return steps
 }
 
 func factTransformsFromAliasSets(sets []FactAliasSet) []FactTransform {
@@ -828,10 +880,17 @@ func factTransformsFromAliasSets(sets []FactAliasSet) []FactTransform {
 		if set.ID == "" || len(members) == 0 {
 			continue
 		}
-		details := []FactTransformDetail{{Name: "members", Value: strings.Join(members, "|")}}
+		affected := canonicalStringList(set.AffectedPaths)
+		if len(affected) == 0 {
+			affected = members
+		}
+		details := []FactTransformDetail{{Name: "members", Value: strings.Join(members, "|")}, {Name: "affected_paths", Value: strings.Join(affected, "|")}}
 		transforms = append(transforms, FactTransform{Kind: FactTransformRefine, Classes: []FactClass{FactAliasClass}, Target: set.ID, Source: strings.Join(members, ","), SourceKind: FactSourceFlowInstr, Details: details, Reason: "alias equivalence set"})
 		if set.Mutated {
 			transforms = append(transforms, FactTransform{Kind: FactTransformRecompute, Classes: []FactClass{FactAliasClass}, Target: set.ID, Source: strings.Join(members, ","), SourceKind: FactSourceFlowInstr, Details: details, Reason: "mutation recomputes facts for alias class"})
+			for _, target := range affected {
+				transforms = append(transforms, FactTransform{Kind: FactTransformRecompute, Classes: []FactClass{FactTypestate, FactShape, FactOptimization, FactStoreDeps}, Target: target, Source: set.ID, SourceKind: FactSourceFlowInstr, Details: []FactTransformDetail{{Name: "alias_class", Value: set.ID}}, Reason: "alias mutation recomputes dependent path facts"})
+			}
 		}
 	}
 	return dedupeAndSortFactTransforms(transforms)

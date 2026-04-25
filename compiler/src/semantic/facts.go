@@ -1,11 +1,14 @@
 package semantic
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	"llcontext/src/lexer"
 )
+
+const FactTraceFormatVersion = "fact-trace-v1"
 
 // FactClass names the orthogonal kinds of static knowledge the analyzer tracks
 // about values. The current compiler still stores these facts in specialized
@@ -27,6 +30,7 @@ const (
 	FactEffects        FactClass = "effects"
 	FactErrorPath      FactClass = "error-path"
 	FactOptimization   FactClass = "optimization"
+	FactInterface      FactClass = "interface"
 )
 
 // FactTransformKind is the small algebra that operations should lower to when
@@ -80,6 +84,12 @@ type FactPath struct {
 	Target string
 	Root   string
 	Path   string
+	Steps  []FactPathStep
+}
+
+type FactPathStep struct {
+	Kind string
+	Name string
 }
 
 type FactExitSummary struct {
@@ -88,9 +98,15 @@ type FactExitSummary struct {
 }
 
 type FactAliasSet struct {
-	ID      string
-	Members []string
-	Mutated bool
+	ID            string
+	Members       []string
+	AffectedPaths []string
+	Mutated       bool
+}
+
+type FactEffectSummary struct {
+	Required []string
+	Provided []string
 }
 
 // FactTransform is a lightweight descriptive record used by diagnostics,
@@ -116,6 +132,7 @@ type FactSnapshot struct {
 	InvalidatedRegions []string
 	RebasedStores      []string
 	RequiredEffects    []string
+	RequiredInterfaces []string
 	Ensured            []string
 	Refined            []string
 	Widened            []string
@@ -124,6 +141,11 @@ type FactSnapshot struct {
 	PathFacts          []FactPath
 	AliasClasses       []string
 	HandleStoreDeps    []string
+	RegionDeps         []string
+}
+
+func FormatFactTraceContract() string {
+	return "contract: version=" + FactTraceFormatVersion + " order=kind,target,class,reason,source filters=function|kind|class|target|source|sourcekind|reason|detail|alias|effect|region|store"
 }
 
 type RefinementFacts = GuardFactSet
@@ -237,6 +259,10 @@ func ExplainFactTransform(transform FactTransform) string {
 	case FactTransformConsume:
 		if hasFactClass(transform.Classes, FactUsage) {
 			return "consume usage facts for " + transform.Target + factExplanationReasonSuffix(transform)
+		}
+	case FactTransformRecompute:
+		if len(transform.Classes) != 0 {
+			return "recompute " + factClassListKey(transform.Classes) + " facts for " + transform.Target + factExplanationSourceSuffix(transform) + factExplanationReasonSuffix(transform)
 		}
 	case FactTransformRequire:
 		if hasFactClass(transform.Classes, FactEffects) {
@@ -357,6 +383,7 @@ func FormatFactSnapshot(snapshot FactSnapshot) string {
 	appendPart("invalidated_regions", snapshot.InvalidatedRegions)
 	appendPart("rebased_stores", snapshot.RebasedStores)
 	appendPart("required_effects", snapshot.RequiredEffects)
+	appendPart("required_interfaces", snapshot.RequiredInterfaces)
 	appendPart("ensured", snapshot.Ensured)
 	appendPart("refined", snapshot.Refined)
 	appendPart("widened", snapshot.Widened)
@@ -365,6 +392,7 @@ func FormatFactSnapshot(snapshot FactSnapshot) string {
 	appendPathPart("path_facts", snapshot.PathFacts)
 	appendPart("alias_classes", snapshot.AliasClasses)
 	appendPart("handle_store_deps", snapshot.HandleStoreDeps)
+	appendPart("region_deps", snapshot.RegionDeps)
 	return strings.Join(parts, " ")
 }
 
@@ -376,7 +404,28 @@ func FormatFactPath(path FactPath) string {
 	if path.Path != "" {
 		parts = append(parts, "path="+path.Path)
 	}
+	if len(path.Steps) != 0 {
+		parts = append(parts, "steps="+formatFactPathSteps(path.Steps))
+	}
 	return path.Target + "{" + strings.Join(parts, ",") + "}"
+}
+
+func formatFactPathSteps(steps []FactPathStep) string {
+	if len(steps) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(steps))
+	for _, step := range steps {
+		if step.Kind == "" && step.Name == "" {
+			continue
+		}
+		if step.Kind == "" {
+			parts = append(parts, step.Name)
+			continue
+		}
+		parts = append(parts, step.Kind+":"+step.Name)
+	}
+	return strings.Join(parts, "/")
 }
 
 func FormatFactExitSummary(summary FactExitSummary) string {
@@ -406,9 +455,26 @@ func FormatFactAliasSets(sets []FactAliasSet) string {
 		if set.Mutated {
 			mutated = "mutated"
 		}
-		lines = append(lines, set.ID+": {"+strings.Join(members, ", ")+"} "+mutated)
+		line := set.ID + ": {" + strings.Join(members, ", ") + "} " + mutated
+		if affected := canonicalStringList(set.AffectedPaths); len(affected) != 0 {
+			line += " affects=[" + strings.Join(affected, ", ") + "]"
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func FormatFactEffectSummary(summary FactEffectSummary) string {
+	parts := make([]string, 0, 2)
+	if required := canonicalStringList(summary.Required); len(required) != 0 {
+		sort.Strings(required)
+		parts = append(parts, "required=["+strings.Join(required, ", ")+"]")
+	}
+	if provided := canonicalStringList(summary.Provided); len(provided) != 0 {
+		sort.Strings(provided)
+		parts = append(parts, "provided=["+strings.Join(provided, ", ")+"]")
+	}
+	return strings.Join(parts, " ")
 }
 
 func canonicalFactPaths(values []FactPath) []FactPath {
@@ -421,7 +487,7 @@ func canonicalFactPaths(values []FactPath) []FactPath {
 		if value.Target == "" || value.Root == "" {
 			continue
 		}
-		key := value.Target + "\x00" + value.Root + "\x00" + value.Path
+		key := value.Target + "\x00" + value.Root + "\x00" + value.Path + "\x00" + formatFactPathSteps(value.Steps)
 		if seen[key] {
 			continue
 		}
@@ -438,6 +504,13 @@ func canonicalFactPaths(values []FactPath) []FactPath {
 		return out[i].Path < out[j].Path
 	})
 	return out
+}
+
+func regionDependencyKey(region string, before string, after string) string {
+	if region == "" || (before == "" && after == "") {
+		return ""
+	}
+	return fmt.Sprintf("%s[%s->%s]", region, emptyFactDetailFallback(before, "?"), emptyFactDetailFallback(after, "?"))
 }
 
 func canonicalStringList(values []string) []string {
@@ -482,6 +555,14 @@ func nullableRefRequirementMessage(operation string, actual string) string {
 
 func effectAuthorityGrantMessage(label string, missing []string, hint string) string {
 	return label + " requires" + permissionFamiliesString(missing) + " and has no explicit local effect grant; add " + hint + " or a surrounding can ...: block; missing required effect facts"
+}
+
+func interfaceConformanceFactMessage(typ string, iface string, context string) string {
+	message := "type " + quoteFactTarget(typ) + " does not satisfy required interface fact " + quoteFactTarget(iface)
+	if context != "" {
+		message += " for " + context
+	}
+	return message
 }
 
 func ensureTargetUnresolvedMessage(targetName string, funcName string) string {
