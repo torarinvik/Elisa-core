@@ -144,7 +144,7 @@ type Analyzer struct {
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
-	currentConservativeCallWidenings  map[*Symbol][][]borrowReturnAnnotationStep
+	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening
 	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
 	suppressDiagnostics               bool
 	suppressOptimizationFacts         bool
@@ -255,6 +255,12 @@ type regionRefState struct {
 	PackedStoreSummary      PackedStoreProvenance
 	PackedStoreSummaryKnown bool
 	ParamOnlySummary        bool
+}
+
+type conservativeCallWidening struct {
+	Path   []borrowReturnAnnotationStep
+	Source string
+	Reason string
 }
 
 type borrowedOwnerRefState struct {
@@ -3735,8 +3741,8 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 	}
 	switch poststate.Kind {
 	case FuncPoststateKindPreserve:
-		for _, widenedPath := range a.currentConservativeCallWidenings[sym] {
-			if poststatePathsOverlap(widenedPath, poststate.Path) {
+		for _, widening := range a.currentConservativeCallWidenings[sym] {
+			if poststatePathsOverlap(widening.Path, poststate.Path) {
 				a.errorf(poststate.Position, ensurePreserveWidenedMessage(targetName, a.currentFuncDecl.Name))
 				return
 			}
@@ -3833,7 +3839,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentFuncDecl = fn
 	a.currentFuncType = fnType
-	a.currentConservativeCallWidenings = map[*Symbol][][]borrowReturnAnnotationStep{}
+	a.currentConservativeCallWidenings = map[*Symbol][]conservativeCallWidening{}
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)

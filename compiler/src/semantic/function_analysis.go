@@ -16,12 +16,19 @@ type ReturnIsolationSummary struct {
 }
 
 type FunctionAnalysis struct {
-	CFG             *CFG
-	Partitions      *GraphPartitions
-	CleanupPlan     CleanupPlan
-	SinkParams      []bool
-	ReturnIsolation ReturnIsolationSummary
-	FactTransforms  []FactTransform
+	CFG                 *CFG
+	Partitions          *GraphPartitions
+	CleanupPlan         CleanupPlan
+	SinkParams          []bool
+	ReturnIsolation     ReturnIsolationSummary
+	FactTransforms      []FactTransform
+	BlockFactTransforms []FactBlockTransforms
+	FactSnapshot        FactSnapshot
+}
+
+type FactBlockTransforms struct {
+	BlockID    int
+	Transforms []FactTransform
 }
 
 type GraphPartitions struct {
@@ -624,21 +631,123 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 	returnIsolation := summarizeReturnIsolation(fn, fnType, partitions)
 	fnType.ReturnIsolation = returnIsolation
 	fnType.ReturnIsolationKnown = true
+	cfgTransforms := populateCFGBlockFactTransforms(cfg)
 	factTransforms := a.currentConservativeCallWideningTransforms()
-	factTransforms = append(factTransforms, factTransformsFromCFGGuards(cfg)...)
-	factTransforms = append(factTransforms, factTransformsFromCFGFlowInstrs(cfg)...)
+	factTransforms = append(factTransforms, cfgTransforms...)
 	factTransforms = append(factTransforms, factTransformsFromPoststates(fnType)...)
 	factTransforms = append(factTransforms, factTransformsFromPermissions(fnType)...)
 	factTransforms = dedupeAndSortFactTransforms(factTransforms)
+	blockFactTransforms := collectCFGBlockFactTransforms(cfg)
+	factSnapshot := buildFunctionFactSnapshot(fnType, cfg, factTransforms)
 	analysis := &FunctionAnalysis{
-		CFG:             cfg,
-		Partitions:      partitions,
-		CleanupPlan:     cleanupPlan,
-		SinkParams:      append([]bool(nil), fnType.SinkParams...),
-		ReturnIsolation: returnIsolation,
-		FactTransforms:  factTransforms,
+		CFG:                 cfg,
+		Partitions:          partitions,
+		CleanupPlan:         cleanupPlan,
+		SinkParams:          append([]bool(nil), fnType.SinkParams...),
+		ReturnIsolation:     returnIsolation,
+		FactTransforms:      factTransforms,
+		BlockFactTransforms: blockFactTransforms,
+		FactSnapshot:        factSnapshot,
 	}
 	a.functionAnalyses[fn] = analysis
+}
+
+func collectCFGBlockFactTransforms(cfg *CFG) []FactBlockTransforms {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]FactBlockTransforms, 0, len(cfg.Blocks))
+	for _, block := range cfg.Blocks {
+		if len(block.FactTransforms) == 0 {
+			continue
+		}
+		out = append(out, FactBlockTransforms{BlockID: block.ID, Transforms: append([]FactTransform(nil), block.FactTransforms...)})
+	}
+	return out
+}
+
+func buildFunctionFactSnapshot(fnType *FuncType, cfg *CFG, transforms []FactTransform) FactSnapshot {
+	snapshot := FactSnapshot{}
+	if cfg != nil {
+		snapshot.Parameters = append(snapshot.Parameters, cfg.ParamLocations...)
+	}
+	if fnType != nil && fnType.Return != nil && !isVoidType(fnType.Return) {
+		snapshot.Returns = append(snapshot.Returns, fnType.Return.String())
+		snapshot.StoreDeps = append(snapshot.StoreDeps, storeDependencyFactLabelsFromRegionRefState(fnType.ReturnProvenance)...)
+	}
+	for _, transform := range transforms {
+		switch transform.Kind {
+		case FactTransformRequire:
+			snapshot.RequiredEffects = append(snapshot.RequiredEffects, transform.Target)
+		case FactTransformEnsure:
+			snapshot.Ensured = append(snapshot.Ensured, transform.Target)
+		case FactTransformRefine:
+			snapshot.Refined = append(snapshot.Refined, transform.Target)
+		case FactTransformWiden:
+			snapshot.Widened = append(snapshot.Widened, transform.Target)
+		case FactTransformConsume:
+			snapshot.Consumed = append(snapshot.Consumed, transform.Target)
+		case FactTransformProduce:
+			if hasFactClass(transform.Classes, FactErrorPath) {
+				snapshot.ErrorExits = append(snapshot.ErrorExits, transform.Reason)
+			} else if transform.Target == "<return>" {
+				snapshot.Returns = append(snapshot.Returns, transform.Source)
+			} else {
+				snapshot.Produced = append(snapshot.Produced, transform.Target)
+			}
+		case FactTransformInvalidate:
+			snapshot.InvalidatedRegions = append(snapshot.InvalidatedRegions, transform.Target)
+		case FactTransformRebase:
+			snapshot.RebasedStores = append(snapshot.RebasedStores, transform.Target)
+		}
+	}
+	snapshot.Parameters = canonicalStringList(snapshot.Parameters)
+	snapshot.Returns = canonicalStringList(snapshot.Returns)
+	snapshot.Consumed = canonicalStringList(snapshot.Consumed)
+	snapshot.Produced = canonicalStringList(snapshot.Produced)
+	snapshot.InvalidatedRegions = canonicalStringList(snapshot.InvalidatedRegions)
+	snapshot.RebasedStores = canonicalStringList(snapshot.RebasedStores)
+	snapshot.RequiredEffects = canonicalStringList(snapshot.RequiredEffects)
+	snapshot.Ensured = canonicalStringList(snapshot.Ensured)
+	snapshot.Refined = canonicalStringList(snapshot.Refined)
+	snapshot.Widened = canonicalStringList(snapshot.Widened)
+	snapshot.ErrorExits = canonicalStringList(snapshot.ErrorExits)
+	snapshot.StoreDeps = canonicalStringList(snapshot.StoreDeps)
+	return snapshot
+}
+
+func hasFactClass(classes []FactClass, target FactClass) bool {
+	for _, class := range classes {
+		if class == target {
+			return true
+		}
+	}
+	return false
+}
+
+func storeDependencyFactLabelsFromRegionRefState(state regionRefState) []string {
+	out := make([]string, 0)
+	storeDependencyFactLabelsFromRegionRefStateSeen(state, map[uintptr]bool{}, &out)
+	return canonicalStringList(out)
+}
+
+func storeDependencyFactLabelsFromRegionRefStateSeen(state regionRefState, seen map[uintptr]bool, out *[]string) {
+	for _, dep := range state.StoreDeps {
+		if dep.Type != nil {
+			*out = append(*out, dep.Type.String())
+		}
+	}
+	fieldsID := regionRefFieldsIdentity(state.Fields)
+	if fieldsID != 0 {
+		if seen[fieldsID] {
+			return
+		}
+		seen[fieldsID] = true
+		defer delete(seen, fieldsID)
+	}
+	for _, field := range state.Fields {
+		storeDependencyFactLabelsFromRegionRefStateSeen(field, seen, out)
+	}
 }
 
 func configureCFGParamLocations(cfg *CFG, fnType *FuncType) {

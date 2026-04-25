@@ -83,3 +83,35 @@ func TestAppendFlowInstrUniqueDedupesExactInstruction(t *testing.T) {
 		t.Fatalf("unexpected deduped instructions:\nwant %#v\n got %#v", want, block.Instrs)
 	}
 }
+
+func TestPopulateBasicFlowInstrsRecordsErrorPathFacts(t *testing.T) {
+	cfg := &CFG{Blocks: []CFGBlock{{
+		Nodes: []ast.Node{
+			&ast.ExprStmt{Expr: &ast.RaiseExpr{Error: &ast.FieldExpr{Object: &ast.Ident{Name: "FileError"}, Field: "NotFound"}}},
+			&ast.VarDeclStmt{Name: "value", Value: &ast.TryExpr{Value: &ast.CallExpr{Func: &ast.Ident{Name: "checked"}}}},
+			&ast.VarDeclStmt{Name: "ptr", Value: &ast.UnwrapElseExpr{Value: &ast.Ident{Name: "maybe"}, Fallback: &ast.RaiseExpr{Error: &ast.FieldExpr{Object: &ast.Ident{Name: "FileError"}, Field: "NotFound"}}}},
+		},
+	}}}
+
+	populateBasicFlowInstrs(cfg)
+
+	var sawRaise bool
+	var sawTry bool
+	var sawElse bool
+	for _, instr := range cfg.Blocks[0].Instrs {
+		if instr.Kind != FlowInstrErrorExit {
+			continue
+		}
+		switch instr.Note {
+		case "raise error path":
+			sawRaise = true
+		case "try propagates error path":
+			sawTry = true
+		case "else fallback handles nullable path":
+			sawElse = true
+		}
+	}
+	if !sawRaise || !sawTry || !sawElse {
+		t.Fatalf("expected raise/try/else error-path instructions, got %#v", cfg.Blocks[0].Instrs)
+	}
+}

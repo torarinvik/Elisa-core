@@ -15,6 +15,7 @@ const (
 	FlowInstrMutate     FlowInstrKind = "mutate"
 	FlowInstrProduce    FlowInstrKind = "produce"
 	FlowInstrRebase     FlowInstrKind = "rebase"
+	FlowInstrErrorExit  FlowInstrKind = "error-exit"
 	FlowInstrReturn     FlowInstrKind = "return"
 )
 
@@ -31,10 +32,11 @@ type FlowEdge struct {
 }
 
 type CFGBlock struct {
-	ID     int
-	Nodes  []ast.Node
-	Instrs []FlowInstr
-	Edges  []FlowEdge
+	ID             int
+	Nodes          []ast.Node
+	Instrs         []FlowInstr
+	FactTransforms []FactTransform
+	Edges          []FlowEdge
 }
 
 type CFG struct {

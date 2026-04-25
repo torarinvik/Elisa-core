@@ -63,6 +63,15 @@ func hasFactTransform(transforms []FactTransform, kind FactTransformKind, class 
 	return false
 }
 
+func hasString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAnalyzeInfersDirectSinkParamSummary(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "direct_sink_summary.llcontext", `extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
 
@@ -334,8 +343,14 @@ def use(mutable player: Player[Alive]&) -> void:
 	if transform.Kind != FactTransformWiden || transform.Target != "player" || transform.Reason != "ref call without matching ensures" {
 		t.Fatalf("unexpected fact transform: %#v", transform)
 	}
+	if transform.Source != "unknown_update(player)" || transform.SourceKind != FactSourceCallWiden {
+		t.Fatalf("expected call-site widening source, got %#v", transform)
+	}
 	if len(transform.Classes) != 1 || transform.Classes[0] != FactTypestate {
 		t.Fatalf("expected typestate fact class, got %#v", transform.Classes)
+	}
+	if !hasString(analysis.FactSnapshot.Widened, "player") {
+		t.Fatalf("expected fact snapshot to record widened player, got %#v", analysis.FactSnapshot)
 	}
 }
 
@@ -362,6 +377,12 @@ def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64
 	}
 	if !hasFactTransform(analysis.FactTransforms, FactTransformConsume, FactUsage, "thread", "explicit move") {
 		t.Fatalf("expected function analysis to expose explicit move consume transform, got %#v", analysis.FactTransforms)
+	}
+	if !hasString(analysis.FactSnapshot.Consumed, "thread") || !hasString(analysis.FactSnapshot.RequiredEffects, "Thread.Join") {
+		t.Fatalf("expected fact snapshot to record consumed thread and required Thread.Join, got %#v", analysis.FactSnapshot)
+	}
+	if len(analysis.BlockFactTransforms) == 0 || len(analysis.CFG.Blocks[analysis.CFG.Entry].FactTransforms) == 0 {
+		t.Fatalf("expected per-block fact transforms, got blocks=%#v cfg=%#v", analysis.BlockFactTransforms, analysis.CFG.Blocks)
 	}
 }
 
@@ -402,6 +423,27 @@ def freeze_expr_store(owner: Arena) -> Expr.Store[Frozen]:
 	if !hasFactTransform(freezeAnalysis.FactTransforms, FactTransformProduce, FactStorage, "frozen", "freeze produces frozen store") {
 		t.Fatalf("expected function analysis to expose frozen store produce transform, got %#v", freezeAnalysis.FactTransforms)
 	}
+	if !hasString(freezeAnalysis.FactSnapshot.RebasedStores, "store") || !hasString(freezeAnalysis.FactSnapshot.Produced, "frozen") {
+		t.Fatalf("expected fact snapshot to record freeze rebase and production, got %#v", freezeAnalysis.FactSnapshot)
+	}
+}
+
+func TestBuildFunctionFactSnapshotRecordsStoreDependencyLabels(t *testing.T) {
+	enumType := &EnumType{Name: "Expr"}
+	frozenState := &BuiltinType{Name: "Frozen"}
+	storeType := &PackedEnumStoreType{Name: "Expr.Store", Enum: enumType, State: frozenState}
+	storeSym := &Symbol{Name: "store", Type: storeType}
+	fnType := &FuncType{
+		Return: &BuiltinType{Name: "Expr"},
+		ReturnProvenance: regionRefState{StoreDeps: map[*Symbol]packedStoreDependencyState{
+			storeSym: {Type: storeType},
+		}},
+	}
+
+	snapshot := buildFunctionFactSnapshot(fnType, &CFG{ParamLocations: []string{"owner"}}, nil)
+	if !hasString(snapshot.Parameters, "owner") || !hasString(snapshot.StoreDeps, "Expr.Store[Frozen]") {
+		t.Fatalf("expected snapshot to include parameter and packed store dependency label, got %#v", snapshot)
+	}
 }
 
 func TestAnalyzeFunctionAnalysisRecordsRegionInvalidateTransforms(t *testing.T) {
@@ -423,6 +465,13 @@ def destroy_demo() -> void:
 	}
 	if !hasFactTransform(checkpointAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "restore region checkpoint") {
 		t.Fatalf("expected function analysis to expose restore invalidate transform, got %#v", checkpointAnalysis.FactTransforms)
+	}
+	for _, transform := range checkpointAnalysis.FactTransforms {
+		if transform.Kind == FactTransformInvalidate && transform.Target == "scratch" && transform.Reason == "restore region checkpoint" {
+			if len(transform.Details) == 0 || transform.Details[0].Name != "operation" || transform.Details[0].Value != "restore region checkpoint" {
+				t.Fatalf("expected invalidate transform details, got %#v", transform)
+			}
+		}
 	}
 	if !hasFactTransform(checkpointAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "reset region") {
 		t.Fatalf("expected function analysis to expose reset invalidate transform, got %#v", checkpointAnalysis.FactTransforms)

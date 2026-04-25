@@ -20,6 +20,7 @@ const (
 	FactAliasClass     FactClass = "alias-class"
 	FactUsage          FactClass = "usage"
 	FactEffects        FactClass = "effects"
+	FactErrorPath      FactClass = "error-path"
 	FactOptimization   FactClass = "optimization"
 )
 
@@ -41,16 +42,59 @@ const (
 	FactTransformEnsure     FactTransformKind = "ensure"
 )
 
+type FactTransformSourceKind string
+
+const (
+	FactSourceUnknown    FactTransformSourceKind = "unknown"
+	FactSourceGuard      FactTransformSourceKind = "guard"
+	FactSourceFlowInstr  FactTransformSourceKind = "flow-instr"
+	FactSourceSignature  FactTransformSourceKind = "signature"
+	FactSourceCallWiden  FactTransformSourceKind = "call-widen"
+	FactSourcePermission FactTransformSourceKind = "permission"
+	FactSourceRegion     FactTransformSourceKind = "region"
+	FactSourceStore      FactTransformSourceKind = "store"
+	FactSourceErrorPath  FactTransformSourceKind = "error-path"
+	FactSourceReturn     FactTransformSourceKind = "return"
+)
+
+type FactTransformDetail struct {
+	Name  string
+	Value string
+}
+
 // FactTransform is a lightweight descriptive record used by diagnostics,
 // reports, and future analyzer cleanup work. It intentionally does not own the
 // fact payload yet; existing precise structures remain the source of truth until
 // each subsystem migrates onto the shared model.
 type FactTransform struct {
-	Kind    FactTransformKind
-	Classes []FactClass
-	Target  string
-	Source  string
-	Reason  string
+	Kind       FactTransformKind
+	Classes    []FactClass
+	Target     string
+	Source     string
+	SourceKind FactTransformSourceKind
+	Details    []FactTransformDetail
+	Reason     string
+}
+
+type FactSnapshot struct {
+	Parameters         []string
+	Returns            []string
+	Consumed           []string
+	Produced           []string
+	InvalidatedRegions []string
+	RebasedStores      []string
+	RequiredEffects    []string
+	Ensured            []string
+	Refined            []string
+	Widened            []string
+	ErrorExits         []string
+	StoreDeps          []string
+}
+
+type RefinementFacts = GuardFactSet
+
+func NewRefinementFacts() RefinementFacts {
+	return NewGuardFactSet()
 }
 
 func FormatFactTransforms(transforms []FactTransform) string {
@@ -92,12 +136,120 @@ func FormatFactTransform(transform FactTransform) string {
 		out.WriteString(" <- ")
 		out.WriteString(transform.Source)
 	}
+	if len(transform.Details) != 0 {
+		details := make([]string, 0, len(transform.Details))
+		for _, detail := range transform.Details {
+			if detail.Name == "" || detail.Value == "" {
+				continue
+			}
+			details = append(details, detail.Name+"="+detail.Value)
+		}
+		if len(details) != 0 {
+			out.WriteString(" {")
+			out.WriteString(strings.Join(details, ","))
+			out.WriteByte('}')
+		}
+	}
 	if transform.Reason != "" {
 		out.WriteString(" (")
 		out.WriteString(transform.Reason)
 		out.WriteByte(')')
 	}
 	return out.String()
+}
+
+func FormatFactTransformGroups(transforms []FactTransform) string {
+	groups := GroupFactTransforms(transforms)
+	if len(groups) == 0 {
+		return ""
+	}
+	labels := []struct {
+		Kind  FactTransformKind
+		Label string
+	}{
+		{FactTransformRequire, "requires"},
+		{FactTransformEnsure, "ensures"},
+		{FactTransformRefine, "refines"},
+		{FactTransformWiden, "widens"},
+		{FactTransformProduce, "produces"},
+		{FactTransformConsume, "consumes"},
+		{FactTransformInvalidate, "invalidates"},
+		{FactTransformRebase, "rebases"},
+		{FactTransformRecompute, "recomputes"},
+	}
+	lines := make([]string, 0, len(labels))
+	for _, label := range labels {
+		items := groups[label.Kind]
+		if len(items) == 0 {
+			continue
+		}
+		parts := make([]string, 0, len(items))
+		for _, item := range items {
+			if text := FormatFactTransform(item); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		if len(parts) != 0 {
+			lines = append(lines, label.Label+": "+strings.Join(parts, "; "))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func GroupFactTransforms(transforms []FactTransform) map[FactTransformKind][]FactTransform {
+	if len(transforms) == 0 {
+		return nil
+	}
+	groups := map[FactTransformKind][]FactTransform{}
+	for _, transform := range transforms {
+		if transform.Kind == "" {
+			continue
+		}
+		groups[transform.Kind] = append(groups[transform.Kind], transform)
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	return groups
+}
+
+func FormatFactSnapshot(snapshot FactSnapshot) string {
+	parts := make([]string, 0, 11)
+	appendPart := func(label string, values []string) {
+		values = canonicalStringList(values)
+		if len(values) != 0 {
+			parts = append(parts, label+"=["+strings.Join(values, ", ")+"]")
+		}
+	}
+	appendPart("params", snapshot.Parameters)
+	appendPart("returns", snapshot.Returns)
+	appendPart("consumed", snapshot.Consumed)
+	appendPart("produced", snapshot.Produced)
+	appendPart("invalidated_regions", snapshot.InvalidatedRegions)
+	appendPart("rebased_stores", snapshot.RebasedStores)
+	appendPart("required_effects", snapshot.RequiredEffects)
+	appendPart("ensured", snapshot.Ensured)
+	appendPart("refined", snapshot.Refined)
+	appendPart("widened", snapshot.Widened)
+	appendPart("error_exits", snapshot.ErrorExits)
+	appendPart("store_deps", snapshot.StoreDeps)
+	return strings.Join(parts, " ")
+}
+
+func canonicalStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func invalidatedRegionFactUseMessage(label string, name string, reason string) string {
@@ -158,4 +310,8 @@ func (k FactTransformKind) String() string {
 
 func (c FactClass) String() string {
 	return string(c)
+}
+
+func (k FactTransformSourceKind) String() string {
+	return string(k)
 }

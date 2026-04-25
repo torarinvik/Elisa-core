@@ -57,8 +57,17 @@ func generateSemanticReport(result *semantic.Result) string {
 		if analysis, ok := result.FunctionAnalysisByName(name); ok && analysis != nil {
 			fmt.Fprintf(&out, "  sink_params: %s\n", summarizeSinkParams(analysis.SinkParams))
 			fmt.Fprintf(&out, "  return_isolation: %s\n", summarizeReturnIsolation(analysis.ReturnIsolation))
+			if snapshot := semantic.FormatFactSnapshot(analysis.FactSnapshot); snapshot != "" {
+				fmt.Fprintf(&out, "  fact_snapshot: %s\n", snapshot)
+			}
 			if summary := semantic.FormatFactTransforms(analysis.FactTransforms); summary != "" {
 				fmt.Fprintf(&out, "  fact_transforms: %s\n", summary)
+			}
+			if groups := semantic.FormatFactTransformGroups(analysis.FactTransforms); groups != "" {
+				fmt.Fprintf(&out, "  fact_groups:\n%s", indentReportBlock(groups, "    "))
+			}
+			if blockSummary := summarizeBlockFactTransforms(analysis.BlockFactTransforms); blockSummary != "" {
+				fmt.Fprintf(&out, "  fact_blocks:\n%s", indentReportBlock(blockSummary, "    "))
 			}
 		}
 	}
@@ -84,6 +93,36 @@ func generateSemanticReport(result *semantic.Result) string {
 		}
 	}
 	return out.String()
+}
+
+func summarizeBlockFactTransforms(blocks []semantic.FactBlockTransforms) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if len(block.Transforms) == 0 {
+			continue
+		}
+		if summary := semantic.FormatFactTransforms(block.Transforms); summary != "" {
+			lines = append(lines, fmt.Sprintf("block %d: %s", block.BlockID, summary))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func indentReportBlock(text string, prefix string) string {
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func summarizeSinkParams(sinkParams []bool) string {

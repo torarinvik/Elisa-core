@@ -5323,7 +5323,7 @@ func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, ord
 		if specializedType, ok := specializedParamTypes[i]; ok {
 			paramType = specializedType
 		}
-		a.recordCallArgPoststates(loweredArgs[i], paramType, funcPoststatesForParam(appliedType.Poststates, i), originalTrackedByRoot)
+		a.recordCallArgPoststates(expr, loweredArgs[i], i, paramType, funcPoststatesForParam(appliedType.Poststates, i), originalTrackedByRoot)
 	}
 	a.rememberConditionalCallPoststates(expr, appliedType, originalTrackedByRoot)
 	switch ft.Name {

@@ -158,7 +158,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
-	a.currentConservativeCallWidenings = map[*Symbol][][]borrowReturnAnnotationStep{}
+	a.currentConservativeCallWidenings = map[*Symbol][]conservativeCallWidening{}
 
 	for _, capture := range captures {
 		sym := &Symbol{Name: capture.name, Kind: SymbolLocal, Type: capture.typ, Node: expr, Mutable: capture.mutable}

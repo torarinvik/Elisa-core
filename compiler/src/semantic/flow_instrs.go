@@ -132,6 +132,9 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 		for _, arg := range n.Args {
 			appendBasicFlowExprInstrs(block, arg)
 		}
+	case *ast.RaiseExpr:
+		appendBasicFlowExprInstrs(block, n.Error)
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Error), Note: "raise error path"})
 	case *ast.FieldExpr:
 		appendBasicFlowExprInstrs(block, n.Object)
 	case *ast.IndexExpr:
@@ -162,9 +165,15 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 	case *ast.TryExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Fallback)
+		note := "try fallback handles error path"
+		if n.Fallback == nil {
+			note = "try propagates error path"
+		}
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Value), Note: note})
 	case *ast.UnwrapElseExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Fallback)
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Value), Note: "else fallback handles nullable path"})
 	case *ast.OptionalBindExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.TernaryExpr:

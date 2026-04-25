@@ -30,6 +30,7 @@ Every value can carry facts from several orthogonal classes:
 | Alias class | which paths may refer to the same mutable cell | ref params, mutable references, call boundaries |
 | Usage | copyable, affine, consumed, moved | `move`, thread/guard protocols |
 | Effects | ambient authority required | `effects[...]`, `can ...:` |
+| Error path | alternate failure/control exits | `raise`, `try`, nullable `else` recovery |
 | Optimization | readonly, exclusive, contiguous, exact extent | dense loops, frozen scans, parallel legality |
 
 These facts do not all need to be written by the programmer. The important rule
@@ -160,6 +161,42 @@ ensure normal return: job Typestate Ready
 otherwise. Error paths need their own fact story; they should not silently get
 success postconditions.
 
+### Ref-call widening
+
+```llcontext
+extern unknown_update(mutable player: Player[Alive]&) -> void
+
+def use(mutable player: Player[Alive]&) -> void:
+    unknown_update(player)
+```
+
+Fact view:
+
+```text
+widen player Typestate <- unknown_update(player)
+```
+
+The call source matters. If an `ensures ... => preserve` proof later fails, the
+compiler should be able to point at the call that caused the loss of precision,
+not merely say that some unknown widening happened.
+
+### Error path exits
+
+```llcontext
+def read() -> int error[FileError]:
+    raise FileError.NotFound
+```
+
+Fact view:
+
+```text
+produce <error> ErrorPath <- FileError.NotFound
+```
+
+Similarly, `try checked()` without a fallback produces a propagated error path;
+`try checked() else fallback` and nullable `value else fallback` produce handled
+alternate paths. These are not success-path `ensures` facts.
+
 ## Surface Design Rule
 
 The pyramid remains the language direction:
@@ -188,7 +225,7 @@ rather than treating each subsystem as unrelated.
 1. Keep existing precise implementations in place.
 2. Use the shared fact vocabulary in docs, diagnostics, and tests.
 3. Gradually map current structures onto the model:
-   - `GuardFactSet` = refinement facts
+    - `GuardFactSet` / `RefinementFacts` = refinement facts
    - `OptimizationFacts` = optimization/provenance facts
    - `RefType.State` = refstate facts
    - `Shape` = shape facts
@@ -200,8 +237,13 @@ rather than treating each subsystem as unrelated.
 
 Current implementation foothold:
 
-- `compiler/src/semantic/facts.go` defines the shared fact class and transform names
+- `compiler/src/semantic/facts.go` defines the shared fact class, transform names, typed transform sources, metadata details, formatter, grouped formatter, and per-function snapshot formatter
 - region invalidation diagnostics now describe invalidated region dependency facts
 - local-region escape and thread-transfer diagnostics use the same provenance vocabulary
 - `ensures` proof failures now describe missing `ensure` proofs against current tracked facts, and conservative call precision loss uses the `widen` vocabulary
-- function analysis records allocation/tree/store `produce`, control-flow guard and alias-class `refine`, conservative call-site `widen`, flow-instruction `recompute`/`consume`, region lifecycle `invalidate`, store-publication `rebase`, effect authority `require`, and declaration postcondition `ensure` transforms; semantic reports can surface those transforms without turning normal valid code into warnings
+- function analysis records allocation/tree/store `produce`, control-flow guard and alias-class `refine`, conservative call-site `widen`, flow-instruction `recompute`/`consume`, region lifecycle `invalidate`, store-publication `rebase`, effect authority `require`, declaration postcondition `ensure`, return exits, and error-path transforms
+- CFG blocks now carry their own projected fact transforms, while the function analysis keeps the deduped per-function stream
+- semantic reports now include `fact_snapshot`, flat `fact_transforms`, grouped `fact_groups`, and per-block `fact_blocks`
+- conservative call widening stores the call-site source, such as `unknown_update(player)`, alongside the widened target
+- region invalidation transforms carry detail tags such as `operation=restore region checkpoint` and `checkpoint=cp`
+- return provenance snapshots surface explicit packed/tree store dependency labels such as `Expr.Store[Frozen]`

@@ -12,16 +12,22 @@ func (a *Analyzer) currentConservativeCallWideningTransforms() []FactTransform {
 		return nil
 	}
 	transforms := make([]FactTransform, 0)
-	for root, paths := range a.currentConservativeCallWidenings {
+	for root, widenings := range a.currentConservativeCallWidenings {
 		if root == nil {
 			continue
 		}
-		for _, path := range paths {
+		for _, widening := range widenings {
+			reason := widening.Reason
+			if reason == "" {
+				reason = "ref call without matching ensures"
+			}
 			transforms = append(transforms, FactTransform{
-				Kind:    FactTransformWiden,
-				Classes: []FactClass{FactTypestate},
-				Target:  namedStateTargetDisplayName(root, path),
-				Reason:  "ref call without matching ensures",
+				Kind:       FactTransformWiden,
+				Classes:    []FactClass{FactTypestate},
+				Target:     namedStateTargetDisplayName(root, widening.Path),
+				Source:     widening.Source,
+				SourceKind: FactSourceCallWiden,
+				Reason:     reason,
 			})
 		}
 	}
@@ -41,6 +47,32 @@ func factTransformsFromCFGGuards(cfg *CFG) []FactTransform {
 	return dedupeAndSortFactTransforms(transforms)
 }
 
+func populateCFGBlockFactTransforms(cfg *CFG) []FactTransform {
+	if cfg == nil {
+		return nil
+	}
+	all := make([]FactTransform, 0)
+	for i := range cfg.Blocks {
+		transforms := factTransformsFromCFGBlock(cfg.Blocks[i])
+		cfg.Blocks[i].FactTransforms = transforms
+		all = append(all, transforms...)
+	}
+	return dedupeAndSortFactTransforms(all)
+}
+
+func factTransformsFromCFGBlock(block CFGBlock) []FactTransform {
+	transforms := make([]FactTransform, 0)
+	for _, edge := range block.Edges {
+		transforms = append(transforms, factTransformsFromRefinementFacts(edge.Guard)...)
+	}
+	for _, instr := range block.Instrs {
+		if transform, ok := factTransformFromFlowInstr(instr); ok {
+			transforms = append(transforms, transform)
+		}
+	}
+	return dedupeAndSortFactTransforms(transforms)
+}
+
 func factTransformsFromCFGFlowInstrs(cfg *CFG) []FactTransform {
 	if cfg == nil {
 		return nil
@@ -48,77 +80,77 @@ func factTransformsFromCFGFlowInstrs(cfg *CFG) []FactTransform {
 	transforms := make([]FactTransform, 0)
 	for _, block := range cfg.Blocks {
 		for _, instr := range block.Instrs {
-			switch instr.Kind {
-			case FlowInstrAlias:
-				if instr.Location == "" || instr.Source == "" {
-					continue
-				}
-				transforms = append(transforms, FactTransform{
-					Kind:    FactTransformRefine,
-					Classes: []FactClass{FactAliasClass},
-					Target:  instr.Location,
-					Source:  instr.Source,
-					Reason:  flowInstrFactReason(instr, "alias fact"),
-				})
-			case FlowInstrInvalidate:
-				if instr.Location == "" {
-					continue
-				}
-				transforms = append(transforms, FactTransform{
-					Kind:    FactTransformInvalidate,
-					Classes: []FactClass{FactRegionDeps},
-					Target:  instr.Location,
-					Source:  flowInstrFactSource(instr, "control-flow instruction"),
-					Reason:  flowInstrFactReason(instr, "invalidate region dependencies"),
-				})
-			case FlowInstrProduce:
-				if instr.Location == "" {
-					continue
-				}
-				transforms = append(transforms, FactTransform{
-					Kind:    FactTransformProduce,
-					Classes: []FactClass{FactRepresentation, FactStorage},
-					Target:  instr.Location,
-					Source:  flowInstrFactSource(instr, "control-flow instruction"),
-					Reason:  flowInstrFactReason(instr, "produce value"),
-				})
-			case FlowInstrRebase:
-				if instr.Location == "" {
-					continue
-				}
-				transforms = append(transforms, FactTransform{
-					Kind:    FactTransformRebase,
-					Classes: []FactClass{FactStoreDeps},
-					Target:  instr.Location,
-					Source:  flowInstrFactSource(instr, "control-flow instruction"),
-					Reason:  flowInstrFactReason(instr, "rebase provenance"),
-				})
-			case FlowInstrConsume:
-				if instr.Location == "" {
-					continue
-				}
-				transforms = append(transforms, FactTransform{
-					Kind:    FactTransformConsume,
-					Classes: []FactClass{FactUsage},
-					Target:  instr.Location,
-					Source:  "control-flow instruction",
-					Reason:  flowInstrFactReason(instr, "consume value"),
-				})
-			case FlowInstrMutate:
-				if instr.Location == "" {
-					continue
-				}
-				transforms = append(transforms, FactTransform{
-					Kind:    FactTransformRecompute,
-					Classes: []FactClass{FactTypestate},
-					Target:  instr.Location,
-					Source:  "control-flow instruction",
-					Reason:  flowInstrFactReason(instr, "mutation recomputes derived facts"),
-				})
+			if transform, ok := factTransformFromFlowInstr(instr); ok {
+				transforms = append(transforms, transform)
 			}
 		}
 	}
 	return dedupeAndSortFactTransforms(transforms)
+}
+
+func factTransformFromFlowInstr(instr FlowInstr) (FactTransform, bool) {
+	switch instr.Kind {
+	case FlowInstrAlias:
+		if instr.Location == "" || instr.Source == "" {
+			return FactTransform{}, false
+		}
+		return FactTransform{Kind: FactTransformRefine, Classes: []FactClass{FactAliasClass}, Target: instr.Location, Source: instr.Source, SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "alias fact")}, true
+	case FlowInstrInvalidate:
+		if instr.Location == "" {
+			return FactTransform{}, false
+		}
+		return FactTransform{Kind: FactTransformInvalidate, Classes: []FactClass{FactRegionDeps}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourceKind: FactSourceRegion, Details: flowInstrFactDetails(instr), Reason: flowInstrFactReason(instr, "invalidate region dependencies")}, true
+	case FlowInstrProduce:
+		if instr.Location == "" {
+			return FactTransform{}, false
+		}
+		return FactTransform{Kind: FactTransformProduce, Classes: []FactClass{FactRepresentation, FactStorage}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourceKind: flowInstrProduceSourceKind(instr), Reason: flowInstrFactReason(instr, "produce value")}, true
+	case FlowInstrRebase:
+		if instr.Location == "" {
+			return FactTransform{}, false
+		}
+		return FactTransform{Kind: FactTransformRebase, Classes: []FactClass{FactStoreDeps}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourceKind: FactSourceStore, Reason: flowInstrFactReason(instr, "rebase provenance")}, true
+	case FlowInstrConsume:
+		if instr.Location == "" {
+			return FactTransform{}, false
+		}
+		return FactTransform{Kind: FactTransformConsume, Classes: []FactClass{FactUsage}, Target: instr.Location, Source: "control-flow instruction", SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "consume value")}, true
+	case FlowInstrMutate:
+		if instr.Location == "" {
+			return FactTransform{}, false
+		}
+		return FactTransform{Kind: FactTransformRecompute, Classes: []FactClass{FactTypestate}, Target: instr.Location, Source: "control-flow instruction", SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "mutation recomputes derived facts")}, true
+	case FlowInstrErrorExit:
+		if instr.Location == "" {
+			return FactTransform{}, false
+		}
+		return FactTransform{Kind: FactTransformProduce, Classes: []FactClass{FactErrorPath}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourceKind: FactSourceErrorPath, Reason: flowInstrFactReason(instr, "error path")}, true
+	case FlowInstrReturn:
+		return FactTransform{Kind: FactTransformProduce, Classes: []FactClass{FactRepresentation}, Target: "<return>", Source: "return statement", SourceKind: FactSourceReturn, Reason: flowInstrFactReason(instr, "return exit")}, true
+	default:
+		return FactTransform{}, false
+	}
+}
+
+func flowInstrProduceSourceKind(instr FlowInstr) FactTransformSourceKind {
+	if strings.Contains(instr.Note, "freeze") || strings.Contains(instr.Source, ".Store") {
+		return FactSourceStore
+	}
+	return FactSourceFlowInstr
+}
+
+func flowInstrFactDetails(instr FlowInstr) []FactTransformDetail {
+	if instr.Kind != FlowInstrInvalidate {
+		return nil
+	}
+	details := []FactTransformDetail{}
+	if instr.Note != "" {
+		details = append(details, FactTransformDetail{Name: "operation", Value: instr.Note})
+	}
+	if instr.Source != "" {
+		details = append(details, FactTransformDetail{Name: "checkpoint", Value: instr.Source})
+	}
+	return details
 }
 
 func flowInstrFactSource(instr FlowInstr, fallback string) string {
@@ -146,9 +178,10 @@ func factTransformsFromPoststates(fnType *FuncType) []FactTransform {
 			continue
 		}
 		transform := FactTransform{
-			Kind:   FactTransformEnsure,
-			Target: target,
-			Source: "ensures " + funcPoststateConditionLabel(poststate.Condition),
+			Kind:       FactTransformEnsure,
+			Target:     target,
+			Source:     "ensures " + funcPoststateConditionLabel(poststate.Condition),
+			SourceKind: FactSourceSignature,
 		}
 		switch poststate.Kind {
 		case FuncPoststateKindNamedState:
@@ -192,34 +225,41 @@ func factTransformsFromPermissions(fnType *FuncType) []FactTransform {
 			continue
 		}
 		transforms = append(transforms, FactTransform{
-			Kind:    FactTransformRequire,
-			Classes: []FactClass{FactEffects},
-			Target:  target,
-			Source:  "function signature",
-			Reason:  "requires effect authority",
+			Kind:       FactTransformRequire,
+			Classes:    []FactClass{FactEffects},
+			Target:     target,
+			Source:     "function signature",
+			SourceKind: FactSourcePermission,
+			Reason:     "requires effect authority",
 		})
 	}
 	return dedupeAndSortFactTransforms(transforms)
+}
+
+func factTransformsFromRefinementFacts(facts RefinementFacts) []FactTransform {
+	return factTransformsFromGuardFactSet(facts)
 }
 
 func factTransformsFromGuardFactSet(guards GuardFactSet) []FactTransform {
 	transforms := make([]FactTransform, 0)
 	for _, target := range sortedBoolFactKeys(guards.NonNull) {
 		transforms = append(transforms, FactTransform{
-			Kind:    FactTransformRefine,
-			Classes: []FactClass{FactRefState},
-			Target:  target,
-			Source:  "control-flow guard",
-			Reason:  "guard proves non-null",
+			Kind:       FactTransformRefine,
+			Classes:    []FactClass{FactRefState},
+			Target:     target,
+			Source:     "control-flow guard",
+			SourceKind: FactSourceGuard,
+			Reason:     "guard proves non-null",
 		})
 	}
 	for _, target := range sortedBoolFactKeys(guards.Null) {
 		transforms = append(transforms, FactTransform{
-			Kind:    FactTransformRefine,
-			Classes: []FactClass{FactRefState},
-			Target:  target,
-			Source:  "control-flow guard",
-			Reason:  "guard proves null",
+			Kind:       FactTransformRefine,
+			Classes:    []FactClass{FactRefState},
+			Target:     target,
+			Source:     "control-flow guard",
+			SourceKind: FactSourceGuard,
+			Reason:     "guard proves null",
 		})
 	}
 	variantTargets := make([]string, 0, len(guards.PackedVariants))
@@ -233,11 +273,12 @@ func factTransformsFromGuardFactSet(guards GuardFactSet) []FactTransform {
 			continue
 		}
 		transforms = append(transforms, FactTransform{
-			Kind:    FactTransformRefine,
-			Classes: []FactClass{FactTypestate},
-			Target:  target,
-			Source:  "control-flow guard",
-			Reason:  "guard proves variant " + guard.EnumName + "." + guard.VariantName,
+			Kind:       FactTransformRefine,
+			Classes:    []FactClass{FactTypestate},
+			Target:     target,
+			Source:     "control-flow guard",
+			SourceKind: FactSourceGuard,
+			Reason:     "guard proves variant " + guard.EnumName + "." + guard.VariantName,
 		})
 	}
 	lefts := make([]string, 0, len(guards.Leq))
@@ -249,11 +290,12 @@ func factTransformsFromGuardFactSet(guards GuardFactSet) []FactTransform {
 		rights := sortedBoolFactKeys(guards.Leq[left])
 		for _, right := range rights {
 			transforms = append(transforms, FactTransform{
-				Kind:    FactTransformRefine,
-				Classes: []FactClass{FactOptimization},
-				Target:  left,
-				Source:  "control-flow guard",
-				Reason:  "guard proves <= " + right,
+				Kind:       FactTransformRefine,
+				Classes:    []FactClass{FactOptimization},
+				Target:     left,
+				Source:     "control-flow guard",
+				SourceKind: FactSourceGuard,
+				Reason:     "guard proves <= " + right,
 			})
 		}
 	}
@@ -315,8 +357,21 @@ func factTransformDedupeKey(transform FactTransform) string {
 		transform.Target,
 		factClassListKey(transform.Classes),
 		transform.Source,
+		transform.SourceKind.String(),
+		factTransformDetailsKey(transform.Details),
 		transform.Reason,
 	}, "\x00")
+}
+
+func factTransformDetailsKey(details []FactTransformDetail) string {
+	if len(details) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(details))
+	for _, detail := range details {
+		parts = append(parts, detail.Name+"="+detail.Value)
+	}
+	return strings.Join(parts, ",")
 }
 
 func factClassListKey(classes []FactClass) string {

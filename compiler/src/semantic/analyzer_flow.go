@@ -9843,17 +9843,32 @@ func poststatePathsOverlap(left []borrowReturnAnnotationStep, right []borrowRetu
 	return true
 }
 
-func (a *Analyzer) noteConservativeCallWidening(root *Symbol, steps []borrowReturnAnnotationStep) {
+func (a *Analyzer) noteConservativeCallWidening(root *Symbol, steps []borrowReturnAnnotationStep, source string, reason string) {
 	if a == nil || a.currentConservativeCallWidenings == nil || root == nil {
 		return
 	}
 	cloned := cloneBorrowReturnAnnotationSteps(steps)
 	for _, existing := range a.currentConservativeCallWidenings[root] {
-		if borrowReturnAnnotationPathEqual(existing, cloned) {
+		if borrowReturnAnnotationPathEqual(existing.Path, cloned) && existing.Source == source && existing.Reason == reason {
 			return
 		}
 	}
-	a.currentConservativeCallWidenings[root] = append(a.currentConservativeCallWidenings[root], cloned)
+	a.currentConservativeCallWidenings[root] = append(a.currentConservativeCallWidenings[root], conservativeCallWidening{Path: cloned, Source: source, Reason: reason})
+}
+
+func conservativeCallWideningSource(call *ast.CallExpr, arg ast.Expr, paramIndex int) string {
+	name := callIdentName(call)
+	if name == "" {
+		name = "call"
+	}
+	argText := flowLocationForExpr(arg)
+	if argText == "" && paramIndex >= 0 {
+		argText = "arg" + strconv.FormatInt(int64(paramIndex+1), 10)
+	}
+	if argText == "" {
+		return name
+	}
+	return name + "(" + argText + ")"
 }
 
 func namedStateTargetDisplayName(root *Symbol, steps []borrowReturnAnnotationStep) string {
@@ -11122,7 +11137,7 @@ func (a *Analyzer) recordNamedStateAugAssignTarget(target ast.Expr) {
 	a.bindTrackedValueType(root, updatedType)
 }
 
-func (a *Analyzer) recordNamedStateCallArgMutation(arg ast.Expr, paramType Type) {
+func (a *Analyzer) recordNamedStateCallArgMutation(call *ast.CallExpr, arg ast.Expr, paramIndex int, paramType Type) {
 	if a.currentSpecializedValueTypes == nil || arg == nil || paramType == nil {
 		return
 	}
@@ -11134,7 +11149,7 @@ func (a *Analyzer) recordNamedStateCallArgMutation(arg ast.Expr, paramType Type)
 	if !ok || root == nil {
 		return
 	}
-	a.noteConservativeCallWidening(root, steps)
+	a.noteConservativeCallWidening(root, steps, conservativeCallWideningSource(call, arg, paramIndex), "ref call without matching ensures")
 	current := a.currentTrackedValueType(root)
 	updatedType, ok := a.widenNamedStatesDeepAtPath(current, steps)
 	if !ok || updatedType == nil {
@@ -11159,9 +11174,9 @@ func funcPoststatesForParam(poststates []FuncPoststate, paramIndex int) []FuncPo
 	return filtered
 }
 
-func (a *Analyzer) recordCallArgPoststates(arg ast.Expr, paramType Type, poststates []FuncPoststate, originalByRoot map[*Symbol]Type) {
+func (a *Analyzer) recordCallArgPoststates(call *ast.CallExpr, arg ast.Expr, paramIndex int, paramType Type, poststates []FuncPoststate, originalByRoot map[*Symbol]Type) {
 	if len(poststates) == 0 {
-		a.recordNamedStateCallArgMutation(arg, paramType)
+		a.recordNamedStateCallArgMutation(call, arg, paramIndex, paramType)
 		return
 	}
 	if a.currentSpecializedValueTypes == nil || arg == nil || paramType == nil {

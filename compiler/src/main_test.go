@@ -1023,6 +1023,9 @@ func TestRunCLIEmitsSemanticReport(t *testing.T) {
 		"signature: func(mutable ParserState&) -> Token",
 		"func __grammar_try__PascalFrontend__expression",
 		"return_isolation:",
+		"fact_snapshot:",
+		"fact_groups:",
+		"fact_blocks:",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected semantic report to contain %q, got:\n%s", want, output)
