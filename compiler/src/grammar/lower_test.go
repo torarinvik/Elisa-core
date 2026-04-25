@@ -344,6 +344,38 @@ func TestLowerDeclExpandsGrammarAliases(t *testing.T) {
 	}
 }
 
+func TestLowerDeclExpandsBlockGrammarAliases(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalAtomGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    token:
+        IDENT
+        INTEGER
+    grammar alias atom_choice:
+        choice:
+            .IDENT
+            .INTEGER
+    atom() -> Token:
+        value = atom_choice
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.INTEGER)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered block grammar alias output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclImportsGrammarAliasesFromHelperGrammar(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalArgsListGrammar over Token using ParserState:
     cursor state

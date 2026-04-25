@@ -150,6 +150,45 @@ func TestParseGrammarDeclAllowsGrammarAliases(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsBlockGrammarAliases(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalAtomGrammar over Token using ParserState:
+    token:
+        IDENT
+        INTEGER
+    grammar alias atom_choice:
+        choice:
+            .IDENT
+            .INTEGER
+    atom() -> Token:
+        value = atom_choice
+        return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.GrammarAliases) != 1 {
+		t.Fatalf("expected one grammar alias, got %d", len(decl.GrammarAliases))
+	}
+	if _, ok := decl.GrammarAliases[0].Term.(*ast.GrammarChoiceTerm); !ok {
+		t.Fatalf("expected block grammar alias term to be a choice, got %T", decl.GrammarAliases[0].Term)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"grammar alias atom_choice:",
+		"choice:",
+		".IDENT",
+		".INTEGER",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted block grammar alias output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalGrammar[B] over PascalToken using PascalParseCtx:
     error PascalFrontendError

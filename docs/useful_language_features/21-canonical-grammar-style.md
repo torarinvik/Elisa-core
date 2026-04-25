@@ -53,6 +53,18 @@ grammar PascalStmtGrammar with PascalTreeGrammarEnv uses PascalListGrammar:
         return make_compound_stmt(begin_token, statements, end_token)
 ```
 
+Use the block form when the alias names a larger fragment:
+
+```context
+grammar ATPLPostfix:
+    grammar alias member_postfix_step:
+        attempt(try self.try_parse_postfix_member(owner, base))
+
+    postfix_step(self: mutable ATPLParser&, owner: mutable Arena&, base: ATPLExpr.Expr) -> ATPLExpr.Expr error[ATPLFrontendError]:
+        step = member_postfix_step
+        return step
+```
+
 Aliases are compile-time grammar terms. They are imported through `uses`, may compose with `grammar type` constructors, and expand before lowering. Use them for named parser concepts such as `call_args`, `program_decls`, `tuple_tail_items`, and `block_statement_items`; do not use them just to hide a one-off expression that is clearer inline.
 
 ## Tokens And Sets

@@ -477,8 +477,20 @@ func (p *Parser) parseGrammarAliasDecl() ast.GrammarAliasDecl {
 	p.expectIdentText("grammar")
 	p.expectIdentText("alias")
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_ASSIGN)
-	term := p.parseGrammarRecoverableTermValue()
+	var term ast.GrammarTerm
+	if p.match(lexer.TOKEN_ASSIGN) {
+		term = p.parseGrammarRecoverableTermValue()
+	} else {
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		terms := p.parseGrammarTermBlock()
+		if len(terms) == 1 {
+			term = terms[0]
+		} else {
+			term = &ast.GrammarSeqTerm{Position: pos, Terms: terms}
+		}
+		return ast.GrammarAliasDecl{Position: pos, Name: name, Term: term}
+	}
 	p.expectNewline()
 	return ast.GrammarAliasDecl{Position: pos, Name: name, Term: term}
 }

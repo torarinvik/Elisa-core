@@ -655,6 +655,11 @@ func (f *formatter) writeGrammarTokenSetDecl(level int, tokenSet ast.GrammarToke
 }
 
 func (f *formatter) writeGrammarAliasDecl(level int, alias ast.GrammarAliasDecl) {
+	if grammarTermUsesBlockForm(alias.Term) {
+		f.writeLine(level, "grammar alias "+alias.Name+":")
+		f.writeGrammarTerm(level+1, alias.Term)
+		return
+	}
 	f.writeLine(level, "grammar alias "+alias.Name+" = "+formatGrammarTerm(alias.Term))
 }
 
@@ -806,6 +811,21 @@ func grammarChoiceUsesBlockForm(choice *ast.GrammarChoiceTerm) bool {
 		}
 	}
 	return false
+}
+
+func grammarTermUsesBlockForm(term ast.GrammarTerm) bool {
+	switch n := term.(type) {
+	case *ast.GrammarChoiceTerm:
+		return true
+	case *ast.GrammarSeqTerm, *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
+		return true
+	case *ast.GrammarBindTerm:
+		return grammarTermUsesBlockForm(n.Term)
+	case *ast.GrammarAssignTerm:
+		return grammarTermUsesBlockForm(n.Term)
+	default:
+		return false
+	}
 }
 
 func (f *formatter) writeBoundChoiceTerm(level int, name string, choice *ast.GrammarChoiceTerm) {
