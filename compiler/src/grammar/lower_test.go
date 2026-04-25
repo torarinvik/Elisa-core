@@ -305,6 +305,90 @@ func TestLowerDeclExpandsGrammarFns(t *testing.T) {
 	}
 }
 
+func TestLowerDeclExpandsGrammarAliases(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    token:
+        COMMA ","
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+    grammar type separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+    grammar alias arg_list = separated_by(item: token(TokenKind.IDENT), stop: RParenSync)
+    args() -> darray[Token]:
+        values = arg_list
+        return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.COMMA)",
+		"state.current_token().kind == TokenKind.RPAREN",
+		"state.current_token().kind == TokenKind.EOF",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered grammar alias output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Count(formatted, "values = arg_list") != 1 {
+		t.Fatalf("expected grammar alias to remain only in the source grammar declaration, got:\n%s", formatted)
+	}
+}
+
+func TestLowerDeclImportsGrammarAliasesFromHelperGrammar(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalArgsListGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    token:
+        COMMA ","
+        IDENT
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+    grammar type separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+    grammar alias ident_args = separated_by(item: token(TokenKind.IDENT), stop: RParenSync)
+
+grammar PascalArgsGrammar over Token using ParserState uses PascalArgsListGrammar:
+    cursor state
+    token_kind TokenKind
+    token_field kind
+    current current_token
+    advance advance_token
+    expect expect
+    expect_kind expect_kind
+    args() -> darray[Token]:
+        values = ident_args
+        return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.COMMA)",
+		"state.current_token().kind == TokenKind.RPAREN",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected imported grammar alias output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclImportsGrammarFnsFromHelperOnlyGrammar(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalListGrammar over Token using ParserState:
     cursor state

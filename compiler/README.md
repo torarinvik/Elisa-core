@@ -23,6 +23,8 @@ For compile-time interfaces and receiver-style dispatch, see `../docs/useful_lan
 
 For the canonical bundle/tree-capability cleanup direction, including implicit bundle fallback and parser/tree helper style, see `../docs/useful_language_features/20-tree-capabilities-and-interface-cleanup.md`.
 
+For the parser implementation house style, see `../docs/useful_language_features/21-canonical-grammar-style.md`.
+
 For scope/checkpoint rollback blocks, see `../docs/useful_language_features/08-region-checkpoints.md`.
 
 For current annotations and compile-time hints, see `../docs/useful_language_features/20-annotations-and-compile-time-hints.md`.

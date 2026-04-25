@@ -109,6 +109,47 @@ func TestParseGrammarDeclAllowsHelperOnlyGrammar(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsGrammarAliases(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    token:
+        COMMA ","
+        RPAREN ")"
+    tokenset RParenSync:
+        RPAREN
+    grammar type separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+        separated item by sep until(stop)
+    grammar alias arg_list = separated_by(item: expression(), stop: RParenSync)
+    args() -> darray[Pascal.Expr]:
+        values = arg_list
+        return values
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.GrammarAliases) != 1 {
+		t.Fatalf("expected one grammar alias, got %d", len(decl.GrammarAliases))
+	}
+	if decl.GrammarAliases[0].Name != "arg_list" {
+		t.Fatalf("expected grammar alias name arg_list, got %q", decl.GrammarAliases[0].Name)
+	}
+	if _, ok := decl.GrammarAliases[0].Term.(*ast.GrammarApplyTerm); !ok {
+		t.Fatalf("expected grammar alias term to be a grammar type application, got %T", decl.GrammarAliases[0].Term)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"grammar alias arg_list = separated_by(item: expression(), stop: RParenSync)",
+		"values = arg_list",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted grammar alias output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalGrammar[B] over PascalToken using PascalParseCtx:
     error PascalFrontendError

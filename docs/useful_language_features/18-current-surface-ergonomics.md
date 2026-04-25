@@ -527,6 +527,7 @@ Current header declarations:
 - `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
 - `channel name` at the top of a production body declares a production-local channel, which is preferred for helper tuple/struct results
 - `grammar type Name[...]` declares a reusable higher-order grammar combinator with the same expansion model as `grammarfn`, but with a clearer “grammar constructor” intent
+- `grammar alias name = term` gives a compile-time grammar term a reusable name, so call sites can say `args = call_args` or `statements = block_statement_items` while keeping the lower-level `separated_by(...)` or recovery shape available in the header
 - `infix table Name(result):` hoists a reusable named-precedence ladder into grammar header scope so productions can say `result = infix(Name)` instead of inlining every level
 - if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from matching channel names
 - struct-return synthesis only uses channels that correspond to struct fields; unrelated grammar-wide channels such as `node` are ignored instead of producing invalid helper struct literals

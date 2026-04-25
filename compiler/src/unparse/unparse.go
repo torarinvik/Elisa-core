@@ -342,6 +342,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, tokenSet := range n.TokenSets {
 			f.writeGrammarTokenSetDecl(level+1, tokenSet)
 		}
+		for _, alias := range n.GrammarAliases {
+			f.writeGrammarAliasDecl(level+1, alias)
+		}
 		for _, grammarFn := range n.GrammarFns {
 			f.writeGrammarFnDecl(level+1, grammarFn)
 		}
@@ -649,6 +652,10 @@ func (f *formatter) writeGrammarTokenSetDecl(level int, tokenSet ast.GrammarToke
 	for _, term := range tokenSet.Terms {
 		f.writeLine(level+1, formatGrammarTokenSetItem(term))
 	}
+}
+
+func (f *formatter) writeGrammarAliasDecl(level int, alias ast.GrammarAliasDecl) {
+	f.writeLine(level, "grammar alias "+alias.Name+" = "+formatGrammarTerm(alias.Term))
 }
 
 func (f *formatter) writeGrammarFnDecl(level int, grammarFn ast.GrammarFnDecl) {

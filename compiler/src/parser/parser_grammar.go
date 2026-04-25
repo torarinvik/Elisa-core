@@ -57,6 +57,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	tokenAliases := make([]ast.GrammarTokenAliasDecl, 0)
 	channels := make([]ast.GrammarChannelDecl, 0)
 	tokenSets := make([]ast.GrammarTokenSetDecl, 0)
+	grammarAliases := make([]ast.GrammarAliasDecl, 0)
 	grammarFns := make([]ast.GrammarFnDecl, 0)
 	recoveryPolicies := make([]ast.GrammarRecoveryDecl, 0)
 	infixTables := make([]ast.GrammarInfixTableDecl, 0)
@@ -97,6 +98,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			channels = append(channels, p.parseGrammarChannelDecl())
 		case p.peekIdentText("tokenset"):
 			tokenSets = append(tokenSets, p.parseGrammarTokenSetDecl())
+		case p.peekGrammarAliasDecl():
+			grammarAliases = append(grammarAliases, p.parseGrammarAliasDecl())
 		case p.peekIdentText("grammarfn"):
 			grammarFns = append(grammarFns, p.parseGrammarFnDecl(false))
 		case p.peekGrammarTypeDecl():
@@ -150,6 +153,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		TokenAliases:     tokenAliases,
 		Channels:         channels,
 		TokenSets:        tokenSets,
+		GrammarAliases:   grammarAliases,
 		GrammarFns:       grammarFns,
 		RecoveryPolicies: recoveryPolicies,
 		InfixTables:      infixTables,
@@ -170,6 +174,10 @@ func (p *Parser) peekGrammarInfixTableDecl() bool {
 
 func (p *Parser) peekGrammarTypeDecl() bool {
 	return p.peekIdentText("grammar") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "type"
+}
+
+func (p *Parser) peekGrammarAliasDecl() bool {
+	return p.peekIdentText("grammar") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "alias"
 }
 
 func (p *Parser) parseGrammarEnvDecl() *ast.GrammarEnvDecl {
@@ -276,7 +284,7 @@ func (p *Parser) peekGrammarHeaderDecl() bool {
 	case "grammarfn":
 		return next == lexer.TOKEN_IDENT
 	case "grammar":
-		return p.peekGrammarTypeDecl()
+		return p.peekGrammarTypeDecl() || p.peekGrammarAliasDecl()
 	case "recovery":
 		return next == lexer.TOKEN_IDENT
 	default:
@@ -462,6 +470,17 @@ func normalizeGrammarTokenSetItemNames(tokenSets []ast.GrammarTokenSetDecl) []as
 		normalized = append(normalized, tokenSet)
 	}
 	return normalized
+}
+
+func (p *Parser) parseGrammarAliasDecl() ast.GrammarAliasDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("grammar")
+	p.expectIdentText("alias")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_ASSIGN)
+	term := p.parseGrammarRecoverableTermValue()
+	p.expectNewline()
+	return ast.GrammarAliasDecl{Position: pos, Name: name, Term: term}
 }
 
 func (p *Parser) parseGrammarFnDecl(typeCtor bool) ast.GrammarFnDecl {

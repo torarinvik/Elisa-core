@@ -125,6 +125,7 @@ type GrammarDecl struct {
 	TokenAliases     []GrammarTokenAliasDecl
 	Channels         []GrammarChannelDecl
 	TokenSets        []GrammarTokenSetDecl
+	GrammarAliases   []GrammarAliasDecl
 	GrammarFns       []GrammarFnDecl
 	RecoveryPolicies []GrammarRecoveryDecl
 	InfixTables      []GrammarInfixTableDecl
@@ -167,6 +168,12 @@ type GrammarTokenSetDecl struct {
 	Position lexer.Pos
 	Name     string
 	Terms    []GrammarTerm
+}
+
+type GrammarAliasDecl struct {
+	Position lexer.Pos
+	Name     string
+	Term     GrammarTerm
 }
 
 type GrammarFnDecl struct {
