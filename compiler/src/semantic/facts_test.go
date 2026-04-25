@@ -67,7 +67,7 @@ func TestFormatFactSnapshotIncludesPathAndHandleFacts(t *testing.T) {
 }
 
 func TestFormatFactTraceContractAndEffectSummary(t *testing.T) {
-	if got := FormatFactTraceContract(); !strings.Contains(got, FactTraceFormatVersion) || !strings.Contains(got, "filters=") {
+	if got := FormatFactTraceContract(); !strings.Contains(got, FactTraceFormatVersion) || !strings.Contains(got, "summary=mode=summary") || !strings.Contains(got, "filters=alias|class|detail|effect|function|kind|mode|path|reason|region|source|sourcekind|store|target|verb") {
 		t.Fatalf("expected trace contract to include version and filters, got %q", got)
 	}
 	got := FormatFactEffectSummary(FactEffectSummary{Required: []string{"Memory.Allocate", "Abort.Panic"}, Provided: []string{"Console.Write"}})
@@ -75,6 +75,38 @@ func TestFormatFactTraceContractAndEffectSummary(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected effect summary %q to contain %q", got, want)
 		}
+	}
+}
+
+func TestNewFactPathBuildsTypedSteps(t *testing.T) {
+	got := NewFactPath("state.cursor[0].value")
+	want := "state.cursor[0].value{root=state,path=cursor[0].value,steps=index:cursor[0]/field:value}"
+	if formatted := FormatFactPath(got); formatted != want {
+		t.Fatalf("expected %q, got %q", want, formatted)
+	}
+	if got := NewFactPath("<return>"); got.Target != "" {
+		t.Fatalf("expected synthetic target to produce empty path, got %#v", got)
+	}
+}
+
+func TestFormatFactSnapshotOrdersValuesDeterministically(t *testing.T) {
+	snapshot := FactSnapshot{Parameters: []string{"z", "a", "z"}, RegionDeps: []string{"scratch[2->1]", "arena[1->0]"}}
+	got := FormatFactSnapshot(snapshot)
+	want := "params=[a, z] region_deps=[arena[1->0], scratch[2->1]]"
+	if got != want {
+		t.Fatalf("expected deterministic snapshot %q, got %q", want, got)
+	}
+}
+
+func TestFormatFactTransformSummary(t *testing.T) {
+	got := FormatFactTransformSummary([]FactTransform{
+		{Kind: FactTransformRecompute, Classes: []FactClass{FactStoreDeps, FactTypestate}},
+		{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}},
+		{Kind: FactTransformRecompute, Classes: []FactClass{FactTypestate}},
+	})
+	want := "transforms=3 kinds=[recompute:2, require:1] classes=[interface:1, store-deps:1, typestate:2]"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 

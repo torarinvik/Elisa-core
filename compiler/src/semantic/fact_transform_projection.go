@@ -315,7 +315,7 @@ func factTransformsFromGenericInterfaceBounds(fn *ast.FuncDecl) []FactTransform 
 			Source:     "generic parameter",
 			SourcePos:  param.Position,
 			SourceKind: FactSourceSignature,
-			Reason:     "requires interface conformance fact",
+			Reason:     "required interface fact",
 		})
 	}
 	return dedupeAndSortFactTransforms(transforms)

@@ -110,7 +110,11 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
-		response.Output = generateFactTraceReport(result, "")
+		facts, err := generateFactTraceReport(result, "")
+		if err != nil {
+			return compileServerResponse{OK: false, Error: err.Error(), Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		response.Output = facts
 	case emitFmt:
 		file, ok := parseLoadedProgram(program, &stderr)
 		if !ok {

@@ -840,34 +840,7 @@ func buildFunctionFactExitSummary(transforms []FactTransform) FactExitSummary {
 }
 
 func factPathFromTarget(target string) FactPath {
-	if target == "" || strings.HasPrefix(target, "<") {
-		return FactPath{}
-	}
-	root := flowLocationRoot(target)
-	if root == "" {
-		return FactPath{}
-	}
-	path := strings.TrimPrefix(target[len(root):], ".")
-	return FactPath{Target: target, Root: root, Path: path, Steps: factPathStepsFromPath(path)}
-}
-
-func factPathStepsFromPath(path string) []FactPathStep {
-	if path == "" {
-		return nil
-	}
-	parts := strings.Split(path, ".")
-	steps := make([]FactPathStep, 0, len(parts))
-	for _, part := range parts {
-		if part == "" {
-			continue
-		}
-		kind := "field"
-		if strings.Contains(part, "[") {
-			kind = "index"
-		}
-		steps = append(steps, FactPathStep{Kind: kind, Name: part})
-	}
-	return steps
+	return NewFactPath(target)
 }
 
 func factTransformsFromAliasSets(sets []FactAliasSet) []FactTransform {

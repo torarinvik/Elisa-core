@@ -16,6 +16,10 @@ def fact_interface_rules[B: FactBuilder]() -> B.State can[Console.Write]:
         signal Console.Write
     return B.state()
 
+def fact_interface_nested[B: FactBuilder]() -> B.State can[Console.Write]:
+    can Console.Write:
+        return fact_interface_rules[B]()
+
 def fact_interface_concrete() -> int can[Console.Write]:
     can Console.Write:
-        return fact_interface_rules[FactBuilderTag]()
+        return fact_interface_nested[FactBuilderTag]()

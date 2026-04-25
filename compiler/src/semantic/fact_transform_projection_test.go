@@ -92,7 +92,7 @@ func TestFactTransformsFromFunctionSignatureProjectsPoststatesAndPermissions(t *
 func TestFactTransformsFromGenericInterfaceBounds(t *testing.T) {
 	fn := &ast.FuncDecl{Name: "build", GenericParams: []ast.GenericParam{{Kind: ast.GenericParamType, Name: "B", InterfaceBound: "Builder"}}}
 	got := factTransformsFromGenericInterfaceBounds(fn)
-	want := []FactTransform{{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", SourceKind: FactSourceSignature, Reason: "requires interface conformance fact"}}
+	want := []FactTransform{{Kind: FactTransformRequire, Classes: []FactClass{FactInterface}, Target: "B:Builder", Source: "generic parameter", SourceKind: FactSourceSignature, Reason: "required interface fact"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected interface-bound fact transforms:\nwant %#v\n got %#v", want, got)
 	}

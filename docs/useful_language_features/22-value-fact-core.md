@@ -37,6 +37,12 @@ Every value can carry facts from several orthogonal classes:
 These facts do not all need to be written by the programmer. The important rule
 is that they are all part of one model, not separate mini-languages.
 
+The canonical class names are the lowercase report names in the table above.
+Do not introduce spelling variants for diagnostics or trace filters unless a new
+trace contract version is declared. In particular, user-facing output should use
+`region-deps`, `store-deps`, `alias-class`, `error-path`, `refstate`, and
+`interface` exactly as written here.
+
 ## Rule Catalog
 
 The core transformations are the vocabulary diagnostics, reports, and lowering
@@ -61,6 +67,11 @@ carry enough provenance to answer three debugging questions:
 - what fact class changed?
 - what source operation changed it?
 - what path, alias class, region generation, or store dependency was affected?
+
+The canonical transform names are `produce`, `refine`, `widen`, `recompute`,
+`consume`, `invalidate`, `rebase`, `require`, and `ensure`. Diagnostics should
+prefer these words over subsystem-specific synonyms such as "drop precision",
+"capability check", or "trait bound" when the message is describing fact flow.
 
 ## Implementation Anchors
 
@@ -100,8 +111,12 @@ go run ./src -emit facts -filter 'class=interface' ../Code/test_programs/fact_in
 The first non-heading line of a fact trace is a contract line such as
 `contract: version=fact-trace-v1 ...`. It records stable ordering and the
 supported filter keys. Current keyed filters include `function`, `kind`,
-`class`, `target`, `source`, `sourcekind`, `reason`, `detail`, `alias`,
-`effect`, `region`, and `store`.
+`class`, `target`, `path`, `source`, `sourcekind`, `reason`, `detail`, `alias`,
+`effect`, `region`, `store`, `verb`, and `mode`. Malformed keyed filters such as
+`kind=`, `=widen`, or unknown keys are errors so scripts do not silently fall
+back to substring matching. `mode=summary` keeps the same contract line and
+per-function snapshots but replaces raw transform/explanation sections with a
+compact count summary.
 
 The report surface is intentionally close to the catalog:
 
@@ -114,6 +129,25 @@ The report surface is intentionally close to the catalog:
 - `fact_blocks` shows the block-local projection.
 - `fact_explanations` / `explanations` renders human-readable provenance such as
     `widen player from FactPlayer[Alive] to FactPlayer after unknown_update(player)`.
+
+### Trace Debugging Workflow
+
+When a frontend or semantic rule behaves unexpectedly, prefer narrowing the
+trace before reading the full semantic report:
+
+```sh
+go run ./src -emit facts -filter 'function=parse_expr,mode=summary' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'kind=recompute,class=store-deps,target=node' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'region=scratch' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'alias=alias-class#0' path/to/frontend.llcontext
+```
+
+Use `mode=summary` first to verify that the expected function has fact activity,
+then add `kind`, `class`, `target`, `region`, `store`, `alias`, or `effect` keys
+until the output is small enough to inspect. For grammar-lowered parsers, filter
+on the generated helper, for example
+`function=__grammar_try__PascalFrontend__expression`, to inspect parser-state
+paths such as `state.cursor{root=state,path=cursor,steps=field:cursor}`.
 
 ## Canonical Examples
 
@@ -321,6 +355,39 @@ The frontend grammar DSL can keep concise syntax, but the lowered fact trace
 must expose parser-state mutation, recovery/error paths, tree handle production,
 and span/store dependencies.
 
+The parser-level regression fixture in `compiler/src/main_test.go` checks that a
+grammar-lowered helper exposes typed path facts for `state.cursor`. Tree handle
+fixtures should follow the same rule: the sugar can remain compact, but reports
+must expose the produced handle, span/store provenance, and any recovery/error
+path facts.
+
+## Stable Contract Boundary
+
+`fact-trace-v1` is stable for the current report shape: contract line, canonical
+class/transform names, deterministic ordering, keyed filters, summary mode,
+snapshot/exits/aliases/effects/transforms/groups/explanations sections, and
+typed path-step formatting. Additive fields may be appended to existing records
+only when old filters and golden tests keep passing.
+
+Declare `fact-trace-v2` before any change that renames a class, transform kind,
+filter key, section name, path-step syntax, or default ordering rule. Version
+boundaries should be paired with fixture updates and a migration note in this
+document.
+
+## Regression and Overhead Checks
+
+Fact-reporting changes should cover both behavior and cost:
+
+```sh
+go test ./src/semantic ./src
+go test ./src -run 'TestRunCLIEmitsFactTrace|TestRunCLIRejectsMalformedFactTraceFilters'
+go test ./src -bench BenchmarkGenerateFactTraceReportSummary -benchmem
+```
+
+The benchmark is intentionally small. It is a smoke check for accidental large
+allocation regressions in fact emission, not a replacement for frontend-level
+benchmark suites.
+
 ## Surface Design Rule
 
 The pyramid remains the language direction:
@@ -389,6 +456,8 @@ Current implementation foothold:
     `fact_explanations`, and per-block `fact_blocks`
 - fact-only traces are available with `-emit facts` / `-emit fact-trace`, begin
     with a `fact-trace-v1` contract line, and support keyed filters
+- `mode=summary` provides compact per-function fact counts for large traces
+- keyed fact trace filters are validated and unknown/malformed keys are errors
 - conservative call widening stores source position, call-site source, and
     before/after type details
 - region invalidation transforms carry detail tags such as

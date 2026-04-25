@@ -107,15 +107,18 @@ func generateSemanticReport(result *semantic.Result) string {
 	return out.String()
 }
 
-func generateFactTraceReport(result *semantic.Result, filter string) string {
+func generateFactTraceReport(result *semantic.Result, filter string) (string, error) {
 	if result == nil || result.GlobalScope == nil {
-		return ""
+		return "", nil
 	}
 	var out bytes.Buffer
 	out.WriteString("=== facts ===\n")
 	out.WriteString(semantic.FormatFactTraceContract())
 	out.WriteByte('\n')
-	traceFilter := parseFactTraceFilter(filter)
+	traceFilter, err := parseFactTraceFilter(filter)
+	if err != nil {
+		return "", err
+	}
 	funcNames := make([]string, 0)
 	for name, sym := range result.GlobalScope.Symbols {
 		if sym == nil || (sym.Kind != semantic.SymbolFunc && sym.Kind != semantic.SymbolExternFunc) {
@@ -149,6 +152,10 @@ func generateFactTraceReport(result *semantic.Result, filter string) string {
 		if effects := semantic.FormatFactEffectSummary(analysis.EffectSummary); effects != "" {
 			fmt.Fprintf(&out, "  effects: %s\n", effects)
 		}
+		if traceFilter.SummaryMode() {
+			fmt.Fprintf(&out, "  summary: %s\n", semantic.FormatFactTransformSummary(transforms))
+			continue
+		}
 		if summary := semantic.FormatFactTransforms(transforms); summary != "" {
 			fmt.Fprintf(&out, "  transforms: %s\n", summary)
 		}
@@ -159,7 +166,7 @@ func generateFactTraceReport(result *semantic.Result, filter string) string {
 			fmt.Fprintf(&out, "  explanations:\n%s", indentReportBlock(explanations, "    "))
 		}
 	}
-	return out.String()
+	return out.String(), nil
 }
 
 type factTraceFilter struct {
@@ -168,8 +175,9 @@ type factTraceFilter struct {
 	active        bool
 }
 
-func parseFactTraceFilter(input string) factTraceFilter {
+func parseFactTraceFilter(input string) (factTraceFilter, error) {
 	filter := factTraceFilter{keys: map[string][]string{}}
+	allowed := supportedFactTraceFilterKeySet()
 	for _, term := range strings.FieldsFunc(input, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' }) {
 		term = strings.TrimSpace(term)
 		if term == "" {
@@ -179,17 +187,48 @@ func parseFactTraceFilter(input string) factTraceFilter {
 		if key, value, ok := strings.Cut(term, "="); ok {
 			key = strings.ToLower(strings.TrimSpace(key))
 			value = strings.TrimSpace(value)
-			if key != "" && value != "" {
-				filter.keys[key] = append(filter.keys[key], value)
+			if key == "" || value == "" {
+				return factTraceFilter{}, fmt.Errorf("malformed fact trace filter %q: expected key=value with non-empty key and value", term)
 			}
+			if !allowed[key] {
+				return factTraceFilter{}, fmt.Errorf("unsupported fact trace filter key %q (supported: %s)", key, strings.Join(supportedFactTraceFilterKeys(), ", "))
+			}
+			filter.keys[key] = append(filter.keys[key], value)
 			continue
 		}
 		filter.functionTerms = append(filter.functionTerms, term)
 	}
-	return filter
+	return filter, nil
+}
+
+func supportedFactTraceFilterKeys() []string {
+	keys := append([]string(nil), semantic.SupportedFactTraceFilterKeys...)
+	sort.Strings(keys)
+	return keys
+}
+
+func supportedFactTraceFilterKeySet() map[string]bool {
+	keys := supportedFactTraceFilterKeys()
+	out := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		out[key] = true
+	}
+	return out
+}
+
+func (f factTraceFilter) SummaryMode() bool {
+	for _, value := range f.keys["mode"] {
+		if strings.EqualFold(value, "summary") || strings.EqualFold(value, "compact") {
+			return true
+		}
+	}
+	return false
 }
 
 func (f factTraceFilter) FunctionNameCandidate(name string) bool {
+	if !f.matchesFunctionNameKey(name) {
+		return false
+	}
 	if len(f.functionTerms) == 0 {
 		return true
 	}
@@ -205,10 +244,16 @@ func (f factTraceFilter) MatchesFunction(name string, analysis *semantic.Functio
 	if !f.active {
 		return true
 	}
+	if !f.matchesFunctionNameKey(name) {
+		return false
+	}
 	for _, term := range f.functionTerms {
 		if strings.Contains(name, term) {
 			return true
 		}
+	}
+	if len(f.transformFilterKeys()) == 0 {
+		return true
 	}
 	if len(f.keys) == 0 {
 		return false
@@ -223,7 +268,7 @@ func (f factTraceFilter) MatchesFunction(name string, analysis *semantic.Functio
 }
 
 func (f factTraceFilter) FilterTransforms(transforms []semantic.FactTransform) []semantic.FactTransform {
-	if !f.active || len(f.keys) == 0 {
+	if !f.active || len(f.transformFilterKeys()) == 0 {
 		return transforms
 	}
 	out := make([]semantic.FactTransform, 0, len(transforms))
@@ -236,7 +281,7 @@ func (f factTraceFilter) FilterTransforms(transforms []semantic.FactTransform) [
 }
 
 func (f factTraceFilter) matchesTransform(transform semantic.FactTransform) bool {
-	for key, values := range f.keys {
+	for key, values := range f.transformFilterKeys() {
 		matched := false
 		for _, value := range values {
 			if factTraceTransformFieldMatches(transform, key, value) {
@@ -249,6 +294,32 @@ func (f factTraceFilter) matchesTransform(transform semantic.FactTransform) bool
 		}
 	}
 	return true
+}
+
+func (f factTraceFilter) matchesFunctionNameKey(name string) bool {
+	values := f.keys["function"]
+	if len(values) == 0 {
+		return true
+	}
+	for _, value := range values {
+		if strings.Contains(name, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f factTraceFilter) transformFilterKeys() map[string][]string {
+	out := map[string][]string{}
+	for key, values := range f.keys {
+		switch key {
+		case "function", "mode":
+			continue
+		default:
+			out[key] = values
+		}
+	}
+	return out
 }
 
 func factTraceTransformFieldMatches(transform semantic.FactTransform, key string, value string) bool {

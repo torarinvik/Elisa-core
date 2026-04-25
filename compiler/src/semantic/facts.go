@@ -10,6 +10,24 @@ import (
 
 const FactTraceFormatVersion = "fact-trace-v1"
 
+var SupportedFactTraceFilterKeys = []string{
+	"alias",
+	"class",
+	"detail",
+	"effect",
+	"function",
+	"kind",
+	"mode",
+	"path",
+	"reason",
+	"region",
+	"source",
+	"sourcekind",
+	"store",
+	"target",
+	"verb",
+}
+
 // FactClass names the orthogonal kinds of static knowledge the analyzer tracks
 // about values. The current compiler still stores these facts in specialized
 // structures such as GuardFactSet, OptimizationFacts, RefType, Shape, effects,
@@ -145,7 +163,9 @@ type FactSnapshot struct {
 }
 
 func FormatFactTraceContract() string {
-	return "contract: version=" + FactTraceFormatVersion + " order=kind,target,class,reason,source filters=function|kind|class|target|source|sourcekind|reason|detail|alias|effect|region|store"
+	keys := append([]string(nil), SupportedFactTraceFilterKeys...)
+	sort.Strings(keys)
+	return "contract: version=" + FactTraceFormatVersion + " order=kind,target,class,reason,source summary=mode=summary filters=" + strings.Join(keys, "|")
 }
 
 type RefinementFacts = GuardFactSet
@@ -168,6 +188,50 @@ func FormatFactTransforms(transforms []FactTransform) string {
 		return ""
 	}
 	return "[" + strings.Join(parts, "; ") + "]"
+}
+
+func FormatFactTransformSummary(transforms []FactTransform) string {
+	if len(transforms) == 0 {
+		return "transforms=0"
+	}
+	kindCounts := map[FactTransformKind]int{}
+	classCounts := map[FactClass]int{}
+	for _, transform := range transforms {
+		if transform.Kind != "" {
+			kindCounts[transform.Kind]++
+		}
+		for _, class := range transform.Classes {
+			if class != "" {
+				classCounts[class]++
+			}
+		}
+	}
+	parts := []string{fmt.Sprintf("transforms=%d", len(transforms))}
+	if len(kindCounts) != 0 {
+		keys := make([]string, 0, len(kindCounts))
+		for kind := range kindCounts {
+			keys = append(keys, kind.String())
+		}
+		sort.Strings(keys)
+		items := make([]string, 0, len(keys))
+		for _, key := range keys {
+			items = append(items, fmt.Sprintf("%s:%d", key, kindCounts[FactTransformKind(key)]))
+		}
+		parts = append(parts, "kinds=["+strings.Join(items, ", ")+"]")
+	}
+	if len(classCounts) != 0 {
+		keys := make([]string, 0, len(classCounts))
+		for class := range classCounts {
+			keys = append(keys, class.String())
+		}
+		sort.Strings(keys)
+		items := make([]string, 0, len(keys))
+		for _, key := range keys {
+			items = append(items, fmt.Sprintf("%s:%d", key, classCounts[FactClass(key)]))
+		}
+		parts = append(parts, "classes=["+strings.Join(items, ", ")+"]")
+	}
+	return strings.Join(parts, " ")
 }
 
 func FormatFactTransform(transform FactTransform) string {
@@ -410,6 +474,47 @@ func FormatFactPath(path FactPath) string {
 	return path.Target + "{" + strings.Join(parts, ",") + "}"
 }
 
+func NewFactPath(target string) FactPath {
+	if target == "" || strings.HasPrefix(target, "<") {
+		return FactPath{}
+	}
+	root := factPathRoot(target)
+	if root == "" {
+		return FactPath{}
+	}
+	path := strings.TrimPrefix(target[len(root):], ".")
+	return FactPath{Target: target, Root: root, Path: path, Steps: FactPathStepsFromPath(path)}
+}
+
+func FactPathStepsFromPath(path string) []FactPathStep {
+	if path == "" {
+		return nil
+	}
+	parts := strings.Split(path, ".")
+	steps := make([]FactPathStep, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		kind := "field"
+		if strings.Contains(part, "[") {
+			kind = "index"
+		}
+		steps = append(steps, FactPathStep{Kind: kind, Name: part})
+	}
+	return steps
+}
+
+func factPathRoot(target string) string {
+	if target == "" {
+		return ""
+	}
+	if idx := strings.IndexAny(target, ".[ "); idx >= 0 {
+		return target[:idx]
+	}
+	return target
+}
+
 func formatFactPathSteps(steps []FactPathStep) string {
 	if len(steps) == 0 {
 		return ""
@@ -501,7 +606,10 @@ func canonicalFactPaths(values []FactPath) []FactPath {
 		if out[i].Root != out[j].Root {
 			return out[i].Root < out[j].Root
 		}
-		return out[i].Path < out[j].Path
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return formatFactPathSteps(out[i].Steps) < formatFactPathSteps(out[j].Steps)
 	})
 	return out
 }
@@ -526,6 +634,7 @@ func canonicalStringList(values []string) []string {
 		seen[value] = true
 		out = append(out, value)
 	}
+	sort.Strings(out)
 	return out
 }
 
