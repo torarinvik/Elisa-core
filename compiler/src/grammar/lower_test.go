@@ -265,6 +265,72 @@ func TestLowerDeclExpandsFirstTermLookahead(t *testing.T) {
 	}
 }
 
+func TestLowerFilePreservesInlineNodeConstructionInStatefulGrammar(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct Span:
+    start: i32
+    end: i32
+
+struct Token:
+    kind: TokenKind
+    span: Span
+    lexeme_key: u32
+
+struct ParserState:
+    tokens: darray[Token]
+    cursor: mutable usize
+
+const enum TokenKind of i16:
+    EOF = 0
+    IDENT = 1
+    STAR = 2
+
+tree Demo:
+    common:
+        span: Span
+    node Expr:
+        Invalid
+        Name(name_id: u32)
+        Pair(child left: Expr, child right: Expr)
+
+grammarenv DemoEnv over Token using ParserState:
+    cursor state
+    alloc alloc
+    token_kind TokenKind
+    eof TokenKind.EOF
+    token_field kind
+    current current_token
+    advance advance_token
+    expect_kind expect_kind
+
+grammar DemoGrammar with DemoEnv:
+    token:
+        IDENT
+        STAR "*"
+    atom() -> Demo.Expr:
+        .IDENT(token)
+        node <- expr(node[span = token.span] Demo.Expr.Name(name_id: token.lexeme_key))
+        return node
+    maybe_pair(left: Demo.Expr) -> Demo.Expr:
+        node <- when(state.current_token().kind == TokenKind.STAR, pair_tail(left), expr(node[span = left.span] Demo.Expr.Invalid))
+        return node
+    pair_tail(left: Demo.Expr) -> Demo.Expr:
+        .STAR
+        right = atom()
+        return node[span = left.span + right.span] Demo.Expr.Pair(left: left, right: right)
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_value_atom_DemoGrammar_value_11 = node[span = token.span] Demo.Expr.Name(name_id: token.lexeme_key)",
+		"node[span = left.span] Demo.Expr.Invalid()",
+		"return (true, __grammar_committed_pair_tail_DemoGrammar_committed_8, node[span = (left.span + right.span)] Demo.Expr.Pair(left: left, right: right))",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered inline node construction to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclExpandsGrammarFns(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalArgsGrammar over Token using ParserState:
     cursor state
@@ -1355,6 +1421,83 @@ func TestLowerFileAppendsLoweredFunctionsAfterGrammarDecl(t *testing.T) {
 	}
 	if fn.Name != "program" {
 		t.Fatalf("expected lowered function name program, got %q", fn.Name)
+	}
+}
+
+func TestFormatFilePreservesLexerHelperDecl(t *testing.T) {
+	file := parseGrammarTestFile(t, `lexer DemoLex:
+    token_kind DemoTokenKind
+    charclass digit = '0'..'9'
+    charclass ident = '_' | digit
+    keywords fallback IDENT:
+        "if" -> IF
+    literals longest fallback EOF:
+        "==" -> EQEQ
+        "=" -> EQ
+`)
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"lexer DemoLex:",
+		"token_kind DemoTokenKind",
+		"charclass digit = '0'..'9'",
+		"charclass ident = '_' | digit",
+		"keywords fallback IDENT:",
+		`"if" -> IF`,
+		"literals longest fallback EOF:",
+		`"==" -> EQEQ`,
+		`"=" -> EQ`,
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted lexer decl to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileLowersLexerHelperDeclToFunctions(t *testing.T) {
+	file := parseGrammarTestFile(t, `const enum DemoTokenKind of i16:
+    EOF = 0
+    IDENT = 1
+    IF = 2
+    EQ = 3
+    EQEQ = 4
+
+lexer DemoLex:
+    token_kind DemoTokenKind
+    charclass digit = '0'..'9'
+    charclass ident = '_' | digit
+    keywords fallback IDENT:
+        "if" -> IF
+    literals longest fallback EOF:
+        "=" -> EQ
+        "==" -> EQEQ
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def demo_lex_is_digit(ch: char) -> bool:",
+		"def demo_lex_is_ident(ch: char) -> bool:",
+		"demo_lex_is_digit(ch)",
+		"def demo_lex_keyword_kind(text: sview) -> DemoTokenKind:",
+		"return match text:",
+		`"if":`,
+		"DemoTokenKind.IF",
+		"DemoTokenKind.IDENT",
+		"def demo_lex_match_literal(source: dstr, offset: usize) -> (kind: DemoTokenKind, len: usize):",
+		`source[offset:(offset + 2)] == "=="`,
+		"return (DemoTokenKind.EQEQ, 2)",
+		"return (DemoTokenKind.EOF, 0)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered lexer helper output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "lexer DemoLex:") {
+		t.Fatalf("expected lexer decl to be lowered away, got:\n%s", formatted)
+	}
+	longIndex := strings.Index(formatted, `source[offset:(offset + 2)] == "=="`)
+	shortIndex := strings.Index(formatted, `source[offset:(offset + 1)] == "="`)
+	if longIndex < 0 || shortIndex < 0 || longIndex > shortIndex {
+		t.Fatalf("expected longest literal match to be checked before shorter prefix, got:\n%s", formatted)
 	}
 }
 

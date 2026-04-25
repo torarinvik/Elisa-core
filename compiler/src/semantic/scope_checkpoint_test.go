@@ -100,6 +100,16 @@ func TestAnalyzeRejectsDuplicateLocalBinding(t *testing.T) {
 	}
 }
 
+func TestAnalyzeUndefinedAssignmentTargetSuggestsLocalBinding(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "undefined_assignment_target_hint.llcontext", `def build() -> void:
+    value <- 1
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "undefined assignment target \"value\" (use = to introduce a new local; <- requires an existing mutable target)") {
+		t.Fatalf("expected assignment target hint diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsDuplicateGlobalDeclaration(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_global_declaration.llcontext", `
 global answer: i64 = 1

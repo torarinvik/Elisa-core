@@ -150,6 +150,55 @@ type GrammarEnvDecl struct {
 	RecordErrorFunc string
 }
 
+type LexerDecl struct {
+	Position      lexer.Pos
+	Name          string
+	TokenKindType TypeExpr
+	CharClasses   []LexerCharClassDecl
+	Keywords      *LexerKeywordDecl
+	Literals      *LexerLiteralDecl
+}
+
+type LexerCharClassDecl struct {
+	Position lexer.Pos
+	Name     string
+	Terms    []LexerCharClassTerm
+}
+
+type LexerCharClassTerm struct {
+	Position lexer.Pos
+	Name     string
+	Start    string
+	End      string
+	Range    bool
+	Ref      bool
+}
+
+type LexerKeywordDecl struct {
+	Position lexer.Pos
+	Fallback string
+	Entries  []LexerKeywordEntry
+}
+
+type LexerKeywordEntry struct {
+	Position lexer.Pos
+	Text     string
+	Kind     string
+}
+
+type LexerLiteralDecl struct {
+	Position lexer.Pos
+	Fallback string
+	Longest  bool
+	Entries  []LexerLiteralEntry
+}
+
+type LexerLiteralEntry struct {
+	Position lexer.Pos
+	Text     string
+	Kind     string
+}
+
 type GrammarTokenAliasDecl struct {
 	Position   lexer.Pos
 	Kind       string
@@ -1750,6 +1799,7 @@ func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
 func (n *TreeDecl) Pos() lexer.Pos       { return n.Position }
 func (n *GrammarDecl) Pos() lexer.Pos    { return n.Position }
 func (n *GrammarEnvDecl) Pos() lexer.Pos { return n.Position }
+func (n *LexerDecl) Pos() lexer.Pos      { return n.Position }
 func (n *GrammarProductionDecl) Pos() lexer.Pos {
 	return n.Position
 }
@@ -2010,6 +2060,7 @@ func (*EnumDecl) nodeTag()                  {}
 func (*TreeDecl) nodeTag()                  {}
 func (*GrammarDecl) nodeTag()               {}
 func (*GrammarEnvDecl) nodeTag()            {}
+func (*LexerDecl) nodeTag()                 {}
 func (*GrammarProductionDecl) nodeTag()     {}
 func (*GrammarPassTerm) nodeTag()           {}
 func (*GrammarTokenTerm) nodeTag()          {}
@@ -2188,6 +2239,7 @@ func (*EnumDecl) declTag()         {}
 func (*TreeDecl) declTag()         {}
 func (*GrammarDecl) declTag()      {}
 func (*GrammarEnvDecl) declTag()   {}
+func (*LexerDecl) declTag()        {}
 func (*AttributeDecl) declTag()    {}
 func (*GlobalDecl) declTag()       {}
 func (*StructDecl) declTag()       {}

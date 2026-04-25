@@ -109,6 +109,17 @@ func formatCascadeExprValue(expr ast.Expr) string {
 	return text
 }
 
+func formatLexerCharClassTerm(term ast.LexerCharClassTerm) string {
+	if term.Ref {
+		return term.Name
+	}
+	start := formatCharLiteral(term.Start)
+	if term.Range {
+		return start + ".." + formatCharLiteral(term.End)
+	}
+	return start
+}
+
 func formatLambdaExpr(expr *ast.LambdaExpr) string {
 	if expr == nil {
 		return "lambda"
@@ -419,6 +430,43 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		if n.RecordErrorFunc != "" {
 			f.writeLine(level+1, "record_error "+n.RecordErrorFunc)
+		}
+	case *ast.LexerDecl:
+		f.writeLine(level, "lexer "+n.Name+":")
+		if n.TokenKindType != nil {
+			f.writeLine(level+1, "token_kind "+formatTypeExpr(n.TokenKindType))
+		}
+		for _, class := range n.CharClasses {
+			parts := make([]string, 0, len(class.Terms))
+			for _, term := range class.Terms {
+				parts = append(parts, formatLexerCharClassTerm(term))
+			}
+			f.writeLine(level+1, "charclass "+class.Name+" = "+strings.Join(parts, " | "))
+		}
+		if n.Keywords != nil {
+			line := "keywords"
+			if n.Keywords.Fallback != "" {
+				line += " fallback " + n.Keywords.Fallback
+			}
+			line += ":"
+			f.writeLine(level+1, line)
+			for _, entry := range n.Keywords.Entries {
+				f.writeLine(level+2, strconv.Quote(entry.Text)+" -> "+entry.Kind)
+			}
+		}
+		if n.Literals != nil {
+			line := "literals"
+			if n.Literals.Longest {
+				line += " longest"
+			}
+			if n.Literals.Fallback != "" {
+				line += " fallback " + n.Literals.Fallback
+			}
+			line += ":"
+			f.writeLine(level+1, line)
+			for _, entry := range n.Literals.Entries {
+				f.writeLine(level+2, strconv.Quote(entry.Text)+" -> "+entry.Kind)
+			}
 		}
 	case *ast.StructDecl:
 		f.writeAnnotations(level, n.Annotations)

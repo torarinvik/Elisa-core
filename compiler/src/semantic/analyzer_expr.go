@@ -9567,7 +9567,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		}
 		if !ok {
 			if sym, _, ok = a.lookupVisibleGlobal(n.Name); !ok {
-				a.errorf(n.Pos(), "undefined assignment target %q", n.Name)
+				a.errorf(n.Pos(), "undefined assignment target %q (use = to introduce a new local; <- requires an existing mutable target)", n.Name)
 				return invalidType
 			}
 		}
@@ -9863,7 +9863,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		}
 		if !ok {
 			if sym, _, ok = a.lookupVisibleGlobal(n.Name); !ok {
-				a.errorf(n.Pos(), "undefined assignment target %q", n.Name)
+				a.errorf(n.Pos(), "undefined assignment target %q (use = to introduce a new local; <- requires an existing mutable target)", n.Name)
 				return invalidType
 			}
 		}

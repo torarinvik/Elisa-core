@@ -70,6 +70,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.EnumDecl{})
 		gob.Register(&ast.GrammarDecl{})
 		gob.Register(&ast.GrammarEnvDecl{})
+		gob.Register(&ast.LexerDecl{})
 		gob.Register(&ast.GlobalDecl{})
 		gob.Register(&ast.StructDecl{})
 		gob.Register(&ast.InterfaceDecl{})
