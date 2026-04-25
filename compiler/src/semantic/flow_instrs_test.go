@@ -59,8 +59,8 @@ func TestPopulateBasicFlowInstrsRecordsProduceAndRebaseFacts(t *testing.T) {
 	want := []FlowInstr{
 		{Kind: FlowInstrProduce, Location: "region_node", Source: "scratch", Note: "allocation produces value"},
 		{Kind: FlowInstrProduce, Location: "tree_node", Source: "store", Note: "node construction"},
-		{Kind: FlowInstrProduce, Location: "frozen", Note: "freeze produces frozen store"},
-		{Kind: FlowInstrRebase, Location: "store", Note: "freeze rebases store provenance"},
+		{Kind: FlowInstrProduce, Location: "frozen", Source: "store", Note: "freeze produces frozen store"},
+		{Kind: FlowInstrRebase, Location: "store", Source: "freeze", Note: "freeze rebases store provenance"},
 		{Kind: FlowInstrConsume, Location: "store", Note: "explicit move"},
 	}
 	if !reflect.DeepEqual(cfg.Blocks[0].Instrs, want) {

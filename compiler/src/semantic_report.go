@@ -60,11 +60,20 @@ func generateSemanticReport(result *semantic.Result) string {
 			if snapshot := semantic.FormatFactSnapshot(analysis.FactSnapshot); snapshot != "" {
 				fmt.Fprintf(&out, "  fact_snapshot: %s\n", snapshot)
 			}
+			if exits := semantic.FormatFactExitSummary(analysis.FactExitSummary); exits != "" {
+				fmt.Fprintf(&out, "  fact_exits: %s\n", exits)
+			}
+			if aliases := semantic.FormatFactAliasSets(analysis.AliasSets); aliases != "" {
+				fmt.Fprintf(&out, "  fact_aliases:\n%s", indentReportBlock(aliases, "    "))
+			}
 			if summary := semantic.FormatFactTransforms(analysis.FactTransforms); summary != "" {
 				fmt.Fprintf(&out, "  fact_transforms: %s\n", summary)
 			}
 			if groups := semantic.FormatFactTransformGroups(analysis.FactTransforms); groups != "" {
 				fmt.Fprintf(&out, "  fact_groups:\n%s", indentReportBlock(groups, "    "))
+			}
+			if explanations := semantic.FormatFactExplanations(analysis.FactTransforms); explanations != "" {
+				fmt.Fprintf(&out, "  fact_explanations:\n%s", indentReportBlock(explanations, "    "))
 			}
 			if blockSummary := summarizeBlockFactTransforms(analysis.BlockFactTransforms); blockSummary != "" {
 				fmt.Fprintf(&out, "  fact_blocks:\n%s", indentReportBlock(blockSummary, "    "))
@@ -90,6 +99,48 @@ func generateSemanticReport(result *semantic.Result) string {
 				continue
 			}
 			fmt.Fprintf(&out, "  global %s: %s\n", exported.PublicName, exported.Type.String())
+		}
+	}
+	return out.String()
+}
+
+func generateFactTraceReport(result *semantic.Result, filter string) string {
+	if result == nil || result.GlobalScope == nil {
+		return ""
+	}
+	var out bytes.Buffer
+	out.WriteString("=== facts ===\n")
+	funcNames := make([]string, 0)
+	for name, sym := range result.GlobalScope.Symbols {
+		if sym == nil || (sym.Kind != semantic.SymbolFunc && sym.Kind != semantic.SymbolExternFunc) {
+			continue
+		}
+		if filter != "" && !strings.Contains(name, filter) {
+			continue
+		}
+		funcNames = append(funcNames, name)
+	}
+	sort.Strings(funcNames)
+	for _, name := range funcNames {
+		analysis, ok := result.FunctionAnalysisByName(name)
+		if !ok || analysis == nil {
+			continue
+		}
+		fmt.Fprintf(&out, "func %s\n", name)
+		if snapshot := semantic.FormatFactSnapshot(analysis.FactSnapshot); snapshot != "" {
+			fmt.Fprintf(&out, "  snapshot: %s\n", snapshot)
+		}
+		if exits := semantic.FormatFactExitSummary(analysis.FactExitSummary); exits != "" {
+			fmt.Fprintf(&out, "  exits: %s\n", exits)
+		}
+		if aliases := semantic.FormatFactAliasSets(analysis.AliasSets); aliases != "" {
+			fmt.Fprintf(&out, "  aliases:\n%s", indentReportBlock(aliases, "    "))
+		}
+		if groups := semantic.FormatFactTransformGroups(analysis.FactTransforms); groups != "" {
+			fmt.Fprintf(&out, "  groups:\n%s", indentReportBlock(groups, "    "))
+		}
+		if explanations := semantic.FormatFactExplanations(analysis.FactTransforms); explanations != "" {
+			fmt.Fprintf(&out, "  explanations:\n%s", indentReportBlock(explanations, "    "))
 		}
 	}
 	return out.String()

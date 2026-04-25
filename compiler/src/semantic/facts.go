@@ -1,6 +1,11 @@
 package semantic
 
-import "strings"
+import (
+	"sort"
+	"strings"
+
+	"llcontext/src/lexer"
+)
 
 // FactClass names the orthogonal kinds of static knowledge the analyzer tracks
 // about values. The current compiler still stores these facts in specialized
@@ -62,6 +67,32 @@ type FactTransformDetail struct {
 	Value string
 }
 
+type StoreDependencyFacts struct {
+	HasPackedStoreDeps          bool
+	HasFrozenPackedStoreDeps    bool
+	HasNonFrozenPackedStoreDeps bool
+	HasNonStoreProvenance       bool
+}
+
+type PackedStoreProvenance = StoreDependencyFacts
+
+type FactPath struct {
+	Target string
+	Root   string
+	Path   string
+}
+
+type FactExitSummary struct {
+	Normal []string
+	Error  []string
+}
+
+type FactAliasSet struct {
+	ID      string
+	Members []string
+	Mutated bool
+}
+
 // FactTransform is a lightweight descriptive record used by diagnostics,
 // reports, and future analyzer cleanup work. It intentionally does not own the
 // fact payload yet; existing precise structures remain the source of truth until
@@ -71,6 +102,7 @@ type FactTransform struct {
 	Classes    []FactClass
 	Target     string
 	Source     string
+	SourcePos  lexer.Pos
 	SourceKind FactTransformSourceKind
 	Details    []FactTransformDetail
 	Reason     string
@@ -89,6 +121,9 @@ type FactSnapshot struct {
 	Widened            []string
 	ErrorExits         []string
 	StoreDeps          []string
+	PathFacts          []FactPath
+	AliasClasses       []string
+	HandleStoreDeps    []string
 }
 
 type RefinementFacts = GuardFactSet
@@ -136,6 +171,10 @@ func FormatFactTransform(transform FactTransform) string {
 		out.WriteString(" <- ")
 		out.WriteString(transform.Source)
 	}
+	if !transform.SourcePos.IsZero() {
+		out.WriteString(" @ ")
+		out.WriteString(transform.SourcePos.String())
+	}
 	if len(transform.Details) != 0 {
 		details := make([]string, 0, len(transform.Details))
 		for _, detail := range transform.Details {
@@ -156,6 +195,85 @@ func FormatFactTransform(transform FactTransform) string {
 		out.WriteByte(')')
 	}
 	return out.String()
+}
+
+func FormatFactExplanations(transforms []FactTransform) string {
+	if len(transforms) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(transforms))
+	for _, transform := range transforms {
+		if text := ExplainFactTransform(transform); text != "" {
+			lines = append(lines, text)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func ExplainFactTransform(transform FactTransform) string {
+	switch transform.Kind {
+	case FactTransformWiden:
+		before := factTransformDetailValue(transform.Details, "before")
+		after := factTransformDetailValue(transform.Details, "after")
+		parts := []string{"widen " + transform.Target}
+		if before != "" || after != "" {
+			parts = append(parts, "from "+emptyFactDetailFallback(before, "<unknown>")+" to "+emptyFactDetailFallback(after, "<widened>"))
+		}
+		if transform.Source != "" {
+			parts = append(parts, "after "+transform.Source)
+		}
+		if transform.Reason != "" {
+			parts = append(parts, "because "+transform.Reason)
+		}
+		return strings.Join(parts, " ")
+	case FactTransformInvalidate:
+		if hasFactClass(transform.Classes, FactRegionDeps) {
+			return "invalidate region facts for " + transform.Target + factExplanationSourceSuffix(transform) + factExplanationReasonSuffix(transform)
+		}
+	case FactTransformRebase:
+		if hasFactClass(transform.Classes, FactStoreDeps) {
+			return "rebase store dependency facts for " + transform.Target + factExplanationSourceSuffix(transform) + factExplanationReasonSuffix(transform)
+		}
+	case FactTransformConsume:
+		if hasFactClass(transform.Classes, FactUsage) {
+			return "consume usage facts for " + transform.Target + factExplanationReasonSuffix(transform)
+		}
+	case FactTransformRequire:
+		if hasFactClass(transform.Classes, FactEffects) {
+			return "require effect authority fact " + transform.Target
+		}
+	}
+	return ""
+}
+
+func factExplanationSourceSuffix(transform FactTransform) string {
+	if transform.Source == "" {
+		return ""
+	}
+	return " from " + transform.Source
+}
+
+func factExplanationReasonSuffix(transform FactTransform) string {
+	if transform.Reason == "" {
+		return ""
+	}
+	return " because " + transform.Reason
+}
+
+func emptyFactDetailFallback(value string, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func factTransformDetailValue(details []FactTransformDetail, name string) string {
+	for _, detail := range details {
+		if detail.Name == name {
+			return detail.Value
+		}
+	}
+	return ""
 }
 
 func FormatFactTransformGroups(transforms []FactTransform) string {
@@ -214,12 +332,23 @@ func GroupFactTransforms(transforms []FactTransform) map[FactTransformKind][]Fac
 }
 
 func FormatFactSnapshot(snapshot FactSnapshot) string {
-	parts := make([]string, 0, 11)
+	parts := make([]string, 0, 14)
 	appendPart := func(label string, values []string) {
 		values = canonicalStringList(values)
 		if len(values) != 0 {
 			parts = append(parts, label+"=["+strings.Join(values, ", ")+"]")
 		}
+	}
+	appendPathPart := func(label string, values []FactPath) {
+		values = canonicalFactPaths(values)
+		if len(values) == 0 {
+			return
+		}
+		partsText := make([]string, 0, len(values))
+		for _, value := range values {
+			partsText = append(partsText, FormatFactPath(value))
+		}
+		parts = append(parts, label+"=["+strings.Join(partsText, "; ")+"]")
 	}
 	appendPart("params", snapshot.Parameters)
 	appendPart("returns", snapshot.Returns)
@@ -233,7 +362,82 @@ func FormatFactSnapshot(snapshot FactSnapshot) string {
 	appendPart("widened", snapshot.Widened)
 	appendPart("error_exits", snapshot.ErrorExits)
 	appendPart("store_deps", snapshot.StoreDeps)
+	appendPathPart("path_facts", snapshot.PathFacts)
+	appendPart("alias_classes", snapshot.AliasClasses)
+	appendPart("handle_store_deps", snapshot.HandleStoreDeps)
 	return strings.Join(parts, " ")
+}
+
+func FormatFactPath(path FactPath) string {
+	if path.Target == "" {
+		return ""
+	}
+	parts := []string{"root=" + path.Root}
+	if path.Path != "" {
+		parts = append(parts, "path="+path.Path)
+	}
+	return path.Target + "{" + strings.Join(parts, ",") + "}"
+}
+
+func FormatFactExitSummary(summary FactExitSummary) string {
+	normal := canonicalStringList(summary.Normal)
+	errorExits := canonicalStringList(summary.Error)
+	parts := make([]string, 0, 2)
+	if len(normal) != 0 {
+		parts = append(parts, "normal=["+strings.Join(normal, "; ")+"]")
+	}
+	if len(errorExits) != 0 {
+		parts = append(parts, "error=["+strings.Join(errorExits, "; ")+"]")
+	}
+	return strings.Join(parts, " ")
+}
+
+func FormatFactAliasSets(sets []FactAliasSet) string {
+	if len(sets) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(sets))
+	for _, set := range sets {
+		members := canonicalStringList(set.Members)
+		if set.ID == "" || len(members) == 0 {
+			continue
+		}
+		mutated := "stable"
+		if set.Mutated {
+			mutated = "mutated"
+		}
+		lines = append(lines, set.ID+": {"+strings.Join(members, ", ")+"} "+mutated)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func canonicalFactPaths(values []FactPath) []FactPath {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]FactPath, 0, len(values))
+	for _, value := range values {
+		if value.Target == "" || value.Root == "" {
+			continue
+		}
+		key := value.Target + "\x00" + value.Root + "\x00" + value.Path
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Target != out[j].Target {
+			return out[i].Target < out[j].Target
+		}
+		if out[i].Root != out[j].Root {
+			return out[i].Root < out[j].Root
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
 }
 
 func canonicalStringList(values []string) []string {
@@ -268,12 +472,28 @@ func threadUnpublishedStoreDependencyMessage(callName string, storeName string) 
 	return "argument to " + quoteFactTarget(callName) + " cannot cross thread boundary: store dependency facts require " + FactTransformRebase.String() + " to frozen/public store, got " + quoteFactTarget(storeName)
 }
 
+func consumedFactUseMessage(label string, name string, consumedBy string) string {
+	return label + " " + quoteFactTarget(name) + " cannot be used: usage facts were " + FactTransformConsume.String() + "d by " + consumedBy
+}
+
+func nullableRefRequirementMessage(operation string, actual string) string {
+	return operation + " requires an optional or nullable reference (refstate fact nullable), got " + actual
+}
+
+func effectAuthorityGrantMessage(label string, missing []string, hint string) string {
+	return label + " requires" + permissionFamiliesString(missing) + " and has no explicit local effect grant; add " + hint + " or a surrounding can ...: block; missing required effect facts"
+}
+
 func ensureTargetUnresolvedMessage(targetName string, funcName string) string {
 	return "cannot prove ensures " + targetName + " on function " + quoteFactTarget(funcName) + ": " + FactTransformEnsure.String() + " fact target cannot be resolved from current tracked facts"
 }
 
-func ensurePreserveWidenedMessage(targetName string, funcName string) string {
-	return "cannot prove ensures " + targetName + " => preserve on function " + quoteFactTarget(funcName) + ": target facts may have been " + FactTransformWiden.String() + "ed conservatively by a call"
+func ensurePreserveWidenedMessage(targetName string, funcName string, source string) string {
+	message := "cannot prove ensures " + targetName + " => preserve on function " + quoteFactTarget(funcName) + ": target facts may have been " + FactTransformWiden.String() + "ed conservatively by a call"
+	if source != "" {
+		message += " at " + quoteFactTarget(source)
+	}
+	return message
 }
 
 func ensureIncomingTargetUnresolvedMessage(targetName string, funcName string) string {

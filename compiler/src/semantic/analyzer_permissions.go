@@ -731,7 +731,7 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 	if len(missing) == 0 {
 		return
 	}
-	a.warnf(pos, "%s requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", label, permissionFamiliesString(missing), permissionGrantHint(refs, missing))
+	a.warnf(pos, effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing)))
 }
 
 func (a *Analyzer) validatePermissionStmts(stmts []ast.Stmt, granted map[string]bool) {
@@ -1006,5 +1006,5 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	if len(missing) == 0 {
 		return
 	}
-	a.warnf(pos, "call to %q requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", fnType.Name, permissionFamiliesString(missing), permissionGrantHint(functionPermissionRefs(fnType), missing))
+	a.warnf(pos, effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), missing, permissionGrantHint(functionPermissionRefs(fnType), missing)))
 }

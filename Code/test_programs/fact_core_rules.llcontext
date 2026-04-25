@@ -1,0 +1,38 @@
+struct FactPlayer[state Alive | Dead]:
+    health: mutable int
+
+    derive state:
+        Alive when self.health > 0
+        Dead when self.health <= 0
+
+struct FactNode:
+    next: FactNode&?
+    value: mutable int
+
+packed enum FactExpr:
+    Int(value: int)
+
+error FactCoreError:
+    BadValue
+
+extern unknown_fact_update(mutable player: FactPlayer[Alive]&) -> void
+
+def fact_core_error_path(value: int) -> int error[FactCoreError]:
+    if value < 0:
+        raise FactCoreError.BadValue
+    return value
+
+def fact_core_rules(mutable player: FactPlayer[Alive]&, owner: Arena) -> int:
+    region scratch(1024)
+    mark scratch as saved
+    first: scratch FactNode& = new[scratch] FactNode(null, player.health)
+    alias: mutable FactNode& = first
+    alias.value <- alias.value + 1
+    store: FactExpr.Store[Local] = FactExpr.Store(owner)
+    frozen: FactExpr.Store[Frozen] = freeze(move store)
+    unknown_fact_update(player)
+    value: int = try fact_core_error_path(player.health) else 0
+    restore scratch from saved
+    reset scratch
+    _ = frozen
+    return value

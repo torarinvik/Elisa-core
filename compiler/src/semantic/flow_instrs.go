@@ -1,6 +1,9 @@
 package semantic
 
-import "llcontext/src/ast"
+import (
+	"llcontext/src/ast"
+	"llcontext/src/lexer"
+)
 
 func populateBasicFlowInstrs(cfg *CFG) {
 	if cfg == nil {
@@ -21,7 +24,7 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 	switch n := node.(type) {
 	case *ast.VarDeclStmt:
 		if loc := flowLocationForExpr(n.Value); loc != "" {
-			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrAlias, Location: n.Name, Source: loc, Note: "var init alias"})
+			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrAlias, Location: n.Name, Source: loc, Position: n.Pos(), Note: "var init alias"})
 		}
 		appendProduceFlowInstrForExpr(block, n.Name, n.Value)
 		appendBasicFlowExprInstrs(block, n.Value)
@@ -30,31 +33,31 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 	case *ast.LetDestructureStmt:
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.AssignStmt:
-		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), "assign")
+		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), n.Pos(), "assign")
 		appendProduceFlowInstrForExpr(block, flowLocationForExpr(n.Target), n.Value)
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.AsRefAssignStmt:
-		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), "assign-as-ref")
+		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), n.Pos(), "assign-as-ref")
 		appendProduceFlowInstrForExpr(block, flowLocationForExpr(n.Target), n.Value)
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.AugAssignStmt:
-		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), "aug-assign")
+		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), n.Pos(), "aug-assign")
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.ReturnStmt:
 		appendProduceFlowInstrForExpr(block, "<return>", n.Value)
 		appendBasicFlowExprInstrs(block, n.Value)
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrReturn, Note: "return"})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrReturn, Position: n.Pos(), Note: "return"})
 	case *ast.ExprStmt:
 		appendBasicFlowExprInstrs(block, n.Expr)
 	case *ast.RegionStmt:
 		appendBasicFlowExprInstrs(block, n.Capacity)
 	case *ast.MarkStmt:
 	case *ast.RestoreStmt:
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.RegionName, Source: n.MarkName, Note: "restore region checkpoint"})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.RegionName, Source: n.MarkName, Position: n.Pos(), Note: "restore region checkpoint"})
 	case *ast.ResetStmt:
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.Name, Note: "reset region"})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.Name, Position: n.Pos(), Note: "reset region"})
 	case *ast.DestroyStmt:
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.Name, Note: "destroy region"})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.Name, Position: n.Pos(), Note: "destroy region"})
 	case *ast.PoolStmt:
 		appendBasicFlowExprInstrs(block, n.Workers)
 	case *ast.LockStmt:
@@ -112,7 +115,7 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 		appendBasicFlowExprInstrs(block, n.Expr)
 	case *ast.MoveExpr:
 		if loc := flowLocationForExpr(n.Operand); loc != "" {
-			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrConsume, Location: loc, Note: "explicit move"})
+			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrConsume, Location: loc, Position: n.Pos(), Note: "explicit move"})
 		}
 		appendBasicFlowExprInstrs(block, n.Operand)
 	case *ast.AllocExpr:
@@ -134,7 +137,7 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 		}
 	case *ast.RaiseExpr:
 		appendBasicFlowExprInstrs(block, n.Error)
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Error), Note: "raise error path"})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Error), Position: n.Pos(), Note: "raise error path"})
 	case *ast.FieldExpr:
 		appendBasicFlowExprInstrs(block, n.Object)
 	case *ast.IndexExpr:
@@ -169,11 +172,11 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 		if n.Fallback == nil {
 			note = "try propagates error path"
 		}
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Value), Note: note})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Value), Position: n.Pos(), Note: note})
 	case *ast.UnwrapElseExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Fallback)
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Value), Note: "else fallback handles nullable path"})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Value), Position: n.Pos(), Note: "else fallback handles nullable path"})
 	case *ast.OptionalBindExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.TernaryExpr:
@@ -223,10 +226,14 @@ func appendProduceFlowInstrForExpr(block *CFGBlock, target string, expr ast.Expr
 	case *ast.CanExpr:
 		appendProduceFlowInstrForExpr(block, target, n.Expr)
 	case *ast.AllocExpr:
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrProduce, Location: target, Source: flowLocationForExpr(n.Owner), Note: allocProduceFlowNote(n)})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrProduce, Location: target, Source: flowLocationForExpr(n.Owner), Position: n.Pos(), Note: allocProduceFlowNote(n)})
 	case *ast.CallExpr:
 		if callIdentName(n) == "freeze" {
-			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrProduce, Location: target, Note: "freeze produces frozen store"})
+			source := "freeze"
+			if len(n.Args) == 1 {
+				source = flowLocationForExpr(n.Args[0])
+			}
+			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrProduce, Location: target, Source: source, Position: n.Pos(), Note: "freeze produces frozen store"})
 		}
 	}
 }
@@ -236,7 +243,7 @@ func appendRebaseFlowInstrForCall(block *CFGBlock, call *ast.CallExpr) {
 		return
 	}
 	if target := flowLocationForExpr(call.Args[0]); target != "" {
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrRebase, Location: target, Note: "freeze rebases store provenance"})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrRebase, Location: target, Source: "freeze", Position: call.Pos(), Note: "freeze rebases store provenance"})
 	}
 }
 
@@ -247,12 +254,12 @@ func allocProduceFlowNote(expr *ast.AllocExpr) string {
 	return "allocation produces value"
 }
 
-func appendMutationFlowInstr(block *CFGBlock, location string, note string) {
+func appendMutationFlowInstr(block *CFGBlock, location string, pos lexer.Pos, note string) {
 	if block == nil || location == "" {
 		return
 	}
 	for _, candidate := range mutationLocationPrefixes(location) {
-		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrMutate, Location: candidate, Note: note})
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrMutate, Location: candidate, Position: pos, Note: note})
 	}
 }
 
@@ -261,7 +268,7 @@ func appendFlowInstrUnique(block *CFGBlock, instr FlowInstr) {
 		return
 	}
 	for _, existing := range block.Instrs {
-		if existing.Kind == instr.Kind && existing.Location == instr.Location && existing.Source == instr.Source && existing.Note == instr.Note {
+		if existing.Kind == instr.Kind && existing.Location == instr.Location && existing.Source == instr.Source && existing.Position == instr.Position && existing.Note == instr.Note {
 			return
 		}
 	}

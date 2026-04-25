@@ -145,6 +145,7 @@ type Analyzer struct {
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening
+	currentRegionFactTransforms       []FactTransform
 	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
 	suppressDiagnostics               bool
 	suppressOptimizationFacts         bool
@@ -258,9 +259,12 @@ type regionRefState struct {
 }
 
 type conservativeCallWidening struct {
-	Path   []borrowReturnAnnotationStep
-	Source string
-	Reason string
+	Path      []borrowReturnAnnotationStep
+	Source    string
+	SourcePos lexer.Pos
+	Reason    string
+	Before    string
+	After     string
 }
 
 type borrowedOwnerRefState struct {
@@ -3743,7 +3747,7 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 	case FuncPoststateKindPreserve:
 		for _, widening := range a.currentConservativeCallWidenings[sym] {
 			if poststatePathsOverlap(widening.Path, poststate.Path) {
-				a.errorf(poststate.Position, ensurePreserveWidenedMessage(targetName, a.currentFuncDecl.Name))
+				a.errorf(poststate.Position, ensurePreserveWidenedMessage(targetName, a.currentFuncDecl.Name, widening.Source))
 				return
 			}
 		}
@@ -3821,6 +3825,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
+	savedRegionFactTransforms := a.currentRegionFactTransforms
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
@@ -3840,6 +3845,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFuncDecl = fn
 	a.currentFuncType = fnType
 	a.currentConservativeCallWidenings = map[*Symbol][]conservativeCallWidening{}
+	a.currentRegionFactTransforms = nil
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
@@ -3933,6 +3939,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
+	a.currentRegionFactTransforms = savedRegionFactTransforms
 }
 
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {

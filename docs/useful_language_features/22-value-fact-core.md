@@ -36,13 +36,14 @@ Every value can carry facts from several orthogonal classes:
 These facts do not all need to be written by the programmer. The important rule
 is that they are all part of one model, not separate mini-languages.
 
-## Fact Transformations
+## Rule Catalog
 
-The core transformations are:
+The core transformations are the vocabulary diagnostics, reports, and lowering
+should use when explaining semantic behavior:
 
 | Transform | Meaning | Examples |
 | --- | --- | --- |
-| `produce` | create a value with fresh facts | `new[...]`, `node[...]`, packed constructors, `darray_new` |
+| `produce` | create a value with fresh facts | `new[...]`, `node[...]`, packed constructors, `darray_new`, returns |
 | `refine` | gain stronger knowledge | `if p != null`, `assert`, `match`, variant tests |
 | `widen` | intentionally lose precision | unknown ref calls, mutation through aliases, loop joins |
 | `recompute` | derive exact facts after a write | assignment, field mutation with known derived state |
@@ -52,9 +53,54 @@ The core transformations are:
 | `require` | demand authority or proof before an operation | `can[...]`, non-null deref, sendable/shareable checks |
 | `ensure` | promise/prove post-call facts | `ensures job => Ready`, `ensures node => !` |
 
-This is the proposed internal calculus. Existing analyzer code can stay
-specialized where that is clearer, but every specialized rule should be
-explainable with these verbs.
+Existing analyzer code can stay specialized where that is clearer, but every
+specialized rule should be explainable with these verbs. A transform should also
+carry enough provenance to answer three debugging questions:
+
+- what fact class changed?
+- what source operation changed it?
+- what path, alias class, region generation, or store dependency was affected?
+
+## Implementation Anchors
+
+The current implementation deliberately exposes these facts in one shared place:
+
+- `compiler/src/semantic/facts.go` defines fact classes, transform kinds,
+    transform sources, source positions, details, snapshots, path facts, exit
+    summaries, alias sets, and formatting/explanation helpers.
+- `compiler/src/semantic/flow_ir.go` and `flow_instrs.go` attach source
+    positions to CFG flow instructions so fact traces can point back to the
+    producing operation.
+- `compiler/src/semantic/fact_transform_projection.go` converts CFG, signature,
+    permission, widening, alias, region, freeze, and return information into
+    fact transforms.
+- `compiler/src/semantic/function_analysis.go` stores the deduped per-function
+    stream plus `FactSnapshot`, `FactExitSummary`, `AliasSets`, and block-local
+    transforms.
+- `compiler/src/semantic_report.go` prints these fields in `-emit semantic` and
+    provides a fact-only trace with `-emit facts` or `-emit fact-trace`.
+
+The executable fixture `Code/test_programs/fact_core_rules.llcontext` is the
+compile-checked smoke sample for the catalog.
+
+## Reporting Surface
+
+`-emit semantic` is still the broad report. Fact-specific work can use:
+
+```sh
+go run ./src -emit facts ../Code/test_programs/fact_core_rules.llcontext
+go run ./src -emit fact-trace -filter fact_core_rules ../Code/test_programs/fact_core_rules.llcontext
+```
+
+The report surface is intentionally close to the catalog:
+
+- `fact_snapshot` / `snapshot` summarize final per-function facts.
+- `fact_exits` / `exits` split normal-return facts from error-path facts.
+- `fact_aliases` / `aliases` list alias classes and mutated classes.
+- `fact_groups` / `groups` group transforms by verb and fact class.
+- `fact_blocks` shows the block-local projection.
+- `fact_explanations` / `explanations` renders human-readable provenance such as
+    `widen player from FactPlayer[Alive] to FactPlayer after unknown_update(player)`.
 
 ## Canonical Examples
 
@@ -124,6 +170,8 @@ produce frozen: Expr.Store[Frozen]
 ```
 
 This is not "just a cast". It is a publication boundary.
+Fact traces should show the consume, rebase, and produce steps, including the
+store dependency detail (`store_deps=store`) for the produced frozen handle.
 
 ### Effects and local grants
 
@@ -179,6 +227,8 @@ widen player Typestate <- unknown_update(player)
 The call source matters. If an `ensures ... => preserve` proof later fails, the
 compiler should be able to point at the call that caused the loss of precision,
 not merely say that some unknown widening happened.
+Widen transforms should carry `before` and `after` details and a source
+position.
 
 ### Error path exits
 
@@ -196,6 +246,23 @@ produce <error> ErrorPath <- FileError.NotFound
 Similarly, `try checked()` without a fallback produces a propagated error path;
 `try checked() else fallback` and nullable `value else fallback` produce handled
 alternate paths. These are not success-path `ensures` facts.
+
+### Alias class mutation
+
+```llcontext
+alias: mutable Node& = first
+alias.value <- alias.value + 1
+```
+
+Fact view:
+
+```text
+refine alias AliasClass <- first
+recompute alias-class#0 AliasClass <- mutation
+```
+
+Alias classes are path facts. Reports should expose both the individual alias
+refinement and the equivalence class that must be recomputed after mutation.
 
 ## Surface Design Rule
 
@@ -220,30 +287,53 @@ cannot call parse: missing required effect fact Memory.Allocate
 
 rather than treating each subsystem as unrelated.
 
-## Migration Plan
+## Cleanup Rules
 
-1. Keep existing precise implementations in place.
-2. Use the shared fact vocabulary in docs, diagnostics, and tests.
-3. Gradually map current structures onto the model:
-    - `GuardFactSet` / `RefinementFacts` = refinement facts
-   - `OptimizationFacts` = optimization/provenance facts
-   - `RefType.State` = refstate facts
-   - `Shape` = shape facts
-   - `EnsuresClause` = normal-return ensure transforms
-   - `effects[...]` / `can` = required authority facts
-   - packed store state = store dependency and rebase facts
-4. Add diagnostics that explain `widen`, `invalidate`, and `rebase` explicitly.
-5. Only after the vocabulary is stable, consider merging internal fact stores.
+1. Keep existing precise implementations where they encode real semantics.
+2. When adding a language feature, decide which fact classes it touches before
+     adding surface syntax.
+3. When adding a diagnostic, prefer the shared vocabulary: consumed usage facts,
+     nullable refstate requirements, missing effect authority facts, invalidated
+     region dependency facts, widened typestate facts.
+4. When adding a report field, make it path-aware when the fact belongs to a
+     value path rather than the whole value.
+5. When a mutable reference may alias another location, update the alias class,
+     not only the local path.
+6. When region state changes, record generation-before and generation-after
+     details for invalidation transforms.
+7. When a packed/tree store is frozen, model it as consume + rebase + produce.
+8. When a normal-return postcondition is checked, separate success facts from
+     error-path facts.
+9. Keep fact formatting deterministic so golden tests and LLM review are stable.
+10. Add compile-checked fixtures for new fact rules instead of documentation-only
+     examples.
 
 Current implementation foothold:
 
-- `compiler/src/semantic/facts.go` defines the shared fact class, transform names, typed transform sources, metadata details, formatter, grouped formatter, and per-function snapshot formatter
 - region invalidation diagnostics now describe invalidated region dependency facts
 - local-region escape and thread-transfer diagnostics use the same provenance vocabulary
-- `ensures` proof failures now describe missing `ensure` proofs against current tracked facts, and conservative call precision loss uses the `widen` vocabulary
-- function analysis records allocation/tree/store `produce`, control-flow guard and alias-class `refine`, conservative call-site `widen`, flow-instruction `recompute`/`consume`, region lifecycle `invalidate`, store-publication `rebase`, effect authority `require`, declaration postcondition `ensure`, return exits, and error-path transforms
-- CFG blocks now carry their own projected fact transforms, while the function analysis keeps the deduped per-function stream
-- semantic reports now include `fact_snapshot`, flat `fact_transforms`, grouped `fact_groups`, and per-block `fact_blocks`
-- conservative call widening stores the call-site source, such as `unknown_update(player)`, alongside the widened target
-- region invalidation transforms carry detail tags such as `operation=restore region checkpoint` and `checkpoint=cp`
-- return provenance snapshots surface explicit packed/tree store dependency labels such as `Expr.Store[Frozen]`
+- consumed affine diagnostics use the shared usage-fact wording
+- nullable recovery and optional-chain diagnostics mention refstate fact
+    requirements
+- effect permission warnings end with `missing required effect facts`
+- `ensures` proof failures describe missing `ensure` proofs against current
+    tracked facts, and conservative call precision loss uses the `widen`
+    vocabulary with source call text
+- function analysis records allocation/tree/store `produce`, control-flow guard
+    and alias-class `refine`, conservative call-site `widen`, flow-instruction
+    `recompute`/`consume`, region lifecycle `invalidate`, store-publication
+    `rebase`, effect authority `require`, declaration postcondition `ensure`,
+    return exits, and error-path transforms
+- CFG blocks carry their own projected fact transforms, while function analysis
+    keeps the deduped per-function stream
+- semantic reports include `fact_snapshot`, `fact_exits`, `fact_aliases`, flat
+    `fact_transforms`, grouped `fact_groups`, explanatory `fact_explanations`, and
+    per-block `fact_blocks`
+- fact-only traces are available with `-emit facts` / `-emit fact-trace`
+- conservative call widening stores source position, call-site source, and
+    before/after type details
+- region invalidation transforms carry detail tags such as
+    `operation=restore region checkpoint`, `checkpoint=cp`,
+    `generation_before=...`, and `generation_after=...`
+- return provenance snapshots surface explicit packed/tree store dependency
+    labels such as `Expr.Store[Frozen]`

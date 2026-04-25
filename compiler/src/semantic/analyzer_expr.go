@@ -40,13 +40,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					}
 				}
 				if state, ok := a.lookupAffineValueState(n); ok && a.containsAffineHandleValues(result, map[string]bool{}) {
-					a.errorf(n.Pos(), "%s %q cannot be used after %s", affineHandleKind(sym.Type), n.Name, state.ConsumedBy)
+					a.errorf(n.Pos(), consumedFactUseMessage(affineHandleKind(sym.Type), n.Name, state.ConsumedBy))
 					return
 				}
 				if ownerType, ok := borrowableOwnerRefElemType(result); ok {
 					if key, ok := a.lookupBorrowedOwnerRefKey(n); ok {
 						if state, ok := a.lookupAffineValueStateForKey(key); ok && state.ConsumedBy != "" {
-							a.errorf(n.Pos(), "%s %q cannot be used after %s", affineHandleKind(ownerType), n.Name, state.ConsumedBy)
+							a.errorf(n.Pos(), consumedFactUseMessage(affineHandleKind(ownerType), n.Name, state.ConsumedBy))
 							return
 						}
 					}
@@ -323,7 +323,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		valueType := a.analyzeExpr(n.Value)
 		refType, ok := valueType.(*RefType)
 		if !ok || refType.State == RefStateNonNull {
-			a.errorf(n.Pos(), "else recovery requires a nullable reference, got %s", valueType)
+			a.errorf(n.Pos(), nullableRefRequirementMessage("else recovery", valueType.String()))
 			result = invalidType
 			return
 		}
@@ -347,7 +347,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 		}
 		if _, ok := conditionOptionalBindType(valueType); !ok {
-			a.errorf(n.Pos(), "let condition requires an optional or nullable reference, got %s", valueType)
+			a.errorf(n.Pos(), nullableRefRequirementMessage("let condition", valueType.String()))
 			result = invalidType
 			return
 		}
@@ -5381,7 +5381,7 @@ func (a *Analyzer) analyzeSafeFieldExpr(expr *ast.FieldExpr) Type {
 	receiverType := a.analyzeExpr(expr.Object)
 	baseReceiverType, ok := a.safeChainReceiverType(receiverType)
 	if !ok {
-		a.errorf(expr.Pos(), "optional chaining requires an optional or nullable reference receiver, got %s", receiverType)
+		a.errorf(expr.Pos(), nullableRefRequirementMessage("optional chaining receiver", receiverType.String()))
 		return invalidType
 	}
 	if field, ok := dstrSyntheticField(baseReceiverType, expr.Field); ok {
@@ -5411,7 +5411,7 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 	receiverType := a.analyzeExpr(fieldExpr.Object)
 	baseReceiverType, ok := a.safeChainReceiverType(receiverType)
 	if !ok {
-		a.errorf(expr.Pos(), "optional chaining requires an optional or nullable reference receiver, got %s", receiverType)
+		a.errorf(expr.Pos(), nullableRefRequirementMessage("optional chaining receiver", receiverType.String()))
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -8056,7 +8056,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 			field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 			a.reportInvalidRegionUse(expr, field.Type)
 			if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
-				a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
+				a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy))
 			}
 			a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 			return field.Type
@@ -8066,7 +8066,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
-			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
+			a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy))
 		}
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 		return field.Type
@@ -8076,7 +8076,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		attrType := a.specializeProjectedFunctionFieldType(expr, attr.ReturnType)
 		a.reportInvalidRegionUse(expr, attrType)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(attrType, map[string]bool{}) {
-			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(attrType), affineValueDisplayName(expr), state.ConsumedBy)
+			a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(attrType), affineValueDisplayName(expr), state.ConsumedBy))
 		}
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, attrType)
 		return attrType
@@ -8086,7 +8086,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
-			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
+			a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy))
 		}
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 		return field.Type
@@ -8896,7 +8896,7 @@ func (a *Analyzer) reportBorrowedOwnerRefUseAfterConsume(expr ast.Expr, valueTyp
 	if !ok || state.ConsumedBy == "" {
 		return
 	}
-	a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(ownerType), affineValueDisplayName(expr), state.ConsumedBy)
+	a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(ownerType), affineValueDisplayName(expr), state.ConsumedBy))
 }
 
 func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {

@@ -1,6 +1,9 @@
 package semantic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFactDiagnosticMessageVocabulary(t *testing.T) {
 	cases := []struct {
@@ -25,8 +28,8 @@ func TestFactDiagnosticMessageVocabulary(t *testing.T) {
 		},
 		{
 			name: "ensure widen",
-			got:  ensurePreserveWidenedMessage("job", "finish"),
-			want: `cannot prove ensures job => preserve on function "finish": target facts may have been widened conservatively by a call`,
+			got:  ensurePreserveWidenedMessage("job", "finish", "unknown_update(job)"),
+			want: `cannot prove ensures job => preserve on function "finish": target facts may have been widened conservatively by a call at "unknown_update(job)"`,
 		},
 		{
 			name: "ensure named mismatch",
@@ -38,6 +41,30 @@ func TestFactDiagnosticMessageVocabulary(t *testing.T) {
 		if tc.got != tc.want {
 			t.Fatalf("%s: expected %q, got %q", tc.name, tc.want, tc.got)
 		}
+	}
+}
+
+func TestFormatFactSnapshotIncludesPathAndHandleFacts(t *testing.T) {
+	snapshot := FactSnapshot{
+		Parameters:      []string{"player"},
+		Widened:         []string{"player.health"},
+		PathFacts:       []FactPath{{Target: "player.health", Root: "player", Path: "health"}},
+		AliasClasses:    []string{"alias-class#0"},
+		HandleStoreDeps: []string{"node<-store"},
+	}
+	got := FormatFactSnapshot(snapshot)
+	for _, want := range []string{"params=[player]", "widened=[player.health]", "path_facts=[player.health{root=player,path=health}]", "alias_classes=[alias-class#0]", "handle_store_deps=[node<-store]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected snapshot %q to contain %q", got, want)
+		}
+	}
+}
+
+func TestFormatFactExplanationsDescribesWidening(t *testing.T) {
+	got := ExplainFactTransform(FactTransform{Kind: FactTransformWiden, Classes: []FactClass{FactTypestate}, Target: "player", Source: "unknown_update(player)", Details: []FactTransformDetail{{Name: "before", Value: "Player[Alive]"}, {Name: "after", Value: "Player[*]"}}, Reason: "ref call without matching ensures"})
+	want := "widen player from Player[Alive] to Player[*] after unknown_update(player) because ref call without matching ensures"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 

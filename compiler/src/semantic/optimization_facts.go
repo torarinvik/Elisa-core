@@ -44,13 +44,6 @@ type optimizationAffineExpr struct {
 	Terms map[string]int64
 }
 
-type PackedStoreProvenance struct {
-	HasPackedStoreDeps          bool
-	HasFrozenPackedStoreDeps    bool
-	HasNonFrozenPackedStoreDeps bool
-	HasNonStoreProvenance       bool
-}
-
 func (p PackedStoreProvenance) HasAnyFacts() bool {
 	return p.HasPackedStoreDeps || p.HasFrozenPackedStoreDeps || p.HasNonFrozenPackedStoreDeps || p.HasNonStoreProvenance
 }

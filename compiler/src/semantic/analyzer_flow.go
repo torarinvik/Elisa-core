@@ -192,10 +192,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "region %q has already been destroyed", n.Name)
 			return
 		}
+		before := state.Generation
 		state.Destroyed = true
 		a.currentRegions[sym] = state
 		a.invalidateRegionRefs(sym, func(regionDependencyState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
+		a.recordRegionInvalidateTransform(n.Pos(), n.Name, "", "destroy region", before, -1)
 	case *ast.AssignStmt:
 		var targetType Type
 		if n.Optional {
@@ -3372,6 +3374,7 @@ func (a *Analyzer) restoreFromRegionCheckpoint(pos lexer.Pos, regionSym *Symbol,
 		a.errorf(pos, "checkpoint %q is invalid after %s", markSym.Name, markState.InvalidatedBy)
 		return
 	}
+	before := state.Generation
 	reason := fmt.Sprintf("restore of region %q from checkpoint %q", regionSym.Name, markSym.Name)
 	a.invalidateRegionRefs(regionSym, func(dep regionDependencyState) bool {
 		return dep.Generation >= markState.Generation
@@ -3381,6 +3384,7 @@ func (a *Analyzer) restoreFromRegionCheckpoint(pos lexer.Pos, regionSym *Symbol,
 	}, reason)
 	state.Generation = markState.Generation
 	a.currentRegions[regionSym] = state
+	a.recordRegionInvalidateTransform(pos, regionSym.Name, markSym.Name, "restore region checkpoint", before, markState.Generation)
 	if saved, ok := a.currentRegionMarks[markSym]; ok {
 		saved.Valid = true
 		saved.InvalidatedBy = ""
@@ -3542,10 +3546,38 @@ func (a *Analyzer) analyzeResetStmt(stmt *ast.ResetStmt) {
 		return
 	}
 	reason := fmt.Sprintf("reset of region %q", stmt.Name)
+	before := state.Generation
 	a.invalidateRegionRefs(regionSym, func(regionDependencyState) bool { return true }, reason)
 	a.invalidateRegionMarks(regionSym, func(regionMarkState) bool { return true }, reason)
 	state.Generation = 0
 	a.currentRegions[regionSym] = state
+	a.recordRegionInvalidateTransform(stmt.Pos(), stmt.Name, "", "reset region", before, 0)
+}
+
+func (a *Analyzer) recordRegionInvalidateTransform(pos lexer.Pos, regionName string, checkpointName string, operation string, before int, after int) {
+	if a == nil || regionName == "" {
+		return
+	}
+	details := []FactTransformDetail{{Name: "operation", Value: operation}}
+	if checkpointName != "" {
+		details = append(details, FactTransformDetail{Name: "checkpoint", Value: checkpointName})
+	}
+	details = append(details, FactTransformDetail{Name: "generation_before", Value: strconv.Itoa(before)})
+	afterText := strconv.Itoa(after)
+	if after < 0 {
+		afterText = "destroyed"
+	}
+	details = append(details, FactTransformDetail{Name: "generation_after", Value: afterText})
+	a.currentRegionFactTransforms = append(a.currentRegionFactTransforms, FactTransform{
+		Kind:       FactTransformInvalidate,
+		Classes:    []FactClass{FactRegionDeps},
+		Target:     regionName,
+		Source:     checkpointName,
+		SourcePos:  pos,
+		SourceKind: FactSourceRegion,
+		Details:    details,
+		Reason:     operation,
+	})
 }
 
 func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
@@ -9843,17 +9875,17 @@ func poststatePathsOverlap(left []borrowReturnAnnotationStep, right []borrowRetu
 	return true
 }
 
-func (a *Analyzer) noteConservativeCallWidening(root *Symbol, steps []borrowReturnAnnotationStep, source string, reason string) {
+func (a *Analyzer) noteConservativeCallWidening(root *Symbol, steps []borrowReturnAnnotationStep, source string, sourcePos lexer.Pos, reason string, before string, after string) {
 	if a == nil || a.currentConservativeCallWidenings == nil || root == nil {
 		return
 	}
 	cloned := cloneBorrowReturnAnnotationSteps(steps)
 	for _, existing := range a.currentConservativeCallWidenings[root] {
-		if borrowReturnAnnotationPathEqual(existing.Path, cloned) && existing.Source == source && existing.Reason == reason {
+		if borrowReturnAnnotationPathEqual(existing.Path, cloned) && existing.Source == source && existing.Reason == reason && existing.Before == before && existing.After == after {
 			return
 		}
 	}
-	a.currentConservativeCallWidenings[root] = append(a.currentConservativeCallWidenings[root], conservativeCallWidening{Path: cloned, Source: source, Reason: reason})
+	a.currentConservativeCallWidenings[root] = append(a.currentConservativeCallWidenings[root], conservativeCallWidening{Path: cloned, Source: source, SourcePos: sourcePos, Reason: reason, Before: before, After: after})
 }
 
 func conservativeCallWideningSource(call *ast.CallExpr, arg ast.Expr, paramIndex int) string {
@@ -11149,12 +11181,12 @@ func (a *Analyzer) recordNamedStateCallArgMutation(call *ast.CallExpr, arg ast.E
 	if !ok || root == nil {
 		return
 	}
-	a.noteConservativeCallWidening(root, steps, conservativeCallWideningSource(call, arg, paramIndex), "ref call without matching ensures")
 	current := a.currentTrackedValueType(root)
 	updatedType, ok := a.widenNamedStatesDeepAtPath(current, steps)
 	if !ok || updatedType == nil {
 		return
 	}
+	a.noteConservativeCallWidening(root, steps, conservativeCallWideningSource(call, arg, paramIndex), call.Pos(), "ref call without matching ensures", current.String(), updatedType.String())
 	a.bindTrackedValueType(root, updatedType)
 }
 

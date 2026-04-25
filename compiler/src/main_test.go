@@ -487,6 +487,15 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "fact_core_rules",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext"),
+			checks: []string{
+				"%FactPlayer__Alive = type { i64 }",
+				"define i64 @fact_core_rules(",
+				"define i32 @fact_core_error_path(",
+			},
+		},
+		{
 			name: "grammar_uses_shared_helpers",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_uses_shared_helpers.llcontext"),
 			checks: []string{
@@ -959,6 +968,16 @@ func TestParseArgsAcceptsSemanticEmitAlias(t *testing.T) {
 	}
 }
 
+func TestParseArgsAcceptsFactTraceEmitAlias(t *testing.T) {
+	options, err := parseArgs([]string{"-emit", "fact-trace", "fixture.llcontext"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if options.emit != emitFacts {
+		t.Fatalf("expected facts emit mode, got %q", options.emit)
+	}
+}
+
 func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "lowered_fixture.llcontext")
@@ -1024,11 +1043,30 @@ func TestRunCLIEmitsSemanticReport(t *testing.T) {
 		"func __grammar_try__PascalFrontend__expression",
 		"return_isolation:",
 		"fact_snapshot:",
+		"fact_exits:",
 		"fact_groups:",
 		"fact_blocks:",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected semantic report to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunCLIEmitsFactTraceReport(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "fact_core_rules", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"=== facts ===", "func fact_core_rules", "snapshot:", "groups:", "explanations:", "widen player"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected fact trace report to contain %q, got:\n%s", want, output)
 		}
 	}
 }
@@ -2410,7 +2448,7 @@ func TestRunCLIRejectsFilterOutsideAnnotationListModes(t *testing.T) {
 	if exitCode == 0 {
 		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "-filter is only supported for -emit tests, benches, fixtures, test-runner, or test") {
+	if !strings.Contains(stderr.String(), "-filter is only supported for -emit facts, tests, benches, fixtures, test-runner, or test") {
 		t.Fatalf("expected filter-mode diagnostic, got:\n%s", stderr.String())
 	}
 }

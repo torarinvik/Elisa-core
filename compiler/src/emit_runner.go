@@ -132,6 +132,17 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprint(stdout, report)
 		}
 		return 0
+	case emitFacts:
+		report := generateFactTraceReport(result, options.filter)
+		if options.output != "" {
+			if err := writeOutputFile(options.output, []byte(report)); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, report)
+		}
+		return 0
 	case emitInterface:
 		interfaceSource := generateModuleInterface(result.File)
 		if options.output != "" {

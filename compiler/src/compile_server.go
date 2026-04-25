@@ -105,6 +105,12 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
 		response.Output = generateSemanticReport(result)
+	case emitFacts:
+		_, result, ok := analyzeLoadedProgram(program, &stderr)
+		if !ok {
+			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		response.Output = generateFactTraceReport(result, "")
 	case emitFmt:
 		file, ok := parseLoadedProgram(program, &stderr)
 		if !ok {

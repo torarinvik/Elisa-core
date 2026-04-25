@@ -26,12 +26,25 @@ func (a *Analyzer) currentConservativeCallWideningTransforms() []FactTransform {
 				Classes:    []FactClass{FactTypestate},
 				Target:     namedStateTargetDisplayName(root, widening.Path),
 				Source:     widening.Source,
+				SourcePos:  widening.SourcePos,
 				SourceKind: FactSourceCallWiden,
+				Details:    conservativeCallWideningDetails(widening),
 				Reason:     reason,
 			})
 		}
 	}
 	return dedupeAndSortFactTransforms(transforms)
+}
+
+func conservativeCallWideningDetails(widening conservativeCallWidening) []FactTransformDetail {
+	details := make([]FactTransformDetail, 0, 2)
+	if widening.Before != "" {
+		details = append(details, FactTransformDetail{Name: "before", Value: widening.Before})
+	}
+	if widening.After != "" {
+		details = append(details, FactTransformDetail{Name: "after", Value: widening.After})
+	}
+	return details
 }
 
 func factTransformsFromCFGGuards(cfg *CFG) []FactTransform {
@@ -94,42 +107,77 @@ func factTransformFromFlowInstr(instr FlowInstr) (FactTransform, bool) {
 		if instr.Location == "" || instr.Source == "" {
 			return FactTransform{}, false
 		}
-		return FactTransform{Kind: FactTransformRefine, Classes: []FactClass{FactAliasClass}, Target: instr.Location, Source: instr.Source, SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "alias fact")}, true
+		return FactTransform{Kind: FactTransformRefine, Classes: []FactClass{FactAliasClass}, Target: instr.Location, Source: instr.Source, SourcePos: instr.Position, SourceKind: FactSourceFlowInstr, Details: []FactTransformDetail{{Name: "alias_member", Value: instr.Source}}, Reason: flowInstrFactReason(instr, "alias fact")}, true
 	case FlowInstrInvalidate:
 		if instr.Location == "" {
 			return FactTransform{}, false
 		}
-		return FactTransform{Kind: FactTransformInvalidate, Classes: []FactClass{FactRegionDeps}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourceKind: FactSourceRegion, Details: flowInstrFactDetails(instr), Reason: flowInstrFactReason(instr, "invalidate region dependencies")}, true
+		return FactTransform{Kind: FactTransformInvalidate, Classes: []FactClass{FactRegionDeps}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourcePos: instr.Position, SourceKind: FactSourceRegion, Details: flowInstrFactDetails(instr), Reason: flowInstrFactReason(instr, "invalidate region dependencies")}, true
 	case FlowInstrProduce:
 		if instr.Location == "" {
 			return FactTransform{}, false
 		}
-		return FactTransform{Kind: FactTransformProduce, Classes: []FactClass{FactRepresentation, FactStorage}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourceKind: flowInstrProduceSourceKind(instr), Reason: flowInstrFactReason(instr, "produce value")}, true
+		return FactTransform{Kind: FactTransformProduce, Classes: flowInstrProduceClasses(instr), Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourcePos: instr.Position, SourceKind: flowInstrProduceSourceKind(instr), Details: flowInstrProduceDetails(instr), Reason: flowInstrFactReason(instr, "produce value")}, true
 	case FlowInstrRebase:
 		if instr.Location == "" {
 			return FactTransform{}, false
 		}
-		return FactTransform{Kind: FactTransformRebase, Classes: []FactClass{FactStoreDeps}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourceKind: FactSourceStore, Reason: flowInstrFactReason(instr, "rebase provenance")}, true
+		return FactTransform{Kind: FactTransformRebase, Classes: []FactClass{FactStoreDeps}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourcePos: instr.Position, SourceKind: FactSourceStore, Details: flowInstrStoreDetails(instr), Reason: flowInstrFactReason(instr, "rebase provenance")}, true
 	case FlowInstrConsume:
 		if instr.Location == "" {
 			return FactTransform{}, false
 		}
-		return FactTransform{Kind: FactTransformConsume, Classes: []FactClass{FactUsage}, Target: instr.Location, Source: "control-flow instruction", SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "consume value")}, true
+		return FactTransform{Kind: FactTransformConsume, Classes: []FactClass{FactUsage}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourcePos: instr.Position, SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "consume value")}, true
 	case FlowInstrMutate:
 		if instr.Location == "" {
 			return FactTransform{}, false
 		}
-		return FactTransform{Kind: FactTransformRecompute, Classes: []FactClass{FactTypestate}, Target: instr.Location, Source: "control-flow instruction", SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "mutation recomputes derived facts")}, true
+		return FactTransform{Kind: FactTransformRecompute, Classes: []FactClass{FactTypestate}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourcePos: instr.Position, SourceKind: FactSourceFlowInstr, Reason: flowInstrFactReason(instr, "mutation recomputes derived facts")}, true
 	case FlowInstrErrorExit:
 		if instr.Location == "" {
 			return FactTransform{}, false
 		}
-		return FactTransform{Kind: FactTransformProduce, Classes: []FactClass{FactErrorPath}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourceKind: FactSourceErrorPath, Reason: flowInstrFactReason(instr, "error path")}, true
+		return FactTransform{Kind: FactTransformProduce, Classes: []FactClass{FactErrorPath}, Target: instr.Location, Source: flowInstrFactSource(instr, "control-flow instruction"), SourcePos: instr.Position, SourceKind: FactSourceErrorPath, Reason: flowInstrFactReason(instr, "error path")}, true
 	case FlowInstrReturn:
-		return FactTransform{Kind: FactTransformProduce, Classes: []FactClass{FactRepresentation}, Target: "<return>", Source: "return statement", SourceKind: FactSourceReturn, Reason: flowInstrFactReason(instr, "return exit")}, true
+		return FactTransform{Kind: FactTransformProduce, Classes: []FactClass{FactRepresentation}, Target: "<return>", Source: "return statement", SourcePos: instr.Position, SourceKind: FactSourceReturn, Reason: flowInstrFactReason(instr, "return exit")}, true
 	default:
 		return FactTransform{}, false
 	}
+}
+
+func flowInstrProduceClasses(instr FlowInstr) []FactClass {
+	classes := []FactClass{FactRepresentation, FactStorage}
+	if strings.Contains(instr.Note, "node construction") || strings.Contains(instr.Note, "freeze") {
+		classes = append(classes, FactStoreDeps)
+	}
+	return classes
+}
+
+func flowInstrProduceDetails(instr FlowInstr) []FactTransformDetail {
+	details := make([]FactTransformDetail, 0, 2)
+	if strings.Contains(instr.Note, "node construction") {
+		details = append(details, FactTransformDetail{Name: "representation", Value: "handle"})
+		if instr.Source != "" {
+			details = append(details, FactTransformDetail{Name: "store_deps", Value: instr.Source})
+		}
+	}
+	if strings.Contains(instr.Note, "freeze") {
+		details = append(details, FactTransformDetail{Name: "operation", Value: "freeze"})
+		if instr.Source != "" {
+			details = append(details, FactTransformDetail{Name: "store_deps", Value: instr.Source})
+		}
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return details
+}
+
+func flowInstrStoreDetails(instr FlowInstr) []FactTransformDetail {
+	if !strings.Contains(instr.Note, "freeze") {
+		return nil
+	}
+	return []FactTransformDetail{{Name: "operation", Value: "freeze"}, {Name: "before", Value: instr.Location}, {Name: "after", Value: "frozen/public store"}}
 }
 
 func flowInstrProduceSourceKind(instr FlowInstr) FactTransformSourceKind {
@@ -357,6 +405,7 @@ func factTransformDedupeKey(transform FactTransform) string {
 		transform.Target,
 		factClassListKey(transform.Classes),
 		transform.Source,
+		transform.SourcePos.String(),
 		transform.SourceKind.String(),
 		factTransformDetailsKey(transform.Details),
 		transform.Reason,

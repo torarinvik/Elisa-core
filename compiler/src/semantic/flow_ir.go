@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"llcontext/src/ast"
+	"llcontext/src/lexer"
 )
 
 type FlowInstrKind string
@@ -23,6 +24,7 @@ type FlowInstr struct {
 	Kind     FlowInstrKind
 	Location string
 	Source   string
+	Position lexer.Pos
 	Note     string
 }
 

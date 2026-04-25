@@ -346,11 +346,17 @@ def use(mutable player: Player[Alive]&) -> void:
 	if transform.Source != "unknown_update(player)" || transform.SourceKind != FactSourceCallWiden {
 		t.Fatalf("expected call-site widening source, got %#v", transform)
 	}
+	if transform.SourcePos.IsZero() || factTransformDetailValue(transform.Details, "before") == "" || factTransformDetailValue(transform.Details, "after") == "" {
+		t.Fatalf("expected widening transform to include source position and before/after details, got %#v", transform)
+	}
 	if len(transform.Classes) != 1 || transform.Classes[0] != FactTypestate {
 		t.Fatalf("expected typestate fact class, got %#v", transform.Classes)
 	}
 	if !hasString(analysis.FactSnapshot.Widened, "player") {
 		t.Fatalf("expected fact snapshot to record widened player, got %#v", analysis.FactSnapshot)
+	}
+	if len(analysis.FactSnapshot.PathFacts) == 0 || analysis.FactSnapshot.PathFacts[0].Root != "player" {
+		t.Fatalf("expected path-aware snapshot entry for player, got %#v", analysis.FactSnapshot.PathFacts)
 	}
 }
 
@@ -426,6 +432,9 @@ def freeze_expr_store(owner: Arena) -> Expr.Store[Frozen]:
 	if !hasString(freezeAnalysis.FactSnapshot.RebasedStores, "store") || !hasString(freezeAnalysis.FactSnapshot.Produced, "frozen") {
 		t.Fatalf("expected fact snapshot to record freeze rebase and production, got %#v", freezeAnalysis.FactSnapshot)
 	}
+	if !hasString(freezeAnalysis.FactSnapshot.HandleStoreDeps, "frozen<-store") {
+		t.Fatalf("expected fact snapshot to record frozen store dependency, got %#v", freezeAnalysis.FactSnapshot)
+	}
 }
 
 func TestBuildFunctionFactSnapshotRecordsStoreDependencyLabels(t *testing.T) {
@@ -440,7 +449,7 @@ func TestBuildFunctionFactSnapshotRecordsStoreDependencyLabels(t *testing.T) {
 		}},
 	}
 
-	snapshot := buildFunctionFactSnapshot(fnType, &CFG{ParamLocations: []string{"owner"}}, nil)
+	snapshot := buildFunctionFactSnapshot(fnType, &CFG{ParamLocations: []string{"owner"}}, nil, nil)
 	if !hasString(snapshot.Parameters, "owner") || !hasString(snapshot.StoreDeps, "Expr.Store[Frozen]") {
 		t.Fatalf("expected snapshot to include parameter and packed store dependency label, got %#v", snapshot)
 	}
@@ -473,6 +482,15 @@ def destroy_demo() -> void:
 			}
 		}
 	}
+	var sawGenerationDetails bool
+	for _, transform := range checkpointAnalysis.FactTransforms {
+		if transform.Kind == FactTransformInvalidate && transform.Target == "scratch" && factTransformDetailValue(transform.Details, "generation_before") != "" && factTransformDetailValue(transform.Details, "generation_after") != "" {
+			sawGenerationDetails = true
+		}
+	}
+	if !sawGenerationDetails {
+		t.Fatalf("expected invalidate transform to include region generation details, got %#v", checkpointAnalysis.FactTransforms)
+	}
 	if !hasFactTransform(checkpointAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "reset region") {
 		t.Fatalf("expected function analysis to expose reset invalidate transform, got %#v", checkpointAnalysis.FactTransforms)
 	}
@@ -493,7 +511,7 @@ func TestAnalyzeFunctionAnalysisRecordsAliasClassTransforms(t *testing.T) {
 def alias_region_ref(seed: i32) -> i32:
 	region scratch(1024)
 	first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
-	alias: RegionNode& = first
+	alias: mutable RegionNode& = first
 	return alias.value
 `)
 	analysis, ok := result.FunctionAnalysisByName("alias_region_ref")
@@ -502,6 +520,30 @@ def alias_region_ref(seed: i32) -> i32:
 	}
 	if !hasFactTransform(analysis.FactTransforms, FactTransformRefine, FactAliasClass, "alias", "var init alias") {
 		t.Fatalf("expected function analysis to expose alias-class refine transform, got %#v", analysis.FactTransforms)
+	}
+	if len(analysis.AliasSets) == 0 || !hasString(analysis.FactSnapshot.AliasClasses, "alias-class#0") {
+		t.Fatalf("expected explicit alias set and snapshot alias class, got sets=%#v snapshot=%#v", analysis.AliasSets, analysis.FactSnapshot)
+	}
+}
+
+func TestAnalyzeFunctionAnalysisRecordsAliasClassMutationTransforms(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "alias_mutation_fact_transforms.llcontext", `struct RegionNode:
+	next: RegionNode&?
+	value: mutable i32
+
+def alias_region_mutation(seed: i32) -> i32:
+	region scratch(1024)
+	first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
+	alias: mutable RegionNode& = first
+	alias.value <- alias.value + 1
+	return first.value
+`)
+	analysis, ok := result.FunctionAnalysisByName("alias_region_mutation")
+	if !ok || analysis == nil {
+		t.Fatal("expected alias_region_mutation function analysis")
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRecompute, FactAliasClass, "alias-class#0", "mutation recomputes facts for alias class") {
+		t.Fatalf("expected alias-class mutation recompute transform, got %#v", analysis.FactTransforms)
 	}
 }
 
