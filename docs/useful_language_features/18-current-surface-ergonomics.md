@@ -102,6 +102,42 @@ Current rules:
 - lowering expands token-set references into the existing explicit token checks, so there is no runtime token-set object
 - prefer token sets for recurring parser sync concepts such as `StatementSync`, `BlockEndSync`, `DeclSync`, and `ExprEndSync`
 
+## Interleaved grammar support declarations
+
+Grammar support declarations can be colocated with the productions that use them. This keeps local aliases, token sets, channels, recovery policies, infix tables, and token literal declarations near the parser surface they support instead of forcing every helper to the top of the grammar block.
+
+```context
+grammar PascalTypeDeclGrammar over Token using ParserState:
+    type_decl_name() -> Token:
+        name = required(.IDENT, ParseMessageKey.ExpectedTypeName)
+        required(.EQ, ParseMessageKey.ExpectedTypeEquals)
+        return name
+
+    token:
+        LPAREN "("
+        RPAREN ")"
+        COMMA ","
+
+    tokenset EnumEndSync:
+        RPAREN
+        token(TokenKind.EOF)
+
+    grammar alias enum_member_names = required(.IDENT, ParseMessageKey.ExpectedDeclName) |> separated_by(stop: EnumEndSync)
+
+    enum_type_decl(name: Token) -> Pascal.Decl:
+        .LPAREN
+        members = enum_member_names
+        close = required(.RPAREN, ParseMessageKey.ExpectedRightParen)
+        return build_enum_type_decl(name, members, close)
+```
+
+Current rules:
+
+- support declarations accepted between productions include `token`, `channel`, `tokenset`, `grammar alias`, `grammar type`, `grammarfn`, `recovery`, and `infix table`
+- grammar environment wiring such as `cursor`, `alloc`, `token_kind`, `current`, `advance`, `expect`, and `record_error` still belongs at the top of the grammar block before productions
+- support declarations remain grammar-scoped regardless of where they appear, so a later alias can be referenced by an earlier production after lowering sees the complete grammar block
+- formatting preserves the declaration order you wrote; it does not hoist colocated helpers back to the top
+
 ## Grammar functions
 
 Grammar functions are compile-time grammar-term templates. They let a grammar name a reusable parser shape and pass grammar terms or token-set references into it.

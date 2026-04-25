@@ -66,7 +66,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		if !p.peekGrammarHeaderDecl() {
+		if !p.peekGrammarConfigDecl() {
 			break
 		}
 		switch {
@@ -92,6 +92,15 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			expectKindFunc = p.parseGrammarNameHeaderDecl("expect_kind")
 		case p.peekIdentText("record_error"):
 			recordErrorFunc = p.parseGrammarNameHeaderDecl("record_error")
+		default:
+			p.errorf("expected grammar environment declaration")
+			p.advance()
+		}
+	}
+
+	productions := make([]ast.GrammarProductionDecl, 0, p.estimateIndentedItemCount())
+	parseSupportDecl := func() bool {
+		switch {
 		case p.peekIdentText("token"):
 			tokenAliases = append(tokenAliases, p.parseGrammarTokenAliasDecls()...)
 		case p.peekIdentText("channel"):
@@ -109,16 +118,17 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		case p.peekGrammarInfixTableDecl():
 			infixTables = append(infixTables, p.parseGrammarInfixTableDecl())
 		default:
-			p.errorf("expected grammar header declaration")
-			p.advance()
+			return false
 		}
+		return true
 	}
-
-	productions := make([]ast.GrammarProductionDecl, 0, p.estimateIndentedItemCount())
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
+		}
+		if parseSupportDecl() {
+			continue
 		}
 		productions = append(productions, p.parseGrammarProductionDecls()...)
 	}
@@ -265,9 +275,29 @@ func (p *Parser) parseGrammarEnvDecl() *ast.GrammarEnvDecl {
 }
 
 func (p *Parser) peekGrammarHeaderDecl() bool {
+	return p.peekGrammarConfigDecl() || p.peekGrammarSupportDecl()
+}
+
+func (p *Parser) peekGrammarConfigDecl() bool {
 	if p.peek() == lexer.TOKEN_ERROR {
 		return true
 	}
+	if p.peek() != lexer.TOKEN_IDENT {
+		return false
+	}
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos+1].Kind
+	switch p.cur().Text {
+	case "cursor", "alloc", "token_kind", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error":
+		return next != lexer.TOKEN_LPAREN
+	default:
+		return false
+	}
+}
+
+func (p *Parser) peekGrammarSupportDecl() bool {
 	if p.peekGrammarInfixTableDecl() {
 		return true
 	}
@@ -279,7 +309,7 @@ func (p *Parser) peekGrammarHeaderDecl() bool {
 	}
 	next := p.tokens[p.pos+1].Kind
 	switch p.cur().Text {
-	case "cursor", "alloc", "token_kind", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error", "token", "channel":
+	case "token", "channel":
 		return next != lexer.TOKEN_LPAREN
 	case "tokenset":
 		return next == lexer.TOKEN_IDENT

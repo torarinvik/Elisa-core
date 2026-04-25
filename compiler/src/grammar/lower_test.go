@@ -2306,6 +2306,48 @@ func TestLowerFileStatefulFlatMapListInfersElementTypeFromReturnType(t *testing.
 	}
 }
 
+func TestLowerFileStatefulInterleavedSupportDeclsResolve(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	current current_token
+	record_error record_parse_error
+	first_arg() -> Token:
+		token = .IDENT
+		return token
+	token:
+		IDENT
+		COMMA ","
+		RPAREN ")"
+	tokenset RParenSync:
+		RPAREN
+		token(TokenKind.EOF)
+	grammar alias arg_items = separated required(.IDENT, ParseMessageKey.ExpectedDeclName) by .COMMA until(RParenSync)
+	recovery ArgRecovery:
+		message ParseMessageKey.ExpectedDeclName
+		until RParenSync
+		fallback []
+	args() -> darray[Token]:
+		values = arg_items recover ArgRecovery
+		return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def first_arg(parser: mutable ParserState&) -> Token:",
+		"parser.expect_kind(TokenKind.IDENT)",
+		"parser.current_token().kind == TokenKind.RPAREN",
+		"parser.record_parse_error(ParseMessageKey.ExpectedDeclName)",
+		"def args(parser: mutable ParserState&) -> darray[Token]:",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered interleaved grammar support declarations to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulSingletonBuildsSingleItemList(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
 	cursor parser

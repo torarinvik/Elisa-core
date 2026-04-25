@@ -288,6 +288,53 @@ func TestParseGrammarDeclAllowsParameterizedGrammarAliases(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsInterleavedSupportDecls(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState:
+    token:
+        IDENT
+        COMMA ","
+        RPAREN ")"
+    first_arg() -> Token:
+        token = .IDENT
+        return token
+    tokenset RParenSync:
+        RPAREN
+        token(TokenKind.EOF)
+    grammar alias arg_items = required(.IDENT, ParseMessageKey.ExpectedDeclName) |> separated_by(stop: RParenSync)
+    recovery ArgRecovery:
+        message ParseMessageKey.ExpectedDeclName
+        until RParenSync
+    args() -> darray[Token]:
+        values = arg_items recover ArgRecovery
+        return values
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors for interleaved support declarations: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.Productions) != 2 {
+		t.Fatalf("expected two productions around interleaved support declarations, got %d", len(decl.Productions))
+	}
+	if len(decl.TokenSets) != 1 || len(decl.GrammarAliases) != 1 || len(decl.RecoveryPolicies) != 1 {
+		t.Fatalf("expected one token set, alias, and recovery policy, got tokenSets=%d aliases=%d recoveries=%d", len(decl.TokenSets), len(decl.GrammarAliases), len(decl.RecoveryPolicies))
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"first_arg() -> Token:",
+		"tokenset RParenSync:",
+		"grammar alias arg_items = required(.IDENT, ParseMessageKey.ExpectedDeclName) |> separated_by(stop: RParenSync)",
+		"recovery ArgRecovery:",
+		"args() -> darray[Token]:",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted interleaved grammar output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsParameterizedAliasBodyToUseImportedHelper(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
     token:
