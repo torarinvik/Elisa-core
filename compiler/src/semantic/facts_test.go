@@ -67,7 +67,7 @@ func TestFormatFactSnapshotIncludesPathAndHandleFacts(t *testing.T) {
 }
 
 func TestFormatFactTraceContractAndEffectSummary(t *testing.T) {
-	if got := FormatFactTraceContract(); !strings.Contains(got, FactTraceFormatVersion) || !strings.Contains(got, "summary=mode=summary") || !strings.Contains(got, "filters=alias|class|detail|effect|function|kind|mode|path|reason|region|source|sourcekind|store|target|verb") {
+	if got := FormatFactTraceContract(); !strings.Contains(got, FactTraceFormatVersion) || !strings.Contains(got, "summary=mode=eq:summary") || !strings.Contains(got, "json=format=eq:json") || !strings.Contains(got, "matchers=contains|eq|regex") || !strings.Contains(got, "filters=alias|class|detail|effect|format|function|kind|mode|path|reason|region|source|sourcekind|store|target|verb") {
 		t.Fatalf("expected trace contract to include version and filters, got %q", got)
 	}
 	got := FormatFactEffectSummary(FactEffectSummary{Required: []string{"Memory.Allocate", "Abort.Panic"}, Provided: []string{"Console.Write"}})

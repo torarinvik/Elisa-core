@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
+	"llcontext/src/lexer"
 	"llcontext/src/semantic"
 )
 
@@ -26,21 +28,26 @@ func generateFactTraceReport(result *semantic.Result, filter string) (string, er
 
 func formatJSONFactTraceReport(result *semantic.Result, traceFilter factTraceFilter) (string, error) {
 	payload := factTraceJSONReport{
-		Version: semantic.FactTraceFormatVersion,
-		Mode:    semantic.FactTraceJSONMode,
-		Filters: supportedFactTraceFilterKeys(),
+		Version:  semantic.FactTraceFormatVersion,
+		Mode:     factTraceReportMode(traceFilter),
+		Format:   semantic.FactTraceJSONFormat,
+		Filters:  supportedFactTraceFilterKeys(),
+		Matchers: supportedFactTraceFilterMatchers(),
 	}
 	for _, entry := range collectFactTraceEntries(result, traceFilter) {
-		payload.Functions = append(payload.Functions, factTraceJSONFunction{
-			Name:        entry.Name,
-			Snapshot:    entry.Analysis.FactSnapshot,
-			Exits:       entry.Analysis.FactExitSummary,
-			Aliases:     entry.Analysis.AliasSets,
-			Effects:     entry.Analysis.EffectSummary,
-			Summary:     semantic.FormatFactTransformSummary(entry.Transforms),
-			Transforms:  factTraceJSONTransforms(entry.Transforms),
-			TextSummary: semantic.FormatFactTransforms(entry.Transforms),
-		})
+		item := factTraceJSONFunction{
+			Name:     entry.Name,
+			Snapshot: entry.Analysis.FactSnapshot,
+			Exits:    entry.Analysis.FactExitSummary,
+			Aliases:  entry.Analysis.AliasSets,
+			Effects:  entry.Analysis.EffectSummary,
+			Summary:  semantic.FormatFactTransformSummary(entry.Transforms),
+		}
+		if !traceFilter.SummaryMode() {
+			item.Transforms = factTraceJSONTransforms(entry.Transforms)
+			item.TextSummary = semantic.FormatFactTransforms(entry.Transforms)
+		}
+		payload.Functions = append(payload.Functions, item)
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -52,7 +59,9 @@ func formatJSONFactTraceReport(result *semantic.Result, traceFilter factTraceFil
 type factTraceJSONReport struct {
 	Version   string                  `json:"version"`
 	Mode      string                  `json:"mode"`
+	Format    string                  `json:"format"`
 	Filters   []string                `json:"filters"`
+	Matchers  []string                `json:"matchers"`
 	Functions []factTraceJSONFunction `json:"functions"`
 }
 
@@ -63,8 +72,16 @@ type factTraceJSONFunction struct {
 	Aliases     []semantic.FactAliasSet    `json:"aliases,omitempty"`
 	Effects     semantic.FactEffectSummary `json:"effects"`
 	Summary     string                     `json:"summary"`
-	Transforms  []factTraceJSONTransform   `json:"transforms"`
+	Transforms  []factTraceJSONTransform   `json:"transforms,omitempty"`
 	TextSummary string                     `json:"text_summary,omitempty"`
+}
+
+type factTraceJSONPosition struct {
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Column    int    `json:"column"`
+	EndLine   int    `json:"end_line,omitempty"`
+	EndColumn int    `json:"end_column,omitempty"`
 }
 
 type factTraceJSONTransform struct {
@@ -72,11 +89,18 @@ type factTraceJSONTransform struct {
 	Classes    []string                       `json:"classes,omitempty"`
 	Target     string                         `json:"target,omitempty"`
 	Source     string                         `json:"source,omitempty"`
-	SourcePos  string                         `json:"source_pos,omitempty"`
+	SourcePos  *factTraceJSONPosition         `json:"source_pos,omitempty"`
 	SourceKind string                         `json:"source_kind,omitempty"`
 	Details    []semantic.FactTransformDetail `json:"details,omitempty"`
 	Reason     string                         `json:"reason,omitempty"`
 	Text       string                         `json:"text"`
+}
+
+func factTraceReportMode(traceFilter factTraceFilter) string {
+	if traceFilter.SummaryMode() {
+		return semantic.FactTraceSummaryMode
+	}
+	return semantic.FactTraceFullMode
 }
 
 func factTraceJSONTransforms(transforms []semantic.FactTransform) []factTraceJSONTransform {
@@ -98,11 +122,27 @@ func factTraceJSONTransforms(transforms []semantic.FactTransform) []factTraceJSO
 			Text:       semantic.FormatFactTransform(transform),
 		}
 		if !transform.SourcePos.IsZero() {
-			item.SourcePos = transform.SourcePos.String()
+			item.SourcePos = newFactTraceJSONPosition(transform.SourcePos)
 		}
 		out = append(out, item)
 	}
 	return out
+}
+
+func newFactTraceJSONPosition(pos lexer.Pos) *factTraceJSONPosition {
+	if pos.IsZero() {
+		return nil
+	}
+	item := &factTraceJSONPosition{
+		File:   pos.File,
+		Line:   pos.Line,
+		Column: pos.Col,
+	}
+	if pos.EndLine != 0 && pos.EndCol != 0 {
+		item.EndLine = pos.EndLine
+		item.EndColumn = pos.EndCol
+	}
+	return item
 }
 
 func formatTextFactTraceReport(result *semantic.Result, traceFilter factTraceFilter) string {
@@ -178,13 +218,26 @@ func collectFactTraceEntries(result *semantic.Result, traceFilter factTraceFilte
 }
 
 type factTraceFilter struct {
-	functionTerms []string
-	keys          map[string][]string
-	active        bool
+	keys   map[string][]factTraceMatchTerm
+	active bool
+}
+
+type factTraceMatchOperator string
+
+const (
+	factTraceMatchContains factTraceMatchOperator = "contains"
+	factTraceMatchEquals   factTraceMatchOperator = "eq"
+	factTraceMatchRegex    factTraceMatchOperator = "regex"
+)
+
+type factTraceMatchTerm struct {
+	Operator factTraceMatchOperator
+	Value    string
+	Pattern  *regexp.Regexp
 }
 
 func parseFactTraceFilter(input string) (factTraceFilter, error) {
-	filter := factTraceFilter{keys: map[string][]string{}}
+	filter := factTraceFilter{keys: map[string][]factTraceMatchTerm{}}
 	allowed := supportedFactTraceFilterKeySet()
 	for _, term := range strings.FieldsFunc(input, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' }) {
 		term = strings.TrimSpace(term)
@@ -192,27 +245,63 @@ func parseFactTraceFilter(input string) (factTraceFilter, error) {
 			continue
 		}
 		filter.active = true
-		if key, value, ok := strings.Cut(term, "="); ok {
-			key = strings.ToLower(strings.TrimSpace(key))
-			value = strings.TrimSpace(value)
-			if key == "" || value == "" {
-				return factTraceFilter{}, fmt.Errorf("malformed fact trace filter %q: expected key=value with non-empty key and value", term)
-			}
-			if !allowed[key] {
-				return factTraceFilter{}, fmt.Errorf("unsupported fact trace filter key %q (supported: %s)", key, strings.Join(supportedFactTraceFilterKeys(), ", "))
-			}
-			filter.keys[key] = append(filter.keys[key], value)
-			continue
+		key, value, ok := strings.Cut(term, "=")
+		if !ok {
+			return factTraceFilter{}, fmt.Errorf("malformed fact trace filter %q: expected key=operator:value", term)
 		}
-		filter.functionTerms = append(filter.functionTerms, term)
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			return factTraceFilter{}, fmt.Errorf("malformed fact trace filter %q: expected key=operator:value with non-empty key and value", term)
+		}
+		if !allowed[key] {
+			return factTraceFilter{}, fmt.Errorf("unsupported fact trace filter key %q (supported: %s)", key, strings.Join(supportedFactTraceFilterKeys(), ", "))
+		}
+		match, err := parseFactTraceMatchTerm(term, value)
+		if err != nil {
+			return factTraceFilter{}, err
+		}
+		filter.keys[key] = append(filter.keys[key], match)
 	}
 	return filter, nil
+}
+
+func parseFactTraceMatchTerm(term string, raw string) (factTraceMatchTerm, error) {
+	operator, value, ok := strings.Cut(raw, ":")
+	if !ok {
+		return factTraceMatchTerm{}, fmt.Errorf("malformed fact trace filter %q: expected key=operator:value", term)
+	}
+	operator = strings.ToLower(strings.TrimSpace(operator))
+	value = strings.TrimSpace(value)
+	if operator == "" || value == "" {
+		return factTraceMatchTerm{}, fmt.Errorf("malformed fact trace filter %q: expected key=operator:value with non-empty operator and value", term)
+	}
+	match := factTraceMatchTerm{Operator: factTraceMatchOperator(operator), Value: value}
+	switch match.Operator {
+	case factTraceMatchContains, factTraceMatchEquals:
+		return match, nil
+	case factTraceMatchRegex:
+		pattern, err := regexp.Compile(value)
+		if err != nil {
+			return factTraceMatchTerm{}, fmt.Errorf("invalid regex in fact trace filter %q: %w", term, err)
+		}
+		match.Pattern = pattern
+		return match, nil
+	default:
+		return factTraceMatchTerm{}, fmt.Errorf("unsupported fact trace filter operator %q in %q (supported: %s)", operator, term, strings.Join(supportedFactTraceFilterMatchers(), ", "))
+	}
 }
 
 func supportedFactTraceFilterKeys() []string {
 	keys := append([]string(nil), semantic.SupportedFactTraceFilterKeys...)
 	sort.Strings(keys)
 	return keys
+}
+
+func supportedFactTraceFilterMatchers() []string {
+	matchers := append([]string(nil), semantic.SupportedFactTraceFilterMatchers...)
+	sort.Strings(matchers)
+	return matchers
 }
 
 func supportedFactTraceFilterKeySet() map[string]bool {
@@ -225,36 +314,15 @@ func supportedFactTraceFilterKeySet() map[string]bool {
 }
 
 func (f factTraceFilter) SummaryMode() bool {
-	for _, value := range f.keys["mode"] {
-		if strings.EqualFold(value, "summary") || strings.EqualFold(value, "compact") {
-			return true
-		}
-	}
-	return false
+	return factTraceTermsMatchAny(f.keys["mode"], semantic.FactTraceSummaryMode, "compact")
 }
 
 func (f factTraceFilter) JSONMode() bool {
-	for _, value := range f.keys["mode"] {
-		if strings.EqualFold(value, semantic.FactTraceJSONMode) {
-			return true
-		}
-	}
-	return false
+	return factTraceTermsMatchAny(f.keys["format"], semantic.FactTraceJSONFormat)
 }
 
 func (f factTraceFilter) FunctionNameCandidate(name string) bool {
-	if !f.matchesFunctionNameKey(name) {
-		return false
-	}
-	if len(f.functionTerms) == 0 {
-		return true
-	}
-	for _, term := range f.functionTerms {
-		if strings.Contains(name, term) {
-			return true
-		}
-	}
-	return len(f.keys) != 0
+	return f.matchesFunctionNameKey(name)
 }
 
 func (f factTraceFilter) MatchesFunction(name string, analysis *semantic.FunctionAnalysis, transforms []semantic.FactTransform) bool {
@@ -264,16 +332,8 @@ func (f factTraceFilter) MatchesFunction(name string, analysis *semantic.Functio
 	if !f.matchesFunctionNameKey(name) {
 		return false
 	}
-	for _, term := range f.functionTerms {
-		if strings.Contains(name, term) {
-			return true
-		}
-	}
 	if len(f.transformFilterKeys()) == 0 {
 		return true
-	}
-	if len(f.keys) == 0 {
-		return false
 	}
 	if len(transforms) != 0 {
 		return true
@@ -281,7 +341,7 @@ func (f factTraceFilter) MatchesFunction(name string, analysis *semantic.Functio
 	if analysis == nil {
 		return false
 	}
-	return f.matchesAliasSets(analysis.AliasSets) || f.matchesEffectSummary(analysis.EffectSummary) || f.matchesSnapshot(analysis.FactSnapshot)
+	return f.matchesSupplementalFilters(analysis)
 }
 
 func (f factTraceFilter) FilterTransforms(transforms []semantic.FactTransform) []semantic.FactTransform {
@@ -318,19 +378,14 @@ func (f factTraceFilter) matchesFunctionNameKey(name string) bool {
 	if len(values) == 0 {
 		return true
 	}
-	for _, value := range values {
-		if strings.Contains(name, value) {
-			return true
-		}
-	}
-	return false
+	return factTraceTermsMatchText(values, name)
 }
 
-func (f factTraceFilter) transformFilterKeys() map[string][]string {
-	out := map[string][]string{}
+func (f factTraceFilter) transformFilterKeys() map[string][]factTraceMatchTerm {
+	out := map[string][]factTraceMatchTerm{}
 	for key, values := range f.keys {
 		switch key {
-		case "function", "mode":
+		case "function", "mode", "format":
 			continue
 		default:
 			out[key] = values
@@ -339,42 +394,53 @@ func (f factTraceFilter) transformFilterKeys() map[string][]string {
 	return out
 }
 
-func factTraceTransformFieldMatches(transform semantic.FactTransform, key string, value string) bool {
+func factTraceTransformFieldMatches(transform semantic.FactTransform, key string, value factTraceMatchTerm) bool {
 	switch key {
 	case "kind", "verb":
-		return string(transform.Kind) == value
-	case "class", "fact", "factclass":
+		return value.Matches(string(transform.Kind))
+	case "class":
 		for _, class := range transform.Classes {
-			if string(class) == value {
+			if value.Matches(string(class)) {
 				return true
 			}
 		}
 		return false
 	case "target", "path":
-		return strings.Contains(transform.Target, value)
+		return value.Matches(transform.Target)
 	case "source":
-		return strings.Contains(transform.Source, value)
+		return value.Matches(transform.Source)
 	case "sourcekind":
-		return string(transform.SourceKind) == value
+		return value.Matches(string(transform.SourceKind))
 	case "reason":
-		return strings.Contains(transform.Reason, value)
+		return value.Matches(transform.Reason)
 	case "detail":
 		for _, detail := range transform.Details {
-			if strings.Contains(detail.Name+"="+detail.Value, value) {
+			if value.Matches(detail.Name + "=" + detail.Value) {
 				return true
 			}
 		}
 		return false
 	case "alias":
-		return strings.Contains(transform.Target, value) || strings.Contains(semantic.FormatFactTransform(transform), value)
+		return value.Matches(transform.Target) || value.Matches(semantic.FormatFactTransform(transform))
 	case "effect":
-		return strings.Contains(transform.Target, value) && hasReportFactClass(transform.Classes, semantic.FactEffects)
+		return value.Matches(transform.Target) && hasReportFactClass(transform.Classes, semantic.FactEffects)
 	case "region":
-		return strings.Contains(transform.Target, value) && hasReportFactClass(transform.Classes, semantic.FactRegionDeps)
+		return value.Matches(transform.Target) && hasReportFactClass(transform.Classes, semantic.FactRegionDeps)
 	case "store":
-		return (strings.Contains(transform.Target, value) || strings.Contains(transform.Source, value)) && hasReportFactClass(transform.Classes, semantic.FactStoreDeps)
+		return (value.Matches(transform.Target) || value.Matches(transform.Source)) && hasReportFactClass(transform.Classes, semantic.FactStoreDeps)
 	default:
-		return strings.Contains(semantic.FormatFactTransform(transform), value)
+		return value.Matches(semantic.FormatFactTransform(transform))
+	}
+}
+
+func (term factTraceMatchTerm) Matches(candidate string) bool {
+	switch term.Operator {
+	case factTraceMatchEquals:
+		return candidate == term.Value
+	case factTraceMatchRegex:
+		return term.Pattern != nil && term.Pattern.MatchString(candidate)
+	default:
+		return strings.Contains(candidate, term.Value)
 	}
 }
 
@@ -387,46 +453,124 @@ func hasReportFactClass(classes []semantic.FactClass, target semantic.FactClass)
 	return false
 }
 
-func (f factTraceFilter) matchesAliasSets(sets []semantic.FactAliasSet) bool {
-	values := f.keys["alias"]
-	if len(values) == 0 {
+func factTraceTermsMatchText(terms []factTraceMatchTerm, text string) bool {
+	if len(terms) == 0 {
 		return false
 	}
-	text := semantic.FormatFactAliasSets(sets)
-	for _, value := range values {
-		if strings.Contains(text, value) {
+	for _, term := range terms {
+		if term.Matches(text) {
 			return true
 		}
 	}
 	return false
 }
 
-func (f factTraceFilter) matchesEffectSummary(summary semantic.FactEffectSummary) bool {
-	values := f.keys["effect"]
-	if len(values) == 0 {
+func factTraceTermsMatchAny(terms []factTraceMatchTerm, candidates ...string) bool {
+	if len(terms) == 0 {
 		return false
 	}
-	text := semantic.FormatFactEffectSummary(summary)
-	for _, value := range values {
-		if strings.Contains(text, value) {
+	return factTraceTermsMatchCandidates(terms, candidates)
+}
+
+func factTraceTermsMatchCandidates(terms []factTraceMatchTerm, candidates []string) bool {
+	if len(terms) == 0 {
+		return false
+	}
+	for _, candidate := range candidates {
+		if factTraceTermsMatchText(terms, candidate) {
 			return true
 		}
 	}
 	return false
 }
 
-func (f factTraceFilter) matchesSnapshot(snapshot semantic.FactSnapshot) bool {
-	for _, key := range []string{"target", "path", "region", "store"} {
-		values := f.keys[key]
-		if len(values) == 0 {
-			continue
+func (f factTraceFilter) matchesSupplementalFilters(analysis *semantic.FunctionAnalysis) bool {
+	if analysis == nil {
+		return false
+	}
+	for key, terms := range f.transformFilterKeys() {
+		switch key {
+		case "alias":
+			if !factTraceTermsMatchCandidates(terms, factTraceAliasSetCandidates(analysis.AliasSets)) {
+				return false
+			}
+		case "effect":
+			if !factTraceTermsMatchCandidates(terms, factTraceEffectSummaryCandidates(analysis.EffectSummary)) {
+				return false
+			}
+		case "target", "path", "region", "store":
+			if !factTraceTermsMatchCandidates(terms, factTraceSnapshotCandidates(analysis.FactSnapshot, key)) {
+				return false
+			}
+		default:
+			return false
 		}
-		text := semantic.FormatFactSnapshot(snapshot)
-		for _, value := range values {
-			if strings.Contains(text, value) {
-				return true
+	}
+	return true
+}
+
+func factTraceAliasSetCandidates(sets []semantic.FactAliasSet) []string {
+	candidates := make([]string, 0, len(sets)*4+1)
+	for _, set := range sets {
+		if set.ID != "" {
+			candidates = append(candidates, set.ID)
+		}
+		candidates = append(candidates, set.Members...)
+		candidates = append(candidates, set.AffectedPaths...)
+	}
+	if formatted := semantic.FormatFactAliasSets(sets); formatted != "" {
+		candidates = append(candidates, formatted)
+	}
+	return candidates
+}
+
+func factTraceEffectSummaryCandidates(summary semantic.FactEffectSummary) []string {
+	candidates := make([]string, 0, len(summary.Required)+len(summary.Provided)+1)
+	candidates = append(candidates, summary.Required...)
+	candidates = append(candidates, summary.Provided...)
+	if formatted := semantic.FormatFactEffectSummary(summary); formatted != "" {
+		candidates = append(candidates, formatted)
+	}
+	return candidates
+}
+
+func factTraceSnapshotCandidates(snapshot semantic.FactSnapshot, key string) []string {
+	switch key {
+	case "target", "path":
+		candidates := make([]string, 0, len(snapshot.PathFacts)*4+len(snapshot.Parameters)+len(snapshot.Returns)+len(snapshot.Consumed)+len(snapshot.Produced)+len(snapshot.Ensured)+len(snapshot.Refined)+len(snapshot.Widened))
+		candidates = append(candidates, snapshot.Parameters...)
+		candidates = append(candidates, snapshot.Returns...)
+		candidates = append(candidates, snapshot.Consumed...)
+		candidates = append(candidates, snapshot.Produced...)
+		candidates = append(candidates, snapshot.Ensured...)
+		candidates = append(candidates, snapshot.Refined...)
+		candidates = append(candidates, snapshot.Widened...)
+		for _, path := range snapshot.PathFacts {
+			candidates = append(candidates, path.Target, path.Root, path.Path, semantic.FormatFactPath(path))
+		}
+		return candidates
+	case "region":
+		candidates := make([]string, 0, len(snapshot.RegionDeps)*2+len(snapshot.InvalidatedRegions))
+		candidates = append(candidates, snapshot.InvalidatedRegions...)
+		for _, region := range snapshot.RegionDeps {
+			candidates = append(candidates, region)
+			if idx := strings.Index(region, "["); idx > 0 {
+				candidates = append(candidates, region[:idx])
 			}
 		}
+		return candidates
+	case "store":
+		candidates := make([]string, 0, len(snapshot.StoreDeps)+len(snapshot.HandleStoreDeps)*3+len(snapshot.RebasedStores))
+		candidates = append(candidates, snapshot.StoreDeps...)
+		candidates = append(candidates, snapshot.RebasedStores...)
+		for _, dep := range snapshot.HandleStoreDeps {
+			candidates = append(candidates, dep)
+			if left, right, ok := strings.Cut(dep, "<-"); ok {
+				candidates = append(candidates, left, right)
+			}
+		}
+		return candidates
+	default:
+		return nil
 	}
-	return false
 }

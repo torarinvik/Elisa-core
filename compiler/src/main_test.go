@@ -1076,7 +1076,7 @@ func TestRunCLIEmitsFactTraceForGrammarLoweredPaths(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=__grammar_try__PascalFrontend__expression,mode=summary", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=eq:__grammar_try__PascalFrontend__expression,mode=eq:summary", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
@@ -1094,12 +1094,12 @@ func TestRunCLIEmitsFactTraceReport(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "fact_core_rules", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=contains:fact_core_rules", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
 	output := stdout.String()
-	for _, want := range []string{"=== facts ===", "contract: version=fact-trace-v1", "func fact_core_rules", "snapshot:", "transforms:", "groups:", "explanations:", "widen player"} {
+	for _, want := range []string{"=== facts ===", "contract: version=fact-trace-v2", "func fact_core_rules", "snapshot:", "transforms:", "groups:", "explanations:", "widen player"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected fact trace report to contain %q, got:\n%s", want, output)
 		}
@@ -1112,7 +1112,7 @@ func TestRunCLIEmitsFilteredFactTraceReport(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "fact-trace", "-filter", "kind=widen,class=typestate", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "fact-trace", "-filter", "kind=eq:widen,class=eq:typestate", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
@@ -1131,7 +1131,7 @@ func TestRunCLIEmitsInterfaceFactTraceReport(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "class=interface", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "class=eq:interface", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
@@ -1149,13 +1149,13 @@ func TestRunCLIEmitsFactTraceContractSnapshot(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=fact_core_rules,mode=summary", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=eq:fact_core_rules,mode=eq:summary", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
 	output := stdout.String()
 	for _, want := range []string{
-		"contract: version=fact-trace-v1 order=kind,target,class,reason,source summary=mode=summary filters=alias|class|detail|effect|function|kind|mode|path|reason|region|source|sourcekind|store|target|verb",
+		"contract: version=fact-trace-v2 order=kind,target,class,reason,source summary=mode=eq:summary json=format=eq:json matchers=contains|eq|regex filters=alias|class|detail|effect|format|function|kind|mode|path|reason|region|source|sourcekind|store|target|verb",
 		"func fact_core_rules",
 		"summary: transforms=21",
 		"kinds=[consume:1, invalidate:4, produce:4, rebase:1, recompute:7, refine:3, widen:1]",
@@ -1180,15 +1180,15 @@ func TestRunCLIEmitsFactTraceKeyedFilterSelectors(t *testing.T) {
 		contains []string
 		omits    []string
 	}{
-		{name: "kind", fixture: coreFixture, filter: "kind=consume", contains: []string{"consume store [usage]"}, omits: []string{"widen player"}},
-		{name: "sourcekind", fixture: coreFixture, filter: "sourcekind=store", contains: []string{"produce frozen [representation,storage,store-deps]", "rebase store [store-deps]"}},
-		{name: "target", fixture: coreFixture, filter: "target=alias.value", contains: []string{"recompute alias.value [typestate,shape,optimization]"}, omits: []string{"consume store"}},
-		{name: "path", fixture: coreFixture, filter: "path=alias.value", contains: []string{"path_facts=[<return>.value{root=<return>,path=value,steps=result:value};", "alias.value{root=alias,path=value,steps=field:value}", "recompute alias.value [typestate,shape,optimization]"}},
-		{name: "alias", fixture: coreFixture, filter: "alias=alias-class#0", contains: []string{"alias-class#0: {alias, first} mutated", "recompute first [typestate,shape,optimization,store-deps]"}},
-		{name: "region", fixture: coreFixture, filter: "region=scratch", contains: []string{"region_deps=[scratch[1->0], scratch[1->1]]", "invalidate scratch [region-deps]"}},
-		{name: "store", fixture: coreFixture, filter: "store=store", contains: []string{"handle_store_deps=[frozen<-store]", "rebase store [store-deps]"}},
-		{name: "detail", fixture: coreFixture, filter: "detail=store_deps=store", contains: []string{"{operation=freeze,store_deps=store}"}, omits: []string{"rebase store [store-deps]"}},
-		{name: "effect", fixture: interfaceFixture, filter: "effect=Console.Write", contains: []string{"require Console.Write [effects]", "required_effects=[Console.Write]"}},
+		{name: "kind", fixture: coreFixture, filter: "kind=eq:consume", contains: []string{"consume store [usage]"}, omits: []string{"widen player"}},
+		{name: "sourcekind", fixture: coreFixture, filter: "sourcekind=eq:store", contains: []string{"produce frozen [representation,storage,store-deps]", "rebase store [store-deps]"}},
+		{name: "target", fixture: coreFixture, filter: "target=contains:alias.value", contains: []string{"recompute alias.value [typestate,shape,optimization]"}, omits: []string{"consume store"}},
+		{name: "path", fixture: coreFixture, filter: "path=contains:alias.value", contains: []string{"path_facts=[<return>.value{root=<return>,path=value,steps=result:value};", "alias.value{root=alias,path=value,steps=field:value}", "recompute alias.value [typestate,shape,optimization]"}},
+		{name: "alias", fixture: coreFixture, filter: "alias=contains:alias-class#0", contains: []string{"alias-class#0: {alias, first} mutated", "recompute first [typestate,shape,optimization,store-deps]"}},
+		{name: "region", fixture: coreFixture, filter: "region=eq:scratch", contains: []string{"region_deps=[scratch[1->0], scratch[1->1]]", "invalidate scratch [region-deps]"}},
+		{name: "store", fixture: coreFixture, filter: "store=eq:store", contains: []string{"handle_store_deps=[frozen<-store]", "rebase store [store-deps]"}},
+		{name: "detail", fixture: coreFixture, filter: "detail=eq:store_deps=store", contains: []string{"{operation=freeze,store_deps=store}"}, omits: []string{"rebase store [store-deps]"}},
+		{name: "effect", fixture: interfaceFixture, filter: "effect=eq:Console.Write", contains: []string{"require Console.Write [effects]", "required_effects=[Console.Write]"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1219,7 +1219,7 @@ func TestRunCLIEmitsFactTraceFilterIntersections(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "kind=recompute,class=store-deps,target=alias.value", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "kind=eq:recompute,class=eq:store-deps,target=contains:alias.value", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
@@ -1238,7 +1238,7 @@ func TestRunCLIEmitsFactTraceSnapshotOnlyFilter(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=fact_core_rules,target=<return>.value,mode=summary", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=eq:fact_core_rules,target=eq:<return>.value,mode=eq:summary", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
@@ -1256,7 +1256,7 @@ func TestRunCLIEmitsMixedRequireFactTrace(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=fact_interface_rules,kind=require", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=eq:fact_interface_rules,kind=eq:require", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
@@ -1274,7 +1274,7 @@ func TestRunCLIEmitsPackedTreeStoreProvenanceFacts(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=build_frozen_expr_graph,store=store", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=eq:build_frozen_expr_graph,store=eq:store", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
@@ -1292,18 +1292,20 @@ func TestRunCLIEmitsFactTraceJSONShape(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=fact_interface_rules,class=interface,mode=json", fixturePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=eq:fact_interface_rules,class=eq:interface,format=eq:json", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
 	}
 	var report struct {
 		Version   string   `json:"version"`
 		Mode      string   `json:"mode"`
+		Format    string   `json:"format"`
 		Filters   []string `json:"filters"`
+		Matchers  []string `json:"matchers"`
 		Functions []struct {
 			Name     string `json:"name"`
 			Snapshot struct {
-				RequiredInterfaces []string `json:"RequiredInterfaces"`
+				RequiredInterfaces []string `json:"required_interfaces"`
 			} `json:"snapshot"`
 			Transforms []struct {
 				Kind    string   `json:"kind"`
@@ -1315,8 +1317,25 @@ func TestRunCLIEmitsFactTraceJSONShape(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("failed to parse JSON fact trace:\n%s\nerror: %v", stdout.String(), err)
 	}
-	if report.Version != "fact-trace-v1" || report.Mode != "json" {
+	if report.Version != "fact-trace-v2" || report.Mode != "full" || report.Format != "json" {
 		t.Fatalf("unexpected JSON contract: %#v", report)
+	}
+	hasFilter := false
+	for _, filter := range report.Filters {
+		if filter == "format" {
+			hasFilter = true
+			break
+		}
+	}
+	hasMatcher := false
+	for _, matcher := range report.Matchers {
+		if matcher == "eq" {
+			hasMatcher = true
+			break
+		}
+	}
+	if !hasFilter || !hasMatcher {
+		t.Fatalf("expected JSON contract metadata to include v2 filters and matchers, got %#v", report)
 	}
 	if len(report.Functions) != 1 || report.Functions[0].Name != "fact_interface_rules" {
 		t.Fatalf("expected one filtered function, got %#v", report.Functions)
@@ -1329,10 +1348,42 @@ func TestRunCLIEmitsFactTraceJSONShape(t *testing.T) {
 	}
 }
 
+func TestRunCLIEmitsFactTraceJSONStructuredSourcePos(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=eq:fact_core_rules,kind=eq:widen,format=eq:json", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	var report struct {
+		Functions []struct {
+			Transforms []struct {
+				SourcePos struct {
+					File   string `json:"file"`
+					Line   int    `json:"line"`
+					Column int    `json:"column"`
+				} `json:"source_pos"`
+			} `json:"transforms"`
+		} `json:"functions"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON fact trace:\n%s\nerror: %v", stdout.String(), err)
+	}
+	if len(report.Functions) != 1 || len(report.Functions[0].Transforms) != 1 {
+		t.Fatalf("expected one widened transform, got %#v", report.Functions)
+	}
+	if report.Functions[0].Transforms[0].SourcePos.File == "" || report.Functions[0].Transforms[0].SourcePos.Line == 0 || report.Functions[0].Transforms[0].SourcePos.Column == 0 {
+		t.Fatalf("expected structured source position, got %#v", report.Functions[0].Transforms[0].SourcePos)
+	}
+}
+
 func TestRunCLIRejectsMalformedFactTraceFilters(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
-	cases := []string{"kind=", "=widen", "unknown=widen"}
+	cases := []string{"kind=", "=eq:widen", "unknown=eq:widen", "kind=widen", "fact_core_rules"}
 	for _, filter := range cases {
 		t.Run(filter, func(t *testing.T) {
 			var stdout bytes.Buffer
@@ -1363,7 +1414,7 @@ func BenchmarkGenerateFactTraceReportSummary(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := generateFactTraceReport(result, "mode=summary"); err != nil {
+		if _, err := generateFactTraceReport(result, "mode=eq:summary"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -1374,7 +1425,7 @@ func BenchmarkGenerateFactTraceReportLargeTransformStream(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := generateFactTraceReport(result, "mode=summary"); err != nil {
+		if _, err := generateFactTraceReport(result, "mode=eq:summary"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -1385,7 +1436,7 @@ func BenchmarkGenerateFactTraceReportKeyedFilterLargeTransformStream(b *testing.
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := generateFactTraceReport(result, "kind=recompute,class=store-deps,target=node.99,mode=summary"); err != nil {
+		if _, err := generateFactTraceReport(result, "kind=eq:recompute,class=eq:store-deps,target=eq:node.99,mode=eq:summary"); err != nil {
 			b.Fatal(err)
 		}
 	}

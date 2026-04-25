@@ -103,23 +103,28 @@ samples for the catalog.
 
 ```sh
 go run ./src -emit facts ../Code/test_programs/fact_core_rules.llcontext
-go run ./src -emit fact-trace -filter fact_core_rules ../Code/test_programs/fact_core_rules.llcontext
-go run ./src -emit facts -filter 'kind=widen,class=typestate' ../Code/test_programs/fact_core_rules.llcontext
-go run ./src -emit facts -filter 'class=interface' ../Code/test_programs/fact_interface_rules.llcontext
+go run ./src -emit fact-trace -filter 'function=contains:fact_core_rules' ../Code/test_programs/fact_core_rules.llcontext
+go run ./src -emit facts -filter 'kind=eq:widen,class=eq:typestate' ../Code/test_programs/fact_core_rules.llcontext
+go run ./src -emit facts -filter 'class=eq:interface' ../Code/test_programs/fact_interface_rules.llcontext
 ```
 
 The first non-heading line of a fact trace is a contract line such as
-`contract: version=fact-trace-v1 ...`. It records stable ordering and the
-supported filter keys. Current keyed filters include `function`, `kind`,
-`class`, `target`, `path`, `source`, `sourcekind`, `reason`, `detail`, `alias`,
-`effect`, `region`, `store`, `verb`, and `mode`. Malformed keyed filters such as
-`kind=`, `=widen`, or unknown keys are errors so scripts do not silently fall
-back to substring matching. `mode=summary` keeps the same contract line and
+`contract: version=fact-trace-v2 ...`. It records stable ordering, supported
+filter keys, and supported match operators. Current keyed filters include
+`function`, `kind`, `class`, `target`, `path`, `source`, `sourcekind`,
+`reason`, `detail`, `alias`, `effect`, `region`, `store`, `verb`, `mode`, and
+`format`. Filter values are explicit `operator:value` pairs, currently
+`eq:value`, `contains:value`, or `regex:value`. Malformed keyed filters such as
+`kind=`, `kind=widen`, bare terms such as `fact_core_rules`, `=eq:widen`, or
+unknown keys are errors so scripts do not silently fall back to implicit
+substring matching. `mode=eq:summary` keeps the same contract line and
 per-function snapshots but replaces raw transform/explanation sections with a
-compact count summary. `mode=json` emits the same filtered functions as a
-machine-readable JSON document with `version`, `mode`, `filters`, `functions`,
-per-function snapshots, exits, aliases, effects, summary counts, transform
-objects, and a text summary for compatibility.
+compact count summary. `format=eq:json` emits the same filtered functions as a
+machine-readable JSON document with `version`, `mode`, `format`, `filters`,
+`matchers`, `functions`, per-function snapshots, exits, aliases, effects,
+summary counts, transform objects, and a text summary for compatibility. JSON
+snapshot records now use explicit `snake_case` field names, and transform
+`source_pos` values are structured objects instead of formatted strings.
 
 The report surface is intentionally close to the catalog:
 
@@ -139,32 +144,35 @@ When a frontend or semantic rule behaves unexpectedly, prefer narrowing the
 trace before reading the full semantic report:
 
 ```sh
-go run ./src -emit facts -filter 'function=parse_expr,mode=summary' path/to/frontend.llcontext
-go run ./src -emit facts -filter 'kind=recompute,class=store-deps,target=node' path/to/frontend.llcontext
-go run ./src -emit facts -filter 'region=scratch' path/to/frontend.llcontext
-go run ./src -emit facts -filter 'alias=alias-class#0' path/to/frontend.llcontext
-go run ./src -emit facts -filter 'function=parse_expr,mode=json' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'function=contains:parse_expr,mode=eq:summary' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'kind=eq:recompute,class=eq:store-deps,target=contains:node' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'region=eq:scratch' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'alias=contains:alias-class#0' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'function=contains:parse_expr,format=eq:json' path/to/frontend.llcontext
 ```
 
-Use `mode=summary` first to verify that the expected function has fact activity,
-then add `kind`, `class`, `target`, `region`, `store`, `alias`, or `effect` keys
-until the output is small enough to inspect. For grammar-lowered parsers, filter
-on the generated helper, for example
-`function=__grammar_try__PascalFrontend__expression`, to inspect parser-state
+Use `mode=eq:summary` first to verify that the expected function has fact
+activity, then add `kind`, `class`, `target`, `region`, `store`, `alias`, or
+`effect` keys until the output is small enough to inspect. Prefer `eq:` when
+you know the exact canonical fact name and `contains:` when you are probing a
+larger path or generated helper name. For grammar-lowered parsers, filter on
+the generated helper, for example
+`function=eq:__grammar_try__PascalFrontend__expression`, to inspect parser-state
 paths such as `state.cursor{root=state,path=cursor,steps=field:cursor}`.
 
 Common recipes:
 
-- Alias debugging: start with `alias=alias-class#N`, then add `kind=recompute`
-    to see dependent-path recomputes after mutation.
-- Region debugging: use `region=name` and inspect `generation_before` /
+- Alias debugging: start with `alias=contains:alias-class#N`, then add
+    `kind=eq:recompute` to see dependent-path recomputes after mutation.
+- Region debugging: use `region=eq:name` and inspect `generation_before` /
     `generation_after` details plus `region_deps=[name[before->after]]`.
-- Store debugging: use `store=store_name` to see `consume`, `rebase`, and
+- Store debugging: use `store=eq:store_name` to see `consume`, `rebase`, and
     `produce` publication facts around `freeze(move store)`.
-- Effect debugging: use `effect=Console.Write` or `kind=require,class=effects`
-    to distinguish required authority from local grants.
-- Grammar debugging: use `function=__grammar_try__...` and `path=state.cursor`
-    to inspect generated parser-state mutations.
+- Effect debugging: use `effect=eq:Console.Write` or
+    `kind=eq:require,class=eq:effects` to distinguish required authority from
+    local grants.
+- Grammar debugging: use `function=contains:__grammar_try__...` and
+    `path=contains:state.cursor` to inspect generated parser-state mutations.
 
 ## Canonical Examples
 
@@ -380,34 +388,36 @@ path facts.
 
 ## Stable Contract Boundary
 
-`fact-trace-v1` is stable for the current report shape: contract line, canonical
-class/transform names, deterministic ordering, keyed filters, summary mode,
-snapshot/exits/aliases/effects/transforms/groups/explanations sections, and
-typed path-step formatting. Additive fields may be appended to existing records
-only when old filters and golden tests keep passing.
+`fact-trace-v2` is stable for the current report shape: contract line,
+canonical class/transform names, deterministic ordering, keyed filters,
+explicit `eq|contains|regex` match operators, separate `mode` and `format`
+selectors, summary mode, snapshot/exits/aliases/effects/transforms/groups/
+explanations sections, `snake_case` JSON field tags, structured JSON source
+positions, and typed path-step formatting. Additive fields may be appended to
+existing records only when old filters and golden tests keep passing.
 
 Summary mode has stable omission rules: it keeps the contract line, function
 headers, snapshots, exits, aliases, and effects, then emits one `summary:` line;
 it omits raw `transforms:`, `groups:`, and `explanations:` sections. JSON mode
-is additive to v1 and does not change the text-mode contract.
+is selected with `format=eq:json`; its top-level `mode` now records `full` vs
+`summary` independently from the output format.
 
-Declare `fact-trace-v2` before any change that renames a class, transform kind,
-filter key, section name, path-step syntax, or default ordering rule. Version
-boundaries should be paired with fixture updates and a migration note in this
-document.
+Declare `fact-trace-v3` before any change that renames a class, transform kind,
+filter key, matcher, section name, path-step syntax, JSON field name, or
+default ordering rule. Version boundaries should be paired with fixture updates
+and a migration note in this document.
 
-Current v2 backlog:
+The v2 migration landed these breaking changes together:
 
-- Replace Go default JSON field names for snapshot records with explicit
-    lowercase snake_case field tags.
-- Split `mode` into separate `mode` and `format` filter keys if more output
-    formats are added.
-- Encode source positions as structured `{file,line,column}` objects instead of
-    formatted strings.
-- Replace substring matching with explicit match operators if scripts need exact
-    vs contains semantics.
-- Consider promoting compile-server fact filter failures to a first-class
-    request field with `error_code=fact_trace_filter` responses.
+- Snapshot, exit, alias, effect, path, and detail JSON records now use explicit
+    lowercase `snake_case` field tags.
+- `mode` and `format` are separate filter keys, so `mode=eq:summary` and
+    `format=eq:json` can evolve independently.
+- JSON transform source positions are structured objects such as
+    `{file, line, column, end_line, end_column}` instead of formatted strings.
+- Match semantics are explicit via `eq:`, `contains:`, and `regex:` operators.
+- The compile server accepts a `filter` request field for `mode: "facts"` and
+    reports malformed filter failures with `error_code=fact_trace_filter`.
 
 ## Regression and Overhead Checks
 
@@ -491,9 +501,11 @@ Current implementation foothold:
     `fact_effects`, flat `fact_transforms`, grouped `fact_groups`, explanatory
     `fact_explanations`, and per-block `fact_blocks`
 - fact-only traces are available with `-emit facts` / `-emit fact-trace`, begin
-    with a `fact-trace-v1` contract line, and support keyed filters
-- `mode=summary` provides compact per-function fact counts for large traces
-- `mode=json` provides a machine-readable trace shape for tools and golden tests
+    with a `fact-trace-v2` contract line, and support keyed filters with
+    explicit `eq|contains|regex` operators
+- `mode=eq:summary` provides compact per-function fact counts for large traces
+- `format=eq:json` provides a machine-readable trace shape for tools and golden
+    tests while keeping `mode` as a separate `full|summary` selector
 - keyed fact trace filters are validated and unknown/malformed keys are errors
 - conservative call widening stores source position, call-site source, and
     before/after type details

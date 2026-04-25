@@ -18,6 +18,7 @@ import (
 
 type compileServerRequest struct {
 	Mode     string `json:"mode"`
+	Filter   string `json:"filter,omitempty"`
 	Filename string `json:"filename,omitempty"`
 	Source   string `json:"source,omitempty"`
 	IR       string `json:"ir,omitempty"`
@@ -111,7 +112,7 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
-		facts, err := generateFactTraceReport(result, "")
+		facts, err := generateFactTraceReport(result, req.Filter)
 		if err != nil {
 			return compileServerResponse{OK: false, Error: err.Error(), ErrorCode: "fact_trace_filter", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}

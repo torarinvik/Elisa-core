@@ -8,13 +8,21 @@ import (
 	"llcontext/src/lexer"
 )
 
-const FactTraceFormatVersion = "fact-trace-v1"
+const FactTraceFormatVersion = "fact-trace-v2"
+
+const (
+	FactTraceSummaryMode = "summary"
+	FactTraceFullMode    = "full"
+	FactTraceTextFormat  = "text"
+	FactTraceJSONFormat  = "json"
+)
 
 var SupportedFactTraceFilterKeys = []string{
 	"alias",
 	"class",
 	"detail",
 	"effect",
+	"format",
 	"function",
 	"kind",
 	"mode",
@@ -28,7 +36,11 @@ var SupportedFactTraceFilterKeys = []string{
 	"verb",
 }
 
-const FactTraceJSONMode = "json"
+var SupportedFactTraceFilterMatchers = []string{
+	"contains",
+	"eq",
+	"regex",
+}
 
 // FactClass names the orthogonal kinds of static knowledge the analyzer tracks
 // about values. The current compiler still stores these facts in specialized
@@ -87,8 +99,8 @@ const (
 )
 
 type FactTransformDetail struct {
-	Name  string
-	Value string
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type StoreDependencyFacts struct {
@@ -101,32 +113,32 @@ type StoreDependencyFacts struct {
 type PackedStoreProvenance = StoreDependencyFacts
 
 type FactPath struct {
-	Target string
-	Root   string
-	Path   string
-	Steps  []FactPathStep
+	Target string         `json:"target"`
+	Root   string         `json:"root"`
+	Path   string         `json:"path"`
+	Steps  []FactPathStep `json:"steps"`
 }
 
 type FactPathStep struct {
-	Kind string
-	Name string
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 type FactExitSummary struct {
-	Normal []string
-	Error  []string
+	Normal []string `json:"normal"`
+	Error  []string `json:"error"`
 }
 
 type FactAliasSet struct {
-	ID            string
-	Members       []string
-	AffectedPaths []string
-	Mutated       bool
+	ID            string   `json:"id"`
+	Members       []string `json:"members"`
+	AffectedPaths []string `json:"affected_paths"`
+	Mutated       bool     `json:"mutated"`
 }
 
 type FactEffectSummary struct {
-	Required []string
-	Provided []string
+	Required []string `json:"required"`
+	Provided []string `json:"provided"`
 }
 
 // FactTransform is a lightweight descriptive record used by diagnostics,
@@ -145,29 +157,31 @@ type FactTransform struct {
 }
 
 type FactSnapshot struct {
-	Parameters         []string
-	Returns            []string
-	Consumed           []string
-	Produced           []string
-	InvalidatedRegions []string
-	RebasedStores      []string
-	RequiredEffects    []string
-	RequiredInterfaces []string
-	Ensured            []string
-	Refined            []string
-	Widened            []string
-	ErrorExits         []string
-	StoreDeps          []string
-	PathFacts          []FactPath
-	AliasClasses       []string
-	HandleStoreDeps    []string
-	RegionDeps         []string
+	Parameters         []string   `json:"parameters"`
+	Returns            []string   `json:"returns"`
+	Consumed           []string   `json:"consumed"`
+	Produced           []string   `json:"produced"`
+	InvalidatedRegions []string   `json:"invalidated_regions"`
+	RebasedStores      []string   `json:"rebased_stores"`
+	RequiredEffects    []string   `json:"required_effects"`
+	RequiredInterfaces []string   `json:"required_interfaces"`
+	Ensured            []string   `json:"ensured"`
+	Refined            []string   `json:"refined"`
+	Widened            []string   `json:"widened"`
+	ErrorExits         []string   `json:"error_exits"`
+	StoreDeps          []string   `json:"store_deps"`
+	PathFacts          []FactPath `json:"path_facts"`
+	AliasClasses       []string   `json:"alias_classes"`
+	HandleStoreDeps    []string   `json:"handle_store_deps"`
+	RegionDeps         []string   `json:"region_deps"`
 }
 
 func FormatFactTraceContract() string {
 	keys := append([]string(nil), SupportedFactTraceFilterKeys...)
 	sort.Strings(keys)
-	return "contract: version=" + FactTraceFormatVersion + " order=kind,target,class,reason,source summary=mode=summary filters=" + strings.Join(keys, "|")
+	matchers := append([]string(nil), SupportedFactTraceFilterMatchers...)
+	sort.Strings(matchers)
+	return "contract: version=" + FactTraceFormatVersion + " order=kind,target,class,reason,source summary=mode=eq:" + FactTraceSummaryMode + " json=format=eq:" + FactTraceJSONFormat + " matchers=" + strings.Join(matchers, "|") + " filters=" + strings.Join(keys, "|")
 }
 
 type RefinementFacts = GuardFactSet

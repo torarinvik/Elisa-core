@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -267,5 +268,47 @@ func TestCompileServerRequestSupportsIRInterpretAndLLVM(t *testing.T) {
 	}
 	if !strings.Contains(llvmResp.Output, "define i64 @main()") {
 		t.Fatalf("expected llvm response to contain main definition, got:\n%s", llvmResp.Output)
+	}
+}
+
+func TestCompileServerRequestSupportsFactTraceV2Filter(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+	source, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("failed to read fact interface fixture: %v", err)
+	}
+
+	resp, status := executeCompileServerRequest(compileServerRequest{
+		Mode:     "facts",
+		Filename: filepath.Base(fixturePath),
+		Source:   string(source),
+		Filter:   "function=eq:fact_interface_rules,class=eq:interface,format=eq:json",
+	})
+	if status != http.StatusOK || !resp.OK {
+		t.Fatalf("expected compile server facts request to succeed, status=%d resp=%+v", status, resp)
+	}
+	var report struct {
+		Version   string `json:"version"`
+		Format    string `json:"format"`
+		Functions []struct {
+			Name string `json:"name"`
+		} `json:"functions"`
+	}
+	if err := json.Unmarshal([]byte(resp.Output), &report); err != nil {
+		t.Fatalf("failed to parse fact trace JSON: %v\n%s", err, resp.Output)
+	}
+	if report.Version != "fact-trace-v2" || report.Format != "json" || len(report.Functions) != 1 || report.Functions[0].Name != "fact_interface_rules" {
+		t.Fatalf("unexpected fact trace JSON response: %#v", report)
+	}
+
+	resp, status = executeCompileServerRequest(compileServerRequest{
+		Mode:     "facts",
+		Filename: filepath.Base(fixturePath),
+		Source:   string(source),
+		Filter:   "kind=widen",
+	})
+	if status != http.StatusBadRequest || resp.OK || resp.ErrorCode != "fact_trace_filter" {
+		t.Fatalf("expected compile server filter failure to be tagged, status=%d resp=%+v", status, resp)
 	}
 }
