@@ -845,13 +845,17 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 	returnIsolation := summarizeReturnIsolation(fn, fnType, partitions)
 	fnType.ReturnIsolation = returnIsolation
 	fnType.ReturnIsolationKnown = true
+	factTransforms := a.currentConservativeCallWideningTransforms()
+	factTransforms = append(factTransforms, factTransformsFromCFGGuards(cfg)...)
+	factTransforms = append(factTransforms, factTransformsFromPoststates(fnType)...)
+	factTransforms = dedupeAndSortFactTransforms(factTransforms)
 	analysis := &FunctionAnalysis{
 		CFG:             cfg,
 		Partitions:      partitions,
 		CleanupPlan:     cleanupPlan,
 		SinkParams:      append([]bool(nil), fnType.SinkParams...),
 		ReturnIsolation: returnIsolation,
-		FactTransforms:  a.currentConservativeCallWideningTransforms(),
+		FactTransforms:  factTransforms,
 	}
 	a.functionAnalyses[fn] = analysis
 }
@@ -874,13 +878,189 @@ func (a *Analyzer) currentConservativeCallWideningTransforms() []FactTransform {
 			})
 		}
 	}
-	sort.Slice(transforms, func(i, j int) bool {
-		if transforms[i].Target != transforms[j].Target {
-			return transforms[i].Target < transforms[j].Target
+	return dedupeAndSortFactTransforms(transforms)
+}
+
+func factTransformsFromCFGGuards(cfg *CFG) []FactTransform {
+	if cfg == nil {
+		return nil
+	}
+	transforms := make([]FactTransform, 0)
+	for _, block := range cfg.Blocks {
+		for _, edge := range block.Edges {
+			transforms = append(transforms, factTransformsFromGuardFactSet(edge.Guard)...)
 		}
-		return transforms[i].Reason < transforms[j].Reason
-	})
+	}
+	return dedupeAndSortFactTransforms(transforms)
+}
+
+func factTransformsFromPoststates(fnType *FuncType) []FactTransform {
+	if fnType == nil || len(fnType.Poststates) == 0 {
+		return nil
+	}
+	transforms := make([]FactTransform, 0, len(fnType.Poststates))
+	for _, poststate := range fnType.Poststates {
+		target := functionPoststateTargetName(fnType, poststate)
+		if target == "" {
+			continue
+		}
+		transform := FactTransform{
+			Kind:   FactTransformEnsure,
+			Target: target,
+			Source: "ensures " + funcPoststateConditionLabel(poststate.Condition),
+		}
+		switch poststate.Kind {
+		case FuncPoststateKindNamedState:
+			transform.Classes = []FactClass{FactTypestate}
+			transform.Reason = "ensures typestate " + strings.Join(poststate.StateCases, "|")
+		case FuncPoststateKindRefState:
+			transform.Classes = []FactClass{FactRefState}
+			transform.Reason = "ensures refstate " + ast.RefStateMarker(ast.RefState(poststate.RefState))
+		case FuncPoststateKindPreserve:
+			transform.Classes = []FactClass{FactTypestate, FactRefState}
+			transform.Reason = "ensures preserve"
+		default:
+			continue
+		}
+		transforms = append(transforms, transform)
+	}
+	return dedupeAndSortFactTransforms(transforms)
+}
+
+func functionPoststateTargetName(fnType *FuncType, poststate FuncPoststate) string {
+	base := functionParamName(fnType, poststate.ParamIndex)
+	if base == "" {
+		return ""
+	}
+	return base + borrowAnnotationPathSuffix(poststate.Path)
+}
+
+func factTransformsFromGuardFactSet(guards GuardFactSet) []FactTransform {
+	transforms := make([]FactTransform, 0)
+	for _, target := range sortedBoolFactKeys(guards.NonNull) {
+		transforms = append(transforms, FactTransform{
+			Kind:    FactTransformRefine,
+			Classes: []FactClass{FactRefState},
+			Target:  target,
+			Source:  "control-flow guard",
+			Reason:  "guard proves non-null",
+		})
+	}
+	for _, target := range sortedBoolFactKeys(guards.Null) {
+		transforms = append(transforms, FactTransform{
+			Kind:    FactTransformRefine,
+			Classes: []FactClass{FactRefState},
+			Target:  target,
+			Source:  "control-flow guard",
+			Reason:  "guard proves null",
+		})
+	}
+	variantTargets := make([]string, 0, len(guards.PackedVariants))
+	for target := range guards.PackedVariants {
+		variantTargets = append(variantTargets, target)
+	}
+	sort.Strings(variantTargets)
+	for _, target := range variantTargets {
+		guard := guards.PackedVariants[target]
+		if guard.EnumName == "" || guard.VariantName == "" {
+			continue
+		}
+		transforms = append(transforms, FactTransform{
+			Kind:    FactTransformRefine,
+			Classes: []FactClass{FactTypestate},
+			Target:  target,
+			Source:  "control-flow guard",
+			Reason:  "guard proves variant " + guard.EnumName + "." + guard.VariantName,
+		})
+	}
+	lefts := make([]string, 0, len(guards.Leq))
+	for left := range guards.Leq {
+		lefts = append(lefts, left)
+	}
+	sort.Strings(lefts)
+	for _, left := range lefts {
+		rights := sortedBoolFactKeys(guards.Leq[left])
+		for _, right := range rights {
+			transforms = append(transforms, FactTransform{
+				Kind:    FactTransformRefine,
+				Classes: []FactClass{FactOptimization},
+				Target:  left,
+				Source:  "control-flow guard",
+				Reason:  "guard proves <= " + right,
+			})
+		}
+	}
 	return transforms
+}
+
+func sortedBoolFactKeys(values map[string]bool) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key, value := range values {
+		if key != "" && value {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func dedupeAndSortFactTransforms(transforms []FactTransform) []FactTransform {
+	if len(transforms) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]FactTransform, 0, len(transforms))
+	for _, transform := range transforms {
+		if transform.Kind == "" {
+			continue
+		}
+		key := factTransformDedupeKey(transform)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, transform)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		if out[i].Target != out[j].Target {
+			return out[i].Target < out[j].Target
+		}
+		if factClassListKey(out[i].Classes) != factClassListKey(out[j].Classes) {
+			return factClassListKey(out[i].Classes) < factClassListKey(out[j].Classes)
+		}
+		if out[i].Reason != out[j].Reason {
+			return out[i].Reason < out[j].Reason
+		}
+		return out[i].Source < out[j].Source
+	})
+	return out
+}
+
+func factTransformDedupeKey(transform FactTransform) string {
+	return strings.Join([]string{
+		transform.Kind.String(),
+		transform.Target,
+		factClassListKey(transform.Classes),
+		transform.Source,
+		transform.Reason,
+	}, "\x00")
+}
+
+func factClassListKey(classes []FactClass) string {
+	if len(classes) == 0 {
+		return ""
+	}
+	values := make([]string, 0, len(classes))
+	for _, class := range classes {
+		values = append(values, class.String())
+	}
+	return strings.Join(values, ",")
 }
 
 func configureCFGParamLocations(cfg *CFG, fnType *FuncType) {

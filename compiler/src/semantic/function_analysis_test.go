@@ -43,6 +43,26 @@ func analyzeFunctionAnalysisTestSourceWithSemanticErrors(t *testing.T, filename 
 	return Analyze(file)
 }
 
+func hasFactTransform(transforms []FactTransform, kind FactTransformKind, class FactClass, target string, reason string) bool {
+	for _, transform := range transforms {
+		if transform.Kind != kind || transform.Target != target || transform.Reason != reason {
+			continue
+		}
+		foundClass := false
+		for _, candidate := range transform.Classes {
+			if candidate == class {
+				foundClass = true
+				break
+			}
+		}
+		if !foundClass {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func TestAnalyzeInfersDirectSinkParamSummary(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "direct_sink_summary.llcontext", `extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
 
@@ -213,6 +233,9 @@ def read_box(box: heap Box&?) -> i32:
 	if !sawNonNullGuard {
 		t.Fatalf("expected entry CFG edges to carry @guard_nonnull facts, got %#v", analysis.CFG.Blocks[analysis.CFG.Entry].Edges)
 	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRefine, FactRefState, "box", "guard proves non-null") {
+		t.Fatalf("expected function analysis to expose non-null refine transform, got %#v", analysis.FactTransforms)
+	}
 }
 
 func TestAnalyzeFunctionAnalysisCFGRecordsGuardVariantCallFacts(t *testing.T) {
@@ -244,6 +267,9 @@ def fold(node: Expr) -> i32:
 	}
 	if !sawVariantGuard {
 		t.Fatalf("expected entry CFG edges to carry @guard_variant facts, got %#v", analysis.CFG.Blocks[analysis.CFG.Entry].Edges)
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRefine, FactTypestate, "node", "guard proves variant Expr.Int") {
+		t.Fatalf("expected function analysis to expose variant refine transform, got %#v", analysis.FactTransforms)
 	}
 }
 
@@ -278,6 +304,9 @@ def fold(node: Lua.Expr) -> i64:
 	}
 	if !sawVariantGuard {
 		t.Fatalf("expected entry CFG edges to carry tree @guard_variant facts, got %#v", analysis.CFG.Blocks[analysis.CFG.Entry].Edges)
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRefine, FactTypestate, "node", "guard proves variant Lua.Expr.Binary") {
+		t.Fatalf("expected function analysis to expose tree variant refine transform, got %#v", analysis.FactTransforms)
 	}
 }
 

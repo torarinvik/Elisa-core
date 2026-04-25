@@ -40,6 +40,13 @@ def use(job: ParseJob[Pending]&) -> void can[Abort]:
 	if fnType.Poststates[0].Kind != FuncPoststateKindNamedState || len(fnType.Poststates[0].StateCases) != 1 || fnType.Poststates[0].StateCases[0] != "Ready" {
 		t.Fatalf("expected finish_ok poststate to record Ready, got %#v", fnType.Poststates[0])
 	}
+	analysis, ok := result.FunctionAnalysisByName("finish_ok")
+	if !ok || analysis == nil {
+		t.Fatal("expected finish_ok function analysis")
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformEnsure, FactTypestate, "job", "ensures typestate Ready") {
+		t.Fatalf("expected function analysis to expose named-state ensure transform, got %#v", analysis.FactTransforms)
+	}
 }
 
 func TestSemanticEnsuresRejectsWrongNamedStateProof(t *testing.T) {
@@ -91,7 +98,7 @@ def use(node: heap HeapPairNode&) -> void can[Abort]:
 }
 
 func TestSemanticEnsuresDefRefStateProofAndCallRecovery(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "ensures_require_non_null.llcontext", `struct HeapPairNode:
+	result := analyzeFunctionAnalysisTestSource(t, "ensures_require_non_null.llcontext", `struct HeapPairNode:
 	value: i32
 
 def expect_non_null(node: heap HeapPairNode&) -> void:
@@ -104,10 +111,17 @@ def use(node: heap HeapPairNode&?) -> void can[Abort]:
 	require_non_null(node)
 	expect_non_null(node)
 `)
+	analysis, ok := result.FunctionAnalysisByName("require_non_null")
+	if !ok || analysis == nil {
+		t.Fatal("expected require_non_null function analysis")
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformEnsure, FactRefState, "node", "ensures refstate &") {
+		t.Fatalf("expected function analysis to expose refstate ensure transform, got %#v", analysis.FactTransforms)
+	}
 }
 
 func TestSemanticEnsuresPreserveCallRecovery(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "ensures_preserve.llcontext", `struct Player[state Alive | Dead]:
+	result := analyzeFunctionAnalysisTestSource(t, "ensures_preserve.llcontext", `struct Player[state Alive | Dead]:
 	health: mutable int
 	score: mutable int
 
@@ -125,6 +139,13 @@ def use(player: Player[Alive]&) -> void can[Abort]:
 	bump_score(player)
 	expect_alive(player)
 `)
+	analysis, ok := result.FunctionAnalysisByName("bump_score")
+	if !ok || analysis == nil {
+		t.Fatal("expected bump_score function analysis")
+	}
+	if !hasFactTransform(analysis.FactTransforms, FactTransformEnsure, FactTypestate, "player", "ensures preserve") {
+		t.Fatalf("expected function analysis to expose preserve ensure transform, got %#v", analysis.FactTransforms)
+	}
 }
 
 func TestSemanticEnsuresRejectsInvalidPreserveAfterRelevantMutation(t *testing.T) {
