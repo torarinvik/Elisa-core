@@ -469,6 +469,7 @@ Current rules:
 - `node Tree.Member(...)` is canonical sugar for tree construction through an in-scope `alloc` binding
 - `node[span = expr] Tree.Member(...)` injects the common `span` field without repeating it in the constructor arguments
 - `node[alloc = owner, span = expr] Tree.Member(...)` is the explicit-owner form for parser helpers that name the arena something other than `alloc`
+- in the fact-core model, `node[...]` is a `produce` transform: it creates a fresh tree value with representation, allocator/store, and common-field facts rather than a pure value expression
 - `left.span + right.span` is the canonical span algebra form for span-like parser ranges; it first uses a visible `SpanLike` static-interface impl when present, then falls back to legacy helper functions such as `combine_span`
 - inside an exact `rewrite` arm, `default` rebuilds the current exact member using the already rewritten child results
 - `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
@@ -1035,6 +1036,7 @@ Current rules:
 - `values.get_or_insert(key): ...` rewrites the trailing block into the default-value argument for `get_or_insert`
 - `values.entry(key).get_or_insert(): ...` does the same thing for the entry API surface
 - the generic syntax parses for more than one key family, but the current runtime-backed helper surface is primarily validated for `dict[dstr[key_shape], V]` unless matching helper overloads are supplied
+- packed and row store values should be read through the fact-core lens: mutable local stores carry store-dependency facts, `freeze(move store)` consumes the local store and rebases handles onto frozen-store facts, and row scans may add optimization facts such as readonly, contiguous, or exact extent
 
 ## Pool scopes and `parallel for`
 
@@ -1205,6 +1207,7 @@ Current rules:
 - ordinary function bodies must prove every applicable `ensures` clause on each normal return path
 - call analysis applies the declared poststate to the caller-visible tracked type after the call when the target argument path is known
 - `ensures` is static effect typing, not a runtime contract/assertion feature
+- in the fact-core model, `ensures` is an explicit `ensure` transform on normal return paths; error paths need their own explicit story and do not silently inherit success poststates
 
 ## Conservative call-site auto-borrow
 

@@ -56,6 +56,20 @@ func TestAnalyzeRejectsInvalidGroupedCheckpointTarget(t *testing.T) {
 	}
 }
 
+func TestAnalyzeInvalidatedRegionRefDiagnosticUsesFactVocabulary(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_fact_invalidated_use.llcontext", `def build(seed: i32) -> i32:
+    region scratch(1024)
+    mark scratch as cp
+    value: scratch i32& = new[scratch] seed
+    restore scratch from cp
+    return value[0u]
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `reference "value" cannot be used: region dependency facts were invalidated by restore of region "scratch" from checkpoint "cp"`) {
+		t.Fatalf("expected invalidated region fact diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
 	l := lexer.New("legacy_reverse_iter_error.llcontext", []byte(`def build(items: darray[int]) -> void:
     for rev value in items:

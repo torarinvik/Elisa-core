@@ -2,6 +2,12 @@
 
 This document describes the **full typestate story** in Contextlang.
 
+Typestate is now described as one fact class inside the broader
+`Value = Representation + Facts` model from
+`22-value-fact-core.md`. This document remains the detailed guide for the
+typestate-specific rules; the core fact document explains how typestate relates
+to refstate, shapes, regions, stores, effects, aliases, and optimization facts.
+
 It is intentionally broader than the pointer-only typestate documents:
 
 - `02-pointer-typestate-practical.md` focuses on nullable/non-null pointers in practice
@@ -24,6 +30,13 @@ In short:
 > Some typestate is **explicit in types**.
 > Some typestate is **inferred from control flow**.
 > Some typestate is **recomputed or widened after mutation**.
+
+In fact-core terms:
+
+- control flow usually `refine`s typestate/refstate facts
+- mutation usually `recompute`s or `widen`s those facts
+- calls may `ensure` poststate facts, or `widen` when no checked poststate is available
+- region/store operations may `invalidate` or `rebase` facts that typestate alone cannot explain
 
 ---
 

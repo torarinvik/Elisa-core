@@ -2,6 +2,12 @@
 
 This note records the canonical direction for keeping llcontext low-level at the bottom and DSL-like at the top without splitting the language into unrelated feature islands.
 
+The guiding rule is the fact-core rule from `22-value-fact-core.md`: tree and
+grammar sugar may hide constructor boilerplate, but it must not hide fact
+transitions. `node[...]` is a producing operation tied to an allocator/store;
+`freeze(move store)` is consume + rebase + produce; parser recovery and region
+rollback can invalidate facts derived from speculative allocations.
+
 ## Interface spelling
 
 Compile-time interfaces are available as `protocol` for capability-style contracts and `static interface` for the explicit low-level spelling.

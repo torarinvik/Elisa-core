@@ -284,9 +284,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if refState, ok := a.regionRefStateForExpr(n.Value); ok {
 			if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil {
 				if _, isRef := valueType.(*RefType); isRef {
-					a.errorf(n.Pos(), "cannot return reference allocated from local region %q", region.Name)
+					a.errorf(n.Pos(), localRegionEscapeMessage("reference", region.Name))
 				} else {
-					a.errorf(n.Pos(), "cannot return value depending on local region %q", region.Name)
+					a.errorf(n.Pos(), localRegionEscapeMessage("value", region.Name))
 				}
 			}
 			if summary, ok := abstractParamOnlyRegionRefState(refState); ok {

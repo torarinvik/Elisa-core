@@ -3,6 +3,13 @@
 This document defines the sound unified model for low-level parallel features in
 `llcontext`.
 
+This is the packed/concurrency companion to `22-value-fact-core.md`. The older
+"three axes" language below maps directly onto fact classes:
+
+- representation/layout facts
+- storage, region, and store provenance facts
+- usage, protocol, and effect facts
+
 The language goal here is not “high-level concurrency made fashionable”. It is:
 
 - keep packed enums cheap enough for hot compiler IR and AST work

@@ -35,7 +35,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 						if _, isRef := result.(*RefType); isRef {
 							label = "reference"
 						}
-						a.errorf(n.Pos(), "%s %q is invalid after %s", label, n.Name, dep.InvalidatedBy)
+						a.errorf(n.Pos(), invalidatedRegionFactUseMessage(label, n.Name, dep.InvalidatedBy))
 						return
 					}
 				}
@@ -4759,7 +4759,7 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 		return
 	}
 	if region, _, ok := firstLiveRegionDependency(state); ok && region != nil {
-		a.errorf(arg.Pos(), "argument to %q cannot depend on local region %q", callName, region.Name)
+		a.errorf(arg.Pos(), threadLocalRegionDependencyMessage(callName, region.Name))
 		return
 	}
 	if store, dep, ok := firstNonShareablePackedStoreDependency(state); ok {
@@ -4770,7 +4770,7 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 		if dep.Type != nil {
 			label = dep.Type.String()
 		}
-		a.errorf(arg.Pos(), "argument to %q cannot depend on unpublished packed store %q", callName, label)
+		a.errorf(arg.Pos(), threadUnpublishedStoreDependencyMessage(callName, label))
 	}
 }
 
@@ -8879,7 +8879,7 @@ func (a *Analyzer) reportInvalidRegionUse(expr ast.Expr, valueType Type) {
 		if _, isRef := valueType.(*RefType); isRef {
 			label = "reference"
 		}
-		a.errorf(expr.Pos(), "%s %q is invalid after %s", label, affineValueDisplayName(expr), dep.InvalidatedBy)
+		a.errorf(expr.Pos(), invalidatedRegionFactUseMessage(label, affineValueDisplayName(expr), dep.InvalidatedBy))
 	}
 }
 

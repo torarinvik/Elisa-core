@@ -318,9 +318,9 @@ func (a *Analyzer) recordLambdaReturnExpr(value ast.Expr, valueType Type) {
 	if refState, ok := a.regionRefStateForExpr(value); ok {
 		if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil {
 			if _, isRef := valueType.(*RefType); isRef {
-				a.errorf(value.Pos(), "cannot return reference allocated from local region %q", region.Name)
+				a.errorf(value.Pos(), localRegionEscapeMessage("reference", region.Name))
 			} else {
-				a.errorf(value.Pos(), "cannot return value depending on local region %q", region.Name)
+				a.errorf(value.Pos(), localRegionEscapeMessage("value", region.Name))
 			}
 		}
 		if hasRegionProvenance(refState) {
