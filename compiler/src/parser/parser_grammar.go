@@ -136,6 +136,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	tokenSets = normalizeGrammarTokenSetItemNames(tokenSets)
 	p.validateGrammarAliasCycles(grammarAliases)
 	p.validateGrammarFnApplications(grammarFns, grammarAliases, tokenSets, productions)
+	p.validateGrammarProductionBodies(grammarFns, productions)
 
 	return &ast.GrammarDecl{
 		Position:         pos,
@@ -1050,6 +1051,56 @@ func grammarFnExprArg(term ast.GrammarTerm) ast.Expr {
 	return nil
 }
 
+func (p *Parser) validateGrammarProductionBodies(grammarFns []ast.GrammarFnDecl, productions []ast.GrammarProductionDecl) {
+	for _, production := range productions {
+		p.validateGrammarProductionTermSequence(production.Name, production.Terms)
+	}
+}
+
+func (p *Parser) validateGrammarProductionTermSequence(productionName string, terms []ast.GrammarTerm) {
+	for _, term := range terms {
+		p.validateGrammarProductionTerm(productionName, term)
+	}
+}
+
+func (p *Parser) validateGrammarProductionTerm(productionName string, term ast.GrammarTerm) {
+	switch n := term.(type) {
+	case *ast.GrammarBindTerm:
+		p.validateGrammarProductionTerm(productionName, n.Term)
+	case *ast.GrammarAssignTerm:
+		p.validateGrammarProductionTerm(productionName, n.Term)
+	case *ast.GrammarReturnTerm:
+		// valid
+	case *ast.GrammarPassTerm:
+		// valid
+	case *ast.GrammarSeqTerm:
+		for _, seqTerm := range n.Terms {
+			p.validateGrammarProductionTerm(productionName, seqTerm)
+		}
+	case *ast.GrammarChoiceTerm:
+		for _, opt := range n.Options {
+			p.validateGrammarProductionTerm(productionName, opt)
+		}
+	case *ast.GrammarOptionalTerm, *ast.GrammarRequiredTerm, *ast.GrammarDelimitedTerm,
+		*ast.GrammarLookaheadTerm, *ast.GrammarGuardTerm, *ast.GrammarAttemptTerm,
+		*ast.GrammarWhenTerm, *ast.GrammarRecoverTerm:
+		// valid
+	case *ast.GrammarListTerm, *ast.GrammarRepeatTerm, *ast.GrammarFlatRepeatTerm, *ast.GrammarSeparatedTerm:
+		// valid
+	case *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
+		// valid
+	case *ast.GrammarExprTerm, *ast.GrammarMapListTerm, *ast.GrammarSingletonTerm, *ast.GrammarEmptyTerm,
+		*ast.GrammarConcatTerm, *ast.GrammarCutTerm:
+		// valid
+	case *ast.GrammarCallTerm, *ast.GrammarApplyTerm, *ast.GrammarTokenTerm, *ast.GrammarTokenKindTerm,
+		*ast.GrammarTokenSetRefTerm, *ast.GrammarFirstTerm, *ast.GrammarInfixTableTerm:
+		// valid
+	default:
+		pos := term.Pos()
+		p.errorAt(pos, "grammar production %q contains an unsupported construct at %s; expected grammar terms such as token matches, bindings, choices, sequences, or helper calls", productionName, pos)
+	}
+}
+
 func (p *Parser) parseGrammarRecoveryDecl() ast.GrammarRecoveryDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("recovery")
@@ -1344,6 +1395,13 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 			p.expectNewline()
 		}
 		return &ast.GrammarBindTerm{Position: pos, Name: name, Term: term}
+	}
+	if p.peek() == lexer.TOKEN_MUTABLE || p.peek() == lexer.TOKEN_IF || p.peek() == lexer.TOKEN_WHILE || p.peek() == lexer.TOKEN_MATCH {
+		pos := p.cur().Pos
+		keyword := p.cur().Text
+		p.errorAt(pos, "grammar production body cannot contain general statements (found %q); grammar terms should use token matches, bindings, choices, or helper calls, not general control flow or local variable declarations", keyword)
+		p.advance()
+		return nil
 	}
 	term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
 	if grammarTermNeedsTrailingNewline(term, p.peek()) {

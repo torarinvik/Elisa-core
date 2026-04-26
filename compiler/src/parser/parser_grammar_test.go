@@ -3203,6 +3203,35 @@ func TestParseGrammarDeclPreservesNonCallMemberExpressions(t *testing.T) {
 	}
 }
 
+func TestParseGrammarProductionBodyRejectsNonGrammarStatements(t *testing.T) {
+	_, errs := parseSourceFile(t, `grammar SMLFrontend:
+    token:
+        REC "rec"
+        WHILE "while"
+    val_decl() -> SMLDecl:
+        is_recursive: mutable bool = false
+        if is_recursive:
+            .REC
+        .IDENT
+`)
+	for _, want := range []string{
+		"grammar production body cannot contain general statements (found \"mutable\")",
+		"grammar production body cannot contain general statements (found \"if\")",
+		"grammar terms should use token matches, bindings, choices",
+	} {
+		found := false
+		for _, err := range errs {
+			if strings.Contains(err, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected parser errors to contain %q, got:\n%s", want, strings.Join(errs, "\n"))
+		}
+	}
+}
+
 func formatExprForTest(t *testing.T, expr ast.Expr) string {
 	t.Helper()
 	if expr == nil {
