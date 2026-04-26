@@ -6841,6 +6841,14 @@ func (a *Analyzer) analyzeLiteralMatchPatternExpr(pos lexer.Pos, literalExpr ast
 }
 
 func (a *Analyzer) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *EnumVariant, qualified string, nested bool) []*ast.MatchPatternArg {
+	return a.resolveMatchPatternArgsWithOptions(pattern, variant, qualified, nested, false)
+}
+
+func (a *Analyzer) resolvePartialMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *EnumVariant, qualified string, nested bool) []*ast.MatchPatternArg {
+	return a.resolveMatchPatternArgsWithOptions(pattern, variant, qualified, nested, true)
+}
+
+func (a *Analyzer) resolveMatchPatternArgsWithOptions(pattern *ast.MatchVariantPattern, variant *EnumVariant, qualified string, nested bool, allowPartialNamed bool) []*ast.MatchPatternArg {
 	ordered := make([]*ast.MatchPatternArg, len(variant.Payload))
 	if len(pattern.Args) == 0 {
 		pattern.ResolvedArgs = ordered
@@ -6895,7 +6903,7 @@ func (a *Analyzer) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, var
 			missing = append(missing, variant.PayloadLabel(i))
 		}
 	}
-	if len(missing) > 0 {
+	if len(missing) > 0 && !allowPartialNamed {
 		sort.Strings(missing)
 		a.errorf(pattern.Pos(), "%s is missing named payload patterns for: %s", matchPatternContext(qualified, nested), strings.Join(missing, ", "))
 	}
@@ -7162,7 +7170,7 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 			if !ok {
 				return
 			}
-			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
 			for i, arg := range orderedArgs {
 				if arg == nil {
 					continue
@@ -7174,7 +7182,7 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 			if !ok {
 				return
 			}
-			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
 			for i, arg := range orderedArgs {
 				if arg == nil {
 					continue
@@ -7481,7 +7489,7 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 			if !ok {
 				return
 			}
-			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
 			for i, arg := range orderedArgs {
 				if arg == nil {
 					continue
@@ -7500,7 +7508,7 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 			if !ok {
 				return
 			}
-			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
 			for i, arg := range orderedArgs {
 				if arg == nil {
 					continue

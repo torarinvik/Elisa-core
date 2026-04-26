@@ -598,8 +598,8 @@ func TestParseGrammarDeclAllowsTokenSets(t *testing.T) {
 	if _, ok := decl.TokenSets[1].Terms[0].(*ast.GrammarTokenSetRefTerm); !ok {
 		t.Fatalf("expected nested token set item to reference token set, got %T", decl.TokenSets[1].Terms[0])
 	}
-	if kind, ok := decl.TokenSets[1].Terms[1].(*ast.GrammarTokenKindTerm); !ok || kind.Kind != "RPAREN" {
-		t.Fatalf("expected non-set bare item to become token kind RPAREN, got %T %#v", decl.TokenSets[1].Terms[1], decl.TokenSets[1].Terms[1])
+	if ref, ok := decl.TokenSets[1].Terms[1].(*ast.GrammarTokenSetRefTerm); !ok || ref.Name != "RPAREN" {
+		t.Fatalf("expected parser to preserve bare token-set item for lowering, got %T %#v", decl.TokenSets[1].Terms[1], decl.TokenSets[1].Terms[1])
 	}
 	production := decl.Productions[0]
 	assign, ok := production.Terms[0].(*ast.GrammarBindTerm)

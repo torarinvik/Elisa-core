@@ -4,6 +4,50 @@ This note documents implemented source-language features that landed after many 
 
 Unlike several of the earlier files here, this is not a forward-looking proposal. It is a practical reference for syntax the current compiler accepts today.
 
+## Variant `is` payload patterns
+
+Variant `is` tests can destructure named payloads directly. Named payload patterns in `is` tests may be partial, so a condition can inspect or bind only the fields it needs.
+
+```context
+def is_nil_left(node: Lua.Expr) -> bool:
+    return node is Lua.Expr.Binary(left: Lua.Expr.Nil)
+
+def right_span(node: Lua.Expr) -> i64:
+    if node is Lua.Expr.Binary(right: rhs):
+        return rhs.span
+    return 0
+```
+
+Current rules:
+
+- `Variant(field: pattern)` works for enum and tree-category variant `is` tests when the variant declares named payloads
+- named payload patterns in `is` expressions and direct condition patterns may omit fields; omitted fields are ignored
+- positional payload patterns still use the full variant arity
+- positional and named payload patterns cannot be mixed in one variant pattern
+- ordinary `match` arms remain exhaustive for named payload patterns, so `match value: Type.Variant(field: x): ...` must still name every payload field
+
+## Optional AST payloads
+
+Optional value types can be used directly in structs and tree payloads, which is preferable to paired `has_*` booleans plus dummy sentinel values.
+
+```context
+struct SMLDatatypeConstructor:
+    constructor_span: SMLSpan
+    name_id: SMLNameId
+    payload_type: SMLType.Type?
+
+tree SML:
+    node Decl:
+        Structure(name_id: SMLNameId, signature_path?: SMLNamePath, decls: darray[Decl])
+```
+
+Constructors use the ordinary optional surface: pass the present value when it exists, or `null` when it does not. Consumers should use `if let` to unwrap the optional.
+
+```context
+if let payload_type = constructor.payload_type:
+    use_payload(payload_type)
+```
+
 ## Grammar recovery policies
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.
@@ -89,6 +133,26 @@ block() -> Pascal.Stmt:
     return zeroed as Pascal.Stmt
 ```
 
+Shared helper grammars can define common sync fragments once and importing grammars can compose them into local sets or use them directly in lookahead choices.
+
+```context
+grammar PascalListGrammar over Token using ParserState:
+    token:
+        EOF
+
+    tokenset FileEndSync:
+        EOF
+
+grammar PascalExprGrammar over Token using ParserState uses PascalListGrammar:
+    tokenset RParenSync:
+        RPAREN
+        FileEndSync
+
+    atom() -> Pascal.Expr:
+        lookahead(.LPAREN | FileEndSync)
+        return zeroed as Pascal.Expr
+```
+
 Current rules:
 
 - `tokenset Name:` declares a grammar-scoped set of stop terms
@@ -98,7 +162,8 @@ Current rules:
 - `tokenset Name = A, B, token(TokenKind.EOF)` is also accepted for compact one-line sets
 - bare `Name` inside `until(...)` or recovery `until Name` is parsed as a token-set reference
 - `lookahead(Name)` can reference a token set and lowers as lookahead over a choice of the set terms
-- token sets from grammars listed in `uses` are available to the using grammar, matching recovery policies and infix tables
+- token sets from grammars listed in `uses` are available to the using grammar, matching recovery policies and infix tables; imported set names resolve before bare token-kind fallback
+- token-set names can appear in ordinary grammar-term choices, such as `lookahead(.LPAREN | FileEndSync)`
 - lowering expands token-set references into the existing explicit token checks, so there is no runtime token-set object
 - prefer token sets for recurring parser sync concepts such as `StatementSync`, `BlockEndSync`, `DeclSync`, and `ExprEndSync`
 

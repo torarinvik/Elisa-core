@@ -1955,6 +1955,61 @@ grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:
 	}
 }
 
+func TestLowerFileStatefulUsesClauseResolvesImportedTokenSets(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalBaseGrammar over Token using ParserState:
+	cursor state
+	token_kind TokenKind
+	token_field kind
+	current current_token
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	token:
+		EOF
+		RPAREN ")"
+	tokenset FileEndSync:
+		EOF
+
+grammar PascalArgsGrammar over Token using ParserState uses PascalBaseGrammar:
+	cursor state
+	token_kind TokenKind
+	token_field kind
+	current current_token
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	token:
+		IDENT
+		LPAREN "("
+		COMMA ","
+	tokenset RParenOrFileSync:
+		RPAREN
+		FileEndSync
+	grammarfn separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
+		separated item by sep until(stop)
+	args() -> darray[Token]:
+		lookahead(.LPAREN | FileEndSync)
+		values = apply separated_by(token(TokenKind.IDENT), RParenOrFileSync)
+		eof_values = apply separated_by(token(TokenKind.IDENT), FileEndSync)
+		return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.current_token().kind == TokenKind.EOF",
+		"state.current_token().kind == TokenKind.RPAREN",
+		"state.expect_kind(TokenKind.LPAREN)",
+		"state.expect_kind(TokenKind.COMMA)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected uses-imported token set lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "TokenKind.FileEndSync") {
+		t.Fatalf("expected imported token set refs to resolve before token-kind lowering, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulExposesTypedHeaderChannelDefaultsAsLocals(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor parser

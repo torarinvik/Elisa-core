@@ -459,6 +459,22 @@ def child_span(node: Lua.Expr) -> i64:
 
 def starts_with_nil(node: Lua.Expr) -> bool:
 	return node is Lua.Expr.Binary(Lua.Expr.Nil, _)
+
+def has_nil_left_named(node: Lua.Expr) -> bool:
+	return node is Lua.Expr.Binary(left: Lua.Expr.Nil)
+
+def has_any_right_named(node: Lua.Expr) -> bool:
+	return node is Lua.Expr.Binary(right: _)
+
+def branch_on_nil_left_named(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Binary(left: Lua.Expr.Nil):
+		return 1
+	return 0
+
+def bind_right_named(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Binary(right: rhs):
+		return rhs.span
+	return 0
 `)
 }
 
@@ -645,6 +661,28 @@ def eval(node: Lua.Expr) -> i64:
 		Lua.Expr.Binary(left: Lua.Expr.Int(value: lhs), right: right):
 			lhs + eval(right)
 `)
+}
+
+func TestAnalyzeRejectsPartialNamedTreeMatchArm(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_match_partial_named_reject.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def child_span(node: Lua.Expr) -> i64:
+	match node:
+		Lua.Expr.Binary(left: Lua.Expr.Nil):
+			return 1
+		_:
+			return 0
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `match arm "Lua.Expr.Binary" is missing named payload patterns for: right`) {
+		t.Fatalf("expected partial named match arm diagnostic, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeTreeOpenAndViewStatements(t *testing.T) {

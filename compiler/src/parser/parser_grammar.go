@@ -133,7 +133,6 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		productions = append(productions, p.parseGrammarProductionDecls()...)
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	tokenSets = normalizeGrammarTokenSetItemNames(tokenSets)
 	p.validateGrammarAliasCycles(grammarAliases)
 	p.validateGrammarFnApplications(grammarFns, grammarAliases, tokenSets, productions)
 	p.validateGrammarProductionBodies(grammarFns, productions)
@@ -988,6 +987,9 @@ func (p *Parser) validateGrammarApplyArgTypes(kind string, name string, params [
 		}
 		argKind := grammarApplyArgKind(arg, tokenSetNames)
 		if param.Type.Kind == "tokenset" && argKind != "tokenset" {
+			if _, ok := arg.Term.(*ast.GrammarTokenSetRefTerm); ok {
+				continue
+			}
 			p.errorAt(arg.Position, "%s %s argument %q expects tokenset, got %s", kind, name, param.Name, argKind)
 		}
 		if param.Type.Kind == "grammar" && argKind == "tokenset" {

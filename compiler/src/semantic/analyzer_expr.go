@@ -3485,7 +3485,7 @@ func (a *Analyzer) validateEnumVariantIsTargetPattern(pattern *ast.MatchVariantP
 	if pattern == nil || variant == nil {
 		return
 	}
-	orderedArgs := a.resolveMatchPatternArgs(pattern, variant, pattern.EnumName+"."+pattern.Variant, false)
+	orderedArgs := a.resolvePartialMatchPatternArgs(pattern, variant, pattern.EnumName+"."+pattern.Variant, false)
 	for i, arg := range orderedArgs {
 		if arg == nil {
 			continue
@@ -3508,7 +3508,7 @@ func (a *Analyzer) validateTreeVariantIsTargetPattern(pattern *ast.MatchVariantP
 	if pattern == nil || treeType == nil || variant == nil {
 		return
 	}
-	orderedArgs := a.resolveMatchPatternArgs(pattern, variant, treeType.Name+"."+pattern.Variant, false)
+	orderedArgs := a.resolvePartialMatchPatternArgs(pattern, variant, treeType.Name+"."+pattern.Variant, false)
 	for i, arg := range orderedArgs {
 		if arg == nil {
 			continue
@@ -3541,7 +3541,7 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 				a.errorf(p.Pos(), "enum %q has no variant %q", target.Name, p.Variant)
 				return
 			}
-			orderedArgs := a.resolveMatchPatternArgs(p, variant, target.Name+"."+variant.Name, true)
+			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, target.Name+"."+variant.Name, true)
 			for i, arg := range orderedArgs {
 				if arg == nil {
 					continue
@@ -3558,7 +3558,7 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 				a.errorf(p.Pos(), "tree category %q has no variant %q", target.Name, p.Variant)
 				return
 			}
-			orderedArgs := a.resolveMatchPatternArgs(p, variant, target.Name+"."+variant.Name, true)
+			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, target.Name+"."+variant.Name, true)
 			for i, arg := range orderedArgs {
 				if arg == nil {
 					continue
@@ -3600,7 +3600,7 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 			a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
 			return
 		}
-		orderedArgs := a.resolveMatchPatternArgs(p, variant, enumType.Name+"."+variant.Name, true)
+		orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, enumType.Name+"."+variant.Name, true)
 		for i, arg := range orderedArgs {
 			if arg == nil {
 				continue

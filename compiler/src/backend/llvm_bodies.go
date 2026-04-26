@@ -6957,14 +6957,13 @@ func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchV
 			return nil, packedPayloadValueCache{}, err
 		}
 	}
-	hasNestedPattern := false
+	lastNestedPattern := -1
 	for i := range orderedArgs {
 		if orderedArgs[i] != nil && orderedArgs[i].Pattern != nil {
-			hasNestedPattern = true
-			break
+			lastNestedPattern = i
 		}
 	}
-	if !hasNestedPattern {
+	if lastNestedPattern < 0 {
 		C.LLVMBuildBr(s.builder, successBB)
 		return matchedDecodedValue, packedPayloadValueCache{}, nil
 	}
@@ -6985,13 +6984,13 @@ func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchV
 			continue
 		}
 		nextSuccess := successBB
-		if i != len(orderedArgs)-1 {
+		if i != lastNestedPattern {
 			nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
 		}
 		if _, _, err := s.emitMatchPatternTest(arg.Pattern, payloadValues[i], nil, variant.Payload[i], store, nil, nil, nextSuccess, failureBB); err != nil {
 			return nil, packedPayloadValueCache{}, err
 		}
-		if i != len(orderedArgs)-1 {
+		if i != lastNestedPattern {
 			C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
 		}
 	}
@@ -7032,14 +7031,13 @@ func (s *functionState) emitMatchedTreeVariantPayloadPatternTest(pattern *ast.Ma
 			return nil, packedPayloadValueCache{}, err
 		}
 	}
-	hasNestedPattern := false
+	lastNestedPattern := -1
 	for i := range orderedArgs {
 		if orderedArgs[i] != nil && orderedArgs[i].Pattern != nil {
-			hasNestedPattern = true
-			break
+			lastNestedPattern = i
 		}
 	}
-	if !hasNestedPattern {
+	if lastNestedPattern < 0 {
 		C.LLVMBuildBr(s.builder, successBB)
 		return actualValue, packedPayloadValueCache{}, nil
 	}
@@ -7053,13 +7051,13 @@ func (s *functionState) emitMatchedTreeVariantPayloadPatternTest(pattern *ast.Ma
 			continue
 		}
 		nextSuccess := successBB
-		if i != len(orderedArgs)-1 {
+		if i != lastNestedPattern {
 			nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.tree.pattern.next"))
 		}
 		if _, _, err := s.emitMatchPatternTest(arg.Pattern, payloadValues[i], nil, variant.Payload[i], nil, nil, nil, nextSuccess, failureBB); err != nil {
 			return nil, packedPayloadValueCache{}, err
 		}
-		if i != len(orderedArgs)-1 {
+		if i != lastNestedPattern {
 			C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
 		}
 	}

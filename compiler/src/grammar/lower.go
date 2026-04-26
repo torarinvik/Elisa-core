@@ -459,6 +459,8 @@ func normalizeGrammarDeclBeforeFirstSetsInScope(decl *ast.GrammarDecl, grammarSc
 	normalized.RecoveryPolicies = rewriteGrammarRecoveryPoliciesTokenAliases(normalized.RecoveryPolicies, aliasByLiteral)
 	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(normalized.InfixTables, aliasByLiteral)
 	tokenSets := grammarTokenSetMap(normalized.TokenSets)
+	normalized.TokenSets = rewriteGrammarTokenSetBareRefsToKinds(normalized.TokenSets, tokenSets)
+	tokenSets = grammarTokenSetMap(normalized.TokenSets)
 	normalized.TokenSets = resolveGrammarTokenSetsTokenSets(normalized.TokenSets, tokenSets)
 	tokenSets = grammarTokenSetMap(normalized.TokenSets)
 	normalized.RecoveryPolicies = resolveGrammarRecoveryPoliciesTokenSets(normalized.RecoveryPolicies, tokenSets)
@@ -652,6 +654,32 @@ func grammarTokenSetMap(tokenSets []ast.GrammarTokenSetDecl) map[string]ast.Gram
 		return nil
 	}
 	return resolved
+}
+
+func rewriteGrammarTokenSetBareRefsToKinds(tokenSets []ast.GrammarTokenSetDecl, setMap map[string]ast.GrammarTokenSetDecl) []ast.GrammarTokenSetDecl {
+	if len(tokenSets) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
+	for _, tokenSet := range tokenSets {
+		terms := make([]ast.GrammarTerm, 0, len(tokenSet.Terms))
+		for _, term := range tokenSet.Terms {
+			terms = append(terms, rewriteGrammarTokenSetBareRefToKind(term, setMap))
+		}
+		rewritten = append(rewritten, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, Terms: terms})
+	}
+	return rewritten
+}
+
+func rewriteGrammarTokenSetBareRefToKind(term ast.GrammarTerm, setMap map[string]ast.GrammarTokenSetDecl) ast.GrammarTerm {
+	ref, ok := term.(*ast.GrammarTokenSetRefTerm)
+	if !ok {
+		return term
+	}
+	if _, ok := setMap[ref.Name]; ok {
+		return term
+	}
+	return &ast.GrammarTokenKindTerm{Position: ref.Position, Kind: ref.Name}
 }
 
 func grammarFnMap(grammarFns []ast.GrammarFnDecl) map[string]ast.GrammarFnDecl {
@@ -1632,6 +1660,15 @@ func resolveGrammarTermTokenSets(term ast.GrammarTerm, tokenSets map[string]ast.
 			return term
 		}
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: terms}
+	case *ast.GrammarCallTerm:
+		if !n.Explicit && len(n.Args) == 0 {
+			ref := &ast.GrammarTokenSetRefTerm{Position: n.Position, Name: n.Name}
+			terms := resolveGrammarTokenSetStop(ref, tokenSets, nil)
+			if len(terms) != 1 || terms[0] != ref {
+				return &ast.GrammarChoiceTerm{Position: n.Position, Options: terms}
+			}
+		}
+		return term
 	case *ast.GrammarBindTerm:
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
 	case *ast.GrammarAssignTerm:
