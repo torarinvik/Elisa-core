@@ -2,6 +2,22 @@
 # Test helpers - low level Contextlang runtime dialect
 # ============================================================
 
+def fail(message: dstr):
+    can Abort.Panic:
+        panic(message)
+
+
+def assert_true(condition: bool):
+    can Abort.Panic:
+        if not condition:
+            panic("assert_true failed")
+
+
+def assert_false(condition: bool):
+    can Abort.Panic:
+        if condition:
+            panic("assert_false failed")
+
 def assert_eq[T](actual: T, expected: T):
     can Abort.Panic:
         if actual != expected:
