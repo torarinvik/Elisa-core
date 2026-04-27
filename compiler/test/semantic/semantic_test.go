@@ -327,14 +327,17 @@ func loadSourceWithIncludes(t *testing.T, filename string, seen map[string]bool)
 }
 
 func parseIncludeDirective(line string) (string, bool) {
-	if !strings.HasPrefix(line, "# include ") {
-		return "", false
+	for _, prefix := range []string{"# include ", "include "} {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+			return "", false
+		}
+		return rest[1 : len(rest)-1], true
 	}
-	rest := strings.TrimSpace(strings.TrimPrefix(line, "# include "))
-	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
-		return "", false
-	}
-	return rest[1 : len(rest)-1], true
+	return "", false
 }
 
 func TestAnalyzeValidInlineProgram(t *testing.T) {

@@ -1,4 +1,4 @@
-# include "../llcontext_std/contextlang_runtime.llcontext"
+include "../llcontext_std/contextlang_runtime.llcontext"
 
 const JSON_CH_NUL = 0
 const JSON_CH_TAB = 9

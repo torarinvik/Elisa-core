@@ -1,4 +1,4 @@
-# include "../llcontext_std/contextlang_runtime.llcontext"
+include "../llcontext_std/contextlang_runtime.llcontext"
 
 const ML_AST_PARALLEL_MAX_WORKERS = 128
 const ML_AST_FOREST_ROUNDS = 16

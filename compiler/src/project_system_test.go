@@ -349,7 +349,7 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
 }
 `
 	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
-	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.llcontext"), "# include \"project_extra.llcontext\"\n\ndef main() -> int:\n    return core_seed() + project_extra()\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.llcontext"), "include \"project_extra.llcontext\"\n\ndef main() -> int:\n    return core_seed() + project_extra()\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "native", "app_runtime.c"), "/* app foreign stub */\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "shared", "project_extra.llcontext"), "def project_extra() -> int:\n    return 1\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.llcontext"), "@test\ndef alpha_case() -> void:\n    pass\n")
@@ -362,7 +362,7 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
 		"foreign": ["native/mathcore_runtime.c"]
 }
 `)
-	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src", "mathcore.llcontext"), "# include \"math_helper.llcontext\"\n\ndef core_seed() -> int:\n    return math_helper()\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src", "mathcore.llcontext"), "include \"math_helper.llcontext\"\n\ndef core_seed() -> int:\n    return math_helper()\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src", "mathcore.llcontexti"), "extern core_seed() -> int\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "native", "mathcore_runtime.c"), "/* mathcore foreign stub */\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "shared", "math_helper.llcontext"), "def math_helper() -> int:\n    return 41\n")

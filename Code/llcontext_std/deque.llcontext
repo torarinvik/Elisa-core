@@ -2,7 +2,7 @@
 # Deque helpers - low level Contextlang runtime dialect
 # ============================================================
 
-# include "./arena.llcontext"
+include "./arena.llcontext"
 
 const ARENA_DEQUE_INIT_CAP: usize = 16
 

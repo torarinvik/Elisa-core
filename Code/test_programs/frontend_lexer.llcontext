@@ -1,4 +1,4 @@
-# include "../frontend_llcontext/contextlang_frontend.llcontext"
+include "../frontend_llcontext/contextlang_frontend.llcontext"
 
 
 global mutable frontend_lexer_bench_arena: Arena = zeroed

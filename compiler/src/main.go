@@ -419,26 +419,31 @@ func writeSourceWithIncludes(out *bytes.Buffer, filename string, seen map[string
 }
 
 func parseIncludeDirective(line string) (string, bool) {
-	if !strings.HasPrefix(line, "# include ") {
-		return "", false
+	for _, prefix := range []string{"# include ", "include "} {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+			return "", false
+		}
+		return rest[1 : len(rest)-1], true
 	}
-	rest := strings.TrimSpace(strings.TrimPrefix(line, "# include "))
-	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
-		return "", false
-	}
-	return rest[1 : len(rest)-1], true
+	return "", false
 }
 
 func parseIncludeDirectiveBytes(line []byte) (string, bool) {
-	const prefix = "# include "
-	if !bytes.HasPrefix(line, []byte(prefix)) {
-		return "", false
+	for _, prefix := range [][]byte{[]byte("# include "), []byte("include ")} {
+		if !bytes.HasPrefix(line, prefix) {
+			continue
+		}
+		rest := bytes.TrimSpace(line[len(prefix):])
+		if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+			return "", false
+		}
+		return string(rest[1 : len(rest)-1]), true
 	}
-	rest := bytes.TrimSpace(line[len(prefix):])
-	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
-		return "", false
-	}
-	return string(rest[1 : len(rest)-1]), true
+	return "", false
 }
 
 func printFile(w io.Writer, f *ast.File) {

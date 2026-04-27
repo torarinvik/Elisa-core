@@ -2,7 +2,7 @@
 # Collections helpers - low level Contextlang runtime dialect
 # ============================================================
 
-# include "./deque.llcontext"
+include "./deque.llcontext"
 
 const ARENA_DA_INIT_CAP: usize = 256
 const DICT_INIT_CAP: usize = 8

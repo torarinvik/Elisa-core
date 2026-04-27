@@ -1,4 +1,4 @@
-# include "../../Code/llcontext_std/contextlang_runtime.llcontext"
+include "../../Code/llcontext_std/contextlang_runtime.llcontext"
 
 def local_view(src: any u8&) -> i64:
     text: sview = string_view(src, 0, 1)

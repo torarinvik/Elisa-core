@@ -4,7 +4,7 @@
 # Split into focused include fragments.
 # ============================================================
 
-# include "./contextlang_runtime_prelude.llcontext"
-# include "./contextlang_runtime_concurrency.llcontext"
-# include "./contextlang_runtime_strings.llcontext"
-# include "./runtime.llcontext"
+include "./contextlang_runtime_prelude.llcontext"
+include "./contextlang_runtime_concurrency.llcontext"
+include "./contextlang_runtime_strings.llcontext"
+include "./runtime.llcontext"

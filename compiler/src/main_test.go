@@ -658,6 +658,34 @@ func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines
 	}
 }
 
+func TestReadSourceWithIncludesAcceptsBareIncludeDirective(t *testing.T) {
+	dir := t.TempDir()
+	leafPath := filepath.Join(dir, "leaf.llcontext")
+	midPath := filepath.Join(dir, "mid.llcontext")
+	rootPath := filepath.Join(dir, "root.llcontext")
+
+	if err := os.WriteFile(leafPath, []byte("leaf_line"), 0o644); err != nil {
+		t.Fatalf("write leaf fixture: %v", err)
+	}
+	if err := os.WriteFile(midPath, []byte("include \"leaf.llcontext\"\nmid_line"), 0o644); err != nil {
+		t.Fatalf("write mid fixture: %v", err)
+	}
+	if err := os.WriteFile(rootPath, []byte("root_start\ninclude \"mid.llcontext\"\nroot_end"), 0o644); err != nil {
+		t.Fatalf("write root fixture: %v", err)
+	}
+
+	expanded, err := readSourceWithIncludes(rootPath, map[string]bool{})
+	if err != nil {
+		t.Fatalf("readSourceWithIncludes: %v", err)
+	}
+
+	got := string(expanded)
+	want := "root_start\nleaf_line\nmid_line\nroot_end"
+	if got != want {
+		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
+	}
+}
+
 func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.llcontext")
@@ -829,6 +857,51 @@ func TestRunCLIEmitsSourceDependenciesJSON(t *testing.T) {
 		leafPath: "def leaf() -> int:\n    return 1\n",
 		midPath:  "# include \"leaf.llcontext\"\n\ndef mid() -> int:\n    return leaf()\n",
 		rootPath: "# include \"mid.llcontext\"\n\ndef main() -> int:\n    return mid()\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "deps-json", rootPath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected deps-json emit to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	var report sourceDependencyReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("expected deps-json output to decode: %v\n%s", err, stdout.String())
+	}
+	rootAbs, _ := filepath.Abs(rootPath)
+	midAbs, _ := filepath.Abs(midPath)
+	leafAbs, _ := filepath.Abs(leafPath)
+	if report.Root != rootAbs {
+		t.Fatalf("expected root dependency %s, got %s", rootAbs, report.Root)
+	}
+	want := []string{rootAbs, midAbs, leafAbs}
+	if len(report.Files) != len(want) {
+		t.Fatalf("expected %d dependencies, got %d (%v)", len(want), len(report.Files), report.Files)
+	}
+	for i, got := range report.Files {
+		if got != want[i] {
+			t.Fatalf("dependency %d mismatch: got %s want %s", i, got, want[i])
+		}
+	}
+}
+
+func TestRunCLIEmitsSourceDependenciesJSONForBareInclude(t *testing.T) {
+	fixtureDir := t.TempDir()
+	leafPath := filepath.Join(fixtureDir, "leaf.llcontext")
+	midPath := filepath.Join(fixtureDir, "mid.llcontext")
+	rootPath := filepath.Join(fixtureDir, "root.llcontext")
+	for path, content := range map[string]string{
+		leafPath: "def leaf() -> int:\n    return 1\n",
+		midPath:  "include \"leaf.llcontext\"\n\ndef mid() -> int:\n    return leaf()\n",
+		rootPath: "include \"mid.llcontext\"\n\ndef main() -> int:\n    return mid()\n",
 	} {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write %s: %v", path, err)

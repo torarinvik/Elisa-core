@@ -3,8 +3,8 @@
 # Split prelude: shared declarations, caches, builders
 # ============================================================
 
-# include "./test.llcontext"
-# include "./stores.llcontext"
+include "./test.llcontext"
+include "./stores.llcontext"
 
 # ------------------------------------------------------------
 # External C function declarations

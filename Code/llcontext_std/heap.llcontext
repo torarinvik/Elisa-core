@@ -2,7 +2,7 @@
 # Orthogonal heap helpers - low level Contextlang runtime dialect
 # ============================================================
 
-# include "./collections.llcontext"
+include "./collections.llcontext"
 
 struct FixedBufferAllocator:
     data: mutable u8&?

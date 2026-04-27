@@ -428,15 +428,17 @@ func repoRootFromPackedBench(b *testing.B) string {
 }
 
 func parsePackedBenchIncludeDirective(line string) (string, bool) {
-	const prefix = "# include "
-	if !strings.HasPrefix(line, prefix) {
-		return "", false
+	for _, prefix := range []string{"# include ", "include "} {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		rest := strings.TrimSpace(line[len(prefix):])
+		if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+			return "", false
+		}
+		return rest[1 : len(rest)-1], true
 	}
-	rest := strings.TrimSpace(line[len(prefix):])
-	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
-		return "", false
-	}
-	return rest[1 : len(rest)-1], true
+	return "", false
 }
 
 func readPackedBenchSourceWithIncludes(path string, seen map[string]bool) ([]byte, error) {

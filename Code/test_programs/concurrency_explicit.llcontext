@@ -1,4 +1,4 @@
-# include "../llcontext_std/contextlang_runtime.llcontext"
+include "../llcontext_std/contextlang_runtime.llcontext"
 
 def atomic_roundtrip() -> i64:
 	can Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence:
