@@ -478,6 +478,61 @@ def bind_right_named(node: Lua.Expr) -> i64:
 `)
 }
 
+func TestAnalyzeStructPatternIsConditionWithBindings(t *testing.T) {
+	analyzeTreeTestSource(t, "struct_is_condition_bindings.llcontext", `struct Span:
+	start: i64
+	finish: i64
+
+struct Token:
+	kind: i64
+	span: Span
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: 1, span: Span(start: start), value: value):
+		return start + value
+	return 0
+`)
+}
+
+func TestAnalyzeStructPatternIsConditionTruthyOrBindings(t *testing.T) {
+	analyzeTreeTestSource(t, "struct_is_condition_truthy_or_bindings.llcontext", `struct Span:
+	start: i64
+	finish: i64
+
+struct Token:
+	kind: i64
+	span: Span
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: 1, value: value) or tok is Token(kind: 2, value: value):
+		return value
+	return 0
+`)
+}
+
+func TestAnalyzeStructPatternIsConditionRejectsMissingNestedField(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "struct_is_condition_missing_nested_field.llcontext", `struct Span:
+	start: i64
+	finish: i64
+
+struct Token:
+	kind: i64
+	span: Span
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: 1, span: Span(missing: start), value: value):
+		return start + value
+	return 0
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `struct "Span" has no field "missing"`) {
+		t.Fatalf("expected nested struct is-pattern diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeTreeConstructorsSupportExplicitAndScopedOwners(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_owner_surface.llcontext", `tree Lua:
 	common:

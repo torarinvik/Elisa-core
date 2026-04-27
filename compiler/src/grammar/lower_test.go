@@ -611,6 +611,53 @@ grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
 	}
 }
 
+func TestLowerDeclExpandsParameterizedAliasConcatWithGrammarTypeContinuation(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalItemsGrammar over Token using ParserState:
+	cursor state
+	token_kind TokenKind
+	token_field kind
+	current current_token
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	token:
+		IDENT
+		SEMICOLON ";"
+		END "end"
+	tokenset GroupStop:
+		SEMICOLON
+		END
+		token(TokenKind.EOF)
+	tokenset EndSync:
+		END
+		token(TokenKind.EOF)
+	grammar type group_tail(sep: grammar) -> grammar -> darray[Token]:
+		seq:
+			sep
+			group()
+	grammar alias group_items(stop: tokenset, sep: grammar = .SEMICOLON):
+		group() + flatrepeat group_tail(sep) until(stop)
+	group() -> darray[Token]:
+		values = list(token(TokenKind.IDENT), until(GroupStop))
+		return values
+	items() -> darray[Token]:
+		values = group_items(stop: EndSync)
+		return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def items(state: mutable ParserState&) -> darray[Token]:",
+		"state.expect_kind(TokenKind.SEMICOLON)",
+		"flatrepeat_group",
+		"state.current_token().kind == TokenKind.END",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered concat+grammar-type alias output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclImportsGrammarFnsFromHelperOnlyGrammar(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalListGrammar over Token using ParserState:
     cursor state

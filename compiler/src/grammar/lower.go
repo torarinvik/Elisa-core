@@ -1010,6 +1010,32 @@ func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast
 				if replacement, ok := bindings.exprs[n.Name]; ok {
 					return &ast.GrammarExprTerm{Position: n.Position, Expr: replacement}
 				}
+			} else if len(n.Args) > 0 {
+				if _, isFn := grammarFns[n.Name]; isFn {
+					// Convert expression args that reference grammar parameter bindings into
+					// grammar apply args so the callee grammar function can expand them properly.
+					applyArgs := make([]ast.GrammarApplyArg, 0, len(n.Args))
+					for _, arg := range n.Args {
+						var argTerm ast.GrammarTerm
+						if ident, ok := arg.(*ast.Ident); ok {
+							if t, ok2 := bindings.terms[ident.Name]; ok2 {
+								argTerm = t
+							} else if e, ok2 := bindings.exprs[ident.Name]; ok2 {
+								argTerm = &ast.GrammarExprTerm{Position: ident.Position, Expr: e}
+							}
+						}
+						if argTerm == nil {
+							argTerm = &ast.GrammarExprTerm{Position: n.Position, Expr: arg}
+						}
+						applyArgs = append(applyArgs, ast.GrammarApplyArg{Position: n.Position, Term: argTerm})
+					}
+					apply := &ast.GrammarApplyTerm{Position: n.Position, Name: n.Name, Args: applyArgs}
+					expanded := expandGrammarApplyTerm(apply, grammarFns)
+					if expanded == apply {
+						return apply
+					}
+					return expandGrammarTermGrammarFns(expanded, grammarFns, bindings)
+				}
 			}
 		case *ast.GrammarTokenSetRefTerm:
 			if replacement, ok := bindings.terms[n.Name]; ok {
