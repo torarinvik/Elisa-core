@@ -436,6 +436,12 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.TokenKindType != nil {
 			f.writeLine(level+1, "token_kind "+formatTypeExpr(n.TokenKindType))
 		}
+		if n.ModeEnumName != "" {
+			f.writeLine(level+1, "mode_enum "+n.ModeEnumName)
+		}
+		for _, mode := range n.Modes {
+			f.writeLine(level+1, "mode "+mode.Name)
+		}
 		for _, class := range n.CharClasses {
 			parts := make([]string, 0, len(class.Terms))
 			for _, term := range class.Terms {
@@ -724,13 +730,19 @@ func (f *formatter) writeGrammarAliasDecl(level int, alias ast.GrammarAliasDecl)
 func (f *formatter) writeGrammarFnDecl(level int, grammarFn ast.GrammarFnDecl) {
 	params := formatGrammarFnParams(grammarFn.Params)
 	line := "grammarfn " + grammarFn.Name
-	if grammarFn.TypeCtor {
+	if grammarFn.Shorthand {
+		line = "grammar " + grammarFn.Name
+	} else if grammarFn.TypeCtor {
 		line = "grammar type " + grammarFn.Name
 	}
 	line += formatGenericParams(grammarFn.GenericParams, grammarFn.TypeParams, nil, nil, nil, nil)
 	line += "(" + strings.Join(params, ", ") + ")"
 	if grammarFn.Return.Kind != "" {
-		line += " -> " + formatGrammarFnType(grammarFn.Return)
+		if grammarFn.Shorthand && grammarFn.Return.Kind == "grammar" && grammarFn.Return.Result != nil {
+			line += " -> " + formatTypeExpr(grammarFn.Return.Result)
+		} else {
+			line += " -> " + formatGrammarFnType(grammarFn.Return)
+		}
 	}
 	line += ":"
 	f.writeLine(level, line)

@@ -14,6 +14,8 @@ func (p *Parser) parseLexerDecl() *ast.LexerDecl {
 	p.expect(lexer.TOKEN_INDENT)
 
 	var tokenKindType ast.TypeExpr
+	var modeEnumName string
+	modes := make([]ast.LexerModeDecl, 0)
 	charClasses := make([]ast.LexerCharClassDecl, 0)
 	var keywords *ast.LexerKeywordDecl
 	var literals *ast.LexerLiteralDecl
@@ -28,6 +30,12 @@ func (p *Parser) parseLexerDecl() *ast.LexerDecl {
 			p.expectIdentText("token_kind")
 			tokenKindType = p.parseTypeExpr()
 			p.expectNewline()
+		case p.peekIdentText("mode_enum"):
+			p.expectIdentText("mode_enum")
+			modeEnumName = p.parseQualifiedDeclName()
+			p.expectNewline()
+		case p.peekIdentText("mode"):
+			modes = append(modes, p.parseLexerModeDecl())
 		case p.peekIdentText("charclass"):
 			charClasses = append(charClasses, p.parseLexerCharClassDecl())
 		case p.peekIdentText("keywords"):
@@ -43,7 +51,15 @@ func (p *Parser) parseLexerDecl() *ast.LexerDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.LexerDecl{Position: pos, Name: name, TokenKindType: tokenKindType, CharClasses: charClasses, Keywords: keywords, Literals: literals}
+	return &ast.LexerDecl{Position: pos, Name: name, TokenKindType: tokenKindType, ModeEnumName: modeEnumName, Modes: modes, CharClasses: charClasses, Keywords: keywords, Literals: literals}
+}
+
+func (p *Parser) parseLexerModeDecl() ast.LexerModeDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("mode")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return ast.LexerModeDecl{Position: pos, Name: name}
 }
 
 func (p *Parser) parseLexerCharClassDecl() ast.LexerCharClassDecl {

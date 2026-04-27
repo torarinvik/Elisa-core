@@ -11,7 +11,10 @@ func lowerLexerDecls(decl *ast.LexerDecl) []ast.Decl {
 	if decl == nil {
 		return nil
 	}
-	out := make([]ast.Decl, 0, len(decl.CharClasses)+2)
+	out := make([]ast.Decl, 0, len(decl.CharClasses)+3)
+	if len(decl.Modes) != 0 {
+		out = append(out, lowerLexerModeEnumDecl(decl))
+	}
 	for _, class := range decl.CharClasses {
 		out = append(out, lowerLexerCharClassDecl(decl, class))
 	}
@@ -22,6 +25,18 @@ func lowerLexerDecls(decl *ast.LexerDecl) []ast.Decl {
 		out = append(out, lowerLexerLiteralDecl(decl, *decl.Literals))
 	}
 	return out
+}
+
+func lowerLexerModeEnumDecl(decl *ast.LexerDecl) *ast.EnumDecl {
+	name := decl.ModeEnumName
+	if name == "" {
+		name = decl.Name + "Mode"
+	}
+	variants := make([]ast.EnumVariantDecl, 0, len(decl.Modes))
+	for _, mode := range decl.Modes {
+		variants = append(variants, ast.EnumVariantDecl{Position: mode.Position, Name: mode.Name})
+	}
+	return &ast.EnumDecl{Position: decl.Position, Name: name, Variants: variants}
 }
 
 func lowerLexerCharClassDecl(decl *ast.LexerDecl, class ast.LexerCharClassDecl) *ast.FuncDecl {

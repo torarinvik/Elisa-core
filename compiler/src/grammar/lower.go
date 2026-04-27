@@ -4982,10 +4982,15 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 			}
 		}
 	case *ast.GrammarWhenTerm:
-		if typ := ctx.inferTermType(n.Then); typ != nil {
+		thenType := ctx.inferTermType(n.Then)
+		elseType := ctx.inferTermType(n.Else)
+		if typ := mergeGrammarBranchTypes(thenType, elseType); typ != nil {
 			return typ
 		}
-		return ctx.inferTermType(n.Else)
+		if thenType != nil {
+			return thenType
+		}
+		return elseType
 	case *ast.GrammarRequiredTerm:
 		return ctx.inferTermType(n.Term)
 	case *ast.GrammarDelimitedTerm:
@@ -5049,6 +5054,127 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		return grammarResolvedValueTypeExpr(n.Position, ctx.production.ReturnType)
 	}
 	return grammarResolvedValueTypeExpr(ctx.production.Position, ctx.production.ReturnType)
+}
+
+func mergeGrammarBranchTypes(left ast.TypeExpr, right ast.TypeExpr) ast.TypeExpr {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+	leftOptional, leftIsOptional := left.(*ast.OptionalTypeExpr)
+	rightOptional, rightIsOptional := right.(*ast.OptionalTypeExpr)
+	if leftIsOptional && rightIsOptional {
+		if grammarTypeExprEqual(leftOptional.Value, rightOptional.Value) {
+			return left
+		}
+	}
+	if leftIsOptional && grammarTypeExprEqual(leftOptional.Value, right) {
+		return left
+	}
+	if rightIsOptional && grammarTypeExprEqual(left, rightOptional.Value) {
+		return right
+	}
+	return nil
+}
+
+func grammarTypeExprEqual(left ast.TypeExpr, right ast.TypeExpr) bool {
+	switch l := left.(type) {
+	case *ast.NamedType:
+		r, ok := right.(*ast.NamedType)
+		return ok && l.Name == r.Name
+	case *ast.GenericType:
+		r, ok := right.(*ast.GenericType)
+		if !ok || l.Name != r.Name || len(l.Args) != len(r.Args) {
+			return false
+		}
+		for i := range l.Args {
+			if !grammarTypeExprEqual(l.Args[i], r.Args[i]) {
+				return false
+			}
+		}
+		return true
+	case *ast.BuiltinTypeExpr:
+		r, ok := right.(*ast.BuiltinTypeExpr)
+		if !ok || l.Name != r.Name || len(l.TypeArgs) != len(r.TypeArgs) || len(l.ValueArgs) != len(r.ValueArgs) {
+			return false
+		}
+		for i := range l.TypeArgs {
+			if !grammarTypeExprEqual(l.TypeArgs[i], r.TypeArgs[i]) {
+				return false
+			}
+		}
+		for i := range l.ValueArgs {
+			if !grammarExprEqual(l.ValueArgs[i], r.ValueArgs[i]) {
+				return false
+			}
+		}
+		return true
+	case *ast.OptionalTypeExpr:
+		r, ok := right.(*ast.OptionalTypeExpr)
+		return ok && grammarTypeExprEqual(l.Value, r.Value)
+	case *ast.TupleTypeExpr:
+		r, ok := right.(*ast.TupleTypeExpr)
+		if !ok || len(l.Fields) != len(r.Fields) {
+			return false
+		}
+		for i := range l.Fields {
+			if l.Fields[i].Name != r.Fields[i].Name || !grammarTypeExprEqual(l.Fields[i].Type, r.Fields[i].Type) {
+				return false
+			}
+		}
+		return true
+	case *ast.RefType:
+		r, ok := right.(*ast.RefType)
+		return ok && l.State == r.State && l.Storage == r.Storage && l.StateParam == r.StateParam && l.StorageParam == r.StorageParam && l.Region == r.Region && grammarTypeExprEqual(l.Elem, r.Elem)
+	case *ast.MutableType:
+		r, ok := right.(*ast.MutableType)
+		return ok && grammarTypeExprEqual(l.Elem, r.Elem)
+	case *ast.TailType:
+		r, ok := right.(*ast.TailType)
+		return ok && grammarTypeExprEqual(l.Elem, r.Elem)
+	case *ast.ArrayType:
+		r, ok := right.(*ast.ArrayType)
+		return ok && grammarTypeExprEqual(l.Elem, r.Elem) && grammarExprEqual(l.Size, r.Size)
+	case *ast.AggregateStateTypeExpr:
+		r, ok := right.(*ast.AggregateStateTypeExpr)
+		if !ok || l.State != r.State || len(l.States) != len(r.States) || !grammarTypeExprEqual(l.Base, r.Base) {
+			return false
+		}
+		for i := range l.States {
+			if l.States[i] != r.States[i] {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func grammarExprEqual(left ast.Expr, right ast.Expr) bool {
+	switch l := left.(type) {
+	case nil:
+		return right == nil
+	case *ast.Ident:
+		r, ok := right.(*ast.Ident)
+		return ok && l.Name == r.Name
+	case *ast.IntLit:
+		r, ok := right.(*ast.IntLit)
+		return ok && l.Value == r.Value
+	case *ast.StringLit:
+		r, ok := right.(*ast.StringLit)
+		return ok && l.Value == r.Value
+	case *ast.CharLit:
+		r, ok := right.(*ast.CharLit)
+		return ok && l.Value == r.Value
+	case *ast.BoolLit:
+		r, ok := right.(*ast.BoolLit)
+		return ok && l.Value == r.Value
+	default:
+		return false
+	}
 }
 
 func (ctx *statefulLowerContext) resolveGrammarProductionInfo(term *ast.GrammarCallTerm) (string, ast.GrammarProductionDecl, bool) {

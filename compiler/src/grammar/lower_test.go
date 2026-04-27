@@ -371,6 +371,51 @@ func TestLowerDeclExpandsGrammarFns(t *testing.T) {
 	}
 }
 
+func TestLowerDeclExpandsGrammarHelperShorthandNoneAndPipeTokenSets(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar DemoGrammar over Token using ParserState:
+	cursor state
+	token_kind TokenKind
+	token_field kind
+	current current_token
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	token:
+		IDENT
+		RPAREN ")"
+	tokenset Stop = RPAREN | token(TokenKind.EOF)
+	grammar pick(item: grammar -> DemoValue) -> DemoValue:
+		item
+	maybe_value() -> DemoValue?:
+		node <- when(state.current_token().kind == TokenKind.IDENT, pick(item: present_value()), none[DemoValue])
+		return node
+	present_value() -> DemoValue:
+		.IDENT
+		node <- expr(make_demo_value())
+		return node
+	values() -> darray[DemoValue]:
+		node = flatrepeat present_value() until(Stop)
+		return node
+`)
+	formattedSource := unparse.FormatFile(file)
+	if !strings.Contains(formattedSource, "grammar pick(item: grammar -> DemoValue) -> DemoValue:") {
+		t.Fatalf("expected formatted source to preserve shorthand grammar helper, got:\n%s", formattedSource)
+	}
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.current_token().kind == TokenKind.RPAREN",
+		"state.current_token().kind == TokenKind.EOF",
+		"DemoValue?",
+		"null",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclExpandsGrammarPipelineApply(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalArgsGrammar over Token using ParserState:
 	cursor state
@@ -1474,6 +1519,9 @@ func TestLowerFileAppendsLoweredFunctionsAfterGrammarDecl(t *testing.T) {
 func TestFormatFilePreservesLexerHelperDecl(t *testing.T) {
 	file := parseGrammarTestFile(t, `lexer DemoLex:
     token_kind DemoTokenKind
+    mode_enum DemoLexMode
+    mode NORMAL
+    mode STRING
     charclass digit = '0'..'9'
     charclass ident = '_' | digit
     keywords fallback IDENT:
@@ -1486,6 +1534,9 @@ func TestFormatFilePreservesLexerHelperDecl(t *testing.T) {
 	for _, want := range []string{
 		"lexer DemoLex:",
 		"token_kind DemoTokenKind",
+		"mode_enum DemoLexMode",
+		"mode NORMAL",
+		"mode STRING",
 		"charclass digit = '0'..'9'",
 		"charclass ident = '_' | digit",
 		"keywords fallback IDENT:",
@@ -1510,6 +1561,9 @@ func TestLowerFileLowersLexerHelperDeclToFunctions(t *testing.T) {
 
 lexer DemoLex:
     token_kind DemoTokenKind
+    mode_enum DemoLexMode
+    mode NORMAL
+    mode STRING
     charclass digit = '0'..'9'
     charclass ident = '_' | digit
     keywords fallback IDENT:
@@ -1521,6 +1575,9 @@ lexer DemoLex:
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
+		"enum DemoLexMode:",
+		"NORMAL",
+		"STRING",
 		"def demo_lex_is_digit(ch: char) -> bool:",
 		"def demo_lex_is_ident(ch: char) -> bool:",
 		"demo_lex_is_digit(ch)",

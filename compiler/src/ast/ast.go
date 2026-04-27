@@ -154,9 +154,16 @@ type LexerDecl struct {
 	Position      lexer.Pos
 	Name          string
 	TokenKindType TypeExpr
+	ModeEnumName  string
+	Modes         []LexerModeDecl
 	CharClasses   []LexerCharClassDecl
 	Keywords      *LexerKeywordDecl
 	Literals      *LexerLiteralDecl
+}
+
+type LexerModeDecl struct {
+	Position lexer.Pos
+	Name     string
 }
 
 type LexerCharClassDecl struct {
@@ -230,6 +237,7 @@ type GrammarFnDecl struct {
 	Position      lexer.Pos
 	Name          string
 	TypeCtor      bool
+	Shorthand     bool
 	TypeParams    []string
 	GenericParams []GenericParam
 	Params        []GrammarFnParam

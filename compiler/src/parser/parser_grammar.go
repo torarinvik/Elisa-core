@@ -109,6 +109,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			tokenSets = append(tokenSets, p.parseGrammarTokenSetDecl())
 		case p.peekGrammarAliasDecl():
 			grammarAliases = append(grammarAliases, p.parseGrammarAliasDecl())
+		case p.peekGrammarHelperDecl():
+			grammarFns = append(grammarFns, p.parseGrammarHelperDecl())
 		case p.peekIdentText("grammarfn"):
 			grammarFns = append(grammarFns, p.parseGrammarFnDecl(false))
 		case p.peekGrammarTypeDecl():
@@ -190,6 +192,14 @@ func (p *Parser) peekGrammarTypeDecl() bool {
 
 func (p *Parser) peekGrammarAliasDecl() bool {
 	return p.peekIdentText("grammar") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "alias"
+}
+
+func (p *Parser) peekGrammarHelperDecl() bool {
+	if !p.peekIdentText("grammar") || p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos+1]
+	return next.Kind == lexer.TOKEN_IDENT && next.Text != "type" && next.Text != "alias"
 }
 
 func (p *Parser) parseGrammarEnvDecl() *ast.GrammarEnvDecl {
@@ -316,7 +326,7 @@ func (p *Parser) peekGrammarSupportDecl() bool {
 	case "grammarfn":
 		return next == lexer.TOKEN_IDENT
 	case "grammar":
-		return p.peekGrammarTypeDecl() || p.peekGrammarAliasDecl()
+		return p.peekGrammarTypeDecl() || p.peekGrammarAliasDecl() || p.peekGrammarHelperDecl()
 	case "recovery":
 		return next == lexer.TOKEN_IDENT
 	default:
@@ -435,7 +445,7 @@ func (p *Parser) parseGrammarTokenSetDecl() ast.GrammarTokenSetDecl {
 	if p.match(lexer.TOKEN_ASSIGN) {
 		for {
 			terms = append(terms, p.parseGrammarTokenSetItem())
-			if !p.match(lexer.TOKEN_COMMA) {
+			if !p.match(lexer.TOKEN_COMMA) && !p.match(lexer.TOKEN_PIPE) {
 				break
 			}
 		}
@@ -704,6 +714,23 @@ func (p *Parser) parseGrammarFnDecl(typeCtor bool) ast.GrammarFnDecl {
 	p.expectNewline()
 	terms := p.parseGrammarTermBlock()
 	return ast.GrammarFnDecl{Position: pos, Name: name, TypeCtor: typeCtor, TypeParams: typeParams, GenericParams: genericParams, Params: params, Return: ret, Terms: terms}
+}
+
+func (p *Parser) parseGrammarHelperDecl() ast.GrammarFnDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("grammar")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	typeParams, _, _, _, _, genericParams := p.parseFuncGenericParams()
+	p.expect(lexer.TOKEN_LPAREN)
+	params := p.parseGrammarFnParamsUntilRParen()
+	if !p.match(lexer.TOKEN_ARROW) {
+		p.errorAt(pos, "expected return type for grammar helper %q; use `grammar %s(...) -> ResultType:`", name, name)
+	}
+	retType := p.parseTypeExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	terms := p.parseGrammarTermBlock()
+	return ast.GrammarFnDecl{Position: pos, Name: name, TypeCtor: true, Shorthand: true, TypeParams: typeParams, GenericParams: genericParams, Params: params, Return: ast.GrammarFnType{Position: pos, Kind: "grammar", Result: retType}, Terms: terms}
 }
 
 func (p *Parser) parseGrammarFnParamsUntilRParen() []ast.GrammarFnParam {
@@ -1597,6 +1624,9 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	if p.peekIdentText("empty") {
 		return p.parseGrammarEmptyTerm()
 	}
+	if p.peekIdentText("none") {
+		return p.parseGrammarNoneTerm()
+	}
 	if p.peekIdentText("guard") {
 		return p.parseGrammarGuardTerm()
 	}
@@ -1899,6 +1929,15 @@ func (p *Parser) parseGrammarEmptyTerm() ast.GrammarTerm {
 		p.expect(lexer.TOKEN_RBRACKET)
 	}
 	return &ast.GrammarEmptyTerm{Position: pos, Type: typ}
+}
+
+func (p *Parser) parseGrammarNoneTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("none")
+	p.expect(lexer.TOKEN_LBRACKET)
+	typ := p.parseTypeExpr()
+	p.expect(lexer.TOKEN_RBRACKET)
+	return &ast.GrammarExprTerm{Position: pos, Type: &ast.OptionalTypeExpr{Position: pos, Value: typ}, Expr: &ast.NullLit{Position: pos}}
 }
 
 func (p *Parser) parseGrammarGuardTerm() ast.GrammarTerm {
