@@ -1,0 +1,39 @@
+def json_reduce_sum_smoke(values: darray[i64, 4], bias: i64) -> i64:
+    base: dview[i64] = values[0:4]
+    return reduce_sum(readonly(base), json_reduce_sum_bias, bias)
+def json_expect_checksum(source: static u8&, expected: i64) -> bool:
+    return json_parser_checksum_impl(source.cast[u8&]) == expected
+def json_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: usize, mode: i64) -> i64:
+    can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+        if worker_count == 0 or iterations == 0 or worker_count > JSON_PARALLEL_MAX_WORKERS:
+            return -1
+
+        worker_total: mutable usize = worker_count
+        if worker_total > iterations:
+            worker_total <- iterations
+
+        partials: i64[128] = zeroed
+        source_bits: uintptr = source.uintptr()
+        base_repeats: usize = iterations / worker_total
+        extra_repeats: usize = iterations % worker_total
+
+        pool workers(worker_total):
+            group: mutable TaskGroup = task_group_new()
+            for slot in 0..<worker_total:
+                repeats: mutable usize = base_repeats
+                if slot < extra_repeats:
+                    repeats <- repeats + 1
+
+                result_bits: uintptr = partials[slot].ref[i64&].uintptr()
+                job: JsonParallelJob = JsonParallelJob(source_bits, repeats, result_bits, mode)
+                task: Task[i64, Pending] = submit json_parallel_worker(job)
+                task_group_add(group.ref[TaskGroup&], move task)
+
+            wait all group
+
+        total: mutable i64 = 0
+        for slot in 0..<worker_total:
+            if partials[slot] < 0:
+                return -1
+            total <- total + partials[slot]
+        return total

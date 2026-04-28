@@ -1,0 +1,339 @@
+def mutate_201_require_heap_pair_node() -> heap HeapPairNode& error[MemoryError]:
+    node: heap HeapPairNode& = alloc_heap_pair_node() else raise MemoryError.OutOfMemory
+    return node
+
+
+def mutate_202_release_heap_pair_node(node: mutable heap HeapPairNode&?):
+    if node != null:
+        node as ! <- sfree_heap_pair_node(node)
+
+
+def mutate_203_checked_any_pair(slot: FuzzPair&) -> int error[DiskError, NetError]:
+    if slot.left == 0:
+        raise DiskError.Missing
+    if slot.right == 0:
+        raise NetError.Timeout
+    return slot.left + slot.right
+
+
+def mutate_204_recursive_pair_node_sum(node: heap HeapPairNode&) -> int error[LogicError, DiskError, NetError]:
+    value: int = try mutate_203_checked_any_pair((&node.pair) -> FuzzPair&)
+    if node.next == null:
+        return value
+    next: heap HeapPairNode& = node.next
+    return value + (try mutate_204_recursive_pair_node_sum(next))
+
+
+def mutate_205_recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> void error[LogicError]:
+    if node == null:
+        return
+    live: heap HeapPairNode& = node
+    next_node: mutable heap HeapPairNode&? = live.next
+    node as ! <- sfree_heap_pair_node(node)
+    try mutate_205_recursive_free_pair_chain(next_node)
+
+
+def mutate_206_build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetError]:
+    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live.pair <- FuzzPair(206, 207)
+    second_live.pair <- FuzzPair(208, 209)
+    first_live.next <- second_live
+    total: int = try mutate_204_recursive_pair_node_sum(first_live)
+    first: mutable heap HeapPairNode&? = first_live
+    try mutate_205_recursive_free_pair_chain(first)
+    return total
+
+
+def mutate_207_stack_buffer_format() -> int error[FormatError]:
+    buffer: u8[32] = zeroed
+    return try mutate_181_checked_write_into((&buffer[0]) -> u8&, 32, "stack=%d")
+
+
+def mutate_208_stack_buffer_format_or_minus_one() -> int:
+    return try mutate_207_stack_buffer_format() else -1
+
+
+def mutate_209_static_bits_nonzero() -> bool:
+    return mutate_166_static_ptr_bits("static") != 0
+
+
+def mutate_210_zero_any_void_self_eq() -> bool:
+    zero: void& = mutate_186_zero_any_void()
+    return zero == mutate_186_zero_any_void()
+
+
+def mutate_211_recursive_pair_node_count(node: heap HeapPairNode&) -> int error[LogicError]:
+    if node.next == null:
+        return 1
+    next: heap HeapPairNode& = node.next
+    return 1 + (try mutate_211_recursive_pair_node_count(next))
+
+
+def mutate_212_build_three_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetError]:
+    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    third_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live.pair <- FuzzPair(212, 213)
+    second_live.pair <- FuzzPair(214, 215)
+    third_live.pair <- FuzzPair(216, 217)
+    first_live.next <- second_live
+    second_live.next <- third_live
+    total: int = try mutate_204_recursive_pair_node_sum(first_live)
+    first: mutable heap HeapPairNode&? = first_live
+    try mutate_205_recursive_free_pair_chain(first)
+    return total
+
+
+def mutate_213_build_three_pair_chain_count() -> int error[MemoryError, LogicError]:
+    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    third_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live.next <- second_live
+    second_live.next <- third_live
+    total: int = try mutate_211_recursive_pair_node_count(first_live)
+    first: mutable heap HeapPairNode&? = first_live
+    try mutate_205_recursive_free_pair_chain(first)
+    return total
+
+
+def mutate_214_heap_pair_any_roundtrip() -> bool error[MemoryError]:
+    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    live.pair <- root_pair
+    same: bool = (&live.pair) -> FuzzPair&.uintptr() == (&live.pair).uintptr()
+    handle: mutable heap HeapPairNode&? = live
+    mutate_202_release_heap_pair_node(handle)
+    return same
+
+
+def mutate_215_alloc_and_compare_two_buffers() -> bool error[MemoryError]:
+    left: heap u8& = alloc_bytes(8) else raise MemoryError.OutOfMemory
+    right: heap u8& = alloc_bytes(8) else raise MemoryError.OutOfMemory
+    different: bool = left.uintptr() != right.uintptr()
+    sfree_bytes(left)
+    sfree_bytes(right)
+    return different
+
+
+def mutate_216_recursive_static_format_bits(depth: int) -> uintptr:
+    bits: uintptr = mutate_184_static_as_any_bits("fmt")
+    if depth <= 0:
+        return bits
+    return bits + mutate_216_recursive_static_format_bits(depth - 1)
+
+
+def mutate_217_use_recursive_static_format_bits() -> uintptr:
+    return mutate_216_recursive_static_format_bits(2)
+
+
+def mutate_218_recursive_any_pair_sum(depth: int, pair: FuzzPair&) -> int error[DiskError, NetError]:
+    value: int = try mutate_203_checked_any_pair(pair)
+    if depth <= 0:
+        return value
+    return value + (try mutate_218_recursive_any_pair_sum(depth - 1, pair))
+
+
+def mutate_219_use_static_any_pair_sum() -> int:
+    return try mutate_218_recursive_any_pair_sum(2, (&root_pair) -> FuzzPair&) else 0
+
+
+def mutate_220_use_heap_pair_any_sum() -> int error[MemoryError, DiskError, NetError]:
+    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    live.pair <- root_pair
+    total: int = try mutate_218_recursive_any_pair_sum(2, (&live.pair) -> FuzzPair&)
+    handle: mutable heap HeapPairNode&? = live
+    mutate_202_release_heap_pair_node(handle)
+    return total
+
+
+def mutate_221_alloc_zero_offset_compare() -> bool error[MemoryError]:
+    ptr: heap u8& = alloc_bytes(12) else raise MemoryError.OutOfMemory
+    same: bool = (ptr + 0).uintptr() == ptr.uintptr()
+    sfree_bytes(ptr)
+    return same
+
+
+def mutate_222_heap_bytes_to_any_void_roundtrip() -> bool error[MemoryError]:
+    ptr: heap u8& = alloc_bytes(12) else raise MemoryError.OutOfMemory
+    same: bool = ptr -> void& -> u8&.uintptr() == ptr.uintptr()
+    sfree_bytes(ptr)
+    return same
+
+
+def mutate_223_recursive_buffer_write_fallback(depth: int) -> int:
+    if depth <= 0:
+        return try mutate_182_alloc_and_format_heap_buffer() else -223
+    return (try mutate_182_alloc_and_format_heap_buffer() else -223) + mutate_223_recursive_buffer_write_fallback(depth - 1)
+
+
+def mutate_224_mixed_stack_heap_static_any() -> uintptr error[MemoryError, FormatError]:
+    local: u8[32] = zeroed
+    stack_bits: uintptr = (&local[0]) -> u8&.uintptr()
+    heap_bits: uintptr = try mutate_191_heap_bytes_format_bits()
+    static_bits: uintptr = mutate_184_static_as_any_bits("mix")
+    return stack_bits + heap_bits + static_bits
+
+
+def mutate_225_combo_pointers_and_errors(which: int) -> int:
+    return mutate_208_stack_buffer_format_or_minus_one() + (try mutate_123_dispatch_error8(which) else -225)
+
+
+def mutate_226_recursive_alloc_bits(depth: int, size: usize) -> uintptr error[MemoryError]:
+    ptr: heap u8& = alloc_bytes(size) else raise MemoryError.OutOfMemory
+    bits: uintptr = ptr.uintptr()
+    sfree_bytes(ptr)
+    if depth <= 0:
+        return bits
+    return bits + (try mutate_226_recursive_alloc_bits(depth - 1, size))
+
+
+def mutate_227_recursive_buffer_format_bits(depth: int) -> uintptr error[MemoryError, FormatError]:
+    bits: uintptr = try mutate_191_heap_bytes_format_bits()
+    if depth <= 0:
+        return bits
+    return bits + (try mutate_227_recursive_buffer_format_bits(depth - 1))
+
+
+def mutate_228_static_heap_bits_differ() -> bool error[MemoryError]:
+    heap_bits: uintptr = try mutate_185_heap_as_any_bits()
+    static_bits: uintptr = mutate_184_static_as_any_bits("heap-vs-static")
+    return heap_bits != static_bits
+
+
+def mutate_229_pair_chain_sum_and_count() -> int error[MemoryError, LogicError, DiskError, NetError]:
+    return (try mutate_212_build_three_pair_chain_sum()) + (try mutate_213_build_three_pair_chain_count())
+
+
+def mutate_230_recursive_logic_and_memory(depth: int) -> int error[MemoryError, LogicError]:
+    if depth <= 0:
+        return try mutate_173_use_recursive_heap_logic()
+    return (try mutate_173_use_recursive_heap_logic()) + (try mutate_230_recursive_logic_and_memory(depth - 1))
+
+
+def mutate_231_stack_buffer_ptr_compare() -> bool:
+    buffer: u8[4] = zeroed
+    return (&buffer[0]) -> u8&.uintptr() != (&buffer[1]) -> u8&.uintptr()
+
+
+def mutate_232_static_vs_stack_bits() -> bool:
+    buffer: u8[4] = zeroed
+    return (&buffer[0]) -> u8&.uintptr() != mutate_184_static_as_any_bits("stack")
+
+
+def mutate_233_heap_not_zero_any_void() -> bool error[MemoryError]:
+    ptr: heap u8& = alloc_bytes(12) else raise MemoryError.OutOfMemory
+    different: bool = ptr -> void& != mutate_186_zero_any_void()
+    sfree_bytes(ptr)
+    return different
+
+
+def mutate_234_recursive_static_string_walk(depth: int, text: static u8&) -> uintptr:
+    bits: uintptr = text -> u8&.uintptr()
+    if depth <= 0:
+        return bits
+    return bits + mutate_234_recursive_static_string_walk(depth - 1, text + 1)
+
+
+def mutate_235_use_recursive_static_string_walk() -> uintptr:
+    return mutate_234_recursive_static_string_walk(2, "hello")
+
+
+def mutate_236_recursive_heap_any_mix(depth: int) -> uintptr error[MemoryError]:
+    ptr: heap u8& = alloc_bytes(16) else raise MemoryError.OutOfMemory
+    bits: uintptr = mutate_192_recursive_any_ptr_walk(depth, ptr -> u8&) + mutate_194_recursive_heap_offset_sum(depth, ptr)
+    sfree_bytes(ptr)
+    return bits
+
+
+def mutate_237_pair_chain_from_static_pairs() -> int error[MemoryError, LogicError, DiskError, NetError]:
+    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live.pair <- root_pair
+    second_live.pair <- pair_table[1]
+    first_live.next <- second_live
+    total: int = try mutate_204_recursive_pair_node_sum(first_live)
+    first: mutable heap HeapPairNode&? = first_live
+    try mutate_205_recursive_free_pair_chain(first)
+    return total
+
+
+def mutate_238_release_empty_heap_node() -> int:
+    node: mutable heap HeapNode&? = null
+    mutate_152_release_heap_node(node)
+    return 238
+
+
+def mutate_239_release_empty_heap_pair_node() -> int:
+    node: mutable heap HeapPairNode&? = null
+    mutate_202_release_heap_pair_node(node)
+    return 239
+
+
+def mutate_240_recursive_alloc_free_compare(depth: int) -> bool error[MemoryError]:
+    bits: uintptr = try mutate_226_recursive_alloc_bits(depth, 8)
+    return bits != 0
+
+
+def mutate_241_recursive_format_or_fallback(depth: int) -> int:
+    if depth <= 0:
+        return try mutate_182_alloc_and_format_heap_buffer() else -241
+    return (try mutate_182_alloc_and_format_heap_buffer() else -241) + mutate_241_recursive_format_or_fallback(depth - 1)
+
+
+def mutate_242_deep_pointer_combo(depth: int) -> uintptr error[MemoryError, FormatError]:
+    return (try mutate_200_mixed_memory_combo(depth)) + (try mutate_227_recursive_buffer_format_bits(depth))
+
+
+def mutate_243_static_stack_heap_compare() -> bool error[MemoryError]:
+    if mutate_232_static_vs_stack_bits() == false:
+        return false
+    return try mutate_228_static_heap_bits_differ()
+
+
+def mutate_244_chain_sum_plus_format() -> int error[MemoryError, LogicError, DiskError, NetError, FormatError]:
+    return (try mutate_237_pair_chain_from_static_pairs()) + (try mutate_207_stack_buffer_format())
+
+
+def mutate_245_recursive_combo_error(depth: int, which: int) -> int:
+    if depth <= 0:
+        return mutate_225_combo_pointers_and_errors(which)
+    return mutate_225_combo_pointers_and_errors(which) + mutate_245_recursive_combo_error(depth - 1, which + 1)
+
+
+def mutate_246_heap_and_zero_any_compare_twice() -> bool error[MemoryError]:
+    left: bool = try mutate_233_heap_not_zero_any_void()
+    right: bool = try mutate_222_heap_bytes_to_any_void_roundtrip()
+    if left == false:
+        return false
+    return right
+
+
+def mutate_247_recursive_pair_chain_combo(depth: int) -> int error[MemoryError, LogicError, DiskError, NetError]:
+    if depth <= 0:
+        return try mutate_229_pair_chain_sum_and_count()
+    return (try mutate_229_pair_chain_sum_and_count()) + (try mutate_247_recursive_pair_chain_combo(depth - 1))
+
+
+def mutate_248_recursive_static_ptr_combo(depth: int) -> uintptr:
+    bits: uintptr = mutate_189_use_recursive_static_ptr_bits() + mutate_235_use_recursive_static_string_walk()
+    if depth <= 0:
+        return bits
+    return bits + mutate_248_recursive_static_ptr_combo(depth - 1)
+
+
+def mutate_249_memory_truth_table(which: int) -> int:
+    total: mutable int = mutate_225_combo_pointers_and_errors(which)
+    if mutate_209_static_bits_nonzero():
+        total <- total + 1
+    if mutate_231_stack_buffer_ptr_compare():
+        total <- total + 1
+    return total
+
+
+def mutate_250_final_memory_recursion_combo(depth: int, which: int) -> int:
+    total: mutable int = mutate_245_recursive_combo_error(depth, which)
+    total <- total + mutate_241_recursive_format_or_fallback(depth)
+    total <- total + (try mutate_244_chain_sum_plus_format() else -250)
+    return total
+
+

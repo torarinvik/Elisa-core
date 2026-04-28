@@ -1,0 +1,413 @@
+def mutate_91_read_static_hyper(slot: static FuzzHyper&) -> int:
+    return mutate_05_read_static_pair(&slot.universes[1].matrices[0].worlds[1].root.frame.holder.pair)
+
+
+def mutate_92_use_static_hyper() -> int:
+    return mutate_91_read_static_hyper(&root_hyper)
+
+
+def mutate_93_read_hyper_table() -> int:
+    return hyper_table[1].universes[0].matrices[1].tower_bank[0].layers[1].frame.pairs[0].left
+
+
+def mutate_94_copy_hyper_pair_to_local() -> int:
+    pair: FuzzPair = hyper_table[0].matrices[1].worlds[0].pair_ring[2]
+    return try checked_pair(&pair) else 0
+
+
+def mutate_95_make_hyper_array() -> FuzzHyper[2]:
+    return [root_hyper, hyper_table[1]]
+
+
+def mutate_96_read_returned_hyper_array() -> int:
+    return mutate_95_make_hyper_array()[1].universes[1].beacon.right
+
+
+def mutate_97_local_hyper_stack_borrow() -> int:
+    hyper: FuzzHyper = root_hyper
+    return try checked_pair(&hyper.universes[0].matrices[1].worlds[0].root.frame.pairs[1]) else 0
+
+
+def mutate_98_local_hyper_array_read() -> int:
+    hypers: FuzzHyper[2] = [root_hyper, hyper_table[0]]
+    return hypers[1].matrices[0].sentinel.left
+
+
+def mutate_99_read_static_hyper_anchor(slot: static FuzzHyper&) -> int:
+    return mutate_05_read_static_pair(&slot.anchor)
+
+
+def mutate_100_use_static_hyper_anchor() -> int:
+    return mutate_99_read_static_hyper_anchor(&hyper_table[1])
+
+
+def mutate_101_read_static_cluster(slot: static FuzzCluster&) -> int:
+    return mutate_05_read_static_pair(&slot.hypers[1].universes[0].matrices[1].worlds[0].root.frame.holder.pair)
+
+
+def mutate_102_use_static_cluster() -> int:
+    return mutate_101_read_static_cluster(&root_cluster)
+
+
+def mutate_103_read_cluster_table() -> int:
+    return cluster_table[1].hypers[0].universes[1].matrices[0].tower_bank[1].layers[0].frame.pairs[1].right
+
+
+def mutate_104_copy_cluster_pair_to_local() -> int:
+    pair: FuzzPair = cluster_table[0].universes[1].worlds[0].pair_ring[1]
+    return try checked_pair(&pair) else 0
+
+
+def mutate_105_make_cluster_array() -> FuzzCluster[2]:
+    return [root_cluster, cluster_table[1]]
+
+
+def mutate_106_read_returned_cluster_array() -> int:
+    return mutate_105_make_cluster_array()[1].universes[0].beacon.left
+
+
+def mutate_107_local_cluster_stack_borrow() -> int:
+    cluster: FuzzCluster = root_cluster
+    return try checked_pair(&cluster.hypers[0].matrices[1].worlds[1].root.frame.pairs[0]) else 0
+
+
+def mutate_108_local_cluster_array_read() -> int:
+    clusters: FuzzCluster[2] = [root_cluster, cluster_table[0]]
+    return clusters[1].hypers[1].anchor.right
+
+
+def mutate_109_read_static_cluster_core(slot: static FuzzCluster&) -> int:
+    return mutate_05_read_static_pair(&slot.core)
+
+
+def mutate_110_use_static_cluster_core() -> int:
+    return mutate_109_read_static_cluster_core(&cluster_table[1])
+
+
+def mutate_111_read_static_galaxy(slot: static FuzzGalaxy&) -> int:
+    return mutate_05_read_static_pair(&slot.clusters[1].hypers[0].universes[1].matrices[0].worlds[1].root.frame.holder.pair)
+
+
+def mutate_112_use_static_galaxy() -> int:
+    return mutate_111_read_static_galaxy(&root_galaxy)
+
+
+def mutate_113_read_galaxy_table() -> int:
+    return galaxy_table[1].clusters[0].hypers[1].matrices[0].tower_bank[0].layers[1].frame.pairs[0].left
+
+
+def mutate_114_copy_galaxy_pair_to_local() -> int:
+    pair: FuzzPair = galaxy_table[0].clusters[1].universes[0].worlds[1].pair_ring[2]
+    return try checked_pair(&pair) else 0
+
+
+def mutate_115_make_galaxy_array() -> FuzzGalaxy[2]:
+    return [root_galaxy, galaxy_table[1]]
+
+
+def mutate_116_read_returned_galaxy_array() -> int:
+    return mutate_115_make_galaxy_array()[1].hypers[0].anchor.left
+
+
+def mutate_117_local_galaxy_stack_borrow() -> int:
+    galaxy: FuzzGalaxy = root_galaxy
+    return try checked_pair(&galaxy.clusters[0].hypers[1].universes[0].matrices[1].worlds[0].root.frame.pairs[1]) else 0
+
+
+def mutate_118_local_galaxy_array_read() -> int:
+    galaxies: FuzzGalaxy[2] = [root_galaxy, galaxy_table[0]]
+    return galaxies[1].clusters[1].core.right
+
+
+def mutate_119_read_static_galaxy_edge(slot: static FuzzGalaxy&) -> int:
+    return mutate_05_read_static_pair(&slot.edge)
+
+
+def mutate_120_use_static_galaxy_edge() -> int:
+    return mutate_119_read_static_galaxy_edge(&galaxy_table[1])
+
+
+def seed_local() -> int:
+    pair: FuzzPair = FuzzPair(3, 4)
+    return try checked_pair(&pair) else 0
+
+
+def mutate_01_local_array_elem() -> int:
+    pairs: FuzzPair[2] = [FuzzPair(15, 16), FuzzPair(17, 18)]
+    return try checked_pair(&pairs[1]) else 0
+
+
+def seed_nested_local() -> int:
+    deep: FuzzDeep = FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(7, 8), null), [FuzzPair(9, 10), FuzzPair(11, 12)]), FuzzHolder(FuzzPair(13, 14), null))
+    return try checked_pair(&deep.frame.holder.pair) else 0
+
+
+def mutate_02_nested_local_array_elem() -> int:
+    deep: FuzzDeep = FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(19, 20), null), [FuzzPair(21, 22), FuzzPair(23, 24)]), FuzzHolder(FuzzPair(25, 26), null))
+    return try checked_pair(&deep.frame.pairs[0]) else 0
+
+
+def seed_array_slice(values: darray[i32, row]) -> i32:
+    part: dview[i32] = values[1:3]
+    return part[0]
+
+
+def seed_array_view() -> i32:
+    return make_array_view()[1]
+
+
+def mutate_21_read_returned_darray_index() -> i32:
+    return make_array()[2]
+
+
+def mutate_22_read_returned_darray_slice_index() -> i32:
+    return make_array()[1:4][1]
+
+
+def mutate_23_slice_param_twice(values: darray[i32, row]) -> i32:
+    return values[0:3][1]
+
+
+def mutate_24_explicit_view_from_param(values: darray[i32, row]) -> i32:
+    mid: dview[i32] = values[1:4]
+    return mid[2]
+
+
+def mutate_05_read_static_pair(slot: static FuzzPair&) -> int:
+    return slot.left + slot.right
+
+
+def mutate_05_use_static_elem() -> int:
+    return mutate_05_read_static_pair(&pair_table[2])
+
+
+def mutate_08_read_static_holder(slot: static FuzzHolder&) -> int:
+    return mutate_05_read_static_pair(&slot.pair)
+
+
+def mutate_09_use_static_nested_field() -> int:
+    return mutate_05_read_static_pair(&holder_table[0].pair)
+
+
+def mutate_10_global_holder_sum() -> int:
+    return holder_table[0].pair.left + holder_table[1].pair.right
+
+
+def mutate_20_read_static_deep(slot: static FuzzDeep&) -> int:
+    return mutate_05_read_static_pair(&slot.frame.pairs[1])
+
+
+def mutate_20_use_static_deep() -> int:
+    return mutate_20_read_static_deep(&root_deep)
+
+
+def mutate_35_read_static_tower(slot: static FuzzTower&) -> int:
+    return mutate_05_read_static_pair(&slot.layers[1].frame.holder.pair)
+
+
+def mutate_36_use_static_tower() -> int:
+    return mutate_35_read_static_tower(&root_tower)
+
+
+def mutate_38_read_tower_table() -> int:
+    return tower_table[1].layers[0].frame.pairs[1].right
+
+
+def mutate_39_use_tower_table_static() -> int:
+    return mutate_35_read_static_tower(&tower_table[0])
+
+
+def mutate_40_copy_tower_pair_to_local() -> int:
+    pair: FuzzPair = tower_table[1].layers[1].frame.holder.pair
+    return try checked_pair(&pair) else 0
+
+
+def mutate_49_read_static_tower_edge(slot: static FuzzTower&) -> int:
+    return mutate_05_read_static_pair(&slot.edge)
+
+
+def mutate_49_use_static_tower_edge() -> int:
+    return mutate_49_read_static_tower_edge(&tower_table[1])
+
+
+def mutate_51_read_static_world(slot: static FuzzWorld&) -> int:
+    return mutate_05_read_static_pair(&slot.root.frame.holder.pair)
+
+
+def mutate_52_use_static_world() -> int:
+    return mutate_51_read_static_world(&root_world)
+
+
+def mutate_53_read_world_table() -> int:
+    return world_table[1].towers[0].layers[1].frame.pairs[0].right
+
+
+def mutate_54_copy_world_pair_to_local() -> int:
+    pair: FuzzPair = world_table[0].pair_ring[2]
+    return try checked_pair(&pair) else 0
+
+
+def mutate_55_make_world_array() -> FuzzWorld[2]:
+    return [root_world, world_table[1]]
+
+
+def mutate_56_read_returned_world_array() -> int:
+    return mutate_55_make_world_array()[1].pair_ring[1].left
+
+
+def mutate_57_local_world_stack_borrow() -> int:
+    world: FuzzWorld = root_world
+    return try checked_pair(&world.root.frame.pairs[1]) else 0
+
+
+def mutate_58_local_world_array_read() -> int:
+    worlds: FuzzWorld[2] = [root_world, world_table[0]]
+    return worlds[1].towers[1].edge.right
+
+
+def mutate_59_read_static_world_ring(slot: static FuzzWorld&) -> int:
+    return mutate_05_read_static_pair(&slot.pair_ring[2])
+
+
+def mutate_60_use_static_world_ring() -> int:
+    return mutate_59_read_static_world_ring(&world_table[1])
+
+
+def mutate_61_read_static_matrix(slot: static FuzzMatrix&) -> int:
+    return mutate_05_read_static_pair(&slot.worlds[1].root.frame.holder.pair)
+
+
+def mutate_62_use_static_matrix() -> int:
+    return mutate_61_read_static_matrix(&root_matrix)
+
+
+def mutate_63_read_matrix_table() -> int:
+    return matrix_table[1].tower_bank[0].layers[0].frame.pairs[1].left
+
+
+def mutate_64_copy_matrix_pair_to_local() -> int:
+    pair: FuzzPair = matrix_table[0].worlds[0].pair_ring[1]
+    return try checked_pair(&pair) else 0
+
+
+def mutate_65_make_matrix_array() -> FuzzMatrix[2]:
+    return [root_matrix, matrix_table[1]]
+
+
+def mutate_66_read_returned_matrix_array() -> int:
+    return mutate_65_make_matrix_array()[1].worlds[1].pair_ring[0].right
+
+
+def mutate_67_local_matrix_stack_borrow() -> int:
+    matrix: FuzzMatrix = root_matrix
+    return try checked_pair(&matrix.worlds[0].root.frame.pairs[0]) else 0
+
+
+def mutate_68_local_matrix_array_read() -> int:
+    matrices: FuzzMatrix[2] = [root_matrix, matrix_table[0]]
+    return matrices[1].tower_bank[1].edge.left
+
+
+def mutate_69_read_static_matrix_edge(slot: static FuzzMatrix&) -> int:
+    return mutate_05_read_static_pair(&slot.sentinel)
+
+
+def mutate_70_use_static_matrix_edge() -> int:
+    return mutate_69_read_static_matrix_edge(&matrix_table[1])
+
+
+def mutate_71_read_static_universe(slot: static FuzzUniverse&) -> int:
+    return mutate_05_read_static_pair(&slot.matrices[1].worlds[0].root.frame.holder.pair)
+
+
+def mutate_72_use_static_universe() -> int:
+    return mutate_71_read_static_universe(&root_universe)
+
+
+def mutate_73_read_universe_table() -> int:
+    return universe_table[1].matrices[0].tower_bank[1].layers[0].frame.pairs[1].right
+
+
+def mutate_74_copy_universe_pair_to_local() -> int:
+    pair: FuzzPair = universe_table[0].worlds[1].pair_ring[0]
+    return try checked_pair(&pair) else 0
+
+
+def mutate_75_make_universe_array() -> FuzzUniverse[2]:
+    return [root_universe, universe_table[1]]
+
+
+def mutate_76_read_returned_universe_array() -> int:
+    return mutate_75_make_universe_array()[1].worlds[0].pair_ring[2].left
+
+
+def mutate_77_local_universe_stack_borrow() -> int:
+    universe: FuzzUniverse = root_universe
+    return try checked_pair(&universe.matrices[0].worlds[1].root.frame.pairs[1]) else 0
+
+
+def mutate_78_local_universe_array_read() -> int:
+    universes: FuzzUniverse[2] = [root_universe, universe_table[0]]
+    return universes[1].matrices[1].sentinel.right
+
+
+def mutate_79_read_static_universe_beacon(slot: static FuzzUniverse&) -> int:
+    return mutate_05_read_static_pair(&slot.beacon)
+
+
+def mutate_80_use_static_universe_beacon() -> int:
+    return mutate_79_read_static_universe_beacon(&universe_table[1])
+
+
+def mutate_50_combo(values: darray[i32, row], which: int) -> int:
+    return mutate_24_explicit_view_from_param(values) + mutate_47_local_tower_stack_borrow() + (try mutate_43_dispatch_error4(which) else -50)
+
+
+def mutate_47_local_tower_stack_borrow() -> int:
+    tower: FuzzTower = FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(144, 145), null), [FuzzPair(146, 147), FuzzPair(148, 149)]), FuzzHolder(FuzzPair(150, 151), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(152, 153), null), [FuzzPair(154, 155), FuzzPair(156, 157)]), FuzzHolder(FuzzPair(158, 159), null))], FuzzPair(160, 161))
+    return try checked_pair(&tower.layers[0].frame.pairs[1]) else 0
+
+
+def mutate_48_local_tower_array_read() -> int:
+    towers: FuzzTower[2] = [root_tower, tower_table[0]]
+    return towers[1].layers[1].frame.pairs[0].left
+
+
+def mutate_11_local_fixed_slice() -> int:
+    nums: int[4] = [50, 51, 52, 53]
+    part: view[int] = nums[1:4]
+    return part[1]
+
+
+def mutate_12_inferred_fixed_slice() -> int:
+    nums = [60, 61, 62, 63]
+    part: view[int] = nums[0:2]
+    return part[1]
+
+
+def mutate_13_local_pair_array_sum() -> int:
+    pairs: FuzzPair[2] = [FuzzPair(70, 71), FuzzPair(72, 73)]
+    return pairs[0].left + pairs[1].right
+
+
+def mutate_14_make_pair_array() -> FuzzPair[2]:
+    return [FuzzPair(74, 75), FuzzPair(76, 77)]
+
+
+def mutate_15_read_returned_pair_array() -> int:
+    return mutate_14_make_pair_array()[1].left
+
+
+def mutate_16_make_holder_array() -> FuzzHolder[2]:
+    return [FuzzHolder(FuzzPair(78, 79), null), FuzzHolder(FuzzPair(80, 81), null)]
+
+
+def mutate_17_read_returned_holder_array() -> int:
+    return mutate_16_make_holder_array()[1].pair.right
+
+
+def mutate_18_copy_returned_pair_to_local() -> int:
+    pair: FuzzPair = mutate_16_make_holder_array()[0].pair
+    return try checked_pair(&pair) else 0
+
+

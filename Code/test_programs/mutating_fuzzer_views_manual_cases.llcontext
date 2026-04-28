@@ -1,0 +1,219 @@
+def seed_string_ops(text: dstr[row]) -> i64:
+    mid: sview[1, 3] = text[1:3]
+    return mid[0].i64() + text.len
+
+
+def mutate_25_same_view_as_text(text: dstr[row]) -> bool:
+    mid: sview[1, 3] = text[1:3]
+    return mid == text
+
+
+def mutate_26_different_string_views(left: dstr[row], right: dstr[col]) -> bool:
+    left_mid: sview[0, 2] = left[0:2]
+    right_mid: sview[0, 2] = right[0:2]
+    return left_mid != right_mid
+
+
+def mutate_27_ptr_bits_roundtrip(ptr: u8&) -> bool:
+    bits: uintptr = ptr.uintptr()
+    return bits -> u8& == ptr
+
+
+def mutate_28_nullable_ptr_is_null(ptr: u8&?) -> bool:
+    return ptr == null
+
+
+def mutate_29_advance_raw_twice(ptr: void&, offset: usize) -> void&:
+    mid: u8& = ptr -> u8& + offset
+    return mid -> void&
+
+
+def seed_list_view() -> i32:
+    return make_array_view()[0]
+
+
+def mutate_30_list_view_pair_sum() -> i32:
+    return make_array_view()[0] + make_array_view()[0]
+
+
+def mutate_32_explicit_list_view_temp() -> i32:
+    values: dview[i32] = make_array_view()
+    return values[0]
+
+
+def mutate_251_manual_pair_value() -> int error[MemoryError, DiskError, NetError]:
+    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    live.pair <- FuzzPair(251, 252)
+    total: int = try mutate_203_checked_any_pair((&live.pair) -> FuzzPair&)
+    handle: mutable heap HeapPairNode&? = live
+    mutate_202_release_heap_pair_node(handle)
+    return total
+
+
+def mutate_252_manual_two_pair_chain() -> int error[MemoryError, LogicError, DiskError, NetError]:
+    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live.pair <- FuzzPair(252, 253)
+    second_live.pair <- FuzzPair(254, 255)
+    first_live.next <- second_live
+    total: int = try mutate_204_recursive_pair_node_sum(first_live)
+    first: mutable heap HeapPairNode&? = first_live
+    try mutate_205_recursive_free_pair_chain(first)
+    return total
+
+
+def mutate_253_manual_three_pair_chain() -> int error[MemoryError, LogicError, DiskError, NetError]:
+    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    third_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live.pair <- FuzzPair(253, 254)
+    second_live.pair <- FuzzPair(255, 256)
+    third_live.pair <- FuzzPair(257, 258)
+    first_live.next <- second_live
+    second_live.next <- third_live
+    total: int = try mutate_204_recursive_pair_node_sum(first_live)
+    first: mutable heap HeapPairNode&? = first_live
+    try mutate_205_recursive_free_pair_chain(first)
+    return total
+
+
+def mutate_254_manual_heap_buffer_bits() -> uintptr error[MemoryError, FormatError]:
+    ptr: heap u8& = alloc_bytes(48) else raise MemoryError.OutOfMemory
+    try mutate_181_checked_write_into(ptr -> u8&, 48, "m254=%d")
+    next: u8& = ptr -> u8& + 1
+    bits: uintptr = ptr.uintptr() + next.uintptr()
+    sfree_bytes(ptr)
+    return bits
+
+
+def mutate_255_manual_stack_heap_bits() -> uintptr error[MemoryError, FormatError]:
+    local: u8[16] = zeroed
+    stack_bits: uintptr = (&local[0]) -> u8&.uintptr()
+    heap_bits: uintptr = try mutate_254_manual_heap_buffer_bits()
+    static_bits: uintptr = mutate_184_static_as_any_bits("m255")
+    return stack_bits + heap_bits + static_bits
+
+
+def mutate_256_manual_nullable_release_cycle() -> int error[MemoryError]:
+    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    handle: mutable heap HeapPairNode&? = live
+    mutate_202_release_heap_pair_node(handle)
+    return 256
+
+
+def mutate_257_manual_pair_chain_from_globals() -> int error[MemoryError, LogicError, DiskError, NetError]:
+    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live.pair <- root_pair
+    second_live.pair <- pair_table[2]
+    first_live.next <- second_live
+    total: int = try mutate_204_recursive_pair_node_sum(first_live)
+    first: mutable heap HeapPairNode&? = first_live
+    try mutate_205_recursive_free_pair_chain(first)
+    return total
+
+
+def mutate_258_manual_reborrow_pair_field() -> int error[MemoryError, DiskError, NetError]:
+    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    live.pair <- FuzzPair(258, 259)
+    pair_ref: FuzzPair& = (&live.pair) -> FuzzPair&
+    total: int = try mutate_203_checked_any_pair(pair_ref)
+    handle: mutable heap HeapPairNode&? = live
+    mutate_202_release_heap_pair_node(handle)
+    return total
+
+
+def mutate_259_manual_heap_buffer_compare() -> bool error[MemoryError, FormatError]:
+    bits: uintptr = try mutate_254_manual_heap_buffer_bits()
+    return bits != 0
+
+
+def mutate_260_manual_pair_and_buffer_combo(depth: int) -> int:
+    return (try mutate_252_manual_two_pair_chain() else -260) + mutate_241_recursive_format_or_fallback(depth)
+
+
+def mutate_261_pair_value_or_minus() -> int:
+    return try mutate_251_manual_pair_value() else -261
+
+
+def mutate_262_two_chain_or_minus() -> int:
+    return try mutate_252_manual_two_pair_chain() else -262
+
+
+def mutate_263_three_chain_or_minus() -> int:
+    return try mutate_253_manual_three_pair_chain() else -263
+
+
+def mutate_264_heap_buffer_bits_nonzero() -> bool:
+    bits: uintptr = try mutate_254_manual_heap_buffer_bits() else 0
+    return bits != 0
+
+
+def mutate_265_stack_heap_bits_or_zero() -> uintptr:
+    return try mutate_255_manual_stack_heap_bits() else 0
+
+
+def mutate_266_release_cycle_or_minus() -> int:
+    return try mutate_256_manual_nullable_release_cycle() else -266
+
+
+def mutate_267_global_chain_or_minus() -> int:
+    return try mutate_257_manual_pair_chain_from_globals() else -267
+
+
+def mutate_268_reborrow_pair_or_minus() -> int:
+    return try mutate_258_manual_reborrow_pair_field() else -268
+
+
+def mutate_269_heap_buffer_truth() -> int:
+    if try mutate_259_manual_heap_buffer_compare() else false:
+        return 269
+    return -269
+
+
+def mutate_270_pair_buffer_combo(depth: int) -> int:
+    return mutate_260_manual_pair_and_buffer_combo(depth) + mutate_225_combo_pointers_and_errors(depth)
+
+
+def mutate_271_allocator_wave(depth: int) -> int:
+    return mutate_261_pair_value_or_minus() + mutate_241_recursive_format_or_fallback(depth)
+
+
+def mutate_272_ownership_wave(depth: int) -> int:
+    return mutate_262_two_chain_or_minus() + mutate_223_recursive_buffer_write_fallback(depth)
+
+
+def mutate_273_chain_wave(depth: int) -> int:
+    return mutate_263_three_chain_or_minus() + (try mutate_247_recursive_pair_chain_combo(depth) else -273)
+
+
+def mutate_274_bits_wave(depth: int) -> uintptr:
+    return mutate_265_stack_heap_bits_or_zero() + (try mutate_226_recursive_alloc_bits(depth, 8) else 0)
+
+
+def mutate_275_truth_wave(which: int) -> int:
+    return mutate_249_memory_truth_table(which) + mutate_270_pair_buffer_combo(which)
+
+
+def mutate_276_format_pair_wave(depth: int) -> int:
+    return mutate_271_allocator_wave(depth) + (try mutate_207_stack_buffer_format() else -276)
+
+
+def mutate_277_global_chain_wave(depth: int) -> int:
+    return mutate_267_global_chain_or_minus() + (try mutate_237_pair_chain_from_static_pairs() else -277) + depth
+
+
+def mutate_278_pointer_combo_wave(depth: int) -> uintptr:
+    return (try mutate_255_manual_stack_heap_bits() else 0) + (try mutate_224_mixed_stack_heap_static_any() else 0) + mutate_248_recursive_static_ptr_combo(depth)
+
+
+def mutate_279_recursive_wave(depth: int) -> int:
+    if depth <= 0:
+        return mutate_276_format_pair_wave(1)
+    return mutate_276_format_pair_wave(depth) + mutate_279_recursive_wave(depth - 1)
+
+
+def mutate_280_deep_memory_wave(depth: int, which: int) -> int:
+    return mutate_250_final_memory_recursion_combo(depth, which) + mutate_279_recursive_wave(depth)
+
+

@@ -1,0 +1,30 @@
+struct PackedStoreAllocResult:
+    row: mutable heap void&?
+    handle: mutable uintptr
+struct PackedStoreIndexAllocResult:
+    row: mutable heap void&?
+    index: mutable u32
+struct PackedStoreVariantRows:
+    tag: mutable u32
+    rows: mutable darray[uintptr]
+struct PackedStoreState:
+    head_region: mutable heap Region&?
+    alloc_region: mutable heap Region&?
+    alloc_region_index: mutable usize
+    decode_region: mutable heap Region&?
+    decode_region_index: mutable usize
+    tail_region: mutable heap Region&?
+    regions: mutable darray[heap Region&?]
+    handles: mutable darray[uintptr]
+    indices: mutable darray[u32]
+    tags: mutable darray[u32]
+    variant_slots: mutable darray[u32]
+    variant_rows: mutable darray[PackedStoreVariantRows]
+    prefix_words: mutable usize
+    prefix_columns: mutable darray[uintptr]
+    prefix_column_capacity: mutable usize
+    side_words: mutable usize
+    side_columns: mutable darray[uintptr]
+    side_column_capacity: mutable usize
+    row_words: mutable usize
+    preferred_region_capacity: mutable usize

@@ -1,0 +1,88 @@
+@inline(always)
+def frontend_char_at(source: u8&, source_len: usize, index: usize) -> i64:
+    if index >= source_len:
+        return FRONTEND_CH_NUL
+    return source[index].i64()
+@inline(always)
+def frontend_cur_char(lexer: FrontendLexer&) -> i64:
+    return frontend_char_at(lexer.source, lexer.source_len, lexer.pos)
+@inline(always)
+def frontend_match_char(lexer: mutable FrontendLexer&, expected: i64) -> bool:
+    if frontend_cur_char(lexer) == expected:
+        _ = frontend_advance_char(lexer)
+        return true
+    return false
+@inline(always)
+def frontend_is_ident_char(ch: i64) -> bool:
+    return ch == FRONTEND_CH_UNDERSCORE or frontend_is_ascii_alnum(ch)
+@inline(always)
+def frontend_sv_first_char(view: sview) -> i64:
+    if view.len <= 0:
+        return FRONTEND_CH_NUL
+    return view.data[0].i64()
+def frontend_read_string(lexer: mutable FrontendLexer&) -> FrontendToken:
+    pos: FrontendPos = frontend_cur_pos(lexer)
+    _ = frontend_advance_char(lexer)
+    start: usize = lexer.pos
+
+    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_DQUOTE and frontend_cur_char(lexer) != FRONTEND_CH_NL:
+        if frontend_cur_char(lexer) == FRONTEND_CH_BSLASH:
+            _ = frontend_advance_char(lexer)
+            if frontend_is_eof(lexer):
+                text: sview = frontend_make_lexer_view(lexer, start, lexer.pos)
+                return frontend_make_token(FrontendTokenKind.StringLit, pos, text, frontend_empty_view())
+        _ = frontend_advance_char(lexer)
+
+    text: sview = frontend_make_lexer_view(lexer, start, lexer.pos)
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_DQUOTE:
+        _ = frontend_advance_char(lexer)
+
+    return frontend_make_token(FrontendTokenKind.StringLit, pos, text, frontend_empty_view())
+def frontend_read_char(lexer: mutable FrontendLexer&) -> FrontendToken:
+    pos: FrontendPos = frontend_cur_pos(lexer)
+    _ = frontend_advance_char(lexer)
+    start: usize = lexer.pos
+
+    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_SQUOTE and frontend_cur_char(lexer) != FRONTEND_CH_NL:
+        if frontend_cur_char(lexer) == FRONTEND_CH_BSLASH:
+            _ = frontend_advance_char(lexer)
+            if frontend_is_eof(lexer):
+                text: sview = frontend_make_lexer_view(lexer, start, lexer.pos)
+                return frontend_make_token(FrontendTokenKind.CharLit, pos, text, frontend_empty_view())
+        _ = frontend_advance_char(lexer)
+
+    text: sview = frontend_make_lexer_view(lexer, start, lexer.pos)
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_SQUOTE:
+        _ = frontend_advance_char(lexer)
+
+    return frontend_make_token(FrontendTokenKind.CharLit, pos, text, frontend_empty_view())
+@inline(always)
+def frontend_skip_string_kind(lexer: mutable FrontendLexer&) -> FrontendTokenKind:
+    _ = frontend_advance_char(lexer)
+
+    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_DQUOTE and frontend_cur_char(lexer) != FRONTEND_CH_NL:
+        if frontend_cur_char(lexer) == FRONTEND_CH_BSLASH:
+            _ = frontend_advance_char(lexer)
+            if frontend_is_eof(lexer):
+                return FrontendTokenKind.StringLit
+        _ = frontend_advance_char(lexer)
+
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_DQUOTE:
+        _ = frontend_advance_char(lexer)
+
+    return FrontendTokenKind.StringLit
+@inline(always)
+def frontend_skip_char_kind(lexer: mutable FrontendLexer&) -> FrontendTokenKind:
+    _ = frontend_advance_char(lexer)
+
+    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_SQUOTE and frontend_cur_char(lexer) != FRONTEND_CH_NL:
+        if frontend_cur_char(lexer) == FRONTEND_CH_BSLASH:
+            _ = frontend_advance_char(lexer)
+            if frontend_is_eof(lexer):
+                return FrontendTokenKind.CharLit
+        _ = frontend_advance_char(lexer)
+
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_SQUOTE:
+        _ = frontend_advance_char(lexer)
+
+    return FrontendTokenKind.CharLit

@@ -1,0 +1,389 @@
+struct FuzzPair:
+    left: mutable int
+    right: mutable int
+
+struct FuzzHolder:
+    pair: mutable FuzzPair
+    next: mutable FuzzHolder&?
+
+struct FuzzFrame:
+    holder: mutable FuzzHolder
+    pairs: mutable FuzzPair[2]
+
+struct FuzzDeep:
+    frame: mutable FuzzFrame
+    backup: mutable FuzzHolder
+
+struct FuzzTower:
+    layers: mutable FuzzDeep[2]
+    edge: mutable FuzzPair
+
+struct FuzzWorld:
+    towers: mutable FuzzTower[2]
+    root: mutable FuzzDeep
+    pair_ring: mutable FuzzPair[3]
+
+struct FuzzMatrix:
+    worlds: mutable FuzzWorld[2]
+    tower_bank: mutable FuzzTower[2]
+    sentinel: mutable FuzzPair
+
+struct FuzzUniverse:
+    matrices: mutable FuzzMatrix[2]
+    worlds: mutable FuzzWorld[2]
+    beacon: mutable FuzzPair
+
+struct FuzzHyper:
+    universes: mutable FuzzUniverse[2]
+    matrices: mutable FuzzMatrix[2]
+    anchor: mutable FuzzPair
+
+struct FuzzCluster:
+    hypers: mutable FuzzHyper[2]
+    universes: mutable FuzzUniverse[2]
+    core: mutable FuzzPair
+
+struct FuzzGalaxy:
+    clusters: mutable FuzzCluster[2]
+    hypers: mutable FuzzHyper[2]
+    edge: mutable FuzzPair
+
+struct FuzzCosmos:
+    galaxies: mutable FuzzGalaxy[2]
+    clusters: mutable FuzzCluster[2]
+    apex: mutable FuzzPair
+
+struct FuzzContinuum:
+    cosmoses: mutable FuzzCosmos[2]
+    galaxies: mutable FuzzGalaxy[2]
+    pivot: mutable FuzzPair
+
+struct HeapNode:
+    value: mutable int
+    next: mutable heap HeapNode&?
+
+struct HeapPairNode:
+    pair: mutable FuzzPair
+    next: mutable heap HeapPairNode&?
+
+error DiskError:
+    Missing
+    Denied
+
+error NetError:
+    Timeout
+    Closed
+
+error ParseError:
+    BadHeader
+    BadBody
+
+error ArenaError:
+    Exhausted
+    Corrupt
+
+error LogicError:
+    Impossible
+    Overflow
+
+error StateError:
+    BadMode
+    Poisoned
+
+error DataError:
+    MissingField
+    WrongShape
+
+error UtfError:
+    InvalidLead
+    InvalidTrail
+
+error MemoryError:
+    OutOfMemory
+
+error FormatError:
+    WriteFailed
+
+global root_pair: FuzzPair = FuzzPair(31, 32)
+global pair_table: FuzzPair[3] = [FuzzPair(33, 34), FuzzPair(35, 36), FuzzPair(37, 38)]
+global root_holder: FuzzHolder = FuzzHolder(FuzzPair(39, 40), null)
+global holder_table: FuzzHolder[2] = [FuzzHolder(FuzzPair(41, 42), null), FuzzHolder(FuzzPair(43, 44), null)]
+global root_deep: FuzzDeep = FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(82, 83), null), [FuzzPair(84, 85), FuzzPair(86, 87)]), FuzzHolder(FuzzPair(88, 89), null))
+global root_tower: FuzzTower = FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(90, 91), null), [FuzzPair(92, 93), FuzzPair(94, 95)]), FuzzHolder(FuzzPair(96, 97), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(98, 99), null), [FuzzPair(100, 101), FuzzPair(102, 103)]), FuzzHolder(FuzzPair(104, 105), null))], FuzzPair(106, 107))
+global tower_table: FuzzTower[2] = [FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(108, 109), null), [FuzzPair(110, 111), FuzzPair(112, 113)]), FuzzHolder(FuzzPair(114, 115), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(116, 117), null), [FuzzPair(118, 119), FuzzPair(120, 121)]), FuzzHolder(FuzzPair(122, 123), null))], FuzzPair(124, 125)), FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(126, 127), null), [FuzzPair(128, 129), FuzzPair(130, 131)]), FuzzHolder(FuzzPair(132, 133), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(134, 135), null), [FuzzPair(136, 137), FuzzPair(138, 139)]), FuzzHolder(FuzzPair(140, 141), null))], FuzzPair(142, 143))]
+global root_world: FuzzWorld = FuzzWorld([FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(162, 163), null), [FuzzPair(164, 165), FuzzPair(166, 167)]), FuzzHolder(FuzzPair(168, 169), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(170, 171), null), [FuzzPair(172, 173), FuzzPair(174, 175)]), FuzzHolder(FuzzPair(176, 177), null))], FuzzPair(178, 179)), FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(180, 181), null), [FuzzPair(182, 183), FuzzPair(184, 185)]), FuzzHolder(FuzzPair(186, 187), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(188, 189), null), [FuzzPair(190, 191), FuzzPair(192, 193)]), FuzzHolder(FuzzPair(194, 195), null))], FuzzPair(196, 197))], FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(198, 199), null), [FuzzPair(200, 201), FuzzPair(202, 203)]), FuzzHolder(FuzzPair(204, 205), null)), [FuzzPair(206, 207), FuzzPair(208, 209), FuzzPair(210, 211)])
+global world_table: FuzzWorld[2] = [FuzzWorld([FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(212, 213), null), [FuzzPair(214, 215), FuzzPair(216, 217)]), FuzzHolder(FuzzPair(218, 219), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(220, 221), null), [FuzzPair(222, 223), FuzzPair(224, 225)]), FuzzHolder(FuzzPair(226, 227), null))], FuzzPair(228, 229)), FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(230, 231), null), [FuzzPair(232, 233), FuzzPair(234, 235)]), FuzzHolder(FuzzPair(236, 237), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(238, 239), null), [FuzzPair(240, 241), FuzzPair(242, 243)]), FuzzHolder(FuzzPair(244, 245), null))], FuzzPair(246, 247))], FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(248, 249), null), [FuzzPair(250, 251), FuzzPair(252, 253)]), FuzzHolder(FuzzPair(254, 255), null)), [FuzzPair(256, 257), FuzzPair(258, 259), FuzzPair(260, 261)]), FuzzWorld([FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(262, 263), null), [FuzzPair(264, 265), FuzzPair(266, 267)]), FuzzHolder(FuzzPair(268, 269), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(270, 271), null), [FuzzPair(272, 273), FuzzPair(274, 275)]), FuzzHolder(FuzzPair(276, 277), null))], FuzzPair(278, 279)), FuzzTower([FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(280, 281), null), [FuzzPair(282, 283), FuzzPair(284, 285)]), FuzzHolder(FuzzPair(286, 287), null)), FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(288, 289), null), [FuzzPair(290, 291), FuzzPair(292, 293)]), FuzzHolder(FuzzPair(294, 295), null))], FuzzPair(296, 297))], FuzzDeep(FuzzFrame(FuzzHolder(FuzzPair(298, 299), null), [FuzzPair(300, 301), FuzzPair(302, 303)]), FuzzHolder(FuzzPair(304, 305), null)), [FuzzPair(306, 307), FuzzPair(308, 309), FuzzPair(310, 311)])]
+global root_matrix: FuzzMatrix = FuzzMatrix([root_world, world_table[0]], [root_tower, tower_table[1]], FuzzPair(312, 313))
+global matrix_table: FuzzMatrix[2] = [FuzzMatrix([world_table[1], root_world], [tower_table[0], root_tower], FuzzPair(314, 315)), FuzzMatrix([root_world, world_table[1]], [tower_table[1], tower_table[0]], FuzzPair(316, 317))]
+global root_universe: FuzzUniverse = FuzzUniverse([root_matrix, matrix_table[0]], [root_world, world_table[1]], FuzzPair(320, 321))
+global universe_table: FuzzUniverse[2] = [FuzzUniverse([matrix_table[1], root_matrix], [world_table[0], root_world], FuzzPair(322, 323)), FuzzUniverse([root_matrix, matrix_table[0]], [root_world, world_table[1]], FuzzPair(324, 325))]
+global root_hyper: FuzzHyper = FuzzHyper([root_universe, universe_table[0]], [root_matrix, matrix_table[1]], FuzzPair(326, 327))
+global hyper_table: FuzzHyper[2] = [FuzzHyper([universe_table[1], root_universe], [matrix_table[0], root_matrix], FuzzPair(328, 329)), FuzzHyper([root_universe, universe_table[0]], [root_matrix, matrix_table[1]], FuzzPair(330, 331))]
+global root_cluster: FuzzCluster = FuzzCluster([root_hyper, hyper_table[0]], [root_universe, universe_table[1]], FuzzPair(332, 333))
+global cluster_table: FuzzCluster[2] = [FuzzCluster([hyper_table[1], root_hyper], [universe_table[0], root_universe], FuzzPair(334, 335)), FuzzCluster([root_hyper, hyper_table[0]], [root_universe, universe_table[1]], FuzzPair(336, 337))]
+global root_galaxy: FuzzGalaxy = FuzzGalaxy([root_cluster, cluster_table[0]], [root_hyper, hyper_table[1]], FuzzPair(338, 339))
+global galaxy_table: FuzzGalaxy[2] = [FuzzGalaxy([cluster_table[1], root_cluster], [hyper_table[0], root_hyper], FuzzPair(340, 341)), FuzzGalaxy([root_cluster, cluster_table[0]], [root_hyper, hyper_table[1]], FuzzPair(342, 343))]
+global root_cosmos: FuzzCosmos = FuzzCosmos([root_galaxy, galaxy_table[0]], [root_cluster, cluster_table[1]], FuzzPair(344, 345))
+global cosmos_table: FuzzCosmos[2] = [FuzzCosmos([galaxy_table[1], root_galaxy], [cluster_table[0], root_cluster], FuzzPair(346, 347)), FuzzCosmos([root_galaxy, galaxy_table[0]], [root_cluster, cluster_table[1]], FuzzPair(348, 349))]
+global root_continuum: FuzzContinuum = FuzzContinuum([root_cosmos, cosmos_table[0]], [root_galaxy, galaxy_table[1]], FuzzPair(350, 351))
+global continuum_table: FuzzContinuum[2] = [FuzzContinuum([cosmos_table[1], root_cosmos], [galaxy_table[0], root_galaxy], FuzzPair(352, 353)), FuzzContinuum([root_cosmos, cosmos_table[0]], [root_galaxy, galaxy_table[1]], FuzzPair(354, 355))]
+
+extern make_array() -> darray[i32, row]
+extern make_array_view() -> dview[i32]
+extern alloc_heap_node() -> heap HeapNode&?
+extern sfree_heap_node(node: heap HeapNode&) -> heap HeapNode!
+extern alloc_heap_pair_node() -> heap HeapPairNode&?
+extern sfree_heap_pair_node(node: heap HeapPairNode&) -> heap HeapPairNode!
+extern alloc_bytes(size: usize) -> heap u8&?
+extern sfree_bytes(ptr: heap u8&) -> heap u8!
+extern snprintf(buffer: u8&?, buffer_size: usize, format: static u8&, ...) -> int
+
+
+def checked_pair(slot: stack FuzzPair&) -> int error[DiskError, NetError]:
+    if slot.left == 0:
+        raise DiskError.Missing
+    if slot.right == 0:
+        raise NetError.Timeout
+    return slot.left + slot.right
+
+
+def fail_disk() -> int error[DiskError]:
+    raise DiskError.Missing
+
+
+def fail_net() -> int error[NetError]:
+    raise NetError.Timeout
+
+
+def fail_parse() -> int error[ParseError]:
+    raise ParseError.BadHeader
+
+
+def mutate_42_fail_arena() -> int error[ArenaError]:
+    raise ArenaError.Exhausted
+
+
+def dispatch_error(which: int) -> int error[DiskError, NetError, ParseError]:
+    if which == 0:
+        return try fail_disk()
+    if which == 1:
+        return try fail_net()
+    return try fail_parse()
+
+
+def mutate_43_dispatch_error4(which: int) -> int error[DiskError, NetError, ParseError, ArenaError]:
+    if which == 0:
+        return try fail_disk()
+    if which == 1:
+        return try fail_net()
+    if which == 2:
+        return try fail_parse()
+    return try mutate_42_fail_arena()
+
+
+def mutate_44_dispatch_error4_fallback(which: int) -> int:
+    return try mutate_43_dispatch_error4(which) else -44
+
+
+def mutate_45_widen_disk() -> int error[DiskError, NetError, ParseError, ArenaError]:
+    return try fail_disk()
+
+
+def mutate_46_widen_arena() -> int error[DiskError, NetError, ParseError, ArenaError]:
+    return try mutate_42_fail_arena()
+
+
+def mutate_81_fail_logic() -> int error[LogicError]:
+    raise LogicError.Impossible
+
+
+def mutate_82_fail_state() -> int error[StateError]:
+    raise StateError.Poisoned
+
+
+def mutate_83_dispatch_error6(which: int) -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError]:
+    if which == 0:
+        return try fail_disk()
+    if which == 1:
+        return try fail_net()
+    if which == 2:
+        return try fail_parse()
+    if which == 3:
+        return try mutate_42_fail_arena()
+    if which == 4:
+        return try mutate_81_fail_logic()
+    return try mutate_82_fail_state()
+
+
+def mutate_84_dispatch_error6_fallback(which: int) -> int:
+    return try mutate_83_dispatch_error6(which) else -84
+
+
+def mutate_85_widen_logic() -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError]:
+    return try mutate_81_fail_logic()
+
+
+def mutate_86_widen_state() -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError]:
+    return try mutate_82_fail_state()
+
+
+def mutate_87_dispatch_error6_twice(left: int, right: int) -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError]:
+    return (try mutate_83_dispatch_error6(left)) + (try mutate_83_dispatch_error6(right))
+
+
+def mutate_88_dispatch_error6_choose(flag: bool) -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError]:
+    if flag:
+        return try mutate_81_fail_logic()
+    return try mutate_82_fail_state()
+
+
+def mutate_89_dispatch_error6_choose_fallback(flag: bool) -> int:
+    return try mutate_88_dispatch_error6_choose(flag) else -89
+
+
+def mutate_90_combo_universe_error(values: darray[i32, row], which: int) -> int:
+    return mutate_24_explicit_view_from_param(values) + mutate_72_use_static_universe() + (try mutate_83_dispatch_error6(which) else -90)
+
+
+def mutate_121_fail_data() -> int error[DataError]:
+    raise DataError.MissingField
+
+
+def mutate_122_fail_utf() -> int error[UtfError]:
+    raise UtfError.InvalidLead
+
+
+def mutate_123_dispatch_error8(which: int) -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError, DataError, UtfError]:
+    if which == 0:
+        return try fail_disk()
+    if which == 1:
+        return try fail_net()
+    if which == 2:
+        return try fail_parse()
+    if which == 3:
+        return try mutate_42_fail_arena()
+    if which == 4:
+        return try mutate_81_fail_logic()
+    if which == 5:
+        return try mutate_82_fail_state()
+    if which == 6:
+        return try mutate_121_fail_data()
+    return try mutate_122_fail_utf()
+
+
+def mutate_124_dispatch_error8_fallback(which: int) -> int:
+    return try mutate_123_dispatch_error8(which) else -124
+
+
+def mutate_125_widen_data() -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError, DataError, UtfError]:
+    return try mutate_121_fail_data()
+
+
+def mutate_126_widen_utf() -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError, DataError, UtfError]:
+    return try mutate_122_fail_utf()
+
+
+def mutate_127_dispatch_error8_twice(left: int, right: int) -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError, DataError, UtfError]:
+    return (try mutate_123_dispatch_error8(left)) + (try mutate_123_dispatch_error8(right))
+
+
+def mutate_128_dispatch_error8_choose(flag: bool) -> int error[DiskError, NetError, ParseError, ArenaError, LogicError, StateError, DataError, UtfError]:
+    if flag:
+        return try mutate_121_fail_data()
+    return try mutate_122_fail_utf()
+
+
+def mutate_129_dispatch_error8_choose_fallback(flag: bool) -> int:
+    return try mutate_128_dispatch_error8_choose(flag) else -129
+
+
+def mutate_130_combo_galaxy_error(values: darray[i32, row], which: int) -> int:
+    return mutate_24_explicit_view_from_param(values) + mutate_112_use_static_galaxy() + (try mutate_123_dispatch_error8(which) else -130)
+
+
+def mutate_131_read_static_cosmos(slot: static FuzzCosmos&) -> int:
+    return mutate_05_read_static_pair(&slot.galaxies[1].clusters[0].hypers[1].universes[0].matrices[1].worlds[0].root.frame.holder.pair)
+
+
+def mutate_132_use_static_cosmos() -> int:
+    return mutate_131_read_static_cosmos(&root_cosmos)
+
+
+def mutate_133_read_cosmos_table() -> int:
+    return cosmos_table[1].galaxies[0].clusters[1].hypers[0].matrices[0].tower_bank[1].layers[1].frame.pairs[0].right
+
+
+def mutate_134_copy_cosmos_pair_to_local() -> int:
+    pair: FuzzPair = cosmos_table[0].clusters[1].universes[0].worlds[1].pair_ring[0]
+    return try checked_pair(&pair) else 0
+
+
+def mutate_135_make_cosmos_array() -> FuzzCosmos[2]:
+    return [root_cosmos, cosmos_table[1]]
+
+
+def mutate_136_read_returned_cosmos_array() -> int:
+    return mutate_135_make_cosmos_array()[1].clusters[0].core.left
+
+
+def mutate_137_local_cosmos_stack_borrow() -> int:
+    cosmos: FuzzCosmos = root_cosmos
+    return try checked_pair(&cosmos.galaxies[0].clusters[1].hypers[0].universes[1].matrices[0].worlds[0].root.frame.pairs[1]) else 0
+
+
+def mutate_138_local_cosmos_array_read() -> int:
+    cosmoses: FuzzCosmos[2] = [root_cosmos, cosmos_table[0]]
+    return cosmoses[1].galaxies[1].edge.left
+
+
+def mutate_139_read_static_cosmos_apex(slot: static FuzzCosmos&) -> int:
+    return mutate_05_read_static_pair(&slot.apex)
+
+
+def mutate_140_use_static_cosmos_apex() -> int:
+    return mutate_139_read_static_cosmos_apex(&cosmos_table[1])
+
+
+def mutate_141_read_static_continuum(slot: static FuzzContinuum&) -> int:
+    return mutate_05_read_static_pair(&slot.cosmoses[1].galaxies[0].clusters[1].hypers[0].universes[1].matrices[0].worlds[1].root.frame.holder.pair)
+
+
+def mutate_142_use_static_continuum() -> int:
+    return mutate_141_read_static_continuum(&root_continuum)
+
+
+def mutate_143_read_continuum_table() -> int:
+    return continuum_table[1].cosmoses[0].galaxies[1].clusters[0].hypers[1].matrices[1].tower_bank[0].layers[0].frame.pairs[1].left
+
+
+def mutate_144_copy_continuum_pair_to_local() -> int:
+    pair: FuzzPair = continuum_table[0].galaxies[1].clusters[0].universes[1].worlds[0].pair_ring[2]
+    return try checked_pair(&pair) else 0
+
+
+def mutate_145_make_continuum_array() -> FuzzContinuum[2]:
+    return [root_continuum, continuum_table[1]]
+
+
+def mutate_146_read_returned_continuum_array() -> int:
+    return mutate_145_make_continuum_array()[1].galaxies[0].edge.right
+
+
+def mutate_147_local_continuum_stack_borrow() -> int:
+    continuum: FuzzContinuum = root_continuum
+    return try checked_pair(&continuum.cosmoses[0].clusters[1].hypers[0].universes[0].matrices[1].worlds[1].root.frame.pairs[0]) else 0
+
+
+def mutate_148_local_continuum_array_read() -> int:
+    continuums: FuzzContinuum[2] = [root_continuum, continuum_table[0]]
+    return continuums[1].cosmoses[1].apex.right
+
+
+def mutate_149_read_static_continuum_pivot(slot: static FuzzContinuum&) -> int:
+    return mutate_05_read_static_pair(&slot.pivot)
+
+
+def mutate_150_combo_continuum_everything(values: darray[i32, row], which: int) -> int:
+    return mutate_24_explicit_view_from_param(values) + mutate_142_use_static_continuum() + mutate_147_local_continuum_stack_borrow() + mutate_149_read_static_continuum_pivot(&continuum_table[1]) + (try mutate_123_dispatch_error8(which) else -150)
+
+

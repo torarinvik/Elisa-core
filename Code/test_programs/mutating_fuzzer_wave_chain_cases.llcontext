@@ -1,0 +1,314 @@
+def mutate_281_release_cycle_twice() -> int:
+    return mutate_266_release_cycle_or_minus() + (try mutate_256_manual_nullable_release_cycle() else -281)
+
+
+def mutate_282_pair_value_duet() -> int:
+    return mutate_261_pair_value_or_minus() + mutate_268_reborrow_pair_or_minus()
+
+
+def mutate_283_chain_duet() -> int:
+    return mutate_262_two_chain_or_minus() + mutate_267_global_chain_or_minus()
+
+
+def mutate_284_three_chain_stack_format() -> int:
+    return mutate_263_three_chain_or_minus() + (try mutate_207_stack_buffer_format() else -284)
+
+
+def mutate_285_heap_bits_duet() -> uintptr:
+    return (try mutate_254_manual_heap_buffer_bits() else 0) + (try mutate_200_mixed_memory_combo(1) else 0)
+
+
+def mutate_286_stack_heap_static_bits() -> uintptr:
+    return (try mutate_255_manual_stack_heap_bits() else 0) + mutate_235_use_recursive_static_string_walk()
+
+
+def mutate_287_compare_buffer_truth() -> int:
+    if mutate_264_heap_buffer_bits_nonzero() == false:
+        return -287
+    if mutate_269_heap_buffer_truth() < 0:
+        return -287
+    return 287
+
+
+def mutate_288_format_chain_duet(depth: int) -> int:
+    return mutate_241_recursive_format_or_fallback(depth) + mutate_262_two_chain_or_minus()
+
+
+def mutate_289_alloc_bits_manual(depth: int) -> uintptr:
+    return (try mutate_254_manual_heap_buffer_bits() else 0) + (try mutate_226_recursive_alloc_bits(depth, 12) else 0)
+
+
+def mutate_290_chain_sum_plus_format_fallback() -> int:
+    return (try mutate_244_chain_sum_plus_format() else -290) + mutate_241_recursive_format_or_fallback(1)
+
+
+def mutate_291_pair_buffer_mix() -> int:
+    return mutate_261_pair_value_or_minus() + (try mutate_182_alloc_and_format_heap_buffer() else -291)
+
+
+def mutate_292_global_stack_mix() -> int:
+    return mutate_267_global_chain_or_minus() + (try mutate_207_stack_buffer_format() else -292)
+
+
+def mutate_293_recursive_format_duet(depth: int) -> int:
+    return mutate_241_recursive_format_or_fallback(depth) + mutate_223_recursive_buffer_write_fallback(depth)
+
+
+def mutate_294_chain_mix() -> int:
+    return (try mutate_206_build_pair_chain_sum() else -294) + mutate_262_two_chain_or_minus()
+
+
+def mutate_295_three_chain_mix() -> int:
+    return (try mutate_229_pair_chain_sum_and_count() else -295) + mutate_263_three_chain_or_minus()
+
+
+def mutate_296_reborrow_pair_mix() -> int:
+    return mutate_268_reborrow_pair_or_minus() + mutate_261_pair_value_or_minus()
+
+
+def mutate_297_heap_void_truth() -> int:
+    if try mutate_233_heap_not_zero_any_void() else false:
+        if try mutate_259_manual_heap_buffer_compare() else false:
+            return 297
+    return -297
+
+
+def mutate_298_pointer_bits_mix(depth: int) -> uintptr:
+    return (try mutate_224_mixed_stack_heap_static_any() else 0) + (try mutate_255_manual_stack_heap_bits() else 0) + mutate_248_recursive_static_ptr_combo(depth)
+
+
+def mutate_299_ownership_ladder(depth: int) -> int:
+    return mutate_270_pair_buffer_combo(depth) + mutate_271_allocator_wave(depth)
+
+
+def mutate_300_chain_ladder(depth: int) -> int:
+    return mutate_277_global_chain_wave(depth) + mutate_279_recursive_wave(depth)
+
+
+def mutate_301_recursive_ownership_ladder(depth: int) -> int:
+    if depth <= 0:
+        return mutate_299_ownership_ladder(0)
+    return mutate_299_ownership_ladder(depth) + mutate_301_recursive_ownership_ladder(depth - 1)
+
+
+def mutate_302_recursive_chain_ladder(depth: int) -> int:
+    if depth <= 0:
+        return mutate_300_chain_ladder(0)
+    return mutate_300_chain_ladder(depth) + mutate_302_recursive_chain_ladder(depth - 1)
+
+
+def mutate_303_truth_from_bits(depth: int) -> int:
+    if mutate_274_bits_wave(depth) == 0:
+        return -303
+    return 303
+
+
+def mutate_304_recursive_manual_bits(depth: int) -> uintptr:
+    bits: uintptr = try mutate_254_manual_heap_buffer_bits() else 0
+    if depth <= 0:
+        return bits
+    return bits + mutate_304_recursive_manual_bits(depth - 1)
+
+
+def mutate_305_chain_truth(which: int) -> int:
+    return (try mutate_229_pair_chain_sum_and_count() else -305) + mutate_249_memory_truth_table(which)
+
+
+def mutate_306_mega_combo(depth: int, which: int) -> int:
+    return mutate_280_deep_memory_wave(depth, which) + mutate_299_ownership_ladder(depth)
+
+
+def mutate_307_mega_bits(depth: int) -> uintptr:
+    return mutate_298_pointer_bits_mix(depth) + mutate_304_recursive_manual_bits(depth)
+
+
+def mutate_308_compare_truth(depth: int) -> int:
+    if mutate_303_truth_from_bits(depth) < 0:
+        return -308
+    if mutate_287_compare_buffer_truth() < 0:
+        return -308
+    return 308
+
+
+def mutate_309_pair_release_matrix(depth: int) -> int:
+    return mutate_281_release_cycle_twice() + mutate_282_pair_value_duet() + mutate_299_ownership_ladder(depth)
+
+
+def mutate_310_pointer_matrix(depth: int) -> uintptr:
+    return mutate_274_bits_wave(depth) + mutate_289_alloc_bits_manual(depth)
+
+
+def mutate_311_buffer_wave_a(depth: int) -> int:
+    return mutate_223_recursive_buffer_write_fallback(depth) + mutate_241_recursive_format_or_fallback(depth)
+
+
+def mutate_312_buffer_wave_b(depth: int) -> int:
+    return mutate_311_buffer_wave_a(depth) + (try mutate_182_alloc_and_format_heap_buffer() else -312)
+
+
+def mutate_313_buffer_wave_c(depth: int) -> int:
+    return mutate_312_buffer_wave_b(depth) + (try mutate_207_stack_buffer_format() else -313)
+
+
+def mutate_314_buffer_wave_d(depth: int) -> int:
+    return mutate_313_buffer_wave_c(depth) + mutate_260_manual_pair_and_buffer_combo(depth)
+
+
+def mutate_315_buffer_bits_a(depth: int) -> uintptr:
+    return (try mutate_254_manual_heap_buffer_bits() else 0) + mutate_274_bits_wave(depth)
+
+
+def mutate_316_buffer_bits_b(depth: int) -> uintptr:
+    return mutate_315_buffer_bits_a(depth) + mutate_289_alloc_bits_manual(depth)
+
+
+def mutate_317_buffer_truth(depth: int) -> int:
+    if mutate_315_buffer_bits_a(depth) == 0:
+        return -317
+    return 317
+
+
+def mutate_318_buffer_chain_combo(depth: int) -> int:
+    return mutate_314_buffer_wave_d(depth) + mutate_300_chain_ladder(depth)
+
+
+def mutate_319_buffer_chain_recursive(depth: int) -> int:
+    if depth <= 0:
+        return mutate_318_buffer_chain_combo(0)
+    return mutate_318_buffer_chain_combo(depth) + mutate_319_buffer_chain_recursive(depth - 1)
+
+
+def mutate_320_buffer_final(depth: int) -> int:
+    return mutate_319_buffer_chain_recursive(depth) + mutate_317_buffer_truth(depth)
+
+
+def mutate_321_chain_wave_a() -> int:
+    return (try mutate_252_manual_two_pair_chain() else -321) + (try mutate_237_pair_chain_from_static_pairs() else -321)
+
+
+def mutate_322_chain_wave_b() -> int:
+    return (try mutate_253_manual_three_pair_chain() else -322) + (try mutate_229_pair_chain_sum_and_count() else -322)
+
+
+def mutate_323_chain_wave_c() -> int:
+    return mutate_321_chain_wave_a() + mutate_322_chain_wave_b()
+
+
+def mutate_324_chain_wave_d(depth: int) -> int:
+    return mutate_323_chain_wave_c() + mutate_279_recursive_wave(depth)
+
+
+def mutate_325_chain_bits(depth: int) -> uintptr:
+    return (try mutate_255_manual_stack_heap_bits() else 0) + (try mutate_236_recursive_heap_any_mix(depth) else 0)
+
+
+def mutate_326_chain_bits_plus(depth: int) -> uintptr:
+    return mutate_325_chain_bits(depth) + mutate_307_mega_bits(depth)
+
+
+def mutate_327_chain_truth(depth: int) -> int:
+    if mutate_325_chain_bits(depth) == 0:
+        return -327
+    return 327
+
+
+def mutate_328_chain_memory_combo(depth: int, which: int) -> int:
+    return mutate_324_chain_wave_d(depth) + mutate_306_mega_combo(depth, which)
+
+
+def mutate_329_chain_recursive_memory(depth: int, which: int) -> int:
+    if depth <= 0:
+        return mutate_328_chain_memory_combo(0, which)
+    return mutate_328_chain_memory_combo(depth, which) + mutate_329_chain_recursive_memory(depth - 1, which + 1)
+
+
+def mutate_330_chain_final(depth: int, which: int) -> int:
+    return mutate_329_chain_recursive_memory(depth, which) + mutate_327_chain_truth(depth)
+
+
+def mutate_331_pointer_truth_a(depth: int) -> int:
+    if mutate_310_pointer_matrix(depth) == 0:
+        return -331
+    return 331
+
+
+def mutate_332_pointer_truth_b(depth: int) -> int:
+    if mutate_326_chain_bits_plus(depth) == 0:
+        return -332
+    return 332
+
+
+def mutate_333_pointer_truth_c(depth: int) -> int:
+    return mutate_331_pointer_truth_a(depth) + mutate_332_pointer_truth_b(depth)
+
+
+def mutate_334_pointer_truth_d(depth: int) -> int:
+    return mutate_333_pointer_truth_c(depth) + mutate_308_compare_truth(depth)
+
+
+def mutate_335_pointer_mix_a(depth: int) -> uintptr:
+    return mutate_307_mega_bits(depth) + mutate_326_chain_bits_plus(depth)
+
+
+def mutate_336_pointer_mix_b(depth: int) -> uintptr:
+    return mutate_335_pointer_mix_a(depth) + mutate_310_pointer_matrix(depth)
+
+
+def mutate_337_pointer_mix_c(depth: int) -> int:
+    if mutate_336_pointer_mix_b(depth) == 0:
+        return -337
+    return 337
+
+
+def mutate_338_pointer_mix_d(depth: int) -> int:
+    return mutate_334_pointer_truth_d(depth) + mutate_337_pointer_mix_c(depth)
+
+
+def mutate_339_pointer_mix_recursive(depth: int) -> int:
+    if depth <= 0:
+        return mutate_338_pointer_mix_d(0)
+    return mutate_338_pointer_mix_d(depth) + mutate_339_pointer_mix_recursive(depth - 1)
+
+
+def mutate_340_pointer_final(depth: int) -> int:
+    return mutate_339_pointer_mix_recursive(depth) + mutate_334_pointer_truth_d(depth)
+
+
+def mutate_341_final_wave_a(depth: int, which: int) -> int:
+    return mutate_330_chain_final(depth, which) + mutate_340_pointer_final(depth)
+
+
+def mutate_342_final_wave_b(depth: int, which: int) -> int:
+    return mutate_341_final_wave_a(depth, which) + mutate_320_buffer_final(depth)
+
+
+def mutate_343_final_wave_c(depth: int, which: int) -> int:
+    return mutate_342_final_wave_b(depth, which) + mutate_306_mega_combo(depth, which)
+
+
+def mutate_344_final_wave_d(depth: int, which: int) -> int:
+    return mutate_343_final_wave_c(depth, which) + mutate_280_deep_memory_wave(depth, which)
+
+
+def mutate_345_final_wave_e(depth: int, which: int) -> int:
+    return mutate_344_final_wave_d(depth, which) + mutate_299_ownership_ladder(depth)
+
+
+def mutate_346_final_wave_f(depth: int, which: int) -> int:
+    return mutate_345_final_wave_e(depth, which) + mutate_300_chain_ladder(depth)
+
+
+def mutate_347_final_wave_g(depth: int, which: int) -> int:
+    return mutate_346_final_wave_f(depth, which) + mutate_318_buffer_chain_combo(depth)
+
+
+def mutate_348_final_wave_h(depth: int, which: int) -> int:
+    return mutate_347_final_wave_g(depth, which) + mutate_328_chain_memory_combo(depth, which)
+
+
+def mutate_349_final_wave_i(depth: int, which: int) -> int:
+    return mutate_348_final_wave_h(depth, which) + mutate_340_pointer_final(depth)
+
+
+def mutate_350_final_wave_j(depth: int, which: int) -> int:
+    return mutate_349_final_wave_i(depth, which) + mutate_250_final_memory_recursion_combo(depth, which)

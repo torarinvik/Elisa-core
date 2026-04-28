@@ -1,0 +1,258 @@
+def json_new_cursor_with_len(source: u8&, source_len: usize) -> JsonCursor:
+    out: mutable JsonCursor = zeroed
+    out.source <- source
+    out.source_len <- source_len
+    out.pos <- 0
+    return out
+def json_new_cursor(source: u8&) -> JsonCursor:
+    return json_new_cursor_with_len(source, runtime_strlen(source))
+def json_copy_cursor(cursor: JsonCursor&) -> JsonCursor:
+    return JsonCursor(cursor.source, cursor.source_len, cursor.pos)
+@inline(always)
+def json_char_at(source: u8&, source_len: usize, index: usize) -> i64:
+    if index >= source_len:
+        return JSON_CH_NUL
+    return source[index].i64()
+@inline(always)
+def json_cur_char(cursor: JsonCursor&) -> i64:
+    return json_char_at(cursor.source, cursor.source_len, cursor.pos)
+def json_peek_char(cursor: JsonCursor&, offset: usize) -> i64:
+    return json_char_at(cursor.source, cursor.source_len, cursor.pos + offset)
+@inline(always)
+def json_advance_char(cursor: mutable JsonCursor&) -> i64:
+    ch: i64 = json_cur_char(cursor)
+    if cursor.pos < cursor.source_len:
+        cursor.pos <- cursor.pos + 1
+    return ch
+def json_is_hex_digit(ch: i64) -> bool:
+    return json_is_digit(ch) or (ch >= 65 and ch <= 70) or (ch >= JSON_CH_a and ch <= JSON_CH_f)
+@inline(always)
+def json_hex_digit_value(ch: i64) -> i64:
+    if ch >= JSON_CH_0 and ch <= JSON_CH_9:
+        return ch - JSON_CH_0
+    if ch >= 65 and ch <= 70:
+        return ch - 65 + 10
+    if ch >= JSON_CH_a and ch <= JSON_CH_f:
+        return ch - JSON_CH_a + 10
+    return -1
+def json_read_hex_quad(cursor: mutable JsonCursor&) -> i64:
+    value: mutable i64 = 0
+    for digits in 0..<4:
+        digit: i64 = json_hex_digit_value(json_cur_char(cursor))
+        if digit < 0:
+            return -1
+        _ = json_advance_char(cursor)
+        value <- value * 16 + digit
+    return value
+def json_read_hex_quad_from_source(source: u8&, source_end: usize, pos: mutable usize&) -> i64:
+    if pos[0] + 4 > source_end:
+        return -1
+
+    value: mutable i64 = 0
+    for digits in 0..<4:
+        digit: i64 = json_hex_digit_value(source[pos[0]].i64())
+        if digit < 0:
+            return -1
+        value <- value * 16 + digit
+        pos[0] <- pos[0] + 1
+    return value
+def json_decode_escape_codepoint(cursor: mutable JsonCursor&) -> i64:
+    if cursor.pos >= cursor.source_len:
+        return -1
+
+    esc: i64 = json_advance_char(cursor)
+    if esc == JSON_CH_DQUOTE or esc == JSON_CH_BSLASH or esc == JSON_CH_SLASH:
+        return esc
+    if esc == JSON_CH_b:
+        return 8
+    if esc == JSON_CH_f:
+        return 12
+    if esc == JSON_CH_n:
+        return JSON_CH_NL
+    if esc == JSON_CH_r:
+        return JSON_CH_CR
+    if esc == JSON_CH_t:
+        return JSON_CH_TAB
+    if esc != JSON_CH_u:
+        return -1
+
+    first: i64 = json_read_hex_quad(cursor)
+    if first < 0:
+        return -1
+    if json_is_low_surrogate(first):
+        return -1
+    if not json_is_high_surrogate(first):
+        return first
+
+    if json_advance_char(cursor) != JSON_CH_BSLASH:
+        return -1
+    if json_advance_char(cursor) != JSON_CH_u:
+        return -1
+
+    second: i64 = json_read_hex_quad(cursor)
+    if not json_is_low_surrogate(second):
+        return -1
+
+    return 65536 + ((first - 55296) << 10) + (second - 56320)
+def json_decode_escape_codepoint_from_source(source: u8&, source_end: usize, pos: mutable usize&) -> i64:
+    if pos[0] >= source_end:
+        return -1
+
+    esc: i64 = source[pos[0]].i64()
+    pos[0] <- pos[0] + 1
+
+    if esc == JSON_CH_DQUOTE or esc == JSON_CH_BSLASH or esc == JSON_CH_SLASH:
+        return esc
+    if esc == JSON_CH_b:
+        return 8
+    if esc == JSON_CH_f:
+        return 12
+    if esc == JSON_CH_n:
+        return JSON_CH_NL
+    if esc == JSON_CH_r:
+        return JSON_CH_CR
+    if esc == JSON_CH_t:
+        return JSON_CH_TAB
+    if esc != JSON_CH_u:
+        return -1
+
+    first: i64 = json_read_hex_quad_from_source(source, source_end, pos)
+    if first < 0:
+        return -1
+    if json_is_low_surrogate(first):
+        return -1
+    if not json_is_high_surrogate(first):
+        return first
+
+    if pos[0] >= source_end or source[pos[0]].i64() != JSON_CH_BSLASH:
+        return -1
+    pos[0] <- pos[0] + 1
+    if pos[0] >= source_end or source[pos[0]].i64() != JSON_CH_u:
+        return -1
+    pos[0] <- pos[0] + 1
+
+    second: i64 = json_read_hex_quad_from_source(source, source_end, pos)
+    if not json_is_low_surrogate(second):
+        return -1
+
+    return 65536 + ((first - 55296) << 10) + (second - 56320)
+def json_utf8_codepoint_size(codepoint: i64) -> usize:
+    if codepoint < 0:
+        return 0
+    if codepoint <= 127:
+        return 1
+    if codepoint <= 2047:
+        return 2
+    if codepoint <= 65535:
+        return 3
+    if codepoint <= 1114111:
+        return 4
+    return 0
+def json_write_utf8_codepoint(dst: mutable u8&, dst_pos: usize, codepoint: i64) -> usize:
+    if codepoint <= 127:
+        dst[dst_pos] <- codepoint.u8()
+        return 1
+    if codepoint <= 2047:
+        dst[dst_pos] <- (192 | (codepoint >> 6)).u8()
+        dst[dst_pos + 1] <- (128 | (codepoint & 63)).u8()
+        return 2
+    if codepoint <= 65535:
+        dst[dst_pos] <- (224 | (codepoint >> 12)).u8()
+        dst[dst_pos + 1] <- (128 | ((codepoint >> 6) & 63)).u8()
+        dst[dst_pos + 2] <- (128 | (codepoint & 63)).u8()
+        return 3
+    dst[dst_pos] <- (240 | (codepoint >> 18)).u8()
+    dst[dst_pos + 1] <- (128 | ((codepoint >> 12) & 63)).u8()
+    dst[dst_pos + 2] <- (128 | ((codepoint >> 6) & 63)).u8()
+    dst[dst_pos + 3] <- (128 | (codepoint & 63)).u8()
+    return 4
+def json_string_has_escape(source: u8&, source_offset: usize, source_len: usize) -> bool:
+    if source_len < 2:
+        return false
+
+    pos: mutable usize = source_offset + 1
+    end: usize = source_offset + source_len - 1
+    while pos < end:
+        if source[pos].i64() == JSON_CH_BSLASH:
+            return true
+        pos <- pos + 1
+    return false
+def json_decoded_string_len(source: u8&, source_offset: usize, source_len: usize) -> i64:
+    if source_len < 2:
+        return -1
+    if not json_string_has_escape(source, source_offset, source_len):
+        return (source_len - 2).i64()
+
+    pos: mutable usize = source_offset + 1
+    end: usize = source_offset + source_len - 1
+    total: mutable i64 = 0
+    while pos < end:
+        ch: i64 = source[pos].i64()
+        pos <- pos + 1
+        if likely ch != JSON_CH_BSLASH:
+            total <- total + 1
+        else:
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, pos.ref[mutable usize&])
+            if codepoint < 0:
+                return -1
+            utf8_size: usize = json_utf8_codepoint_size(codepoint)
+            if utf8_size == 0:
+                return -1
+            total <- total + utf8_size.i64()
+    return total
+def json_decode_string_into(source: u8&, source_offset: usize, source_len: usize, dst: mutable u8&) -> i64:
+    if source_len < 2:
+        return -1
+
+    raw_offset: usize = source_offset + 1
+    raw_len: usize = source_len - 2
+    if not json_string_has_escape(source, source_offset, source_len):
+        if raw_len > 0:
+            memcpy(dst.cast[mutable void&], (source + raw_offset).cast[void&], raw_len)
+        return raw_len.i64()
+
+    pos: mutable usize = raw_offset
+    end: usize = source_offset + source_len - 1
+    out_pos: mutable usize = 0
+    while pos < end:
+        ch: i64 = source[pos].i64()
+        pos <- pos + 1
+        if likely ch != JSON_CH_BSLASH:
+            dst[out_pos] <- ch.u8()
+            out_pos <- out_pos + 1
+        else:
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, pos.ref[mutable usize&])
+            if codepoint < 0:
+                return -1
+            out_pos <- out_pos + json_write_utf8_codepoint(dst, out_pos, codepoint)
+    return out_pos.i64()
+def json_string_matches_literal(source: u8&, source_offset: usize, source_len: usize, literal: u8&) -> bool:
+    if source_len < 2:
+        return false
+    if not json_string_has_escape(source, source_offset, source_len):
+        return string_view(source + source_offset + 1, 0, (source_len - 2).i64()) == literal
+
+    literal_len: usize = runtime_strlen(literal)
+    pos: mutable usize = source_offset + 1
+    end: usize = source_offset + source_len - 1
+    literal_pos: mutable usize = 0
+    while pos < end:
+        ch: i64 = source[pos].i64()
+        pos <- pos + 1
+        if likely ch != JSON_CH_BSLASH:
+            if literal_pos >= literal_len or literal[literal_pos].i64() != ch:
+                return false
+            literal_pos <- literal_pos + 1
+        else:
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, pos.ref[mutable usize&])
+            if codepoint < 0:
+                return false
+            utf8: u8[4] = zeroed
+            encoded_len: usize = json_write_utf8_codepoint(utf8[0].ref[mutable u8&], 0, codepoint)
+            if literal_pos + encoded_len > literal_len:
+                return false
+            for i in 0..<encoded_len:
+                if literal[literal_pos + i].i64() != utf8[i].i64():
+                    return false
+            literal_pos <- literal_pos + encoded_len
+    return literal_pos == literal_len

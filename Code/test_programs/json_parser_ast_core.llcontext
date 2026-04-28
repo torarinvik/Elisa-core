@@ -1,0 +1,124 @@
+def json_empty_node_view() -> dview[JsonNode]:
+    return DynArrayView(null, 0, sizeof(JsonNode))
+def json_empty_field_view() -> dview[JsonField]:
+    return DynArrayView(null, 0, sizeof(JsonField))
+def json_node_items_view(items_ptr: JsonNode&?, item_count: usize) -> dview[JsonNode]:
+    if items_ptr == null or item_count == 0:
+        return json_empty_node_view()
+    return DynArrayView(items_ptr.cast[void&], item_count, sizeof(JsonNode))
+def json_field_items_view(fields_ptr: JsonField&?, field_count: usize) -> dview[JsonField]:
+    if fields_ptr == null or field_count == 0:
+        return json_empty_field_view()
+    return DynArrayView(fields_ptr.cast[void&], field_count, sizeof(JsonField))
+def json_ast_array_items_view(node: JsonNode, store: JsonNode.Store[Local]) -> dview[JsonNode]:
+    if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
+        return json_node_items_view(items_ptr, item_count)
+    return json_empty_node_view()
+def json_ast_object_fields_view(node: JsonNode, store: JsonNode.Store[Local]) -> dview[JsonField]:
+    if node in store as JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
+        return json_field_items_view(fields_ptr, field_count)
+    return json_empty_field_view()
+def json_node_view_ref(items: dview[JsonNode], index: usize) -> JsonNode&:
+    assert index < items.len
+    assert items.data != null
+    return (items.data.cast[u8&] + index * items.elem_size).cast[JsonNode&]
+def json_field_view_ref(fields: dview[JsonField], index: usize) -> JsonField&:
+    assert index < fields.len
+    assert fields.data != null
+    return (fields.data.cast[u8&] + index * fields.elem_size).cast[JsonField&]
+def json_node_copy_ref(node_ref: JsonNode&) -> JsonNode:
+    out: mutable JsonNode = zeroed
+    arena_memcpy(out.ref[void&], node_ref.cast[void&], sizeof(JsonNode))
+    return move out
+def json_field_key_ref(field_ref: JsonField&) -> JsonNode&:
+    return field_ref.cast[JsonNode&]
+def json_field_value_ref(field_ref: JsonField&) -> JsonNode&:
+    return (field_ref.cast[u8&] + sizeof(JsonNode)).cast[JsonNode&]
+def json_ast_array_iter_is_valid(cursor: JsonAstArrayIterCursor) -> bool:
+    return cursor.index < cursor.items.len
+def json_ast_object_iter_is_valid(cursor: JsonAstObjectIterCursor) -> bool:
+    return cursor.index < cursor.fields.len
+def json_node_invalid(store: JsonNode.Store[Local]) -> JsonNode:
+    return JsonNode.Invalid
+def json_node_store_words(store: JsonNode.Store[Local]&) -> uintptr&:
+    return store.cast[u8&].cast[uintptr&]
+def json_node_store_row_bytes(store: JsonNode.Store[Local]&) -> usize:
+    return json_node_store_words(store)[1].usize()
+def json_node_store_state_bits(store: JsonNode.Store[Local]&) -> uintptr:
+    return json_node_store_words(store)[2]
+def json_node_store_reserve(arena: mutable Arena&, store: JsonNode.Store[Local]&, needed_rows: usize):
+    can Memory.Allocate, Abort.Panic:
+        state_bits: uintptr = json_node_store_state_bits(store)
+        if state_bits == 0.uintptr():
+            return
+        ctx_packed_store_reserve(arena, needed_rows, state_bits.cast[u8&].cast[void&])
+def json_node_null(store: JsonNode.Store[Local]) -> JsonNode:
+    return JsonNode.Null
+def json_node_is_invalid(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    if node in store as JsonNode.Invalid:
+        return true
+    return false
+def json_parse_node_result(node: JsonNode, checksum: i64) -> JsonParseNodeResult:
+    return JsonParseNodeResult(node, checksum)
+def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -> i64:
+    readonly_items: dview[JsonNode] = readonly(items)
+    total: mutable i64 = 0
+    for index in 0..<readonly_items.len:
+        item: mutable JsonNode = zeroed
+        arena_memcpy(item.ref[void&], json_node_view_ref(readonly_items, index).cast[void&], sizeof(JsonNode))
+        item_count: i64 = json_ast_node_count(item, store)
+        if item_count < 0:
+            return -1
+        total <- total + item_count
+
+    return total
+def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]) -> i64:
+    readonly_fields: dview[JsonField] = readonly(fields)
+    total: mutable i64 = 0
+    for index in 0..<readonly_fields.len:
+        field_ref: JsonField& = json_field_view_ref(readonly_fields, index)
+        key_node: mutable JsonNode = zeroed
+        value_node: mutable JsonNode = zeroed
+        arena_memcpy(key_node.ref[void&], field_ref.cast[void&], sizeof(JsonNode))
+        arena_memcpy(value_node.ref[void&], (field_ref.cast[u8&] + sizeof(JsonNode)).cast[void&], sizeof(JsonNode))
+        key_count: i64 = json_ast_node_count(key_node, store)
+        if key_count < 0:
+            return -1
+        value_count: i64 = json_ast_node_count(value_node, store)
+        if value_count < 0:
+            return -1
+        total <- total + key_count + value_count
+
+    return total
+def json_ast_node_count(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
+    if json_node_is_invalid(node, store):
+        return -1
+
+    array_len: i64 = json_ast_array_len(node, store)
+    if array_len >= 0:
+        items_total: mutable i64 = 0
+        cursor: mutable JsonAstArrayIterCursor = json_ast_array_iter_first(node, store)
+        while json_ast_array_iter_is_valid(cursor):
+            child_count: i64 = json_ast_node_count(json_ast_array_iter_value(cursor, store), store)
+            if child_count < 0:
+                return -1
+            items_total <- items_total + child_count
+            cursor <- json_ast_array_iter_next(cursor, store)
+        return 1 + items_total
+
+    object_len: i64 = json_ast_object_len(node, store)
+    if object_len >= 0:
+        fields_total: mutable i64 = 0
+        cursor: mutable JsonAstObjectIterCursor = json_ast_object_iter_first(node, store)
+        while json_ast_object_iter_is_valid(cursor):
+            key_count: i64 = json_ast_node_count(json_ast_object_iter_key(cursor, store), store)
+            if key_count < 0:
+                return -1
+            value_count: i64 = json_ast_node_count(json_ast_object_iter_value(cursor, store), store)
+            if value_count < 0:
+                return -1
+            fields_total <- fields_total + key_count + value_count
+            cursor <- json_ast_object_iter_next(cursor, store)
+        return 1 + fields_total
+
+    return 1

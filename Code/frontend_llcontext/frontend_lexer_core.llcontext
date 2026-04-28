@@ -1,0 +1,172 @@
+# ============================================================
+# Self-hosted frontend lexer
+# ============================================================
+def frontend_require_arena(lexer: mutable FrontendLexer&) -> mutable Arena&:
+    can Abort.Panic:
+        assert lexer.arena != null
+        return lexer.arena
+@inline(always)
+def frontend_pending_is_empty(lexer: FrontendLexer&) -> bool:
+    is_empty: func(Deque[FrontendToken]&) -> bool = arena_deque_is_empty.specialize[FrontendToken]()
+    return is_empty(lexer.pending_tokens.ref[Deque[FrontendToken]&])
+def frontend_pending_push_back(lexer: mutable FrontendLexer&, token: FrontendToken):
+    push_back: func(mutable Arena&, mutable Deque[FrontendToken]&, FrontendToken) -> mutable Deque[FrontendToken]& effects[Memory.Allocate, Abort.Panic] = arena_deque_push_back.specialize[FrontendToken]()
+    _ = push_back(frontend_require_arena(lexer), lexer.pending_tokens.ref[mutable Deque[FrontendToken]&], token) can Memory.Allocate, Abort.Panic
+def frontend_pending_pop_front(lexer: mutable FrontendLexer&) -> FrontendToken:
+    can Abort.Panic:
+        pop_front: func(mutable Deque[FrontendToken]&, mutable FrontendToken&) -> bool effects[Abort.Panic] = arena_deque_pop_front.specialize[FrontendToken]()
+        token: mutable FrontendToken = zeroed
+        ok: bool = pop_front(lexer.pending_tokens.ref[mutable Deque[FrontendToken]&], token.ref[mutable FrontendToken&])
+        assert ok
+        return token
+@inline(always)
+def frontend_cur_pos(lexer: FrontendLexer&) -> FrontendPos:
+    return FrontendPos(lexer.line, lexer.col, lexer.pos)
+@inline(always)
+def frontend_is_eof(lexer: FrontendLexer&) -> bool:
+    return lexer.pos >= lexer.source_len
+def frontend_push_pending(lexer: mutable FrontendLexer&, token: FrontendToken):
+    frontend_pending_push_back(lexer, token) can Memory.Allocate, Abort.Panic
+def frontend_pop_pending(lexer: mutable FrontendLexer&) -> FrontendToken:
+    token: FrontendToken = frontend_pending_pop_front(lexer) can Abort.Panic
+    return token
+def frontend_measure_indent(lexer: mutable FrontendLexer&) -> usize:
+    indent: mutable usize = 0
+    while not frontend_is_eof(lexer):
+        ch: i64 = frontend_cur_char(lexer)
+        if ch == FRONTEND_CH_SPACE:
+            indent <- indent + 1
+            _ = frontend_advance_char(lexer)
+        elif ch == FRONTEND_CH_TAB:
+            indent <- indent + FRONTEND_TAB_WIDTH
+            _ = frontend_advance_char(lexer)
+        else:
+            return indent
+    return indent
+def frontend_indent_top(lexer: FrontendLexer&) -> usize:
+    if lexer.indent_stack.count == 0:
+        return 0
+    return lexer.indent_stack[lexer.indent_stack.count - 1]
+def frontend_push_indent(lexer: mutable FrontendLexer&, value: usize):
+    can Memory.Allocate, Abort.Panic:
+        in frontend_require_arena(lexer):
+            lexer.indent_stack.push(value)
+def frontend_pop_indent(lexer: mutable FrontendLexer&):
+    if lexer.indent_stack.count > 0:
+        _ = lexer.indent_stack.truncate(lexer.indent_stack.count - 1)
+def frontend_handle_indentation(lexer: mutable FrontendLexer&):
+    can Memory.Allocate, Abort.Panic:
+        indent: mutable usize = frontend_measure_indent(lexer)
+
+        scanning: mutable bool = true
+        while scanning:
+            if frontend_is_eof(lexer) or frontend_cur_char(lexer) == FRONTEND_CH_NL:
+                return
+
+            if frontend_cur_char(lexer) == FRONTEND_CH_HASH:
+                frontend_skip_line_comment(lexer)
+                if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
+                    _ = frontend_advance_char(lexer)
+                    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
+                        _ = frontend_advance_char(lexer)
+                indent <- frontend_measure_indent(lexer)
+            else:
+                scanning <- false
+
+        current: usize = frontend_indent_top(lexer)
+        if indent > current:
+            frontend_push_indent(lexer, indent)
+            frontend_emit_pending_token(lexer, FrontendTokenKind.Indent)
+            return
+
+        if indent < current:
+            while lexer.indent_stack.count > 1 and frontend_indent_top(lexer) > indent:
+                frontend_pop_indent(lexer)
+                frontend_emit_pending_token(lexer, FrontendTokenKind.Dedent)
+
+            if frontend_indent_top(lexer) != indent:
+                frontend_emit_pending_token(lexer, FrontendTokenKind.Dedent)
+@inline(always)
+def frontend_is_ascii_alpha(ch: i64) -> bool:
+    return (ch >= 97 and ch <= 122) or (ch >= 65 and ch <= 90)
+@inline(always)
+def frontend_is_ascii_alnum(ch: i64) -> bool:
+    return frontend_is_ascii_alpha(ch) or frontend_is_digit(ch)
+@inline(always)
+def frontend_is_ident_start(ch: i64) -> bool:
+    return ch == FRONTEND_CH_UNDERSCORE or frontend_is_ascii_alpha(ch)
+@inline(always)
+def frontend_sv_is_1(view: sview, a: i64) -> bool:
+    return view.len == 1 and view.data[0].i64() == a
+@inline(always)
+def frontend_sv_is_2(view: sview, a: i64, b: i64) -> bool:
+    return view.len == 2 and view.data[0].i64() == a and view.data[1].i64() == b
+@inline(always)
+def frontend_sv_is_3(view: sview, a: i64, b: i64, c: i64) -> bool:
+    return view.len == 3 and view.data[0].i64() == a and view.data[1].i64() == b and view.data[2].i64() == c
+@inline(always)
+def frontend_sv_is_4(view: sview, a: i64, b: i64, c: i64, d: i64) -> bool:
+    return view.len == 4 and view.data[0].i64() == a and view.data[1].i64() == b and view.data[2].i64() == c and view.data[3].i64() == d
+@inline(always)
+def frontend_sv_is_5(view: sview, a: i64, b: i64, c: i64, d: i64, e: i64) -> bool:
+    return view.len == 5 and view.data[0].i64() == a and view.data[1].i64() == b and view.data[2].i64() == c and view.data[3].i64() == d and view.data[4].i64() == e
+@inline(always)
+def frontend_sv_is_6(view: sview, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> bool:
+    return view.len == 6 and view.data[0].i64() == a and view.data[1].i64() == b and view.data[2].i64() == c and view.data[3].i64() == d and view.data[4].i64() == e and view.data[5].i64() == f
+@inline(always)
+def frontend_sv_is_7(view: sview, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64, g: i64) -> bool:
+    return view.len == 7 and view.data[0].i64() == a and view.data[1].i64() == b and view.data[2].i64() == c and view.data[3].i64() == d and view.data[4].i64() == e and view.data[5].i64() == f and view.data[6].i64() == g
+@inline(always)
+def frontend_valid_suffix(view: sview) -> bool:
+    first: i64 = frontend_sv_first_char(view)
+    if first == FRONTEND_CH_u:
+        return frontend_sv_is_1(view, FRONTEND_CH_u) or frontend_sv_is_2(view, FRONTEND_CH_u, 56) or frontend_sv_is_3(view, FRONTEND_CH_u, 49, 54) or frontend_sv_is_3(view, FRONTEND_CH_u, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_u, 54, 52) or frontend_sv_is_5(view, FRONTEND_CH_u, 115, 105, 122, 101)
+    if first == FRONTEND_CH_i:
+        return frontend_sv_is_2(view, FRONTEND_CH_i, 56) or frontend_sv_is_3(view, FRONTEND_CH_i, 49, 54) or frontend_sv_is_3(view, FRONTEND_CH_i, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_i, 54, 52) or frontend_sv_is_5(view, FRONTEND_CH_i, 115, 105, 122, 101)
+    if first == FRONTEND_CH_f:
+        return frontend_sv_is_3(view, FRONTEND_CH_f, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_f, 54, 52)
+    return false
+@inline(always)
+def frontend_try_read_type_suffix(lexer: mutable FrontendLexer&) -> sview:
+    start: usize = lexer.pos
+    first: i64 = frontend_cur_char(lexer)
+    if first != FRONTEND_CH_u and first != FRONTEND_CH_i and first != FRONTEND_CH_f:
+        return frontend_empty_view()
+
+    probe: mutable usize = start + 1
+    while probe < lexer.source_len and frontend_is_ascii_alnum(frontend_char_at(lexer.source, lexer.source_len, probe)):
+        probe <- probe + 1
+
+    suffix: sview = frontend_make_lexer_view(lexer, start, probe)
+    if not frontend_valid_suffix(suffix):
+        return frontend_empty_view()
+
+    lexer.pos <- probe
+    lexer.col <- lexer.col + (probe - start).i64()
+    return suffix
+struct FrontendKeywordEntry:
+    text: mutable static u8&
+    kind: mutable FrontendTokenKind
+def frontend_read_ident(lexer: mutable FrontendLexer&) -> FrontendToken:
+    pos: FrontendPos = frontend_cur_pos(lexer)
+    start: usize = lexer.pos
+    while not frontend_is_eof(lexer) and frontend_is_ident_char(frontend_cur_char(lexer)):
+        _ = frontend_advance_char(lexer)
+    text: sview = frontend_make_lexer_view(lexer, start, lexer.pos)
+    return frontend_make_token(frontend_lookup_keyword(text), pos, text, frontend_empty_view())
+@inline(always)
+def frontend_read_ident_kind(lexer: mutable FrontendLexer&) -> FrontendTokenKind:
+    start: usize = lexer.pos
+    while not frontend_is_eof(lexer) and frontend_is_ident_char(frontend_cur_char(lexer)):
+        _ = frontend_advance_char(lexer)
+
+    length: usize = lexer.pos - start
+    if length < 2 or length > 7:
+        return FrontendTokenKind.Ident
+
+    first: i64 = lexer.source[start].i64()
+    if not frontend_maybe_keyword_first_char(first):
+        return FrontendTokenKind.Ident
+
+    text: sview = frontend_make_lexer_view(lexer, start, lexer.pos)
+    return frontend_lookup_keyword(text)

@@ -1,0 +1,117 @@
+def json_invalid_array_iter_cursor() -> JsonAstArrayIterCursor:
+    return JsonAstArrayIterCursor(json_empty_node_view(), 0)
+def json_invalid_object_iter_cursor() -> JsonAstObjectIterCursor:
+    return JsonAstObjectIterCursor(json_empty_field_view(), 0)
+def json_ast_string_view_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
+    if lexeme.checksum >= 0:
+        if lexeme.source_len < 2:
+            return json_empty_view()
+        start: i64 = lexeme.source_offset.i64() + 1
+        return string_view(source, start, start + (lexeme.source_len - 2).i64())
+    return json_empty_view()
+def json_ast_string_view(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
+    return json_ast_string_view_with_len(source, runtime_strlen(source), node, store)
+def json_ast_string_value_from_span(source: u8&, source_offset: usize, source_len: usize) -> heap u8&:
+    can Memory.Allocate, Abort.Panic:
+        decoded_len: i64 = json_decoded_string_len(source, source_offset, source_len)
+        if decoded_len < 0:
+            return intern_small_string("".cast[u8&], 0)
+
+        if decoded_len <= 8:
+            text: u8[9] = zeroed
+            written: i64 = json_decode_string_into(source, source_offset, source_len, text[0].ref[u8&])
+            if written < 0:
+                return intern_small_string("".cast[u8&], 0)
+            text[written.usize()] <- 0
+            return intern_small_string(text[0].ref[u8&], written.usize())
+
+        out: heap u8& = alloc_perm((decoded_len + 1).i64()).cast[heap u8&]
+        written: i64 = json_decode_string_into(source, source_offset, source_len, out.cast[u8&])
+        if written < 0:
+            return intern_small_string("".cast[u8&], 0)
+        out[written.usize()] <- 0
+        register_perm_string_len(out.cast[u8&], written.usize())
+        return out
+def json_ast_string_is_escaped_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
+    if lexeme.checksum < 0:
+        return false
+    return json_string_has_escape(source, lexeme.source_offset, lexeme.source_len)
+def json_ast_string_is_escaped(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    return json_ast_string_is_escaped_with_len(source, runtime_strlen(source), node, store)
+def json_ast_string_len_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> i64:
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
+    if lexeme.checksum >= 0:
+        return json_decoded_string_len(source, lexeme.source_offset, lexeme.source_len)
+    return -1
+def json_ast_string_len(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> i64:
+    return json_ast_string_len_with_len(source, runtime_strlen(source), node, store)
+def json_ast_string_copy_with_len(source: u8&, source_len: usize, node: JsonNode, out: u8&, capacity: usize, store: JsonNode.Store[Local]) -> i64:
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
+    if lexeme.checksum >= 0:
+        decoded_len: i64 = json_decoded_string_len(source, lexeme.source_offset, lexeme.source_len)
+        if decoded_len < 0:
+            return -1
+        required_capacity: usize = decoded_len.usize() + 1
+        if capacity < required_capacity:
+            return decoded_len
+        written: i64 = json_decode_string_into(source, lexeme.source_offset, lexeme.source_len, out)
+        if written < 0:
+            return -1
+        out[written.usize()] <- 0
+        return written
+    return -1
+def json_ast_string_copy(source: u8&, node: JsonNode, out: u8&, capacity: usize, store: JsonNode.Store[Local]) -> i64:
+    return json_ast_string_copy_with_len(source, runtime_strlen(source), node, out, capacity, store)
+def json_ast_string_value_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8&:
+    can Memory.Allocate, Abort.Panic:
+        lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
+        if lexeme.checksum >= 0:
+            return json_ast_string_value_from_span(source, lexeme.source_offset, lexeme.source_len)
+        return intern_small_string("".cast[u8&], 0)
+def json_ast_string_value(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8&:
+    return json_ast_string_value_with_len(source, runtime_strlen(source), node, store) can Memory.Allocate, Abort.Panic
+def json_ast_string_eq_literal_with_len(source: u8&, source_len: usize, node: JsonNode, literal: u8&, store: JsonNode.Store[Local]) -> bool:
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
+    if lexeme.checksum >= 0:
+        return json_string_matches_literal(source, lexeme.source_offset, lexeme.source_len, literal)
+    return false
+def json_ast_string_eq_literal(source: u8&, node: JsonNode, literal: u8&, store: JsonNode.Store[Local]) -> bool:
+    return json_ast_string_eq_literal_with_len(source, runtime_strlen(source), node, literal, store)
+def json_parser_array_iter_cursor(iter: JsonParserArrayIter&) -> JsonAstArrayIterCursor:
+    if not json_parser_array_iter_is_live(iter):
+        return json_invalid_array_iter_cursor()
+    items: dview[JsonNode] = json_node_items_view(iter[0].items_ptr.cast[JsonNode&?], iter[0].item_count)
+    if iter[0].index < items.len:
+        return JsonAstArrayIterCursor(items, iter[0].index)
+    return json_invalid_array_iter_cursor()
+def json_parser_object_iter_cursor(iter: JsonParserObjectIter&) -> JsonAstObjectIterCursor:
+    if not json_parser_object_iter_is_live(iter):
+        return json_invalid_object_iter_cursor()
+    fields: dview[JsonField] = json_field_items_view(iter[0].fields_ptr.cast[JsonField&?], iter[0].field_count)
+    if iter[0].index < fields.len:
+        return JsonAstObjectIterCursor(fields, iter[0].index)
+    return json_invalid_object_iter_cursor()
+def json_parser_array_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstArrayIterCursor, store: JsonNode.Store[Local]) -> JsonParserArrayIter:
+    can Memory.Allocate, Abort.Panic:
+        if not json_ast_array_iter_is_valid(cursor):
+            return json_parser_array_iter_null()
+
+        out: mutable JsonParserArrayIter = zeroed
+        out.impl_bits <- impl.uintptr()
+        out.items_ptr <- cursor.items.data
+        out.item_count <- cursor.items.len
+        out.index <- cursor.index
+        return move out
+def json_parser_object_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonParserObjectIter:
+    can Memory.Allocate, Abort.Panic:
+        if not json_ast_object_iter_is_valid(cursor):
+            return json_parser_object_iter_null()
+
+        out: mutable JsonParserObjectIter = zeroed
+        out.impl_bits <- impl.uintptr()
+        out.fields_ptr <- cursor.fields.data
+        out.field_count <- cursor.fields.len
+        out.index <- cursor.index
+        return move out

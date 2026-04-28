@@ -1,0 +1,456 @@
+@inline(always)
+def json_skip_ws(cursor: mutable JsonCursor&):
+    scanning: mutable bool = true
+    while scanning:
+        ch: i64 = json_cur_char(cursor)
+        if ch == JSON_CH_SPACE or ch == JSON_CH_TAB or ch == JSON_CH_NL or ch == JSON_CH_CR:
+            _ = json_advance_char(cursor)
+        else:
+            scanning <- false
+@inline(always)
+def json_expect_literal_with_len(cursor: mutable JsonCursor&, literal: u8&, literal_len: usize) -> bool:
+    if cursor.pos + literal_len > cursor.source_len:
+        return false
+
+    for i in 0..<literal_len:
+        if cursor.source[cursor.pos + i].i64() != literal[i].i64():
+            return false
+
+    cursor.pos <- cursor.pos + literal_len
+    return true
+def json_expect_literal(cursor: mutable JsonCursor&, literal: u8&) -> bool:
+    return json_expect_literal_with_len(cursor, literal, runtime_strlen(literal))
+def json_invalid_lexeme() -> JsonLexemeResult:
+    return JsonLexemeResult(-1, 0, 0)
+def json_parse_string_lexeme(cursor: mutable JsonCursor&) -> JsonLexemeResult:
+    start: usize = cursor.pos
+    if json_advance_char(cursor) != JSON_CH_DQUOTE:
+        return json_invalid_lexeme()
+
+    length: mutable i64 = 0
+    while true:
+        if cursor.pos >= cursor.source_len:
+            return json_invalid_lexeme()
+
+        ch: i64 = json_advance_char(cursor)
+        if ch == JSON_CH_DQUOTE:
+            return JsonLexemeResult(17 + length, start, cursor.pos - start)
+
+        if likely ch != JSON_CH_BSLASH:
+            if ch < JSON_CH_SPACE:
+                return json_invalid_lexeme()
+            length <- length + 1
+        else:
+            if json_decode_escape_codepoint(cursor) < 0:
+                return json_invalid_lexeme()
+            length <- length + 1
+
+    return json_invalid_lexeme()
+def json_parse_number_lexeme(cursor: mutable JsonCursor&) -> JsonLexemeResult:
+    start: usize = cursor.pos
+    ch: mutable i64 = json_cur_char(cursor)
+    if ch == JSON_CH_MINUS:
+        _ = json_advance_char(cursor)
+
+    ch <- json_cur_char(cursor)
+    if ch == JSON_CH_0:
+        _ = json_advance_char(cursor)
+    elif json_is_digit(ch):
+        while json_is_digit(json_cur_char(cursor)):
+            _ = json_advance_char(cursor)
+    else:
+        return json_invalid_lexeme()
+
+    if json_cur_char(cursor) == JSON_CH_DOT:
+        _ = json_advance_char(cursor)
+        if not json_is_digit(json_cur_char(cursor)):
+            return json_invalid_lexeme()
+        while json_is_digit(json_cur_char(cursor)):
+            _ = json_advance_char(cursor)
+
+    ch <- json_cur_char(cursor)
+    if ch == JSON_CH_e or ch == JSON_CH_E:
+        _ = json_advance_char(cursor)
+        ch <- json_cur_char(cursor)
+        if ch == JSON_CH_PLUS or ch == JSON_CH_MINUS:
+            _ = json_advance_char(cursor)
+        if not json_is_digit(json_cur_char(cursor)):
+            return json_invalid_lexeme()
+        while json_is_digit(json_cur_char(cursor)):
+            _ = json_advance_char(cursor)
+
+    return JsonLexemeResult(23 + (cursor.pos - start).i64(), start, cursor.pos - start)
+def json_parse_number(cursor: mutable JsonCursor&) -> i64:
+    return json_parse_number_lexeme(cursor).checksum
+def json_parse_string_lexeme_at(source: u8&, source_len: usize, source_offset: u32) -> JsonLexemeResult:
+    if source_offset.u64() > JSON_MAX_INLINE_SOURCE_OFFSET or source_offset.usize() >= source_len:
+        return json_invalid_lexeme()
+    cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
+    cursor.pos <- source_offset.usize()
+    return json_parse_string_lexeme(cursor.ref[mutable JsonCursor&])
+def json_parse_number_lexeme_at(source: u8&, source_len: usize, source_offset: u32) -> JsonLexemeResult:
+    if source_offset.u64() > JSON_MAX_INLINE_SOURCE_OFFSET or source_offset.usize() >= source_len:
+        return json_invalid_lexeme()
+    cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
+    cursor.pos <- source_offset.usize()
+    return json_parse_number_lexeme(cursor.ref[mutable JsonCursor&])
+def json_parse_value_after_ws(cursor: mutable JsonCursor&) -> i64:
+    ch: i64 = json_cur_char(cursor)
+    if ch == JSON_CH_DQUOTE:
+        return json_parse_string(cursor)
+    if ch == JSON_CH_LBRACE:
+        return json_parse_object(cursor)
+    if ch == JSON_CH_LBRACKET:
+        return json_parse_array(cursor)
+    if ch == JSON_CH_t:
+        return json_parse_true(cursor)
+    if ch == JSON_CH_f:
+        return json_parse_false(cursor)
+    if ch == JSON_CH_n:
+        return json_parse_null(cursor)
+    if ch == JSON_CH_MINUS or json_is_digit(ch):
+        return json_parse_number(cursor)
+    return -1
+def json_count_array_items_after_ws(cursor: mutable JsonCursor&) -> i64:
+    if json_cur_char(cursor) == JSON_CH_RBRACKET:
+        _ = json_advance_char(cursor)
+        return 0
+
+    count: mutable i64 = 0
+    done: mutable bool = false
+    while not done:
+        item: i64 = json_parse_value_after_ws(cursor)
+        if item < 0:
+            return -1
+        count <- count + 1
+        json_skip_ws(cursor)
+
+        ch: i64 = json_cur_char(cursor)
+        if likely ch == JSON_CH_COMMA:
+            _ = json_advance_char(cursor)
+            json_skip_ws(cursor)
+        elif ch == JSON_CH_RBRACKET:
+            _ = json_advance_char(cursor)
+            done <- true
+        else:
+            return -1
+
+    return count
+def json_count_object_fields_after_ws(cursor: mutable JsonCursor&) -> i64:
+    if json_cur_char(cursor) == JSON_CH_RBRACE:
+        _ = json_advance_char(cursor)
+        return 0
+
+    count: mutable i64 = 0
+    done: mutable bool = false
+    while not done:
+        key: i64 = json_parse_string(cursor)
+        if key < 0:
+            return -1
+        json_skip_ws(cursor)
+        if json_advance_char(cursor) != JSON_CH_COLON:
+            return -1
+
+        json_skip_ws(cursor)
+        value: i64 = json_parse_value_after_ws(cursor)
+        if value < 0:
+            return -1
+        count <- count + 1
+        json_skip_ws(cursor)
+
+        ch: i64 = json_cur_char(cursor)
+        if likely ch == JSON_CH_COMMA:
+            _ = json_advance_char(cursor)
+            json_skip_ws(cursor)
+        elif ch == JSON_CH_RBRACE:
+            _ = json_advance_char(cursor)
+            done <- true
+        else:
+            return -1
+
+    return count
+def json_parse_array(cursor: mutable JsonCursor&) -> i64:
+    if json_advance_char(cursor) != JSON_CH_LBRACKET:
+        return -1
+
+    json_skip_ws(cursor)
+    if json_cur_char(cursor) == JSON_CH_RBRACKET:
+        _ = json_advance_char(cursor)
+        return 43
+
+    total: mutable i64 = 43
+    done: mutable bool = false
+    while not done:
+        item: i64 = json_parse_value_after_ws(cursor)
+        if item < 0:
+            return -1
+        total <- total + item
+        json_skip_ws(cursor)
+
+        ch: i64 = json_cur_char(cursor)
+        if likely ch == JSON_CH_COMMA:
+            _ = json_advance_char(cursor)
+            json_skip_ws(cursor)
+        elif ch == JSON_CH_RBRACKET:
+            _ = json_advance_char(cursor)
+            done <- true
+        else:
+            return -1
+
+    return total
+def json_parse_object(cursor: mutable JsonCursor&) -> i64:
+    if json_advance_char(cursor) != JSON_CH_LBRACE:
+        return -1
+
+    json_skip_ws(cursor)
+    if json_cur_char(cursor) == JSON_CH_RBRACE:
+        _ = json_advance_char(cursor)
+        return 47
+
+    total: mutable i64 = 47
+    done: mutable bool = false
+    while not done:
+        key: i64 = json_parse_string(cursor)
+        if key < 0:
+            return -1
+        total <- total + key
+        json_skip_ws(cursor)
+        if json_advance_char(cursor) != JSON_CH_COLON:
+            return -1
+
+        json_skip_ws(cursor)
+        value: i64 = json_parse_value_after_ws(cursor)
+        if value < 0:
+            return -1
+        total <- total + value
+        json_skip_ws(cursor)
+
+        ch: i64 = json_cur_char(cursor)
+        if likely ch == JSON_CH_COMMA:
+            _ = json_advance_char(cursor)
+            json_skip_ws(cursor)
+        elif ch == JSON_CH_RBRACE:
+            _ = json_advance_char(cursor)
+            done <- true
+        else:
+            return -1
+
+    return total
+def json_parse_true(cursor: mutable JsonCursor&) -> i64:
+    if json_expect_literal_with_len(cursor, "true".cast[u8&], 4):
+        return 31
+    return -1
+def json_parse_false(cursor: mutable JsonCursor&) -> i64:
+    if json_expect_literal_with_len(cursor, "false".cast[u8&], 5):
+        return 37
+    return -1
+def json_parse_null(cursor: mutable JsonCursor&) -> i64:
+    if json_expect_literal_with_len(cursor, "null".cast[u8&], 4):
+        return 41
+    return -1
+def json_ast_count_or_invalid(count: i64) -> i64:
+    return -1 if count < 0 else 1 + count
+def json_parse_number_node(cursor: mutable JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    lexeme: JsonLexemeResult = json_parse_number_lexeme(cursor)
+    checksum: i64 = lexeme.checksum
+    if checksum < 0:
+        return json_parse_node_result(invalid_node, -1)
+    return json_parse_node_result(JsonNode.Num(source_offset: lexeme.source_offset.u32()), checksum)
+def json_parse_true_node(cursor: mutable JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    start: usize = cursor.pos
+    checksum: i64 = json_parse_true(cursor)
+    if checksum < 0:
+        return json_parse_node_result(invalid_node, -1)
+    return json_parse_node_result(JsonNode.Bool(value: true), checksum)
+def json_parse_false_node(cursor: mutable JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    start: usize = cursor.pos
+    checksum: i64 = json_parse_false(cursor)
+    if checksum < 0:
+        return json_parse_node_result(invalid_node, -1)
+    return json_parse_node_result(JsonNode.Bool(value: false), checksum)
+def json_parse_null_node(cursor: mutable JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    start: usize = cursor.pos
+    checksum: i64 = json_parse_null(cursor)
+    if checksum < 0:
+        return json_parse_node_result(invalid_node, -1)
+    return json_parse_node_result(JsonNode.Null, checksum)
+def json_parse_value_node_after_ws(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    can Memory.Allocate, Abort.Panic:
+        ch: i64 = json_cur_char(cursor)
+        if ch == JSON_CH_DQUOTE:
+            return json_parse_string_node(cursor, store, invalid_node)
+        if ch == JSON_CH_LBRACE:
+            return json_parse_object_node(cursor, arena, store, invalid_node)
+        if ch == JSON_CH_LBRACKET:
+            return json_parse_array_node(cursor, arena, store, invalid_node)
+        if ch == JSON_CH_t:
+            return json_parse_true_node(cursor, store, invalid_node)
+        if ch == JSON_CH_f:
+            return json_parse_false_node(cursor, store, invalid_node)
+        if ch == JSON_CH_n:
+            return json_parse_null_node(cursor, store, invalid_node)
+        if ch == JSON_CH_MINUS or json_is_digit(ch):
+            return json_parse_number_node(cursor, store, invalid_node)
+        return JsonParseNodeResult(invalid_node, -1)
+def json_parse_array_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    can Memory.Allocate, Abort.Panic:
+        in arena:
+            items: mutable darray[JsonNode] = []
+            done: mutable bool = false
+            items_checksum: mutable i64 = 0
+            if json_advance_char(cursor) != JSON_CH_LBRACKET:
+                return json_parse_node_result(invalid_node, -1)
+
+            json_skip_ws(cursor)
+            if json_cur_char(cursor) == JSON_CH_RBRACKET:
+                _ = json_advance_char(cursor)
+                return json_parse_node_result(JsonNode.Array(items_ptr: null, item_count: 0), 43)
+
+            while not done:
+                value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
+                if value_result.checksum < 0:
+                    return value_result
+
+                items.push(value_result.node)
+                items_checksum <- items_checksum + value_result.checksum
+
+                json_skip_ws(cursor)
+                ch: i64 = json_cur_char(cursor)
+                if likely ch == JSON_CH_COMMA:
+                    _ = json_advance_char(cursor)
+                    json_skip_ws(cursor)
+                elif ch == JSON_CH_RBRACKET:
+                    _ = json_advance_char(cursor)
+                    done <- true
+                else:
+                    return json_parse_node_result(invalid_node, -1)
+
+            return json_parse_node_result(JsonNode.Array(items_ptr: items.items, item_count: items.count), 43 + items_checksum)
+def json_parse_object_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    can Memory.Allocate, Abort.Panic:
+        in arena:
+            fields: mutable darray[JsonField] = []
+            done: mutable bool = false
+            fields_checksum: mutable i64 = 0
+            key_lexeme: mutable JsonLexemeResult = zeroed
+            key_checksum: mutable i64 = 0
+            key_node: mutable JsonNode = zeroed
+            field_value: mutable JsonNode = zeroed
+            field_entry: mutable JsonField = zeroed
+            if json_advance_char(cursor) != JSON_CH_LBRACE:
+                return json_parse_node_result(invalid_node, -1)
+
+            json_skip_ws(cursor)
+            if json_cur_char(cursor) == JSON_CH_RBRACE:
+                _ = json_advance_char(cursor)
+                return json_parse_node_result(JsonNode.Object(fields_ptr: null, field_count: 0), 47)
+
+            while not done:
+                key_lexeme <- json_parse_string_lexeme(cursor)
+                key_checksum <- key_lexeme.checksum
+                if key_checksum < 0:
+                    return JsonParseNodeResult(invalid_node, -1)
+
+                key_node <- JsonNode.Text(source_offset: key_lexeme.source_offset.u32())
+
+                json_skip_ws(cursor)
+                if json_advance_char(cursor) != JSON_CH_COLON:
+                    return JsonParseNodeResult(invalid_node, -1)
+                json_skip_ws(cursor)
+
+                value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
+                if value_result.checksum < 0:
+                    return value_result
+
+                field_value <- value_result.node
+                field_entry <- JsonField(key_node, field_value)
+                fields.push(field_entry)
+                fields_checksum <- fields_checksum + key_checksum + value_result.checksum
+
+                json_skip_ws(cursor)
+                ch: i64 = json_cur_char(cursor)
+                if likely ch == JSON_CH_COMMA:
+                    _ = json_advance_char(cursor)
+                    json_skip_ws(cursor)
+                elif ch == JSON_CH_RBRACE:
+                    _ = json_advance_char(cursor)
+                    done <- true
+                else:
+                    return JsonParseNodeResult(invalid_node, -1)
+
+            return json_parse_node_result(JsonNode.Object(fields_ptr: fields.items, field_count: fields.count), 47 + fields_checksum)
+def json_parse_value_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    can Memory.Allocate, Abort.Panic:
+        json_skip_ws(cursor)
+        return json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
+def json_parse_value(cursor: mutable JsonCursor&) -> i64:
+    json_skip_ws(cursor)
+    return json_parse_value_after_ws(cursor)
+def json_parse_number_f64_value(source: u8&, source_offset: usize, source_len: usize) -> f64 error[JsonNumberAccessError]:
+    if source_len == 0:
+        raise JsonNumberAccessError.Invalid
+
+    return strtod(source + source_offset, null)
+def json_parse_number_f32_value(source: u8&, source_offset: usize, source_len: usize) -> f32 error[JsonNumberAccessError]:
+    parsed: f64 = try json_parse_number_f64_value(source, source_offset, source_len)
+    return parsed.f32()
+def json_ast_text_lexeme(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> JsonLexemeResult:
+    if node in store as JsonNode.Text(source_offset: off):
+        return json_parse_string_lexeme_at(source, source_len, off)
+    return json_invalid_lexeme()
+def json_ast_number_lexeme(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> JsonLexemeResult:
+    if node in store as JsonNode.Num(source_offset: off):
+        return json_parse_number_lexeme_at(source, source_len, off)
+    return json_invalid_lexeme()
+def json_parse_number_value(source: u8&, source_offset: usize, source_len: usize) -> JsonNumberValue:
+    if source_len == 0:
+        return json_invalid_number_value()
+
+    i64_max_u64: u64 = 9223372036854775807
+    i64_min_abs_u64: u64 = 9223372036854775808
+    if json_number_has_fraction_or_exponent(source, source_offset, source_len):
+        return JsonNumberValue(JsonNumberKind.NON_INTEGRAL, 0, 0)
+
+    negative: bool = source[source_offset].i64() == JSON_CH_MINUS
+    digits_offset: mutable usize = source_offset
+    if negative:
+        digits_offset <- digits_offset + 1
+
+    digits_end: usize = source_offset + source_len
+    if json_u64_digits_exceed_max(source, digits_offset, digits_end):
+        return JsonNumberValue(JsonNumberKind.OUT_OF_RANGE, 0, 0)
+
+    parsed: u64 = try json_parse_u64_digits(source, digits_offset, digits_end) else 0
+
+    magnitude: u64 = parsed
+    if negative:
+        if magnitude > i64_min_abs_u64:
+            return JsonNumberValue(JsonNumberKind.OUT_OF_RANGE, 0, 0)
+        if magnitude == i64_min_abs_u64:
+            min_value: i64 = -9223372036854775807 - 1
+            return JsonNumberValue(JsonNumberKind.SIGNED, 0, min_value)
+        return JsonNumberValue(JsonNumberKind.SIGNED, 0, -magnitude.i64())
+
+    signed_value: mutable i64 = 0
+    if magnitude <= i64_max_u64:
+        signed_value <- magnitude.i64()
+    return JsonNumberValue(JsonNumberKind.UNSIGNED, magnitude, signed_value)
+def json_parser_document_node_count_impl(doc: JsonParserDocument&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return -1
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
+    return json_ast_node_count(impl.root, store)
+def json_parser_ast_node_count_impl(source: u8&) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        source_len: usize = runtime_strlen(source)
+        region scratch(json_ast_scratch_capacity(source_len))
+        store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+        arena: mutable Arena& = scratch.ref[mutable Arena&]
+        result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
+        if result.checksum < 0:
+            destroy scratch
+            return -1
+        count: i64 = json_ast_node_count(result.node, store)
+        destroy scratch
+        return count

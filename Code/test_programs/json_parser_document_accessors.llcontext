@@ -1,0 +1,251 @@
+def json_parse_document_node_with_len(source: u8&, source_len: usize, arena: mutable Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult:
+    can Memory.Allocate, Abort.Panic:
+        invalid_node: JsonNode = json_node_invalid(store)
+        if source_len > JSON_MAX_INLINE_SOURCE_OFFSET.usize():
+            return json_parse_node_result(invalid_node, -1)
+        cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
+        result: JsonParseNodeResult = json_parse_value_node(cursor.ref[mutable JsonCursor&], arena, store, invalid_node)
+        if result.checksum < 0:
+            return result
+        json_skip_ws(cursor.ref[mutable JsonCursor&])
+        if cursor.pos != cursor.source_len:
+            return json_parse_node_result(invalid_node, -1)
+        return result
+def json_ast_scratch_capacity(source_len: usize) -> usize:
+    slots_per_byte_budget: usize = 2
+    capacity: usize = source_len * slots_per_byte_budget + 1024
+    return max(capacity, ARENA_REGION_DEFAULT_CAPACITY)
+def json_ast_estimated_node_reserve(source_len: usize) -> usize:
+    estimated_rows: usize = source_len / 12 + 64
+    return max(estimated_rows, ARENA_DA_INIT_CAP)
+def json_parser_array_iter_null() -> JsonParserArrayIter:
+    out: mutable JsonParserArrayIter = zeroed
+    return move out
+def json_parser_object_iter_null() -> JsonParserObjectIter:
+    out: mutable JsonParserObjectIter = zeroed
+    return move out
+def json_parser_array_iter_is_live(iter: JsonParserArrayIter&) -> bool:
+    return iter[0].impl_bits != 0.uintptr()
+def json_parser_array_iter_doc_impl(iter: JsonParserArrayIter&) -> heap JsonParserDocumentInternal&:
+    return iter[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+def json_parser_object_iter_is_live(iter: JsonParserObjectIter&) -> bool:
+    return iter[0].impl_bits != 0.uintptr()
+def json_parser_object_iter_doc_impl(iter: JsonParserObjectIter&) -> heap JsonParserDocumentInternal&:
+    return iter[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+def json_parser_value_node_ref(value: JsonParserValue&) -> JsonNode&?:
+    return value[0].node_ptr.cast[JsonNode&?]
+def json_parser_value_from_node_ref(impl: heap JsonParserDocumentInternal&, node_ref: JsonNode&?) -> JsonParserValue:
+    can Memory.Allocate, Abort.Panic:
+        if node_ref == null:
+            return json_parser_value_null()
+
+        out: mutable JsonParserValue = zeroed
+        out.impl_bits <- impl.uintptr()
+        out.node_ptr <- node_ref.cast[void&?]
+        return move out
+def json_parser_document_field_node(impl: heap JsonParserDocumentInternal&, key: u8&, store: JsonNode.Store[Local]) -> JsonNode:
+    return json_ast_object_get(impl.root, json_parser_document_source(impl), key, store)
+def json_parser_document_array_field_item_node(impl: heap JsonParserDocumentInternal&, key: u8&, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
+    array_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(array_node, store):
+        return json_node_invalid(store)
+    return json_ast_array_nth(array_node, index, store)
+def json_parser_document_object_key_node_at(impl: heap JsonParserDocumentInternal&, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
+    return json_ast_object_key_nth(impl.root, index, store)
+def json_parser_document_object_value_node_at(impl: heap JsonParserDocumentInternal&, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
+    return json_ast_object_value_nth(impl.root, index, store)
+def json_parser_document_array_item_node_at(impl: heap JsonParserDocumentInternal&, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
+    return json_ast_array_nth(impl.root, index, store)
+def json_parser_document_field_bool_impl(doc: JsonParserDocument&, key: u8&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return -1
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return -1
+    return json_ast_bool_value(field_node, store)
+def json_parser_document_field_is_null_impl(doc: JsonParserDocument&, key: u8&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return -1
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return -1
+    return 1 if json_ast_is_null(field_node, store) else 0
+def json_parser_document_field_kind_impl(doc: JsonParserDocument&, key: u8&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return -1
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return -1
+    return json_ast_kind_code(json_ast_kind(field_node, store))
+def json_parser_document_field_number_kind_impl(doc: JsonParserDocument&, key: u8&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return -1
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return -1
+    return json_ast_number_kind_code(json_ast_number_kind(json_parser_document_source(impl), field_node, store))
+def json_parser_document_field_i64_impl(doc: JsonParserDocument&, key: u8&, out: mutable i64&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return 0
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), field_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
+        return 0
+    out[0] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
+    return 1
+def json_parser_document_field_u64_impl(doc: JsonParserDocument&, key: u8&, out: mutable u64&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return 0
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), field_node, store)
+    if not json_number_value_can_materialize_u64(number_value):
+        return 0
+    out[0] <- number_value.unsigned_value
+    return 1
+def json_parser_document_field_f64_impl(doc: JsonParserDocument&, key: u8&, out: mutable f64&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return 0
+    if not json_node_can_materialize_float(json_parser_document_source(impl), field_node, store):
+        return 0
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), field_node, store) else 0.0
+    out[0] <- float_value
+    return 1
+def json_parser_document_field_f32_impl(doc: JsonParserDocument&, key: u8&, out: mutable f32&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return 0
+    if not json_node_can_materialize_float(json_parser_document_source(impl), field_node, store):
+        return 0
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), field_node, store) else 0.0
+    out[0] <- float_value
+    return 1
+def json_parser_document_array_field_len_impl(doc: JsonParserDocument&, key: u8&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return -1
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return -1
+    return json_ast_array_len(field_node, store)
+def json_parser_document_object_field_len_impl(doc: JsonParserDocument&, key: u8&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return -1
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return -1
+    return json_ast_object_len(field_node, store)
+def json_parser_document_array_field_i64_at_impl(doc: JsonParserDocument&, key: u8&, index: usize, out: mutable i64&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
+    if json_node_is_invalid(item_node, store):
+        return 0
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), item_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
+        return 0
+    out[0] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
+    return 1
+def json_parser_document_array_field_f64_at_impl(doc: JsonParserDocument&, key: u8&, index: usize, out: mutable f64&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
+    if json_node_is_invalid(item_node, store):
+        return 0
+    if not json_node_can_materialize_float(json_parser_document_source(impl), item_node, store):
+        return 0
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), item_node, store) else 0.0
+    out[0] <- float_value
+    return 1
+def json_parser_document_array_field_f32_at_impl(doc: JsonParserDocument&, key: u8&, index: usize, out: mutable f32&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
+    if json_node_is_invalid(item_node, store):
+        return 0
+    if not json_node_can_materialize_float(json_parser_document_source(impl), item_node, store):
+        return 0
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), item_node, store) else 0.0
+    out[0] <- float_value
+    return 1
+def json_parser_document_array_field_kind_at_impl(doc: JsonParserDocument&, key: u8&, index: usize) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return -1
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
+    if json_node_is_invalid(item_node, store):
+        return -1
+    return json_ast_kind_code(json_ast_kind(item_node, store))
+def json_parser_document_object_field_i64_at_impl(doc: JsonParserDocument&, index: usize, out: mutable i64&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
+    if json_node_is_invalid(value_node, store):
+        return 0
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), value_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
+        return 0
+    out[0] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
+    return 1
+def json_parser_document_object_field_f64_at_impl(doc: JsonParserDocument&, index: usize, out: mutable f64&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
+    if json_node_is_invalid(value_node, store):
+        return 0
+    if not json_node_can_materialize_float(json_parser_document_source(impl), value_node, store):
+        return 0
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), value_node, store) else 0.0
+    out[0] <- float_value
+    return 1
+def json_parser_document_object_field_f32_at_impl(doc: JsonParserDocument&, index: usize, out: mutable f32&) -> i64:
+    if doc[0].impl_bits == 0.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
+    if json_node_is_invalid(value_node, store):
+        return 0
+    if not json_node_can_materialize_float(json_parser_document_source(impl), value_node, store):
+        return 0
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), value_node, store) else 0.0
+    out[0] <- float_value
+    return 1

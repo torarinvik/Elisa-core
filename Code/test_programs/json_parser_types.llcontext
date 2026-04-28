@@ -1,0 +1,131 @@
+const JSON_CH_NUL = 0
+const JSON_CH_TAB = 9
+const JSON_CH_NL = 10
+const JSON_CH_CR = 13
+const JSON_CH_SPACE = 32
+const JSON_CH_DQUOTE = 34
+const JSON_CH_PLUS = 43
+const JSON_CH_COMMA = 44
+const JSON_CH_MINUS = 45
+const JSON_CH_DOT = 46
+const JSON_CH_SLASH = 47
+const JSON_CH_0 = 48
+const JSON_CH_1 = 49
+const JSON_CH_9 = 57
+const JSON_CH_COLON = 58
+const JSON_CH_E = 69
+const JSON_CH_LBRACKET = 91
+const JSON_CH_BSLASH = 92
+const JSON_CH_RBRACKET = 93
+const JSON_CH_a = 97
+const JSON_CH_b = 98
+const JSON_CH_e = 101
+const JSON_CH_f = 102
+const JSON_CH_l = 108
+const JSON_CH_n = 110
+const JSON_CH_r = 114
+const JSON_CH_t = 116
+const JSON_CH_u = 117
+const JSON_CH_LBRACE = 123
+const JSON_CH_RBRACE = 125
+const JSON_MAX_INLINE_SOURCE_OFFSET = 4294967295
+struct JsonCursor:
+    source: mutable u8&
+    source_len: mutable usize
+    pos: mutable usize
+struct JsonParseNodeResult:
+    node: mutable JsonNode
+    checksum: mutable i64
+struct JsonLexemeResult:
+    checksum: mutable i64
+    source_offset: mutable usize
+    source_len: mutable usize
+struct JsonField:
+    key: mutable JsonNode
+    value: mutable JsonNode
+struct JsonAstArrayIterCursor:
+    items: mutable dview[JsonNode]
+    index: mutable usize
+struct JsonAstObjectIterCursor:
+    fields: mutable dview[JsonField]
+    index: mutable usize
+@packed_profile(retained_reads)
+packed enum JsonNode:
+    Invalid
+    Null
+    Bool(value: bool)
+    Num(source_offset: u32)
+    Text(source_offset: u32)
+    Array(items_ptr: JsonNode&?, item_count: usize)
+    Object(fields_ptr: JsonField&?, field_count: usize)
+const enum JsonNodeKind of i8:
+    INVALID = -1
+    NULL = 0
+    BOOL = 1
+    NUMBER = 2
+    STRING = 3
+    ARRAY = 4
+    OBJECT = 5
+const enum JsonNumberKind of i8:
+    INVALID = -1
+    UNSIGNED = 0
+    SIGNED = 1
+    NON_INTEGRAL = 2
+    OUT_OF_RANGE = 3
+struct JsonNumberValue:
+    kind: mutable JsonNumberKind
+    unsigned_value: mutable u64
+    signed_value: mutable i64
+struct JsonParserNumberData:
+    kind: mutable i64
+    unsigned_value: mutable u64
+    signed_value: mutable i64
+    float_value: mutable f64
+
+
+error JsonNumberAccessError:
+    Invalid
+extern strtod(nptr: u8&, endptr: u8&?) -> f64
+def readonly[T](view: dview[T]) -> dview[T]:
+    return view
+struct JsonParserDocumentInternal:
+    source: mutable u8&
+    source_len: mutable usize
+    arena: mutable Arena
+    store_row_bytes: mutable usize
+    store_state_bits: mutable uintptr
+    root: mutable JsonNode
+    checksum: mutable i64
+struct JsonParserValueInternal:
+    doc_bits: mutable uintptr
+    node_ptr: mutable void&?
+struct JsonParserArrayIterInternal:
+    doc_bits: mutable uintptr
+    cursor: mutable JsonAstArrayIterCursor
+struct JsonParserObjectIterInternal:
+    doc_bits: mutable uintptr
+    cursor: mutable JsonAstObjectIterCursor
+struct JsonParserDocument:
+    impl_bits: mutable uintptr
+struct JsonParserValue:
+    impl_bits: mutable uintptr
+    node_ptr: mutable void&?
+struct JsonParserArrayIter:
+    impl_bits: mutable uintptr
+    items_ptr: mutable void&?
+    item_count: mutable usize
+    index: mutable usize
+struct JsonParserObjectIter:
+    impl_bits: mutable uintptr
+    fields_ptr: mutable void&?
+    field_count: mutable usize
+    index: mutable usize
+const JSON_PARALLEL_MODE_CHECKSUM = 0
+const JSON_PARALLEL_MODE_AST = 1
+const JSON_PARALLEL_MODE_AST_CACHED = 2
+const JSON_PARALLEL_MAX_WORKERS = 128
+struct JsonParallelJob:
+    source_bits: uintptr
+    repeats: usize
+    result_bits: uintptr
+    mode: i64

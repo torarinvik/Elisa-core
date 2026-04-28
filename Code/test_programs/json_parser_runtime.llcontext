@@ -1,0 +1,104 @@
+@inline(always)
+def json_is_digit(ch: i64) -> bool:
+    return ch >= JSON_CH_0 and ch <= JSON_CH_9
+def json_is_high_surrogate(codepoint: i64) -> bool:
+    return codepoint >= 55296 and codepoint <= 56319
+def json_is_low_surrogate(codepoint: i64) -> bool:
+    return codepoint >= 56320 and codepoint <= 57343
+def json_parse_string(cursor: mutable JsonCursor&) -> i64:
+    return json_parse_string_lexeme(cursor).checksum
+def json_reduce_sum_bias(value: i64, bias: i64) -> i64:
+    return value + bias
+def json_parse_string_node(cursor: mutable JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
+    lexeme: JsonLexemeResult = json_parse_string_lexeme(cursor)
+    checksum: i64 = lexeme.checksum
+    if checksum < 0:
+        return json_parse_node_result(invalid_node, -1)
+    return json_parse_node_result(JsonNode.Text(source_offset: lexeme.source_offset.u32()), checksum)
+def json_abs_f64(value: f64) -> f64:
+    return -value if value < 0.0 else value
+def json_number_has_nonzero_digit(source: u8&, source_offset: usize, source_len: usize) -> bool:
+    pos: mutable usize = source_offset
+    end: usize = source_offset + source_len
+    while pos < end:
+        ch: i64 = source[pos].i64()
+        if ch >= JSON_CH_1 and ch <= JSON_CH_9:
+            return true
+        pos <- pos + 1
+    return false
+def json_number_has_fraction_or_exponent(source: u8&, source_offset: usize, source_len: usize) -> bool:
+    pos: mutable usize = source_offset
+    end: usize = source_offset + source_len
+    while pos < end:
+        ch: i64 = source[pos].i64()
+        if ch == JSON_CH_DOT or ch == JSON_CH_E or ch == JSON_CH_e:
+            return true
+        pos <- pos + 1
+    return false
+def json_parse_u64_digits(source: u8&, source_offset: usize, source_end: usize) -> u64 error[JsonNumberAccessError]:
+    if source_offset >= source_end:
+        raise JsonNumberAccessError.Invalid
+
+    max_div10: u64 = 1844674407370955161
+    max_mod10: u64 = 5
+    value: mutable u64 = 0
+    pos: mutable usize = source_offset
+    while pos < source_end:
+        ch: i64 = source[pos].i64()
+        if not json_is_digit(ch):
+            raise JsonNumberAccessError.Invalid
+
+        digit: u64 = (ch - JSON_CH_0).u64()
+        if value > max_div10 or (value == max_div10 and digit > max_mod10):
+            raise JsonNumberAccessError.Invalid
+
+        value <- value * 10 + digit
+        pos <- pos + 1
+
+    return value
+def json_u64_digits_exceed_max(source: u8&, source_offset: usize, source_end: usize) -> bool:
+    digit_count: usize = source_end - source_offset
+    if digit_count < 20:
+        return false
+    if digit_count > 20:
+        return true
+
+    max_digits: u8& = "18446744073709551615".cast[u8&]
+    pos: mutable usize = source_offset
+    max_pos: mutable usize = 0
+    while pos < source_end:
+        digit: i64 = source[pos].i64()
+        max_digit: i64 = max_digits[max_pos].i64()
+        if digit < max_digit:
+            return false
+        if digit > max_digit:
+            return true
+        pos <- pos + 1
+        max_pos <- max_pos + 1
+    return false
+def json_expect_invalid(source: static u8&) -> bool:
+    return json_parser_checksum_impl(source.cast[u8&]) < 0
+def json_expect_invalid_ast(source: static u8&) -> bool:
+    return json_parser_ast_checksum_impl(source.cast[u8&]) < 0 can Memory.Allocate, Abort.Panic
+def json_parallel_parse_once(source: u8&, mode: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        if mode == JSON_PARALLEL_MODE_CHECKSUM:
+            return json_parser_checksum_impl(source)
+        if mode == JSON_PARALLEL_MODE_AST:
+            return json_parser_ast_checksum_impl(source)
+        if mode == JSON_PARALLEL_MODE_AST_CACHED:
+            return json_parser_ast_cached_checksum_impl(source)
+        return -1
+def json_parallel_worker(job: JsonParallelJob) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        source: u8& = job.source_bits.cast[u8&]
+        result_slot: mutable i64& = job.result_bits.cast[mutable i64&]
+        total: mutable i64 = 0
+        for iteration in 0..<job.repeats:
+            value: i64 = json_parallel_parse_once(source, job.mode)
+            if value < 0:
+                result_slot[0] <- -1
+                return -1
+            total <- total + value
+        result_slot[0] <- total
+        return total

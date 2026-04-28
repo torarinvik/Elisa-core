@@ -1,0 +1,188 @@
+def packed_store_handle_table(state: mutable PackedStoreState&) -> mutable darray[uintptr]&:
+    return state.handles.ref[darray[uintptr]&]
+def packed_store_append_handle(a: mutable Arena&, state: mutable PackedStoreState&, handle: uintptr):
+    can Memory.Allocate, Abort.Panic:
+        handles: mutable darray[uintptr]& = packed_store_handle_table(state)
+        in a:
+            handles.push(handle)
+def ctx_packed_store_encode(a: mutable Arena&, ptr: void&, state_bits: mutable void&) -> uintptr:
+    can Abort.Panic:
+        raw: uintptr = ptr.cast[u8&].uintptr()
+
+        if state_bits != null:
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+
+            if state.alloc_region != null:
+                alloc_data_base: heap u8& = packed_store_region_data(state.alloc_region)
+                alloc_data_begin: uintptr = alloc_data_base.uintptr()
+                alloc_data_end: uintptr = alloc_data_begin + (state.alloc_region.capacity * sizeof(uintptr)).uintptr()
+
+                if raw >= alloc_data_begin and raw < alloc_data_end:
+                    alloc_offset_bytes: uintptr = raw - alloc_data_begin
+                    alloc_offset_words: uintptr = alloc_offset_bytes / sizeof(uintptr).uintptr()
+                    return (state.alloc_region_index.uintptr() << 32.uintptr()) | ((alloc_offset_words + 1.uintptr()) << 1.uintptr())
+
+            if state.decode_region != null:
+                decode_data_base: heap u8& = packed_store_region_data(state.decode_region)
+                decode_data_begin: uintptr = decode_data_base.uintptr()
+                decode_data_end: uintptr = decode_data_begin + (state.decode_region.capacity * sizeof(uintptr)).uintptr()
+
+                if raw >= decode_data_begin and raw < decode_data_end:
+                    decode_offset_bytes: uintptr = raw - decode_data_begin
+                    decode_offset_words: uintptr = decode_offset_bytes / sizeof(uintptr).uintptr()
+                    return (state.decode_region_index.uintptr() << 32.uintptr()) | ((decode_offset_words + 1.uintptr()) << 1.uintptr())
+
+            owner_cursor: mutable heap Region&? = state.head_region
+            while owner_cursor != null:
+                owner_data_base: heap u8& = packed_store_region_data(owner_cursor)
+                owner_data_begin: uintptr = owner_data_base.uintptr()
+                owner_data_end: uintptr = owner_data_begin + (owner_cursor.capacity * sizeof(uintptr)).uintptr()
+
+                if raw >= owner_data_begin and raw < owner_data_end:
+                    owner_offset_bytes: uintptr = raw - owner_data_begin
+                    owner_offset_words: uintptr = owner_offset_bytes / sizeof(uintptr).uintptr()
+                    return (owner_cursor.global_index.uintptr() << 32.uintptr()) | ((owner_offset_words + 1.uintptr()) << 1.uintptr())
+
+                owner_cursor <- owner_cursor.owner_next
+
+        if a.end != null:
+            end_data_base: heap u8& = packed_store_region_data(a.end)
+            end_data_begin: uintptr = end_data_base.uintptr()
+            end_data_end: uintptr = end_data_begin + (a.end.capacity * sizeof(uintptr)).uintptr()
+
+            if raw >= end_data_begin and raw < end_data_end:
+                end_offset_bytes: uintptr = raw - end_data_begin
+                end_offset_words: uintptr = end_offset_bytes / sizeof(uintptr).uintptr()
+                return (a.end_index.uintptr() << 32.uintptr()) | ((end_offset_words + 1.uintptr()) << 1.uintptr())
+
+        r: mutable heap Region&? = a.begin
+
+        while r != null:
+            data_base: heap u8& = packed_store_region_data(r)
+            data_begin: uintptr = data_base.uintptr()
+            data_end: uintptr = data_begin + (r.capacity * sizeof(uintptr)).uintptr()
+
+            if raw >= data_begin and raw < data_end:
+                offset_bytes: uintptr = raw - data_begin
+                offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
+                return (r.global_index.uintptr() << 32.uintptr()) | ((offset_words + 1.uintptr()) << 1.uintptr())
+
+            r <- r.next
+
+        panic("packed store encode pointer outside arena")
+def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: mutable void&) -> mutable void&:
+    can Abort.Panic:
+        assert handle != 0.uintptr()
+        if handle & 1.uintptr() != 0.uintptr():
+            panic("packed store decode cannot materialize inline word handles")
+
+        region_index: usize = (handle >> 32.uintptr()).usize()
+        offset_words_plus_one: usize = ((handle & 0xffffffffu64.uintptr()) >> 1.uintptr()).usize()
+        assert offset_words_plus_one > 0
+
+        if state_bits != null:
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            if state.alloc_region != null and state.alloc_region_index == region_index:
+                offset_words: usize = offset_words_plus_one - 1
+                assert offset_words < state.alloc_region.capacity
+
+                data_base: heap u8& = packed_store_region_data(state.alloc_region)
+                return (data_base + offset_words * sizeof(uintptr)).cast[mutable void&]
+
+            if state.decode_region != null and state.decode_region_index == region_index:
+                offset_words: usize = offset_words_plus_one - 1
+                assert offset_words < state.decode_region.capacity
+
+                data_base: heap u8& = packed_store_region_data(state.decode_region)
+                return (data_base + offset_words * sizeof(uintptr)).cast[mutable void&]
+
+            indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
+            if indexed_region != null:
+                offset_words: usize = offset_words_plus_one - 1
+                assert offset_words < indexed_region.capacity
+
+                state.decode_region <- indexed_region
+                state.decode_region_index <- region_index
+
+                data_base: heap u8& = packed_store_region_data(indexed_region)
+                return (data_base + offset_words * sizeof(uintptr)).cast[mutable void&]
+
+        r: mutable heap Region&? = a.begin
+        i: mutable usize = 0
+
+        if state_bits != null:
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            owner_cursor: mutable heap Region&? = null
+            owner_cursor_index: mutable usize = 0
+
+            if state.head_region != null and state.head_region.global_index <= region_index:
+                owner_cursor <- state.head_region
+                owner_cursor_index <- state.head_region.global_index
+                r <- state.head_region
+                i <- state.head_region.global_index
+
+            if state.alloc_region != null and state.alloc_region_index <= region_index:
+                if owner_cursor == null or state.alloc_region_index > owner_cursor_index:
+                    owner_cursor <- state.alloc_region
+                    owner_cursor_index <- state.alloc_region_index
+                if r == null or state.alloc_region_index > i:
+                    r <- state.alloc_region
+                    i <- state.alloc_region_index
+
+            if state.decode_region != null and state.decode_region_index <= region_index:
+                if owner_cursor == null or state.decode_region_index > owner_cursor_index:
+                    owner_cursor <- state.decode_region
+                    owner_cursor_index <- state.decode_region_index
+                if r == null or state.decode_region_index > i:
+                    r <- state.decode_region
+                    i <- state.decode_region_index
+
+            if owner_cursor != null:
+                while owner_cursor != null and owner_cursor.global_index < region_index:
+                    owner_cursor <- owner_cursor.owner_next
+
+                if owner_cursor != null and owner_cursor.global_index == region_index:
+                    offset_words: usize = offset_words_plus_one - 1
+                    assert offset_words < owner_cursor.capacity
+
+                    state.decode_region <- owner_cursor
+                    state.decode_region_index <- region_index
+
+                    data_base: heap u8& = packed_store_region_data(owner_cursor)
+                    return (data_base + offset_words * sizeof(uintptr)).cast[mutable void&]
+
+        while i < region_index and r != null:
+            r <- r.next
+            i <- i + 1
+
+        assert r != null
+        offset_words: usize = offset_words_plus_one - 1
+        assert offset_words < r.capacity
+
+        if state_bits != null:
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            state.decode_region <- r
+            state.decode_region_index <- region_index
+
+        data_base: heap u8& = packed_store_region_data(r)
+        return (data_base + offset_words * sizeof(uintptr)).cast[mutable void&]
+def ctx_packed_store_encode_index(a: mutable Arena&, ptr: void&, state_bits: mutable void&) -> u32:
+    can Abort.Panic:
+        assert state_bits != null
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        encoded: uintptr = ctx_packed_store_encode(a, ptr, state_bits)
+        assert state.handles.items != null
+        handles: uintptr& = state.handles.items
+        for i in 0..<state.handles.count:
+            if handles[i] == encoded:
+                return i.u32()
+        panic("packed store encode index missing handle")
+def ctx_packed_store_decode_index(a: mutable Arena&, index: u32, state_bits: mutable void&) -> mutable void&:
+    can Abort.Panic:
+        assert state_bits != null
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        index_usize: usize = index.usize()
+        assert index_usize < state.handles.count
+        assert state.handles.items != null
+        handles: uintptr& = state.handles.items
+        return ctx_packed_store_decode(a, handles[index_usize], state_bits)
