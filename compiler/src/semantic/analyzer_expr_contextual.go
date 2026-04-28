@@ -75,6 +75,11 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 		a.recordAnalyzedExprType(expr, expected)
 		return expected
 	}
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		result := a.analyzeValueExpr(paren.Inner, expected)
+		a.recordAnalyzedExprType(paren, result)
+		return result
+	}
 	if shorthandType, ok := a.analyzeContextualShorthandValueExpr(expr, expected); ok {
 		return shorthandType
 	}

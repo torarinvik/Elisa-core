@@ -38,7 +38,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if !ok {
 			return 1
 		}
-		lowered := unparse.FormatFile(grammar.LowerFile(file))
+		lowered := unparse.FormatFile(grammar.LowerFileStandalone(file))
 		outputPath := outputPathForEmit(program.filename, options.output, loweredExtension)
 		if err := writeOutputFile(outputPath, []byte(lowered)); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)

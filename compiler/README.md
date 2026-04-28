@@ -171,6 +171,9 @@ Canonical frontend wrapper commands from the repository root:
 
 - `bash Code/llcontext_lua/test/run_tests.sh` runs the Lua frontend suite
 - `bash Code/llcontext_pascal/test/run_tests.sh` runs the Pascal frontend suite
+- `bash Code/llcontext_pascal/test/run_lowered_tests.sh` runs the generated lowered Pascal frontend suite
+- `bash Code/llcontext_pascal/test/regenerate_lowered_tests.sh` refreshes the local lowered Pascal fixture
+- `bash Code/llcontext_pascal/test/run_compiler_smoke.sh` runs a narrow Pascal compiler/lowered-output smoke check
 - `bash Code/llcontext_atpl/test/run_tests.sh` runs the ATPL frontend, runtime, and CLI fixture suites
 - `bash run_frontend_suites.sh` runs the Lua, Pascal, and ATPL frontend suites together
 

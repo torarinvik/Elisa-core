@@ -99,6 +99,49 @@ func TestRunCLIActivatesLoweredGrammarProductionsForInterpretAndIR(t *testing.T)
 	}
 }
 
+func TestRunCLIEmittedLoweredGrammarSourceIsStandalone(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "grammar_standalone.llcontext")
+	loweredPath := filepath.Join(fixtureDir, "grammar_standalone.lowered.llcontext")
+	src := "grammar Demo:\n    produce() -> i64:\n        return 9\n\ndef main() -> i64:\n    return produce()\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write grammar standalone fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "lowered", "-o", loweredPath, sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected lowered emit to succeed, stderr:\n%s", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"-emit", "interpret", loweredPath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected standalone lowered source to interpret, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 9") {
+		t.Fatalf("expected standalone lowered source to report 9, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "contextual_ternary_darray.llcontext")
+	src := "def main() -> i64:\n    region scratch(4096)\n    in scratch:\n        xs: darray[i64] = ([1] if true else [])\n        return xs.count.cast[i64]\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write contextual ternary fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ir", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected contextual ternary darray fixture to compile, stderr:\n%s", stderr.String())
+	}
+}
+
 func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "grammar_return.llcontext")

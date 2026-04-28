@@ -68,11 +68,22 @@ func LowerFile(file *ast.File) *ast.File {
 	return &ast.File{Filename: file.Filename, Decls: lowerDeclList(file.Decls)}
 }
 
-func lowerDeclList(decls []ast.Decl) []ast.Decl {
-	return lowerDeclListInScope(decls, grammarDeclScope(decls), grammarEnvDeclScope(decls), structDeclScope(decls))
+func LowerFileStandalone(file *ast.File) *ast.File {
+	if file == nil {
+		return nil
+	}
+	return &ast.File{Filename: file.Filename, Decls: lowerDeclListStandalone(file.Decls)}
 }
 
-func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl, structScope map[string]*ast.StructDecl) []ast.Decl {
+func lowerDeclList(decls []ast.Decl) []ast.Decl {
+	return lowerDeclListInScope(decls, grammarDeclScope(decls), grammarEnvDeclScope(decls), structDeclScope(decls), true)
+}
+
+func lowerDeclListStandalone(decls []ast.Decl) []ast.Decl {
+	return lowerDeclListInScope(decls, grammarDeclScope(decls), grammarEnvDeclScope(decls), structDeclScope(decls), false)
+}
+
+func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl, structScope map[string]*ast.StructDecl, preserveGrammarDecls bool) []ast.Decl {
 	if len(decls) == 0 {
 		return nil
 	}
@@ -81,7 +92,9 @@ func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.Grammar
 	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.GrammarDecl:
-			lowered = append(lowered, n)
+			if preserveGrammarDecls {
+				lowered = append(lowered, n)
+			}
 			if loweredGrammarNames[n.Name] {
 				continue
 			}
@@ -96,7 +109,7 @@ func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.Grammar
 		case *ast.LexerDecl:
 			lowered = append(lowered, lowerLexerDecls(n)...)
 		case *ast.NamespaceDecl:
-			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls), grammarEnvDeclScope(n.Decls), structDeclScope(n.Decls))}
+			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls), grammarEnvDeclScope(n.Decls), structDeclScope(n.Decls), preserveGrammarDecls)}
 			lowered = append(lowered, cloned)
 		default:
 			lowered = append(lowered, decl)

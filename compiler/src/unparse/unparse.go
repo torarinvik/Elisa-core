@@ -1372,6 +1372,9 @@ func formatInlineCanStmt(stmt ast.Stmt, permissions []ast.PermissionRef) (string
 	if stmt == nil || len(permissions) == 0 {
 		return "", false
 	}
+	if stmtContainsNodeSugar(stmt) {
+		return "", false
+	}
 	wrapExpr := func(expr ast.Expr) string {
 		return formatExprWithSurfacePermissions(expr, permissions)
 	}
@@ -1424,6 +1427,109 @@ func formatInlineCanStmt(stmt ast.Stmt, permissions []ast.PermissionRef) (string
 		return "_ = " + wrapExpr(n.Value), true
 	default:
 		return "", false
+	}
+}
+
+func stmtContainsNodeSugar(stmt ast.Stmt) bool {
+	switch n := stmt.(type) {
+	case *ast.AssignStmt:
+		return exprContainsNodeSugar(n.Value)
+	case *ast.AsRefAssignStmt:
+		return exprContainsNodeSugar(n.Value)
+	case *ast.VarDeclStmt:
+		return exprContainsNodeSugar(n.Value)
+	case *ast.TupleBindStmt:
+		return exprContainsNodeSugar(n.Value)
+	case *ast.ReturnStmt:
+		return exprContainsNodeSugar(n.Value)
+	case *ast.ExprStmt:
+		return exprContainsNodeSugar(n.Expr)
+	case *ast.DiscardStmt:
+		return exprContainsNodeSugar(n.Value)
+	default:
+		return false
+	}
+}
+
+func exprContainsNodeSugar(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case nil:
+		return false
+	case *ast.AllocExpr:
+		return n.NodeSugar || exprContainsNodeSugar(n.Owner) || exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.NodeSpan)
+	case *ast.CanExpr:
+		return exprContainsNodeSugar(n.Expr)
+	case *ast.BinaryExpr:
+		return exprContainsNodeSugar(n.Left) || exprContainsNodeSugar(n.Right)
+	case *ast.UnaryExpr:
+		return exprContainsNodeSugar(n.Operand)
+	case *ast.CallExpr:
+		if exprContainsNodeSugar(n.Func) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if exprContainsNodeSugar(arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.FieldExpr:
+		return exprContainsNodeSugar(n.Object)
+	case *ast.IndexExpr:
+		return exprContainsNodeSugar(n.Object) || exprContainsNodeSugar(n.Index) || exprContainsNodeSugar(n.Fallback)
+	case *ast.SliceExpr:
+		return exprContainsNodeSugar(n.Object) || exprContainsNodeSugar(n.Start) || exprContainsNodeSugar(n.End)
+	case *ast.CastExpr:
+		return exprContainsNodeSugar(n.Operand)
+	case *ast.ListLitExpr:
+		for _, item := range n.Elems {
+			if exprContainsNodeSugar(item) {
+				return true
+			}
+		}
+		return false
+	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			if exprContainsNodeSugar(arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.RecordUpdateExpr:
+		if exprContainsNodeSugar(n.Base) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if exprContainsNodeSugar(arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			if exprContainsNodeSugar(elem) {
+				return true
+			}
+		}
+		return false
+	case *ast.ParenExpr:
+		return exprContainsNodeSugar(n.Inner)
+	case *ast.TernaryExpr:
+		return exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.Cond) || exprContainsNodeSugar(n.Alt)
+	case *ast.AddrOfExpr:
+		return exprContainsNodeSugar(n.Operand)
+	case *ast.SpecializeExpr:
+		return exprContainsNodeSugar(n.Operand)
+	case *ast.TryExpr:
+		return exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.Fallback)
+	case *ast.CatchExpr:
+		return exprContainsNodeSugar(n.Value)
+	case *ast.UnwrapElseExpr:
+		return exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.Fallback)
+	case *ast.OptionalBindExpr:
+		return exprContainsNodeSugar(n.Value)
+	default:
+		return false
 	}
 }
 
@@ -2021,6 +2127,9 @@ func formatNodeSugarValue(expr *ast.AllocExpr) string {
 		}
 		trimmed.ArgItemOrder = items
 	}
+	if len(trimmed.Args) == 0 {
+		return formatExpr(trimmed.Func)
+	}
 	return formatExpr(&trimmed)
 }
 
@@ -2442,6 +2551,11 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	case *ast.CastExpr:
+		if addr, ok := n.Operand.(*ast.AddrOfExpr); ok && addr != nil {
+			if isRefCastTarget(n.Target) {
+				return formatExpr(addr.Operand) + ".ref[" + formatTypeExpr(n.Target) + "]"
+			}
+		}
 		if n.Origin == ast.CastExprOriginToSyntax {
 			return formatExpr(n.Operand) + " to " + formatTypeExpr(n.Target)
 		}
@@ -2524,6 +2638,8 @@ func formatExpr(expr ast.Expr) string {
 			parts = append(parts, formatExpr(target))
 		}
 		return strings.Join(parts, " | ")
+	case *ast.TypeExprExpr:
+		return formatTypeExpr(n.Type)
 	case *ast.ParenExpr:
 		return "(" + formatExpr(n.Inner) + ")"
 	case *ast.RaiseExpr:
@@ -2581,6 +2697,17 @@ func formatExpr(expr ast.Expr) string {
 		return "emit " + formatExpr(n.Value)
 	default:
 		return "<expr>"
+	}
+}
+
+func isRefCastTarget(t ast.TypeExpr) bool {
+	switch n := t.(type) {
+	case *ast.RefType:
+		return true
+	case *ast.MutableType:
+		return isRefCastTarget(n.Elem)
+	default:
+		return false
 	}
 }
 

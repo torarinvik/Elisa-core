@@ -1090,8 +1090,10 @@ func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
 		t.Fatalf("failed to read lowered output file: %v", err)
 	}
 	output := string(data)
+	if strings.Contains(output, "grammar PascalFrontend:") {
+		t.Fatalf("expected standalone lowered output to omit source grammar declarations, got:\n%s", output)
+	}
 	for _, want := range []string{
-		"grammar PascalFrontend:",
 		"def expression(state: mutable ParserState&) -> Token:",
 		"state.expect_kind(TokenKind.IDENT)",
 		"return (true, __grammar_committed_",
