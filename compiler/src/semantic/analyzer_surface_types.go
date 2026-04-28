@@ -1,0 +1,259 @@
+package semantic
+
+import (
+	"llcontext/src/ast"
+	"llcontext/src/lexer"
+	"strings"
+)
+
+func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
+	switch expr.Name {
+	case "Dict":
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "Dict", "dict")
+		return invalidType, true
+	case "view":
+		if len(expr.Args) != 1 {
+			a.errorf(expr.Pos(), "view expects 1 argument, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &ViewType{Elem: a.resolveType(expr.Args[0])}, true
+	case "dview":
+		if len(expr.Args) != 1 {
+			a.errorf(expr.Pos(), "dview expects 1 argument, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &DArrayViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "dview"}, true
+	case "DArray":
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArray", "darray")
+		return invalidType, true
+	case "DArrayView":
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArrayView", "dview")
+		return invalidType, true
+	case "DList":
+		a.errorf(expr.Pos(), "DList has been removed from the language; use darray instead")
+		return invalidType, true
+	case "DListView":
+		a.errorf(expr.Pos(), "DListView has been removed from the language; use dview instead")
+		return invalidType, true
+	case "DStr":
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "DStr", "dstr")
+		return invalidType, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) resolvePackedVariantViewSurfaceType(expr ast.TypeExpr, pos lexer.Pos) Type {
+	named, ok := expr.(*ast.NamedType)
+	if !ok {
+		a.errorf(pos, "packedview expects a packed enum variant like packedview[Expr.Lit]")
+		return invalidType
+	}
+	lastDot := strings.LastIndex(named.Name, ".")
+	if lastDot <= 0 || lastDot >= len(named.Name)-1 {
+		a.errorf(pos, "packedview expects a packed enum variant like packedview[Expr.Lit]")
+		return invalidType
+	}
+	enumName := named.Name[:lastDot]
+	variantName := named.Name[lastDot+1:]
+	base, ok := a.namedTypes[enumName]
+	if !ok {
+		a.errorf(pos, "unknown packed enum %q in packedview type", enumName)
+		return invalidType
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok {
+		a.errorf(pos, "packedview expects a packed enum variant like packedview[Expr.Lit]")
+		return invalidType
+	}
+	if !enumType.Packed {
+		a.errorf(pos, "packedview requires a packed enum variant, got ordinary enum %q", enumType.Name)
+		return invalidType
+	}
+	variant, ok := enumType.Variant(variantName)
+	if !ok {
+		a.errorf(pos, "enum %q has no variant %q", enumType.Name, variantName)
+		return invalidType
+	}
+	viewType := &PackedVariantViewType{Enum: enumType, Variant: variant}
+	return viewType
+}
+
+func (a *Analyzer) resolveTreeVariantViewSurfaceType(expr ast.TypeExpr, pos lexer.Pos) Type {
+	named, ok := expr.(*ast.NamedType)
+	if !ok {
+		a.errorf(pos, "treeview expects a tree variant like Lua.Expr.Binary")
+		return invalidType
+	}
+	categoryType, variant, ok := a.treeVariantTargetFromNamedType(named)
+	if !ok || categoryType == nil || variant == nil {
+		if categoryType == nil {
+			a.errorf(pos, "treeview expects a tree variant like Lua.Expr.Binary")
+			return invalidType
+		}
+		a.errorf(pos, "tree category %q has no variant %q", categoryType.Name, named.Name[strings.LastIndex(named.Name, ".")+1:])
+		return invalidType
+	}
+	return categoryType.VariantViewType(variant)
+}
+
+func (a *Analyzer) resolveNamedVariantWitnessType(named *ast.NamedType) (Type, bool) {
+	if named == nil {
+		return nil, false
+	}
+	idx := strings.LastIndex(named.Name, ".")
+	if idx <= 0 || idx+1 >= len(named.Name) {
+		return nil, false
+	}
+	baseName := named.Name[:idx]
+	variantName := named.Name[idx+1:]
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return nil, false
+	}
+	switch tt := base.(type) {
+	case *TreeCategoryType:
+		variant, ok := tt.Variant(variantName)
+		if !ok || variant == nil {
+			a.errorf(named.Pos(), "tree category %q has no variant %q", tt.Name, variantName)
+			return invalidType, true
+		}
+		return tt.VariantViewType(variant), true
+	case *EnumType:
+		variant, ok := tt.Variant(variantName)
+		if !ok || variant == nil {
+			a.errorf(named.Pos(), "enum %q has no variant %q", tt.Name, variantName)
+			return invalidType, true
+		}
+		if !tt.Packed {
+			a.errorf(named.Pos(), "bare variant type %q requires a packed enum or tree category; ordinary enum variants are not first-class types", named.Name)
+			return invalidType, true
+		}
+		return variant.PackedViewType(tt), true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
+	switch expr.Name {
+	case "array":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
+			a.errorf(expr.Pos(), "array expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		resolved := a.resolveArrayType(&ast.ArrayType{Position: expr.Position, Elem: expr.TypeArgs[0], Size: expr.ValueArgs[0]})
+		if arrayType, ok := resolved.(*ArrayType); ok {
+			arrayType.SurfaceName = "array"
+		}
+		return resolved
+	case "darray":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) > 1 {
+			a.errorf(expr.Pos(), "darray expects 1 or 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		if len(expr.ValueArgs) == 0 {
+			return &DArrayType{Elem: a.resolveType(expr.TypeArgs[0]), Shape: &WildcardShape{}, SurfaceName: "darray"}
+		}
+		return &DArrayType{Elem: a.resolveType(expr.TypeArgs[0]), Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "darray"}
+	case "dict":
+		if len(expr.TypeArgs) != 2 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "dict expects 2 type arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return a.resolveDictType(expr.TypeArgs[0], expr.TypeArgs[1], "dict")
+	case "str":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
+			a.errorf(expr.Pos(), "str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		resolved := a.resolveArrayType(&ast.ArrayType{
+			Position: expr.Position,
+			Elem:     &ast.NamedType{Position: expr.Position, Name: "u8"},
+			Size:     expr.ValueArgs[0],
+		})
+		if arrayType, ok := resolved.(*ArrayType); ok {
+			arrayType.SurfaceName = "str"
+		}
+		return resolved
+	case "string":
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "string", "str")
+		return invalidType
+	case "dstr":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
+			a.errorf(expr.Pos(), "dstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return &DStrType{Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "dstr"}
+	case "dstring":
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "dstring", "dstr")
+		return invalidType
+	case "view":
+		if len(expr.TypeArgs) != 1 {
+			a.errorf(expr.Pos(), "view expects 1 type argument, got %d", len(expr.TypeArgs))
+			return invalidType
+		}
+		viewType := &ViewType{Elem: a.resolveType(expr.TypeArgs[0])}
+		if len(expr.ValueArgs) == 2 {
+			viewType.Begin = a.exprSummary(expr.ValueArgs[0])
+			viewType.End = a.exprSummary(expr.ValueArgs[1])
+		} else if len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "view expects either 1 or 3 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return viewType
+	case "dview":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "dview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return &DArrayViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "dview"}
+	case "packedview":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "packedview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return a.resolvePackedVariantViewSurfaceType(expr.TypeArgs[0], expr.Pos())
+	case "treeview":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "treeview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return a.resolveTreeVariantViewSurfaceType(expr.TypeArgs[0], expr.Pos())
+	case "sview":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
+			a.errorf(expr.Pos(), "sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return &SViewType{Begin: a.exprSummary(expr.ValueArgs[0]), End: a.exprSummary(expr.ValueArgs[1])}
+	default:
+		a.errorf(expr.Pos(), "unknown built-in type %q", expr.Name)
+		return invalidType
+	}
+}
+
+func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr, surfaceName string) Type {
+	keyType := a.resolveType(keyExpr)
+	valueType := a.resolveType(valueExpr)
+	if IsInvalidType(keyType) || IsInvalidType(valueType) {
+		return invalidType
+	}
+	if a.containsAffineHandleValues(keyType, map[string]bool{}) {
+		a.errorf(keyExpr.Pos(), "dict keys cannot contain affine handles, got %s", keyType)
+		return invalidType
+	}
+	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}
+}
+
+func dictRuntimeBackedKeyType(keyType Type) bool {
+	switch StripAggregateStateType(keyType).(type) {
+	case *DStrType, *TypeParamType:
+		return true
+	default:
+		return false
+	}
+}
+
+func dictSupportsRuntimeBackedOps(dictType *DictType) bool {
+	return dictType != nil && dictRuntimeBackedKeyType(dictType.Key)
+}

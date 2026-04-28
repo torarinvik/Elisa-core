@@ -1,0 +1,571 @@
+package semantic
+
+import (
+	"strings"
+
+	"llcontext/src/ast"
+	"llcontext/src/lexer"
+)
+
+func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
+	for _, scoped := range decls {
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			switch n := scoped.Decl.(type) {
+			case *ast.ConstDecl:
+				if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
+					valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
+					if !AssignableTo(sym.Type, valueType) {
+						a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type, valueType)
+					}
+					if value, ok := a.evalConstExpr(n.Value); ok {
+						a.constValues[joinQualifiedName(scoped.Namespace, n.Name)] = value
+					} else {
+						a.errorf(n.Value.Pos(), "const %q initializer must be a compile-time %s value", n.Name, sym.Type)
+					}
+				}
+			case *ast.GlobalDecl:
+				if n.Value != nil {
+					if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
+						valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
+						if !AssignableTo(sym.Type, valueType) {
+							a.errorf(n.Pos(), "global %q expects %s, got %s", n.Name, sym.Type, valueType)
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				a.analyzeFunctionAnnotations(n)
+				a.analyzeFunc(n)
+			case *ast.AttributeDecl:
+				a.analyzeAttributeDecl(n)
+			case *ast.InterfaceDecl:
+			case *ast.ImplDecl:
+				for _, member := range n.Members {
+					fnDecl, ok := member.(*ast.FuncDecl)
+					if !ok {
+						continue
+					}
+					a.analyzeFunctionAnnotations(fnDecl)
+					a.analyzeFunc(fnDecl)
+				}
+			case *ast.TreeDecl:
+			case *ast.ConstEnumDecl:
+			case *ast.EnumDecl:
+			case *ast.ErrorDecl:
+			case *ast.EffectDecl:
+			case *ast.PermissionDecl:
+			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
+			}
+		})
+	}
+}
+
+func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
+	if len(fn.Annotations) == 0 {
+		return
+	}
+
+	valid := make([]ast.Annotation, 0, len(fn.Annotations))
+	seen := make(map[string]lexer.Pos, len(fn.Annotations))
+	for _, annotation := range fn.Annotations {
+		if prev, exists := seen[annotation.Name]; exists {
+			a.errorf(annotation.Position, "duplicate @%s annotation on function %q (first seen at %s:%d:%d)", annotation.Name, fn.Name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seen[annotation.Name] = annotation.Position
+		if !isSupportedFunctionAnnotation(annotation.Name) {
+			a.errorf(annotation.Position, "unknown function annotation @%s on %q", annotation.Name, fn.Name)
+			continue
+		}
+		valid = append(valid, annotation)
+	}
+
+	if len(valid) == 0 {
+		return
+	}
+
+	var signature *FuncType
+	if sym, ok := a.symbolForFuncDecl(fn); ok {
+		signature, _ = sym.Type.(*FuncType)
+	}
+	accepted := make([]ast.Annotation, 0, len(valid))
+	for _, annotation := range valid {
+		if a.validateFunctionAnnotation(annotation, fn, signature) {
+			switch annotation.Name {
+			case "inline":
+				a.applyFunctionInlineAnnotation(annotation, fn, signature)
+			case "norecurse":
+				a.applyFunctionNoRecurseAnnotation(annotation, fn, signature)
+			case "hot", "cold":
+				a.applyFunctionTemperatureAnnotation(annotation, fn, signature)
+			case "guard_nonnull", "guard_variant":
+				a.applyFunctionGuardAnnotation(annotation, fn, signature)
+			default:
+				accepted = append(accepted, annotation)
+			}
+		}
+	}
+	if len(accepted) == 0 {
+		return
+	}
+	a.annotatedFuncs = append(a.annotatedFuncs, &AnnotatedFunc{
+		Name:        fn.Name,
+		Annotations: accepted,
+		Signature:   signature,
+		Decl:        fn,
+	})
+}
+
+func (a *Analyzer) applyFunctionInlineAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil || len(annotation.Args) != 1 {
+		return
+	}
+	mode, ok := normalizeInlineAnnotationArg(annotation.Args[0])
+	if !ok {
+		return
+	}
+	signature.InlineMode = mode
+	signature.HasInlineMode = true
+}
+
+func (a *Analyzer) applyFunctionNoRecurseAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil || len(annotation.Args) != 0 {
+		return
+	}
+	signature.HasNoRecurse = true
+}
+
+func (a *Analyzer) applyFunctionTemperatureAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil || len(annotation.Args) != 0 {
+		return
+	}
+	mode, ok := temperatureModeForAnnotationName(annotation.Name)
+	if !ok {
+		return
+	}
+	if signature.HasTemperatureMode {
+		if signature.TemperatureMode != mode {
+			a.errorf(annotation.Position, "@%s on function %q conflicts with existing @%s annotation", annotation.Name, fn.Name, string(signature.TemperatureMode))
+		}
+		return
+	}
+	signature.TemperatureMode = mode
+	signature.HasTemperatureMode = true
+}
+
+func (a *Analyzer) applyFunctionGuardAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil {
+		return
+	}
+	switch annotation.Name {
+	case "guard_nonnull":
+		paramIndex, ok := a.functionAnnotationParamIndex(fn, annotation.Args[0])
+		if !ok {
+			return
+		}
+		signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindNonNull, ParamIndex: paramIndex})
+	case "guard_variant":
+		paramIndex, ok := a.functionAnnotationParamIndex(fn, annotation.Args[0])
+		if !ok {
+			return
+		}
+		enumName, variantName, ok := parseFunctionGuardVariantPath(annotation.Args[1])
+		if !ok {
+			return
+		}
+		base, _, ok := a.lookupVisibleType(enumName)
+		if !ok {
+			return
+		}
+		switch variantBase := base.(type) {
+		case *EnumType:
+			if variantBase == nil {
+				return
+			}
+			signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindPackedVariant, ParamIndex: paramIndex, EnumName: variantBase.Name, VariantName: variantName})
+		case *TreeCategoryType:
+			if variantBase == nil {
+				return
+			}
+			signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindPackedVariant, ParamIndex: paramIndex, EnumName: variantBase.Name, VariantName: variantName})
+		}
+	}
+}
+
+func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if signature == nil {
+		a.errorf(annotation.Position, "cannot resolve signature for @%s function %q", annotation.Name, fn.Name)
+		return false
+	}
+	if annotation.Name == "guard_nonnull" {
+		return a.validateFunctionGuardNonNullAnnotation(annotation, fn, signature)
+	}
+	if annotation.Name == "guard_variant" {
+		return a.validateFunctionGuardVariantAnnotation(annotation, fn, signature)
+	}
+	if annotation.Name == "skip" || annotation.Name == "ignore" {
+		return true
+	}
+	if annotation.Name == "inline" {
+		if len(annotation.Args) != 1 {
+			a.errorf(annotation.Position, "@inline on function %q expects exactly one mode argument", fn.Name)
+			return false
+		}
+		if _, ok := normalizeInlineAnnotationArg(annotation.Args[0]); !ok {
+			a.errorf(annotation.Position, "@inline on function %q uses unsupported mode %q (expected always or never)", fn.Name, annotation.Args[0])
+			return false
+		}
+		return true
+	}
+	if annotation.Name == "norecurse" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@norecurse on function %q does not take arguments", fn.Name)
+			return false
+		}
+		return true
+	}
+	if annotation.Name == "hot" || annotation.Name == "cold" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@%s on function %q does not take arguments", annotation.Name, fn.Name)
+			return false
+		}
+		return true
+	}
+	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 {
+		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature)
+		return false
+	}
+	if !annotationAllowsDeclaredPermissions(annotation.Name, signature) {
+		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature)
+		return false
+	}
+	if signature.Variadic {
+		a.errorf(annotation.Position, "@%s function %q must not be variadic", annotation.Name, fn.Name)
+		return false
+	}
+	if len(signature.Params) > 0 {
+		a.errorf(annotation.Position, "@%s function %q must not take parameters; got %s", annotation.Name, fn.Name, signature)
+		return false
+	}
+	switch annotation.Name {
+	case "test", "bench":
+		if !isVoidType(signature.Return) {
+			a.errorf(annotation.Position, "@%s function %q must return void, got %s", annotation.Name, fn.Name, signature.Return)
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) validateFunctionGuardSignature(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if signature.Return == nil || !IsBoolType(signature.Return) {
+		a.errorf(annotation.Position, "@%s function %q must return bool, got %s", annotation.Name, fn.Name, signature.Return)
+		return false
+	}
+	if signature.Variadic {
+		a.errorf(annotation.Position, "@%s function %q must not be variadic", annotation.Name, fn.Name)
+		return false
+	}
+	if len(signature.Permissions) != 0 {
+		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature)
+		return false
+	}
+	return true
+}
+
+func (a *Analyzer) validateFunctionGuardNonNullAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if !a.validateFunctionGuardSignature(annotation, fn, signature) {
+		return false
+	}
+	if len(annotation.Args) != 1 {
+		a.errorf(annotation.Position, "@guard_nonnull on function %q expects exactly one parameter name", fn.Name)
+		return false
+	}
+	paramIndex, ok := a.functionAnnotationParamIndex(fn, annotation.Args[0])
+	if !ok || paramIndex >= len(signature.Params) {
+		a.errorf(annotation.Position, "@guard_nonnull on function %q references unknown parameter %q", fn.Name, annotation.Args[0])
+		return false
+	}
+	if !guardNonNullParamType(signature.Params[paramIndex]) {
+		a.errorf(annotation.Position, "@guard_nonnull on function %q requires a nullable reference or optional parameter, got %s", fn.Name, signature.Params[paramIndex])
+		return false
+	}
+	return true
+}
+
+func (a *Analyzer) validateFunctionGuardVariantAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if !a.validateFunctionGuardSignature(annotation, fn, signature) {
+		return false
+	}
+	if len(annotation.Args) != 2 {
+		a.errorf(annotation.Position, "@guard_variant on function %q expects a parameter name and VariantType.Variant path", fn.Name)
+		return false
+	}
+	paramIndex, ok := a.functionAnnotationParamIndex(fn, annotation.Args[0])
+	if !ok || paramIndex >= len(signature.Params) {
+		a.errorf(annotation.Position, "@guard_variant on function %q references unknown parameter %q", fn.Name, annotation.Args[0])
+		return false
+	}
+	enumName, variantName, ok := parseFunctionGuardVariantPath(annotation.Args[1])
+	if !ok {
+		a.errorf(annotation.Position, "@guard_variant on function %q expects a VariantType.Variant path, got %q", fn.Name, annotation.Args[1])
+		return false
+	}
+	base, _, ok := a.lookupVisibleType(enumName)
+	if !ok {
+		a.errorf(annotation.Position, "@guard_variant on function %q references unknown variant type %q", fn.Name, enumName)
+		return false
+	}
+	switch variantBase := base.(type) {
+	case *EnumType:
+		if variantBase == nil {
+			return false
+		}
+		if !variantBase.Packed {
+			a.errorf(annotation.Position, "@guard_variant on function %q currently requires a packed enum or tree-category variant path, got %q", fn.Name, annotation.Args[1])
+			return false
+		}
+		if _, ok := variantBase.Variant(variantName); !ok {
+			a.errorf(annotation.Position, "enum %q has no variant %q", variantBase.Name, variantName)
+			return false
+		}
+		paramEnum, _, ok := resolveMatchableEnumType(signature.Params[paramIndex])
+		if !ok || paramEnum == nil || !paramEnum.Packed {
+			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex])
+			return false
+		}
+		if paramEnum.Name != variantBase.Name {
+			a.errorf(annotation.Position, "@guard_variant on function %q expects parameter %q to use variant type %q, got %q", fn.Name, annotation.Args[0], variantBase.Name, paramEnum.Name)
+			return false
+		}
+	case *TreeCategoryType:
+		if variantBase == nil {
+			return false
+		}
+		if _, ok := variantBase.Variant(variantName); !ok {
+			a.errorf(annotation.Position, "tree category %q has no variant %q", variantBase.Name, variantName)
+			return false
+		}
+		paramTree, _, ok := resolveMatchableTreeCategoryType(signature.Params[paramIndex])
+		if !ok || paramTree == nil {
+			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex])
+			return false
+		}
+		if paramTree.Name != variantBase.Name {
+			a.errorf(annotation.Position, "@guard_variant on function %q expects parameter %q to use variant type %q, got %q", fn.Name, annotation.Args[0], variantBase.Name, paramTree.Name)
+			return false
+		}
+	default:
+		a.errorf(annotation.Position, "@guard_variant on function %q expects a packed enum or tree-category variant path, got %q", fn.Name, annotation.Args[1])
+		return false
+	}
+	return true
+}
+
+func guardNonNullParamType(t Type) bool {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *RefType:
+		return tt != nil && tt.State == RefStateNullable
+	case *OptionalType:
+		return tt != nil
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) functionAnnotationParamIndex(fn *ast.FuncDecl, name string) (int, bool) {
+	if a == nil || fn == nil || name == "" {
+		return 0, false
+	}
+	for i, param := range a.expandedFuncDeclParams(fn) {
+		if param.Name == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func parseFunctionGuardVariantPath(text string) (string, string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", "", false
+	}
+	split := strings.LastIndex(trimmed, ".")
+	if split <= 0 || split >= len(trimmed)-1 {
+		return "", "", false
+	}
+	return trimmed[:split], trimmed[split+1:], true
+}
+
+func annotationAllowsDeclaredPermissions(annotationName string, signature *FuncType) bool {
+	if signature == nil || len(signature.Permissions) == 0 {
+		return true
+	}
+	return annotationName == "test"
+}
+
+func funcHasAnnotation(fn *ast.FuncDecl, name string) bool {
+	if fn == nil || name == "" {
+		return false
+	}
+	for _, annotation := range fn.Annotations {
+		if annotation.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isSupportedFunctionAnnotation(name string) bool {
+	switch name {
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant":
+		return true
+	default:
+		return false
+	}
+}
+
+func poststateTargetDisplayName(rootName string, steps []borrowReturnAnnotationStep) string {
+	if rootName == "" {
+		return "<value>"
+	}
+	return rootName + borrowAnnotationPathSuffix(steps)
+}
+
+func poststateNamedStateCurrentType(t Type) (Type, bool) {
+	switch tt := t.(type) {
+	case *AggregateStateType:
+		return poststateNamedStateCurrentType(tt.Base)
+	case *RefType:
+		return poststateNamedStateCurrentType(tt.Elem)
+	default:
+		if _, ok := namedStateStructBase(t); ok {
+			return t, true
+		}
+		return nil, false
+	}
+}
+
+func (a *Analyzer) currentFuncParamSymbol(index int) (*Symbol, bool) {
+	if a == nil || a.currentFuncDecl == nil || a.currentScope == nil || index < 0 {
+		return nil, false
+	}
+	params := append([]ast.ParamDecl(nil), a.currentFuncDecl.Params...)
+	if implicitDecls, _ := a.expandImplicitParamDecls(a.currentFuncDecl.Params, a.currentFuncDecl.ImplicitParams, a.currentFuncDecl.ImplicitBundles, a.currentFuncDecl.ImplicitItemOrder, a.currentFuncDecl.Name); len(implicitDecls) != 0 {
+		params = append(params, implicitDecls...)
+	}
+	if index >= len(params) {
+		return nil, false
+	}
+	name := params[index].Name
+	if name == "" {
+		return nil, false
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	return sym, ok && sym != nil
+}
+
+func (a *Analyzer) validateCurrentFuncPoststates() {
+	a.validateCurrentFuncPoststatesForOutcome(false, false)
+}
+
+func funcPoststatesHaveConditional(poststates []FuncPoststate) bool {
+	for _, poststate := range poststates {
+		if poststate.Condition.Kind != FuncPoststateConditionAlways {
+			return true
+		}
+	}
+	return false
+}
+
+func funcPoststateAppliesForOutcome(poststate FuncPoststate, outcomeKnown bool, outcomeValue bool) bool {
+	switch poststate.Condition.Kind {
+	case FuncPoststateConditionReturnBool:
+		return outcomeKnown && poststate.Condition.ReturnBool == outcomeValue
+	default:
+		return true
+	}
+}
+
+func (a *Analyzer) validateCurrentFuncPoststatesForReturnValue(value ast.Expr) {
+	if a == nil || a.currentFuncType == nil || !funcPoststatesHaveConditional(a.currentFuncType.Poststates) {
+		a.validateCurrentFuncPoststates()
+		return
+	}
+	outcomeValue, outcomeKnown := a.evalConstBoolExpr(value)
+	if !outcomeKnown {
+		a.errorf(value.Pos(), "functions with branch-sensitive ensures must return literal true or false on each return path")
+	}
+	a.validateCurrentFuncPoststatesForOutcome(outcomeKnown, outcomeValue)
+}
+
+func (a *Analyzer) validateCurrentFuncPoststatesForOutcome(outcomeKnown bool, outcomeValue bool) {
+	if a == nil || a.suppressDiagnostics || a.currentFuncDecl == nil || a.currentFuncType == nil || len(a.currentFuncType.Poststates) == 0 {
+		return
+	}
+	for _, poststate := range a.currentFuncType.Poststates {
+		if !funcPoststateAppliesForOutcome(poststate, outcomeKnown, outcomeValue) {
+			continue
+		}
+		a.validateCurrentFuncPoststate(poststate)
+	}
+}
+
+func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
+	sym, ok := a.currentFuncParamSymbol(poststate.ParamIndex)
+	if !ok || sym == nil {
+		return
+	}
+	targetName := poststateTargetDisplayName(sym.Name, poststate.Path)
+	currentTarget, ok := a.projectTrackedValueTypeAtPath(a.currentTrackedValueType(sym), poststate.Path)
+	if !ok || currentTarget == nil {
+		a.errorf(poststate.Position, ensureTargetUnresolvedMessage(targetName, a.currentFuncDecl.Name))
+		return
+	}
+	switch poststate.Kind {
+	case FuncPoststateKindPreserve:
+		for _, widening := range a.currentConservativeCallWidenings[sym] {
+			if poststatePathsOverlap(widening.Path, poststate.Path) {
+				a.errorf(poststate.Position, ensurePreserveWidenedMessage(targetName, a.currentFuncDecl.Name, widening.Source))
+				return
+			}
+		}
+		originalTarget, ok := a.projectTrackedValueTypeAtPath(sym.Type, poststate.Path)
+		if !ok || originalTarget == nil {
+			a.errorf(poststate.Position, ensureIncomingTargetUnresolvedMessage(targetName, a.currentFuncDecl.Name))
+			return
+		}
+		if !SameType(currentTarget, originalTarget) {
+			a.errorf(poststate.Position, ensurePreserveMismatchMessage(targetName, a.currentFuncDecl.Name, currentTarget.String()))
+		}
+	case FuncPoststateKindNamedState:
+		actualTarget, ok := poststateNamedStateCurrentType(currentTarget)
+		if !ok || actualTarget == nil {
+			a.errorf(poststate.Position, ensureNamedStateTargetMessage(targetName, a.currentFuncDecl.Name))
+			return
+		}
+		base, ok := namedStateStructBase(actualTarget)
+		if !ok || base == nil {
+			a.errorf(poststate.Position, ensureNamedStateTargetMessage(targetName, a.currentFuncDecl.Name))
+			return
+		}
+		desired := newNamedStateType(base.Name, base.NamedStateCases, poststate.StateCases)
+		actualState, ok := namedStateCurrentArg(actualTarget)
+		if desired == nil || !ok || actualState == nil || !namedStateTypeAssignable(desired, actualState) {
+			a.errorf(poststate.Position, ensureNamedStateMismatchMessage(targetName, strings.Join(poststate.StateCases, " | "), a.currentFuncDecl.Name, actualTarget.String()))
+		}
+	case FuncPoststateKindRefState:
+		actualRef, ok := poststateRefTargetType(currentTarget)
+		if !ok || actualRef == nil {
+			a.errorf(poststate.Position, ensureRefStateTargetMessage(targetName, a.currentFuncDecl.Name))
+			return
+		}
+		if !refStateAssignable(poststate.RefState, actualRef.State) {
+			a.errorf(poststate.Position, ensureRefStateMismatchMessage(targetName, ast.RefStateMarker(ast.RefState(poststate.RefState)), a.currentFuncDecl.Name, currentTarget.String()))
+		}
+	}
+}
+
+func isVoidType(t Type) bool {
+	builtin, ok := t.(*BuiltinType)
+	return ok && builtin.Name == "void"
+}

@@ -18,7 +18,7 @@ func TestIntBitSetTracksInlineAndOverflowWords(t *testing.T) {
 		}
 	}
 	if got := set.Count(); got != 5 {
-		 t.Fatalf("expected count 5, got %d", got)
+		t.Fatalf("expected count 5, got %d", got)
 	}
 	var seen []int
 	set.ForEach(func(index int) {

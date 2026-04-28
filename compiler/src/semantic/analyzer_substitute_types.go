@@ -1,0 +1,227 @@
+package semantic
+
+import (
+	"llcontext/src/ast"
+)
+
+func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string, permissionBindings map[string][]ast.PermissionRef) Type {
+	return a.substituteTypeWithDepth(t, bindings, shapeBindings, regionBindings, permissionBindings, 0)
+}
+
+func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string, permissionBindings map[string][]ast.PermissionRef, depth int) Type {
+	if t == nil {
+		return nil
+	}
+	if depth > semanticSubstitutionDepthLimit {
+		a.reportSemanticDepthLimit("type substitution", semanticSubstitutionDepthLimit)
+		return invalidType
+	}
+	switch n := t.(type) {
+	case *TypeParamType:
+		if resolved, ok := bindings[n.Name]; ok {
+			return resolved
+		}
+		return n
+	case *AssociatedTypeProjection:
+		receiver := a.substituteTypeWithDepth(n.Receiver, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(receiver) {
+			return invalidType
+		}
+		projected := &AssociatedTypeProjection{Receiver: receiver, InterfaceName: n.InterfaceName, Name: n.Name}
+		if resolved, ok := ResolveAssociatedTypeProjection(projected, a.staticImpls); ok {
+			return resolved
+		}
+		return projected
+	case *RefStorageParamType:
+		if resolved, ok := bindings[n.Name]; ok {
+			return resolved
+		}
+		return n
+	case *RefStateParamType:
+		if resolved, ok := bindings[n.Name]; ok {
+			return resolved
+		}
+		return n
+	case *ErrorUnionType:
+		value := a.substituteTypeWithDepth(n.Value, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(value) {
+			return invalidType
+		}
+		return &ErrorUnionType{Value: value, Errors: n.Errors}
+	case *OptionalType:
+		value := a.substituteTypeWithDepth(n.Value, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(value) {
+			return invalidType
+		}
+		return &OptionalType{Value: value}
+	case *RefType:
+		region := n.Region
+		if bound, ok := regionBindings[n.Region]; ok {
+			region = bound
+		}
+		state := n.State
+		stateParam := n.StateParam
+		if stateParam != "" {
+			if resolved, ok := bindings[stateParam]; ok {
+				switch resolved := resolved.(type) {
+				case *RefStateValueType:
+					state = resolved.State
+					stateParam = ""
+				case *RefStateParamType:
+					stateParam = resolved.Name
+				}
+			}
+		}
+		storage := n.Storage
+		storageParam := n.StorageParam
+		if storageParam != "" {
+			if resolved, ok := bindings[storageParam]; ok {
+				switch resolved := resolved.(type) {
+				case *RefStorageValueType:
+					storage = resolved.Storage
+					storageParam = ""
+				case *RefStorageParamType:
+					storageParam = resolved.Name
+				}
+			}
+		}
+		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(elem) {
+			return invalidType
+		}
+		return &RefType{Elem: elem, Mutable: n.Mutable, State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: n.ExplicitStorage}
+	case *ArrayType:
+		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(elem) {
+			return invalidType
+		}
+		return &ArrayType{Elem: elem, Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
+	case *DArrayType:
+		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(elem) {
+			return invalidType
+		}
+		return &DArrayType{Elem: elem, Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+	case *ViewType:
+		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(elem) {
+			return invalidType
+		}
+		return &ViewType{Elem: elem, Begin: n.Begin, End: n.End}
+	case *DArrayViewType:
+		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(elem) {
+			return invalidType
+		}
+		return &DArrayViewType{Elem: elem, Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
+	case *DStrType:
+		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+	case *DictType:
+		key := a.substituteTypeWithDepth(n.Key, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(key) {
+			return invalidType
+		}
+		value := a.substituteTypeWithDepth(n.Value, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(value) {
+			return invalidType
+		}
+		return &DictType{Key: key, Value: value, SurfaceName: n.SurfaceName}
+	case *SViewType:
+		return &SViewType{Begin: n.Begin, End: n.End}
+	case *GenericInstanceType:
+		args := make([]Type, 0, len(n.Args))
+		for _, arg := range n.Args {
+			resolvedArg := a.substituteTypeWithDepth(arg, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+			if IsInvalidType(resolvedArg) {
+				return invalidType
+			}
+			args = append(args, resolvedArg)
+		}
+		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
+	case *TupleType:
+		fields := make([]TupleField, 0, len(n.Fields))
+		for _, field := range n.Fields {
+			fieldType := a.substituteTypeWithDepth(field.Type, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+			if IsInvalidType(fieldType) {
+				return invalidType
+			}
+			fields = append(fields, TupleField{Name: field.Name, Type: fieldType})
+		}
+		return &TupleType{Fields: fields}
+	case *AggregateStateType:
+		base := a.substituteTypeWithDepth(n.Base, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(base) {
+			return invalidType
+		}
+		return cloneAggregateStateWithBase(base, aggregateStateStates(n))
+	case *PackedEnumStoreType:
+		state := a.substituteTypeWithDepth(n.State, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(state) {
+			return invalidType
+		}
+		return PackedEnumStoreWithState(n, state)
+	case *TreeStoreType:
+		state := a.substituteTypeWithDepth(n.State, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(state) {
+			return invalidType
+		}
+		return TreeStoreWithState(n, state)
+	case *FuncType:
+		params := make([]Type, 0, len(n.Params))
+		for _, param := range n.Params {
+			resolvedParam := a.substituteTypeWithDepth(param, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+			if IsInvalidType(resolvedParam) {
+				return invalidType
+			}
+			params = append(params, resolvedParam)
+		}
+		declaredRefs, refs, usedPermissionParams := substitutePermissionRefs(n.DeclaredPermissionRefs, n.PermissionRefs, n.UsedPermissionParams, permissionBindings)
+		returnType := a.substituteTypeWithDepth(n.Return, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(returnType) {
+			return invalidType
+		}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RefStorageParams: append([]string(nil), n.RefStorageParams...), RefStateParams: append([]string(nil), n.RefStateParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), InlineMode: n.InlineMode, HasInlineMode: n.HasInlineMode, HasNoRecurse: n.HasNoRecurse, TemperatureMode: n.TemperatureMode, HasTemperatureMode: n.HasTemperatureMode, GuardEffects: cloneFuncGuardEffects(n.GuardEffects), Poststates: cloneFuncPoststates(n.Poststates), Params: params, ExplicitParamCount: n.ExplicitParamCount, ExplicitParamNames: append([]string(nil), n.ExplicitParamNames...), ExplicitParamDefaultExprs: append([]ast.Expr(nil), n.ExplicitParamDefaultExprs...), ExplicitParamHasDefault: append([]bool(nil), n.ExplicitParamHasDefault...), ImplicitParamNames: append([]string(nil), n.ImplicitParamNames...), Return: returnType, Variadic: n.Variadic, SinkParams: append([]bool(nil), n.SinkParams...), SinkParamsKnown: n.SinkParamsKnown, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown, ReturnIsolation: n.ReturnIsolation, ReturnIsolationKnown: n.ReturnIsolationKnown}
+	default:
+		return t
+	}
+}
+
+func substitutePermissionRefs(declared []ast.PermissionRef, refs []ast.PermissionRef, permissionParams []string, bindings map[string][]ast.PermissionRef) ([]ast.PermissionRef, []ast.PermissionRef, []string) {
+	if len(bindings) == 0 {
+		return append([]ast.PermissionRef(nil), declared...), append([]ast.PermissionRef(nil), refs...), append([]string(nil), permissionParams...)
+	}
+	substitute := func(items []ast.PermissionRef) []ast.PermissionRef {
+		if len(items) == 0 {
+			return nil
+		}
+		out := make([]ast.PermissionRef, 0, len(items))
+		for _, ref := range items {
+			if ref.Member == "" {
+				if bound, ok := bindings[ref.Name]; ok {
+					out = append(out, bound...)
+					continue
+				}
+			}
+			out = append(out, ref)
+		}
+		return canonicalizePermissionRefs(out)
+	}
+	remaining := make([]string, 0, len(permissionParams))
+	for _, name := range permissionParams {
+		if _, ok := bindings[name]; !ok {
+			remaining = append(remaining, name)
+		}
+	}
+	return substitute(declared), substitute(refs), remaining
+}
+
+func (a *Analyzer) substituteShape(shape Shape, bindings map[string]Shape) Shape {
+	param, ok := shape.(*ShapeParam)
+	if !ok {
+		return shape
+	}
+	if resolved, ok := bindings[param.Name]; ok {
+		return resolved
+	}
+	return shape
+}
