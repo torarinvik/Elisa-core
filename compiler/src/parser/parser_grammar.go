@@ -101,6 +101,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	productions := make([]ast.GrammarProductionDecl, 0, p.estimateIndentedItemCount())
 	parseSupportDecl := func() bool {
 		switch {
+		case p.peekGrammarTokenFamilyDecl():
+			tokenSets = append(tokenSets, p.parseGrammarTokenFamilyDecl())
 		case p.peekIdentText("token"):
 			tokenAliases = append(tokenAliases, p.parseGrammarTokenAliasDecls()...)
 		case p.peekIdentText("channel"):
@@ -192,6 +194,10 @@ func (p *Parser) peekGrammarTypeDecl() bool {
 
 func (p *Parser) peekGrammarAliasDecl() bool {
 	return p.peekIdentText("grammar") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "alias"
+}
+
+func (p *Parser) peekGrammarTokenFamilyDecl() bool {
+	return p.peekIdentText("token") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "family"
 }
 
 func (p *Parser) peekGrammarHelperDecl() bool {
@@ -440,7 +446,17 @@ func (p *Parser) parseGrammarChannelDecl() ast.GrammarChannelDecl {
 func (p *Parser) parseGrammarTokenSetDecl() ast.GrammarTokenSetDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("tokenset")
-	name := p.expect(lexer.TOKEN_IDENT).Text
+	return p.finishGrammarTokenSetDecl(pos, p.expect(lexer.TOKEN_IDENT).Text, false)
+}
+
+func (p *Parser) parseGrammarTokenFamilyDecl() ast.GrammarTokenSetDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("token")
+	p.expectIdentText("family")
+	return p.finishGrammarTokenSetDecl(pos, p.expect(lexer.TOKEN_IDENT).Text, true)
+}
+
+func (p *Parser) finishGrammarTokenSetDecl(pos lexer.Pos, name string, tokenFamily bool) ast.GrammarTokenSetDecl {
 	terms := make([]ast.GrammarTerm, 0, 4)
 	if p.match(lexer.TOKEN_ASSIGN) {
 		for {
@@ -450,7 +466,7 @@ func (p *Parser) parseGrammarTokenSetDecl() ast.GrammarTokenSetDecl {
 			}
 		}
 		p.expectNewline()
-		return ast.GrammarTokenSetDecl{Position: pos, Name: name, Terms: terms}
+		return ast.GrammarTokenSetDecl{Position: pos, Name: name, TokenFamily: tokenFamily, Terms: terms}
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
@@ -464,7 +480,7 @@ func (p *Parser) parseGrammarTokenSetDecl() ast.GrammarTokenSetDecl {
 		p.expectNewline()
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return ast.GrammarTokenSetDecl{Position: pos, Name: name, Terms: terms}
+	return ast.GrammarTokenSetDecl{Position: pos, Name: name, TokenFamily: tokenFamily, Terms: terms}
 }
 
 func (p *Parser) parseGrammarTokenSetItem() ast.GrammarTerm {

@@ -702,7 +702,11 @@ func (f *formatter) writeGrammarRecoveryDecl(level int, recovery ast.GrammarReco
 }
 
 func (f *formatter) writeGrammarTokenSetDecl(level int, tokenSet ast.GrammarTokenSetDecl) {
-	f.writeLine(level, "tokenset "+tokenSet.Name+":")
+	header := "tokenset "
+	if tokenSet.TokenFamily {
+		header = "token family "
+	}
+	f.writeLine(level, header+tokenSet.Name+":")
 	for _, term := range tokenSet.Terms {
 		f.writeLine(level+1, formatGrammarTokenSetItem(term))
 	}

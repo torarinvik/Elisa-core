@@ -183,6 +183,47 @@ func TestLowerDeclExpandsGrammarTokenSets(t *testing.T) {
 	}
 }
 
+func TestLowerDeclExpandsGrammarTokenFamilies(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar OperatorTokens over Token using ParserState:
+	cursor state
+	token_kind TokenKind
+	token_field kind
+	current current_token
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	token:
+		IDENT
+		SYMBOL_IDENT
+		PLUS "+"
+	token family OperatorName:
+		IDENT
+		SYMBOL_IDENT
+		PLUS
+
+grammar PascalFrontend over Token using ParserState uses OperatorTokens:
+	operator_name() -> Token:
+		lookahead(OperatorName)
+		name = required(OperatorName, ParseMessageKey.ExpectedOperatorName)
+		return name
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "token family OperatorName:") {
+		t.Fatalf("expected formatted grammar to preserve token family declaration, got:\n%s", formatted)
+	}
+	for _, want := range []string{
+		"expect_kind(TokenKind.IDENT)",
+		"expect_kind(TokenKind.SYMBOL_IDENT)",
+		"expect_kind(TokenKind.PLUS)",
+		"required(OperatorName, ParseMessageKey.ExpectedOperatorName)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerDeclExpandsFirstTokenSets(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
 	cursor state

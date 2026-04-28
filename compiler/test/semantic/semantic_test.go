@@ -1203,7 +1203,7 @@ def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> i64:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "task handle \"task\" cannot be used after argument to call \"task_group_add\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "task handle \"task\" cannot be used: usage facts were consumed by argument to call \"task_group_add\"") {
 		t.Fatalf("expected consumed-task diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -1465,7 +1465,7 @@ def bad() -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected closed-thread-pool submit diagnostic, got:\n%s", all)
 	}
 }
@@ -1492,7 +1492,7 @@ def bad() -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected underlying-owner shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1516,7 +1516,7 @@ def bad(pool: ThreadPool&) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected borrowed-param shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1546,7 +1546,7 @@ def bad() -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected projected-alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1576,7 +1576,7 @@ def bad(left: ThreadPool&, right: ThreadPool&) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"right\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"right\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected reassigned projected-alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1603,7 +1603,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected aggregate-param alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1631,7 +1631,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected move-bind alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1662,7 +1662,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected helper-returned alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1693,7 +1693,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected aggregate helper-returned alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1748,7 +1748,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected higher-order helper-returned alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1807,7 +1807,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected local callback binding shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1867,7 +1867,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected aggregate-held callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1928,7 +1928,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected move-as destructured callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -1990,7 +1990,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected move-as variant destructured callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2053,7 +2053,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected enum match bound callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2119,7 +2119,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected packed enum match bound callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2188,7 +2188,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected enum match bound aggregate projected callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2260,7 +2260,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected packed enum match bound aggregate projected callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2329,7 +2329,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected aggregate callback param projection shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2395,7 +2395,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected aggregate callback param local alias projection shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2466,7 +2466,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected mutable aggregate callback wrapper rebinding shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2537,7 +2537,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected mutable callback rebinding shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2609,7 +2609,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.left_pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.left_pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected branch-merged callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2684,7 +2684,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected differing-param-name branch-merged callback shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2893,7 +2893,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected extern-returned alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2924,7 +2924,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected extern aggregate-returned alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -2958,7 +2958,7 @@ def bad(holder: PoolHolder) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected extern nested-field alias shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -3043,7 +3043,7 @@ def bad() -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used: usage facts were consumed by argument to call \"pool_shutdown\"") {
 		t.Fatalf("expected double-shutdown diagnostic, got:\n%s", all)
 	}
 }
@@ -3088,7 +3088,7 @@ func TestAnalyzeRejectsReusingMovedTaskGroupOwner(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "task group owner \"group\" cannot be used after move into local \"moved\"") {
+	if !strings.Contains(all, "task group owner \"group\" cannot be used: usage facts were consumed by move into local \"moved\"") {
 		t.Fatalf("expected task-group owner reuse diagnostic, got:\n%s", all)
 	}
 }
@@ -3307,7 +3307,7 @@ def bad(holder: mutable Holder) -> void:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "thread handle \"holder.thread\" cannot be used after argument to call \"join\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "thread handle \"holder.thread\" cannot be used: usage facts were consumed by argument to call \"join\"") {
 		t.Fatalf("expected consumed-thread-field diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -3394,7 +3394,7 @@ def bad(holder: Holder) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "value containing affine handles \"holder\" cannot be used after argument to call \"join\"") {
+	if !strings.Contains(all, "value containing affine handles \"holder\" cannot be used: usage facts were consumed by argument to call \"join\"") {
 		t.Fatalf("expected aggregate-after-field-move diagnostic, got:\n%s", all)
 	}
 }
@@ -3412,7 +3412,7 @@ def bad(holder: Holder) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "value containing affine handles \"holder\" cannot be used after move into local \"copy\"") {
+	if !strings.Contains(all, "value containing affine handles \"holder\" cannot be used: usage facts were consumed by move into local \"copy\"") {
 		t.Fatalf("expected moved-aggregate diagnostic, got:\n%s", all)
 	}
 }
@@ -3433,7 +3433,7 @@ def bad(thread: Thread[i64, Joinable]) -> i64:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread handle \"thread\" cannot be used after move into struct literal field \"thread\"") {
+	if !strings.Contains(all, "thread handle \"thread\" cannot be used: usage facts were consumed by move into struct literal field \"thread\"") {
 		t.Fatalf("expected struct-literal move diagnostic, got:\n%s", all)
 	}
 }
@@ -3450,7 +3450,7 @@ def bad(thread: Thread[i64, Joinable]) -> i64:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread handle \"thread\" cannot be used after move into array literal element") {
+	if !strings.Contains(all, "thread handle \"thread\" cannot be used: usage facts were consumed by move into array literal element") {
 		t.Fatalf("expected array-literal move diagnostic, got:\n%s", all)
 	}
 }
@@ -3470,7 +3470,7 @@ def bad(thread: Thread[i64, Joinable]) -> i64:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread handle \"thread\" cannot be used after move into enum payload \"Job.Run.thread\"") {
+	if !strings.Contains(all, "thread handle \"thread\" cannot be used: usage facts were consumed by move into enum payload \"Job.Run.thread\"") {
 		t.Fatalf("expected enum-constructor move diagnostic, got:\n%s", all)
 	}
 }
@@ -3490,7 +3490,7 @@ def bad(holder: Holder) -> i64:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "thread handle \"holder.thread\" cannot be used after move into local \"copy\"") {
+	if !strings.Contains(all, "thread handle \"holder.thread\" cannot be used: usage facts were consumed by move into local \"copy\"") {
 		t.Fatalf("expected parent-move child-use diagnostic, got:\n%s", all)
 	}
 }
@@ -3508,7 +3508,7 @@ def bad(items: array[Thread[i64, Joinable], 1]) -> i64:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "value containing affine handles \"items\" cannot be used after argument to call \"join\"") {
+	if !strings.Contains(all, "value containing affine handles \"items\" cannot be used: usage facts were consumed by argument to call \"join\"") {
 		t.Fatalf("expected indexed-affine diagnostic, got:\n%s", all)
 	}
 }
@@ -5343,7 +5343,7 @@ func TestAnalyzeRejectsReturningReferenceAllocatedFromLocalRegion(t *testing.T) 
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference allocated from local region \"scratch\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
 		t.Fatalf("expected region-escape return diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -5358,7 +5358,7 @@ func TestAnalyzeRejectsReturningCastedReferenceAllocatedFromLocalRegion(t *testi
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference allocated from local region \"scratch\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
 		t.Fatalf("expected region-escape return diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -7611,7 +7611,7 @@ def consume_twice(owner: Arena, thread: Thread[i64, Joinable]) -> i64:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "cannot be used after match over affine enum") {
+	if !strings.Contains(all, "cannot be used: usage facts were consumed by match over affine enum") {
 		t.Fatalf("expected affine packed match consumption diagnostic, got:\n%s", all)
 	}
 }
@@ -7686,7 +7686,7 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "argument to \"spawn1\" cannot depend on unpublished packed store \"Expr.Store[Local]\"") {
+	if !strings.Contains(all, "argument to \"spawn1\" cannot cross thread boundary: store dependency facts require rebase to frozen/public store, got \"Expr.Store[Local]\"") {
 		t.Fatalf("expected unpublished-store spawn diagnostic, got:\n%s", all)
 	}
 }
@@ -7899,7 +7899,7 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "argument to \"spawn1\" cannot depend on unpublished packed store \"Expr.Store[Local]\"") {
+	if !strings.Contains(all, "argument to \"spawn1\" cannot cross thread boundary: store dependency facts require rebase to frozen/public store, got \"Expr.Store[Local]\"") {
 		t.Fatalf("expected nested unpublished-store spawn diagnostic, got:\n%s", all)
 	}
 }
@@ -7962,7 +7962,7 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "argument to \"spawn1\" cannot depend on unpublished packed store \"Expr.Store[Local]\"") {
+	if !strings.Contains(all, "argument to \"spawn1\" cannot cross thread boundary: store dependency facts require rebase to frozen/public store, got \"Expr.Store[Local]\"") {
 		t.Fatalf("expected nested view unpublished-store spawn diagnostic, got:\n%s", all)
 	}
 }
@@ -8021,7 +8021,7 @@ def bad(owner: Arena, pool: ThreadPool&) -> Task[i64, Pending]:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "argument to \"pool_submit1\" cannot depend on local region \"scratch\"") {
+	if !strings.Contains(all, "argument to \"pool_submit1\" cannot cross thread boundary: region dependency facts include local region \"scratch\"") {
 		t.Fatalf("expected local-region pool diagnostic, got:\n%s", all)
 	}
 }
@@ -8108,7 +8108,7 @@ func TestAnalyzeRejectsUsingReferenceInvalidatedByRestore(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"value\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"value\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8126,7 +8126,7 @@ func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for move-bound alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8148,7 +8148,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for struct field alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8170,7 +8170,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for move-as struct alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8310,7 +8310,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for enum move-as alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8351,7 +8351,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for helper-returned reference, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8401,7 +8401,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for helper-returned nested view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8446,7 +8446,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for extern borrowed reference, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8476,7 +8476,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for extern borrowed nested view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8508,7 +8508,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for extern path-borrowed view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8567,7 +8567,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for extern ref-param borrowed view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8599,7 +8599,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for extern ref-param borrowed element alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8630,7 +8630,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"pair.left\" is invalid after restore of region \"left_r\" from checkpoint \"left_cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"pair.left\" cannot be used: region dependency facts were invalidated by restore of region \"left_r\" from checkpoint \"left_cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for extern field-borrowed left field, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8683,7 +8683,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected rebased subview invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8736,7 +8736,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected field-rebased invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8809,7 +8809,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected nested field-path invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8873,7 +8873,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected nested field-path rebased invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8949,7 +8949,7 @@ def bad(owner: Arena) -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for packed move-as alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -8988,7 +8988,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for indexed struct alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -9028,7 +9028,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for sliced-view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -9073,7 +9073,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for nested struct view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -9122,7 +9122,7 @@ def bad() -> i32:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
 		t.Fatalf("expected restore invalidation diagnostic for move-as enum indexed alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -9192,7 +9192,7 @@ func TestAnalyzeRejectsUsingReferenceInvalidatedByReset(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"value\" is invalid after reset of region \"scratch\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"value\" cannot be used: region dependency facts were invalidated by reset of region \"scratch\"") {
 		t.Fatalf("expected reset invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -9539,7 +9539,7 @@ func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "else recovery requires a nullable reference") {
+	if !strings.Contains(strings.Join(errs, "\n"), "else recovery requires an optional or nullable reference (refstate fact nullable)") {
 		t.Fatalf("expected else recovery diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -10255,7 +10255,7 @@ func TestAnalyzeFormatsSafeChainDViewUsingSurfaceNames(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "optional chaining requires an optional or nullable reference receiver, got dview[i32]") {
+	if !strings.Contains(all, "optional chaining receiver requires an optional or nullable reference (refstate fact nullable), got dview[i32]") {
 		t.Fatalf("expected surface dview safe-chain diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "DynArrayView") {
@@ -10323,7 +10323,7 @@ def bad() -> int:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "type argument \"sview\" does not implement interface \"Builder\"") {
+	if !strings.Contains(all, "type \"sview\" does not satisfy required interface fact \"Builder\" for type argument") {
 		t.Fatalf("expected surface sview interface-bound diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "StringView") {

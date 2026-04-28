@@ -631,9 +631,10 @@ func rewriteGrammarTokenSetsTokenAliases(tokenSets []ast.GrammarTokenSetDecl, al
 	rewritten := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
 	for _, tokenSet := range tokenSets {
 		rewritten = append(rewritten, ast.GrammarTokenSetDecl{
-			Position: tokenSet.Position,
-			Name:     tokenSet.Name,
-			Terms:    rewriteGrammarTermListTokenAliases(tokenSet.Terms, aliases),
+			Position:    tokenSet.Position,
+			Name:        tokenSet.Name,
+			TokenFamily: tokenSet.TokenFamily,
+			Terms:       rewriteGrammarTermListTokenAliases(tokenSet.Terms, aliases),
 		})
 	}
 	return rewritten
@@ -666,7 +667,7 @@ func rewriteGrammarTokenSetBareRefsToKinds(tokenSets []ast.GrammarTokenSetDecl, 
 		for _, term := range tokenSet.Terms {
 			terms = append(terms, rewriteGrammarTokenSetBareRefToKind(term, setMap))
 		}
-		rewritten = append(rewritten, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, Terms: terms})
+		rewritten = append(rewritten, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, TokenFamily: tokenSet.TokenFamily, Terms: terms})
 	}
 	return rewritten
 }
@@ -1341,9 +1342,10 @@ func resolveGrammarTokenSetsTokenSets(tokenSets []ast.GrammarTokenSetDecl, setMa
 	resolved := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
 	for _, tokenSet := range tokenSets {
 		resolved = append(resolved, ast.GrammarTokenSetDecl{
-			Position: tokenSet.Position,
-			Name:     tokenSet.Name,
-			Terms:    resolveGrammarTokenSetRefsInStopList(tokenSet.Terms, setMap),
+			Position:    tokenSet.Position,
+			Name:        tokenSet.Name,
+			TokenFamily: tokenSet.TokenFamily,
+			Terms:       resolveGrammarTokenSetRefsInStopList(tokenSet.Terms, setMap),
 		})
 	}
 	return resolved
@@ -1414,7 +1416,7 @@ func resolveGrammarTokenSetsFirstSets(tokenSets []ast.GrammarTokenSetDecl, produ
 	}
 	resolved := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
 	for _, tokenSet := range tokenSets {
-		resolved = append(resolved, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, Terms: resolveGrammarFirstRefsInStopList(tokenSet.Terms, productions)})
+		resolved = append(resolved, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, TokenFamily: tokenSet.TokenFamily, Terms: resolveGrammarFirstRefsInStopList(tokenSet.Terms, productions)})
 	}
 	return resolved
 }

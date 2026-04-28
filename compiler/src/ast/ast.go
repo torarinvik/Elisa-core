@@ -221,9 +221,10 @@ type GrammarChannelDecl struct {
 }
 
 type GrammarTokenSetDecl struct {
-	Position lexer.Pos
-	Name     string
-	Terms    []GrammarTerm
+	Position    lexer.Pos
+	Name        string
+	TokenFamily bool
+	Terms       []GrammarTerm
 }
 
 type GrammarAliasDecl struct {

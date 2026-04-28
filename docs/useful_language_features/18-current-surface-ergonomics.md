@@ -167,6 +167,42 @@ Current rules:
 - lowering expands token-set references into the existing explicit token checks, so there is no runtime token-set object
 - prefer token sets for recurring parser sync concepts such as `StatementSync`, `BlockEndSync`, `DeclSync`, and `ExprEndSync`
 
+## Grammar token families
+
+When a reusable token union describes a grammar-domain atom rather than a recovery or synchronization boundary, use `token family`. Token families lower through the same token-set expansion machinery, but make the intent at the declaration site clearer.
+
+```context
+grammar SMLExprGrammar over Token using ParserState:
+    token:
+        IDENT
+        CONSTR_IDENT
+        SYMBOL_IDENT
+        PLUS "+"
+        MINUS "-"
+        EQ "="
+
+    token family OperatorName:
+        IDENT
+        CONSTR_IDENT
+        SYMBOL_IDENT
+        PLUS
+        MINUS
+        EQ
+
+    op_name() -> Token:
+        token = required(OperatorName, ParseMessageKey.ExpectedOperatorName)
+        return token
+```
+
+Current rules:
+
+- `token family Name:` declares a grammar-scoped reusable token union
+- `token family Name = A | B | C` uses the same compact one-line form as `tokenset`
+- token family items accept the same item forms as `tokenset`, including bare token kinds and references to other token sets or families
+- token families are imported through `uses`, just like token sets, recovery policies, grammar aliases, and infix tables
+- using a token family in grammar-term position, `required(...)`, `lookahead(...)`, or `until(...)` expands to an ordinary choice of token checks
+- prefer token families for recurring semantic token domains such as `OperatorName`, `TypeNameStart`, or `PatternAtomStart`; keep `tokenset` for synchronization and list-stop boundaries
+
 ## Interleaved grammar support declarations
 
 Grammar support declarations can be colocated with the productions that use them. This keeps local aliases, token sets, channels, recovery policies, infix tables, and token literal declarations near the parser surface they support instead of forcing every helper to the top of the grammar block.

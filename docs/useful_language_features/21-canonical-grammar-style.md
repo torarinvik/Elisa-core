@@ -146,6 +146,24 @@ tokenset StatementSync:
 
 Prefer semantic names such as `StatementSync`, `BlockEndSync`, `RParenSync`, and `DeclarationSync` over repeating raw token lists at call sites.
 
+Use `token family` when the same token union names a domain atom rather than a sync boundary:
+
+```context
+token family OperatorName:
+    IDENT
+    CONSTR_IDENT
+    SYMBOL_IDENT
+    PLUS
+    MINUS
+    EQ
+
+operator_name() -> Token:
+    token = required(OperatorName, ParseMessageKey.ExpectedOperatorName)
+    return token
+```
+
+Prefer names that describe the parser concept. `StatementSync` and `BlockEndSync` should stay `tokenset`; `OperatorName` and `TypeNameStart` should be token families.
+
 ## Channels
 
 Use grammar-wide channels for fields that are genuinely shared by most productions in the grammar:

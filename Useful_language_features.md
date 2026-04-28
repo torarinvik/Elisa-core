@@ -24,6 +24,9 @@ This document is now a landing page for the split design notes in `docs/useful_l
 18. [`18-current-surface-ergonomics.md`](docs/useful_language_features/18-current-surface-ergonomics.md) — implemented reference for current surface features such as default and named arguments, `..` forwarding, effect declarations, `signal`, local `can` grants, `effectalias` bundles, implicit and explicit `bundle` declarations, brace destructuring and updates, grammar DSL parser features, filtered loops, `do:` blocks, `defer`, index fallback, store/dict sugar, explicit `parallel for`, lambdas, tree `rewrite`, char literals, and shorthand cast hooks.
 19. [`19-static-interfaces-extension-methods-and-ufcs.md`](docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md) — implemented reference for static interfaces, associated types, receiver-scoped extension impls, UFCS rewriting, safe call chaining, and the preferred generic specialization surface.
 20. [`20-annotations-and-compile-time-hints.md`](docs/useful_language_features/20-annotations-and-compile-time-hints.md) — implemented reference for current layout, packed-lowering, function-codegen, guard, and branch-hint metadata surfaces.
+21. [`20-tree-capabilities-and-interface-cleanup.md`](docs/useful_language_features/20-tree-capabilities-and-interface-cleanup.md) — canonical cleanup direction for tree construction, implicit bundles, parser helper style, and capability-oriented frontend structure.
+22. [`21-canonical-grammar-style.md`](docs/useful_language_features/21-canonical-grammar-style.md) — house style for grammars, including `grammar type`, aliases, token sets, list terms, channels, and recovery layout.
+23. [`22-value-fact-core.md`](docs/useful_language_features/22-value-fact-core.md) — design note on the fact-core rule for keeping sugar from obscuring semantic state transitions.
 
 ## Notes
 
