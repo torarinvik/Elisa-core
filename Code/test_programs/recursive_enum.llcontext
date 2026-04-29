@@ -3,11 +3,11 @@ enum Expr:
 	Add(left: Expr&, right: Expr&)
 
 def eval(node: Expr&) -> int:
-	return match node[0]:
+	match node[0]:
 		Expr.Int(value):
-			value
+			return value
 		Expr.Add(left, right):
-			eval(left) + eval(right)
+			return eval(left) + eval(right)
 
 def make_sum() -> int:
 	region scratch(1024)

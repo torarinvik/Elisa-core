@@ -56,70 +56,70 @@ def bool_score(value: bool, when_true: i64, when_false: i64) -> i64:
     return when_false
 
 def score_type(node: TypeExpr, types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in types:
+    match node in types:
         TypeExpr.Record(label: label, field_ty: TypeExpr.Tuple(left: left, right: right), rest: rest):
-            node.span + node.weight + label + score_type(left, types) + score_type(right, types) + score_type(rest, types) + 17
+            return node.span + node.weight + label + score_type(left, types) + score_type(right, types) + score_type(rest, types) + 17
         TypeExpr.Var(symbol: symbol):
-            node.span + node.weight + symbol + 3
+            return node.span + node.weight + symbol + 3
         TypeExpr.Tuple(left: left, right: right):
-            node.span + node.weight + score_type(left, types) + score_type(right, types) + 5
+            return node.span + node.weight + score_type(left, types) + score_type(right, types) + 5
         TypeExpr.Arrow(param: param, result: result):
-            node.span + node.weight + score_type(param, types) + score_type(result, types) + 7
+            return node.span + node.weight + score_type(param, types) + score_type(result, types) + 7
         TypeExpr.Record(label: label, field_ty: field_ty, rest: rest):
-            node.span + node.weight + label + score_type(field_ty, types) + score_type(rest, types) + 13
+            return node.span + node.weight + label + score_type(field_ty, types) + score_type(rest, types) + 13
 
 def score_pattern(node: Pattern, patterns: Pattern.Store[Frozen], exprs: Expr.Store[Frozen], clauses: Clause.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in patterns:
+    match node in patterns:
         Pattern.Wildcard:
-            node.span + node.weight + 43
+            return node.span + node.weight + 43
         Pattern.Bind(symbol: symbol, ann: ann):
-            node.span + node.weight + symbol + score_type(ann, types) + 47
+            return node.span + node.weight + symbol + score_type(ann, types) + 47
         Pattern.Alias(alias_symbol: alias_symbol, inner: inner):
-            node.span + node.weight + alias_symbol + score_pattern(inner, patterns, exprs, clauses, types) + 53
+            return node.span + node.weight + alias_symbol + score_pattern(inner, patterns, exprs, clauses, types) + 53
         Pattern.Tuple(left: left, right: right):
-            node.span + node.weight + score_pattern(left, patterns, exprs, clauses, types) + score_pattern(right, patterns, exprs, clauses, types) + 59
+            return node.span + node.weight + score_pattern(left, patterns, exprs, clauses, types) + score_pattern(right, patterns, exprs, clauses, types) + 59
         Pattern.Ctor(label: label, arg: arg, ann: ann):
-            node.span + node.weight + label + score_pattern(arg, patterns, exprs, clauses, types) + score_type(ann, types) + 61
+            return node.span + node.weight + label + score_pattern(arg, patterns, exprs, clauses, types) + score_type(ann, types) + 61
         Pattern.LiteralInt(value: value):
-            node.span + node.weight + value + 67
+            return node.span + node.weight + value + 67
         Pattern.Or(left: left, right: right):
-            node.span + node.weight + score_pattern(left, patterns, exprs, clauses, types) + score_pattern(right, patterns, exprs, clauses, types) + 89
+            return node.span + node.weight + score_pattern(left, patterns, exprs, clauses, types) + score_pattern(right, patterns, exprs, clauses, types) + 89
         Pattern.Guarded(inner: inner, guard: guard):
-            node.span + node.weight + score_pattern(inner, patterns, exprs, clauses, types) + score_expr(guard, exprs, clauses, patterns, types) + 97
+            return node.span + node.weight + score_pattern(inner, patterns, exprs, clauses, types) + score_expr(guard, exprs, clauses, patterns, types) + 97
 
 def score_clause(node: Clause, clauses: Clause.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in clauses:
+    match node in clauses:
         Clause.Terminal(pattern: pattern, body: body):
-            node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + 211
+            return node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + 211
         Clause.Chain(pattern: pattern, body: body, next: next):
-            node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + score_clause(next, clauses, exprs, patterns, types) + 223
+            return node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + score_clause(next, clauses, exprs, patterns, types) + 223
         Clause.Guarded(pattern: pattern, guard: guard, body: body, next: next):
-            node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(guard, exprs, clauses, patterns, types) + score_expr(body, exprs, clauses, patterns, types) + score_clause(next, clauses, exprs, patterns, types) + 227
+            return node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(guard, exprs, clauses, patterns, types) + score_expr(body, exprs, clauses, patterns, types) + score_clause(next, clauses, exprs, patterns, types) + 227
 
 def score_expr(node: Expr, exprs: Expr.Store[Frozen], clauses: Clause.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in exprs:
+    match node in exprs:
         Expr.LiteralInt(value: value):
-            node.span + node.cost + value + 131
+            return node.span + node.cost + value + 131
         Expr.LiteralBool(value: value):
-            node.span + node.cost + bool_score(value, 137, 139)
+            return node.span + node.cost + bool_score(value, 137, 139)
         Expr.Name(symbol: symbol, ty: ty):
-            node.span + node.cost + symbol + score_type(ty, types) + 149
+            return node.span + node.cost + symbol + score_type(ty, types) + 149
         Expr.Lambda(param: param, body: body, ty: ty):
-            node.span + node.cost + score_pattern(param, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + score_type(ty, types) + 151
+            return node.span + node.cost + score_pattern(param, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + score_type(ty, types) + 151
         Expr.Apply(callee: callee, arg: arg, ty: ty):
-            node.span + node.cost + score_expr(callee, exprs, clauses, patterns, types) + score_expr(arg, exprs, clauses, patterns, types) + score_type(ty, types) + 157
+            return node.span + node.cost + score_expr(callee, exprs, clauses, patterns, types) + score_expr(arg, exprs, clauses, patterns, types) + score_type(ty, types) + 157
         Expr.Let(pattern: pattern, value: value, body: body, ty: ty):
-            node.span + node.cost + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(value, exprs, clauses, patterns, types) + score_expr(body, exprs, clauses, patterns, types) + score_type(ty, types) + 163
+            return node.span + node.cost + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(value, exprs, clauses, patterns, types) + score_expr(body, exprs, clauses, patterns, types) + score_type(ty, types) + 163
         Expr.Match(scrutinee: scrutinee, clauses: match_clauses, ty: ty):
-            node.span + node.cost + score_expr(scrutinee, exprs, clauses, patterns, types) + score_clause(match_clauses, clauses, exprs, patterns, types) + score_type(ty, types) + 167
+            return node.span + node.cost + score_expr(scrutinee, exprs, clauses, patterns, types) + score_clause(match_clauses, clauses, exprs, patterns, types) + score_type(ty, types) + 167
         Expr.Ctor(label: label, arg: arg, ty: ty):
-            node.span + node.cost + label + score_expr(arg, exprs, clauses, patterns, types) + score_type(ty, types) + 173
+            return node.span + node.cost + label + score_expr(arg, exprs, clauses, patterns, types) + score_type(ty, types) + 173
         Expr.Record(label: label, field_value: field_value, rest: rest, ty: ty):
-            node.span + node.cost + label + score_expr(field_value, exprs, clauses, patterns, types) + score_expr(rest, exprs, clauses, patterns, types) + score_type(ty, types) + 179
+            return node.span + node.cost + label + score_expr(field_value, exprs, clauses, patterns, types) + score_expr(rest, exprs, clauses, patterns, types) + score_type(ty, types) + 179
         Expr.Project(base: base, label: label, ty: ty):
-            node.span + node.cost + score_expr(base, exprs, clauses, patterns, types) + label + score_type(ty, types) + 181
+            return node.span + node.cost + score_expr(base, exprs, clauses, patterns, types) + label + score_type(ty, types) + 181
         Expr.If(cond: cond, then_branch: then_branch, else_branch: else_branch, ty: ty):
-            node.span + node.cost + score_expr(cond, exprs, clauses, patterns, types) + score_expr(then_branch, exprs, clauses, patterns, types) + score_expr(else_branch, exprs, clauses, patterns, types) + score_type(ty, types) + 191
+            return node.span + node.cost + score_expr(cond, exprs, clauses, patterns, types) + score_expr(then_branch, exprs, clauses, patterns, types) + score_expr(else_branch, exprs, clauses, patterns, types) + score_type(ty, types) + 191
 
 def packed_ml_expr_repro_impl() -> i64:
     region scratch(65536)

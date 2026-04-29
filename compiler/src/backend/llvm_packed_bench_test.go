@@ -119,51 +119,51 @@ packed enum Decl:
     Entry(initializer: Expr, script: Stmt, summary: Expr)
 
 def score_type(node: TypeExpr, frozen: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         TypeExpr.Name(symbol: symbol):
-            node.span + node.weight + symbol + node.span
+            return node.span + node.weight + symbol + node.span
         TypeExpr.Apply(callee: callee, arg: arg):
-            node.span + node.weight + score_type(callee, frozen) + score_type(arg, frozen) + node.span
+            return node.span + node.weight + score_type(callee, frozen) + score_type(arg, frozen) + node.span
         TypeExpr.Func(param: param, result: result):
-            node.span + node.weight + score_type(param, frozen) + score_type(result, frozen) + node.span
+            return node.span + node.weight + score_type(param, frozen) + score_type(result, frozen) + node.span
 
 def score_pattern(node: Pattern, frozen: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         Pattern.Bind(symbol: symbol, ann: ann):
-            node.span + node.weight + symbol + score_type(ann, types) + node.span
+            return node.span + node.weight + symbol + score_type(ann, types) + node.span
         Pattern.Tuple(left: left, right: right):
-            node.span + node.weight + score_pattern(left, frozen, types) + score_pattern(right, frozen, types) + node.span
+            return node.span + node.weight + score_pattern(left, frozen, types) + score_pattern(right, frozen, types) + node.span
         Pattern.Annotated(inner: inner, ann: ann):
-            node.span + node.weight + score_pattern(inner, frozen, types) + score_type(ann, types) + node.span
+            return node.span + node.weight + score_pattern(inner, frozen, types) + score_type(ann, types) + node.span
 
 def score_expr(node: Expr, frozen: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         Expr.Int(value: value):
-            node.span + node.cost + value + node.span
+            return node.span + node.cost + value + node.span
         Expr.Name(symbol: symbol, ty: ty):
-            node.span + node.cost + symbol + score_type(ty, types) + node.span
+            return node.span + node.cost + symbol + score_type(ty, types) + node.span
         Expr.Call(callee: callee, arg: arg, ty: ty):
-            node.span + node.cost + score_expr(callee, frozen, patterns, types) + score_expr(arg, frozen, patterns, types) + score_type(ty, types) + node.span
+            return node.span + node.cost + score_expr(callee, frozen, patterns, types) + score_expr(arg, frozen, patterns, types) + score_type(ty, types) + node.span
         Expr.Construct(pattern: pattern, body: body, ty: ty):
-            node.span + node.cost + score_pattern(pattern, patterns, types) + score_expr(body, frozen, patterns, types) + score_type(ty, types) + node.span
+            return node.span + node.cost + score_pattern(pattern, patterns, types) + score_expr(body, frozen, patterns, types) + score_type(ty, types) + node.span
 
 def score_stmt(node: Stmt, frozen: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         Stmt.Let(pattern: pattern, ann: ann, value: value, next: next):
-            node.span + node.effect + score_pattern(pattern, patterns, types) + score_type(ann, types) + score_expr(value, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span
+            return node.span + node.effect + score_pattern(pattern, patterns, types) + score_type(ann, types) + score_expr(value, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span
         Stmt.If(cond: cond, then_branch: then_branch, else_branch: else_branch):
-            node.span + node.effect + score_expr(cond, exprs, patterns, types) + score_stmt(then_branch, frozen, exprs, patterns, types) + score_stmt(else_branch, frozen, exprs, patterns, types) + node.span
+            return node.span + node.effect + score_expr(cond, exprs, patterns, types) + score_stmt(then_branch, frozen, exprs, patterns, types) + score_stmt(else_branch, frozen, exprs, patterns, types) + node.span
         Stmt.Return(value: value):
-            node.span + node.effect + score_expr(value, exprs, patterns, types) + node.span
+            return node.span + node.effect + score_expr(value, exprs, patterns, types) + node.span
 
 def score_decl(node: Decl, frozen: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         Decl.Fun(name: name, param: param, signature: signature, body: body):
-            node.span + node.phase + name + score_pattern(param, patterns, types) + score_type(signature, types) + score_stmt(body, stmts, exprs, patterns, types) + node.span
+            return node.span + node.phase + name + score_pattern(param, patterns, types) + score_type(signature, types) + score_stmt(body, stmts, exprs, patterns, types) + node.span
         Decl.TypeAlias(name: name, target: target):
-            node.span + node.phase + name + score_type(target, types) + node.span
+            return node.span + node.phase + name + score_type(target, types) + node.span
         Decl.Entry(initializer: initializer, script: script, summary: summary):
-            node.span + node.phase + score_expr(initializer, exprs, patterns, types) + score_stmt(script, stmts, exprs, patterns, types) + score_expr(summary, exprs, patterns, types) + node.span
+            return node.span + node.phase + score_expr(initializer, exprs, patterns, types) + score_stmt(script, stmts, exprs, patterns, types) + score_expr(summary, exprs, patterns, types) + node.span
 
 def checksum_language_ast(decls: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     total: mutable i64 = 0
@@ -266,67 +266,67 @@ packed enum Decl:
     Bundle(left: Decl, right: Decl)
 
 def score_type(node: TypeExpr, frozen: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         TypeExpr.Name(symbol: symbol):
-            node.span + node.weight + symbol + node.span + node.weight
+            return node.span + node.weight + symbol + node.span + node.weight
         TypeExpr.Apply(callee: callee, arg: arg):
-            node.span + node.weight + score_type(callee, frozen) + score_type(arg, frozen) + node.span + node.weight
+            return node.span + node.weight + score_type(callee, frozen) + score_type(arg, frozen) + node.span + node.weight
         TypeExpr.Func(param: param, result: result):
-            node.span + node.weight + score_type(param, frozen) + score_type(result, frozen) + node.span + node.weight
+            return node.span + node.weight + score_type(param, frozen) + score_type(result, frozen) + node.span + node.weight
         TypeExpr.Effect(label: label, carrier: carrier):
-            node.span + node.weight + label + score_type(carrier, frozen) + node.span + node.weight
+            return node.span + node.weight + label + score_type(carrier, frozen) + node.span + node.weight
 
 def score_pattern(node: Pattern, frozen: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         Pattern.Bind(symbol: symbol, ann: ann):
-            node.span + node.weight + symbol + score_type(ann, types) + node.span + node.weight
+            return node.span + node.weight + symbol + score_type(ann, types) + node.span + node.weight
         Pattern.Tuple(left: left, right: right):
-            node.span + node.weight + score_pattern(left, frozen, types) + score_pattern(right, frozen, types) + node.span + node.weight
+            return node.span + node.weight + score_pattern(left, frozen, types) + score_pattern(right, frozen, types) + node.span + node.weight
         Pattern.Annotated(inner: inner, ann: ann):
-            node.span + node.weight + score_pattern(inner, frozen, types) + score_type(ann, types) + node.span + node.weight
+            return node.span + node.weight + score_pattern(inner, frozen, types) + score_type(ann, types) + node.span + node.weight
         Pattern.Destructure(head: head, rest: rest, ann: ann):
-            node.span + node.weight + score_pattern(head, frozen, types) + score_pattern(rest, frozen, types) + score_type(ann, types) + node.span + node.weight
+            return node.span + node.weight + score_pattern(head, frozen, types) + score_pattern(rest, frozen, types) + score_type(ann, types) + node.span + node.weight
 
 def score_expr(node: Expr, frozen: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         Expr.Int(value: value):
-            node.span + node.cost + value + node.span + node.cost
+            return node.span + node.cost + value + node.span + node.cost
         Expr.Name(symbol: symbol, ty: ty):
-            node.span + node.cost + symbol + score_type(ty, types) + node.span + node.cost
+            return node.span + node.cost + symbol + score_type(ty, types) + node.span + node.cost
         Expr.Call(callee: callee, arg: arg, ty: ty):
-            node.span + node.cost + score_expr(callee, frozen, patterns, types) + score_expr(arg, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
+            return node.span + node.cost + score_expr(callee, frozen, patterns, types) + score_expr(arg, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
         Expr.Construct(pattern: pattern, body: body, ty: ty):
-            node.span + node.cost + score_pattern(pattern, patterns, types) + score_expr(body, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
+            return node.span + node.cost + score_pattern(pattern, patterns, types) + score_expr(body, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
         Expr.Select(base: base, field: field, ty: ty):
-            node.span + node.cost + score_expr(base, frozen, patterns, types) + field + score_type(ty, types) + node.span + node.cost
+            return node.span + node.cost + score_expr(base, frozen, patterns, types) + field + score_type(ty, types) + node.span + node.cost
         Expr.LetExpr(pattern: pattern, value: value, body: body, ty: ty):
-            node.span + node.cost + score_pattern(pattern, patterns, types) + score_expr(value, frozen, patterns, types) + score_expr(body, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
+            return node.span + node.cost + score_pattern(pattern, patterns, types) + score_expr(value, frozen, patterns, types) + score_expr(body, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
 
 def score_stmt(node: Stmt, frozen: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         Stmt.Let(pattern: pattern, ann: ann, value: value, next: next):
-            node.span + node.effect + score_pattern(pattern, patterns, types) + score_type(ann, types) + score_expr(value, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span + node.effect
+            return node.span + node.effect + score_pattern(pattern, patterns, types) + score_type(ann, types) + score_expr(value, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span + node.effect
         Stmt.If(cond: cond, then_branch: then_branch, else_branch: else_branch):
-            node.span + node.effect + score_expr(cond, exprs, patterns, types) + score_stmt(then_branch, frozen, exprs, patterns, types) + score_stmt(else_branch, frozen, exprs, patterns, types) + node.span + node.effect
+            return node.span + node.effect + score_expr(cond, exprs, patterns, types) + score_stmt(then_branch, frozen, exprs, patterns, types) + score_stmt(else_branch, frozen, exprs, patterns, types) + node.span + node.effect
         Stmt.Block(first: first, second: second, result_expr: result_expr):
-            node.span + node.effect + score_stmt(first, frozen, exprs, patterns, types) + score_stmt(second, frozen, exprs, patterns, types) + score_expr(result_expr, exprs, patterns, types) + node.span + node.effect
+            return node.span + node.effect + score_stmt(first, frozen, exprs, patterns, types) + score_stmt(second, frozen, exprs, patterns, types) + score_expr(result_expr, exprs, patterns, types) + node.span + node.effect
         Stmt.While(cond: cond, body: body, next: next):
-            node.span + node.effect + score_expr(cond, exprs, patterns, types) + score_stmt(body, frozen, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span + node.effect
+            return node.span + node.effect + score_expr(cond, exprs, patterns, types) + score_stmt(body, frozen, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span + node.effect
         Stmt.Return(value: value):
-            node.span + node.effect + score_expr(value, exprs, patterns, types) + node.span + node.effect
+            return node.span + node.effect + score_expr(value, exprs, patterns, types) + node.span + node.effect
 
 def score_decl(node: Decl, frozen: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         Decl.Fun(name: name, param: param, signature: signature, body: body):
-            node.span + node.phase + name + score_pattern(param, patterns, types) + score_type(signature, types) + score_stmt(body, stmts, exprs, patterns, types) + node.span + node.phase
+            return node.span + node.phase + name + score_pattern(param, patterns, types) + score_type(signature, types) + score_stmt(body, stmts, exprs, patterns, types) + node.span + node.phase
         Decl.TypeAlias(name: name, target: target):
-            node.span + node.phase + name + score_type(target, types) + node.span + node.phase
+            return node.span + node.phase + name + score_type(target, types) + node.span + node.phase
         Decl.Entry(initializer: initializer, script: script, summary: summary):
-            node.span + node.phase + score_expr(initializer, exprs, patterns, types) + score_stmt(script, stmts, exprs, patterns, types) + score_expr(summary, exprs, patterns, types) + node.span + node.phase
+            return node.span + node.phase + score_expr(initializer, exprs, patterns, types) + score_stmt(script, stmts, exprs, patterns, types) + score_expr(summary, exprs, patterns, types) + node.span + node.phase
         Decl.Nested(name: name, signature: signature, body: body, inner: inner):
-            node.span + node.phase + name + score_type(signature, types) + score_stmt(body, stmts, exprs, patterns, types) + score_decl(inner, frozen, stmts, exprs, patterns, types) + node.span + node.phase
+            return node.span + node.phase + name + score_type(signature, types) + score_stmt(body, stmts, exprs, patterns, types) + score_decl(inner, frozen, stmts, exprs, patterns, types) + node.span + node.phase
         Decl.Bundle(left: left, right: right):
-            node.span + node.phase + score_decl(left, frozen, stmts, exprs, patterns, types) + score_decl(right, frozen, stmts, exprs, patterns, types) + node.span + node.phase
+            return node.span + node.phase + score_decl(left, frozen, stmts, exprs, patterns, types) + score_decl(right, frozen, stmts, exprs, patterns, types) + node.span + node.phase
 
 def checksum_language_ast(decls: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     total: mutable i64 = 0

@@ -1071,6 +1071,29 @@ func (p *Parser) parseMatchExpr() ast.Expr {
 	return &ast.MatchExpr{Position: pos, Value: value, Store: store, Arms: arms}
 }
 
+func (p *Parser) lowerMatchStmtExprValue(pos lexer.Pos, stmt *ast.MatchStmt) ast.Expr {
+	if stmt == nil {
+		p.errorf("expression block requires a final expression statement or match statement in the block")
+		return &ast.NullLit{Position: pos}
+	}
+	armExprs := make([]ast.MatchArm, 0, len(stmt.Arms))
+	for _, arm := range stmt.Arms {
+		if len(arm.Body) == 0 {
+			p.errorf("expression block requires each final match arm to end in an expression statement")
+			return &ast.NullLit{Position: pos}
+		}
+		exprStmt, ok := arm.Body[len(arm.Body)-1].(*ast.ExprStmt)
+		if !ok || exprStmt == nil || exprStmt.Expr == nil {
+			p.errorf("expression block requires each final match arm to end in an expression statement")
+			return &ast.NullLit{Position: pos}
+		}
+		body := append([]ast.Stmt(nil), arm.Body[:len(arm.Body)-1]...)
+		body = append(body, &ast.ExprStmt{Position: exprStmt.Position, Expr: exprStmt.Expr})
+		armExprs = append(armExprs, ast.MatchArm{Position: arm.Position, Pattern: arm.Pattern, Body: body})
+	}
+	return &ast.MatchExpr{Position: stmt.Position, Value: stmt.Value, Store: stmt.Store, Arms: armExprs}
+}
+
 func (p *Parser) parseCatchExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_CATCH)
@@ -1890,8 +1913,6 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		errExpr := p.parseOr()
 		return &ast.RaiseExpr{Position: pos, Error: errExpr}
-	case lexer.TOKEN_MATCH:
-		return p.parseMatchExpr()
 	case lexer.TOKEN_IDENT:
 		if p.cur().Text == "do" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
 			pos := p.cur().Pos
@@ -1969,19 +1990,28 @@ func (p *Parser) parseExprBlockValue(pos lexer.Pos, flattenSingle bool) ast.Expr
 	p.expectNewline()
 	body := p.parseBlock()
 	if len(body) == 0 {
-		p.errorf("expression block requires a final expression statement in the block")
+		p.errorf("expression block requires a final expression statement or match statement in the block")
 		return &ast.NullLit{Position: pos}
 	}
-	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
-	if !ok || exprStmt == nil || exprStmt.Expr == nil {
-		p.errorf("expression block requires a final expression statement in the block")
+	var value ast.Expr
+	switch tail := body[len(body)-1].(type) {
+	case *ast.ExprStmt:
+		if tail == nil || tail.Expr == nil {
+			p.errorf("expression block requires a final expression statement or match statement in the block")
+			return &ast.NullLit{Position: pos}
+		}
+		value = tail.Expr
+	case *ast.MatchStmt:
+		value = p.lowerMatchStmtExprValue(pos, tail)
+	default:
+		p.errorf("expression block requires a final expression statement or match statement in the block")
 		return &ast.NullLit{Position: pos}
 	}
 	if flattenSingle && len(body) == 1 {
-		return exprStmt.Expr
+		return value
 	}
 	stmts := append([]ast.Stmt(nil), body[:len(body)-1]...)
-	return &ast.ExprBlock{Position: pos, Stmts: stmts, Value: exprStmt.Expr}
+	return &ast.ExprBlock{Position: pos, Stmts: stmts, Value: value}
 }
 
 func (p *Parser) peekStructLiteralTypeArgsFollowedBy(close lexer.TokenKind) bool {

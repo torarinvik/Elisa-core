@@ -12,15 +12,15 @@ packed enum TypeExpr:
     Record(label: i64, field_ty: TypeExpr, rest: TypeExpr)
 
 def score_type(node: TypeExpr, frozen: TypeExpr.Store[Frozen]) -> i64:
-    return match node in frozen:
+    match node in frozen:
         TypeExpr.Record(label: label, field_ty: TypeExpr.Tuple(left: left, right: right), rest: rest):
-            node.span + node.weight + label + score_type(left, frozen) + score_type(right, frozen) + score_type(rest, frozen) + 17
+            return node.span + node.weight + label + score_type(left, frozen) + score_type(right, frozen) + score_type(rest, frozen) + 17
         TypeExpr.Var(symbol: symbol):
-            node.span + node.weight + symbol + 3
+            return node.span + node.weight + symbol + 3
         TypeExpr.Tuple(left: left, right: right):
-            node.span + node.weight + score_type(left, frozen) + score_type(right, frozen) + 5
+            return node.span + node.weight + score_type(left, frozen) + score_type(right, frozen) + 5
         TypeExpr.Record(label: label, field_ty: field_ty, rest: rest):
-            node.span + node.weight + label + score_type(field_ty, frozen) + score_type(rest, frozen) + 13
+            return node.span + node.weight + label + score_type(field_ty, frozen) + score_type(rest, frozen) + 13
 
 def build_type(seed: usize, current: TypeExpr, previous: TypeExpr, store: TypeExpr.Store[Local]) -> TypeExpr:
     seed_i64: i64 = seed.i64()

@@ -106,9 +106,9 @@ def fold() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(value: 5)
-		return match node:
+		match node:
 			Expr.Lit(value):
-				value
+				return value
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_default.llcontext", src)
 	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
@@ -137,9 +137,9 @@ def fold() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(value: 5)
-		return match node:
+		match node:
 			Expr.Lit(value):
-				value
+				return value
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_legacy.llcontext", src)
 	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIIndexSOA)
@@ -208,11 +208,11 @@ def sum_pair() -> int:
 	store: Pair.Store[Local] = Pair.Store(scratch)
 	in store:
 		node: Pair = new Pair.Both(left: 2, right: 3)
-		return match node:
+		match node:
 			Pair.Both(left: left, right: right):
-				left + right
+				return left + right
 			Pair.End:
-				0
+				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -243,11 +243,11 @@ def sum_pair() -> int:
 	store: Pair.Store[Local] = Pair.Store(scratch)
 	in store:
 		node: Pair = new Pair.Both(left: 2, right: 3)
-		return match node:
+		match node:
 			Pair.Both(left: left, right: right):
-				left + right
+				return left + right
 			Pair.End:
-				0
+				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -283,11 +283,11 @@ def fold_frozen() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match node in frozen:
+	match node in frozen:
 		Expr.Lit(value):
-			value
+			return value
 		Expr.End:
-			0
+			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -317,11 +317,11 @@ def fold_frozen() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match node in frozen:
+	match node in frozen:
 		Expr.Lit(value):
-			value
+			return value
 		Expr.End:
-			0
+			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -353,13 +353,13 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForNestedFrozenPackedPayloadMatchInIn
 	Wrap(inner: Expr)
 
 def fold_frozen(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Wrap(inner: Expr.Lit(value: value)):
-			value
+			return value
 		Expr.Wrap(inner: inner):
-			fold_frozen(inner, frozen)
+			return fold_frozen(inner, frozen)
 		Expr.Lit(value: value):
-			value
+			return value
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_payload_decode_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -389,13 +389,13 @@ func TestGenerateLLVMIRUsesCanonicalIndexReadHelpersForNestedFrozenPackedPayload
 	Wrap(inner: Expr)
 
 def fold_frozen(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Wrap(inner: Expr.Lit(value: value)):
-			value
+			return value
 		Expr.Wrap(inner: inner):
-			fold_frozen(inner, frozen)
+			return fold_frozen(inner, frozen)
 		Expr.Lit(value: value):
-			value
+			return value
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_payload_decode_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -437,21 +437,21 @@ packed enum Expr:
 	Match(scrutinee: Expr, clauses: Clause, ty: TypeExpr)
 
 def score_type(node: TypeExpr, types: TypeExpr.Store[Frozen]) -> i64:
-	return match node in types:
+	match node in types:
 		TypeExpr.Var(symbol: symbol):
-			symbol
+			return symbol
 
 def score_clause(node: Clause, clauses: Clause.Store[Frozen], exprs: Expr.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-	return match node in clauses:
+	match node in clauses:
 		Clause.Terminal(body: body):
-			score_expr(body, exprs, clauses, types) + 1
+			return score_expr(body, exprs, clauses, types) + 1
 
 def score_expr(node: Expr, exprs: Expr.Store[Frozen], clauses: Clause.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-	return match node in exprs:
+	match node in exprs:
 		Expr.Literal(value: value):
-			value
+			return value
 		Expr.Match(scrutinee: scrutinee, clauses: match_clauses, ty: ty):
-			score_expr(scrutinee, exprs, clauses, types) + score_clause(match_clauses, clauses, exprs, types) + score_type(ty, types)
+			return score_expr(scrutinee, exprs, clauses, types) + score_clause(match_clauses, clauses, exprs, types) + score_type(ty, types)
 
 def fold_frozen() -> i64:
 	region scratch(512u)
@@ -502,21 +502,21 @@ packed enum Expr:
 	Match(scrutinee: Expr, clauses: Clause, ty: TypeExpr)
 
 def score_type(node: TypeExpr, types: TypeExpr.Store[Frozen]) -> i64:
-	return match node in types:
+	match node in types:
 		TypeExpr.Var(symbol: symbol):
-			symbol
+			return symbol
 
 def score_clause(node: Clause, clauses: Clause.Store[Frozen], exprs: Expr.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-	return match node in clauses:
+	match node in clauses:
 		Clause.Terminal(body: body):
-			score_expr(body, exprs, clauses, types) + 1
+			return score_expr(body, exprs, clauses, types) + 1
 
 def score_expr(node: Expr, exprs: Expr.Store[Frozen], clauses: Clause.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
-	return match node in exprs:
+	match node in exprs:
 		Expr.Literal(value: value):
-			value
+			return value
 		Expr.Match(scrutinee: scrutinee, clauses: match_clauses, ty: ty):
-			score_expr(scrutinee, exprs, clauses, types) + score_clause(match_clauses, clauses, exprs, types) + score_type(ty, types)
+			return score_expr(scrutinee, exprs, clauses, types) + score_clause(match_clauses, clauses, exprs, types) + score_type(ty, types)
 
 def fold_frozen() -> i64:
 	region scratch(512u)
@@ -567,11 +567,11 @@ def fold_frozen_mixed() -> int:
 	local_ref: scratch i32& = new[scratch] 7i32
 	node: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match node in frozen:
+	match node in frozen:
 		Expr.Hold(value):
-			1
+			return 1
 		Expr.End:
-			0
+			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_payload_decode_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -798,11 +798,11 @@ func TestGenerateLLVMIRUsesCanonicalDirectReadsForFrozenMatchedValueFieldAccess(
 	End
 
 def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Lit(value):
-			node.span + node.span + value
+			return node.span + node.span + value
 		Expr.End:
-			0
+			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_field_cache_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -832,13 +832,13 @@ func TestGenerateLLVMIRPreloadsCanonicalMatchedValueCommonFieldsAcrossArms(t *te
 	Stop
 
 def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Lit(value):
-			node.span + node.weight + value
+			return node.span + node.weight + value
 		Expr.End:
-			node.span + node.weight
+			return node.span + node.weight
 		Expr.Stop:
-			node.span + node.weight
+			return node.span + node.weight
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_common_preload_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -868,13 +868,13 @@ func TestGenerateLLVMIRPreloadsIndexSOAMatchedValueCommonFieldsAcrossArms(t *tes
 	Stop
 
 def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Lit(value):
-			node.span + node.weight + value
+			return node.span + node.weight + value
 		Expr.End:
-			node.span + node.weight
+			return node.span + node.weight
 		Expr.Stop:
-			node.span + node.weight
+			return node.span + node.weight
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_common_preload_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -902,18 +902,18 @@ func TestGenerateLLVMIRUsesCanonicalDirectReadsForNestedMatchedValueFieldAccess(
 	Wrap(child: Expr)
 
 def fold_child(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Lit(value):
-			node.span + node.span + value
+			return node.span + node.span + value
 		Expr.Wrap(child: inner):
-			fold_child(inner, frozen)
+			return fold_child(inner, frozen)
 
 def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Wrap(child: child):
-			fold_child(child, frozen)
+			return fold_child(child, frozen)
 		Expr.Lit(value):
-			node.span + value
+			return node.span + value
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_nested_matched_value_field_cache_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -943,13 +943,13 @@ func TestGenerateLLVMIRUsesSwitchForCanonicalFrozenUniqueVariantMatch(t *testing
 	End
 
 def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Lit(value):
-			node.span + value
+			return node.span + value
 		Expr.Wrap(child):
-			child.span
+			return child.span
 		Expr.End:
-			0
+			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_switch_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -971,11 +971,12 @@ func TestGenerateLLVMIRDoesNotMaterializeUndefFailPathForExhaustiveCanonicalMatc
 	End
 
 def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
-		Expr.Lit(value):
-			value
-		Expr.End:
-			0
+	return do:
+		match node in frozen:
+			Expr.Lit(value):
+				value
+			Expr.End:
+				0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_expr_exhaustive_no_undef_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -1547,13 +1548,13 @@ def fold_child_common_frozen_mixed() -> int:
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match node in frozen:
+	match node in frozen:
 		Expr.Wrap(child: child_alias):
-			child_alias.span + child_alias.span
+			return child_alias.span + child_alias.span
 		Expr.Int(value: _):
-			0
+			return 0
 		Expr.Hold(value: _):
-			1
+			return 1
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_matched_payload_field_cache_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -1598,13 +1599,13 @@ def fold_helper_indexed_child_common_frozen_mixed() -> int:
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match wrapped.items[0u].node in frozen:
+	match wrapped.items[0u].node in frozen:
 		Expr.Wrap(child: child_alias):
-			child_alias.span + child_alias.span
+			return child_alias.span + child_alias.span
 		Expr.Int(value: _):
-			0
+			return 0
 		Expr.Hold(value: _):
-			1
+			return 1
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_matched_payload_field_cache_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -1652,13 +1653,13 @@ def fold_nested_helper_indexed_child_common_frozen_mixed() -> int:
 	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
 	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match wrapped.meta.items[0u].node in frozen:
+	match wrapped.meta.items[0u].node in frozen:
 		Expr.Wrap(child: child_alias):
-			child_alias.span + child_alias.span
+			return child_alias.span + child_alias.span
 		Expr.Int(value: _):
-			0
+			return 0
 		Expr.Hold(value: _):
-			1
+			return 1
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_rebased_helper_indexed_matched_payload_field_cache_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -1706,13 +1707,13 @@ def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
 	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
 	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match wrapped.meta.items[0u].node in frozen:
+	match wrapped.meta.items[0u].node in frozen:
 		Expr.Wrap(child: child_alias):
-			child_alias.span + child_alias.span
+			return child_alias.span + child_alias.span
 		Expr.Int(value: _):
-			0
+			return 0
 		Expr.Hold(value: _):
-			1
+			return 1
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_rebased_helper_indexed_matched_payload_field_cache_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -1744,11 +1745,11 @@ def choose() -> int:
 	store: Flag.Store[Local] = Flag.Store(scratch)
 	node: Flag = new[store] Flag.Yes(span: 7)
 	frozen: Flag.Store[Frozen] = freeze(move store)
-	return match node in frozen:
+	match node in frozen:
 		Flag.Yes:
-			node.span + node.span
+			return node.span + node.span
 		Flag.No:
-			0
+			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payloadless_match_fields_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -1778,11 +1779,11 @@ def choose() -> int:
 	store: Flag.Store[Local] = Flag.Store(scratch)
 	in store:
 		node: Flag = new Flag.Yes
-		return match node:
+		match node:
 			Flag.Yes:
-				1
+				return 1
 			Flag.No:
-				0
+				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_tag_read_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -1848,11 +1849,11 @@ def fold_match_frozen() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	in frozen:
-		return match node:
+		match node:
 			Expr.Lit(value):
-				value + node.span
+				return value + node.span
 			Expr.End:
-				0
+				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_frozen_index_soa_opt.llcontext", src)
 	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIIndexSOA)
@@ -1886,13 +1887,13 @@ packed enum Expr:
 	End
 
 def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return match node in frozen:
+	match node in frozen:
 		Expr.Wide(first: first, second: second, third: third):
-			node.span + node.cost + first + second + third
+			return node.span + node.cost + first + second + third
 		Expr.Leaf(value: value):
-			node.span + node.cost + value
+			return node.span + node.cost + value
 		Expr.End:
-			0
+			return 0
 
 def fold_export() -> int:
 	region scratch(256u)
@@ -1966,11 +1967,11 @@ def fold() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match node in frozen:
+	match node in frozen:
 		Expr.Lit(value):
-			value + node.span
+			return value + node.span
 		Expr.End:
-			0
+			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -2156,11 +2157,11 @@ def fold() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(value: 5)
-		return match node:
+		match node:
 			Expr.Lit(value):
-				value
+				return value
 			Expr.End:
-				0
+				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_index_soa_tag_read_mixed.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -2188,9 +2189,9 @@ def fold() -> int:
 	in store:
 		source_items: array[int, 3] = [1, 2, 3]
 		node: Expr = new Expr.Block(count: 3u, items: source_items[0u:3u])
-		return match node:
+		match node:
 			Expr.Block(count: _, items: items):
-				items[0u] + items[2u]
+				return items[0u] + items[2u]
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_tail_payload_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -2218,9 +2219,9 @@ def fold() -> int:
 	in store:
 		source_items: array[int, 3] = [1, 2, 3]
 		node: Expr = new Expr.Block(items: source_items[0u:3u], count: 3u)
-		return match node:
+		match node:
 			Expr.Block(items: items, count: count):
-				count.int() + items[0u] + items[2u]
+				return count.int() + items[0u] + items[2u]
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_tail_payload_non_final_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)

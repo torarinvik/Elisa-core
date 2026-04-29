@@ -129,148 +129,150 @@ def bool_score(value: bool, when_true: i64, when_false: i64) -> i64:
     return when_false
 
 def score_type(node: TypeExpr, forest: FrozenMlAstForest&) -> i64:
-    return match node in forest.types:
+    match node in forest.types:
         TypeExpr.Var(symbol: symbol):
-            node.span + node.weight + symbol + node.span + 3
+            return node.span + node.weight + symbol + node.span + 3
         TypeExpr.Tuple(left: left, right: right):
-            node.span + node.weight + score_type(left, forest) + score_type(right, forest) + 5
+            return node.span + node.weight + score_type(left, forest) + score_type(right, forest) + 5
         TypeExpr.Arrow(param: param, result: result):
-            node.span + node.weight + score_type(param, forest) + score_type(result, forest) + 7
+            return node.span + node.weight + score_type(param, forest) + score_type(result, forest) + 7
         TypeExpr.Effect(label: label, carrier: carrier):
-            node.span + node.weight + label + score_type(carrier, forest) + 11
+            return node.span + node.weight + label + score_type(carrier, forest) + 11
         TypeExpr.Record(label: label, field_ty: field_ty, rest: rest):
             field_ty_node: TypeExpr = field_ty
-            return node.span + node.weight + label + score_type(rest, forest) + match field_ty in forest.types:
-                TypeExpr.Tuple(left: left, right: right):
-                    score_type(left, forest) + score_type(right, forest) + 17
-                _:
-                    score_type(field_ty_node, forest) + 13
+            return node.span + node.weight + label + score_type(rest, forest) + do:
+                match field_ty in forest.types:
+                    TypeExpr.Tuple(left: left, right: right):
+                        score_type(left, forest) + score_type(right, forest) + 17
+                    _:
+                        score_type(field_ty_node, forest) + 13
         TypeExpr.App(callee: callee, arg: arg):
             callee_node: TypeExpr = callee
-            return node.span + node.weight + score_type(arg, forest) + match callee in forest.types:
-                TypeExpr.Arrow(param: param, result: result):
-                    score_type(param, forest) + score_type(result, forest) + 23
-                _:
-                    score_type(callee_node, forest) + 19
+            return node.span + node.weight + score_type(arg, forest) + do:
+                match callee in forest.types:
+                    TypeExpr.Arrow(param: param, result: result):
+                        score_type(param, forest) + score_type(result, forest) + 23
+                    _:
+                        score_type(callee_node, forest) + 19
         TypeExpr.Merge(left: left, middle: middle, right: right):
-            node.span + node.weight + score_type(left, forest) + score_type(middle, forest) + score_type(right, forest) + 31
+            return node.span + node.weight + score_type(left, forest) + score_type(middle, forest) + score_type(right, forest) + 31
 
 def score_pattern(node: Pattern, forest: FrozenMlAstForest&) -> i64:
-    return match node in forest.patterns:
+    match node in forest.patterns:
         Pattern.Wildcard:
-            node.span + node.weight + 43
+            return node.span + node.weight + 43
         Pattern.Bind(symbol: symbol, ann: ann):
-            node.span + node.weight + symbol + score_type(ann, forest) + 47
+            return node.span + node.weight + symbol + score_type(ann, forest) + 47
         Pattern.Alias(alias_symbol: alias_symbol, inner: inner):
-            node.span + node.weight + alias_symbol + score_pattern(inner, forest) + 53
+            return node.span + node.weight + alias_symbol + score_pattern(inner, forest) + 53
         Pattern.Tuple(left: left, right: right):
-            node.span + node.weight + score_pattern(left, forest) + score_pattern(right, forest) + 59
+            return node.span + node.weight + score_pattern(left, forest) + score_pattern(right, forest) + 59
         Pattern.Ctor(label: label, arg: arg, ann: ann):
-            node.span + node.weight + label + score_pattern(arg, forest) + score_type(ann, forest) + 61
+            return node.span + node.weight + label + score_pattern(arg, forest) + score_type(ann, forest) + 61
         Pattern.LiteralInt(value: value):
-            node.span + node.weight + value + 67
+            return node.span + node.weight + value + 67
         Pattern.LiteralBool(value: value):
-            node.span + node.weight + bool_score(value, 71, 73)
+            return node.span + node.weight + bool_score(value, 71, 73)
         Pattern.ListNil:
-            node.span + node.weight + 79
+            return node.span + node.weight + 79
         Pattern.ListCons(head: head, rest: rest):
-            node.span + node.weight + score_pattern(head, forest) + score_pattern(rest, forest) + 83
+            return node.span + node.weight + score_pattern(head, forest) + score_pattern(rest, forest) + 83
         Pattern.Or(left: left, right: right):
-            node.span + node.weight + score_pattern(left, forest) + score_pattern(right, forest) + 89
+            return node.span + node.weight + score_pattern(left, forest) + score_pattern(right, forest) + 89
         Pattern.Guarded(inner: inner, guard: guard):
-            node.span + node.weight + score_pattern(inner, forest) + score_expr(guard, forest) + 97
+            return node.span + node.weight + score_pattern(inner, forest) + score_expr(guard, forest) + 97
         Pattern.Annotated(inner: inner, ann: ann, fallback: fallback):
-            node.span + node.weight + score_pattern(inner, forest) + score_type(ann, forest) + score_pattern(fallback, forest) + 103
+            return node.span + node.weight + score_pattern(inner, forest) + score_type(ann, forest) + score_pattern(fallback, forest) + 103
 
 def score_expr(node: Expr, forest: FrozenMlAstForest&) -> i64:
-    return match node in forest.exprs:
+    match node in forest.exprs:
         Expr.LiteralInt(value: value):
-            node.span + node.cost + value + 131
+            return node.span + node.cost + value + 131
         Expr.LiteralBool(value: value):
-            node.span + node.cost + bool_score(value, 137, 139)
+            return node.span + node.cost + bool_score(value, 137, 139)
         Expr.Name(symbol: symbol, ty: ty):
-            node.span + node.cost + symbol + score_type(ty, forest) + 149
+            return node.span + node.cost + symbol + score_type(ty, forest) + 149
         Expr.Lambda(param: param, body: body, ty: ty):
-            node.span + node.cost + score_pattern(param, forest) + score_expr(body, forest) + score_type(ty, forest) + 151
+            return node.span + node.cost + score_pattern(param, forest) + score_expr(body, forest) + score_type(ty, forest) + 151
         Expr.Apply(callee: callee, arg: arg, ty: ty):
-            node.span + node.cost + score_expr(callee, forest) + score_expr(arg, forest) + score_type(ty, forest) + 157
+            return node.span + node.cost + score_expr(callee, forest) + score_expr(arg, forest) + score_type(ty, forest) + 157
         Expr.Let(pattern: pattern, value: value, body: body, ty: ty):
-            node.span + node.cost + score_pattern(pattern, forest) + score_expr(value, forest) + score_expr(body, forest) + score_type(ty, forest) + 163
+            return node.span + node.cost + score_pattern(pattern, forest) + score_expr(value, forest) + score_expr(body, forest) + score_type(ty, forest) + 163
         Expr.Match(scrutinee: scrutinee, clauses: clauses, ty: ty):
-            node.span + node.cost + score_expr(scrutinee, forest) + score_clause(clauses, forest) + score_type(ty, forest) + 167
+            return node.span + node.cost + score_expr(scrutinee, forest) + score_clause(clauses, forest) + score_type(ty, forest) + 167
         Expr.Ctor(label: label, arg: arg, ty: ty):
-            node.span + node.cost + label + score_expr(arg, forest) + score_type(ty, forest) + 173
+            return node.span + node.cost + label + score_expr(arg, forest) + score_type(ty, forest) + 173
         Expr.Record(label: label, field_value: field_value, rest: rest, ty: ty):
-            node.span + node.cost + label + score_expr(field_value, forest) + score_expr(rest, forest) + score_type(ty, forest) + 179
+            return node.span + node.cost + label + score_expr(field_value, forest) + score_expr(rest, forest) + score_type(ty, forest) + 179
         Expr.Project(base: base, label: label, ty: ty):
-            node.span + node.cost + score_expr(base, forest) + label + score_type(ty, forest) + 181
+            return node.span + node.cost + score_expr(base, forest) + label + score_type(ty, forest) + 181
         Expr.If(cond: cond, then_branch: then_branch, else_branch: else_branch, ty: ty):
-            node.span + node.cost + score_expr(cond, forest) + score_expr(then_branch, forest) + score_expr(else_branch, forest) + score_type(ty, forest) + 191
+            return node.span + node.cost + score_expr(cond, forest) + score_expr(then_branch, forest) + score_expr(else_branch, forest) + score_type(ty, forest) + 191
         Expr.Sequence(first: first, second: second, third: third, ty: ty):
-            node.span + node.cost + score_expr(first, forest) + score_expr(second, forest) + score_expr(third, forest) + score_type(ty, forest) + 199
+            return node.span + node.cost + score_expr(first, forest) + score_expr(second, forest) + score_expr(third, forest) + score_type(ty, forest) + 199
 
 def score_clause(node: Clause, forest: FrozenMlAstForest&) -> i64:
-    return match node in forest.clauses:
+    match node in forest.clauses:
         Clause.Terminal(pattern: pattern, body: body):
-            node.span + node.weight + score_pattern(pattern, forest) + score_expr(body, forest) + 211
+            return node.span + node.weight + score_pattern(pattern, forest) + score_expr(body, forest) + 211
         Clause.Chain(pattern: pattern, body: body, next: next):
-            node.span + node.weight + score_pattern(pattern, forest) + score_expr(body, forest) + score_clause(next, forest) + 223
+            return node.span + node.weight + score_pattern(pattern, forest) + score_expr(body, forest) + score_clause(next, forest) + 223
         Clause.Guarded(pattern: pattern, guard: guard, body: body, next: next):
-            node.span + node.weight + score_pattern(pattern, forest) + score_expr(guard, forest) + score_expr(body, forest) + score_clause(next, forest) + 227
+            return node.span + node.weight + score_pattern(pattern, forest) + score_expr(guard, forest) + score_expr(body, forest) + score_clause(next, forest) + 227
         Clause.Fanout(pattern: pattern, primary: primary, alternate: alternate, next: next):
-            node.span + node.weight + score_pattern(pattern, forest) + score_expr(primary, forest) + score_expr(alternate, forest) + score_clause(next, forest) + 229
+            return node.span + node.weight + score_pattern(pattern, forest) + score_expr(primary, forest) + score_expr(alternate, forest) + score_clause(next, forest) + 229
 
 def score_stmt(node: Stmt, forest: FrozenMlAstForest&) -> i64:
-    return match node in forest.stmts:
+    match node in forest.stmts:
         Stmt.Let(pattern: pattern, ann: ann, value: value, next: next):
-            node.span + node.effect + score_pattern(pattern, forest) + score_type(ann, forest) + score_expr(value, forest) + score_stmt(next, forest) + 239
+            return node.span + node.effect + score_pattern(pattern, forest) + score_type(ann, forest) + score_expr(value, forest) + score_stmt(next, forest) + 239
         Stmt.Match(scrutinee: scrutinee, clauses: clauses, next: next):
-            node.span + node.effect + score_expr(scrutinee, forest) + score_clause(clauses, forest) + score_stmt(next, forest) + 241
+            return node.span + node.effect + score_expr(scrutinee, forest) + score_clause(clauses, forest) + score_stmt(next, forest) + 241
         Stmt.Block(first: first, second: second, result_expr: result_expr):
-            node.span + node.effect + score_stmt(first, forest) + score_stmt(second, forest) + score_expr(result_expr, forest) + 251
+            return node.span + node.effect + score_stmt(first, forest) + score_stmt(second, forest) + score_expr(result_expr, forest) + 251
         Stmt.Return(value: value):
-            node.span + node.effect + score_expr(value, forest) + 257
+            return node.span + node.effect + score_expr(value, forest) + 257
         Stmt.Pipeline(first: first, second: second, third: third, result_expr: result_expr):
-            node.span + node.effect + score_stmt(first, forest) + score_stmt(second, forest) + score_stmt(third, forest) + score_expr(result_expr, forest) + 269
+            return node.span + node.effect + score_stmt(first, forest) + score_stmt(second, forest) + score_stmt(third, forest) + score_expr(result_expr, forest) + 269
 
 def score_decl(node: Decl, forest: FrozenMlAstForest&) -> i64:
-    return match node in forest.decls:
+    match node in forest.decls:
         Decl.Function(name: name, param: param, signature: signature, body: body):
-            node.span + node.phase + name + score_pattern(param, forest) + score_type(signature, forest) + score_stmt(body, forest) + 277
+            return node.span + node.phase + name + score_pattern(param, forest) + score_type(signature, forest) + score_stmt(body, forest) + 277
         Decl.TypeAlias(name: name, target: target):
-            node.span + node.phase + name + score_type(target, forest) + 281
+            return node.span + node.phase + name + score_type(target, forest) + 281
         Decl.Value(name: name, pattern: pattern, value: value):
-            node.span + node.phase + name + score_pattern(pattern, forest) + score_expr(value, forest) + 283
+            return node.span + node.phase + name + score_pattern(pattern, forest) + score_expr(value, forest) + 283
         Decl.Data(name: name, payload: payload, ctor_pattern: ctor_pattern):
-            node.span + node.phase + name + score_type(payload, forest) + score_pattern(ctor_pattern, forest) + 293
+            return node.span + node.phase + name + score_type(payload, forest) + score_pattern(ctor_pattern, forest) + 293
         Decl.Script(name: name, body: body, result: result):
-            node.span + node.phase + name + score_stmt(body, forest) + score_expr(result, forest) + 307
+            return node.span + node.phase + name + score_stmt(body, forest) + score_expr(result, forest) + 307
         Decl.Group(left: left, right: right):
-            node.span + node.phase + score_decl(left, forest) + score_decl(right, forest) + 311
+            return node.span + node.phase + score_decl(left, forest) + score_decl(right, forest) + 311
         Decl.Instance(name: name, signature: signature, witness: witness, body: body):
-            node.span + node.phase + name + score_type(signature, forest) + score_pattern(witness, forest) + score_expr(body, forest) + 317
+            return node.span + node.phase + name + score_type(signature, forest) + score_pattern(witness, forest) + score_expr(body, forest) + 317
 
 def score_module(node: Module, forest: FrozenMlAstForest&) -> i64:
-    return match node in forest.modules:
+    match node in forest.modules:
         Module.Unit(name: name, primary: primary, bootstrap: bootstrap, summary: summary):
-            node.span + node.weight + name + score_decl(primary, forest) + score_stmt(bootstrap, forest) + score_expr(summary, forest) + 331
+            return node.span + node.weight + name + score_decl(primary, forest) + score_stmt(bootstrap, forest) + score_expr(summary, forest) + 331
         Module.Nested(name: name, primary: primary, fallback: fallback, script: script, summary: summary):
-            node.span + node.weight + name + score_decl(primary, forest) + score_decl(fallback, forest) + score_stmt(script, forest) + score_expr(summary, forest) + 337
+            return node.span + node.weight + name + score_decl(primary, forest) + score_decl(fallback, forest) + score_stmt(script, forest) + score_expr(summary, forest) + 337
         Module.Bundle(left: left, right: right):
-            node.span + node.weight + score_module(left, forest) + score_module(right, forest) + 347
+            return node.span + node.weight + score_module(left, forest) + score_module(right, forest) + 347
         Module.Overlay(base: base, extension: extension, bootstrap: bootstrap, summary: summary):
-            node.span + node.weight + score_module(base, forest) + score_decl(extension, forest) + score_stmt(bootstrap, forest) + score_expr(summary, forest) + 353
+            return node.span + node.weight + score_module(base, forest) + score_decl(extension, forest) + score_stmt(bootstrap, forest) + score_expr(summary, forest) + 353
 
 def score_root(node: Root, forest: FrozenMlAstForest&) -> i64:
-    return match node in forest.roots:
+    match node in forest.roots:
         Root.ModuleRoot(module: module, witness: witness):
-            node.span + node.phase + score_module(module, forest) + score_pattern(witness, forest) + 359
+            return node.span + node.phase + score_module(module, forest) + score_pattern(witness, forest) + 359
         Root.Script(script: script, result: result, witness: witness):
-            node.span + node.phase + score_stmt(script, forest) + score_expr(result, forest) + score_pattern(witness, forest) + 367
+            return node.span + node.phase + score_stmt(script, forest) + score_expr(result, forest) + score_pattern(witness, forest) + 367
         Root.Eval(module: module, expr: expr, witness: witness):
-            node.span + node.phase + score_module(module, forest) + score_expr(expr, forest) + score_pattern(witness, forest) + 373
+            return node.span + node.phase + score_module(module, forest) + score_expr(expr, forest) + score_pattern(witness, forest) + 373
         Root.Batch(module: module, script: script, expr: expr, witness: witness):
-            node.span + node.phase + score_module(module, forest) + score_stmt(script, forest) + score_expr(expr, forest) + score_pattern(witness, forest) + 383
+            return node.span + node.phase + score_module(module, forest) + score_stmt(script, forest) + score_expr(expr, forest) + score_pattern(witness, forest) + 383
 
 def checksum_root_range(start: usize, end: usize, forest: FrozenMlAstForest&) -> i64:
     total: mutable i64 = 0

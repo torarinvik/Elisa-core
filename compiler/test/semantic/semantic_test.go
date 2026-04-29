@@ -5433,13 +5433,14 @@ enum Outer:
 	Empty
 
 def score(value: Outer) -> int:
-	return match value:
-		Outer.Wrap(Inner.A(inner)):
-			inner
-		Outer.Wrap(Inner.B):
-			0
-		Outer.Empty:
-			-1
+	return do:
+		match value:
+			Outer.Wrap(Inner.A(inner)):
+				inner
+			Outer.Wrap(Inner.B):
+				0
+			Outer.Empty:
+				-1
 `
 	_, errs := parseAndAnalyze(t, "enum_match_expr_nested_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5454,11 +5455,12 @@ def make_pair() -> PairOrInt:
 	return PairOrInt.Pair(3, 4)
 
 def score(value: PairOrInt) -> int:
-	return match value:
-		PairOrInt.Just(value: inner):
-			inner
-		PairOrInt.Pair(right: r, left: l):
-			l + r
+	return do:
+		match value:
+			PairOrInt.Just(value: inner):
+				inner
+			PairOrInt.Pair(right: r, left: l):
+				l + r
 `
 	_, errs := parseAndAnalyze(t, "enum_named_payloads_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5481,9 +5483,10 @@ func TestAnalyzeRejectsNamedPatternsForUnnamedEnumPayloads(t *testing.T) {
 	Some(int)
 
 def unwrap(value: MaybeInt) -> int:
-	return match value:
-		MaybeInt.Some(value: inner):
-			inner
+	return do:
+		match value:
+			MaybeInt.Some(value: inner):
+				inner
 `
 	_, errs := parseAndAnalyze(t, "enum_named_payloads_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -5573,9 +5576,10 @@ func TestAnalyzeRejectsNonExhaustiveMatchesWithMissingVariants(t *testing.T) {
 	Pair(int, int)
 
 def unwrap(value: MaybeInt) -> int:
-	return match value:
-		MaybeInt.Some(inner):
-			inner
+	return do:
+		match value:
+			MaybeInt.Some(inner):
+				inner
 `
 	_, errs := parseAndAnalyze(t, "enum_match_non_exhaustive.llcontext", src)
 	if len(errs) == 0 {
@@ -5604,13 +5608,14 @@ def score_stmt(op: Op) -> int:
 	return 0
 
 def score_expr(op: Op) -> int:
-	return match op:
-		Op.ADD:
-			10
-		Op.SUB:
-			20
-		Op.MUL:
-			30
+	return do:
+		match op:
+			Op.ADD:
+				10
+			Op.SUB:
+				20
+			Op.MUL:
+				30
 `
 	_, errs := parseAndAnalyze(t, "const_enum_match_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5623,11 +5628,12 @@ func TestAnalyzeRejectsNonExhaustiveConstEnumMatchExpressions(t *testing.T) {
 	MUL = 3
 
 def score_expr(op: Op) -> int:
-	return match op:
-		Op.ADD:
-			10
-		Op.SUB:
-			20
+	return do:
+		match op:
+			Op.ADD:
+				10
+			Op.SUB:
+				20
 `
 	_, errs := parseAndAnalyze(t, "const_enum_match_non_exhaustive.llcontext", src)
 	if len(errs) == 0 {
@@ -5652,11 +5658,12 @@ func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
 
 func TestAnalyzeAcceptsStringLiteralMatchExpressionOverSlice(t *testing.T) {
 	src := `def classify(text: dstr[row]) -> int:
-	return match text[0:2]:
-		"if":
-			1
-		_:
-			0
+	return do:
+		match text[0:2]:
+			"if":
+				1
+			_:
+				0
 `
 	_, errs := parseAndAnalyze(t, "string_match_expr_slice_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5664,9 +5671,10 @@ func TestAnalyzeAcceptsStringLiteralMatchExpressionOverSlice(t *testing.T) {
 
 func TestAnalyzeRejectsNonExhaustiveStringMatchExpression(t *testing.T) {
 	src := `def classify(text: StringView) -> int:
-	return match text:
-		"local":
-			1
+	return do:
+		match text:
+			"local":
+				1
 `
 	_, errs := parseAndAnalyze(t, "string_match_expr_non_exhaustive.llcontext", src)
 	if len(errs) == 0 {
@@ -5705,11 +5713,12 @@ func TestAnalyzeAcceptsNestedStringLiteralPatterns(t *testing.T) {
 	Other
 
 def classify(value: Wrapper) -> int:
-	return match value:
-		Wrapper.Text("local"):
-			1
-		Wrapper.Other:
-			0
+	return do:
+		match value:
+			Wrapper.Text("local"):
+				1
+			Wrapper.Other:
+				0
 `
 	result, errs := parseAndAnalyze(t, "string_match_nested_pattern_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5718,18 +5727,19 @@ def classify(value: Wrapper) -> int:
 
 func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
 	src := `def classify(value: int) -> int:
-	return match value:
-		"local":
-			1
-		_:
-			0
+	return do:
+		match value:
+			"local":
+				1
+			_:
+				0
 `
 	_, errs := parseAndAnalyze(t, "string_match_non_string_value_reject.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, const enum, tree-category, string, tuple, or struct value, got int") {
+	if !strings.Contains(all, "match requires an enum, const enum, error set, tree-category, string, tuple, or struct value, got int") {
 		t.Fatalf("expected non-string match diagnostic, got:\n%s", all)
 	}
 }
@@ -5739,11 +5749,11 @@ func TestAnalyzeRejectsNonLiteralTopLevelStringMatchArm(t *testing.T) {
 	Region
 
 def classify(text: StringView) -> int:
-	return match text:
+	match text:
 		Token.Region:
-			1
+			return 1
 		_:
-			0
+			return 0
 `
 	_, errs := parseAndAnalyze(t, "string_match_non_literal_arm_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -5909,11 +5919,11 @@ func TestAnalyzeAcceptsRecursiveEnumPayloadByReference(t *testing.T) {
 	Add(left: Expr&, right: Expr&)
 
 def eval(node: Expr&) -> int:
-	return match node[0]:
+	match node[0]:
 		Expr.Int(value: value):
-			value
+			return value
 		Expr.Add(left: left, right: right):
-			eval(left) + eval(right)
+			return eval(left) + eval(right)
 `
 	_, errs := parseAndAnalyze(t, "enum_recursive_by_ref_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5933,11 +5943,11 @@ def build(store_owner: Arena) -> Expr:
 	return new[store] Expr.Add(left: one, right: two)
 
 def eval(node: Expr, store: Expr.Store[Local]) -> int:
-	return match node in store:
+	match node in store:
 		Expr.Int(value: value):
-			value
+			return value
 		Expr.Add(left: left, right: right):
-			eval(left, store) + eval(right, store)
+			return eval(left, store) + eval(right, store)
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_explicit_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5959,11 +5969,11 @@ def build(store_owner: Arena) -> Expr:
 
 def eval(node: Expr, store: Expr.Store[Local]) -> int:
 	in store:
-		return match node:
+		match node:
 			Expr.Int(value: value):
-				value + node.span
+				return value + node.span
 			Expr.Add(left: left, right: right):
-				node.span + eval(left, store) + eval(right, store)
+				return node.span + eval(left, store) + eval(right, store)
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_in_store_block_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5978,11 +5988,11 @@ def build() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Block(count: 3, items: [1, 2, 3])
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match node in frozen:
+	match node in frozen:
 		Expr.Block(count: count, items: items):
 			if items.len == count:
-				items[0] + items[2]
-			0
+				return items[0] + items[2]
+			return 0
 `
 	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_dview_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6034,11 +6044,11 @@ def build() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Block(items: [1, 2, 3], count: 3)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return match node in frozen:
+	match node in frozen:
 		Expr.Block(items: items, count: count):
 			if items.len == count:
-				items[1]
-			0
+				return items[1]
+			return 0
 `
 	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_not_final_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6102,9 +6112,9 @@ func TestAnalyzeAcceptsPackedMatchWithFrozenStore(t *testing.T) {
 	Int(value: int)
 
 def read(node: Expr, store: Expr.Store[Frozen]) -> int:
-	return match node in store:
+	match node in store:
 		Expr.Int(value: value):
-			value
+			return value
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_frozen_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6173,9 +6183,9 @@ func TestAnalyzeRejectsPackedMatchWithoutStoreClause(t *testing.T) {
 	Int(value: int)
 
 def bad(node: Expr) -> int:
-	return match node:
+	match node:
 		Expr.Int(value: value):
-			value
+			return value
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_missing_store_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -6192,9 +6202,9 @@ func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseWithActiveStoreParam(t *test
 	Int(value: int)
 
 def read(node: Expr, store: Expr.Store[Frozen]) -> int:
-	return match node:
+	match node:
 		Expr.Int(value: value):
-			value
+			return value
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_with_active_store_param_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6205,9 +6215,9 @@ func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseFromFrozenIndexExpr(t *testi
 	Int(value: int)
 
 def read(store: Expr.Store[Frozen], index: usize) -> int:
-	return match store[index]:
+	match store[index]:
 		Expr.Int(value: value):
-			value
+			return value
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_frozen_index_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6228,9 +6238,9 @@ def make_box(owner: Arena) -> Box:
 
 def read(owner: Arena) -> int:
 	box: Box = make_box(owner)
-	return match box.store[0]:
+	match box.store[0]:
 		Expr.Int(value: value):
-			value
+			return value
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_hidden_store_field_index_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6245,9 +6255,9 @@ struct RootBox:
 
 def read(store: Expr.Store[Frozen], index: usize) -> int:
 	box: RootBox = RootBox(store[index])
-	return match box.root:
+	match box.root:
 		Expr.Int(value: value):
-			value
+			return value
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_field_projection_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6261,9 +6271,9 @@ packed enum PackedExpr:
 	Int(value: int)
 
 def bad(node: Expr, store: PackedExpr.Store[Local]) -> int:
-	return match node in store:
+	match node in store:
 		Expr.Int(value: value):
-			value
+			return value
 `
 	_, errs := parseAndAnalyze(t, "ordinary_enum_match_store_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -6585,11 +6595,11 @@ def score_add(view_node: packedview[Expr.Add]) -> int:
 	return view_node.left.span + view_node.right.span + view_node.span
 
 def fold(node: Expr, store: Expr.Store[Local]) -> int:
-	return match node in store:
+	match node in store:
 		Expr.Int(value: value):
-			value
+			return value
 		Expr.Add(left: left, right: right):
-			score_add(node) + left.span + right.span
+			return score_add(node) + left.span + right.span
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_scrutinee_refined_to_view_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6604,11 +6614,11 @@ func TestAnalyzeAcceptsMatchOnRefinedPackedViewScrutinee(t *testing.T) {
 
 def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	if node in store as Expr.Int(value: value):
-		return match node in store:
+		match node in store:
 			Expr.Int(value: inner):
-				inner + value + node.span
+				return inner + value + node.span
 			Expr.Add(left: left, right: right):
-				left.span + right.span
+				return left.span + right.span
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_on_refined_view_scrutinee_ok.llcontext", src)
@@ -10192,16 +10202,17 @@ func TestAnalyzeFormatsWhileConditionSViewUsingSurfaceNames(t *testing.T) {
 
 func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 	src := `def bad(values: dview[i32]) -> int:
-	return match values:
-		_:
-			0
+	return do:
+		match values:
+			_:
+				0
 `
 	_, errs := parseAndAnalyze(t, "match_dview_surface_diagnostic.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, const enum, tree-category, string, tuple, or struct value, got dview[i32]") {
+	if !strings.Contains(all, "match requires an enum, const enum, error set, tree-category, string, tuple, or struct value, got dview[i32]") {
 		t.Fatalf("expected surface dview match diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "DynArrayView") {

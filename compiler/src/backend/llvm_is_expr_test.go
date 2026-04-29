@@ -92,11 +92,11 @@ def is_integer(tok: Token) -> bool:
 	return tok is Token(kind: .INTEGER)
 
 def score(tok: Token) -> i64:
-	return match tok:
+	match tok:
 		Token(kind: .INTEGER, span: Span(start: start), value: value):
-			start + value
+			return start + value
 		_:
-			0
+			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_struct_pattern_match_is.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -126,13 +126,14 @@ def apply_stmt(op: Op) -> i64:
 			return 30
 
 def apply_expr(op: Op) -> i64:
-	return match op:
-		Op.ADD:
-			10
-		Op.SUB:
-			20
-		Op.MUL:
-			30
+	return do:
+		match op:
+			Op.ADD:
+				10
+			Op.SUB:
+				20
+			Op.MUL:
+				30
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_const_enum_match.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -456,13 +457,13 @@ def child_span(node: Lua.Expr) -> i64:
 			return node.span
 
 def eval(node: Lua.Expr) -> i64:
-	return match node:
+	match node:
 		Lua.Expr.Nil:
-			0
+			return 0
 		Lua.Expr.Int(value: value):
-			value
+			return value
 		Lua.Expr.Binary(left: Lua.Expr.Int(value: lhs), right: right):
-			lhs + eval(right)
+			return lhs + eval(right)
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_match.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)

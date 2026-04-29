@@ -18,11 +18,11 @@ def build_expr(owner: Arena) -> Expr:
 
 def eval(node: Expr, store: Expr.Store[Local]) -> int:
 	in store:
-		return match node:
+		match node:
 			Expr.Int(value: value):
-				value + node.span
+				return value + node.span
 			Expr.Add(left: left, right: right):
-				node.span + eval(left, store) + eval(right, store)
+				return node.span + eval(left, store) + eval(right, store)
 
 def packed_demo() -> int:
 	region scratch(1024)

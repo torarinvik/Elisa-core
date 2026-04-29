@@ -20,6 +20,11 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeConstEnumMatchStmt(stmt, valueType, constEnumType)
 		return
 	}
+	errorSetType, ok := resolveMatchableErrorSetType(valueType)
+	if ok {
+		a.analyzeErrorSetMatchStmt(stmt, valueType, errorSetType)
+		return
+	}
 	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
 	if ok {
 		a.analyzeTreeMatchStmt(stmt, treeType)
@@ -37,7 +42,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeStructMatchStmt(stmt, valueType)
 		return
 	}
-	a.errorf(stmt.Pos(), "match requires an enum, const enum, tree-category, string, tuple, or struct value, got %s", valueType)
+	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, tree-category, string, tuple, or struct value, got %s", valueType)
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
 	}
@@ -195,6 +200,10 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if ok {
 		return a.analyzeConstEnumMatchExpr(expr, valueType, constEnumType)
 	}
+	errorSetType, ok := resolveMatchableErrorSetType(valueType)
+	if ok {
+		return a.analyzeErrorSetMatchExpr(expr, valueType, errorSetType)
+	}
 	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
 	if ok {
 		return a.analyzeTreeMatchExpr(expr, treeType)
@@ -208,7 +217,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if _, ok := a.resolvedStructFields(valueType); ok {
 		return a.analyzeStructMatchExpr(expr, valueType)
 	}
-	a.errorf(expr.Pos(), "match requires an enum, const enum, tree-category, string, tuple, or struct value, got %s", valueType)
+	a.errorf(expr.Pos(), "match requires an enum, const enum, error set, tree-category, string, tuple, or struct value, got %s", valueType)
 	for _, arm := range expr.Arms {
 		a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
 	}

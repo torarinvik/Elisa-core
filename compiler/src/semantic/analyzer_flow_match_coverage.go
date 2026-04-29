@@ -30,6 +30,11 @@ func resolveMatchableConstEnumType(actual Type) (*ConstEnumType, bool) {
 	return constEnumType, ok && constEnumType != nil
 }
 
+func resolveMatchableErrorSetType(actual Type) (*ErrorSetType, bool) {
+	errorSetType, ok := StripAggregateStateType(actual).(*ErrorSetType)
+	return errorSetType, ok && errorSetType != nil
+}
+
 func isStringMatchableType(actual Type) bool {
 	if actual == nil {
 		return false
@@ -179,6 +184,11 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 			}
 			return true
 		case *ConstEnumType:
+			if variantBase == nil || p.EnumName != variantBase.Name || currVariant.EnumName != variantBase.Name || p.Variant != currVariant.Variant {
+				return false
+			}
+			return true
+		case *ErrorSetType:
 			if variantBase == nil || p.EnumName != variantBase.Name || currVariant.EnumName != variantBase.Name || p.Variant != currVariant.Variant {
 				return false
 			}

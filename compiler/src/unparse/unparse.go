@@ -2149,9 +2149,6 @@ func formatNodeSugarValue(expr *ast.AllocExpr) string {
 		}
 		trimmed.ArgItemOrder = items
 	}
-	if len(trimmed.Args) == 0 {
-		return formatExpr(trimmed.Func)
-	}
 	return formatExpr(&trimmed)
 }
 
@@ -2573,16 +2570,16 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	case *ast.CastExpr:
-		if addr, ok := n.Operand.(*ast.AddrOfExpr); ok && addr != nil {
-			if isRefCastTarget(n.Target) {
-				return formatExpr(addr.Operand) + ".ref[" + formatTypeExpr(n.Target) + "]"
-			}
-		}
 		if n.Origin == ast.CastExprOriginToSyntax {
 			return formatExpr(n.Operand) + " to " + formatTypeExpr(n.Target)
 		}
 		if n.Origin == ast.CastExprOriginAsSyntax {
 			return formatExpr(n.Operand) + " as " + formatTypeExpr(n.Target)
+		}
+		if addr, ok := n.Operand.(*ast.AddrOfExpr); ok && addr != nil {
+			if isRefCastTarget(n.Target) {
+				return formatExpr(addr.Operand) + ".ref[" + formatTypeExpr(n.Target) + "]"
+			}
 		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
 			if named, ok := n.Target.(*ast.NamedType); ok {
@@ -2640,7 +2637,11 @@ func formatExpr(expr ast.Expr) string {
 				lines = append(lines, indentUnit+line)
 			}
 		}
-		for _, line := range strings.Split(strings.TrimRight(formatExpr(n.Value), "\n"), "\n") {
+		valueText := strings.TrimRight(formatExpr(n.Value), "\n")
+		if matchExpr, ok := n.Value.(*ast.MatchExpr); ok {
+			valueText = strings.TrimRight(formatMatchBody(matchExpr.Value, matchExpr.Store, matchExpr.Arms), "\n")
+		}
+		for _, line := range strings.Split(valueText, "\n") {
 			lines = append(lines, indentUnit+line)
 		}
 		return strings.Join(lines, "\n")
@@ -2783,9 +2784,13 @@ func formatMatchExpr(expr *ast.MatchExpr) string {
 	if expr == nil {
 		return "match <nil>:"
 	}
+	return formatMatchBody(expr.Value, expr.Store, expr.Arms)
+}
+
+func formatMatchBody(value ast.Expr, store ast.Expr, arms []ast.MatchArm) string {
 	var builder strings.Builder
-	builder.WriteString(formatMatchHeader("match", expr.Value, expr.Store))
-	for _, arm := range expr.Arms {
+	builder.WriteString(formatMatchHeader("match", value, store))
+	for _, arm := range arms {
 		builder.WriteByte('\n')
 		builder.WriteString(indentUnit)
 		builder.WriteString(formatMatchPattern(arm.Pattern))

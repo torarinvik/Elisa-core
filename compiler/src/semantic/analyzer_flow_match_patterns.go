@@ -524,6 +524,16 @@ func (a *Analyzer) matchCoversAllVariants(variantBase Type, covered map[string]b
 			}
 		}
 		return true
+	case *ErrorSetType:
+		if tt == nil {
+			return false
+		}
+		for _, tag := range tt.Tags {
+			if !covered[tag] {
+				return false
+			}
+		}
+		return true
 	case *TreeCategoryType:
 		if tt == nil {
 			return false
@@ -576,6 +586,20 @@ func (a *Analyzer) reportNonExhaustiveMatch(pos lexer.Pos, variantBase Type, cov
 			return
 		}
 		a.errorf(pos, "non-exhaustive match over %q; missing members: %s", tt.Name, strings.Join(missing, ", "))
+	case *ErrorSetType:
+		if tt == nil {
+			return
+		}
+		missing := make([]string, 0)
+		for _, tag := range tt.Tags {
+			if !covered[tag] {
+				missing = append(missing, tag)
+			}
+		}
+		if len(missing) == 0 {
+			return
+		}
+		a.errorf(pos, "non-exhaustive match over %q; missing tags: %s", tt.Name, strings.Join(missing, ", "))
 	case *TreeCategoryType:
 		if tt == nil {
 			return

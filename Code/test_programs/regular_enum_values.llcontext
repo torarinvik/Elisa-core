@@ -7,13 +7,13 @@ def make_node(value: i64) -> Small:
     return Small.Int(value)
 
 def score(node: Small) -> i64:
-    return match node:
+    match node:
         Small.Int(value):
-            value
+            return value
         Small.Pair(left, right):
-            left + right
+            return left + right
         Small.Done:
-            0
+            return 0
 
 def total(seed: i64) -> i64:
     items: array[Small, 3] = [Small.Int(1), make_node(seed), Small.Done]

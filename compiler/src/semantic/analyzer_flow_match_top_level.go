@@ -129,6 +129,42 @@ func (a *Analyzer) analyzeTopLevelConstEnumMatchPattern(pattern ast.MatchPattern
 	}
 }
 
+func (a *Analyzer) analyzeTopLevelErrorSetMatchPattern(pattern ast.MatchPattern, errorSetType *ErrorSetType, scope *Scope, index int, armCount int, covered map[string]bool) bool {
+	savedScope := a.currentScope
+	a.currentScope = scope
+	defer func() { a.currentScope = savedScope }()
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		if index != armCount-1 {
+			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
+		}
+		return true
+	case *ast.MatchVariantPattern:
+		if p.EnumName != errorSetType.Name {
+			a.errorf(p.Pos(), "match arm expects error set %q, got %q", errorSetType.Name, p.EnumName)
+			return false
+		}
+		if !errorSetType.HasQualifiedTag(errorSetType.Name, p.Variant) {
+			a.errorf(p.Pos(), "error set %q has no tag %q", errorSetType.Name, p.Variant)
+			return false
+		}
+		if len(p.Args) != 0 {
+			a.errorf(p.Pos(), "match arm %q expects 0 payload patterns, got %d", errorSetType.Name+"."+p.Variant, len(p.Args))
+			return false
+		}
+		if covered != nil {
+			covered[QualifyErrorTag(errorSetType.Name, p.Variant)] = true
+		}
+		return false
+	case *ast.MatchBindPattern:
+		a.errorf(p.Pos(), "top-level match arm must use %q tags or _", errorSetType.Name)
+		return false
+	default:
+		a.errorf(pattern.Pos(), "unsupported match pattern %T", pattern)
+		return false
+	}
+}
+
 func (a *Analyzer) analyzeTopLevelTreeMatchPattern(pattern ast.MatchPattern, treeType *TreeCategoryType, valueExpr ast.Expr, scope *Scope, index int, armCount int, covered map[string]bool) bool {
 	savedScope := a.currentScope
 	a.currentScope = scope
@@ -246,6 +282,80 @@ func (a *Analyzer) analyzeConstEnumMatchStmt(stmt *ast.MatchStmt, valueType Type
 	a.reportNonExhaustiveMatch(stmt.Pos(), constEnumType, covered, hasWildcard)
 }
 
+func (a *Analyzer) analyzeErrorSetMatchStmt(stmt *ast.MatchStmt, valueType Type, errorSetType *ErrorSetType) {
+	if stmt.Store != nil {
+		a.errorf(stmt.Store.Pos(), "error-set match over %q does not take an in-store clause", errorSetType.Name)
+	}
+	_ = valueType
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
+	hasFallthrough := false
+	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
+	covered := map[string]bool{}
+	hasWildcard := false
+	for i, arm := range stmt.Arms {
+		if a.matchPatternShadowedByPrevious(arm.Pattern, errorSetType, priorPatterns) {
+			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
+		}
+		scope := NewScope(a.currentScope)
+		if a.analyzeTopLevelErrorSetMatchPattern(arm.Pattern, errorSetType, scope, i, len(stmt.Arms), covered) {
+			hasWildcard = true
+		}
+		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
+		if !blockDefinitelyExits(arm.Body) {
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
+			}
+		}
+		priorPatterns = append(priorPatterns, arm.Pattern)
+	}
+	if !a.matchCoversAllVariants(errorSetType, covered, hasWildcard) {
+		cloneBaseline()
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
+		} else {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
+		}
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.reportNonExhaustiveMatch(stmt.Pos(), errorSetType, covered, hasWildcard)
+}
+
 func (a *Analyzer) analyzeConstEnumMatchExpr(expr *ast.MatchExpr, valueType Type, constEnumType *ConstEnumType) Type {
 	if expr.Store != nil {
 		a.errorf(expr.Store.Pos(), "const enum match over %q does not take an in-store clause", constEnumType.Name)
@@ -332,6 +442,98 @@ func (a *Analyzer) analyzeConstEnumMatchExpr(expr *ast.MatchExpr, valueType Type
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	a.reportNonExhaustiveMatch(expr.Pos(), constEnumType, covered, hasWildcard)
+	if resultType == nil {
+		return neverType
+	}
+	return resultType
+}
+
+func (a *Analyzer) analyzeErrorSetMatchExpr(expr *ast.MatchExpr, valueType Type, errorSetType *ErrorSetType) Type {
+	if expr.Store != nil {
+		a.errorf(expr.Store.Pos(), "error-set match over %q does not take an in-store clause", errorSetType.Name)
+	}
+	_ = valueType
+	covered := map[string]bool{}
+	hasWildcard := false
+	resultType := Type(nil)
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
+	hasFallthrough := false
+	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
+	for i, arm := range expr.Arms {
+		if a.matchPatternShadowedByPrevious(arm.Pattern, errorSetType, priorPatterns) {
+			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
+		}
+		scope := NewScope(a.currentScope)
+		if a.analyzeTopLevelErrorSetMatchPattern(arm.Pattern, errorSetType, scope, i, len(expr.Arms), covered) {
+			hasWildcard = true
+		}
+		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
+		if !blockDefinitelyExits(arm.Body) {
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
+			}
+		}
+		if resultType == nil {
+			resultType = armType
+			priorPatterns = append(priorPatterns, arm.Pattern)
+			continue
+		}
+		merged := MergeTypes(resultType, armType)
+		if IsInvalidType(merged) {
+			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
+			resultType = invalidType
+			priorPatterns = append(priorPatterns, arm.Pattern)
+			continue
+		}
+		resultType = merged
+		priorPatterns = append(priorPatterns, arm.Pattern)
+	}
+	if !a.matchCoversAllVariants(errorSetType, covered, hasWildcard) {
+		cloneBaseline()
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
+		} else {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
+		}
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.reportNonExhaustiveMatch(expr.Pos(), errorSetType, covered, hasWildcard)
 	if resultType == nil {
 		return neverType
 	}

@@ -1623,7 +1623,7 @@ lexer DemoLex:
 		"def demo_lex_is_ident(ch: char) -> bool:",
 		"demo_lex_is_digit(ch)",
 		"def demo_lex_keyword_kind(text: sview) -> DemoTokenKind:",
-		"return match text:",
+		"match text:",
 		`"if":`,
 		"DemoTokenKind.IF",
 		"DemoTokenKind.IDENT",
@@ -1718,7 +1718,7 @@ lexer DemoLex:
 			t.Fatalf("expected lexer keyword compare lowering to contain %q, got:\n%s", want, formatted)
 		}
 	}
-	if strings.Contains(formatted, "return match text:") {
+	if strings.Contains(formatted, "match text:") {
 		t.Fatalf("expected configured keyword compare lowering to avoid match expression, got:\n%s", formatted)
 	}
 }

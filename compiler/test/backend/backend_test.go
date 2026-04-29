@@ -1963,13 +1963,14 @@ def make_pair() -> MaybeInt:
 	return MaybeInt.Pair(3, 4)
 
 def unwrap_or(value: MaybeInt, fallback: int) -> int:
-	match value:
-		MaybeInt.None:
-			return fallback
-		MaybeInt.Some(inner):
-			return inner
-		MaybeInt.Pair(left, right):
-			return left + right
+	return do:
+		match value:
+			MaybeInt.None:
+				fallback
+			MaybeInt.Some(inner):
+				inner
+			MaybeInt.Pair(left, right):
+				left + right
 `
 	result := parseAndAnalyze(t, "backend_enum_match.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1999,13 +2000,14 @@ func TestGenerateLLVMIRLowersMatchExpressionsViaPhi(t *testing.T) {
 	Pair(int, int)
 
 def unwrap_or(value: MaybeInt, fallback: int) -> int:
-	return match value:
-		MaybeInt.None:
-			fallback
-		MaybeInt.Some(inner):
-			inner
-		MaybeInt.Pair(left, right):
-			left + right
+	return do:
+		match value:
+			MaybeInt.None:
+				fallback
+			MaybeInt.Some(inner):
+				inner
+			MaybeInt.Pair(left, right):
+				left + right
 `
 	result := parseAndAnalyze(t, "backend_enum_match_expr.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2028,13 +2030,14 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 
 func TestGenerateLLVMIRLowersStringMatchExpressionsViaPhi(t *testing.T) {
 	src := `def classify(text: StringView) -> int:
-	return match text:
-		"if":
-			1
-		"local":
-			2
-		_:
-			0
+	return do:
+		match text:
+			"if":
+				1
+			"local":
+				2
+			_:
+				0
 `
 	result := parseAndAnalyze(t, "backend_string_match_expr.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2168,13 +2171,14 @@ enum Outer:
 	Empty
 
 def nested_value(value: Outer) -> int:
-	return match value:
-		Outer.Wrap(Inner.A(inner)):
-			inner
-		Outer.Wrap(Inner.B):
-			0
-		Outer.Empty:
-			-1
+	return do:
+		match value:
+			Outer.Wrap(Inner.A(inner)):
+				inner
+			Outer.Wrap(Inner.B):
+				0
+			Outer.Empty:
+				-1
 `
 	result := parseAndAnalyze(t, "backend_nested_match_patterns.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2206,11 +2210,12 @@ func TestGenerateLLVMIRLowersNamedEnumPayloadPatterns(t *testing.T) {
 	Pair(left: int, right: int)
 
 def score(value: PairOrInt) -> int:
-	return match value:
-		PairOrInt.Just(value: inner):
-			inner
-		PairOrInt.Pair(right: r, left: l):
-			l + r
+	return do:
+		match value:
+			PairOrInt.Just(value: inner):
+				inner
+			PairOrInt.Pair(right: r, left: l):
+				l + r
 `
 	result := parseAndAnalyze(t, "backend_enum_named_payload_patterns.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)

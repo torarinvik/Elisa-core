@@ -708,13 +708,13 @@ def child_span(node: Lua.Expr) -> i64:
 			return node.span
 
 def eval(node: Lua.Expr) -> i64:
-	return match node:
+	match node:
 		Lua.Expr.Nil:
-			0
+			return 0
 		Lua.Expr.Int(value: value):
-			value
+			return value
 		Lua.Expr.Binary(left: Lua.Expr.Int(value: lhs), right: right):
-			lhs + eval(right)
+			return lhs + eval(right)
 `)
 }
 

@@ -1947,6 +1947,42 @@ func TestParseDoExprBlock(t *testing.T) {
 	}
 }
 
+func TestParseDoExprBlockFinalMatchStatementLowersToMatchExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum Op of i32:\n    ADD = 1\n    SUB = 2\n\ndef keep(op: Op) -> i64:\n    return do:\n        match op:\n            Op.ADD:\n                10\n            Op.SUB:\n                20\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[1])
+	}
+	ret, ok := fn.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", fn.Body[0])
+	}
+	block, ok := ret.Value.(*ast.ExprBlock)
+	if !ok {
+		t.Fatalf("expected do expr block, got %T", ret.Value)
+	}
+	if len(block.Stmts) != 0 {
+		t.Fatalf("expected final match statement to be lowered into expr block value, got %d setup stmt(s)", len(block.Stmts))
+	}
+	matchExpr, ok := block.Value.(*ast.MatchExpr)
+	if !ok {
+		t.Fatalf("expected expr block value to be lowered match expr, got %T", block.Value)
+	}
+	if len(matchExpr.Arms) != 2 {
+		t.Fatalf("expected two match arms, got %d", len(matchExpr.Arms))
+	}
+}
+
+func TestParseRejectsDirectMatchExprSyntax(t *testing.T) {
+	_, errs := parseSourceFile(t, "const enum Op of i32:\n    ADD = 1\n\ndef keep(op: Op) -> i64:\n    return match op:\n        Op.ADD:\n            10\n")
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for direct match expression syntax, got none")
+	}
+}
+
 func TestFormatCallWithDoExprBlockArg(t *testing.T) {
 	stmt := &ast.VarDeclStmt{
 		Name: "value",

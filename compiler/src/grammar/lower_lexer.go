@@ -184,15 +184,30 @@ func lowerLexerKeywordDecl(decl *ast.LexerDecl, keywords ast.LexerKeywordDecl) *
 			Type:     builtinTypeExpr(pos, "sview"),
 		}},
 		ReturnType: lexerTokenKindType(decl, pos),
-		Body: []ast.Stmt{&ast.ReturnStmt{
+		Body: []ast.Stmt{&ast.MatchStmt{
 			Position: pos,
-			Value: &ast.MatchExpr{
-				Position: pos,
-				Value:    &ast.Ident{Position: pos, Name: "text"},
-				Arms:     arms,
-			},
+			Value:    &ast.Ident{Position: pos, Name: "text"},
+			Arms:     lowerLexerMatchArmsAsReturns(arms),
 		}},
 	}
+}
+
+func lowerLexerMatchArmsAsReturns(arms []ast.MatchArm) []ast.MatchArm {
+	out := make([]ast.MatchArm, 0, len(arms))
+	for _, arm := range arms {
+		value := ast.Expr(&ast.NullLit{Position: arm.Position})
+		if len(arm.Body) != 0 {
+			if exprStmt, ok := arm.Body[len(arm.Body)-1].(*ast.ExprStmt); ok && exprStmt != nil && exprStmt.Expr != nil {
+				value = exprStmt.Expr
+			}
+		}
+		out = append(out, ast.MatchArm{
+			Position: arm.Position,
+			Pattern:  arm.Pattern,
+			Body:     []ast.Stmt{&ast.ReturnStmt{Position: arm.Position, Value: value}},
+		})
+	}
+	return out
 }
 
 func lowerLexerLiteralDecl(decl *ast.LexerDecl, literals ast.LexerLiteralDecl) *ast.FuncDecl {
