@@ -1009,7 +1009,7 @@ The list-family helpers use readable DSL-style forms as the canonical style.
 ```context
 statements = separated statement() by .SEMICOLON until(.END, token(TokenKind.EOF))
 names = separated required(.IDENT, ParseMessageKey.ExpectedDeclName) by .COMMA until(.COLON, token(TokenKind.EOF))
-decls = flatrepeat variable_decl_group() until(.BEGIN, token(TokenKind.EOF))
+decls = [variable_decl_group()] while token in tokens != [.BEGIN, token(TokenKind.EOF)]
 args = delimited(.LPAREN, separated expression() by .COMMA until(.RPAREN, token(TokenKind.EOF)), .RPAREN, ParseMessageKey.ExpectedRightParen)?
 maybe_name = .IDENT?
 ```
@@ -1019,7 +1019,8 @@ Current list-family terms:
 - `term?` succeeds with an optional result
 - `optional term` and `optional(term)` remain accepted for compatibility, but the formatter emits postfix `?`
 - `repeat term until(...)` parses zero or more items and returns the collected list
-- `flatrepeat term until(...)` parses zero or more list-producing items and flattens them
+- `[term] while token in tokens != [stop1, stop2]` is the canonical flattening form for zero or more list-producing items
+- `flatrepeat term until(...)` remains accepted for compatibility, but the preferred surface is the bracket `while` form
 - `separated term by sep until(...)` is the canonical separated-list form
 - `list term separated by sep until(...)` and function-style `separated(term, sep, until(...))` remain accepted, but the formatter emits `separated term by sep until(...)`
 - `delimited(open, body, close, MessageKey)` parses `open`, returns `body`, and requires `close`

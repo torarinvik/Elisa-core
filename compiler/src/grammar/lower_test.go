@@ -435,7 +435,7 @@ func TestLowerDeclExpandsGrammarHelperShorthandNoneAndPipeTokenSets(t *testing.T
 		node <- expr(make_demo_value())
 		return node
 	values() -> darray[DemoValue]:
-		node = flatrepeat present_value() until(Stop)
+		node = [present_value()] while token in tokens != [Stop]
 		return node
 `)
 	formattedSource := unparse.FormatFile(file)
@@ -722,7 +722,7 @@ func TestLowerDeclExpandsParameterizedAliasConcatWithGrammarTypeContinuation(t *
 			sep
 			group()
 	grammar alias group_items(stop: tokenset, sep: grammar = .SEMICOLON):
-		group() + flatrepeat group_tail(sep) until(stop)
+		group() + [group_tail(sep)] while token in tokens != [stop]
 	group() -> darray[Token]:
 		values = list(token(TokenKind.IDENT), until(GroupStop))
 		return values
@@ -3440,7 +3440,7 @@ func TestLowerDeclPreservesReturnSeqBlockTermWithoutPlaceholder(t *testing.T) {
 	}
 }
 
-func TestLowerFileReturnSeqResolvesNestedFlatRepeatUntil(t *testing.T) {
+func TestLowerFileReturnSeqResolvesNestedBracketWhileUntil(t *testing.T) {
 	file := parseGrammarTestFile(t, `struct Token:
 	kind: TokenKind
 
@@ -3476,7 +3476,7 @@ grammar Demo with DemoEnv:
 	section() -> darray[Token]:
 		return seq:
 			.RESOURCESTRING
-			flatrepeat item() until(SectionSync)
+			[item()] while token in tokens != [SectionSync]
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
@@ -3485,7 +3485,7 @@ grammar Demo with DemoEnv:
 		"state.current_token().kind == TokenKind.EOF",
 	} {
 		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected lowered return seq flatrepeat until to contain %q, got:\n%s", want, formatted)
+			t.Fatalf("expected lowered return seq bracket while until to contain %q, got:\n%s", want, formatted)
 		}
 	}
 }
