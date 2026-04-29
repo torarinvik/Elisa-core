@@ -380,15 +380,6 @@ type GrammarExprTerm struct {
 	Expr     Expr
 }
 
-type GrammarMapListTerm struct {
-	Position lexer.Pos
-	Type     TypeExpr
-	Source   Expr
-	Name     string
-	Value    Expr
-	Flatten  bool
-}
-
 type GrammarSingletonTerm struct {
 	Position lexer.Pos
 	Type     TypeExpr
@@ -1837,9 +1828,6 @@ func (n *GrammarLookaheadTerm) Pos() lexer.Pos {
 func (n *GrammarExprTerm) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *GrammarMapListTerm) Pos() lexer.Pos {
-	return n.Position
-}
 func (n *GrammarSingletonTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -2076,7 +2064,6 @@ func (*GrammarDelimitedTerm) nodeTag()      {}
 func (*GrammarSeqTerm) nodeTag()            {}
 func (*GrammarLookaheadTerm) nodeTag()      {}
 func (*GrammarExprTerm) nodeTag()           {}
-func (*GrammarMapListTerm) nodeTag()        {}
 func (*GrammarSingletonTerm) nodeTag()      {}
 func (*GrammarEmptyTerm) nodeTag()          {}
 func (*GrammarConcatTerm) nodeTag()         {}
@@ -2272,7 +2259,6 @@ func (*GrammarDelimitedTerm) grammarTermTag()   {}
 func (*GrammarSeqTerm) grammarTermTag()         {}
 func (*GrammarLookaheadTerm) grammarTermTag()   {}
 func (*GrammarExprTerm) grammarTermTag()        {}
-func (*GrammarMapListTerm) grammarTermTag()     {}
 func (*GrammarSingletonTerm) grammarTermTag()   {}
 func (*GrammarEmptyTerm) grammarTermTag()       {}
 func (*GrammarConcatTerm) grammarTermTag()      {}

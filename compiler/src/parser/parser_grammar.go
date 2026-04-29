@@ -1165,7 +1165,7 @@ func (p *Parser) validateGrammarProductionTerm(productionName string, term ast.G
 		// valid
 	case *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
 		// valid
-	case *ast.GrammarExprTerm, *ast.GrammarMapListTerm, *ast.GrammarSingletonTerm, *ast.GrammarEmptyTerm,
+	case *ast.GrammarExprTerm, *ast.GrammarSingletonTerm, *ast.GrammarEmptyTerm,
 		*ast.GrammarConcatTerm, *ast.GrammarCutTerm:
 		// valid
 	case *ast.GrammarCallTerm, *ast.GrammarApplyTerm, *ast.GrammarTokenTerm, *ast.GrammarTokenKindTerm,
@@ -1927,28 +1927,6 @@ func (p *Parser) parseGrammarExprTerm() ast.GrammarTerm {
 	expr := p.parseExpr()
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarExprTerm{Position: pos, Type: typ, Expr: expr}
-}
-
-func (p *Parser) parseGrammarMapListTerm(flatten bool) ast.GrammarTerm {
-	pos := p.cur().Pos
-	keyword := "maplist"
-	if flatten {
-		keyword = "flatmaplist"
-	}
-	p.expectIdentText(keyword)
-	var typ ast.TypeExpr
-	if p.match(lexer.TOKEN_LBRACKET) {
-		typ = p.parseTypeExpr()
-		p.expect(lexer.TOKEN_RBRACKET)
-	}
-	p.expect(lexer.TOKEN_LPAREN)
-	source := p.parseExpr()
-	p.expect(lexer.TOKEN_COMMA)
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_COMMA)
-	value := p.parseExpr()
-	p.expect(lexer.TOKEN_RPAREN)
-	return &ast.GrammarMapListTerm{Position: pos, Type: typ, Source: source, Name: name, Value: value, Flatten: flatten}
 }
 
 func (p *Parser) parseGrammarSingletonTerm() ast.GrammarTerm {

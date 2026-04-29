@@ -51,6 +51,26 @@ func FormatExpr(expr ast.Expr) string {
 	return formatExpr(expr)
 }
 
+func formatPostfixShorthandCastTarget(typ ast.TypeExpr) (string, bool) {
+	switch n := typ.(type) {
+	case *ast.NamedType:
+		switch n.Name {
+		case "void", "bool", "char", "int",
+			"i8", "i16", "i32", "i64", "isize",
+			"u8", "u16", "u32", "u64", "usize", "uintptr",
+			"f32", "f64":
+			return n.Name, true
+		}
+		if n.Name != "" {
+			first := n.Name[0]
+			if first >= 'A' && first <= 'Z' {
+				return n.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
 type formatter struct {
 	builder strings.Builder
 }
@@ -1237,15 +1257,6 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			return "expr[" + formatTypeExpr(n.Type) + "](" + formatExpr(n.Expr) + ")"
 		}
 		return "expr(" + formatExpr(n.Expr) + ")"
-	case *ast.GrammarMapListTerm:
-		keyword := "maplist"
-		if n.Flatten {
-			keyword = "flatmaplist"
-		}
-		if n.Type != nil {
-			return keyword + "[" + formatTypeExpr(n.Type) + "](" + formatExpr(n.Source) + ", " + n.Name + ", " + formatExpr(n.Value) + ")"
-		}
-		return keyword + "(" + formatExpr(n.Source) + ", " + n.Name + ", " + formatExpr(n.Value) + ")"
 	case *ast.GrammarSingletonTerm:
 		if n.Type != nil {
 			return "singleton[" + formatTypeExpr(n.Type) + "](" + formatExpr(n.Value) + ")"
@@ -2133,6 +2144,9 @@ func formatNodeSugarValue(expr *ast.AllocExpr) string {
 		}
 		trimmed.ArgItemOrder = items
 	}
+	if len(trimmed.Args) == 0 && len(trimmed.ParamPacks) == 0 && !trimmed.HasArgForward && len(trimmed.WithArgs) == 0 && len(trimmed.WithBundles) == 0 {
+		return formatExpr(trimmed.Func)
+	}
 	return formatExpr(&trimmed)
 }
 
@@ -2560,7 +2574,12 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return line + "]"
 	case *ast.CastExpr:
-		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax || n.Origin == ast.CastExprOriginPostfixShorthand {
+		if n.Origin == ast.CastExprOriginPostfixShorthand {
+			if target, ok := formatPostfixShorthandCastTarget(n.Target); ok {
+				return formatExpr(n.Operand) + "." + target + "()"
+			}
+		}
+		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax {
 			return formatExpr(n.Operand) + " as " + formatTypeExpr(n.Target)
 		}
 		if addr, ok := n.Operand.(*ast.AddrOfExpr); ok && addr != nil {

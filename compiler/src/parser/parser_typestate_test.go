@@ -2157,7 +2157,7 @@ func TestParseChildrenToOverrideExpr(t *testing.T) {
 	}
 }
 
-func TestParsePostfixShorthandCastFormatsAsCast(t *testing.T) {
+func TestParsePostfixShorthandCastFormatsAsPostfixShorthand(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(value: i64) -> u32:\n    return value.u32()\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -2174,8 +2174,24 @@ func TestParsePostfixShorthandCastFormatsAsCast(t *testing.T) {
 	if cast.Origin != ast.CastExprOriginPostfixShorthand {
 		t.Fatalf("expected postfix shorthand cast origin, got %v", cast.Origin)
 	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "value as u32") {
-		t.Fatalf("expected unparse to canonicalize postfix cast shorthand to as-cast syntax, got:\n%s", formatted)
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "return value.u32()") {
+		t.Fatalf("expected unparse to preserve postfix cast shorthand, got:\n%s", formatted)
+	}
+}
+
+func TestParsePostfixShorthandCastRoundTripsInsideBranchHead(t *testing.T) {
+	file, errs := parseSourceFile(t, "def lower(ch: char) -> char:\n    if ch >= 'A' and ch <= 'Z':\n        return (ch.i64() + 32).char()\n    return ch\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"if ((ch >= 'A') and (ch <= 'Z')):",
+		"return ((ch.i64() + 32)).char()",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
 	}
 }
 

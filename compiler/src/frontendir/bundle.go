@@ -160,7 +160,6 @@ func registerBundleTypes() {
 		gob.Register(&ast.GrammarSeqTerm{})
 		gob.Register(&ast.GrammarLookaheadTerm{})
 		gob.Register(&ast.GrammarExprTerm{})
-		gob.Register(&ast.GrammarMapListTerm{})
 		gob.Register(&ast.GrammarSingletonTerm{})
 		gob.Register(&ast.GrammarConcatTerm{})
 		gob.Register(&ast.GrammarListTerm{})

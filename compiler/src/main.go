@@ -21,6 +21,26 @@ func main() {
 	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+func formatPostfixShorthandCastTarget(typ ast.TypeExpr) (string, bool) {
+	switch n := typ.(type) {
+	case *ast.NamedType:
+		switch n.Name {
+		case "void", "bool", "char", "int",
+			"i8", "i16", "i32", "i64", "isize",
+			"u8", "u16", "u32", "u64", "usize", "uintptr",
+			"f32", "f64":
+			return n.Name, true
+		}
+		if n.Name != "" {
+			first := n.Name[0]
+			if first >= 'A' && first <= 'Z' {
+				return n.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
 func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) != 0 && isProjectCommand(args[0]) {
 		return runProjectCLI(args, stdout, stderr)
@@ -994,7 +1014,12 @@ func exprStr(e ast.Expr) string {
 	case *ast.SliceExpr:
 		return fmt.Sprintf("%s[%s:%s]", exprStr(n.Object), exprStr(n.Start), exprStr(n.End))
 	case *ast.CastExpr:
-		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax || n.Origin == ast.CastExprOriginPostfixShorthand {
+		if n.Origin == ast.CastExprOriginPostfixShorthand {
+			if target, ok := formatPostfixShorthandCastTarget(n.Target); ok {
+				return fmt.Sprintf("%s.%s()", exprStr(n.Operand), target)
+			}
+		}
+		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax {
 			return fmt.Sprintf("%s as %s", exprStr(n.Operand), typeStr(n.Target))
 		}
 		return fmt.Sprintf("%s.cast[%s]", exprStr(n.Operand), typeStr(n.Target))

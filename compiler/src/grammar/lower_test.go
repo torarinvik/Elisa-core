@@ -363,7 +363,7 @@ grammar DemoGrammar with DemoEnv:
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
 		"__grammar_value_atom_DemoGrammar_value_11 = node[span = token.span] Demo.Expr.Name(name_id: token.lexeme_key)",
-		"node[span = left.span] Demo.Expr.Invalid()",
+		"node[span = left.span] Demo.Expr.Invalid",
 		"return (true, __grammar_committed_pair_tail_DemoGrammar_committed_8, node[span = (left.span + right.span)] Demo.Expr.Pair(left: left, right: right))",
 	} {
 		if !strings.Contains(formatted, want) {
