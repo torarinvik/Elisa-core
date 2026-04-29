@@ -2653,7 +2653,7 @@ func TestRunCLIFmtRoundTripsTryReturnGrantBlocks(t *testing.T) {
 	}
 }
 
-func TestRunCLIPrintsPostfixCastHookSyntaxInAST(t *testing.T) {
+func TestRunCLIPrintsPostfixCastHookSyntaxAsCanonicalCastInAST(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_ast.llcontext")
 	src := "const VALUE: i64 = 1.i64()\n"
@@ -2671,7 +2671,7 @@ func TestRunCLIPrintsPostfixCastHookSyntaxInAST(t *testing.T) {
 		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
 	}
 	output := stdout.String()
-	for _, check := range []string{"const VALUE = 1.i64()"} {
+	for _, check := range []string{"const VALUE = 1 as i64"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
 		}

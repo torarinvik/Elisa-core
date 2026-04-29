@@ -2570,20 +2570,12 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	case *ast.CastExpr:
-		if n.Origin == ast.CastExprOriginToSyntax {
-			return formatExpr(n.Operand) + " to " + formatTypeExpr(n.Target)
-		}
-		if n.Origin == ast.CastExprOriginAsSyntax {
+		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax || n.Origin == ast.CastExprOriginPostfixShorthand {
 			return formatExpr(n.Operand) + " as " + formatTypeExpr(n.Target)
 		}
 		if addr, ok := n.Operand.(*ast.AddrOfExpr); ok && addr != nil {
 			if isRefCastTarget(n.Target) {
 				return formatExpr(addr.Operand) + ".ref[" + formatTypeExpr(n.Target) + "]"
-			}
-		}
-		if n.Origin == ast.CastExprOriginPostfixShorthand {
-			if named, ok := n.Target.(*ast.NamedType); ok {
-				return formatExpr(n.Operand) + "." + named.Name + "()"
 			}
 		}
 		return formatExpr(n.Operand) + ".cast[" + formatTypeExpr(n.Target) + "]"

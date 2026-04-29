@@ -1178,6 +1178,7 @@ const (
 	CastExprOriginGeneral CastExprOrigin = iota
 	CastExprOriginToSyntax
 	CastExprOriginAsSyntax
+	CastExprOriginExplicitCast
 	CastExprOriginPostfixShorthand
 )
 

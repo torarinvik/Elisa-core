@@ -8,7 +8,7 @@ Repository-level release notes now live in `../CHANGELOG.md`.
 
 The current unreleased highlights include:
 
-- postfix shorthand cast hooks, so exact `__cast__` helpers can back method-like conversions such as `op.i64()`
+- canonical cast formatting now prefers `value as Type` for ordinary `to` / postfix-shorthand casts while keeping explicit `.cast[Type]` as the loud low-level escape hatch
 - side-table storage for packed-enum `common:` fields via `@storage(side_table)`
 - first-class `effect` declarations plus explicit `signal` statements for effect tracking
 - the earlier `refstorage` / `refstate` generic work across parsing, semantics, specialization, lowering, and generated C headers
@@ -40,7 +40,7 @@ That reference covers the currently implemented syntax for:
 - brace destructuring, field punning, record updates, and filtered iterable loops
 - grammar DSL parser features: `token:` blocks, `token family` reusable token unions, `seq:` blocks, comma-free `seq(...)`, `prefix(...)`, readable list/repeat forms, recovery, lookahead/cut, precedence/suffix/postfix helpers, and channel-driven struct result synthesis
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
-- cascade blocks and expressions, lambda literals, `node[span = ...]` tree construction, tree `rewrite`, and postfix cast hooks
+- cascade blocks and expressions, lambda literals, `node[span = ...]` tree construction, tree `rewrite`, and canonical `as` casts
 - static interfaces, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
 
 ## Syntax cheat sheet

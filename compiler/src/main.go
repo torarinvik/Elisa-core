@@ -994,13 +994,8 @@ func exprStr(e ast.Expr) string {
 	case *ast.SliceExpr:
 		return fmt.Sprintf("%s[%s:%s]", exprStr(n.Object), exprStr(n.Start), exprStr(n.End))
 	case *ast.CastExpr:
-		if n.Origin == ast.CastExprOriginAsSyntax {
+		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax || n.Origin == ast.CastExprOriginPostfixShorthand {
 			return fmt.Sprintf("%s as %s", exprStr(n.Operand), typeStr(n.Target))
-		}
-		if n.Origin == ast.CastExprOriginPostfixShorthand {
-			if named, ok := n.Target.(*ast.NamedType); ok {
-				return fmt.Sprintf("%s.%s()", exprStr(n.Operand), named.Name)
-			}
 		}
 		return fmt.Sprintf("%s.cast[%s]", exprStr(n.Operand), typeStr(n.Target))
 	case *ast.CascadeExpr:

@@ -1675,7 +1675,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 					p.advance()
 					p.advance()
 				}
-				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target}
+				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target, Origin: ast.CastExprOriginExplicitCast}
 				continue
 			}
 
