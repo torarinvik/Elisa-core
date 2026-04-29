@@ -1656,12 +1656,6 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	if p.peekIdentText("expr") {
 		return p.parseGrammarExprTerm()
 	}
-	if p.peekIdentText("maplist") {
-		return p.parseGrammarMapListTerm(false)
-	}
-	if p.peekIdentText("flatmaplist") {
-		return p.parseGrammarMapListTerm(true)
-	}
 	if p.peekIdentText("first") {
 		return p.parseGrammarFirstTerm()
 	}
@@ -1679,6 +1673,10 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	}
 	if p.peekIdentText("attempt") {
 		return p.parseGrammarAttemptTerm()
+	}
+	if p.peek() == lexer.TOKEN_LBRACKET {
+		expr := p.parseExpr()
+		return &ast.GrammarExprTerm{Position: expr.Pos(), Expr: expr}
 	}
 	if p.peekIdentText("apply") {
 		return p.parseGrammarApplyTerm()

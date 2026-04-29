@@ -53,6 +53,29 @@ func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersListComprehensionExpr(t *testing.T) {
+	src := `def build(owner: Arena, items: darray[i64]) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        xs = [item + 1 for item in items if item > 0]
+        return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_list_comprehension.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "darray.push.slot") {
+		t.Fatalf("expected list comprehension to lower through darray push slots, got:\n%s", output)
+	}
+	if !strings.Contains(output, "iter.cond") {
+		t.Fatalf("expected list comprehension to lower through iterable loop blocks, got:\n%s", output)
+	}
+	if !strings.Contains(output, "@arena_alloc") {
+		t.Fatalf("expected list comprehension growth to lower through arena allocation, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

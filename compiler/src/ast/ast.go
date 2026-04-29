@@ -1172,6 +1172,14 @@ type ListLitExpr struct {
 	Elems    []Expr
 }
 
+type ListComprehensionExpr struct {
+	Position lexer.Pos
+	Value    Expr
+	Name     string
+	Source   Expr
+	Filter   Expr
+}
+
 type CastExprOrigin int
 
 const (
@@ -1945,9 +1953,12 @@ func (n *FieldExpr) Pos() lexer.Pos        { return n.Position }
 func (n *ShorthandMemberExpr) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *IndexExpr) Pos() lexer.Pos      { return n.Position }
-func (n *SliceExpr) Pos() lexer.Pos      { return n.Position }
-func (n *ListLitExpr) Pos() lexer.Pos    { return n.Position }
+func (n *IndexExpr) Pos() lexer.Pos   { return n.Position }
+func (n *SliceExpr) Pos() lexer.Pos   { return n.Position }
+func (n *ListLitExpr) Pos() lexer.Pos { return n.Position }
+func (n *ListComprehensionExpr) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *CastExpr) Pos() lexer.Pos       { return n.Position }
 func (n *CascadeExpr) Pos() lexer.Pos    { return n.Position }
 func (n *LambdaExpr) Pos() lexer.Pos     { return n.Position }
@@ -2135,6 +2146,7 @@ func (*ShorthandMemberExpr) nodeTag()       {}
 func (*IndexExpr) nodeTag()                 {}
 func (*SliceExpr) nodeTag()                 {}
 func (*ListLitExpr) nodeTag()               {}
+func (*ListComprehensionExpr) nodeTag()     {}
 func (*CastExpr) nodeTag()                  {}
 func (*CascadeExpr) nodeTag()               {}
 func (*LambdaExpr) nodeTag()                {}
@@ -2299,23 +2311,24 @@ func (*ErrorUnionTypeExpr) typeExprTag()        {}
 func (*OptionalTypeExpr) typeExprTag()          {}
 func (*TupleTypeExpr) typeExprTag()             {}
 
-func (*Ident) exprTag()               {}
-func (*IntLit) exprTag()              {}
-func (*FloatLit) exprTag()            {}
-func (*StringLit) exprTag()           {}
-func (*CharLit) exprTag()             {}
-func (*BoolLit) exprTag()             {}
-func (*NullLit) exprTag()             {}
-func (*ZeroedLit) exprTag()           {}
-func (*ExprBlock) exprTag()           {}
-func (*BinaryExpr) exprTag()          {}
-func (*UnaryExpr) exprTag()           {}
-func (*MoveExpr) exprTag()            {}
-func (*CallExpr) exprTag()            {}
-func (*FieldExpr) exprTag()           {}
-func (*ShorthandMemberExpr) exprTag() {}
-func (*IndexExpr) exprTag()           {}
-func (*SliceExpr) exprTag()           {}
+func (*Ident) exprTag()                 {}
+func (*IntLit) exprTag()                {}
+func (*FloatLit) exprTag()              {}
+func (*StringLit) exprTag()             {}
+func (*CharLit) exprTag()               {}
+func (*BoolLit) exprTag()               {}
+func (*NullLit) exprTag()               {}
+func (*ZeroedLit) exprTag()             {}
+func (*ExprBlock) exprTag()             {}
+func (*BinaryExpr) exprTag()            {}
+func (*UnaryExpr) exprTag()             {}
+func (*MoveExpr) exprTag()              {}
+func (*CallExpr) exprTag()              {}
+func (*FieldExpr) exprTag()             {}
+func (*ShorthandMemberExpr) exprTag()   {}
+func (*IndexExpr) exprTag()             {}
+func (*SliceExpr) exprTag()             {}
+func (*ListComprehensionExpr) exprTag() {}
 
 func (*MatchWildcardPattern) matchPatternTag()      {}
 func (*MatchBindPattern) matchPatternTag()          {}

@@ -2083,6 +2083,50 @@ func TestParseListWithDoExprBlockElem(t *testing.T) {
 	}
 }
 
+func TestParseListComprehensionExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(items: darray[i64]) -> void:\n    values = [item + 1 for item in items if item > 0]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	comp, ok := decl.Value.(*ast.ListComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected list comprehension expr, got %T", decl.Value)
+	}
+	if comp.Name != "item" {
+		t.Fatalf("expected binder name item, got %q", comp.Name)
+	}
+	if comp.Filter == nil {
+		t.Fatal("expected list comprehension filter")
+	}
+	formatted := unparse.FormatStmt(fn.Body[0])
+	if !strings.Contains(formatted, "["+"(item + 1) for item in items if (item > 0)]") {
+		t.Fatalf("expected formatter to preserve list comprehension syntax, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "for item in items") {
+		t.Fatalf("expected formatter to preserve comprehension loop, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "if (item > 0)") {
+		t.Fatalf("expected formatter to preserve comprehension filter, got:\n%s", formatted)
+	}
+	if _, ok := comp.Source.(*ast.Ident); !ok {
+		t.Fatalf("expected comprehension source ident, got %T", comp.Source)
+	}
+	if _, ok := comp.Value.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected comprehension value binary expr, got %T", comp.Value)
+	}
+	if _, ok := comp.Filter.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected comprehension filter binary expr, got %T", comp.Filter)
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
 	if len(errs) != 0 {

@@ -2821,29 +2821,29 @@ func TestLowerFileStatefulTypedExprTermCarriesDeclaredTypeForEmptyList(t *testin
 	}
 }
 
-func TestLowerFileStatefulFlatMapListInfersElementTypeFromReturnType(t *testing.T) {
+func TestLowerFileStatefulListComprehensionPreservesComprehensionExpr(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
 	cursor parser
 	channel decls
 	variable_decl_group(names: darray[Token], type_token: Token) -> darray[Pascal.Decl]:
-		decls <- flatmaplist(names, name_token, [build_var_decl(name_token, type_token)] if name_token.kind == TokenKind.IDENT else [])
+		decls <- [build_var_decl(name_token, type_token) for name_token in names if name_token.kind == TokenKind.IDENT]
 		pass
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
-		"__grammar_maplist_value_",
-		": darray[Pascal.Decl] = ([build_var_decl(name_token, type_token)] if (name_token.kind == TokenKind.IDENT) else [])",
-		"([build_var_decl(name_token, type_token)] if (name_token.kind == TokenKind.IDENT) else [])",
-		".push(__grammar_maplist_group_",
+		"[build_var_decl(name_token, type_token) for name_token in names if (name_token.kind == TokenKind.IDENT)]",
+		"decls <- [build_var_decl(name_token, type_token) for name_token in names if (name_token.kind == TokenKind.IDENT)]",
 	} {
 		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected flatmaplist lowering to contain %q, got:\n%s", want, formatted)
+			t.Fatalf("expected list comprehension lowering to contain %q, got:\n%s", want, formatted)
 		}
 	}
+	if strings.Contains(formatted, "__grammar_maplist_") {
+		t.Fatalf("expected lowering to avoid legacy maplist scaffolding, got:\n%s", formatted)
+	}
 	if strings.Contains(formatted, "darray[void]") {
-		t.Fatalf("expected flatmaplist to infer element type from production return type, got:\n%s", formatted)
+		t.Fatalf("expected list comprehension lowering to preserve element typing, got:\n%s", formatted)
 	}
 }
 

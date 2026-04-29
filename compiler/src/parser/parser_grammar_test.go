@@ -143,9 +143,10 @@ func TestParseGrammarDeclAllowsGrammarAliases(t *testing.T) {
 	for _, want := range []string{
 		"grammar alias arg_list = separated_by(item: expression(), stop: RParenSync)",
 		"values = arg_list",
+		"return values",
 	} {
 		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected formatted grammar alias output to contain %q, got:\n%s", want, formatted)
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
 		}
 	}
 }
@@ -2553,12 +2554,12 @@ func TestParseGrammarDeclAllowsTypedExprTerm(t *testing.T) {
 	}
 }
 
-func TestParseGrammarDeclAllowsFlatMapListTerm(t *testing.T) {
+func TestParseGrammarDeclAllowsBareListComprehensionExprTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
-    variable_decls(names: darray[Token], type_token: Token) -> darray[Pascal.Decl]:
-        decls = flatmaplist[Pascal.Decl](names, name_token, [build_var_decl(name_token, type_token)] if name_token.kind == TokenKind.IDENT else [])
-        return decls
-`)
+	    variable_decls(names: darray[Token], type_token: Token) -> darray[Pascal.Decl]:
+	        decls = [build_var_decl(name_token, type_token) for name_token in names if name_token.kind == TokenKind.IDENT]
+	        return decls
+	`)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -2568,21 +2569,22 @@ func TestParseGrammarDeclAllowsFlatMapListTerm(t *testing.T) {
 	}
 	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
 	if !ok {
-		t.Fatalf("expected first term to be maplist binding, got %T", decl.Productions[0].Terms[0])
+		t.Fatalf("expected first term to be grammar bind, got %T", decl.Productions[0].Terms[0])
 	}
-	maplist, ok := bind.Term.(*ast.GrammarMapListTerm)
+	exprTerm, ok := bind.Term.(*ast.GrammarExprTerm)
 	if !ok {
-		t.Fatalf("expected bound term to be flatmaplist, got %T", bind.Term)
+		t.Fatalf("expected bound term to be grammar expr term, got %T", bind.Term)
 	}
-	if !maplist.Flatten {
-		t.Fatalf("expected maplist term to preserve flattening mode")
+	comp, ok := exprTerm.Expr.(*ast.ListComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected grammar expr term to carry list comprehension, got %T", exprTerm.Expr)
 	}
-	if got := formatTypeExprForTest(t, maplist.Type); got != "Pascal.Decl" {
-		t.Fatalf("expected flatmaplist term to preserve element type, got %q", got)
+	if comp.Name != "name_token" {
+		t.Fatalf("expected comprehension binder name_token, got %q", comp.Name)
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"flatmaplist[Pascal.Decl](names, name_token, ([build_var_decl(name_token, type_token)] if (name_token.kind == TokenKind.IDENT) else []))",
+		"decls = [build_var_decl(name_token, type_token) for name_token in names if (name_token.kind == TokenKind.IDENT)]",
 		"return decls",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -2591,41 +2593,31 @@ func TestParseGrammarDeclAllowsFlatMapListTerm(t *testing.T) {
 	}
 }
 
-func TestParseGrammarDeclAllowsMapListTerm(t *testing.T) {
+func TestParseGrammarDeclRejectsFlatMapListTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    variable_decls(names: darray[Token], type_token: Token) -> darray[Pascal.Decl]:
+        decls = flatmaplist[Pascal.Decl](names, name_token, [build_var_decl(name_token, type_token)] if name_token.kind == TokenKind.IDENT else [])
+        return decls
+`)
+	if file == nil {
+		t.Fatal("expected parser to return a file even on error")
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected flatmaplist grammar syntax to be rejected")
+	}
+}
+
+func TestParseGrammarDeclRejectsMapListTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     param_names(names: darray[Token]) -> darray[PascalNameId]:
         ids = maplist[PascalNameId](names, name_token, name_token.lexeme_key)
         return ids
 `)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
+	if file == nil {
+		t.Fatal("expected parser to return a file even on error")
 	}
-	decl, ok := file.Decls[0].(*ast.GrammarDecl)
-	if !ok {
-		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
-	}
-	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
-	if !ok {
-		t.Fatalf("expected first term to be maplist binding, got %T", decl.Productions[0].Terms[0])
-	}
-	maplist, ok := bind.Term.(*ast.GrammarMapListTerm)
-	if !ok {
-		t.Fatalf("expected bound term to be maplist, got %T", bind.Term)
-	}
-	if maplist.Flatten {
-		t.Fatalf("expected maplist term to stay non-flattening")
-	}
-	if got := formatTypeExprForTest(t, maplist.Type); got != "PascalNameId" {
-		t.Fatalf("expected maplist term to preserve element type, got %q", got)
-	}
-	formatted := unparse.FormatFile(file)
-	for _, want := range []string{
-		"maplist[PascalNameId](names, name_token, name_token.lexeme_key)",
-		"return ids",
-	} {
-		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
-		}
+	if len(errs) == 0 {
+		t.Fatal("expected maplist grammar syntax to be rejected")
 	}
 }
 

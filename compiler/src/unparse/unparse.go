@@ -1229,6 +1229,10 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	case *ast.GrammarLookaheadTerm:
 		return "lookahead(" + formatGrammarTerm(n.Term) + ")"
 	case *ast.GrammarExprTerm:
+		switch n.Expr.(type) {
+		case *ast.ListLitExpr, *ast.ListComprehensionExpr:
+			return formatExpr(n.Expr)
+		}
 		if n.Type != nil {
 			return "expr[" + formatTypeExpr(n.Type) + "](" + formatExpr(n.Expr) + ")"
 		}
@@ -2549,6 +2553,12 @@ func formatExpr(expr ast.Expr) string {
 			parts = append(parts, formatExpr(elem))
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
+	case *ast.ListComprehensionExpr:
+		line := "[" + formatExpr(n.Value) + " for " + n.Name + " in " + formatExpr(n.Source)
+		if n.Filter != nil {
+			line += " if " + formatExpr(n.Filter)
+		}
+		return line + "]"
 	case *ast.CastExpr:
 		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax || n.Origin == ast.CastExprOriginPostfixShorthand {
 			return formatExpr(n.Operand) + " as " + formatTypeExpr(n.Target)

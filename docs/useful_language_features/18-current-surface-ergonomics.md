@@ -738,8 +738,8 @@ Current header declarations:
 - `expr[T](value)` gives an inline grammar expression term an explicit result type, which lets `seq`, `separated`, and related list combinators keep transformed element types without introducing a one-off helper production
 - `singleton[T](value)` builds a one-item `darray[T]` inside grammar lowering, using the grammar allocator when one is configured
 - `empty[T]` builds a typed empty `darray[T]` in grammar space, so fallback branches do not need to escape to `expr[darray[T]]([])`
+- list comprehensions such as `[value for item in source]` and `[value for item in source if cond]` build a `darray` directly in grammar code, so inline list transforms and filter-style expansions do not need dedicated `maplist` or `flatmaplist` helpers
 - postfix, suffix, and precedence arms can use an indented block form when bindings would otherwise get cramped on one line
-- `maplist[T](source, item, value)` maps an existing list expression into a `darray[T]` without introducing a helper function
 
 ```llcontext
 grammarenv SMLGrammarEnv over SMLToken using SMLParserState:
@@ -774,7 +774,6 @@ extend grammar PerlExprGrammar:
                 right = term()
                 -> make_perl_infix_expr(left, op, right)
 ```
-- `flatmaplist[T](source, item, values)` maps an existing list expression into per-item lists and flattens them into one `darray[T]`; typed empty branches such as `else []` inherit the mapped list type
 - `uses OtherGrammar` imports productions and grammar-scoped helper declarations from another grammar, including token aliases, recovery policies, and infix tables
 
 Inside grammar sequence result positions, `+` is the canonical way to compose list-producing grammar values. Prefer it over tiny helper functions whose only job is to allocate, append the left list, append the right list, and return the merged result.
@@ -842,7 +841,7 @@ grammar PascalProgramHeaderGrammar over Token using ParserState:
 
 Without the `[PascalNameId]` annotation, lowering only sees an untyped `expr(...)` term and list inference has to fall back to a helper production.
 
-Singleton and mapped list terms cover the next common parser-helper shapes: wrap one parsed value in a list, transform each element from a parsed list, and optionally flatten per-item expansions without bouncing out to hand-written allocation helpers.
+Singleton terms and list comprehensions cover the next common parser-helper shapes: wrap one parsed value in a list, transform each element from a parsed list, and filter out unwanted items without bouncing out to hand-written allocation helpers.
 
 ```context
 grammar PascalFrontend over Token using ParserState:
@@ -857,22 +856,20 @@ grammar PascalFrontend over Token using ParserState:
         header = variable_decl_header()
         node <- when(
             header.type_token.kind == TokenKind.IDENT,
-            flatmaplist[Pascal.Decl](
-                header.names,
-                name_token,
-                [
-                    node[span = name_token.span + header.type_token.span] Pascal.Decl.VarDecl(
-                        name_id: name_token.lexeme_key,
-                        type_name_id: header.type_token.lexeme_key
-                    )
-                ] if name_token.kind == TokenKind.IDENT else []
-            ),
+            [
+                node[span = name_token.span + header.type_token.span] Pascal.Decl.VarDecl(
+                    name_id: name_token.lexeme_key,
+                    type_name_id: header.type_token.lexeme_key
+                )
+                for name_token in header.names
+                if name_token.kind == TokenKind.IDENT
+            ],
             empty[Pascal.Decl]
         )
         return node
 ```
 
-Use `empty` when a branch produces no list items. Use `singleton` when a production produces exactly one list item. Use `maplist` when each source item yields exactly one result value. Use `flatmaplist` when each source item may yield zero or more result values and you want the grammar surface to own the flattening.
+Use `empty` when a branch produces no list items. Use `singleton` when a production produces exactly one list item. Use a list comprehension when each source item yields at most one result value and an optional filter decides which items survive. When one source item truly needs to expand into multiple result values, compose list-valued branches explicitly with `+` or drop to a helper that makes the flattening step obvious.
 
 When the result shape is shared more broadly, the same mechanism also works for structs:
 

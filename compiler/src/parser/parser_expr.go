@@ -88,6 +88,19 @@ func (p *Parser) parseTupleExprFromFirst(pos lexer.Pos, first ast.Expr) ast.Expr
 	return &ast.TupleExpr{Position: pos, Elems: elems}
 }
 
+func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) ast.Expr {
+	p.expectIdentText("for")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_IN)
+	source := p.withTernaryDisabled(p.parseExpr)
+	var filter ast.Expr
+	if p.match(lexer.TOKEN_IF) {
+		filter = p.parseExpr()
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, Filter: filter}
+}
+
 func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
@@ -596,7 +609,7 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 func (p *Parser) parseExpr() ast.Expr {
 	expr := p.parseOr()
 
-	if p.peek() == lexer.TOKEN_IF {
+	if p.allowTernary && p.peek() == lexer.TOKEN_IF {
 		pos := p.cur().Pos
 		p.advance()
 		cond := p.parseOr()
@@ -1784,6 +1797,9 @@ func (p *Parser) parsePostfix() ast.Expr {
 			expr = p.attachOptionalCallWithClause(expr)
 
 		case lexer.TOKEN_IF:
+			if !p.allowTernary {
+				return expr
+			}
 			pos := p.cur().Pos
 			p.advance()
 			cond := p.parseOr()
@@ -1839,11 +1855,16 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		elems := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 		if p.peek() != lexer.TOKEN_RBRACKET {
-			for {
-				elems = append(elems, p.parseExpr())
-				if !p.match(lexer.TOKEN_COMMA) {
+			first := p.parseExpr()
+			if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
+				return p.parseListComprehensionFromFirst(pos, first)
+			}
+			elems = append(elems, first)
+			for p.match(lexer.TOKEN_COMMA) {
+				if p.peek() == lexer.TOKEN_RBRACKET {
 					break
 				}
+				elems = append(elems, p.parseExpr())
 			}
 		}
 		p.expect(lexer.TOKEN_RBRACKET)

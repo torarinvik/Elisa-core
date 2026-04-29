@@ -123,6 +123,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.IndexExpr{})
 		gob.Register(&ast.SliceExpr{})
 		gob.Register(&ast.ListLitExpr{})
+		gob.Register(&ast.ListComprehensionExpr{})
 		gob.Register(&ast.CastExpr{})
 		gob.Register(&ast.SizeofExpr{})
 		gob.Register(&ast.TernaryExpr{})

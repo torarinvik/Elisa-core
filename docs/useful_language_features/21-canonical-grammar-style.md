@@ -193,17 +193,17 @@ Let channel synthesis build the final tuple/struct when the result shape is just
 
 ## Lists
 
-Use the list-family terms instead of hand-written allocation helpers:
+Use comprehension syntax and list composition instead of hand-written allocation helpers:
 
 ```context
 decls = const_decls + type_decls + var_decls
 empty_decls = empty[Pascal.Decl]
 one_decl = singleton[Pascal.Decl](decl)
-ids = maplist[PascalNameId](names, token, token.lexeme_key)
-decls = flatmaplist[Pascal.Decl](names, token, build_decls(token))
+ids = [token.lexeme_key for token in names]
+decls = [build_decl(token) for token in names if token.kind == TokenKind.IDENT]
 ```
 
-Use `empty[T]` for no items, `singleton[T](value)` for one item, `maplist[T]` for one result per item, and `flatmaplist[T]` for zero-or-more results per item.
+Use `empty[T]` for no items, `singleton[T](value)` for one item, `[value for item in items]` for mapped lists, and `[value for item in items if cond]` for filtered list construction.
 
 Prefer grammar composition over helper functions whose only job is list plumbing:
 

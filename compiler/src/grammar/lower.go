@@ -13,6 +13,7 @@ type lowerContext struct {
 	expectFunc     string
 	expectKindFunc string
 	eofExpr        ast.Expr
+	allocExpr      ast.Expr
 	returnType     ast.TypeExpr
 	tempCounter    *int
 }
@@ -3772,6 +3773,7 @@ func (ctx *statefulLowerContext) lowerExprContext() lowerContext {
 		expectFunc:     ctx.expectFunc,
 		expectKindFunc: ctx.expectKindFunc,
 		eofExpr:        ctx.eofExpr,
+		allocExpr:      ctx.allocExpr,
 		returnType:     ctx.production.ReturnType,
 		tempCounter:    &ctx.tempCounter,
 	}
@@ -4070,8 +4072,14 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return ctx.lowerLookaheadAttempt(n)
 	case *ast.GrammarExprTerm:
 		valueName := ctx.fresh("value")
+		valueExpr := ast.Expr(n.Expr)
+		valueType := n.Type
+		if wrapped, ok := lowerAllocatingGrammarExpr(ctx.lowerExprContext(), n.Position, n.Type, n.Expr); ok {
+			valueExpr = wrapped
+			valueType = nil
+		}
 		return loweredAttempt{
-			Stmts:     []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Type: n.Type, Value: n.Expr}},
+			Stmts:     []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Type: valueType, Value: valueExpr}},
 			Matched:   &ast.BoolLit{Position: n.Position, Value: true},
 			Committed: &ast.BoolLit{Position: n.Position, Value: false},
 			Value:     &ast.Ident{Position: n.Position, Name: valueName},
@@ -5702,6 +5710,9 @@ func lowerChoiceExpr(ctx lowerContext, pos lexer.Pos, options []ast.GrammarTerm)
 }
 
 func lowerTypedGrammarExpr(ctx lowerContext, pos lexer.Pos, typ ast.TypeExpr, expr ast.Expr) ast.Expr {
+	if wrapped, ok := lowerAllocatingGrammarExpr(ctx, pos, typ, expr); ok {
+		return wrapped
+	}
 	if typ == nil {
 		return expr
 	}
@@ -5713,6 +5724,37 @@ func lowerTypedGrammarExpr(ctx lowerContext, pos lexer.Pos, typ ast.TypeExpr, ex
 		},
 		Value: &ast.Ident{Position: pos, Name: valueName},
 	}
+}
+
+func lowerAllocatingGrammarExpr(ctx lowerContext, pos lexer.Pos, typ ast.TypeExpr, expr ast.Expr) (ast.Expr, bool) {
+	if ctx.allocExpr == nil {
+		return nil, false
+	}
+	if _, ok := expr.(*ast.ListComprehensionExpr); !ok {
+		return nil, false
+	}
+	valueType := typ
+	if valueType == nil {
+		valueType = ctx.returnType
+	}
+	if valueType == nil {
+		return nil, false
+	}
+	valueName := ctx.fresh("expr_value")
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			&ast.VarDeclStmt{Position: pos, Name: valueName, Type: valueType, Mutable: true, Value: &ast.ZeroedLit{Position: pos}},
+			&ast.InStoreStmt{
+				Position: pos,
+				Store:    ctx.allocExpr,
+				Body: []ast.Stmt{
+					&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: valueName}, Value: expr},
+				},
+			},
+		},
+		Value: &ast.Ident{Position: pos, Name: valueName},
+	}, true
 }
 
 func lowerMapListExpr(ctx lowerContext, term *ast.GrammarMapListTerm) ast.Expr {

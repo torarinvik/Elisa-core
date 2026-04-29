@@ -121,5 +121,5 @@ Use the pyramid deliberately:
 - grammar list wrappers use `singleton[T](value)` instead of one-off helpers that allocate a `darray`, push one value, and return it
 - parser branches snapshot cursor-dependent values before trying alternatives that can consume input
 - helper productions that return plain structs can now live inside tree grammars more comfortably: struct synthesis requires channel names to match struct fields, so unrelated grammar-wide channels such as `node` do not accidentally shape non-tree results
-- when parser code already has a list value in hand, prefer `maplist` or `flatmaplist` over a one-off helper function that only loops, pushes, and returns a `darray`
+- when parser code already has a list value in hand, prefer a list comprehension over a one-off helper function that only loops, filters, and returns a `darray`
 - `protocol` / `static interface` express parser-builder variability, not runtime dispatch

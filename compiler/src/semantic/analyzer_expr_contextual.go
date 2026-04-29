@@ -96,6 +96,9 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if list, ok := expr.(*ast.ListLitExpr); ok {
 		return a.analyzeListLitExprWithExpected(list, expected)
 	}
+	if comp, ok := expr.(*ast.ListComprehensionExpr); ok {
+		return a.analyzeListComprehensionExprWithExpected(comp, expected)
+	}
 	if tuple, ok := expr.(*ast.TupleExpr); ok {
 		return a.analyzeTupleExprWithExpected(tuple, expected)
 	}
@@ -494,6 +497,58 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		return invalidType
 	}
 	result := &ArrayType{Elem: elemType, Size: strconv.Itoa(len(expr.Elems)), HasConstSize: true, ConstSize: int64(len(expr.Elems))}
+	a.exprTypes[expr] = result
+	return result
+}
+
+func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListComprehensionExpr, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		a.errorf(expr.Pos(), "list comprehension requires an active in <arena>: scope")
+	}
+	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
+	sourceType := a.analyzeExpr(expr.Source)
+	info, ok := a.resolveIterLoopSourceInfo(expr.Source, sourceType)
+	if !ok {
+		a.errorf(expr.Source.Pos(), "list comprehension currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, enumerate(source), children(node), or a projected tree attribute sequence, got %s", sourceType)
+		info.ItemType = invalidType
+	}
+	if a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
+		a.errorf(expr.Pos(), "list comprehension value iteration does not support affine element type %s; use an explicit loop with ref binding", info.ItemType)
+	}
+	loopScope := NewScope(a.currentScope)
+	pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
+	a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
+	if expr.Filter != nil {
+		condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
+		if !IsBoolType(condType) {
+			a.errorf(expr.Filter.Pos(), "list comprehension filter must be bool, got %s", condType)
+		}
+	}
+	var expectedElem Type
+	if useExpectedDArray {
+		expectedElem = expectedDArray.Elem
+	}
+	savedScope := a.currentScope
+	a.currentScope = loopScope
+	itemType := a.analyzeValueExpr(expr.Value, expectedElem)
+	a.currentScope = savedScope
+	if useExpectedDArray {
+		if !AssignableTo(expectedDArray.Elem, itemType) {
+			a.errorf(expr.Value.Pos(), "list comprehension element expects %s, got %s", expectedDArray.Elem, itemType)
+		}
+		a.consumeAffineValueExpr(expr.Value, expectedDArray.Elem, "move into list comprehension element")
+		a.exprTypes[expr] = expectedDArray
+		return expectedDArray
+	}
+	if itemType == nil || IsInvalidType(itemType) {
+		a.exprTypes[expr] = invalidType
+		return invalidType
+	}
+	a.consumeAffineValueExpr(expr.Value, itemType, "move into list comprehension element")
+	result := &DArrayType{Elem: itemType, Shape: &WildcardShape{}, SurfaceName: "darray"}
 	a.exprTypes[expr] = result
 	return result
 }

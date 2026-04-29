@@ -222,6 +222,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitExprBlock(n, expected)
 	case *ast.ListLitExpr:
 		value, actualType, err = s.emitListLitExpr(n, expected)
+	case *ast.ListComprehensionExpr:
+		value, actualType, err = s.emitListComprehensionExpr(n)
 	case *ast.BinaryExpr:
 		value, actualType, err = s.emitBinaryExpr(n)
 	case *ast.UnaryExpr:
@@ -1221,6 +1223,44 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 	current = C.LLVMBuildInsertValue(s.builder, current, countValue, 1, cStringFree("darray.literal.count"))
 	current = C.LLVMBuildInsertValue(s.builder, current, countValue, 2, cStringFree("darray.literal.capacity"))
 	return current, darrayType, nil
+}
+
+func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExpr) (C.LLVMValueRef, semantic.Type, error) {
+	resultType, ok := s.exprType(expr).(*semantic.DArrayType)
+	if !ok || resultType == nil {
+		return nil, nil, fmt.Errorf("list comprehension requires a resolved darray result type")
+	}
+	resultName := s.g.nextSyntheticName("list.comp.result.")
+	resultInit := &ast.ListLitExpr{Position: expr.Position}
+	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		s.g.result.ExprTypes[resultInit] = resultType
+	}
+	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
+	pushCall := &ast.CallExpr{
+		Position: expr.Position,
+		Func: &ast.FieldExpr{
+			Position: expr.Position,
+			Object:   resultIdent,
+			Field:    "push",
+		},
+		Args: []ast.Expr{expr.Value},
+	}
+	block := &ast.ExprBlock{
+		Position: expr.Position,
+		Stmts: []ast.Stmt{
+			&ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: resultInit},
+			&ast.IterForStmt{
+				Position: expr.Position,
+				Pattern:  &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
+				Mode:     ast.IterBindValue,
+				Source:   expr.Source,
+				Filter:   expr.Filter,
+				Body:     []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: pushCall}},
+			},
+		},
+		Value: resultIdent,
+	}
+	return s.emitExprBlock(block, resultType)
 }
 
 func (s *functionState) listLiteralTargetArrayType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.ArrayType, bool, error) {

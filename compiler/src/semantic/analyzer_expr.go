@@ -148,6 +148,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.ListLitExpr:
 		result = a.analyzeListLitExprWithExpected(n, nil)
 		return
+	case *ast.ListComprehensionExpr:
+		result = a.analyzeListComprehensionExprWithExpected(n, nil)
+		return
 	case *ast.BinaryExpr:
 		result = a.analyzeBinaryExpr(n)
 		return

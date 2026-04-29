@@ -14,10 +14,11 @@ type Parser struct {
 	poolScopes        []string
 	allowAsCast       bool
 	allowInMembership bool
+	allowTernary      bool
 }
 
 func New(tokens []lexer.Token) *Parser {
-	return &Parser{tokens: tokens, allowAsCast: true, allowInMembership: true}
+	return &Parser{tokens: tokens, allowAsCast: true, allowInMembership: true, allowTernary: true}
 }
 
 func (p *Parser) Errors() []string { return p.errors }
@@ -78,6 +79,15 @@ func (p *Parser) withInMembershipDisabled(parse func() ast.Expr) ast.Expr {
 	p.allowInMembership = false
 	defer func() {
 		p.allowInMembership = saved
+	}()
+	return parse()
+}
+
+func (p *Parser) withTernaryDisabled(parse func() ast.Expr) ast.Expr {
+	saved := p.allowTernary
+	p.allowTernary = false
+	defer func() {
+		p.allowTernary = saved
 	}()
 	return parse()
 }

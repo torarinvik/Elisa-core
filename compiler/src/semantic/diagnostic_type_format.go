@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"llcontext/src/ast"
@@ -29,6 +30,10 @@ func formatDiagnosticArg(arg interface{}) interface{} {
 
 func diagnosticTypeString(t Type) string {
 	if t == nil {
+		return "<invalid>"
+	}
+	value := reflect.ValueOf(t)
+	if value.Kind() == reflect.Ptr && value.IsNil() {
 		return "<invalid>"
 	}
 	if replacement, ok := diagnosticRuntimeCarrierTypeString(t); ok {
@@ -257,8 +262,17 @@ func diagnosticTypeString(t Type) string {
 		}
 		return fmt.Sprintf("func%s(%s)%s -> %s%s", prefix, strings.Join(parts, ", "), withClause, diagnosticTypeString(tt.Return), permissionFamiliesString(tt.Permissions))
 	default:
-		return t.String()
+		return safeDiagnosticTypeFallback(t)
 	}
+}
+
+func safeDiagnosticTypeFallback(t Type) (result string) {
+	defer func() {
+		if recover() != nil {
+			result = "<invalid>"
+		}
+	}()
+	return t.String()
 }
 
 func diagnosticRuntimeCarrierTypeString(t Type) (string, bool) {
