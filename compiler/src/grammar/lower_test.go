@@ -1694,6 +1694,35 @@ lexer DemoLex:
 	}
 }
 
+func TestLowerFileLexerKeywordCompareUsesConfiguredFunc(t *testing.T) {
+	file := parseGrammarTestFile(t, `const enum DemoTokenKind of i16:
+    EOF = 0
+    IDENT = 1
+    BEGIN = 2
+
+lexer DemoLex:
+    token_kind DemoTokenKind
+    keyword_compare demo_text_eq
+    keywords fallback IDENT:
+        "begin" -> BEGIN
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def demo_lex_keyword_kind(text: sview) -> DemoTokenKind:",
+		`if demo_text_eq(text, "begin"):`,
+		"return DemoTokenKind.BEGIN",
+		"return DemoTokenKind.IDENT",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lexer keyword compare lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "return match text:") {
+		t.Fatalf("expected configured keyword compare lowering to avoid match expression, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileGeneratesTokenEnumFromGrammarAliases(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar DemoGrammar over Token using ParserState:
     cursor state
@@ -2069,6 +2098,35 @@ func TestLowerFileStatefulTokenLookupUsesTokenAliases(t *testing.T) {
 	}
 	if strings.Contains(formatted, "TokenKind.IDENT") && strings.Contains(formatted, `if (text == "IDENT")`) {
 		t.Fatalf("expected bare token aliases not to become text lookup arms, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulTokenLookupUsesConfiguredCompareFunc(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor state
+    token_lookup token_kind_for_text
+    token_lookup_compare pascal_text_eq_keyword
+    token:
+        PROGRAM "program"
+        PLUS "+"
+    program() -> Token:
+        "program"
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def token_kind_for_text(text: dstr) -> TokenKind:",
+		`if pascal_text_eq_keyword(text, "program"):`,
+		"return TokenKind.PROGRAM",
+		`if pascal_text_eq_keyword(text, "+"):`,
+		"return TokenKind.PLUS",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected token lookup compare lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, `if (text == "program"):`) {
+		t.Fatalf("expected configured token lookup compare to avoid raw equality, got:\n%s", formatted)
 	}
 }
 

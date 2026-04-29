@@ -612,6 +612,40 @@ Current rules:
 - `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
 - `default` also rebuilds `children` sequence fields, materializing fresh arrays in the active tree owner when needed
 
+## Lexer DSL for mixed-mode frontends
+
+The current lexer surface is aimed at handwritten frontends that want generated helpers for regular token tables without giving up manual cursor control for the irregular parts of a language.
+
+```context
+lexer PascalLex:
+    token_kind PascalTokenKind
+    tokens PascalTokenGrammar
+    keyword_compare pascal_sview_eq_keyword
+    keywords fallback IDENT:
+        "unit" -> UNIT
+        "begin" -> BEGIN
+    literals longest fallback EOF:
+        ":=" -> ASSIGN
+        ";" -> SEMICOLON
+
+def read_ident_or_keyword(self: mutable LexerState&) -> PascalToken:
+    kind: PascalTokenKind = pascal_lex_keyword_kind(self.source[start_offset:self.offset])
+    ...
+
+def next_token(self: mutable LexerState&) -> PascalToken:
+    literal_kind, literal_len = pascal_lex_match_literal(self.source, self.offset)
+    ...
+```
+
+Current rules:
+
+- prefer generated `keywords` tables for fixed reserved words; keep a thin manual wrapper when call sites or tests want a stable helper name such as `lua_lookup_keyword`
+- prefer generated `literals` tables for fixed punctuation and operator tokens; use `longest` when longer literals must win over prefixes
+- `tokens GrammarName` is the default way to import literal and keyword aliases from a shared grammar token manifest instead of restating them in the lexer
+- `keyword_compare helper` is the escape hatch for regular-but-non-exact keyword surfaces such as case-insensitive matching
+- keep layout and comment skipping, string and char literal readers, modes, interpolation, directives and includes, numeric edge cases, and context-sensitive operators manual unless the surface is proven regular
+- treat lexer support as mixed-mode: generated helpers own lookup tables, while handwritten code still owns cursor movement, state transitions, diagnostics, and context-sensitive decisions
+
 ## Grammar DSL for parsers and tree frontends
 
 The current grammar surface is aimed at handwritten recursive-descent frontends that still want a compact parser DSL for the repetitive parts: tokens, recovery, lists, infix tables, precedence, postfix/suffix, and prefix forms.

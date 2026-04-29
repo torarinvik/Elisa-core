@@ -98,41 +98,42 @@ type TreeDecl struct {
 }
 
 type GrammarDecl struct {
-	Position         lexer.Pos
-	Extend           bool
-	Name             string
-	TypeParams       []string
-	RefStorageParams []string
-	RefStateParams   []string
-	RegionParams     []string
-	PermissionParams []string
-	GenericParams    []GenericParam
-	EnvType          TypeExpr
-	OverType         TypeExpr
-	UsingType        TypeExpr
-	Uses             []TypeExpr
-	ErrorType        TypeExpr
-	CursorExpr       Expr
-	AllocExpr        Expr
-	TokenKindType    TypeExpr
-	TokenEnumName    string
-	TokenEnumStorage TypeExpr
-	EOFExpr          Expr
-	TokenKindField   string
-	CurrentFunc      string
-	AdvanceFunc      string
-	ExpectFunc       string
-	ExpectKindFunc   string
-	RecordErrorFunc  string
-	TokenLookupFunc  string
-	TokenAliases     []GrammarTokenAliasDecl
-	Channels         []GrammarChannelDecl
-	TokenSets        []GrammarTokenSetDecl
-	GrammarAliases   []GrammarAliasDecl
-	GrammarFns       []GrammarFnDecl
-	RecoveryPolicies []GrammarRecoveryDecl
-	InfixTables      []GrammarInfixTableDecl
-	Productions      []GrammarProductionDecl
+	Position               lexer.Pos
+	Extend                 bool
+	Name                   string
+	TypeParams             []string
+	RefStorageParams       []string
+	RefStateParams         []string
+	RegionParams           []string
+	PermissionParams       []string
+	GenericParams          []GenericParam
+	EnvType                TypeExpr
+	OverType               TypeExpr
+	UsingType              TypeExpr
+	Uses                   []TypeExpr
+	ErrorType              TypeExpr
+	CursorExpr             Expr
+	AllocExpr              Expr
+	TokenKindType          TypeExpr
+	TokenEnumName          string
+	TokenEnumStorage       TypeExpr
+	EOFExpr                Expr
+	TokenKindField         string
+	CurrentFunc            string
+	AdvanceFunc            string
+	ExpectFunc             string
+	ExpectKindFunc         string
+	RecordErrorFunc        string
+	TokenLookupFunc        string
+	TokenLookupCompareFunc string
+	TokenAliases           []GrammarTokenAliasDecl
+	Channels               []GrammarChannelDecl
+	TokenSets              []GrammarTokenSetDecl
+	GrammarAliases         []GrammarAliasDecl
+	GrammarFns             []GrammarFnDecl
+	RecoveryPolicies       []GrammarRecoveryDecl
+	InfixTables            []GrammarInfixTableDecl
+	Productions            []GrammarProductionDecl
 }
 
 type GrammarEnvDecl struct {
@@ -155,15 +156,16 @@ type GrammarEnvDecl struct {
 }
 
 type LexerDecl struct {
-	Position      lexer.Pos
-	Name          string
-	TokenKindType TypeExpr
-	ModeEnumName  string
-	GrammarName   string
-	Modes         []LexerModeDecl
-	CharClasses   []LexerCharClassDecl
-	Keywords      *LexerKeywordDecl
-	Literals      *LexerLiteralDecl
+	Position           lexer.Pos
+	Name               string
+	TokenKindType      TypeExpr
+	ModeEnumName       string
+	GrammarName        string
+	KeywordCompareFunc string
+	Modes              []LexerModeDecl
+	CharClasses        []LexerCharClassDecl
+	Keywords           *LexerKeywordDecl
+	Literals           *LexerLiteralDecl
 }
 
 type LexerModeDecl struct {

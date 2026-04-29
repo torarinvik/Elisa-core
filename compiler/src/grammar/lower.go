@@ -305,6 +305,9 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	if merged.TokenLookupFunc == "" {
 		merged.TokenLookupFunc = extra.TokenLookupFunc
 	}
+	if merged.TokenLookupCompareFunc == "" {
+		merged.TokenLookupCompareFunc = extra.TokenLookupCompareFunc
+	}
 	merged.TokenAliases = append(merged.TokenAliases, extra.TokenAliases...)
 	merged.Channels = append(merged.Channels, extra.Channels...)
 	merged.TokenSets = append(merged.TokenSets, extra.TokenSets...)
@@ -705,16 +708,12 @@ func lowerGrammarTokenLookupFunc(grammarDecl *ast.GrammarDecl) *ast.FuncDecl {
 	}
 	pos := grammarDecl.Position
 	body := make([]ast.Stmt, 0, len(aliases)+1)
+	compareFunc := grammarDecl.TokenLookupCompareFunc
 	for _, alias := range aliases {
 		if !alias.HasLiteral || alias.Literal == "" {
 			continue
 		}
-		cond := &ast.BinaryExpr{
-			Position: alias.Position,
-			Op:       lexer.TOKEN_EQEQ,
-			Left:     &ast.Ident{Position: alias.Position, Name: "text"},
-			Right:    &ast.StringLit{Position: alias.Position, Value: alias.Literal},
-		}
+		cond := grammarTokenLookupCond(alias.Position, compareFunc, alias.Literal)
 		body = append(body, &ast.IfStmt{
 			Position: alias.Position,
 			Cond:     cond,
@@ -738,6 +737,24 @@ func lowerGrammarTokenLookupFunc(grammarDecl *ast.GrammarDecl) *ast.FuncDecl {
 		},
 		ReturnType: grammarDeclTokenKindType(grammarDecl, pos),
 		Body:       body,
+	}
+}
+
+func grammarTokenLookupCond(pos lexer.Pos, compareFunc string, literal string) ast.Expr {
+	textExpr := &ast.Ident{Position: pos, Name: "text"}
+	literalExpr := &ast.StringLit{Position: pos, Value: literal}
+	if compareFunc != "" {
+		return &ast.CallExpr{
+			Position: pos,
+			Func:     &ast.Ident{Position: pos, Name: compareFunc},
+			Args:     []ast.Expr{textExpr, literalExpr},
+		}
+	}
+	return &ast.BinaryExpr{
+		Position: pos,
+		Op:       lexer.TOKEN_EQEQ,
+		Left:     textExpr,
+		Right:    literalExpr,
 	}
 }
 

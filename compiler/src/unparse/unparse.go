@@ -347,6 +347,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.TokenLookupFunc != "" {
 			f.writeLine(level+1, "token_lookup "+n.TokenLookupFunc)
 		}
+		if n.TokenLookupCompareFunc != "" {
+			f.writeLine(level+1, "token_lookup_compare "+n.TokenLookupCompareFunc)
+		}
 		if len(n.TokenAliases) != 0 {
 			f.writeLine(level+1, "token:")
 			for _, alias := range n.TokenAliases {
@@ -454,6 +457,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		if n.GrammarName != "" {
 			f.writeLine(level+1, "tokens "+n.GrammarName)
+		}
+		if n.KeywordCompareFunc != "" {
+			f.writeLine(level+1, "keyword_compare "+n.KeywordCompareFunc)
 		}
 		for _, mode := range n.Modes {
 			f.writeLine(level+1, "mode "+mode.Name)

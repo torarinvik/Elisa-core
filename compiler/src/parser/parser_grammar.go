@@ -57,6 +57,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	var expectKindFunc string
 	var recordErrorFunc string
 	var tokenLookupFunc string
+	var tokenLookupCompareFunc string
 	tokenAliases := make([]ast.GrammarTokenAliasDecl, 0)
 	channels := make([]ast.GrammarChannelDecl, 0)
 	tokenSets := make([]ast.GrammarTokenSetDecl, 0)
@@ -99,6 +100,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			recordErrorFunc = p.parseGrammarNameHeaderDecl("record_error")
 		case p.peekIdentText("token_lookup"):
 			tokenLookupFunc = p.parseGrammarNameHeaderDecl("token_lookup")
+		case p.peekIdentText("token_lookup_compare"):
+			tokenLookupCompareFunc = p.parseGrammarNameHeaderDecl("token_lookup_compare")
 		default:
 			p.errorf("expected grammar environment declaration")
 			p.advance()
@@ -149,41 +152,42 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	p.validateGrammarProductionBodies(grammarFns, productions)
 
 	return &ast.GrammarDecl{
-		Position:         pos,
-		Extend:           extend,
-		Name:             name,
-		TypeParams:       typeParams,
-		RefStorageParams: refStorageParams,
-		RefStateParams:   refStateParams,
-		RegionParams:     regionParams,
-		PermissionParams: permissionParams,
-		GenericParams:    genericParams,
-		EnvType:          envType,
-		OverType:         overType,
-		UsingType:        usingType,
-		Uses:             uses,
-		ErrorType:        errorType,
-		CursorExpr:       cursorExpr,
-		AllocExpr:        allocExpr,
-		TokenKindType:    tokenKindType,
-		TokenEnumName:    tokenEnumName,
-		TokenEnumStorage: tokenEnumStorage,
-		EOFExpr:          eofExpr,
-		TokenKindField:   tokenKindField,
-		CurrentFunc:      currentFunc,
-		AdvanceFunc:      advanceFunc,
-		ExpectFunc:       expectFunc,
-		ExpectKindFunc:   expectKindFunc,
-		RecordErrorFunc:  recordErrorFunc,
-		TokenLookupFunc:  tokenLookupFunc,
-		TokenAliases:     tokenAliases,
-		Channels:         channels,
-		TokenSets:        tokenSets,
-		GrammarAliases:   grammarAliases,
-		GrammarFns:       grammarFns,
-		RecoveryPolicies: recoveryPolicies,
-		InfixTables:      infixTables,
-		Productions:      productions,
+		Position:               pos,
+		Extend:                 extend,
+		Name:                   name,
+		TypeParams:             typeParams,
+		RefStorageParams:       refStorageParams,
+		RefStateParams:         refStateParams,
+		RegionParams:           regionParams,
+		PermissionParams:       permissionParams,
+		GenericParams:          genericParams,
+		EnvType:                envType,
+		OverType:               overType,
+		UsingType:              usingType,
+		Uses:                   uses,
+		ErrorType:              errorType,
+		CursorExpr:             cursorExpr,
+		AllocExpr:              allocExpr,
+		TokenKindType:          tokenKindType,
+		TokenEnumName:          tokenEnumName,
+		TokenEnumStorage:       tokenEnumStorage,
+		EOFExpr:                eofExpr,
+		TokenKindField:         tokenKindField,
+		CurrentFunc:            currentFunc,
+		AdvanceFunc:            advanceFunc,
+		ExpectFunc:             expectFunc,
+		ExpectKindFunc:         expectKindFunc,
+		RecordErrorFunc:        recordErrorFunc,
+		TokenLookupFunc:        tokenLookupFunc,
+		TokenLookupCompareFunc: tokenLookupCompareFunc,
+		TokenAliases:           tokenAliases,
+		Channels:               channels,
+		TokenSets:              tokenSets,
+		GrammarAliases:         grammarAliases,
+		GrammarFns:             grammarFns,
+		RecoveryPolicies:       recoveryPolicies,
+		InfixTables:            infixTables,
+		Productions:            productions,
 	}
 }
 
@@ -322,7 +326,7 @@ func (p *Parser) peekGrammarConfigDecl() bool {
 	}
 	next := p.tokens[p.pos+1].Kind
 	switch p.cur().Text {
-	case "cursor", "alloc", "token_kind", "token_enum", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error", "token_lookup":
+	case "cursor", "alloc", "token_kind", "token_enum", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error", "token_lookup", "token_lookup_compare":
 		return next != lexer.TOKEN_LPAREN
 	default:
 		return false

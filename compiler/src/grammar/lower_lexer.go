@@ -124,6 +124,38 @@ func lowerLexerCharClassDecl(decl *ast.LexerDecl, class ast.LexerCharClassDecl) 
 
 func lowerLexerKeywordDecl(decl *ast.LexerDecl, keywords ast.LexerKeywordDecl) *ast.FuncDecl {
 	pos := keywords.Position
+	if decl.KeywordCompareFunc != "" {
+		body := make([]ast.Stmt, 0, len(keywords.Entries)+1)
+		for _, entry := range keywords.Entries {
+			body = append(body, &ast.IfStmt{
+				Position: entry.Position,
+				Cond: &ast.CallExpr{
+					Position: entry.Position,
+					Func:     &ast.Ident{Position: entry.Position, Name: decl.KeywordCompareFunc},
+					Args: []ast.Expr{
+						&ast.Ident{Position: entry.Position, Name: "text"},
+						&ast.StringLit{Position: entry.Position, Value: entry.Text},
+					},
+				},
+				Then: []ast.Stmt{&ast.ReturnStmt{
+					Position: entry.Position,
+					Value:    lexerKindExpr(decl, entry.Position, entry.Kind),
+				}},
+			})
+		}
+		body = append(body, &ast.ReturnStmt{Position: pos, Value: lexerKindExpr(decl, pos, keywords.Fallback)})
+		return &ast.FuncDecl{
+			Position: pos,
+			Name:     lexerHelperName(decl.Name, "keyword_kind"),
+			Params: []ast.ParamDecl{{
+				Position: pos,
+				Name:     "text",
+				Type:     builtinTypeExpr(pos, "sview"),
+			}},
+			ReturnType: lexerTokenKindType(decl, pos),
+			Body:       body,
+		}
+	}
 	arms := make([]ast.MatchArm, 0, len(keywords.Entries)+1)
 	for _, entry := range keywords.Entries {
 		arms = append(arms, ast.MatchArm{

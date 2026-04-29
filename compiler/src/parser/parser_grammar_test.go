@@ -582,6 +582,31 @@ func TestParseGrammarDeclAllowsTokenLookupHeader(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsTokenLookupCompareHeader(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalGrammar over Token using ParserState:
+    token_lookup token_kind_for_text
+    token_lookup_compare pascal_text_eq_keyword
+    token:
+        BEGIN "begin"
+    program() -> Token:
+        "begin"
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if decl.TokenLookupCompareFunc != "pascal_text_eq_keyword" {
+		t.Fatalf("expected token lookup compare function pascal_text_eq_keyword, got %q", decl.TokenLookupCompareFunc)
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "token_lookup_compare pascal_text_eq_keyword") {
+		t.Fatalf("expected formatted output to contain token_lookup_compare header, got:\n%s", formatted)
+	}
+}
+
 func TestParseGrammarDeclAllowsTokenEnumHeader(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalGrammar over Token using ParserState:
     token_enum PascalTokenKind of u16
