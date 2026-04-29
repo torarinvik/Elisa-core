@@ -965,30 +965,30 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 	}
 }
 
-func TestGenerateLLVMIRDoesNotMaterializeUndefFailPathForExhaustiveCanonicalMatchExpr(t *testing.T) {
+func TestGenerateLLVMIRDoesNotMaterializeUndefFailPathForExhaustiveCanonicalMatchStmt(t *testing.T) {
 	src := `packed enum Expr:
 	Lit(value: int)
 	End
 
 def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
-	return do:
-		match node in frozen:
-			Expr.Lit(value):
-				value
-			Expr.End:
-				0
+	match node in frozen:
+		Expr.Lit(value):
+			return value
+		Expr.End:
+			return 0
+	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_expr_exhaustive_no_undef_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_stmt_exhaustive_no_undef_default.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 
 	if strings.Contains(output, "phi i64 [ undef") {
-		t.Fatalf("expected exhaustive canonical packed match expr to avoid materializing an undef fail path, got:\n%s", output)
+		t.Fatalf("expected exhaustive canonical packed match statement to avoid materializing an undef fail path, got:\n%s", output)
 	}
 	if !strings.Contains(output, "unreachable") {
-		t.Fatalf("expected exhaustive canonical packed match expr to terminate the impossible fail path with unreachable, got:\n%s", output)
+		t.Fatalf("expected exhaustive canonical packed match statement to terminate the impossible fail path with unreachable, got:\n%s", output)
 	}
 }
 

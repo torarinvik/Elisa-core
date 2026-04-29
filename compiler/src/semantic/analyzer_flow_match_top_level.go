@@ -279,7 +279,6 @@ func (a *Analyzer) analyzeConstEnumMatchStmt(stmt *ast.MatchStmt, valueType Type
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
-	a.reportNonExhaustiveMatch(stmt.Pos(), constEnumType, covered, hasWildcard)
 }
 
 func (a *Analyzer) analyzeErrorSetMatchStmt(stmt *ast.MatchStmt, valueType Type, errorSetType *ErrorSetType) {
@@ -353,7 +352,6 @@ func (a *Analyzer) analyzeErrorSetMatchStmt(stmt *ast.MatchStmt, valueType Type,
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
-	a.reportNonExhaustiveMatch(stmt.Pos(), errorSetType, covered, hasWildcard)
 }
 
 func (a *Analyzer) analyzeConstEnumMatchExpr(expr *ast.MatchExpr, valueType Type, constEnumType *ConstEnumType) Type {

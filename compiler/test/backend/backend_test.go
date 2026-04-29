@@ -1963,14 +1963,14 @@ def make_pair() -> MaybeInt:
 	return MaybeInt.Pair(3, 4)
 
 def unwrap_or(value: MaybeInt, fallback: int) -> int:
-	return do:
-		match value:
-			MaybeInt.None:
-				fallback
-			MaybeInt.Some(inner):
-				inner
-			MaybeInt.Pair(left, right):
-				left + right
+	match value:
+		MaybeInt.None:
+			return fallback
+		MaybeInt.Some(inner):
+			return inner
+		MaybeInt.Pair(left, right):
+			return left + right
+	return fallback
 `
 	result := parseAndAnalyze(t, "backend_enum_match.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1993,23 +1993,23 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 	}
 }
 
-func TestGenerateLLVMIRLowersMatchExpressionsViaPhi(t *testing.T) {
+func TestGenerateLLVMIRLowersMatchStatementsWithEnumPayloads(t *testing.T) {
 	src := `enum MaybeInt:
 	None
 	Some(int)
 	Pair(int, int)
 
 def unwrap_or(value: MaybeInt, fallback: int) -> int:
-	return do:
-		match value:
-			MaybeInt.None:
-				fallback
-			MaybeInt.Some(inner):
-				inner
-			MaybeInt.Pair(left, right):
-				left + right
+	match value:
+		MaybeInt.None:
+			return fallback
+		MaybeInt.Some(inner):
+			return inner
+		MaybeInt.Pair(left, right):
+			return left + right
+	return fallback
 `
-	result := parseAndAnalyze(t, "backend_enum_match_expr.llcontext", src)
+	result := parseAndAnalyze(t, "backend_enum_match_stmt_payloads.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -2018,7 +2018,6 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 	checks := []string{
 		"%MaybeInt = type { i32, [2 x i64] }",
 		"define i64 @unwrap_or(%MaybeInt",
-		"phi i64",
 		"switch i32 %match.tag.value",
 	}
 	for _, check := range checks {
@@ -2028,18 +2027,18 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 	}
 }
 
-func TestGenerateLLVMIRLowersStringMatchExpressionsViaPhi(t *testing.T) {
+func TestGenerateLLVMIRLowersStringMatchStatementsWithTinyLiteralFastPath(t *testing.T) {
 	src := `def classify(text: StringView) -> int:
-	return do:
-		match text:
-			"if":
-				1
-			"local":
-				2
-			_:
-				0
+	match text:
+		"if":
+			return 1
+		"local":
+			return 2
+		_:
+			return 0
+	return 0
 `
-	result := parseAndAnalyze(t, "backend_string_match_expr.llcontext", src)
+	result := parseAndAnalyze(t, "backend_string_match_stmt_fast_path.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -2051,7 +2050,6 @@ func TestGenerateLLVMIRLowersStringMatchExpressionsViaPhi(t *testing.T) {
 	}
 	checks := []string{
 		"define i64 @classify(%StringView",
-		"phi i64",
 		"extractvalue %StringView",
 		"load i8, ptr",
 		"getelementptr i8, ptr",
@@ -2171,14 +2169,14 @@ enum Outer:
 	Empty
 
 def nested_value(value: Outer) -> int:
-	return do:
-		match value:
-			Outer.Wrap(Inner.A(inner)):
-				inner
-			Outer.Wrap(Inner.B):
-				0
-			Outer.Empty:
-				-1
+	match value:
+		Outer.Wrap(Inner.A(inner)):
+			return inner
+		Outer.Wrap(Inner.B):
+			return 0
+		Outer.Empty:
+			return -1
+	return 0
 `
 	result := parseAndAnalyze(t, "backend_nested_match_patterns.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2192,7 +2190,6 @@ def nested_value(value: Outer) -> int:
 		"define i64 @nested_value(%Outer",
 		"extractvalue %Outer",
 		"extractvalue %Inner",
-		"phi i64",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -2210,12 +2207,12 @@ func TestGenerateLLVMIRLowersNamedEnumPayloadPatterns(t *testing.T) {
 	Pair(left: int, right: int)
 
 def score(value: PairOrInt) -> int:
-	return do:
-		match value:
-			PairOrInt.Just(value: inner):
-				inner
-			PairOrInt.Pair(right: r, left: l):
-				l + r
+	match value:
+		PairOrInt.Just(value: inner):
+			return inner
+		PairOrInt.Pair(right: r, left: l):
+			return l + r
+	return 0
 `
 	result := parseAndAnalyze(t, "backend_enum_named_payload_patterns.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2227,7 +2224,6 @@ def score(value: PairOrInt) -> int:
 		"%PairOrInt = type { i32, [2 x i64] }",
 		"define i64 @score(%PairOrInt",
 		"extractvalue %PairOrInt",
-		"phi i64",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

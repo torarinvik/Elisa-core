@@ -1059,41 +1059,6 @@ func (p *Parser) injectNodeSpanArg(value ast.Expr, span ast.Expr) ast.Expr {
 	return value
 }
 
-func (p *Parser) parseMatchExpr() ast.Expr {
-	pos := p.cur().Pos
-	p.expect(lexer.TOKEN_MATCH)
-	value := p.parseMatchHeadExpr()
-	var store ast.Expr
-	if p.match(lexer.TOKEN_IN) {
-		store = p.parseExpr()
-	}
-	arms := p.parseMatchArms()
-	return &ast.MatchExpr{Position: pos, Value: value, Store: store, Arms: arms}
-}
-
-func (p *Parser) lowerMatchStmtExprValue(pos lexer.Pos, stmt *ast.MatchStmt) ast.Expr {
-	if stmt == nil {
-		p.errorf("expression block requires a final expression statement or match statement in the block")
-		return &ast.NullLit{Position: pos}
-	}
-	armExprs := make([]ast.MatchArm, 0, len(stmt.Arms))
-	for _, arm := range stmt.Arms {
-		if len(arm.Body) == 0 {
-			p.errorf("expression block requires each final match arm to end in an expression statement")
-			return &ast.NullLit{Position: pos}
-		}
-		exprStmt, ok := arm.Body[len(arm.Body)-1].(*ast.ExprStmt)
-		if !ok || exprStmt == nil || exprStmt.Expr == nil {
-			p.errorf("expression block requires each final match arm to end in an expression statement")
-			return &ast.NullLit{Position: pos}
-		}
-		body := append([]ast.Stmt(nil), arm.Body[:len(arm.Body)-1]...)
-		body = append(body, &ast.ExprStmt{Position: exprStmt.Position, Expr: exprStmt.Expr})
-		armExprs = append(armExprs, ast.MatchArm{Position: arm.Position, Pattern: arm.Pattern, Body: body})
-	}
-	return &ast.MatchExpr{Position: stmt.Position, Value: stmt.Value, Store: stmt.Store, Arms: armExprs}
-}
-
 func (p *Parser) parseCatchExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_CATCH)
@@ -1990,21 +1955,19 @@ func (p *Parser) parseExprBlockValue(pos lexer.Pos, flattenSingle bool) ast.Expr
 	p.expectNewline()
 	body := p.parseBlock()
 	if len(body) == 0 {
-		p.errorf("expression block requires a final expression statement or match statement in the block")
+		p.errorf("expression block requires a final expression statement in the block")
 		return &ast.NullLit{Position: pos}
 	}
 	var value ast.Expr
 	switch tail := body[len(body)-1].(type) {
 	case *ast.ExprStmt:
 		if tail == nil || tail.Expr == nil {
-			p.errorf("expression block requires a final expression statement or match statement in the block")
+			p.errorf("expression block requires a final expression statement in the block")
 			return &ast.NullLit{Position: pos}
 		}
 		value = tail.Expr
-	case *ast.MatchStmt:
-		value = p.lowerMatchStmtExprValue(pos, tail)
 	default:
-		p.errorf("expression block requires a final expression statement or match statement in the block")
+		p.errorf("expression block requires a final expression statement in the block")
 		return &ast.NullLit{Position: pos}
 	}
 	if flattenSingle && len(body) == 1 {

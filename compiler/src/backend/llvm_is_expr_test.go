@@ -126,21 +126,21 @@ def apply_stmt(op: Op) -> i64:
 			return 30
 
 def apply_expr(op: Op) -> i64:
-	return do:
-		match op:
-			Op.ADD:
-				10
-			Op.SUB:
-				20
-			Op.MUL:
-				30
+	match op:
+		Op.ADD:
+			return 10
+		Op.SUB:
+			return 20
+		Op.MUL:
+			return 30
+	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_const_enum_match.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @apply_stmt(i32 ", "define i64 @apply_expr(i32 ", "match.tag", "match.expr.phi"} {
+	for _, check := range []string{"define i64 @apply_stmt(i32 ", "define i64 @apply_expr(i32 ", "match.tag"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected const-enum match lowering to include %q, got:\n%s", check, output)
 		}

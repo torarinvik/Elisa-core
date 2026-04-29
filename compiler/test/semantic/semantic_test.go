@@ -5423,7 +5423,7 @@ def make_none() -> MaybeInt:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsMatchExpressionsAndNestedPatterns(t *testing.T) {
+func TestAnalyzeAcceptsStatementMatchesAndNestedPatterns(t *testing.T) {
 	src := `enum Inner:
 	A(int)
 	B
@@ -5433,16 +5433,16 @@ enum Outer:
 	Empty
 
 def score(value: Outer) -> int:
-	return do:
-		match value:
-			Outer.Wrap(Inner.A(inner)):
-				inner
-			Outer.Wrap(Inner.B):
-				0
-			Outer.Empty:
-				-1
+	match value:
+		Outer.Wrap(Inner.A(inner)):
+			return inner
+		Outer.Wrap(Inner.B):
+			return 0
+		Outer.Empty:
+			return -1
+	return 0
 `
-	_, errs := parseAndAnalyze(t, "enum_match_expr_nested_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_match_stmt_nested_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -5455,12 +5455,12 @@ def make_pair() -> PairOrInt:
 	return PairOrInt.Pair(3, 4)
 
 def score(value: PairOrInt) -> int:
-	return do:
-		match value:
-			PairOrInt.Just(value: inner):
-				inner
-			PairOrInt.Pair(right: r, left: l):
-				l + r
+	match value:
+		PairOrInt.Just(value: inner):
+			return inner
+		PairOrInt.Pair(right: r, left: l):
+			return l + r
+	return 0
 `
 	_, errs := parseAndAnalyze(t, "enum_named_payloads_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5483,10 +5483,10 @@ func TestAnalyzeRejectsNamedPatternsForUnnamedEnumPayloads(t *testing.T) {
 	Some(int)
 
 def unwrap(value: MaybeInt) -> int:
-	return do:
-		match value:
-			MaybeInt.Some(value: inner):
-				inner
+	match value:
+		MaybeInt.Some(value: inner):
+			return inner
+	return 0
 `
 	_, errs := parseAndAnalyze(t, "enum_named_payloads_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -5569,29 +5569,23 @@ def unwrap(value: MaybeInt) -> int:
 	}
 }
 
-func TestAnalyzeRejectsNonExhaustiveMatchesWithMissingVariants(t *testing.T) {
+func TestAnalyzeAcceptsNonExhaustiveEnumMatchStatementsWithFallthrough(t *testing.T) {
 	src := `enum MaybeInt:
 	None
 	Some(int)
 	Pair(int, int)
 
 def unwrap(value: MaybeInt) -> int:
-	return do:
-		match value:
-			MaybeInt.Some(inner):
-				inner
+	match value:
+		MaybeInt.Some(inner):
+			return inner
+	return 0
 `
 	_, errs := parseAndAnalyze(t, "enum_match_non_exhaustive.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "non-exhaustive match over \"MaybeInt\"; missing variants: MaybeInt.None, MaybeInt.Pair") {
-		t.Fatalf("expected non-exhaustive match diagnostic, got:\n%s", all)
-	}
+	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsConstEnumMatchStatementsAndExpressions(t *testing.T) {
+func TestAnalyzeAcceptsConstEnumMatchStatements(t *testing.T) {
 	src := `const enum Op of i32:
 	ADD = 1
 	SUB = 2
@@ -5607,42 +5601,36 @@ def score_stmt(op: Op) -> int:
 			return 30
 	return 0
 
-def score_expr(op: Op) -> int:
-	return do:
-		match op:
-			Op.ADD:
-				10
-			Op.SUB:
-				20
-			Op.MUL:
-				30
+def score_full(op: Op) -> int:
+	match op:
+		Op.ADD:
+			return 10
+		Op.SUB:
+			return 20
+		Op.MUL:
+			return 30
+	return 0
 `
 	_, errs := parseAndAnalyze(t, "const_enum_match_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeRejectsNonExhaustiveConstEnumMatchExpressions(t *testing.T) {
+func TestAnalyzeAcceptsNonExhaustiveConstEnumMatchStatementsWithFallthrough(t *testing.T) {
 	src := `const enum Op of i32:
 	ADD = 1
 	SUB = 2
 	MUL = 3
 
-def score_expr(op: Op) -> int:
-	return do:
-		match op:
-			Op.ADD:
-				10
-			Op.SUB:
-				20
+def score(op: Op) -> int:
+	match op:
+		Op.ADD:
+			return 10
+		Op.SUB:
+			return 20
+	return 0
 `
-	_, errs := parseAndAnalyze(t, "const_enum_match_non_exhaustive.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "non-exhaustive match over \"Op\"; missing members: Op.MUL") {
-		t.Fatalf("expected non-exhaustive const-enum match diagnostic, got:\n%s", all)
-	}
+	_, errs := parseAndAnalyze(t, "const_enum_match_stmt_non_exhaustive.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
@@ -5656,34 +5644,28 @@ func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsStringLiteralMatchExpressionOverSlice(t *testing.T) {
+func TestAnalyzeAcceptsStringLiteralMatchStatementOverSlice(t *testing.T) {
 	src := `def classify(text: dstr[row]) -> int:
-	return do:
-		match text[0:2]:
-			"if":
-				1
-			_:
-				0
+	match text[0:2]:
+		"if":
+			return 1
+		_:
+			return 0
+	return 0
 `
-	_, errs := parseAndAnalyze(t, "string_match_expr_slice_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_match_stmt_slice_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeRejectsNonExhaustiveStringMatchExpression(t *testing.T) {
+func TestAnalyzeAcceptsNonExhaustiveStringMatchStatementWithFallthrough(t *testing.T) {
 	src := `def classify(text: StringView) -> int:
-	return do:
-		match text:
-			"local":
-				1
+	match text:
+		"local":
+			return 1
+	return 0
 `
-	_, errs := parseAndAnalyze(t, "string_match_expr_non_exhaustive.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "non-exhaustive string match expression; add a final _ arm") {
-		t.Fatalf("expected non-exhaustive string-match diagnostic, got:\n%s", all)
-	}
+	_, errs := parseAndAnalyze(t, "string_match_stmt_non_exhaustive.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeRejectsShadowedStringMatchArms(t *testing.T) {
@@ -5713,12 +5695,12 @@ func TestAnalyzeAcceptsNestedStringLiteralPatterns(t *testing.T) {
 	Other
 
 def classify(value: Wrapper) -> int:
-	return do:
-		match value:
-			Wrapper.Text("local"):
-				1
-			Wrapper.Other:
-				0
+	match value:
+		Wrapper.Text("local"):
+			return 1
+		Wrapper.Other:
+			return 0
+	return 0
 `
 	result, errs := parseAndAnalyze(t, "string_match_nested_pattern_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5727,12 +5709,12 @@ def classify(value: Wrapper) -> int:
 
 func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
 	src := `def classify(value: int) -> int:
-	return do:
-		match value:
-			"local":
-				1
-			_:
-				0
+	match value:
+		"local":
+			return 1
+		_:
+			return 0
+	return 0
 `
 	_, errs := parseAndAnalyze(t, "string_match_non_string_value_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -10202,10 +10184,10 @@ func TestAnalyzeFormatsWhileConditionSViewUsingSurfaceNames(t *testing.T) {
 
 func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 	src := `def bad(values: dview[i32]) -> int:
-	return do:
-		match values:
-			_:
-				0
+	match values:
+		_:
+			return 0
+	return 0
 `
 	_, errs := parseAndAnalyze(t, "match_dview_surface_diagnostic.llcontext", src)
 	if len(errs) == 0 {

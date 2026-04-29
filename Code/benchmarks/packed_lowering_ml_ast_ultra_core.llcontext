@@ -140,20 +140,22 @@ def score_type(node: TypeExpr, forest: FrozenMlAstForest&) -> i64:
             return node.span + node.weight + label + score_type(carrier, forest) + 11
         TypeExpr.Record(label: label, field_ty: field_ty, rest: rest):
             field_ty_node: TypeExpr = field_ty
-            return node.span + node.weight + label + score_type(rest, forest) + do:
-                match field_ty in forest.types:
-                    TypeExpr.Tuple(left: left, right: right):
-                        score_type(left, forest) + score_type(right, forest) + 17
-                    _:
-                        score_type(field_ty_node, forest) + 13
+            field_extra: mutable i64 = 0
+            match field_ty in forest.types:
+                TypeExpr.Tuple(left: left, right: right):
+                    field_extra <- score_type(left, forest) + score_type(right, forest) + 17
+                _:
+                    field_extra <- score_type(field_ty_node, forest) + 13
+            return node.span + node.weight + label + score_type(rest, forest) + field_extra
         TypeExpr.App(callee: callee, arg: arg):
             callee_node: TypeExpr = callee
-            return node.span + node.weight + score_type(arg, forest) + do:
-                match callee in forest.types:
-                    TypeExpr.Arrow(param: param, result: result):
-                        score_type(param, forest) + score_type(result, forest) + 23
-                    _:
-                        score_type(callee_node, forest) + 19
+            callee_extra: mutable i64 = 0
+            match callee in forest.types:
+                TypeExpr.Arrow(param: param, result: result):
+                    callee_extra <- score_type(param, forest) + score_type(result, forest) + 23
+                _:
+                    callee_extra <- score_type(callee_node, forest) + 19
+            return node.span + node.weight + score_type(arg, forest) + callee_extra
         TypeExpr.Merge(left: left, middle: middle, right: right):
             return node.span + node.weight + score_type(left, forest) + score_type(middle, forest) + score_type(right, forest) + 31
 
