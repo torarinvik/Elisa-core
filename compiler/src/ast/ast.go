@@ -536,7 +536,7 @@ type GrammarAssignTerm struct {
 
 type GrammarReturnTerm struct {
 	Position lexer.Pos
-	Value    Expr
+	Term     GrammarTerm
 }
 
 type AttributeDecl struct {

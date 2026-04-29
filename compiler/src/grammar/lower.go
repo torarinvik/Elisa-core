@@ -1045,6 +1045,8 @@ func expandGrammarTermGrammarAliases(term ast.GrammarTerm, aliases map[string]as
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: expandGrammarTermGrammarAliases(n.Term, aliases, seen)}
 	case *ast.GrammarAssignTerm:
 		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: expandGrammarTermGrammarAliases(n.Term, aliases, seen)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: expandGrammarTermGrammarAliases(n.Term, aliases, seen)}
 	case *ast.GrammarChoiceTerm:
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: expandGrammarTermListGrammarAliases(n.Options, aliases, seen)}
 	case *ast.GrammarOptionalTerm:
@@ -1252,6 +1254,8 @@ func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings)}
 	case *ast.GrammarAssignTerm:
 		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings)}
 	case *ast.GrammarChoiceTerm:
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: expandGrammarTermListGrammarFns(n.Options, grammarFns, bindings)}
 	case *ast.GrammarOptionalTerm:
@@ -1739,7 +1743,12 @@ func grammarFirstTermsForTerm(term ast.GrammarTerm, productions map[string]resol
 			return grammarFirstTermsForTerm(n.Levels[0].Seed, productions, seen)
 		}
 		return nil, false
-	case *ast.GrammarExprTerm, *ast.GrammarSingletonTerm, *ast.GrammarEmptyTerm, *ast.GrammarConcatTerm, *ast.GrammarGuardTerm, *ast.GrammarAttemptTerm, *ast.GrammarCutTerm, *ast.GrammarReturnTerm:
+	case *ast.GrammarReturnTerm:
+		if n.Term == nil {
+			return nil, true
+		}
+		return grammarFirstTermsForTerm(n.Term, productions, seen)
+	case *ast.GrammarExprTerm, *ast.GrammarSingletonTerm, *ast.GrammarEmptyTerm, *ast.GrammarConcatTerm, *ast.GrammarGuardTerm, *ast.GrammarAttemptTerm, *ast.GrammarCutTerm:
 		return nil, true
 	case *ast.GrammarTokenSetRefTerm:
 		return []ast.GrammarTerm{term}, false
@@ -1765,6 +1774,8 @@ func resolveGrammarTermFirstSets(term ast.GrammarTerm, productions map[string]re
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermFirstSets(n.Term, productions)}
 	case *ast.GrammarAssignTerm:
 		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermFirstSets(n.Term, productions)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: resolveGrammarTermFirstSets(n.Term, productions)}
 	case *ast.GrammarChoiceTerm:
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: resolveGrammarTermListFirstSets(n.Options, productions)}
 	case *ast.GrammarOptionalTerm:
@@ -1882,6 +1893,8 @@ func resolveGrammarTermTokenSets(term ast.GrammarTerm, tokenSets map[string]ast.
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
 	case *ast.GrammarAssignTerm:
 		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
 	case *ast.GrammarChoiceTerm:
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: resolveGrammarTermListTokenSets(n.Options, tokenSets)}
 	case *ast.GrammarOptionalTerm:
@@ -2001,6 +2014,8 @@ func resolveGrammarTermRecoveryPolicies(term ast.GrammarTerm, policies map[strin
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies)}
 	case *ast.GrammarAssignTerm:
 		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies)}
 	case *ast.GrammarChoiceTerm:
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: resolveGrammarTermListRecoveryPolicies(n.Options, policies)}
 	case *ast.GrammarOptionalTerm:
@@ -2052,6 +2067,8 @@ func resolveGrammarTermInfixTables(term ast.GrammarTerm, tables map[string]ast.G
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermInfixTables(n.Term, tables)}
 	case *ast.GrammarAssignTerm:
 		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: resolveGrammarTermInfixTables(n.Term, tables)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: resolveGrammarTermInfixTables(n.Term, tables)}
 	case *ast.GrammarChoiceTerm:
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: resolveGrammarTermListInfixTables(n.Options, tables)}
 	case *ast.GrammarOptionalTerm:
@@ -2287,6 +2304,8 @@ func rewriteGrammarTermTokenAliases(term ast.GrammarTerm, aliases map[string]str
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: rewriteGrammarTermTokenAliases(n.Term, aliases)}
 	case *ast.GrammarAssignTerm:
 		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: rewriteGrammarTermTokenAliases(n.Term, aliases)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases)}
 	case *ast.GrammarChoiceTerm:
 		return &ast.GrammarChoiceTerm{Position: n.Position, Options: rewriteGrammarTermListTokenAliases(n.Options, aliases)}
 	case *ast.GrammarOptionalTerm:
@@ -2373,7 +2392,7 @@ func buildAugmentedGrammarProduction(base ast.GrammarProductionDecl, appends []a
 		resultName := grammarAugmentResultName(base.Name)
 		merged.Terms = []ast.GrammarTerm{
 			&ast.GrammarBindTerm{Position: base.Position, Name: resultName, Term: &ast.GrammarChoiceTerm{Position: base.Position, Options: options}},
-			&ast.GrammarReturnTerm{Position: base.Position, Value: &ast.Ident{Position: base.Position, Name: resultName}},
+			&ast.GrammarReturnTerm{Position: base.Position, Term: &ast.GrammarExprTerm{Position: base.Position, Expr: &ast.Ident{Position: base.Position, Name: resultName}}},
 		}
 	} else {
 		merged.Terms = []ast.GrammarTerm{&ast.GrammarChoiceTerm{Position: base.Position, Options: options}}
@@ -2613,6 +2632,9 @@ func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProduc
 		}
 		rewritten, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Term, counter)
 		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: rewritten}, helpers
+	case *ast.GrammarReturnTerm:
+		rewritten, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Term, counter)
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: rewritten}, helpers
 	case *ast.GrammarChoiceTerm:
 		options := make([]ast.GrammarTerm, 0, len(n.Options))
 		helpers := make([]ast.GrammarProductionDecl, 0)
@@ -2824,7 +2846,7 @@ func buildNamedPrecedenceHelperProduction(production ast.GrammarProductionDecl, 
 		ReturnType:   production.ReturnType,
 		Terms: []ast.GrammarTerm{
 			&ast.GrammarBindTerm{Position: level.Position, Name: resultName, Term: term},
-			&ast.GrammarReturnTerm{Position: level.Position, Value: &ast.Ident{Position: level.Position, Name: resultName}},
+			&ast.GrammarReturnTerm{Position: level.Position, Term: &ast.GrammarExprTerm{Position: level.Position, Expr: &ast.Ident{Position: level.Position, Name: resultName}}},
 		},
 	}
 }
@@ -2880,6 +2902,10 @@ func rewriteNamedPrecedenceHelperCalls(term ast.GrammarTerm, helperNames map[str
 		return n
 	case *ast.GrammarBindTerm:
 		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: rewriteNamedPrecedenceHelperCalls(n.Term, helperNames, paramArgs)}
+	case *ast.GrammarAssignTerm:
+		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: rewriteNamedPrecedenceHelperCalls(n.Term, helperNames, paramArgs)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: rewriteNamedPrecedenceHelperCalls(n.Term, helperNames, paramArgs)}
 	case *ast.GrammarChoiceTerm:
 		options := make([]ast.GrammarTerm, 0, len(n.Options))
 		for _, option := range n.Options {
@@ -3807,7 +3833,7 @@ func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snaps
 	case *ast.GrammarPassTerm:
 		return nil
 	case *ast.GrammarReturnTerm:
-		return ctx.successTupleReturnStmts(n.Position, n.Value)
+		return ctx.lowerExplicitReturnStmts(n, snapshotName)
 	case *ast.GrammarBindTerm:
 		attempt := ctx.lowerAttempt(n.Term)
 		result := append([]ast.Stmt{}, attempt.Stmts...)
@@ -3841,6 +3867,26 @@ func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snaps
 		}
 		return result
 	}
+}
+
+func (ctx *statefulLowerContext) lowerExplicitReturnStmts(term *ast.GrammarReturnTerm, snapshotName string) []ast.Stmt {
+	if term == nil {
+		return nil
+	}
+	if term.Term == nil {
+		return ctx.successTupleReturnStmts(term.Position, nil)
+	}
+	if expr, ok := term.Term.(*ast.GrammarExprTerm); ok && expr != nil {
+		return ctx.successTupleReturnStmts(term.Position, expr.Expr)
+	}
+	attempt := ctx.lowerAttempt(term.Term)
+	result := append([]ast.Stmt{}, attempt.Stmts...)
+	result = append(result, ctx.markAttemptCommittedStmts(term.Term.Pos(), attempt.Committed)...)
+	if ctx.termCanFail(term.Term) {
+		result = append(result, ctx.failureGuard(term.Term.Pos(), snapshotName, attempt.Matched)...)
+	}
+	result = append(result, ctx.successTupleReturnStmts(term.Position, attempt.Value)...)
+	return result
 }
 
 func (ctx *statefulLowerContext) callTermReturnsValue(term *ast.GrammarCallTerm) bool {
@@ -5198,6 +5244,8 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		return ctx.inferTermType(n.Seed)
 	case *ast.GrammarBindTerm:
 		return ctx.inferTermType(n.Term)
+	case *ast.GrammarReturnTerm:
+		return ctx.inferTermType(n.Term)
 	case *ast.GrammarPassTerm:
 		return grammarResolvedValueTypeExpr(n.Position, ctx.production.ReturnType)
 	}
@@ -5474,6 +5522,52 @@ func grammarTermBlockHasExplicitReturn(terms []ast.GrammarTerm) bool {
 	return false
 }
 
+func lowerReturnedGrammarTerm(ctx lowerContext, term ast.GrammarTerm) ([]ast.Stmt, ast.Expr) {
+	switch n := term.(type) {
+	case *ast.GrammarSeqTerm:
+		if n == nil {
+			return nil, nil
+		}
+		if len(n.Terms) == 0 {
+			return nil, &ast.BoolLit{Position: n.Position, Value: true}
+		}
+		body := make([]ast.Stmt, 0, len(n.Terms))
+		for _, child := range n.Terms[:len(n.Terms)-1] {
+			body = append(body, lowerTermStmt(ctx, child))
+		}
+		tailBody, tailValue := lowerReturnedGrammarTerm(ctx, n.Terms[len(n.Terms)-1])
+		body = append(body, tailBody...)
+		return body, tailValue
+	case *ast.GrammarBindTerm:
+		body, value := lowerReturnedGrammarTerm(ctx, n.Term)
+		body = append(body, &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Value: value})
+		return body, &ast.Ident{Position: n.Position, Name: n.Name}
+	case *ast.GrammarAssignTerm:
+		body, value := lowerReturnedGrammarTerm(ctx, n.Term)
+		body = append(body, &ast.AssignStmt{Position: n.Position, Target: &ast.Ident{Position: n.Position, Name: n.Name}, Value: value})
+		return body, &ast.Ident{Position: n.Position, Name: n.Name}
+	case *ast.GrammarReturnTerm:
+		if n == nil {
+			return nil, nil
+		}
+		return lowerReturnedGrammarTerm(ctx, n.Term)
+	default:
+		return nil, lowerTermExpr(ctx, term)
+	}
+}
+
+func lowerExplicitReturnStmt(ctx lowerContext, term *ast.GrammarReturnTerm) ast.Stmt {
+	if term == nil {
+		return &ast.ReturnStmt{}
+	}
+	body, value := lowerReturnedGrammarTerm(ctx, term.Term)
+	body = append(body, &ast.ReturnStmt{Position: term.Position, Value: value})
+	if len(body) == 1 {
+		return body[0]
+	}
+	return &ast.CanStmt{Position: term.Position, Permissions: grammarDefaultPermissions(term.Position), Body: body, SuppressPermissionInference: true}
+}
+
 func grammarTokenReceiverName(params []ast.ParamDecl) string {
 	for _, param := range params {
 		if param.Name == "state" {
@@ -5508,7 +5602,7 @@ func lowerTermStmt(ctx lowerContext, term ast.GrammarTerm) ast.Stmt {
 	case *ast.GrammarCutTerm:
 		return &ast.PassStmt{Position: n.Position}
 	case *ast.GrammarReturnTerm:
-		return &ast.ReturnStmt{Position: n.Position, Value: n.Value}
+		return lowerExplicitReturnStmt(ctx, n)
 	default:
 		return &ast.ExprStmt{Position: term.Pos(), Expr: lowerTermExpr(ctx, term)}
 	}
@@ -5614,7 +5708,7 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 	case *ast.GrammarPassTerm:
 		return &ast.ZeroedLit{Position: n.Position}
 	case *ast.GrammarReturnTerm:
-		return n.Value
+		return lowerTermExpr(ctx, n.Term)
 	default:
 		return &ast.Ident{Position: term.Pos(), Name: "<invalid_grammar_term>"}
 	}
@@ -5825,6 +5919,8 @@ func inferLowerContextTermType(term ast.GrammarTerm, fallback ast.TypeExpr) ast.
 		}
 		return inferLowerContextTermType(n.Seed, fallback)
 	case *ast.GrammarBindTerm:
+		return inferLowerContextTermType(n.Term, fallback)
+	case *ast.GrammarReturnTerm:
 		return inferLowerContextTermType(n.Term, fallback)
 	case *ast.GrammarPassTerm:
 		return fallback

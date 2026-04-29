@@ -642,6 +642,8 @@ func grammarAliasRefs(term ast.GrammarTerm, aliases map[string]ast.GrammarAliasD
 			walk(n.Term)
 		case *ast.GrammarAssignTerm:
 			walk(n.Term)
+		case *ast.GrammarReturnTerm:
+			walk(n.Term)
 		case *ast.GrammarChoiceTerm:
 			for _, option := range n.Options {
 				walk(option)
@@ -920,6 +922,8 @@ func (p *Parser) validateGrammarFnApplicationInTerm(term ast.GrammarTerm, gramma
 		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, aliases, tokenSetNames)
 	case *ast.GrammarAssignTerm:
 		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, aliases, tokenSetNames)
+	case *ast.GrammarReturnTerm:
+		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, aliases, tokenSetNames)
 	case *ast.GrammarChoiceTerm:
 		p.validateGrammarFnApplicationsInTerms(n.Options, grammarFns, aliases, tokenSetNames)
 	case *ast.GrammarOptionalTerm:
@@ -1146,7 +1150,9 @@ func (p *Parser) validateGrammarProductionTerm(productionName string, term ast.G
 	case *ast.GrammarAssignTerm:
 		p.validateGrammarProductionTerm(productionName, n.Term)
 	case *ast.GrammarReturnTerm:
-		// valid
+		if n.Term != nil {
+			p.validateGrammarProductionTerm(productionName, n.Term)
+		}
 	case *ast.GrammarPassTerm:
 		// valid
 	case *ast.GrammarSeqTerm:
@@ -1432,11 +1438,7 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		return &ast.GrammarPassTerm{Position: pos}
 	}
 	if p.peek() == lexer.TOKEN_RETURN {
-		pos := p.cur().Pos
-		p.advance()
-		value := p.parseExpr()
-		p.expectNewline()
-		return &ast.GrammarReturnTerm{Position: pos, Value: value}
+		return p.parseGrammarReturnTerm()
 	}
 	if p.peekGrammarPrecedenceTerm() {
 		return p.parseGrammarPrecedenceTerm()
@@ -1484,6 +1486,24 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		p.expectNewline()
 	}
 	return term
+}
+
+func (p *Parser) parseGrammarReturnTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.advance()
+	term := p.parseGrammarReturnValueTerm()
+	if grammarTermNeedsTrailingNewline(term, p.peek()) {
+		p.expectNewline()
+	}
+	return &ast.GrammarReturnTerm{Position: pos, Term: term}
+}
+
+func (p *Parser) parseGrammarReturnValueTerm() ast.GrammarTerm {
+	if p.peekIdentText("seq") {
+		return p.parseGrammarSeqTerm()
+	}
+	expr := p.parseExpr()
+	return &ast.GrammarExprTerm{Position: expr.Pos(), Expr: expr}
 }
 
 func grammarTermNeedsTrailingNewline(term ast.GrammarTerm, next lexer.TokenKind) bool {

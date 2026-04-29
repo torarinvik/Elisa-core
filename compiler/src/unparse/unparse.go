@@ -859,6 +859,14 @@ func formatGrammarRecoverPolicyUse(name string) string {
 }
 
 func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
+	if ret, ok := term.(*ast.GrammarReturnTerm); ok {
+		if seq, ok := ret.Term.(*ast.GrammarSeqTerm); ok {
+			f.writeReturnSeqTerm(level, seq)
+			return
+		}
+		f.writeLine(level, formatGrammarTerm(ret))
+		return
+	}
 	if bind, ok := term.(*ast.GrammarBindTerm); ok {
 		if tokenKind, ok := bind.Term.(*ast.GrammarTokenKindTerm); ok {
 			f.writeLine(level, "."+tokenKind.Kind+"("+bind.Name+")")
@@ -1014,6 +1022,17 @@ func (f *formatter) writeSeqTerm(level int, seq *ast.GrammarSeqTerm) {
 		return
 	}
 	f.writeLine(level, "seq:")
+	for _, term := range seq.Terms {
+		f.writeGrammarTerm(level+1, term)
+	}
+}
+
+func (f *formatter) writeReturnSeqTerm(level int, seq *ast.GrammarSeqTerm) {
+	if seq == nil {
+		f.writeLine(level, "return <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, "return seq:")
 	for _, term := range seq.Terms {
 		f.writeGrammarTerm(level+1, term)
 	}
@@ -1176,6 +1195,16 @@ func formatGrammarBinding(binding *ast.GrammarBindTerm) string {
 		return "." + tokenKind.Kind + "(" + binding.Name + ")"
 	}
 	return binding.Name + " = " + formatGrammarTerm(binding.Term)
+}
+
+func formatGrammarReturnPayload(term ast.GrammarTerm) string {
+	if term == nil {
+		return "<invalid_grammar_term>"
+	}
+	if expr, ok := term.(*ast.GrammarExprTerm); ok && expr != nil && expr.Type == nil {
+		return formatExpr(expr.Expr)
+	}
+	return formatGrammarTerm(term)
 }
 
 func formatGrammarPrefixSugar(seq *ast.GrammarSeqTerm) (string, bool) {
@@ -1357,7 +1386,7 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	case *ast.GrammarAssignTerm:
 		return n.Name + " <- " + formatGrammarTerm(n.Term)
 	case *ast.GrammarReturnTerm:
-		return "return " + formatExpr(n.Value)
+		return "return " + formatGrammarReturnPayload(n.Term)
 	default:
 		return "<grammar-term>"
 	}

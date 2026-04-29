@@ -1432,13 +1432,60 @@ func TestParseGrammarDeclAllowsExplicitReturnTerm(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected second term to be explicit return, got %T", decl.Productions[0].Terms[1])
 	}
-	if _, ok := ret.Value.(*ast.BinaryExpr); !ok {
-		t.Fatalf("expected return term to carry expression AST, got %T", ret.Value)
+	expr, ok := ret.Term.(*ast.GrammarExprTerm)
+	if !ok {
+		t.Fatalf("expected return term to wrap a grammar expr term, got %T", ret.Term)
+	}
+	if _, ok := expr.Expr.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected return term to carry expression AST, got %T", expr.Expr)
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"value = helper()",
 		"return (value + 1)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsReturnSeqBlockTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar Demo:
+    produce() -> Token:
+        return seq:
+            .IDENT(token)
+            expr(token)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	ret, ok := decl.Productions[0].Terms[0].(*ast.GrammarReturnTerm)
+	if !ok {
+		t.Fatalf("expected first term to be explicit return, got %T", decl.Productions[0].Terms[0])
+	}
+	seq, ok := ret.Term.(*ast.GrammarSeqTerm)
+	if !ok {
+		t.Fatalf("expected return term to hold seq block, got %T", ret.Term)
+	}
+	if len(seq.Terms) != 2 {
+		t.Fatalf("expected return seq to contain 2 terms, got %d", len(seq.Terms))
+	}
+	if _, ok := seq.Terms[0].(*ast.GrammarBindTerm); !ok {
+		t.Fatalf("expected first return seq term to bind token, got %T", seq.Terms[0])
+	}
+	if _, ok := seq.Terms[1].(*ast.GrammarExprTerm); !ok {
+		t.Fatalf("expected second return seq term to be expr term, got %T", seq.Terms[1])
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"return seq:",
+		".IDENT(token)",
+		"expr(token)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)

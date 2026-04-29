@@ -3383,3 +3383,85 @@ func TestLowerDeclPreservesExplicitReturnWithoutPlaceholder(t *testing.T) {
 		t.Fatalf("expected explicit return to suppress placeholder zeroed return, got:\n%s", formatted)
 	}
 }
+
+func TestLowerDeclPreservesReturnSeqBlockTermWithoutPlaceholder(t *testing.T) {
+	decl := parseGrammarTestDecl(t, `grammar Demo:
+    produce() -> i64:
+        return seq:
+            value = expr(helper())
+            expr(value + 1)
+`)
+	funcs := LowerDecl(decl)
+	if len(funcs) != 1 {
+		t.Fatalf("expected one lowered function, got %d", len(funcs))
+	}
+	fn := funcs[0]
+	if len(fn.Body) != 1 {
+		t.Fatalf("expected explicit return seq to lower into one block stmt, got %d statements", len(fn.Body))
+	}
+	if _, ok := fn.Body[0].(*ast.CanStmt); !ok {
+		t.Fatalf("expected lowered explicit return seq to use a block stmt, got %T", fn.Body[0])
+	}
+	formatted := unparse.FormatDecl(fn)
+	for _, want := range []string{
+		"value = helper()",
+		"return (value + 1)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered return seq to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "zeroed") {
+		t.Fatalf("expected explicit return seq to suppress placeholder zeroed return, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileReturnSeqResolvesNestedFlatRepeatUntil(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct Token:
+	kind: TokenKind
+
+struct ParserState:
+	cursor: mutable usize
+
+const enum TokenKind of i16:
+	EOF = 0
+	RESOURCESTRING = 1
+	IDENT = 2
+	TYPE = 3
+
+grammarenv DemoEnv over Token using ParserState:
+	cursor state
+	token_kind TokenKind
+	eof TokenKind.EOF
+	token_field kind
+	current current_token
+	advance advance_token
+	expect_kind expect_kind
+
+grammar Demo with DemoEnv:
+	token:
+		RESOURCESTRING
+		IDENT
+		TYPE
+	tokenset SectionSync:
+		TYPE
+		token(TokenKind.EOF)
+	item() -> darray[Token]:
+		token = .IDENT
+		return singleton[Token](token)
+	section() -> darray[Token]:
+		return seq:
+			.RESOURCESTRING
+			flatrepeat item() until(SectionSync)
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.current_token().kind == TokenKind.TYPE",
+		"state.current_token().kind == TokenKind.EOF",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered return seq flatrepeat until to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
