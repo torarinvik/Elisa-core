@@ -30,24 +30,6 @@ func stmtReferencesVariantFields(stmt ast.Stmt, name string) bool {
 		return exprReferencesVariantFields(n.Value, name)
 	case *ast.MoveBindStmt:
 		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name)
-	case *ast.OpenStmt:
-		if exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name) {
-			return true
-		}
-		for _, inner := range n.Body {
-			if stmtReferencesVariantFields(inner, name) {
-				return true
-			}
-		}
-	case *ast.ViewStmt:
-		if exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name) {
-			return true
-		}
-		for _, inner := range n.Body {
-			if stmtReferencesVariantFields(inner, name) {
-				return true
-			}
-		}
 	case *ast.AssignStmt:
 		return exprReferencesVariantFields(n.Target, name) || exprReferencesVariantFields(n.Value, name)
 	case *ast.AugAssignStmt:

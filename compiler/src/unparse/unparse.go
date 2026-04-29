@@ -1623,26 +1623,6 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 		line += " as " + formatMoveBindPattern(n.Pattern)
 		f.writePrefixedMultiline(level, "", line)
-	case *ast.OpenStmt:
-		line := "open " + formatExpr(n.Value)
-		if n.Store != nil {
-			line += " in " + formatExpr(n.Store)
-		}
-		line += " as " + formatMoveBindVariantPattern(n.Pattern) + ":"
-		f.writeLine(level, line)
-		for _, stmt := range n.Body {
-			f.writeStmt(level+1, stmt)
-		}
-	case *ast.ViewStmt:
-		line := "view " + formatExpr(n.Value)
-		if n.Store != nil {
-			line += " in " + formatExpr(n.Store)
-		}
-		line += " as " + formatViewBindPattern(n.Pattern) + ":"
-		f.writeLine(level, line)
-		for _, stmt := range n.Body {
-			f.writeStmt(level+1, stmt)
-		}
 	case *ast.DeferStmt:
 		mode := "block"
 		if n.Mode == ast.DeferModeFunction {
@@ -3016,28 +2996,6 @@ func formatMoveBindPattern(pattern ast.MoveBindPattern) string {
 func formatMoveBindVariantPattern(pattern *ast.MoveBindVariantPattern) string {
 	if pattern == nil {
 		return "<move-variant-pattern>"
-	}
-	parts := make([]string, 0, len(pattern.Args))
-	for _, arg := range pattern.Args {
-		if arg.Name != "" {
-			parts = append(parts, arg.Name+": "+formatMatchPattern(arg.Pattern))
-		} else {
-			parts = append(parts, formatMatchPattern(arg.Pattern))
-		}
-	}
-	line := pattern.EnumName + "." + pattern.Variant
-	if len(parts) != 0 {
-		line += "(" + strings.Join(parts, ", ") + ")"
-	}
-	return line
-}
-
-func formatViewBindPattern(pattern *ast.ViewBindPattern) string {
-	if pattern == nil {
-		return "<view-pattern>"
-	}
-	if pattern.Name != "" {
-		return pattern.EnumName + "." + pattern.Variant + "(" + pattern.Name + ")"
 	}
 	parts := make([]string, 0, len(pattern.Args))
 	for _, arg := range pattern.Args {

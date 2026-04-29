@@ -201,7 +201,7 @@ Implemented packed destructuring uses:
 
 ```context
 move expr in store as Expr.Add(left, right)
-open expr in store as Expr.Add(Expr.Int(value), rhs):
+if expr in store as Expr.Add(Expr.Int(value), rhs):
   return value
 ```
 
@@ -232,7 +232,7 @@ So:
 - packed enums may contain copyable payloads
 - packed enums may also contain `Thread[...]`, `Task[...]`, `MutexGuard[...]`, user-declared `affine struct` values, or aggregates containing them
 - when a packed enum contains any affine common field or payload, the packed handle itself becomes affine
-- successful packed destructuring (`match`, `open`, or `view`) consumes that affine packed handle after the payload bindings are introduced
+- successful packed destructuring (`match` or `if ... as`) consumes that affine packed handle after the payload bindings are introduced
 
 This keeps the rule orthogonal: packedness still describes layout, while
 affinity still comes from the values stored inside the packed carrier.
@@ -346,7 +346,7 @@ Examples:
 result: i64 = join(move worker)
 move job as Job(thread, priority)
 move node in store as Expr.Add(left, right)
-open node as Expr.Add(Expr.Int(value), rhs):
+if node as Expr.Add(Expr.Int(value), rhs):
   _ = rhs
   return value
 detach(move thread)
@@ -491,9 +491,9 @@ The backend should keep the same separation.
 - first-class packed variant witnesses should surface as `packedview[Enum.Variant]`
   so they can be passed, returned, and stored without inventing a second proof
   vocabulary
-- a successful packed pattern should refine the scrutinee itself to that
+- a successful packed pattern refines the scrutinee itself to that
   `packedview[Enum.Variant]` for the whole matching branch or arm, making
-  explicit `view`/`open` forms optional sugar instead of required ceremony
+  separate `view`/`open` statement forms unnecessary
 
 ### Region lowering
 

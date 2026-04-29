@@ -282,15 +282,14 @@ Current packed-enum rules:
 
 - packed values are handle-backed and must be created with `new[store] Enum.Variant(...)`
 - `Enum.Store` is the explicit per-enum store constructor surface
-- packed control-flow and projection forms (`match`, `open`, `view`, `move-as`, and ownerless `new`) can infer the active store when a matching `Enum.Store[...]` is already in scope
-- first-class `packedview[Enum.Variant]` carriers also provide the omitted-store context for packed `open` / `view` / `move-as`, so those forms do not need a separate `in store` clause when operating on the view itself
-- packed values loaded from an exact `Enum.Store[...]` index root (including immutable whole-value aliases of those loads, and store-bearing field projections such as `box.store[index]`) also carry enough provenance for omitted-store `match` / `open` / `view` / `move-as`
+- packed control-flow and projection forms (`match`, `if ... as`, `move-as`, and ownerless `new`) can infer the active store when a matching `Enum.Store[...]` is already in scope
+- first-class `packedview[Enum.Variant]` carriers also provide the omitted-store context for packed `if ... as` / `move-as`, so those forms do not need a separate `in store` clause when operating on the view itself
+- packed values loaded from an exact `Enum.Store[...]` index root (including immutable whole-value aliases of those loads, and store-bearing field projections such as `box.store[index]`) also carry enough provenance for omitted-store `match` / `if ... as` / `move-as`
 - packed `common:` fields are readable on the packed handle (`node.span`)
 - packed `common:` fields can be initialized by name during allocation; omitted common fields remain zero-initialized
 - packed variants may include one tail payload, which lowers as a `dview[...]` regardless of where that payload appears in the variant field list
-- packed enums may carry affine common fields and affine payloads; when they do, the packed handle becomes affine and packed destructuring forms consume that handle after a successful `match`, `open`, or `view`
-- `view value as Enum.Variant(alias):` still binds a first-class `packedview[Enum.Variant]` alias, while `view value as Enum.Variant(field: x, ...)` and multi-payload positional forms now destructure payloads directly
-- inside a successful `view` body, identifier scrutinees are also refined to `packedview[Enum.Variant]`, so variant fields can be read from the viewed value directly
+- packed enums may carry affine common fields and affine payloads; when they do, the packed handle becomes affine and packed destructuring forms consume that handle after a successful `match` or `if ... as`
+- inside a successful `if ... as` branch or `match` arm, identifier scrutinees are refined to `packedview[Enum.Variant]`, so variant fields can be read from the refined value directly
 
 For a compile-checked end-to-end example, see `../Code/test_programs/packed_enum_common.llcontext`.
 
@@ -305,7 +304,7 @@ def build(owner: Arena) -> Expr:
     return new Expr.Add(span: 3, left: left, right: right)
 ```
 
-Inside an active store context — whether introduced by `in store:` or by an in-scope `Enum.Store[...]` local/parameter — packed allocations can omit `[store]`, packed matches can omit `in store`, and `open`/`view`/`move-as` can omit their store clause; the same omitted-store forms also work when the packed value itself is proven to come from an exact store-index root. All forms still lower to the same explicit-store representation.
+Inside an active store context — whether introduced by `in store:` or by an in-scope `Enum.Store[...]` local/parameter — packed allocations can omit `[store]`, packed matches can omit `in store`, and `if ... as` / `move-as` can omit their store clause; the same omitted-store forms also work when the packed value itself is proven to come from an exact store-index root. All forms still lower to the same explicit-store representation.
 
 ## Frozen packed projections
 

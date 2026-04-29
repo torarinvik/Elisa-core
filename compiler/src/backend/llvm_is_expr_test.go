@@ -491,13 +491,14 @@ def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binar
 	return view_node
 
 def child_span(node: Lua.Expr) -> i64:
-	view node as Lua.Expr.Binary(binary):
+	if node as Lua.Expr.Binary:
+		binary: treeview[Lua.Expr.Binary] = node
 		kept: treeview[Lua.Expr.Binary] = keep_binary(binary)
 		return kept.left.span + binary.right.span + node.left.span
 	return node.span
 
 def left_value(node: Lua.Expr) -> i64:
-	open node as Lua.Expr.Binary(Lua.Expr.Int(value), rhs):
+	if node as Lua.Expr.Binary(Lua.Expr.Int(value), rhs):
 		return value + rhs.span
 	return node.span
 `
@@ -506,13 +507,13 @@ def left_value(node: Lua.Expr) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @child_span(%Lua__TreeHandle ", "define i64 @left_value(%Lua__TreeHandle ", "call %Lua__TreeHandle @keep_binary(%Lua__TreeHandle ", "match.tree.tag", "tree.field.column.ptr", "call void @llvm.trap()"} {
+	for _, check := range []string{"define i64 @child_span(%Lua__TreeHandle ", "define i64 @left_value(%Lua__TreeHandle ", "call %Lua__TreeHandle @keep_binary(%Lua__TreeHandle ", "match.tree.tag", "tree.field.column.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree open/view lowering to include %q, got:\n%s", check, output)
 		}
 	}
 	if strings.Contains(output, "TreeView__") || strings.Contains(output, "treeview.handle") {
-		t.Fatalf("expected tree open/view lowering to keep treeview as the existing tree handle carrier, got:\n%s", output)
+		t.Fatalf("expected tree if-pattern lowering to keep treeview as the existing tree handle carrier, got:\n%s", output)
 	}
 }
 

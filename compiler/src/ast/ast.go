@@ -1460,14 +1460,6 @@ type MoveBindVariantPattern struct {
 	Args     []MatchPatternArg
 }
 
-type ViewBindPattern struct {
-	Position lexer.Pos
-	EnumName string
-	Variant  string
-	Name     string
-	Args     []MatchPatternArg
-}
-
 type MoveBindArg struct {
 	Position lexer.Pos
 	Field    string
@@ -1537,22 +1529,6 @@ type MoveBindStmt struct {
 	Value    Expr
 	Store    Expr
 	Pattern  MoveBindPattern
-}
-
-type OpenStmt struct {
-	Position lexer.Pos
-	Value    Expr
-	Store    Expr
-	Pattern  *MoveBindVariantPattern
-	Body     []Stmt
-}
-
-type ViewStmt struct {
-	Position lexer.Pos
-	Value    Expr
-	Store    Expr
-	Pattern  *ViewBindPattern
-	Body     []Stmt
 }
 
 type DeferMode int
@@ -2019,7 +1995,6 @@ func (n *MoveBindStructPattern) Pos() lexer.Pos {
 }
 func (n *MoveBindTuplePattern) Pos() lexer.Pos   { return n.Position }
 func (n *MoveBindVariantPattern) Pos() lexer.Pos { return n.Position }
-func (n *ViewBindPattern) Pos() lexer.Pos        { return n.Position }
 func (n *AssignStmt) Pos() lexer.Pos             { return n.Position }
 func (n *AugAssignStmt) Pos() lexer.Pos          { return n.Position }
 func (n *AsRefAssignStmt) Pos() lexer.Pos        { return n.Position }
@@ -2028,8 +2003,6 @@ func (n *LocalParamsStmt) Pos() lexer.Pos        { return n.Position }
 func (n *LetDestructureStmt) Pos() lexer.Pos     { return n.Position }
 func (n *TupleBindStmt) Pos() lexer.Pos          { return n.Position }
 func (n *MoveBindStmt) Pos() lexer.Pos           { return n.Position }
-func (n *OpenStmt) Pos() lexer.Pos               { return n.Position }
-func (n *ViewStmt) Pos() lexer.Pos               { return n.Position }
 func (n *DeferStmt) Pos() lexer.Pos              { return n.Position }
 func (n *ReturnStmt) Pos() lexer.Pos             { return n.Position }
 func (n *IfStmt) Pos() lexer.Pos                 { return n.Position }
@@ -2199,7 +2172,6 @@ func (*MoveBindNamePattern) nodeTag()       {}
 func (*MoveBindStructPattern) nodeTag()     {}
 func (*MoveBindTuplePattern) nodeTag()      {}
 func (*MoveBindVariantPattern) nodeTag()    {}
-func (*ViewBindPattern) nodeTag()           {}
 func (*AssignStmt) nodeTag()                {}
 func (*AugAssignStmt) nodeTag()             {}
 func (*AsRefAssignStmt) nodeTag()           {}
@@ -2208,8 +2180,6 @@ func (*LocalParamsStmt) nodeTag()           {}
 func (*LetDestructureStmt) nodeTag()        {}
 func (*TupleBindStmt) nodeTag()             {}
 func (*MoveBindStmt) nodeTag()              {}
-func (*OpenStmt) nodeTag()                  {}
-func (*ViewStmt) nodeTag()                  {}
 func (*DeferStmt) nodeTag()                 {}
 func (*ReturnStmt) nodeTag()                {}
 func (*IfStmt) nodeTag()                    {}
@@ -2395,8 +2365,6 @@ func (*LocalParamsStmt) stmtTag()       {}
 func (*LetDestructureStmt) stmtTag()    {}
 func (*TupleBindStmt) stmtTag()         {}
 func (*MoveBindStmt) stmtTag()          {}
-func (*OpenStmt) stmtTag()              {}
-func (*ViewStmt) stmtTag()              {}
 func (*DeferStmt) stmtTag()             {}
 func (*ReturnStmt) stmtTag()            {}
 func (*IfStmt) stmtTag()                {}

@@ -89,16 +89,6 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Value)
 		c.countExpr(n.Store)
 		c.countMoveBindPattern(n.Pattern)
-	case *ast.OpenStmt:
-		c.countExpr(n.Value)
-		c.countExpr(n.Store)
-		c.countMoveBindPattern(n.Pattern)
-		c.countStmts(n.Body)
-	case *ast.ViewStmt:
-		c.countExpr(n.Value)
-		c.countExpr(n.Store)
-		c.countViewBindPattern(n.Pattern)
-		c.countStmts(n.Body)
 	case *ast.ArgsScopeStmt:
 		for _, arg := range n.Args {
 			c.countExpr(arg.Value)
@@ -321,14 +311,5 @@ func (c *analyzerASTCensus) countMoveBindPattern(pattern ast.MoveBindPattern) {
 		for _, arg := range n.Args {
 			c.countMatchPattern(arg.Pattern)
 		}
-	}
-}
-
-func (c *analyzerASTCensus) countViewBindPattern(pattern *ast.ViewBindPattern) {
-	if pattern == nil {
-		return
-	}
-	for _, arg := range pattern.Args {
-		c.countMatchPattern(arg.Pattern)
 	}
 }

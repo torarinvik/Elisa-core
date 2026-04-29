@@ -62,12 +62,6 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Workers)
 	case *ast.LockStmt:
 		appendBasicFlowExprInstrs(block, n.Mutex)
-	case *ast.OpenStmt:
-		appendBasicFlowExprInstrs(block, n.Value)
-		appendBasicFlowExprInstrs(block, n.Store)
-	case *ast.ViewStmt:
-		appendBasicFlowExprInstrs(block, n.Value)
-		appendBasicFlowExprInstrs(block, n.Store)
 	case *ast.ArgsScopeStmt:
 		for _, arg := range n.Args {
 			appendBasicFlowExprInstrs(block, arg.Value)

@@ -89,14 +89,6 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeLocalBundleStmt() {
 				return p.parseLocalBundleStmt()
 			}
-		case "open":
-			if p.looksLikeOpenOrViewStmt() {
-				return p.parseOpenStmt()
-			}
-		case "view":
-			if p.looksLikeOpenOrViewStmt() {
-				return p.parseViewStmt()
-			}
 		case "lock":
 			if p.looksLikeLockStmt() {
 				return p.parseLockStmt()
@@ -467,33 +459,6 @@ func (p *Parser) looksLikeLockStmt() bool {
 	return false
 }
 
-func (p *Parser) looksLikeOpenOrViewStmt() bool {
-	depth := 0
-	seenAs := false
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
-		switch tok.Kind {
-		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
-			depth++
-		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
-			if depth > 0 {
-				depth--
-			}
-		case lexer.TOKEN_AS:
-			if depth == 0 {
-				seenAs = true
-			}
-		case lexer.TOKEN_COLON:
-			if depth == 0 {
-				return seenAs
-			}
-		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
-			return false
-		}
-	}
-	return false
-}
-
 func (p *Parser) parsePoolStmt() *ast.PoolStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("pool")
@@ -788,65 +753,6 @@ func (p *Parser) parseInStore() *ast.InStoreStmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.InStoreStmt{Position: pos, Store: store, Body: body}
-}
-
-func (p *Parser) parseOpenStmt() *ast.OpenStmt {
-	pos := p.cur().Pos
-	p.expectIdentText("open")
-	value := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
-	var store ast.Expr
-	if p.match(lexer.TOKEN_IN) {
-		store = p.withAsCastDisabled(p.parseExpr)
-	}
-	p.expect(lexer.TOKEN_AS)
-	pattern := p.parseMoveBindPattern()
-	variantPattern, ok := pattern.(*ast.MoveBindVariantPattern)
-	if !ok {
-		p.errorf("open requires Enum.Variant(...) payload binding syntax")
-		variantPattern = &ast.MoveBindVariantPattern{Position: pos}
-	}
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	body := p.parseBlock()
-	return &ast.OpenStmt{Position: pos, Value: value, Store: store, Pattern: variantPattern, Body: body}
-}
-
-func (p *Parser) parseViewStmt() *ast.ViewStmt {
-	pos := p.cur().Pos
-	p.expectIdentText("view")
-	value := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
-	var store ast.Expr
-	if p.match(lexer.TOKEN_IN) {
-		store = p.withAsCastDisabled(p.parseExpr)
-	}
-	p.expect(lexer.TOKEN_AS)
-	pattern := p.parseViewBindPattern()
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	body := p.parseBlock()
-	return &ast.ViewStmt{Position: pos, Value: value, Store: store, Pattern: pattern, Body: body}
-}
-
-func (p *Parser) parseViewBindPattern() *ast.ViewBindPattern {
-	enumName, variant, pos := p.parseQualifiedVariantTarget()
-	p.expect(lexer.TOKEN_LPAREN)
-	pattern := &ast.ViewBindPattern{Position: pos, EnumName: enumName, Variant: variant}
-	if p.match(lexer.TOKEN_RPAREN) {
-		return pattern
-	}
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
-		pattern.Name = p.expect(lexer.TOKEN_IDENT).Text
-		p.expect(lexer.TOKEN_RPAREN)
-		return pattern
-	}
-	for {
-		pattern.Args = append(pattern.Args, p.parseMoveBindVariantArg())
-		if !p.match(lexer.TOKEN_COMMA) {
-			break
-		}
-	}
-	p.expect(lexer.TOKEN_RPAREN)
-	return pattern
 }
 
 func (p *Parser) parseCanStmt() *ast.CanStmt {

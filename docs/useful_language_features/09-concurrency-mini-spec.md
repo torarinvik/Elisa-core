@@ -545,7 +545,7 @@ Rules:
 - `Expr.Store(owner)` returns `Expr.Store[Local]`
 - `new[store] Expr.Variant(...)` requires `store : Expr.Store[Local]`
 - `match node in store:` accepts either `Expr.Store[Local]` or `Expr.Store[Frozen]`
-- `move/open/view ... as Expr.Variant(...)` accept the same nested payload-pattern grammar as `match`
+- `move ... as Expr.Variant(...)` and `if ... as Expr.Variant(...)` accept the same nested payload-pattern grammar as `match`
 - packed-store provenance is structural and recursive through aggregates,
   arrays, views, helper returns, and destructuring binders
 - `freeze(move store)` remaps nested dependencies structurally from
@@ -714,7 +714,7 @@ packed enum Expr:
     Add(left: Expr, right: Expr)
 
 def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
-    open node as Expr.Add(Expr.Int(value), rhs):
+    if node as Expr.Add(Expr.Int(value), rhs):
         _ = rhs
         return value
     return 0

@@ -72,14 +72,6 @@ func (a *Analyzer) validateDeferStmtBodyStmt(stmt ast.Stmt) {
 	case *ast.MoveBindStmt:
 		a.validateDeferStmtBodyExpr(n.Value)
 		a.validateDeferStmtBodyExpr(n.Store)
-	case *ast.OpenStmt:
-		a.validateDeferStmtBodyExpr(n.Value)
-		a.validateDeferStmtBodyExpr(n.Store)
-		a.validateDeferStmtBody(n.Body)
-	case *ast.ViewStmt:
-		a.validateDeferStmtBodyExpr(n.Value)
-		a.validateDeferStmtBodyExpr(n.Store)
-		a.validateDeferStmtBody(n.Body)
 	case *ast.DeferStmt:
 		a.errorf(n.Pos(), "nested defer is not supported inside defer bodies")
 		a.validateDeferStmtBody(n.Body)

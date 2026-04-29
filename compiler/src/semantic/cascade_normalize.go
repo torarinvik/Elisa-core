@@ -88,16 +88,8 @@ func normalizeCascadeStmt(stmt ast.Stmt, target ast.Expr) []ast.Stmt {
 	case *ast.CascadeStmt:
 		n.Target = rewriteCascadeStmtHeadExpr(normalizeCascadeExpr(n.Target, target, true), target)
 		return normalizeCascadeStmtList(n.Body, n.Target)
-	case *ast.OpenStmt:
-		n.Value = normalizeCascadeExpr(n.Value, target, false)
-		n.Store = normalizeCascadeExpr(n.Store, target, false)
-		n.Body = normalizeCascadeStmtList(n.Body, target)
 	case *ast.LocalParamsStmt:
 		normalizeCascadeParams(n.Params)
-	case *ast.ViewStmt:
-		n.Value = normalizeCascadeExpr(n.Value, target, false)
-		n.Store = normalizeCascadeExpr(n.Store, target, false)
-		n.Body = normalizeCascadeStmtList(n.Body, target)
 	case *ast.DeferStmt:
 		n.Body = normalizeCascadeStmtList(n.Body, target)
 	case *ast.IfStmt:

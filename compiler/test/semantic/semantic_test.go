@@ -6607,7 +6607,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsViewStmtForUnnamedPackedVariantWithInferredStore(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternBindingPackedViewAliasWithInferredStore(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
@@ -6616,90 +6616,92 @@ func TestAnalyzeAcceptsViewStmtForUnnamedPackedVariantWithInferredStore(t *testi
 
 def read(node: Expr, store: Expr.Store[Local]) -> int:
 	in store:
-		view node as Expr.Int(lit):
+		if node as Expr.Int:
+			lit: packedview[Expr.Int] = node
 			return lit.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_view_unnamed_payload_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_view_alias_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsViewStmtWithActiveStoreParam(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternBindingPackedViewAliasWithActiveStoreParam(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
 	Int(value: int)
 
 def read(node: Expr, store: Expr.Store[Frozen]) -> int:
-	view node as Expr.Int(lit):
+	if node as Expr.Int:
+		lit: packedview[Expr.Int] = node
 		return lit.value + lit.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_view_active_store_param_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_view_alias_active_store_param_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsViewStmtWithNestedPackedVariantPattern(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithNestedPackedVariantPattern(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
 	Add(left: Expr, right: Expr)
 
 def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
-	view node as Expr.Add(Expr.Int(value), rhs):
+	if node as Expr.Add(Expr.Int(value), rhs):
 		_ = rhs
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_view_nested_pattern_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_nested_pattern_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsViewStmtWithNamedPayloadDestructureAndRefinedScrutinee(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithNamedPayloadDestructureAndRefinedScrutinee(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
 	Int(value: int)
 
 def read(node: Expr, store: Expr.Store[Frozen]) -> int:
-	view node as Expr.Int(value: value):
+	if node as Expr.Int(value: value):
 		return value + node.value + node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_view_named_destructure_refined_scrutinee_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_named_destructure_refined_scrutinee_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsViewStmtWithPackedViewParamWithoutStoreClause(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithPackedViewParamWithoutStoreClause(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
 	Int(value: int)
 
 def read(view_node: packedview[Expr.Int]) -> int:
-	view view_node as Expr.Int(value: value):
+	if view_node as Expr.Int(value: value):
 		return value + view_node.value + view_node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_view_packedview_param_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_packedview_param_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsViewStmtWithUnnamedPayloadDestructure(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithUnnamedPayloadDestructure(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
 	Pair(int, int)
 
 def read(node: Expr, store: Expr.Store[Frozen]) -> int:
-	view node as Expr.Pair(left, right):
+	if node as Expr.Pair(left, right):
 		return left + right + node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_view_unnamed_destructure_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_unnamed_destructure_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsViewStmtWithDirectFieldProjectionWithoutStoreClause(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithDirectFieldProjectionWithoutStoreClause(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
@@ -6710,60 +6712,60 @@ struct RootBox:
 
 def read(store: Expr.Store[Frozen], index: usize) -> int:
 	box: RootBox = RootBox(store[index])
-	view box.root as Expr.Int(value: value):
+	if box.root as Expr.Int(value: value):
 		return value + box.root.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_view_direct_field_projection_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_direct_field_projection_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsOpenStmtWithActiveStoreParam(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithActiveStoreParam(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
 	Int(value: int)
 
 def read(node: Expr, store: Expr.Store[Frozen]) -> int:
-	open node as Expr.Int(value: value):
+	if node as Expr.Int(value: value):
 		return value + node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_open_active_store_param_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_active_store_param_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsOpenStmtWithNestedPackedVariantPattern(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithNestedOpenStylePackedVariantPattern(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
 	Add(left: Expr, right: Expr)
 
 def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
-	open node as Expr.Add(Expr.Int(value), rhs):
+	if node as Expr.Add(Expr.Int(value), rhs):
 		_ = rhs
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_open_nested_pattern_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_nested_pattern_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsOpenStmtWithPackedViewParamWithoutStoreClause(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithPackedViewParamWithoutStoreClauseForOpenStyle(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
 	Int(value: int)
 
 def read(view_node: packedview[Expr.Int]) -> int:
-	open view_node as Expr.Int(value: value):
+	if view_node as Expr.Int(value: value):
 		return value + view_node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_open_packedview_param_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_packedview_param_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsOpenStmtWithFrozenIndexAliasWithoutStoreClause(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithFrozenIndexAliasWithoutStoreClause(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
@@ -6772,15 +6774,15 @@ func TestAnalyzeAcceptsOpenStmtWithFrozenIndexAliasWithoutStoreClause(t *testing
 def read(store: Expr.Store[Frozen], index: usize) -> int:
 	node: Expr = store[index]
 	alias: Expr = node
-	open alias as Expr.Int(value: value):
+	if alias as Expr.Int(value: value):
 		return value + alias.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_open_frozen_index_alias_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_frozen_index_alias_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsOpenStmtWithHiddenStoreFieldIndexAliasWithoutStoreClause(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithHiddenStoreFieldIndexAliasWithoutStoreClause(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
 
@@ -6797,15 +6799,15 @@ def read(owner: Arena) -> int:
 	box: Box = make_box(owner)
 	node: Expr = box.store[0]
 	alias: Expr = node
-	open alias as Expr.Int(value: value):
+	if alias as Expr.Int(value: value):
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_open_hidden_store_field_index_alias_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_hidden_store_field_index_alias_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsOpenStmtWithDirectFieldProjectionWithoutStoreClause(t *testing.T) {
+func TestAnalyzeAcceptsIfPatternWithDirectFieldProjectionWithoutStoreClauseForOpenStyle(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
@@ -6816,11 +6818,11 @@ struct RootBox:
 
 def read(store: Expr.Store[Frozen], index: usize) -> int:
 	box: RootBox = RootBox(store[index])
-	open box.root as Expr.Int(value: value):
+	if box.root as Expr.Int(value: value):
 		return value + box.root.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_open_direct_field_projection_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_direct_field_projection_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 

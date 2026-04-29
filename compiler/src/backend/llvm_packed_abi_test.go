@@ -768,7 +768,7 @@ def fold_child_common_frozen() -> int:
 	child: Expr = new[store] Expr.Int(span: 5, value: 7)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: child)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	open node in frozen as Expr.Wrap(child: child_alias):
+	if node in frozen as Expr.Wrap(child: child_alias):
 		return child_alias.span + child_alias.span
 	return 0
 `
@@ -1919,39 +1919,36 @@ def fold_export() -> int:
 	}
 }
 
-func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedOpenStmtInIndexSOA(t *testing.T) {
+func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedIfPatternInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
 	Lit(value: int)
 	End
 
-def fold_open() -> int:
+def fold_if_pattern() -> int:
 	region scratch(256u)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	open node in frozen as Expr.Lit(value: value):
+	if node in frozen as Expr.Lit(value: value):
 		return value + node.span
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_open_stmt_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_if_pattern_index_soa.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
 	}
 
 	if !strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {
-		t.Fatalf("expected frozen packed open stmt in index-soa mode to use direct tag reads, got:\n%s", output)
+		t.Fatalf("expected frozen packed if pattern in index-soa mode to use direct tag reads, got:\n%s", output)
 	}
 	if !strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
-		t.Fatalf("expected frozen packed open stmt in index-soa mode to use direct prefix word reads, got:\n%s", output)
+		t.Fatalf("expected frozen packed if pattern in index-soa mode to use direct prefix word reads, got:\n%s", output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
-		t.Fatalf("expected frozen packed open stmt in index-soa mode to avoid eager decode, got:\n%s", output)
-	}
-	if !strings.Contains(output, "declare void @llvm.trap()") || !strings.Contains(output, "call void @llvm.trap()") {
-		t.Fatalf("expected packed open stmt mismatch handling to remain trap-based, got:\n%s", output)
+		t.Fatalf("expected frozen packed if pattern in index-soa mode to avoid eager decode, got:\n%s", output)
 	}
 }
 

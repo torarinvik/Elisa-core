@@ -80,18 +80,6 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Store != nil {
 			a.validatePermissionExpr(n.Store, granted)
 		}
-	case *ast.OpenStmt:
-		a.validatePermissionExpr(n.Value, granted)
-		if n.Store != nil {
-			a.validatePermissionExpr(n.Store, granted)
-		}
-		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
-	case *ast.ViewStmt:
-		a.validatePermissionExpr(n.Value, granted)
-		if n.Store != nil {
-			a.validatePermissionExpr(n.Store, granted)
-		}
-		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.ArgsScopeStmt:
 		for _, arg := range n.Args {
 			a.validatePermissionExpr(arg.Value, granted)

@@ -740,8 +740,8 @@ def child_span(node: Lua.Expr) -> i64:
 	}
 }
 
-func TestAnalyzeTreeOpenAndViewStatements(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_open_view_surface.llcontext", `tree Lua:
+func TestAnalyzeTreeIfPatternViewAliasAndNestedPatterns(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_if_pattern_view_alias_surface.llcontext", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -754,13 +754,14 @@ def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binar
 	return view_node
 
 def child_span(node: Lua.Expr) -> i64:
-	view node as Lua.Expr.Binary(binary):
+	if node as Lua.Expr.Binary:
+		binary: treeview[Lua.Expr.Binary] = node
 		kept: treeview[Lua.Expr.Binary] = keep_binary(binary)
 		return kept.left.span + binary.right.span + node.left.span
 	return node.span
 
 def left_value(node: Lua.Expr) -> i64:
-	open node as Lua.Expr.Binary(Lua.Expr.Int(value), rhs):
+	if node as Lua.Expr.Binary(Lua.Expr.Int(value), rhs):
 		return value + rhs.span
 	return node.span
 `)
@@ -1211,8 +1212,8 @@ def visit(stmt: Lua.Stmt) -> i64:
 	}
 }
 
-func TestAnalyzeRejectsTreeOpenAndViewStoreClauses(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_open_view_store_reject.llcontext", `tree Lua:
+func TestAnalyzeRejectsTreeIfPatternStoreClauses(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_if_pattern_store_reject.llcontext", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -1220,20 +1221,17 @@ func TestAnalyzeRejectsTreeOpenAndViewStoreClauses(t *testing.T) {
 		Int(value: i64)
 
 def bad_open(node: Lua.Expr, slot: i64) -> i64:
-	open node in slot as Lua.Expr.Int(value: value):
+	if node in slot as Lua.Expr.Int(value: value):
 		return value
 	return 0
 
 def bad_view(node: Lua.Expr, slot: i64) -> i64:
-	view node in slot as Lua.Expr.Int(value: value):
+	if node in slot as Lua.Expr.Int(value: value):
 		return value + node.value
 	return 0
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `tree open over "Lua.Expr" does not take an in-store clause`) {
-		t.Fatalf("expected tree open in-store rejection, got:\n%s", all)
-	}
-	if !strings.Contains(all, `tree view over "Lua.Expr" does not take an in-store clause`) {
-		t.Fatalf("expected tree view in-store rejection, got:\n%s", all)
+	if !strings.Contains(all, `tree match over "Lua.Expr" does not take an in-store clause`) {
+		t.Fatalf("expected tree match in-store rejection, got:\n%s", all)
 	}
 }

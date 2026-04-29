@@ -84,12 +84,6 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForNode(block *CFGBlock, node ast
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Workers)
 	case *ast.LockStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Mutex)
-	case *ast.OpenStmt:
-		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
-		a.appendImplicitSinkFlowInstrsForExpr(block, n.Store)
-	case *ast.ViewStmt:
-		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
-		a.appendImplicitSinkFlowInstrsForExpr(block, n.Store)
 	case *ast.MoveBindStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Store)

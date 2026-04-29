@@ -77,30 +77,6 @@ func (c *parallelForCaptureCollector) collectStmt(stmt ast.Stmt, locals map[stri
 		for _, name := range parallelForMoveBindNames(n.Pattern) {
 			locals[name] = true
 		}
-	case *ast.OpenStmt:
-		c.collectExpr(n.Value, locals)
-		if n.Store != nil {
-			c.collectExpr(n.Store, locals)
-		}
-		inner := cloneParallelForLocals(locals)
-		for _, name := range parallelForMatchPatternNames(n.Pattern.Args) {
-			inner[name] = true
-		}
-		for _, innerStmt := range n.Body {
-			c.collectStmt(innerStmt, inner)
-		}
-	case *ast.ViewStmt:
-		c.collectExpr(n.Value, locals)
-		if n.Store != nil {
-			c.collectExpr(n.Store, locals)
-		}
-		inner := cloneParallelForLocals(locals)
-		if n.Pattern != nil && n.Pattern.Name != "" {
-			inner[n.Pattern.Name] = true
-		}
-		for _, innerStmt := range n.Body {
-			c.collectStmt(innerStmt, inner)
-		}
 	case *ast.DeferStmt:
 		bodyLocals := cloneParallelForLocals(locals)
 		for _, innerStmt := range n.Body {

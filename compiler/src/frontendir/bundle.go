@@ -188,7 +188,6 @@ func registerBundleTypes() {
 		gob.Register(&ast.MoveBindStructPattern{})
 		gob.Register(&ast.MoveBindTuplePattern{})
 		gob.Register(&ast.MoveBindVariantPattern{})
-		gob.Register(&ast.ViewBindPattern{})
 
 		// Statements.
 		gob.Register(&ast.AssignStmt{})
@@ -198,8 +197,6 @@ func registerBundleTypes() {
 		gob.Register(&ast.LetDestructureStmt{})
 		gob.Register(&ast.TupleBindStmt{})
 		gob.Register(&ast.MoveBindStmt{})
-		gob.Register(&ast.OpenStmt{})
-		gob.Register(&ast.ViewStmt{})
 		gob.Register(&ast.DeferStmt{})
 		gob.Register(&ast.ReturnStmt{})
 		gob.Register(&ast.IfStmt{})

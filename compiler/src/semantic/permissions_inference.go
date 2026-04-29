@@ -103,18 +103,6 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if n.Store != nil {
 			c.collectExpr(n.Store)
 		}
-	case *ast.OpenStmt:
-		c.collectExpr(n.Value)
-		if n.Store != nil {
-			c.collectExpr(n.Store)
-		}
-		c.collectStmts(n.Body)
-	case *ast.ViewStmt:
-		c.collectExpr(n.Value)
-		if n.Store != nil {
-			c.collectExpr(n.Store)
-		}
-		c.collectStmts(n.Body)
 	case *ast.ArgsScopeStmt:
 		for _, arg := range n.Args {
 			c.collectExpr(arg.Value)

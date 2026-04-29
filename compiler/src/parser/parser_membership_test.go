@@ -103,21 +103,10 @@ func TestParseTupleMatchHeadAndPatterns(t *testing.T) {
 	}
 }
 
-func TestParseOpenStatementRemainsTrailingIn(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    Lit(value: int)\n\ndef keep(node: Expr, store: Expr.Store[Local]) -> int:\n    open node in store as Expr.Lit(value: value):\n        return value\n    return 0\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl := file.Decls[1].(*ast.FuncDecl)
-	openStmt, ok := decl.Body[0].(*ast.OpenStmt)
-	if !ok {
-		t.Fatalf("expected open stmt, got %T", decl.Body[0])
-	}
-	if openStmt.Store == nil {
-		t.Fatal("expected open store to be preserved")
-	}
-	if _, ok := openStmt.Value.(*ast.BinaryExpr); ok {
-		t.Fatalf("expected open value to remain plain expr, got %#v", openStmt.Value)
+func TestParseRejectsRemovedOpenStatementSurface(t *testing.T) {
+	_, errs := parseSourceFile(t, "packed enum Expr:\n    Lit(value: int)\n\ndef keep(node: Expr, store: Expr.Store[Local]) -> int:\n    open node in store as Expr.Lit(value: value):\n        return value\n    return 0\n")
+	if len(errs) == 0 {
+		t.Fatal("expected parser errors for removed open statement surface, got none")
 	}
 }
 

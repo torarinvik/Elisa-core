@@ -284,8 +284,8 @@ func TestParseLegacyNullableRefArraySuffixStillWorks(t *testing.T) {
 	}
 }
 
-func TestParsePackedOpenAndViewStatements(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    open node in store as Expr.Lit(value: value):\n        view node in store as Expr.Lit(lit):\n            return value + lit.span\n    return 0\n")
+func TestParsePackedIfPatternWithViewAliasBinding(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Lit(value: value):\n        lit: packedview[Expr.Lit] = node\n        return value + lit.span\n    return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -293,40 +293,34 @@ func TestParsePackedOpenAndViewStatements(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected func decl, got %T", file.Decls[1])
 	}
-	openStmt, ok := decl.Body[0].(*ast.OpenStmt)
+	matchStmt, ok := decl.Body[0].(*ast.MatchStmt)
 	if !ok {
-		t.Fatalf("expected open stmt, got %T", decl.Body[0])
+		t.Fatalf("expected lowered match stmt, got %T", decl.Body[0])
 	}
-	if openStmt.Pattern == nil {
-		t.Fatal("expected open stmt to record a variant pattern")
+	if len(matchStmt.Arms) != 2 {
+		t.Fatalf("expected match arm plus wildcard, got %d", len(matchStmt.Arms))
 	}
-	if openStmt.Pattern.EnumName != "Expr" || openStmt.Pattern.Variant != "Lit" {
-		t.Fatalf("expected Expr.Lit open pattern, got %#v", openStmt.Pattern)
+	pattern, ok := matchStmt.Arms[0].Pattern.(*ast.MatchVariantPattern)
+	if !ok {
+		t.Fatalf("expected Expr.Lit pattern, got %T", matchStmt.Arms[0].Pattern)
 	}
-	if len(openStmt.Pattern.Args) != 1 {
-		t.Fatalf("expected one open binding arg, got %d", len(openStmt.Pattern.Args))
+	if pattern.EnumName != "Expr" || pattern.Variant != "Lit" {
+		t.Fatalf("expected Expr.Lit pattern, got %#v", pattern)
 	}
-	bindPattern, ok := openStmt.Pattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if len(pattern.Args) != 1 {
+		t.Fatalf("expected one binding arg, got %d", len(pattern.Args))
+	}
+	bindPattern, ok := pattern.Args[0].Pattern.(*ast.MatchBindPattern)
 	if !ok || bindPattern.Name != "value" {
-		t.Fatalf("expected value payload binding, got %T %#v", openStmt.Pattern.Args[0].Pattern, openStmt.Pattern.Args[0].Pattern)
+		t.Fatalf("expected value payload binding, got %T %#v", pattern.Args[0].Pattern, pattern.Args[0].Pattern)
 	}
-	viewStmt, ok := openStmt.Body[0].(*ast.ViewStmt)
-	if !ok {
-		t.Fatalf("expected view stmt, got %T", openStmt.Body[0])
-	}
-	if viewStmt.Pattern == nil {
-		t.Fatal("expected view stmt to record a view pattern")
-	}
-	if viewStmt.Pattern.EnumName != "Expr" || viewStmt.Pattern.Variant != "Lit" || viewStmt.Pattern.Name != "lit" {
-		t.Fatalf("expected Expr.Lit(lit) view pattern, got %#v", viewStmt.Pattern)
-	}
-	if len(viewStmt.Pattern.Args) != 0 {
-		t.Fatalf("expected alias-form view pattern to have no payload args, got %#v", viewStmt.Pattern.Args)
+	if _, ok := matchStmt.Arms[0].Body[0].(*ast.VarDeclStmt); !ok {
+		t.Fatalf("expected packedview alias binding in match body, got %T", matchStmt.Arms[0].Body[0])
 	}
 }
 
-func TestParsePackedOpenNestedPayloadPattern(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n    Add(left: Expr, right: Expr)\n\ndef left_value(node: Expr, store: Expr.Store[Local]) -> int:\n    open node in store as Expr.Add(Expr.Int(value), rhs):\n        return value\n    return 0\n")
+func TestParsePackedIfNestedPayloadPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n    Add(left: Expr, right: Expr)\n\ndef left_value(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Add(Expr.Int(value), rhs):\n        return value\n    return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -334,24 +328,25 @@ func TestParsePackedOpenNestedPayloadPattern(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected func decl, got %T", file.Decls[1])
 	}
-	openStmt, ok := decl.Body[0].(*ast.OpenStmt)
+	matchStmt, ok := decl.Body[0].(*ast.MatchStmt)
 	if !ok {
-		t.Fatalf("expected open stmt, got %T", decl.Body[0])
+		t.Fatalf("expected lowered match stmt, got %T", decl.Body[0])
 	}
-	if openStmt.Pattern == nil || len(openStmt.Pattern.Args) != 2 {
-		t.Fatalf("expected two open payload patterns, got %#v", openStmt.Pattern)
+	pattern, ok := matchStmt.Arms[0].Pattern.(*ast.MatchVariantPattern)
+	if !ok || len(pattern.Args) != 2 {
+		t.Fatalf("expected two payload patterns, got %#v", matchStmt.Arms[0].Pattern)
 	}
-	leftPattern, ok := openStmt.Pattern.Args[0].Pattern.(*ast.MatchVariantPattern)
+	leftPattern, ok := pattern.Args[0].Pattern.(*ast.MatchVariantPattern)
 	if !ok || leftPattern.EnumName != "Expr" || leftPattern.Variant != "Int" || len(leftPattern.Args) != 1 {
-		t.Fatalf("expected nested Expr.Int(value) pattern, got %#v", openStmt.Pattern.Args[0].Pattern)
+		t.Fatalf("expected nested Expr.Int(value) pattern, got %#v", pattern.Args[0].Pattern)
 	}
 	leftBind, ok := leftPattern.Args[0].Pattern.(*ast.MatchBindPattern)
 	if !ok || leftBind.Name != "value" {
 		t.Fatalf("expected nested bind pattern value, got %T %#v", leftPattern.Args[0].Pattern, leftPattern.Args[0].Pattern)
 	}
-	rightBind, ok := openStmt.Pattern.Args[1].Pattern.(*ast.MatchBindPattern)
+	rightBind, ok := pattern.Args[1].Pattern.(*ast.MatchBindPattern)
 	if !ok || rightBind.Name != "rhs" {
-		t.Fatalf("expected rhs bind pattern, got %T %#v", openStmt.Pattern.Args[1].Pattern, openStmt.Pattern.Args[1].Pattern)
+		t.Fatalf("expected rhs bind pattern, got %T %#v", pattern.Args[1].Pattern, pattern.Args[1].Pattern)
 	}
 }
 
@@ -739,8 +734,8 @@ func TestParseTypedStateIsConditionAndExplicitStatefulStructLiteral(t *testing.T
 	}
 }
 
-func TestParsePackedViewPayloadDestructureStatement(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Add(left: int, right: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    view node in store as Expr.Add(left: lhs, right: rhs):\n        return lhs + rhs + node.span\n    return 0\n")
+func TestParsePackedIfPayloadDestructureStatement(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Add(left: int, right: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Add(left: lhs, right: rhs):\n        return lhs + rhs + node.span\n    return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -748,29 +743,27 @@ func TestParsePackedViewPayloadDestructureStatement(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected func decl, got %T", file.Decls[1])
 	}
-	viewStmt, ok := decl.Body[0].(*ast.ViewStmt)
+	matchStmt, ok := decl.Body[0].(*ast.MatchStmt)
 	if !ok {
-		t.Fatalf("expected view stmt, got %T", decl.Body[0])
+		t.Fatalf("expected lowered match stmt, got %T", decl.Body[0])
 	}
-	if viewStmt.Pattern == nil {
-		t.Fatal("expected view stmt to record a view pattern")
+	pattern, ok := matchStmt.Arms[0].Pattern.(*ast.MatchVariantPattern)
+	if !ok {
+		t.Fatalf("expected variant pattern, got %T", matchStmt.Arms[0].Pattern)
 	}
-	if viewStmt.Pattern.Name != "" {
-		t.Fatalf("expected destructuring-form view pattern to have no alias name, got %q", viewStmt.Pattern.Name)
+	if len(pattern.Args) != 2 {
+		t.Fatalf("expected two destructured payload args, got %d", len(pattern.Args))
 	}
-	if len(viewStmt.Pattern.Args) != 2 {
-		t.Fatalf("expected two destructured payload args, got %d", len(viewStmt.Pattern.Args))
+	if pattern.Args[0].Name != "left" || pattern.Args[1].Name != "right" {
+		t.Fatalf("expected named payload bindings left/right, got %#v", pattern.Args)
 	}
-	if viewStmt.Pattern.Args[0].Name != "left" || viewStmt.Pattern.Args[1].Name != "right" {
-		t.Fatalf("expected named payload bindings left/right, got %#v", viewStmt.Pattern.Args)
-	}
-	leftBind, ok := viewStmt.Pattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	leftBind, ok := pattern.Args[0].Pattern.(*ast.MatchBindPattern)
 	if !ok || leftBind.Name != "lhs" {
-		t.Fatalf("expected lhs bind pattern, got %T %#v", viewStmt.Pattern.Args[0].Pattern, viewStmt.Pattern.Args[0].Pattern)
+		t.Fatalf("expected lhs bind pattern, got %T %#v", pattern.Args[0].Pattern, pattern.Args[0].Pattern)
 	}
-	rightBind, ok := viewStmt.Pattern.Args[1].Pattern.(*ast.MatchBindPattern)
+	rightBind, ok := pattern.Args[1].Pattern.(*ast.MatchBindPattern)
 	if !ok || rightBind.Name != "rhs" {
-		t.Fatalf("expected rhs bind pattern, got %T %#v", viewStmt.Pattern.Args[1].Pattern, viewStmt.Pattern.Args[1].Pattern)
+		t.Fatalf("expected rhs bind pattern, got %T %#v", pattern.Args[1].Pattern, pattern.Args[1].Pattern)
 	}
 }
 
