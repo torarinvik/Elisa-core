@@ -1336,6 +1336,12 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			parts = append(parts, formatGrammarUntil(n.Until))
 		}
 		return "flatrepeat(" + strings.Join(parts, ", ") + ")"
+	case *ast.GrammarWhileTerm:
+		parts := make([]string, 0, len(n.Until))
+		for _, until := range n.Until {
+			parts = append(parts, formatGrammarTerm(until))
+		}
+		return "[" + formatGrammarTerm(n.Elem) + "] while token in tokens != [" + strings.Join(parts, ", ") + "]"
 	case *ast.GrammarSeparatedTerm:
 		return formatReadableSeparatedTerm(n.Elem, n.Separator, n.Until)
 	case *ast.GrammarSuffixTerm:

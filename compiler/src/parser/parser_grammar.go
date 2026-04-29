@@ -690,6 +690,11 @@ func grammarAliasRefs(term ast.GrammarTerm, aliases map[string]ast.GrammarAliasD
 			for _, until := range n.Until {
 				walk(until)
 			}
+		case *ast.GrammarWhileTerm:
+			walk(n.Elem)
+			for _, until := range n.Until {
+				walk(until)
+			}
 		case *ast.GrammarSeparatedTerm:
 			walk(n.Elem)
 			walk(n.Separator)
@@ -956,6 +961,9 @@ func (p *Parser) validateGrammarFnApplicationInTerm(term ast.GrammarTerm, gramma
 	case *ast.GrammarFlatRepeatTerm:
 		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, aliases, tokenSetNames)
 		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, aliases, tokenSetNames)
+	case *ast.GrammarWhileTerm:
+		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, aliases, tokenSetNames)
+		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, aliases, tokenSetNames)
 	case *ast.GrammarSeparatedTerm:
 		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, aliases, tokenSetNames)
 		p.validateGrammarFnApplicationInTerm(n.Separator, grammarFns, aliases, tokenSetNames)
@@ -1167,7 +1175,7 @@ func (p *Parser) validateGrammarProductionTerm(productionName string, term ast.G
 		*ast.GrammarLookaheadTerm, *ast.GrammarGuardTerm, *ast.GrammarAttemptTerm,
 		*ast.GrammarWhenTerm, *ast.GrammarRecoverTerm:
 		// valid
-	case *ast.GrammarListTerm, *ast.GrammarRepeatTerm, *ast.GrammarFlatRepeatTerm, *ast.GrammarSeparatedTerm:
+	case *ast.GrammarListTerm, *ast.GrammarRepeatTerm, *ast.GrammarFlatRepeatTerm, *ast.GrammarWhileTerm, *ast.GrammarSeparatedTerm:
 		// valid
 	case *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
 		// valid
@@ -1694,6 +1702,9 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	if p.peekIdentText("attempt") {
 		return p.parseGrammarAttemptTerm()
 	}
+	if p.peek() == lexer.TOKEN_LBRACKET && p.isGrammarWhileTermStart() {
+		return p.parseGrammarWhileTerm()
+	}
 	if p.peek() == lexer.TOKEN_LBRACKET {
 		expr := p.parseExpr()
 		return &ast.GrammarExprTerm{Position: expr.Pos(), Expr: expr}
@@ -2097,6 +2108,58 @@ func (p *Parser) parseGrammarFlatRepeatTerm() ast.GrammarTerm {
 	return &ast.GrammarFlatRepeatTerm{Position: pos, Elem: elem, Until: until}
 }
 
+func (p *Parser) isGrammarWhileTermStart() bool {
+	if p.peek() != lexer.TOKEN_LBRACKET {
+		return false
+	}
+	depth := 0
+	for idx := p.pos + 1; idx < len(p.tokens); idx++ {
+		tok := p.tokens[idx]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			if depth == 0 {
+				if tok.Kind != lexer.TOKEN_RBRACKET || idx+6 >= len(p.tokens) {
+					return false
+				}
+				return p.tokens[idx+1].Kind == lexer.TOKEN_WHILE &&
+					p.tokens[idx+2].Kind == lexer.TOKEN_IDENT &&
+					p.tokens[idx+3].Kind == lexer.TOKEN_IN &&
+					p.tokens[idx+4].Kind == lexer.TOKEN_IDENT && p.tokens[idx+4].Text == "tokens" &&
+					p.tokens[idx+5].Kind == lexer.TOKEN_BANGEQ &&
+					p.tokens[idx+6].Kind == lexer.TOKEN_LBRACKET
+			}
+			depth--
+		}
+	}
+	return false
+}
+
+func (p *Parser) parseGrammarWhileTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_LBRACKET)
+	elem := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_RBRACKET)
+	p.expect(lexer.TOKEN_WHILE)
+	p.expect(lexer.TOKEN_IDENT)
+	p.expect(lexer.TOKEN_IN)
+	p.expectIdentText("tokens")
+	p.expect(lexer.TOKEN_BANGEQ)
+	p.expect(lexer.TOKEN_LBRACKET)
+	until := make([]ast.GrammarTerm, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+	if p.peek() != lexer.TOKEN_RBRACKET {
+		for {
+			until = append(until, p.parseGrammarUntilStopTerm())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return &ast.GrammarWhileTerm{Position: pos, Elem: elem, Until: until}
+}
+
 func (p *Parser) parseGrammarSeparatedTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("separated")
@@ -2149,7 +2212,7 @@ func (p *Parser) parseGrammarUntilStopTerm() ast.GrammarTerm {
 			return p.parseGrammarFirstTerm()
 		}
 		switch p.tokens[p.pos+1].Kind {
-		case lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN, lexer.TOKEN_NEWLINE, lexer.TOKEN_DEDENT, lexer.TOKEN_EOF:
+		case lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_NEWLINE, lexer.TOKEN_DEDENT, lexer.TOKEN_EOF:
 			return &ast.GrammarTokenSetRefTerm{Position: pos, Name: p.advance().Text}
 		}
 	}

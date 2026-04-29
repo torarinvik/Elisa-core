@@ -1849,6 +1849,42 @@ func TestParseGrammarListFamilyReadableSugar(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsBracketWhileTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
+        declarations = [variable_decl_group()] while token in tokens != [.BEGIN, token(TokenKind.EOF)]
+        return declarations
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected binding term, got %T", decl.Productions[0].Terms[0])
+	}
+	whileTerm, ok := bind.Term.(*ast.GrammarWhileTerm)
+	if !ok {
+		t.Fatalf("expected GrammarWhileTerm, got %T", bind.Term)
+	}
+	if len(whileTerm.Until) != 2 {
+		t.Fatalf("expected two stop terms, got %#v", whileTerm.Until)
+	}
+	if _, ok := whileTerm.Until[0].(*ast.GrammarTokenKindTerm); !ok {
+		t.Fatalf("expected first stop term to preserve token kind term, got %T", whileTerm.Until[0])
+	}
+	if _, ok := whileTerm.Until[1].(*ast.GrammarCallTerm); !ok {
+		t.Fatalf("expected second stop term to preserve token call, got %T", whileTerm.Until[1])
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "[variable_decl_group()] while token in tokens != [.BEGIN, token(TokenKind.EOF)]") {
+		t.Fatalf("expected formatted output to preserve bracket while term, got:\n%s", formatted)
+	}
+}
+
 func TestParseGrammarSeqBlockAndPrefixSugar(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     expression() -> Expr:

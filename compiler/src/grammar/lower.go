@@ -513,7 +513,7 @@ func normalizeGrammarDeclBeforeFirstSetsInScope(decl *ast.GrammarDecl, grammarSc
 	if decl == nil {
 		return nil
 	}
-	normalizedDecl := applyGrammarEnvDefaults(decl, envScope)
+	normalizedDecl := desugarGrammarDeclWhileTerms(applyGrammarEnvDefaults(decl, envScope))
 	normalized := *normalizedDecl
 	normalized.TokenAliases = nil
 	normalized.TokenSets = nil
@@ -569,6 +569,180 @@ func normalizeGrammarDeclBeforeFirstSetsInScope(decl *ast.GrammarDecl, grammarSc
 	}
 	normalized.Productions = finalProductions
 	return &normalized
+}
+
+func desugarGrammarDeclWhileTerms(decl *ast.GrammarDecl) *ast.GrammarDecl {
+	if decl == nil {
+		return nil
+	}
+	rewritten := cloneGrammarDecl(decl)
+	if len(rewritten.GrammarAliases) != 0 {
+		aliases := make([]ast.GrammarAliasDecl, 0, len(rewritten.GrammarAliases))
+		for _, alias := range rewritten.GrammarAliases {
+			alias.Term = desugarGrammarWhileTerm(alias.Term)
+			aliases = append(aliases, alias)
+		}
+		rewritten.GrammarAliases = aliases
+	}
+	if len(rewritten.GrammarFns) != 0 {
+		grammarFns := make([]ast.GrammarFnDecl, 0, len(rewritten.GrammarFns))
+		for _, grammarFn := range rewritten.GrammarFns {
+			if len(grammarFn.Params) != 0 {
+				params := make([]ast.GrammarFnParam, 0, len(grammarFn.Params))
+				for _, param := range grammarFn.Params {
+					param.Default = desugarGrammarWhileTerm(param.Default)
+					params = append(params, param)
+				}
+				grammarFn.Params = params
+			}
+			grammarFn.Terms = desugarGrammarWhileTerms(grammarFn.Terms)
+			grammarFns = append(grammarFns, grammarFn)
+		}
+		rewritten.GrammarFns = grammarFns
+	}
+	if len(rewritten.RecoveryPolicies) != 0 {
+		policies := make([]ast.GrammarRecoveryDecl, 0, len(rewritten.RecoveryPolicies))
+		for _, policy := range rewritten.RecoveryPolicies {
+			policy.Until = desugarGrammarWhileTerms(policy.Until)
+			policies = append(policies, policy)
+		}
+		rewritten.RecoveryPolicies = policies
+	}
+	if len(rewritten.InfixTables) != 0 {
+		tables := make([]ast.GrammarInfixTableDecl, 0, len(rewritten.InfixTables))
+		for _, table := range rewritten.InfixTables {
+			if len(table.Levels) != 0 {
+				levels := make([]ast.GrammarPrecedenceLevel, 0, len(table.Levels))
+				for _, level := range table.Levels {
+					levels = append(levels, desugarGrammarWhilePrecedenceLevel(level))
+				}
+				table.Levels = levels
+			}
+			tables = append(tables, table)
+		}
+		rewritten.InfixTables = tables
+	}
+	if len(rewritten.Productions) != 0 {
+		productions := make([]ast.GrammarProductionDecl, 0, len(rewritten.Productions))
+		for _, production := range rewritten.Productions {
+			production.RecoverUntil = desugarGrammarWhileTerms(production.RecoverUntil)
+			production.Terms = desugarGrammarWhileTerms(production.Terms)
+			productions = append(productions, production)
+		}
+		rewritten.Productions = productions
+	}
+	return rewritten
+}
+
+func desugarGrammarWhileTerms(terms []ast.GrammarTerm) []ast.GrammarTerm {
+	if len(terms) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarTerm, 0, len(terms))
+	for _, term := range terms {
+		rewritten = append(rewritten, desugarGrammarWhileTerm(term))
+	}
+	return rewritten
+}
+
+func desugarGrammarWhileTerm(term ast.GrammarTerm) ast.GrammarTerm {
+	if term == nil {
+		return nil
+	}
+	switch n := term.(type) {
+	case *ast.GrammarChoiceTerm:
+		return &ast.GrammarChoiceTerm{Position: n.Position, Options: desugarGrammarWhileTerms(n.Options)}
+	case *ast.GrammarOptionalTerm:
+		return &ast.GrammarOptionalTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term)}
+	case *ast.GrammarWhenTerm:
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: desugarGrammarWhileTerm(n.Then), Else: desugarGrammarWhileTerm(n.Else)}
+	case *ast.GrammarRecoverTerm:
+		return &ast.GrammarRecoverTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: desugarGrammarWhileTerms(n.RecoverUntil), RecoverValue: n.RecoverValue}
+	case *ast.GrammarRequiredTerm:
+		return &ast.GrammarRequiredTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term), Message: n.Message}
+	case *ast.GrammarDelimitedTerm:
+		return &ast.GrammarDelimitedTerm{Position: n.Position, Open: desugarGrammarWhileTerm(n.Open), Body: desugarGrammarWhileTerm(n.Body), Close: desugarGrammarWhileTerm(n.Close), Message: n.Message}
+	case *ast.GrammarSeqTerm:
+		return &ast.GrammarSeqTerm{Position: n.Position, Terms: desugarGrammarWhileTerms(n.Terms)}
+	case *ast.GrammarLookaheadTerm:
+		return &ast.GrammarLookaheadTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term)}
+	case *ast.GrammarConcatTerm:
+		return &ast.GrammarConcatTerm{Position: n.Position, Terms: desugarGrammarWhileTerms(n.Terms)}
+	case *ast.GrammarListTerm:
+		return &ast.GrammarListTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Separator: desugarGrammarWhileTerm(n.Separator), Until: desugarGrammarWhileTerms(n.Until)}
+	case *ast.GrammarRepeatTerm:
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Until: desugarGrammarWhileTerms(n.Until)}
+	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Until: desugarGrammarWhileTerms(n.Until)}
+	case *ast.GrammarWhileTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Until: desugarGrammarWhileTerms(n.Until)}
+	case *ast.GrammarSeparatedTerm:
+		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Separator: desugarGrammarWhileTerm(n.Separator), Until: desugarGrammarWhileTerms(n.Until)}
+	case *ast.GrammarSuffixTerm:
+		return &ast.GrammarSuffixTerm{Position: n.Position, LeftName: n.LeftName, Seed: desugarGrammarWhileTerm(n.Seed), Arms: desugarGrammarWhilePostfixArms(n.Arms)}
+	case *ast.GrammarPostfixTerm:
+		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: desugarGrammarWhileTerm(n.Seed), Arms: desugarGrammarWhilePostfixArms(n.Arms)}
+	case *ast.GrammarPrecedenceTerm:
+		levels := make([]ast.GrammarPrecedenceLevel, 0, len(n.Levels))
+		for _, level := range n.Levels {
+			levels = append(levels, desugarGrammarWhilePrecedenceLevel(level))
+		}
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Assoc: n.Assoc, Result: n.Result, Levels: levels, LeftName: n.LeftName, Seed: desugarGrammarWhileTerm(n.Seed), Arms: desugarGrammarWhilePrecedenceArms(n.Arms)}
+	case *ast.GrammarBindTerm:
+		return &ast.GrammarBindTerm{Position: n.Position, Name: n.Name, Term: desugarGrammarWhileTerm(n.Term)}
+	case *ast.GrammarAssignTerm:
+		return &ast.GrammarAssignTerm{Position: n.Position, Name: n.Name, Term: desugarGrammarWhileTerm(n.Term)}
+	case *ast.GrammarReturnTerm:
+		return &ast.GrammarReturnTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term)}
+	default:
+		return term
+	}
+}
+
+func desugarGrammarWhilePostfixArms(arms []ast.GrammarPostfixArm) []ast.GrammarPostfixArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarPostfixArm, 0, len(arms))
+	for _, arm := range arms {
+		arm.Op = desugarGrammarWhileTerm(arm.Op)
+		arm.Bindings = desugarGrammarWhileBindings(arm.Bindings)
+		rewritten = append(rewritten, arm)
+	}
+	return rewritten
+}
+
+func desugarGrammarWhilePrecedenceArms(arms []ast.GrammarPrecedenceArm) []ast.GrammarPrecedenceArm {
+	if len(arms) == 0 {
+		return nil
+	}
+	rewritten := make([]ast.GrammarPrecedenceArm, 0, len(arms))
+	for _, arm := range arms {
+		arm.Op = desugarGrammarWhileTerm(arm.Op)
+		arm.Bindings = desugarGrammarWhileBindings(arm.Bindings)
+		rewritten = append(rewritten, arm)
+	}
+	return rewritten
+}
+
+func desugarGrammarWhilePrecedenceLevel(level ast.GrammarPrecedenceLevel) ast.GrammarPrecedenceLevel {
+	level.Seed = desugarGrammarWhileTerm(level.Seed)
+	level.Arms = desugarGrammarWhilePrecedenceArms(level.Arms)
+	return level
+}
+
+func desugarGrammarWhileBindings(bindings []*ast.GrammarBindTerm) []*ast.GrammarBindTerm {
+	if len(bindings) == 0 {
+		return nil
+	}
+	rewritten := make([]*ast.GrammarBindTerm, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		rewritten = append(rewritten, &ast.GrammarBindTerm{Position: binding.Position, Name: binding.Name, Term: desugarGrammarWhileTerm(binding.Term)})
+	}
+	return rewritten
 }
 
 func normalizeGrammarDeclForLoweringInScope(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl) *ast.GrammarDecl {
@@ -1071,6 +1245,8 @@ func expandGrammarTermGrammarAliases(term ast.GrammarTerm, aliases map[string]as
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
+	case *ast.GrammarWhileTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Separator: expandGrammarTermGrammarAliases(n.Separator, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
 	case *ast.GrammarSuffixTerm:
@@ -1285,6 +1461,8 @@ func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast
 	case *ast.GrammarRepeatTerm:
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
 	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
+	case *ast.GrammarWhileTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Separator: expandGrammarTermGrammarFns(n.Separator, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
@@ -1724,6 +1902,9 @@ func grammarFirstTermsForTerm(term ast.GrammarTerm, productions map[string]resol
 	case *ast.GrammarFlatRepeatTerm:
 		terms, _ := grammarFirstTermsForTerm(n.Elem, productions, seen)
 		return terms, true
+	case *ast.GrammarWhileTerm:
+		terms, _ := grammarFirstTermsForTerm(n.Elem, productions, seen)
+		return terms, true
 	case *ast.GrammarSeparatedTerm:
 		return grammarFirstTermsForTerm(n.Elem, productions, seen)
 	case *ast.GrammarSuffixTerm:
@@ -1797,6 +1978,8 @@ func resolveGrammarTermFirstSets(term ast.GrammarTerm, productions map[string]re
 	case *ast.GrammarRepeatTerm:
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
 	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
+	case *ast.GrammarWhileTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Separator: resolveGrammarTermFirstSets(n.Separator, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
@@ -1923,6 +2106,8 @@ func resolveGrammarTermTokenSets(term ast.GrammarTerm, tokenSets map[string]ast.
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
+	case *ast.GrammarWhileTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Separator: resolveGrammarTermTokenSets(n.Separator, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
 	case *ast.GrammarSuffixTerm:
@@ -2045,6 +2230,8 @@ func resolveGrammarTermRecoveryPolicies(term ast.GrammarTerm, policies map[strin
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
+	case *ast.GrammarWhileTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Separator: resolveGrammarTermRecoveryPolicies(n.Separator, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
 	case *ast.GrammarSuffixTerm:
@@ -2096,6 +2283,8 @@ func resolveGrammarTermInfixTables(term ast.GrammarTerm, tables map[string]ast.G
 	case *ast.GrammarRepeatTerm:
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
 	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
+	case *ast.GrammarWhileTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Separator: resolveGrammarTermInfixTables(n.Separator, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
@@ -2333,6 +2522,8 @@ func rewriteGrammarTermTokenAliases(term ast.GrammarTerm, aliases map[string]str
 	case *ast.GrammarRepeatTerm:
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
 	case *ast.GrammarFlatRepeatTerm:
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
+	case *ast.GrammarWhileTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Separator: rewriteGrammarTermTokenAliases(n.Separator, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
@@ -2718,6 +2909,15 @@ func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProduc
 			helpers = append(helpers, extra...)
 		}
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: elem, Until: until}, helpers
+	case *ast.GrammarWhileTerm:
+		elem, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Elem, counter)
+		until := make([]ast.GrammarTerm, 0, len(n.Until))
+		for _, stop := range n.Until {
+			rewritten, extra := desugarNamedPrecedenceTerm(grammarName, production, stop, counter)
+			until = append(until, rewritten)
+			helpers = append(helpers, extra...)
+		}
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: elem, Until: until}, helpers
 	case *ast.GrammarSeparatedTerm:
 		elem, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Elem, counter)
 		separator, extra := desugarNamedPrecedenceTerm(grammarName, production, n.Separator, counter)
@@ -2953,6 +3153,12 @@ func rewriteNamedPrecedenceHelperCalls(term ast.GrammarTerm, helperNames map[str
 		}
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Until: until}
 	case *ast.GrammarFlatRepeatTerm:
+		until := make([]ast.GrammarTerm, 0, len(n.Until))
+		for _, stop := range n.Until {
+			until = append(until, rewriteNamedPrecedenceHelperCalls(stop, helperNames, paramArgs))
+		}
+		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Until: until}
+	case *ast.GrammarWhileTerm:
 		until := make([]ast.GrammarTerm, 0, len(n.Until))
 		for _, stop := range n.Until {
 			until = append(until, rewriteNamedPrecedenceHelperCalls(stop, helperNames, paramArgs))
@@ -3975,6 +4181,8 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return false
 	case *ast.GrammarFlatRepeatTerm:
 		return false
+	case *ast.GrammarWhileTerm:
+		return false
 	case *ast.GrammarSeparatedTerm:
 		return false
 	case *ast.GrammarSuffixTerm:
@@ -4168,6 +4376,8 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return ctx.lowerListAttempt(repeatTermAsList(n))
 	case *ast.GrammarFlatRepeatTerm:
 		return ctx.lowerFlatRepeatAttempt(n)
+	case *ast.GrammarWhileTerm:
+		return ctx.lowerFlatRepeatAttempt(&ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: n.Elem, Until: n.Until})
 	case *ast.GrammarSeparatedTerm:
 		return ctx.lowerListAttempt(separatedTermAsList(n))
 	case *ast.GrammarSuffixTerm:
@@ -5231,6 +5441,8 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
 	case *ast.GrammarFlatRepeatTerm:
 		return ctx.inferTermType(n.Elem)
+	case *ast.GrammarWhileTerm:
+		return ctx.inferTermType(n.Elem)
 	case *ast.GrammarSeparatedTerm:
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
 	case *ast.GrammarSuffixTerm:
@@ -5691,6 +5903,8 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "repeat"}, Args: args}
 	case *ast.GrammarFlatRepeatTerm:
 		return lowerTermExpr(ctx, n.Elem)
+	case *ast.GrammarWhileTerm:
+		return lowerTermExpr(ctx, n.Elem)
 	case *ast.GrammarSeparatedTerm:
 		args := []ast.Expr{lowerTermExpr(ctx, n.Elem), lowerTermExpr(ctx, n.Separator)}
 		if len(n.Until) != 0 {
@@ -5906,6 +6120,8 @@ func inferLowerContextTermType(term ast.GrammarTerm, fallback ast.TypeExpr) ast.
 	case *ast.GrammarRepeatTerm:
 		return listTypeExpr(n.Position, inferLowerContextTermType(n.Elem, fallback))
 	case *ast.GrammarFlatRepeatTerm:
+		return inferLowerContextTermType(n.Elem, fallback)
+	case *ast.GrammarWhileTerm:
 		return inferLowerContextTermType(n.Elem, fallback)
 	case *ast.GrammarSeparatedTerm:
 		return listTypeExpr(n.Position, inferLowerContextTermType(n.Elem, fallback))

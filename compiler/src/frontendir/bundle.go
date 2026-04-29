@@ -165,6 +165,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.GrammarListTerm{})
 		gob.Register(&ast.GrammarRepeatTerm{})
 		gob.Register(&ast.GrammarFlatRepeatTerm{})
+		gob.Register(&ast.GrammarWhileTerm{})
 		gob.Register(&ast.GrammarSeparatedTerm{})
 		gob.Register(&ast.GrammarSuffixTerm{})
 		gob.Register(&ast.GrammarPrecedenceTerm{})

@@ -1017,6 +1017,30 @@ func TestLowerFileStatefulFlatRepeatTermFlattensNestedLists(t *testing.T) {
 	}
 }
 
+func TestLowerFileStatefulBracketWhileTermUsesFlatRepeatLowering(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    group(state: mutable ParserState&) -> darray[Token]:
+        values = list(token(TokenKind.IDENT), until(";", token(TokenKind.EOF)))
+        return values
+    groups(state: mutable ParserState&) -> darray[Token]:
+        values = [group()] while token in tokens != ["end", token(TokenKind.EOF)]
+        return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"flatrepeat_group",
+		"flatrepeat_index",
+		".count",
+		".push(",
+		"state.current_token().kind == token_kind_for_text(\"end\")",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered bracket while production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulRequiredTermRecordsSpecificParseError(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     ident(state: mutable ParserState&) -> Token:
