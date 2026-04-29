@@ -1646,6 +1646,210 @@ lexer DemoLex:
 	}
 }
 
+func TestLowerFileLexerImportsGrammarTokenAliases(t *testing.T) {
+	file := parseGrammarTestFile(t, `const enum DemoTokenKind of i16:
+    EOF = 0
+    IDENT = 1
+    BEGIN = 2
+    END = 3
+    COLON = 4
+    ASSIGN = 5
+
+grammar DemoGrammar:
+    token_kind DemoTokenKind
+    token:
+        IDENT
+        BEGIN "begin"
+        END "end"
+        COLON ":"
+        ASSIGN ":="
+
+lexer DemoLex:
+    tokens DemoGrammar
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def demo_lex_keyword_kind(text: sview) -> DemoTokenKind:",
+		`"begin":`,
+		"DemoTokenKind.BEGIN",
+		`"end":`,
+		"DemoTokenKind.END",
+		"DemoTokenKind.IDENT",
+		"def demo_lex_match_literal(source: dstr, offset: usize) -> (kind: DemoTokenKind, len: usize):",
+		`source[offset:(offset + 2)] == ":="`,
+		"return (DemoTokenKind.ASSIGN, 2)",
+		`source[offset:(offset + 1)] == ":"`,
+		"return (DemoTokenKind.COLON, 1)",
+		"return (DemoTokenKind.EOF, 0)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lexer imported token aliases to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	assignIndex := strings.Index(formatted, `source[offset:(offset + 2)] == ":="`)
+	colonIndex := strings.Index(formatted, `source[offset:(offset + 1)] == ":"`)
+	if assignIndex < 0 || colonIndex < 0 || assignIndex > colonIndex {
+		t.Fatalf("expected imported literal aliases to use longest matching, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileGeneratesTokenEnumFromGrammarAliases(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar DemoGrammar over Token using ParserState:
+    cursor state
+    token_enum DemoTokenKind of u16
+    token_lookup demo_token_kind_for_text
+    token:
+        IDENT
+        BEGIN "begin"
+        END "end"
+    program() -> Token:
+        "begin"
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"const enum DemoTokenKind of u16:",
+		"EOF = 0",
+		"IDENT = 1",
+		"BEGIN = 2",
+		"END = 3",
+		"def demo_token_kind_for_text(text: dstr) -> DemoTokenKind:",
+		"return DemoTokenKind.BEGIN",
+		"return DemoTokenKind.EOF",
+		"state.expect_kind(DemoTokenKind.BEGIN)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected generated token enum lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileLexerImportsGeneratedGrammarTokenEnum(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar DemoGrammar:
+    token_enum DemoTokenKind
+    token:
+        IDENT
+        BEGIN "begin"
+
+lexer DemoLex:
+    tokens DemoGrammar
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"const enum DemoTokenKind of i16:",
+		"def demo_lex_keyword_kind(text: sview) -> DemoTokenKind:",
+		"DemoTokenKind.BEGIN",
+		"DemoTokenKind.IDENT",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lexer to use generated grammar token enum %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileLexerTokenAliasImportRespectsExplicitEntries(t *testing.T) {
+	file := parseGrammarTestFile(t, `const enum DemoTokenKind of i16:
+    EOF = 0
+    IDENT = 1
+    BEGIN = 2
+    CUSTOM_BEGIN = 3
+    COLON = 4
+    CUSTOM_COLON = 5
+
+grammar DemoGrammar:
+    token_kind DemoTokenKind
+    token:
+        BEGIN "begin"
+        COLON ":"
+
+lexer DemoLex:
+    tokens DemoGrammar
+    keywords fallback IDENT:
+        "begin" -> CUSTOM_BEGIN
+    literals fallback EOF:
+        ":" -> CUSTOM_COLON
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"DemoTokenKind.CUSTOM_BEGIN",
+		"DemoTokenKind.CUSTOM_COLON",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected explicit lexer entries to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "DemoTokenKind.BEGIN") || strings.Contains(formatted, "DemoTokenKind.COLON") {
+		t.Fatalf("expected explicit lexer entries to override imported aliases, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileLexerTokenAliasImportIncludesUsedGrammars(t *testing.T) {
+	file := parseGrammarTestFile(t, `const enum DemoTokenKind of i16:
+    EOF = 0
+    IDENT = 1
+    IF = 2
+    BEGIN = 3
+
+grammar SharedTokens:
+    token_kind DemoTokenKind
+    token:
+        IF "if"
+
+grammar DemoGrammar uses SharedTokens:
+    token_kind DemoTokenKind
+    token:
+        BEGIN "begin"
+
+lexer DemoLex:
+    tokens DemoGrammar
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		`"if":`,
+		"DemoTokenKind.IF",
+		`"begin":`,
+		"DemoTokenKind.BEGIN",
+		"DemoTokenKind.IDENT",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lexer token import to include used grammar alias %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileLexerImportsQualifiedGrammarTokenAliases(t *testing.T) {
+	file := parseGrammarTestFile(t, `const enum DemoTokenKind of i16:
+    EOF = 0
+    IDENT = 1
+    BEGIN = 2
+
+namespace Pascal:
+    grammar Frontend:
+        token_kind DemoTokenKind
+        token:
+            IDENT
+            BEGIN "begin"
+
+lexer DemoLex:
+    tokens Pascal.Frontend
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		`"begin":`,
+		"DemoTokenKind.BEGIN",
+		"DemoTokenKind.IDENT",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lexer to import qualified grammar aliases %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulAddsStablePublicTryWrapper(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Token:
@@ -1837,6 +2041,54 @@ func TestLowerFileStatefulTokenAliasesRewriteLiteralTokensToKinds(t *testing.T) 
 	}
 }
 
+func TestLowerFileStatefulTokenLookupUsesTokenAliases(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor state
+    token_lookup token_kind_for_text
+    token:
+        IDENT
+        PROGRAM "program"
+        PLUS "+"
+    program() -> Token:
+        "program"
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def token_kind_for_text(text: dstr) -> TokenKind:",
+		`if (text == "program"):`,
+		"return TokenKind.PROGRAM",
+		`if (text == "+"):`,
+		"return TokenKind.PLUS",
+		"return TokenKind.EOF",
+		"state.expect_kind(TokenKind.PROGRAM)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected token lookup lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "TokenKind.IDENT") && strings.Contains(formatted, `if (text == "IDENT")`) {
+		t.Fatalf("expected bare token aliases not to become text lookup arms, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulRawTokenLiteralUsesConfiguredTokenLookup(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar DemoGrammar over Token using ParserState:
+    cursor state
+    token_lookup demo_token_kind_for_text
+    program() -> Token:
+        "custom"
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, `demo_token_kind_for_text("custom")`) {
+		t.Fatalf("expected raw token literal matching to use configured token lookup, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, `== token_kind_for_text("custom")`) {
+		t.Fatalf("expected raw token literal matching not to use default token lookup, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulUsesConfiguredTokenEnvironment(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar SMLFrontend over SMLToken using SMLParserState:
     cursor state
@@ -1930,6 +2182,37 @@ grammar SMLFrontend with SMLGrammarEnv:
 	}
 	if strings.Contains(formatted, "state.expect_token(") {
 		t.Fatalf("expected local expect_kind header to override grammarenv default, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulGrammarEnvTokenSourceImportsAliases(t *testing.T) {
+	file := parseGrammarTestFile(t, `const enum DemoTokenKind of i16:
+	EOF = 0
+	IDENT = 1
+	BEGIN = 2
+
+grammar DemoTokens:
+	token_kind DemoTokenKind
+	token:
+		IDENT
+		BEGIN "begin"
+
+grammarenv DemoEnv over Token using ParserState:
+	cursor state
+	token_kind DemoTokenKind
+	tokens DemoTokens
+
+grammar DemoGrammar with DemoEnv:
+	program() -> Token:
+		"begin"
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "state.expect_kind(DemoTokenKind.BEGIN)") {
+		t.Fatalf("expected grammarenv token source aliases to rewrite literals to token kinds, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, `state.expect("begin")`) {
+		t.Fatalf("expected grammarenv token source to avoid raw text expect, got:\n%s", formatted)
 	}
 }
 

@@ -115,6 +115,8 @@ type GrammarDecl struct {
 	CursorExpr       Expr
 	AllocExpr        Expr
 	TokenKindType    TypeExpr
+	TokenEnumName    string
+	TokenEnumStorage TypeExpr
 	EOFExpr          Expr
 	TokenKindField   string
 	CurrentFunc      string
@@ -122,6 +124,7 @@ type GrammarDecl struct {
 	ExpectFunc       string
 	ExpectKindFunc   string
 	RecordErrorFunc  string
+	TokenLookupFunc  string
 	TokenAliases     []GrammarTokenAliasDecl
 	Channels         []GrammarChannelDecl
 	TokenSets        []GrammarTokenSetDecl
@@ -133,21 +136,22 @@ type GrammarDecl struct {
 }
 
 type GrammarEnvDecl struct {
-	Position        lexer.Pos
-	Name            string
-	OverType        TypeExpr
-	UsingType       TypeExpr
-	ErrorType       TypeExpr
-	CursorExpr      Expr
-	AllocExpr       Expr
-	TokenKindType   TypeExpr
-	EOFExpr         Expr
-	TokenKindField  string
-	CurrentFunc     string
-	AdvanceFunc     string
-	ExpectFunc      string
-	ExpectKindFunc  string
-	RecordErrorFunc string
+	Position         lexer.Pos
+	Name             string
+	OverType         TypeExpr
+	UsingType        TypeExpr
+	ErrorType        TypeExpr
+	CursorExpr       Expr
+	AllocExpr        Expr
+	TokenKindType    TypeExpr
+	TokenGrammarName string
+	EOFExpr          Expr
+	TokenKindField   string
+	CurrentFunc      string
+	AdvanceFunc      string
+	ExpectFunc       string
+	ExpectKindFunc   string
+	RecordErrorFunc  string
 }
 
 type LexerDecl struct {
@@ -155,6 +159,7 @@ type LexerDecl struct {
 	Name          string
 	TokenKindType TypeExpr
 	ModeEnumName  string
+	GrammarName   string
 	Modes         []LexerModeDecl
 	CharClasses   []LexerCharClassDecl
 	Keywords      *LexerKeywordDecl

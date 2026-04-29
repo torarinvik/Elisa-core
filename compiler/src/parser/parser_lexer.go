@@ -15,6 +15,7 @@ func (p *Parser) parseLexerDecl() *ast.LexerDecl {
 
 	var tokenKindType ast.TypeExpr
 	var modeEnumName string
+	var grammarName string
 	modes := make([]ast.LexerModeDecl, 0)
 	charClasses := make([]ast.LexerCharClassDecl, 0)
 	var keywords *ast.LexerKeywordDecl
@@ -34,6 +35,10 @@ func (p *Parser) parseLexerDecl() *ast.LexerDecl {
 			p.expectIdentText("mode_enum")
 			modeEnumName = p.parseQualifiedDeclName()
 			p.expectNewline()
+		case p.peekIdentText("tokens"):
+			p.expectIdentText("tokens")
+			grammarName = p.parseQualifiedDeclName()
+			p.expectNewline()
 		case p.peekIdentText("mode"):
 			modes = append(modes, p.parseLexerModeDecl())
 		case p.peekIdentText("charclass"):
@@ -51,7 +56,7 @@ func (p *Parser) parseLexerDecl() *ast.LexerDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.LexerDecl{Position: pos, Name: name, TokenKindType: tokenKindType, ModeEnumName: modeEnumName, Modes: modes, CharClasses: charClasses, Keywords: keywords, Literals: literals}
+	return &ast.LexerDecl{Position: pos, Name: name, TokenKindType: tokenKindType, ModeEnumName: modeEnumName, GrammarName: grammarName, Modes: modes, CharClasses: charClasses, Keywords: keywords, Literals: literals}
 }
 
 func (p *Parser) parseLexerModeDecl() ast.LexerModeDecl {

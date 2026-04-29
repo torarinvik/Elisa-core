@@ -7,10 +7,11 @@ import (
 	"strings"
 )
 
-func lowerLexerDecls(decl *ast.LexerDecl) []ast.Decl {
+func lowerLexerDecls(decl *ast.LexerDecl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl) []ast.Decl {
 	if decl == nil {
 		return nil
 	}
+	decl = resolveLexerTokenAliases(decl, grammarScope, envScope)
 	out := make([]ast.Decl, 0, len(decl.CharClasses)+3)
 	if len(decl.Modes) != 0 {
 		out = append(out, lowerLexerModeEnumDecl(decl))
@@ -25,6 +26,70 @@ func lowerLexerDecls(decl *ast.LexerDecl) []ast.Decl {
 		out = append(out, lowerLexerLiteralDecl(decl, *decl.Literals))
 	}
 	return out
+}
+
+func resolveLexerTokenAliases(decl *ast.LexerDecl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl) *ast.LexerDecl {
+	if decl == nil || decl.GrammarName == "" || grammarScope == nil {
+		return decl
+	}
+	grammarDecl := grammarScope[decl.GrammarName]
+	if grammarDecl == nil {
+		return decl
+	}
+	grammarDecl = normalizeGrammarDeclBeforeFirstSetsInScope(grammarDecl, grammarScope, envScope)
+	if grammarDecl == nil || len(grammarDecl.TokenAliases) == 0 {
+		return decl
+	}
+	resolved := *decl
+	if resolved.TokenKindType == nil {
+		resolved.TokenKindType = grammarDeclTokenKindType(grammarDecl, grammarDecl.Position)
+	}
+	keywords := resolved.Keywords
+	if keywords == nil {
+		decl := ast.LexerKeywordDecl{Position: grammarDecl.Position, Fallback: "IDENT"}
+		keywords = &decl
+	}
+	literals := resolved.Literals
+	if literals == nil {
+		decl := ast.LexerLiteralDecl{Position: grammarDecl.Position, Fallback: "EOF", Longest: true}
+		literals = &decl
+	}
+	keywordEntries := append([]ast.LexerKeywordEntry(nil), keywords.Entries...)
+	literalEntries := append([]ast.LexerLiteralEntry(nil), literals.Entries...)
+	keywordText := lexerKeywordEntryTextSet(keywordEntries)
+	literalText := lexerLiteralEntryTextSet(literalEntries)
+	addedLiteral := false
+	for _, alias := range grammarDecl.TokenAliases {
+		if !alias.HasLiteral || alias.Literal == "" {
+			continue
+		}
+		if lexerLiteralLooksIdentifier(alias.Literal) {
+			if !keywordText[alias.Literal] {
+				keywordEntries = append(keywordEntries, ast.LexerKeywordEntry{Position: alias.Position, Text: alias.Literal, Kind: alias.Kind})
+				keywordText[alias.Literal] = true
+			}
+			continue
+		}
+		if !literalText[alias.Literal] {
+			literalEntries = append(literalEntries, ast.LexerLiteralEntry{Position: alias.Position, Text: alias.Literal, Kind: alias.Kind})
+			literalText[alias.Literal] = true
+			addedLiteral = true
+		}
+	}
+	if len(keywordEntries) != 0 {
+		clonedKeywords := *keywords
+		clonedKeywords.Entries = keywordEntries
+		resolved.Keywords = &clonedKeywords
+	}
+	if len(literalEntries) != 0 {
+		clonedLiterals := *literals
+		clonedLiterals.Entries = literalEntries
+		if addedLiteral {
+			clonedLiterals.Longest = true
+		}
+		resolved.Literals = &clonedLiterals
+	}
+	return &resolved
 }
 
 func lowerLexerModeEnumDecl(decl *ast.LexerDecl) *ast.EnumDecl {
@@ -193,6 +258,42 @@ func lexerLiteralMatchCond(pos lexer.Pos, text string) ast.Expr {
 
 func lexerLiteralReturnTuple(decl *ast.LexerDecl, pos lexer.Pos, kind string, length int) ast.Expr {
 	return &ast.TupleExpr{Position: pos, Elems: []ast.Expr{lexerKindExpr(decl, pos, kind), lexerInt(pos, length)}}
+}
+
+func lexerKeywordEntryTextSet(entries []ast.LexerKeywordEntry) map[string]bool {
+	out := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		out[entry.Text] = true
+	}
+	return out
+}
+
+func lexerLiteralEntryTextSet(entries []ast.LexerLiteralEntry) map[string]bool {
+	out := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		out[entry.Text] = true
+	}
+	return out
+}
+
+func lexerLiteralLooksIdentifier(text string) bool {
+	if text == "" {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+		if i == 0 {
+			if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_' {
+				continue
+			}
+			return false
+		}
+		if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func lexerKindExpr(decl *ast.LexerDecl, pos lexer.Pos, kind string) ast.Expr {

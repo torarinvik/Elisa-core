@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 func main() {
@@ -429,21 +430,33 @@ func parseIncludeDirective(line string) (string, bool) {
 		}
 		return rest[1 : len(rest)-1], true
 	}
+	if len(line) >= 4 && strings.HasPrefix(line, "{$") && strings.HasSuffix(line, "}") {
+		body := strings.TrimSpace(line[2 : len(line)-1])
+		keyword := body
+		arg := ""
+		if cut := strings.IndexFunc(body, unicode.IsSpace); cut >= 0 {
+			keyword = body[:cut]
+			arg = strings.TrimSpace(body[cut:])
+		}
+		switch strings.ToLower(keyword) {
+		case "i", "include":
+			if arg == "" {
+				return "", false
+			}
+			if len(arg) >= 2 && ((arg[0] == '\'' && arg[len(arg)-1] == '\'') || (arg[0] == '"' && arg[len(arg)-1] == '"')) {
+				return arg[1 : len(arg)-1], true
+			}
+			if strings.IndexFunc(arg, unicode.IsSpace) >= 0 {
+				return "", false
+			}
+			return arg, true
+		}
+	}
 	return "", false
 }
 
 func parseIncludeDirectiveBytes(line []byte) (string, bool) {
-	for _, prefix := range [][]byte{[]byte("# include "), []byte("include ")} {
-		if !bytes.HasPrefix(line, prefix) {
-			continue
-		}
-		rest := bytes.TrimSpace(line[len(prefix):])
-		if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
-			return "", false
-		}
-		return string(rest[1 : len(rest)-1]), true
-	}
-	return "", false
+	return parseIncludeDirective(string(line))
 }
 
 func printFile(w io.Writer, f *ast.File) {

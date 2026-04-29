@@ -558,6 +558,57 @@ func TestParseGrammarDeclAllowsTokenAliasBlock(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsTokenLookupHeader(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalGrammar over Token using ParserState:
+    token_lookup token_kind_for_text
+    token:
+        BEGIN "begin"
+    program() -> Token:
+        "begin"
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if decl.TokenLookupFunc != "token_kind_for_text" {
+		t.Fatalf("expected token lookup function token_kind_for_text, got %q", decl.TokenLookupFunc)
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "token_lookup token_kind_for_text") {
+		t.Fatalf("expected formatted output to contain token_lookup header, got:\n%s", formatted)
+	}
+}
+
+func TestParseGrammarDeclAllowsTokenEnumHeader(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalGrammar over Token using ParserState:
+    token_enum PascalTokenKind of u16
+    token:
+        PROGRAM "program"
+    program() -> Token:
+        "program"
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if decl.TokenEnumName != "PascalTokenKind" {
+		t.Fatalf("expected token enum PascalTokenKind, got %q", decl.TokenEnumName)
+	}
+	if got := formatTypeExprForTest(t, decl.TokenEnumStorage); got != "u16" {
+		t.Fatalf("expected token enum storage u16, got %q", got)
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "token_enum PascalTokenKind of u16") {
+		t.Fatalf("expected formatted output to contain token_enum header, got:\n%s", formatted)
+	}
+}
+
 func TestParseGrammarDeclAllowsTokenSets(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
     token:
@@ -1066,6 +1117,7 @@ func TestParseGrammarEnvDeclAndGrammarWithEnv(t *testing.T) {
     cursor state
     alloc alloc
     token_kind TokenKind
+	tokens PascalTokenGrammar
     eof TokenKind.EOF
     token_field kind
     current current_token
@@ -1097,6 +1149,9 @@ grammar PascalExprGrammar with PascalEnv uses PascalCommonGrammar:
 	if got := formatTypeExprForTest(t, env.UsingType); got != "ParserState" {
 		t.Fatalf("expected env using type ParserState, got %q", got)
 	}
+	if env.TokenGrammarName != "PascalTokenGrammar" {
+		t.Fatalf("expected env token grammar PascalTokenGrammar, got %q", env.TokenGrammarName)
+	}
 	decl, ok := file.Decls[1].(*ast.GrammarDecl)
 	if !ok {
 		t.Fatalf("expected grammar decl, got %T", file.Decls[1])
@@ -1108,6 +1163,7 @@ grammar PascalExprGrammar with PascalEnv uses PascalCommonGrammar:
 	for _, want := range []string{
 		"grammarenv PascalEnv over Token using ParserState:",
 		"cursor state",
+		"tokens PascalTokenGrammar",
 		"record_error record_parse_error",
 		"grammar PascalExprGrammar with PascalEnv uses PascalCommonGrammar:",
 		"token:",

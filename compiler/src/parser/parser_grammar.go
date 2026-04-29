@@ -47,6 +47,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	var cursorExpr ast.Expr
 	var allocExpr ast.Expr
 	var tokenKindType ast.TypeExpr
+	var tokenEnumName string
+	var tokenEnumStorage ast.TypeExpr
 	var eofExpr ast.Expr
 	var tokenKindField string
 	var currentFunc string
@@ -54,6 +56,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	var expectFunc string
 	var expectKindFunc string
 	var recordErrorFunc string
+	var tokenLookupFunc string
 	tokenAliases := make([]ast.GrammarTokenAliasDecl, 0)
 	channels := make([]ast.GrammarChannelDecl, 0)
 	tokenSets := make([]ast.GrammarTokenSetDecl, 0)
@@ -78,6 +81,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			allocExpr = p.parseGrammarValueHeaderDecl("alloc")
 		case p.peekIdentText("token_kind"):
 			tokenKindType = p.parseGrammarTypeHeaderDecl("token_kind")
+		case p.peekIdentText("token_enum"):
+			tokenEnumName, tokenEnumStorage = p.parseGrammarTokenEnumHeaderDecl()
 		case p.peekIdentText("eof"):
 			eofExpr = p.parseGrammarValueHeaderDecl("eof")
 		case p.peekIdentText("token_field"):
@@ -92,6 +97,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			expectKindFunc = p.parseGrammarNameHeaderDecl("expect_kind")
 		case p.peekIdentText("record_error"):
 			recordErrorFunc = p.parseGrammarNameHeaderDecl("record_error")
+		case p.peekIdentText("token_lookup"):
+			tokenLookupFunc = p.parseGrammarNameHeaderDecl("token_lookup")
 		default:
 			p.errorf("expected grammar environment declaration")
 			p.advance()
@@ -159,6 +166,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		CursorExpr:       cursorExpr,
 		AllocExpr:        allocExpr,
 		TokenKindType:    tokenKindType,
+		TokenEnumName:    tokenEnumName,
+		TokenEnumStorage: tokenEnumStorage,
 		EOFExpr:          eofExpr,
 		TokenKindField:   tokenKindField,
 		CurrentFunc:      currentFunc,
@@ -166,6 +175,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		ExpectFunc:       expectFunc,
 		ExpectKindFunc:   expectKindFunc,
 		RecordErrorFunc:  recordErrorFunc,
+		TokenLookupFunc:  tokenLookupFunc,
 		TokenAliases:     tokenAliases,
 		Channels:         channels,
 		TokenSets:        tokenSets,
@@ -230,6 +240,7 @@ func (p *Parser) parseGrammarEnvDecl() *ast.GrammarEnvDecl {
 	var cursorExpr ast.Expr
 	var allocExpr ast.Expr
 	var tokenKindType ast.TypeExpr
+	var tokenGrammarName string
 	var eofExpr ast.Expr
 	var tokenKindField string
 	var currentFunc string
@@ -251,6 +262,10 @@ func (p *Parser) parseGrammarEnvDecl() *ast.GrammarEnvDecl {
 			allocExpr = p.parseGrammarValueHeaderDecl("alloc")
 		case p.peekIdentText("token_kind"):
 			tokenKindType = p.parseGrammarTypeHeaderDecl("token_kind")
+		case p.peekIdentText("tokens"):
+			p.expectIdentText("tokens")
+			tokenGrammarName = p.parseQualifiedDeclName()
+			p.expectNewline()
 		case p.peekIdentText("eof"):
 			eofExpr = p.parseGrammarValueHeaderDecl("eof")
 		case p.peekIdentText("token_field"):
@@ -272,21 +287,22 @@ func (p *Parser) parseGrammarEnvDecl() *ast.GrammarEnvDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	return &ast.GrammarEnvDecl{
-		Position:        pos,
-		Name:            name,
-		OverType:        overType,
-		UsingType:       usingType,
-		ErrorType:       errorType,
-		CursorExpr:      cursorExpr,
-		AllocExpr:       allocExpr,
-		TokenKindType:   tokenKindType,
-		EOFExpr:         eofExpr,
-		TokenKindField:  tokenKindField,
-		CurrentFunc:     currentFunc,
-		AdvanceFunc:     advanceFunc,
-		ExpectFunc:      expectFunc,
-		ExpectKindFunc:  expectKindFunc,
-		RecordErrorFunc: recordErrorFunc,
+		Position:         pos,
+		Name:             name,
+		OverType:         overType,
+		UsingType:        usingType,
+		ErrorType:        errorType,
+		CursorExpr:       cursorExpr,
+		AllocExpr:        allocExpr,
+		TokenKindType:    tokenKindType,
+		TokenGrammarName: tokenGrammarName,
+		EOFExpr:          eofExpr,
+		TokenKindField:   tokenKindField,
+		CurrentFunc:      currentFunc,
+		AdvanceFunc:      advanceFunc,
+		ExpectFunc:       expectFunc,
+		ExpectKindFunc:   expectKindFunc,
+		RecordErrorFunc:  recordErrorFunc,
 	}
 }
 
@@ -306,7 +322,7 @@ func (p *Parser) peekGrammarConfigDecl() bool {
 	}
 	next := p.tokens[p.pos+1].Kind
 	switch p.cur().Text {
-	case "cursor", "alloc", "token_kind", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error":
+	case "cursor", "alloc", "token_kind", "token_enum", "eof", "token_field", "current", "advance", "expect", "expect_kind", "record_error", "token_lookup":
 		return next != lexer.TOKEN_LPAREN
 	default:
 		return false
@@ -369,6 +385,17 @@ func (p *Parser) parseGrammarTypeHeaderDecl(keyword string) ast.TypeExpr {
 	value := p.parseGrammarHeaderTypeExpr()
 	p.expectNewline()
 	return value
+}
+
+func (p *Parser) parseGrammarTokenEnumHeaderDecl() (string, ast.TypeExpr) {
+	p.expectIdentText("token_enum")
+	name := p.parseQualifiedDeclName()
+	var storage ast.TypeExpr
+	if p.matchIdentText("of") {
+		storage = p.parseGrammarHeaderTypeExpr()
+	}
+	p.expectNewline()
+	return name, storage
 }
 
 func (p *Parser) parseGrammarNameHeaderDecl(keyword string) string {

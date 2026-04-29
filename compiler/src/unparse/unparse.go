@@ -316,6 +316,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.TokenKindType != nil {
 			f.writeLine(level+1, "token_kind "+formatTypeExpr(n.TokenKindType))
 		}
+		if n.TokenEnumName != "" {
+			line := "token_enum " + n.TokenEnumName
+			if n.TokenEnumStorage != nil {
+				line += " of " + formatTypeExpr(n.TokenEnumStorage)
+			}
+			f.writeLine(level+1, line)
+		}
 		if n.EOFExpr != nil {
 			f.writeLine(level+1, "eof "+formatExpr(n.EOFExpr))
 		}
@@ -336,6 +343,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		if n.RecordErrorFunc != "" {
 			f.writeLine(level+1, "record_error "+n.RecordErrorFunc)
+		}
+		if n.TokenLookupFunc != "" {
+			f.writeLine(level+1, "token_lookup "+n.TokenLookupFunc)
 		}
 		if len(n.TokenAliases) != 0 {
 			f.writeLine(level+1, "token:")
@@ -410,6 +420,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.TokenKindType != nil {
 			f.writeLine(level+1, "token_kind "+formatTypeExpr(n.TokenKindType))
 		}
+		if n.TokenGrammarName != "" {
+			f.writeLine(level+1, "tokens "+n.TokenGrammarName)
+		}
 		if n.EOFExpr != nil {
 			f.writeLine(level+1, "eof "+formatExpr(n.EOFExpr))
 		}
@@ -438,6 +451,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		if n.ModeEnumName != "" {
 			f.writeLine(level+1, "mode_enum "+n.ModeEnumName)
+		}
+		if n.GrammarName != "" {
+			f.writeLine(level+1, "tokens "+n.GrammarName)
 		}
 		for _, mode := range n.Modes {
 			f.writeLine(level+1, "mode "+mode.Name)

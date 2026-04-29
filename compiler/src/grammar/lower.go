@@ -45,6 +45,7 @@ type statefulLowerContext struct {
 	tokenType       ast.TypeExpr
 	tokenKindType   ast.TypeExpr
 	tokenKindField  string
+	tokenLookupFunc string
 	currentFunc     string
 	advanceFunc     string
 	expectFunc      string
@@ -107,9 +108,9 @@ func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.Grammar
 		case *ast.GrammarEnvDecl:
 			continue
 		case *ast.LexerDecl:
-			lowered = append(lowered, lowerLexerDecls(n)...)
+			lowered = append(lowered, lowerLexerDecls(n, grammarScope, envScope)...)
 		case *ast.NamespaceDecl:
-			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls), grammarEnvDeclScope(n.Decls), structDeclScope(n.Decls), preserveGrammarDecls)}
+			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScopeForNamespace(n.Decls, n.Name), grammarEnvDeclScope(n.Decls), structDeclScope(n.Decls), preserveGrammarDecls)}
 			lowered = append(lowered, cloned)
 		default:
 			lowered = append(lowered, decl)
@@ -138,14 +139,50 @@ func grammarDeclScope(decls []ast.Decl) map[string]*ast.GrammarDecl {
 		return nil
 	}
 	scope := make(map[string]*ast.GrammarDecl)
-	for _, decl := range decls {
-		grammarDecl, ok := decl.(*ast.GrammarDecl)
-		if !ok || grammarDecl == nil || grammarDecl.Name == "" {
-			continue
-		}
-		scope[grammarDecl.Name] = mergeGrammarDecls(scope[grammarDecl.Name], grammarDecl)
+	collectGrammarDeclScope(scope, decls, "", true)
+	if len(scope) == 0 {
+		return nil
 	}
 	return scope
+}
+
+func grammarDeclScopeForNamespace(decls []ast.Decl, namespace string) map[string]*ast.GrammarDecl {
+	if len(decls) == 0 {
+		return nil
+	}
+	scope := make(map[string]*ast.GrammarDecl)
+	collectGrammarDeclScope(scope, decls, namespace, true)
+	if len(scope) == 0 {
+		return nil
+	}
+	return scope
+}
+
+func collectGrammarDeclScope(scope map[string]*ast.GrammarDecl, decls []ast.Decl, namespace string, includeLocalNames bool) {
+	for _, decl := range decls {
+		switch n := decl.(type) {
+		case *ast.GrammarDecl:
+			if n == nil || n.Name == "" {
+				continue
+			}
+			if includeLocalNames {
+				scope[n.Name] = mergeGrammarDecls(scope[n.Name], n)
+			}
+			if namespace != "" {
+				qualified := namespace + "." + n.Name
+				scope[qualified] = mergeGrammarDecls(scope[qualified], n)
+			}
+		case *ast.NamespaceDecl:
+			if n == nil || n.Name == "" {
+				continue
+			}
+			childNamespace := n.Name
+			if namespace != "" {
+				childNamespace = namespace + "." + n.Name
+			}
+			collectGrammarDeclScope(scope, n.Decls, childNamespace, false)
+		}
+	}
 }
 
 func grammarEnvDeclScope(decls []ast.Decl) map[string]*ast.GrammarEnvDecl {
@@ -238,6 +275,12 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	if merged.TokenKindType == nil {
 		merged.TokenKindType = extra.TokenKindType
 	}
+	if merged.TokenEnumName == "" {
+		merged.TokenEnumName = extra.TokenEnumName
+	}
+	if merged.TokenEnumStorage == nil {
+		merged.TokenEnumStorage = extra.TokenEnumStorage
+	}
 	if merged.EOFExpr == nil {
 		merged.EOFExpr = extra.EOFExpr
 	}
@@ -259,6 +302,9 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	if merged.RecordErrorFunc == "" {
 		merged.RecordErrorFunc = extra.RecordErrorFunc
 	}
+	if merged.TokenLookupFunc == "" {
+		merged.TokenLookupFunc = extra.TokenLookupFunc
+	}
 	merged.TokenAliases = append(merged.TokenAliases, extra.TokenAliases...)
 	merged.Channels = append(merged.Channels, extra.Channels...)
 	merged.TokenSets = append(merged.TokenSets, extra.TokenSets...)
@@ -278,7 +324,13 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 	normalizedDecl := normalizeGrammarDeclForLoweringInScope(decl, grammarScope, envScope)
 	if !grammarDeclIsStateful(normalizedDecl) {
 		public := LowerDecl(normalizedDecl)
-		out := make([]ast.Decl, 0, len(public))
+		out := make([]ast.Decl, 0, len(public)+2)
+		if tokenEnum := lowerGrammarTokenEnumDecl(normalizedDecl); tokenEnum != nil {
+			out = append(out, tokenEnum)
+		}
+		if lookup := lowerGrammarTokenLookupFunc(normalizedDecl); lookup != nil {
+			out = append(out, lookup)
+		}
 		for _, fn := range public {
 			out = append(out, fn)
 		}
@@ -292,7 +344,13 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 		helperProductions = append(helperProductions, helpers...)
 	}
 	productionMap := reachableGrammarProductionMap(normalizedDecl, grammarScope, envScope, rewrittenProductions, helperProductions)
-	out := make([]ast.Decl, 0, len(rewrittenProductions)*3+len(helperProductions))
+	out := make([]ast.Decl, 0, len(rewrittenProductions)*3+len(helperProductions)+2)
+	if tokenEnum := lowerGrammarTokenEnumDecl(normalizedDecl); tokenEnum != nil {
+		out = append(out, tokenEnum)
+	}
+	if lookup := lowerGrammarTokenLookupFunc(normalizedDecl); lookup != nil {
+		out = append(out, lookup)
+	}
 	for _, production := range rewrittenProductions {
 		receiver := grammarReceiverInfoForProduction(normalizedDecl, production)
 		ctx := &statefulLowerContext{
@@ -303,6 +361,7 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 			tokenType:       grammarDeclTokenType(normalizedDecl, production.Position),
 			tokenKindType:   grammarDeclTokenKindType(normalizedDecl, production.Position),
 			tokenKindField:  grammarDeclTokenKindField(normalizedDecl),
+			tokenLookupFunc: grammarDeclTokenLookupFunc(normalizedDecl),
 			currentFunc:     grammarDeclCurrentFunc(normalizedDecl),
 			advanceFunc:     grammarDeclAdvanceFunc(normalizedDecl),
 			expectFunc:      grammarDeclExpectFunc(normalizedDecl),
@@ -330,6 +389,7 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 			tokenType:       grammarDeclTokenType(normalizedDecl, production.Position),
 			tokenKindType:   grammarDeclTokenKindType(normalizedDecl, production.Position),
 			tokenKindField:  grammarDeclTokenKindField(normalizedDecl),
+			tokenLookupFunc: grammarDeclTokenLookupFunc(normalizedDecl),
 			currentFunc:     grammarDeclCurrentFunc(normalizedDecl),
 			advanceFunc:     grammarDeclAdvanceFunc(normalizedDecl),
 			expectFunc:      grammarDeclExpectFunc(normalizedDecl),
@@ -457,16 +517,16 @@ func normalizeGrammarDeclBeforeFirstSetsInScope(decl *ast.GrammarDecl, grammarSc
 	normalized.GrammarFns = nil
 	normalized.RecoveryPolicies = nil
 	normalized.InfixTables = nil
-	if len(decl.Uses) != 0 && grammarScope != nil {
-		seen := map[string]bool{decl.Name: true}
-		appendUsedGrammarSupportDecls(&normalized.TokenAliases, &normalized.TokenSets, &normalized.GrammarAliases, &normalized.GrammarFns, &normalized.RecoveryPolicies, &normalized.InfixTables, decl, grammarScope, seen)
+	if len(normalizedDecl.Uses) != 0 && grammarScope != nil {
+		seen := map[string]bool{normalizedDecl.Name: true}
+		appendUsedGrammarSupportDecls(&normalized.TokenAliases, &normalized.TokenSets, &normalized.GrammarAliases, &normalized.GrammarFns, &normalized.RecoveryPolicies, &normalized.InfixTables, normalizedDecl, grammarScope, seen)
 	}
-	normalized.TokenAliases = append(normalized.TokenAliases, decl.TokenAliases...)
-	normalized.TokenSets = append(normalized.TokenSets, decl.TokenSets...)
-	normalized.GrammarAliases = append(normalized.GrammarAliases, decl.GrammarAliases...)
-	normalized.GrammarFns = append(normalized.GrammarFns, decl.GrammarFns...)
-	normalized.RecoveryPolicies = append(normalized.RecoveryPolicies, decl.RecoveryPolicies...)
-	normalized.InfixTables = append(normalized.InfixTables, decl.InfixTables...)
+	normalized.TokenAliases = append(normalized.TokenAliases, normalizedDecl.TokenAliases...)
+	normalized.TokenSets = append(normalized.TokenSets, normalizedDecl.TokenSets...)
+	normalized.GrammarAliases = append(normalized.GrammarAliases, normalizedDecl.GrammarAliases...)
+	normalized.GrammarFns = append(normalized.GrammarFns, normalizedDecl.GrammarFns...)
+	normalized.RecoveryPolicies = append(normalized.RecoveryPolicies, normalizedDecl.RecoveryPolicies...)
+	normalized.InfixTables = append(normalized.InfixTables, normalizedDecl.InfixTables...)
 	aliasByLiteral := grammarTokenAliasLiteralMap(normalized.TokenAliases)
 	normalized.TokenSets = rewriteGrammarTokenSetsTokenAliases(normalized.TokenSets, aliasByLiteral)
 	normalized.RecoveryPolicies = rewriteGrammarRecoveryPoliciesTokenAliases(normalized.RecoveryPolicies, aliasByLiteral)
@@ -488,8 +548,8 @@ func normalizeGrammarDeclBeforeFirstSetsInScope(decl *ast.GrammarDecl, grammarSc
 	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(normalized.InfixTables, aliasByLiteral)
 	recoveryPolicies := grammarRecoveryPolicyMap(normalized.RecoveryPolicies)
 	infixTables := grammarInfixTableMap(normalized.InfixTables)
-	normalized.Productions = make([]ast.GrammarProductionDecl, 0, len(decl.Productions))
-	for _, production := range decl.Productions {
+	normalized.Productions = make([]ast.GrammarProductionDecl, 0, len(normalizedDecl.Productions))
+	for _, production := range normalizedDecl.Productions {
 		rewritten := expandGrammarProductionGrammarAliases(production, grammarAliases)
 		rewritten = expandGrammarProductionGrammarFns(rewritten, grammarFns)
 		rewritten = rewriteGrammarProductionTokenAliases(rewritten, aliasByLiteral)
@@ -572,7 +632,22 @@ func applyGrammarEnvDefaults(decl *ast.GrammarDecl, envScope map[string]*ast.Gra
 	if applied.RecordErrorFunc == "" {
 		applied.RecordErrorFunc = envDecl.RecordErrorFunc
 	}
+	if envDecl.TokenGrammarName != "" {
+		applied.Uses = appendGrammarUseIfMissing(applied.Uses, envDecl.TokenGrammarName, envDecl.Position)
+	}
 	return applied
+}
+
+func appendGrammarUseIfMissing(uses []ast.TypeExpr, name string, pos lexer.Pos) []ast.TypeExpr {
+	if name == "" {
+		return uses
+	}
+	for _, used := range uses {
+		if grammarUseName(used) == name {
+			return uses
+		}
+	}
+	return append(uses, &ast.NamedType{Position: pos, Name: name})
 }
 
 func grammarTokenAliasLiteralMap(aliases []ast.GrammarTokenAliasDecl) map[string]string {
@@ -589,6 +664,81 @@ func grammarTokenAliasLiteralMap(aliases []ast.GrammarTokenAliasDecl) map[string
 		return nil
 	}
 	return byLiteral
+}
+
+func lowerGrammarTokenEnumDecl(grammarDecl *ast.GrammarDecl) *ast.ConstEnumDecl {
+	if grammarDecl == nil || grammarDecl.TokenEnumName == "" {
+		return nil
+	}
+	pos := grammarDecl.Position
+	storage := grammarDecl.TokenEnumStorage
+	if storage == nil {
+		storage = builtinTypeExpr(pos, "i16")
+	}
+	members := make([]ast.ConstEnumMemberDecl, 0, len(grammarDecl.TokenAliases)+1)
+	seen := make(map[string]bool, len(grammarDecl.TokenAliases)+1)
+	addMember := func(memberPos lexer.Pos, name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		members = append(members, ast.ConstEnumMemberDecl{
+			Position: memberPos,
+			Name:     name,
+			Value:    lexerInt(memberPos, len(members)),
+		})
+	}
+	addMember(pos, "EOF")
+	for _, alias := range grammarDecl.TokenAliases {
+		addMember(alias.Position, alias.Kind)
+	}
+	return &ast.ConstEnumDecl{Position: pos, Name: grammarDecl.TokenEnumName, Storage: storage, Members: members}
+}
+
+func lowerGrammarTokenLookupFunc(grammarDecl *ast.GrammarDecl) *ast.FuncDecl {
+	if grammarDecl == nil || grammarDecl.TokenLookupFunc == "" {
+		return nil
+	}
+	aliases := grammarDecl.TokenAliases
+	if len(aliases) == 0 {
+		return nil
+	}
+	pos := grammarDecl.Position
+	body := make([]ast.Stmt, 0, len(aliases)+1)
+	for _, alias := range aliases {
+		if !alias.HasLiteral || alias.Literal == "" {
+			continue
+		}
+		cond := &ast.BinaryExpr{
+			Position: alias.Position,
+			Op:       lexer.TOKEN_EQEQ,
+			Left:     &ast.Ident{Position: alias.Position, Name: "text"},
+			Right:    &ast.StringLit{Position: alias.Position, Value: alias.Literal},
+		}
+		body = append(body, &ast.IfStmt{
+			Position: alias.Position,
+			Cond:     cond,
+			Then: []ast.Stmt{
+				&ast.ReturnStmt{
+					Position: alias.Position,
+					Value:    grammarTokenKindExpr(alias.Position, grammarDeclTokenKindType(grammarDecl, alias.Position), alias.Kind),
+				},
+			},
+		})
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	body = append(body, &ast.ReturnStmt{Position: pos, Value: grammarDeclEOFExpr(grammarDecl, pos)})
+	return &ast.FuncDecl{
+		Position: pos,
+		Name:     grammarDecl.TokenLookupFunc,
+		Params: []ast.ParamDecl{
+			{Position: pos, Name: "text", Type: builtinTypeExpr(pos, "dstr")},
+		},
+		ReturnType: grammarDeclTokenKindType(grammarDecl, pos),
+		Body:       body,
+	}
 }
 
 func rewriteGrammarProductionTokenAliases(production ast.GrammarProductionDecl, aliases map[string]string) ast.GrammarProductionDecl {
@@ -2350,6 +2500,9 @@ func grammarDeclTokenKindType(grammarDecl *ast.GrammarDecl, pos lexer.Pos) ast.T
 	if grammarDecl != nil && grammarDecl.TokenKindType != nil {
 		return grammarDecl.TokenKindType
 	}
+	if grammarDecl != nil && grammarDecl.TokenEnumName != "" {
+		return &ast.NamedType{Position: pos, Name: grammarDecl.TokenEnumName}
+	}
 	return builtinTypeExpr(pos, "TokenKind")
 }
 
@@ -2357,7 +2510,17 @@ func grammarDeclEOFExpr(grammarDecl *ast.GrammarDecl, pos lexer.Pos) ast.Expr {
 	if grammarDecl != nil && grammarDecl.EOFExpr != nil {
 		return cloneHeaderExprAtPos(grammarDecl.EOFExpr, pos)
 	}
+	if grammarDecl != nil && grammarDecl.TokenEnumName != "" {
+		return &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: grammarDecl.TokenEnumName}, Field: "EOF"}
+	}
 	return &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: "TokenKind"}, Field: "EOF"}
+}
+
+func grammarDeclTokenLookupFunc(grammarDecl *ast.GrammarDecl) string {
+	if grammarDecl != nil && grammarDecl.TokenLookupFunc != "" {
+		return grammarDecl.TokenLookupFunc
+	}
+	return "token_kind_for_text"
 }
 
 func grammarDeclTokenKindField(grammarDecl *ast.GrammarDecl) string {
@@ -3524,10 +3687,13 @@ func listPushIndexedItemsExprStmts(ctx lowerContext, pos lexer.Pos, targetName s
 	}
 }
 
-func grammarTokenMatchExpr(pos lexer.Pos, tokenExpr ast.Expr, tokenKindField string, value string) ast.Expr {
+func grammarTokenMatchExpr(pos lexer.Pos, tokenExpr ast.Expr, tokenKindField string, tokenLookupFunc string, value string) ast.Expr {
+	if tokenLookupFunc == "" {
+		tokenLookupFunc = "token_kind_for_text"
+	}
 	return grammarTokenKindMatchExpr(pos, tokenExpr, tokenKindField, &ast.CallExpr{
 		Position: pos,
-		Func:     &ast.Ident{Position: pos, Name: "token_kind_for_text"},
+		Func:     &ast.Ident{Position: pos, Name: tokenLookupFunc},
 		Args:     []ast.Expr{&ast.StringLit{Position: pos, Value: value}},
 	})
 }
@@ -3778,7 +3944,7 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return loweredAttempt{
 			Stmts: []ast.Stmt{
 				&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: lowerTermExpr(ctx.lowerExprContext(), n)},
-				&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenMatchExpr(n.Position, valueIdent, ctx.tokenKindField, n.Value)},
+				&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenMatchExpr(n.Position, valueIdent, ctx.tokenKindField, ctx.tokenLookupFunc, n.Value)},
 			},
 			Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
 			Committed: &ast.BoolLit{Position: n.Position, Value: false},
@@ -4936,7 +5102,7 @@ func (ctx *statefulLowerContext) lowerListUntilMatchExpr(pos lexer.Pos, stops []
 func (ctx *statefulLowerContext) lowerListUntilStopExpr(pos lexer.Pos, tokenExpr ast.Expr, stop ast.GrammarTerm) ast.Expr {
 	switch n := stop.(type) {
 	case *ast.GrammarTokenTerm:
-		return grammarTokenMatchExpr(pos, tokenExpr, ctx.tokenKindField, n.Value)
+		return grammarTokenMatchExpr(pos, tokenExpr, ctx.tokenKindField, ctx.tokenLookupFunc, n.Value)
 	case *ast.GrammarTokenKindTerm:
 		return grammarTokenKindMatchExpr(pos, tokenExpr, ctx.tokenKindField, grammarTokenKindExpr(n.Position, ctx.tokenKindType, n.Kind))
 	case *ast.GrammarCallTerm:
