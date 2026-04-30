@@ -20,15 +20,15 @@ The current compiler follows the recommended lightweight model rather than full 
 Implemented today:
 
 - exact fixed-array typing for `array[T, N]` and `T[N]`
-- dynamic shape witnesses for `darray[T, shape]` and `dstr[shape]`
+- dynamic shape witnesses for `darray[T, shape]` and `cstr[shape]`
 - non-owning view types `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]`
 - indexing for fixed arrays, dynamic arrays/views, strings, and string views
 - slice syntax producing view-like results:
     - `array[T, N]`, `T[N]`, and their non-null references slice to `view[T, start, end]`
     - `darray[T, shape]` and `dview[T]` slices produce `dview[T]`
-    - `dstr[shape]`, `str[N]`, and `sview[begin, end]` slices produce `sview[start, end]`
+    - `cstr[shape]`, `str[N]`, and `sview[begin, end]` slices produce `sview[start, end]`
 
-The user-facing built-in spellings are lowercase only: use `str[...]` and `dstr[...]`, not legacy aliases like `string[...]` or `dstring[...]`.
+The user-facing built-in spellings are lowercase only: use `str[...]` and `cstr[...]`, not legacy aliases like `string[...]` or `cstring[...]`.
 
 The same rule applies to the runtime-backed container/view family: `darray[...]`, `dview[...]`, and `sview[...]` are the canonical source-level spellings, while `DynArray[...]`, `DynArrayView`, and `StringView` are internal runtime carrier names.
 
@@ -86,10 +86,10 @@ For strings I would distinguish between logical string length and raw byte array
 ```context
 u8[N]             # raw fixed byte array
 str[N]            # fixed string / byte-string with known logical length
-dstr[n]           # owned dynamic string with tracked logical length
+cstr[n]           # owned dynamic string with tracked logical length
 ```
 
-If you want maximum minimalism, `str[N]` and `dstr[n]` can just be language-level wrappers over `u8[N]` and `darray[u8, n]`.
+If you want maximum minimalism, `str[N]` and `cstr[n]` can just be language-level wrappers over `u8[N]` and `darray[u8, n]`.
 
 ## Core type constructors
 
@@ -99,7 +99,7 @@ Formally, let the type layer have:
 array[T, N]      fixed-size array, N compile-time known
 darray[T, n]     owned dynamic array, logical length index n
 str[N]           fixed string of logical length N
-dstr[n]          owned dynamic string of logical length n
+cstr[n]          owned dynamic string of logical length n
 ```
 
 Where:
@@ -195,9 +195,9 @@ Internally, the runtime representation can still stay equivalent to a simple low
 
 ### Dynamic string representation
 
-User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[begin, end]` when it wants explicit shape relationships, or use bare `dstr` and bare `sview` as shape-erasing shorthand when it only cares that a value is a dynamic string or string subview.
+User-facing code should talk in terms of `str[N]`, `cstr[shape]`, and `sview[begin, end]` when it wants explicit shape relationships, or use bare `cstr` and bare `sview` as shape-erasing shorthand when it only cares that a value is a dynamic string or string subview.
 
-As with `darray[T]`, bare `dstr` means “some logical string shape exists here, but this API is not naming or preserving it”. Bare `sview` means the same thing for a non-owning string subview: some exact slice bounds exist, but this API is intentionally not exposing them.
+As with `darray[T]`, bare `cstr` means “some logical string shape exists here, but this API is not naming or preserving it”. Bare `sview` means the same thing for a non-owning string subview: some exact slice bounds exist, but this API is intentionally not exposing them.
 
 Internally, the runtime representation can still stay equivalent to a simple low-level byte-buffer carrier.
 
@@ -337,12 +337,12 @@ This is useful for:
 ### Dynamic strings
 
 ```text
-Γ ⊢ s : dstr[shape_id]
+Γ ⊢ s : cstr[shape_id]
 ```
 
 with exactly the same logical-shape story as `darray[u8, shape_id]`.
 
-In the current implementation, `dstr[shape_id]` and `str[N]` are also paired with a non-owning runtime-backed `sview[begin, end]` surface for slicing and view-style APIs.
+In the current implementation, `cstr[shape_id]` and `str[N]` are also paired with a non-owning runtime-backed `sview[begin, end]` surface for slicing and view-style APIs.
 
 ### Relationship to byte arrays
 
@@ -429,7 +429,7 @@ Then expose compiler-level logical shape wrappers incrementally.
 
 At first, this can even be mostly API-discipline plus type wrappers.
 
-Status: implemented for `darray`, `dstr`, and the current runtime bridge. The older `DList` / `DListView` surface has been removed from the language.
+Status: implemented for `darray`, `cstr`, and the current runtime bridge. The older `DList` / `DListView` surface has been removed from the language.
 
 ### Stage 3 — logical post-operation shape change
 
@@ -478,7 +478,7 @@ for static arrays.
 
 ```context
 darray[T, n]
-dstr[n]
+cstr[n]
 view[T, begin, end]
 sview[begin, end]
 ```
@@ -493,7 +493,7 @@ push        : darray[T, shape_in] × T -> darray[T, shape_out] error[ShapeOpErro
 append_many : darray[T, shape_in] × darray[T, chunk] -> darray[T, shape_out] error[ShapeOpError]
 truncate    : darray[T, shape_in] × usize -> darray[T, shape_out]
 clear       : darray[T, shape_in] -> darray[T, shape_out]
-concat      : dstr[shape_left] × dstr[shape_right] -> dstr[shape_result] error[ShapeOpError]
+concat      : cstr[shape_left] × cstr[shape_right] -> cstr[shape_result] error[ShapeOpError]
 ```
 
 String indexing now yields `char`. Cast explicitly when you want an integer code unit:
@@ -506,7 +506,7 @@ def first_code(text: str[4]) -> i64:
     return text[0].i64()
 ```
 
-Current meaning note: today `char` is best understood as the element/code-unit type yielded by `str`, `dstr`, and `sview` indexing. In the current implementation it lowers like an `i64`, but user-facing code should treat it as a distinct scalar rather than “just an integer with a funny hat”.
+Current meaning note: today `char` is best understood as the element/code-unit type yielded by `str`, `cstr`, and `sview` indexing. In the current implementation it lowers like an `i64`, but user-facing code should treat it as a distinct scalar rather than “just an integer with a funny hat”.
 
 That also leaves room for future extensions such as encoding-qualified character forms if the language eventually wants to distinguish byte-oriented characters from wider text elements.
 

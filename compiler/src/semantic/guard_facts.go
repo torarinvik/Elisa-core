@@ -181,7 +181,7 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 	if field == "" || objType == nil {
 		return false
 	}
-	if fieldInfo, ok := dstrSyntheticField(objType, field); ok {
+	if fieldInfo, ok := cstrSyntheticField(objType, field); ok {
 		return fieldInfo.Type != nil
 	}
 	if ref, ok := objType.(*RefType); ok {

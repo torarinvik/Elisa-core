@@ -141,28 +141,28 @@ store PendingGotoStore:
     name_key: u32
     depth: u32
 
-def arena_dict_get[T](m: dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> mutable T&?:
+def arena_dict_get[T](m: dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> mutable T&?:
     return null
 
-def arena_dict_contains[T](m: dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
+def arena_dict_contains[T](m: dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> bool:
     return false
 
-def arena_dict_remove[T](m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
+def arena_dict_remove[T](m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> bool:
     return false
 
-def arena_dict_clear[T](m: mutable dict[dstr[key_shape], T]&):
+def arena_dict_clear[T](m: mutable dict[cstr[key_shape], T]&):
     pass
 
-def arena_dict_reserve[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, min_capacity: usize) -> void:
+def arena_dict_reserve[T](a: mutable Arena&, m: mutable dict[cstr[key_shape], T]&, min_capacity: usize) -> void:
     pass
 
-def arena_dict_put[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable T&?:
+def arena_dict_put[T](a: mutable Arena&, m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape], value: T) -> mutable T&?:
     return null
 
-def arena_dict_get_or_insert[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable T&?:
+def arena_dict_get_or_insert[T](a: mutable Arena&, m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape], value: T) -> mutable T&?:
     return null
 
-def build(owner: Arena, key: dstr[key_shape]) -> usize:
+def build(owner: Arena, key: cstr[key_shape]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
@@ -170,7 +170,7 @@ def build(owner: Arena, key: dstr[key_shape]) -> usize:
         pending.push(1u32, 2u32)
         pending.truncate(1)
         pending.clear()
-        values: mutable dict[dstr[key_shape], i64] = zeroed
+        values: mutable dict[cstr[key_shape], i64] = zeroed
         _ = values.put(key, 7)
         slot = values.get_or_insert(key):
             base = 9
@@ -291,7 +291,7 @@ def build(owner: Arena, key: Key, id: u32) -> usize:
         return counts.count + keyed.count
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[dstr, V]") {
+	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[cstr, V]") {
 		t.Fatalf("expected runtime-backed dict restriction diagnostic, got:\n%s", all)
 	}
 }

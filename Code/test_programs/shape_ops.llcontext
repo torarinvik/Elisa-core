@@ -4,7 +4,7 @@ error ShapeOpError:
 extern resize(array: darray[i32, shape_in], size: usize) -> darray[i32, shape_out] error[ShapeOpError]
 extern push(array: darray[i32, shape_in], element: i32) -> darray[i32, shape_out] error[ShapeOpError]
 extern concat(array1: darray[i32, shape_left], array2: darray[i32, shape_right]) -> darray[i32, shape_result] error[ShapeOpError]
-extern strcat(left: dstr[shape_left], right: dstr[shape_right]) -> dstr[shape_result] error[ShapeOpError]
+extern strcat(left: cstr[shape_left], right: cstr[shape_right]) -> cstr[shape_result] error[ShapeOpError]
 
 def grow_once(array: darray[i32, row]) -> darray[i32, shape_after] error[ShapeOpError]:
     return try resize(array, 8)
@@ -15,5 +15,5 @@ def append_once(array: darray[i32, row]) -> darray[i32, shape_after] error[Shape
 def merge_arrays(left: darray[i32, row], right: darray[i32, col]) -> darray[i32, shape_joined] error[ShapeOpError]:
     return try concat(left, right)
 
-def merge_strings(left: dstr[row], right: dstr[col]) -> dstr[shape_joined] error[ShapeOpError]:
+def merge_strings(left: cstr[row], right: cstr[col]) -> cstr[shape_joined] error[ShapeOpError]:
     return try strcat(left, right)

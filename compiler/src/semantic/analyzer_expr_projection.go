@@ -22,7 +22,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 			return field.Type
 		}
 	}
-	if field, ok := dstrSyntheticField(objType, expr.Field); ok {
+	if field, ok := cstrSyntheticField(objType, expr.Field); ok {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {

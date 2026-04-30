@@ -562,16 +562,16 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 		value := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
 		return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{key, value}}
-	case "dstr":
+	case "cstr":
 		p.advance()
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
-		return &ast.BuiltinTypeExpr{Position: pos, Name: "dstr", ValueArgs: []ast.Expr{size}}
-	case "dstring":
+		return &ast.BuiltinTypeExpr{Position: pos, Name: "cstr", ValueArgs: []ast.Expr{size}}
+	case "cstring":
 		p.advance()
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
-		return &ast.BuiltinTypeExpr{Position: pos, Name: "dstring", ValueArgs: []ast.Expr{size}}
+		return &ast.BuiltinTypeExpr{Position: pos, Name: "cstring", ValueArgs: []ast.Expr{size}}
 	case "view", "dview", "packedview", "treeview":
 		p.advance()
 		elem := p.parseTypeExpr()

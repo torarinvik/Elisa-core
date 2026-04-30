@@ -25,7 +25,7 @@ def advance_token(self: mutable ParserState&) -> void:
     self.cursor <- self.cursor + 1
 
 
-def token_kind_for_text(text: dstr) -> TokenKind:
+def token_kind_for_text(text: cstr) -> TokenKind:
     match text:
         "+":
             return TokenKind.PLUS
@@ -43,7 +43,7 @@ def token_kind_for_text(text: dstr) -> TokenKind:
             return TokenKind.EOF
 
 
-def expect(self: mutable ParserState&, text: dstr) -> Token:
+def expect(self: mutable ParserState&, text: cstr) -> Token:
     return Token{kind: token_kind_for_text(text)}
 
 
@@ -51,7 +51,7 @@ def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:
     return Token{kind: kind}
 
 
-def record_parse_error(self: mutable ParserState&, message: dstr) -> void:
+def record_parse_error(self: mutable ParserState&, message: cstr) -> void:
     pass
 
 

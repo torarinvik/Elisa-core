@@ -235,7 +235,7 @@ func lowerLexerLiteralDecl(decl *ast.LexerDecl, literals ast.LexerLiteralDecl) *
 		Position: pos,
 		Name:     lexerHelperName(decl.Name, "match_literal"),
 		Params: []ast.ParamDecl{
-			{Position: pos, Name: "source", Type: builtinTypeExpr(pos, "dstr")},
+			{Position: pos, Name: "source", Type: builtinTypeExpr(pos, "cstr")},
 			{Position: pos, Name: "offset", Type: builtinTypeExpr(pos, "usize")},
 		},
 		ReturnType: &ast.TupleTypeExpr{Position: pos, Fields: []ast.TupleTypeField{

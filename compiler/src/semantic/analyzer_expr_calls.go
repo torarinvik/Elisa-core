@@ -360,7 +360,7 @@ func (a *Analyzer) analyzeSafeFieldExpr(expr *ast.FieldExpr) Type {
 		a.errorf(expr.Pos(), nullableRefRequirementMessage("optional chaining receiver", receiverType.String()))
 		return invalidType
 	}
-	if field, ok := dstrSyntheticField(baseReceiverType, expr.Field); ok {
+	if field, ok := cstrSyntheticField(baseReceiverType, expr.Field); ok {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		return optionalizeSafeChainResult(field.Type)
 	}

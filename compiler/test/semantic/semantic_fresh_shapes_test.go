@@ -77,16 +77,16 @@ def grow(array: darray[i32, row]) -> void:
 }
 
 func TestAnalyzeShapeChangingStringConcatReturnsFreshShape(t *testing.T) {
-	src := `extern concat(left: dstr[shape_left], right: dstr[shape_right]) -> dstr[shape_result]
+	src := `extern concat(left: cstr[shape_left], right: cstr[shape_right]) -> cstr[shape_result]
 
-def bad(left: dstr[row], right: dstr[col]) -> dstr[row]:
+def bad(left: cstr[row], right: cstr[col]) -> cstr[row]:
 		return concat(left, right)
 `
-	_, errs := parseAndAnalyze(t, "concat_dstr_returns_fresh_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "concat_cstr_returns_fresh_shape.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "return type expects dstr[row], got dstr[shape_result#") {
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects cstr[row], got cstr[shape_result#") {
 		t.Fatalf("expected fresh DStr concat witness diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -102,9 +102,9 @@ def grow(array: darray[i32, row]) -> darray[i32, shape_after]:
 }
 
 func TestAnalyzeWrapperCanReturnFreshStringShape(t *testing.T) {
-	src := `extern strcat(left: dstr[shape_left], right: dstr[shape_right]) -> dstr[shape_result]
+	src := `extern strcat(left: cstr[shape_left], right: cstr[shape_right]) -> cstr[shape_result]
 
-def merge(left: dstr[row], right: dstr[col]) -> dstr[shape_after]:
+def merge(left: cstr[row], right: cstr[col]) -> cstr[shape_after]:
 		return strcat(left, right)
 `
 	_, errs := parseAndAnalyze(t, "wrapper_returns_fresh_string_shape.llcontext", src)
@@ -134,15 +134,15 @@ def bad(array: darray[i32, row]) -> void:
 }
 
 func TestAnalyzeWrapperCallPropagatesFreshStringShape(t *testing.T) {
-	src := `extern strcat(left: dstr[shape_left], right: dstr[shape_right]) -> dstr[shape_result]
+	src := `extern strcat(left: cstr[shape_left], right: cstr[shape_right]) -> cstr[shape_result]
 
-def merge(left: dstr[row], right: dstr[col]) -> dstr[shape_after]:
+def merge(left: cstr[row], right: cstr[col]) -> cstr[shape_after]:
 		return strcat(left, right)
 
-def same(left: dstr[shape_pair], right: dstr[shape_pair]) -> void:
+def same(left: cstr[shape_pair], right: cstr[shape_pair]) -> void:
 		pass
 
-def bad(left: dstr[row], right: dstr[col]) -> void:
+def bad(left: cstr[row], right: cstr[col]) -> void:
 		same(merge(left, right), merge(left, right))
 `
 	_, errs := parseAndAnalyze(t, "wrapper_call_propagates_fresh_string_shape.llcontext", src)
@@ -150,7 +150,7 @@ def bad(left: dstr[row], right: dstr[col]) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "argument 2 to \"same\" expects dstr[shape_after#") || !strings.Contains(all, "got dstr[shape_after#") {
+	if !strings.Contains(all, "argument 2 to \"same\" expects cstr[shape_after#") || !strings.Contains(all, "got cstr[shape_after#") {
 		t.Fatalf("expected fresh wrapper string shape diagnostic, got:\n%s", all)
 	}
 }
@@ -239,10 +239,10 @@ func TestAnalyzeStage1StringConcatWrapperReturnsFreshShape(t *testing.T) {
 	src := `def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
 	return lhs if lhs != null else rhs.cast[u8&]
 
-def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
+def rt_concat2(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_result]:
 	return concat2(lhs, rhs)
 
-def bad(left: dstr[row], right: dstr[col]) -> dstr[row]:
+def bad(left: cstr[row], right: cstr[col]) -> cstr[row]:
 	return rt_concat2(left, right)
 `
 	_, errs := parseAndAnalyze(t, "stage1_string_concat_wrapper.llcontext", src)
@@ -250,7 +250,7 @@ def bad(left: dstr[row], right: dstr[col]) -> dstr[row]:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects dstr[row], got dstr[shape_result#") || !strings.Contains(all, "note: rt_concat2 returns a fresh logical shape for shape_result") {
+	if !strings.Contains(all, "return type expects cstr[row], got cstr[shape_result#") || !strings.Contains(all, "note: rt_concat2 returns a fresh logical shape for shape_result") {
 		t.Fatalf("expected fresh stage1 string concat diagnostic, got:\n%s", all)
 	}
 }

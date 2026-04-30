@@ -347,9 +347,9 @@ func (t *StoreRowViewType) String() string {
 }
 func (t *DStrType) String() string {
 	if isWildcardShape(t.Shape) {
-		return "dstr"
+		return "cstr"
 	}
-	return fmt.Sprintf("dstr[%s]", t.Shape.String())
+	return fmt.Sprintf("cstr[%s]", t.Shape.String())
 }
 func (t *DictType) String() string {
 	if t == nil || t.Key == nil || t.Value == nil {

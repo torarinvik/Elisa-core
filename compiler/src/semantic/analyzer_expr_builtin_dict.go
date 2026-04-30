@@ -85,9 +85,9 @@ func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
 		return refToTypeExprWithStorage(elem, t.State != RefStateNonNull, ast.RefStorage(t.Storage))
 	case *DStrType:
 		if isWildcardShape(t.Shape) {
-			return &ast.BuiltinTypeExpr{Position: pos, Name: "dstr"}
+			return &ast.BuiltinTypeExpr{Position: pos, Name: "cstr"}
 		}
-		return &ast.BuiltinTypeExpr{Position: pos, Name: "dstr", ValueArgs: []ast.Expr{&ast.Ident{Position: pos, Name: t.Shape.String()}}}
+		return &ast.BuiltinTypeExpr{Position: pos, Name: "cstr", ValueArgs: []ast.Expr{&ast.Ident{Position: pos, Name: t.Shape.String()}}}
 	case *DictType:
 		return &ast.BuiltinTypeExpr{
 			Position: pos,
@@ -104,9 +104,9 @@ func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
 
 func runtimeBackedDictSupportDiagnostic(dictType *DictType) string {
 	if dictType == nil {
-		return "runtime-backed dict operations currently support only dict[dstr, V]"
+		return "runtime-backed dict operations currently support only dict[cstr, V]"
 	}
-	return fmt.Sprintf("runtime-backed dict operations currently support only dict[dstr, V], got %s", diagnosticTypeString(dictType))
+	return fmt.Sprintf("runtime-backed dict operations currently support only dict[cstr, V], got %s", diagnosticTypeString(dictType))
 }
 
 func (a *Analyzer) ensureRuntimeBackedDictSupported(pos lexer.Pos, dictType *DictType) bool {

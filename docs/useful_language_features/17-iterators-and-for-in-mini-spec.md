@@ -271,7 +271,7 @@ String-like categories should participate in the same model.
 Recommended first shape:
 
 - `str` / `sview` iterate `char` in code-unit order
-- `dstr` may additionally support mutable-ref iteration
+- `cstr` may additionally support mutable-ref iteration
 
 Properties:
 

@@ -29,7 +29,7 @@ func TestRunCLIProvidesDefaultNativeRuntimeHelpersForSelectedTests(t *testing.T)
 struct ProbeToken:
 	kind: i64
 
-def probe_keyword_hit(text: dstr) -> bool:
+def probe_keyword_hit(text: cstr) -> bool:
 	return text == "program"
 
 def probe_first_scalar(owner: mutable Arena&) -> i64:

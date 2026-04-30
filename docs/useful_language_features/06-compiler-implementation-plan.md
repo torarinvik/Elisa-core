@@ -14,16 +14,16 @@ Implemented today:
 - exact fixed-array typing for `array[T, N]` and `T[N]`
 - mismatched fixed-array rejection
 - compile-time constant out-of-bounds diagnostics for fixed arrays
-- lightweight shape witnesses for `darray[T, shape]` and `dstr[shape]`
+- lightweight shape witnesses for `darray[T, shape]` and `cstr[shape]`
 - fresh post-operation shapes for shape-changing APIs such as `resize`, `push`, `concat`, and `strcat`
-- indexing for `darray`, `view`, `dstr`, `str`, and `sview`
-- slice syntax for `darray`, `view`, fixed arrays, `dstr`, `str`, and `sview`
+- indexing for `darray`, `view`, `cstr`, `str`, and `sview`
+- slice syntax for `darray`, `view`, fixed arrays, `cstr`, `str`, and `sview`
 - the built-in `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]` surface syntax, with `view[T]` retained as a shorthand for compile-time array views
 - pointer arithmetic lowering (`ref + int`, `int + ref`, `ref - int`)
 - explicit reference comparisons (`ref == null`, `ref != null`, `ref == ref`)
 - end-to-end fixture coverage through the real CLI pipeline for `Code/test_programs/pointer_alloc.llcontext` and `Code/test_programs/shape_ops.llcontext`
 
-The user-facing built-in spellings are lowercase only: use `str[...]` and `dstr[...]`, not legacy aliases like `string[...]` or `dstring[...]`.
+The user-facing built-in spellings are lowercase only: use `str[...]` and `cstr[...]`, not legacy aliases like `string[...]` or `cstring[...]`.
 
 Still intentionally deferred:
 
@@ -75,7 +75,7 @@ Add syntax and semantic meaning for:
 
 ```context
 darray[T, n]
-dstr[n]
+cstr[n]
 view[T, begin, end]
 sview[begin, end]
 ```
@@ -91,7 +91,7 @@ This phase should focus on:
 
 not on complicated inference.
 
-Status: complete for `darray[T, shape]`, `dstr[shape]`, `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]` under the current lightweight shape-witness model. The compiler accepts lowercase shape-erasing shorthand such as `darray[T]`, bare `dstr`, bare `sview`, and `dview[T]` when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` surface has been removed from the language.
+Status: complete for `darray[T, shape]`, `cstr[shape]`, `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]` under the current lightweight shape-witness model. The compiler accepts lowercase shape-erasing shorthand such as `darray[T]`, bare `cstr`, bare `sview`, and `dview[T]` when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` surface has been removed from the language.
 
 ### Phase 3 — teach shape-changing APIs to produce fresh post-state shapes
 
@@ -186,7 +186,7 @@ Teach the parser to recognize:
 
 ```context
 darray[T, n]
-dstr[n]
+cstr[n]
 view[T, begin, end]
 sview[begin, end]
 ```
@@ -204,7 +204,7 @@ I would use:
 
 ```context
 darray[T, n]
-dstr[n]
+cstr[n]
 view[T, begin, end]
 sview[begin, end]
 ```
@@ -334,7 +334,7 @@ Strings should reuse the same machinery as arrays as much as possible.
 
 Recommended internal rule:
 
-- `dstr[shape_id]` is semantically very close to `DynArrayType{Elem: u8, Shape: shape_id}`
+- `cstr[shape_id]` is semantically very close to `DynArrayType{Elem: u8, Shape: shape_id}`
 - `str[N]` is semantically very close to `array[u8, N]` plus string-specific intent
 
 Whether you expose them as separate semantic types or thin wrappers is mostly an ergonomics decision.
@@ -387,11 +387,11 @@ Current coverage includes exact fixed-array equality, mismatch rejection, and co
 
 ### Phase 2 tests
 
-- parsing `darray[T, n]`, `dstr[n]`, `view[T, begin, end]`, and `sview[begin, end]`
+- parsing `darray[T, n]`, `cstr[n]`, `view[T, begin, end]`, and `sview[begin, end]`
 - type equality for dynamic shape witnesses
 - shape witness preservation across plain assignment
 
-Current coverage includes parsing and semantic checks for `darray`, `dstr`, `view`, `sview`, and their runtime-bridge behavior.
+Current coverage includes parsing and semantic checks for `darray`, `cstr`, `view`, `sview`, and their runtime-bridge behavior.
 
 ### Phase 3 tests
 
@@ -456,14 +456,14 @@ For example, the stage 1 wrappers now look like this:
 error RuntimeError:
     AllocationFailed
 
-def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] error[RuntimeError]:
-    text: dstr[shape_result] = concat2(lhs, rhs) else raise RuntimeError.AllocationFailed
+def rt_concat2(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_result] error[RuntimeError]:
+    text: cstr[shape_result] = concat2(lhs, rhs) else raise RuntimeError.AllocationFailed
     return text
 
-def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
     return string_view(value, start, end)
 
-def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
+def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
     return string_view_copy(view)
 ```
 
@@ -487,7 +487,7 @@ So the public runtime-facing layer carries logical shape transitions, while the 
 
 More concretely, the current semantic bridge is intentionally narrow and wrapper-oriented:
 
-- `dstr[shape_id]` is allowed to flow across the runtime boundary as raw `u8&` / `u8&?` string values
+- `cstr[shape_id]` is allowed to flow across the runtime boundary as raw `u8&` / `u8&?` string values
 - `darray[T, shape_id]` can likewise ride on the existing `DynArray[T]` representation for arena-backed helpers
 - `dview[T]` is allowed to flow across the runtime boundary as `DynArrayView`
 - `sview[begin, end]` / `StringView` is allowed to flow across the runtime boundary as the raw string-view carrier
@@ -508,7 +508,7 @@ If I were choosing the concrete first implementation boundary, it would be:
 
 - exact fixed-array typing for `T[N]`
 - improved constant-index checking
-- syntax support for `darray[T, n]`, `dstr[n]`, `view[T, begin, end]`, and `sview[begin, end]`
+- syntax support for `darray[T, n]`, `cstr[n]`, `view[T, begin, end]`, and `sview[begin, end]`
 - semantic representation for dynamic shape witnesses
 - no arithmetic shape expressions yet
 - no full generic dependent inference
@@ -517,7 +517,7 @@ Status: this MVP boundary has effectively been reached and pushed beyond. The cu
 
 String indexing now yields `char`; convert explicitly with `.i64()` when you want a numeric code unit.
 
-At the moment, `char` should be read as the string element/code-unit type produced by `str`, `dstr`, and `sview` indexing. That keeps the current model simple and low-level while still leaving the door open to future encoding-qualified character forms if the language later wants to distinguish ASCII-like byte chars from wider text elements.
+At the moment, `char` should be read as the string element/code-unit type produced by `str`, `cstr`, and `sview` indexing. That keeps the current model simple and low-level while still leaving the door open to future encoding-qualified character forms if the language later wants to distinguish ASCII-like byte chars from wider text elements.
 
 ### First post-MVP
 
@@ -543,7 +543,7 @@ If I had to turn all this into one concrete engineering instruction, it would be
 
 That gives you the dependent-style safety you want while keeping the compiler tractable.
 
-## Next collection candidate — dictionary MVP (`dict[dstr, V]` first)
+## Next collection candidate — dictionary MVP (`dict[cstr, V]` first)
 
 The next natural runtime-backed collection after `darray` / `view` is a dictionary.
 
@@ -558,15 +558,15 @@ where the key type `K` and value type `V` may differ.
 That means values like these should be ordinary and well-typed:
 
 ```context
-dict[dstr, Expr]
-dict[u64, dstr]
+dict[cstr, Expr]
+dict[u64, cstr]
 dict[TokenKind, i32]
 ```
 
 The recommended MVP, however, is intentionally narrower:
 
 ```context
-dict[dstr, V]
+dict[cstr, V]
 ```
 
 That first slice is enough to support parser-/compiler-style maps, symbol tables, JSON-ish objects, and other string-keyed transient structures without committing the runtime to full heterogeneous key support immediately.
@@ -585,13 +585,13 @@ Recommended internal split:
 
 - surface semantic type: `dict[K, V]`
 - first runtime carrier: `DynDict[V]`
-- first bridge: `dict[dstr, V] <-> DynDict[V]`
+- first bridge: `dict[cstr, V] <-> DynDict[V]`
 
 This matches the current style where:
 
 - `darray[T, shape]` bridges to `DynArray[T]`
 - `dview[T]` bridges to `DynArrayView`
-- `dstr[shape]` bridges to raw `u8&`
+- `cstr[shape]` bridges to raw `u8&`
 - `sview[begin, end]` bridges to `StringView`
 
 The important idea is that the user-facing type stays general even if the first runtime bridge is intentionally narrow, and that source-level code should prefer the lowercase spellings while the CamelCase carriers stay internal.
@@ -644,7 +644,7 @@ Instead:
 
 This mirrors the performance model used by modern flat hash maps (including Rust's standard-library style hash tables) far better than a linked-node design.
 
-### Allocation and ownership rule for `dstr` keys
+### Allocation and ownership rule for `cstr` keys
 
 The best first ownership rule is:
 
@@ -710,11 +710,11 @@ The generic surface `dict[K, V]` needs one key-specific hash/equality pair per s
 
 For the first slice, the compiler should treat these as built-in runtime bridge hooks rather than user-defined traits.
 
-For `dict[dstr, V]`, the required key operations are:
+For `dict[cstr, V]`, the required key operations are:
 
 ```text
-dict_hash_dstr(key: dstr) -> u64
-dict_eq_dstr(bucket_key_data: u8&?, bucket_key_len: i64, probe_key: dstr) -> bool
+dict_hash_cstr(key: cstr) -> u64
+dict_eq_cstr(bucket_key_data: u8&?, bucket_key_len: i64, probe_key: cstr) -> bool
 ```
 
 Required semantics:
@@ -725,7 +725,7 @@ Required semantics:
 
 The first built-in key-family table should be small and explicit:
 
-- `dstr`
+- `cstr`
 - integer keys (later)
 - `bool` (later)
 - enum keys without payloads or fully-hashable enums (later)
@@ -751,19 +751,19 @@ arena_dict_clear[V]
 Suggested first signatures:
 
 ```text
-arena_dict_new[V](a: Arena&, initial_capacity: usize) -> dict[dstr, V]
+arena_dict_new[V](a: Arena&, initial_capacity: usize) -> dict[cstr, V]
 
-arena_dict_reserve[V](a: Arena&, m: dict[dstr, V]&, min_capacity: usize) -> void error[RuntimeError]
+arena_dict_reserve[V](a: Arena&, m: dict[cstr, V]&, min_capacity: usize) -> void error[RuntimeError]
 
-arena_dict_get[V](m: dict[dstr, V]&, key: dstr) -> V&?
+arena_dict_get[V](m: dict[cstr, V]&, key: cstr) -> V&?
 
-arena_dict_put[V](a: Arena&, m: dict[dstr, V]&, key: dstr, value: V) -> V& error[RuntimeError]
+arena_dict_put[V](a: Arena&, m: dict[cstr, V]&, key: cstr, value: V) -> V& error[RuntimeError]
 
-arena_dict_contains[V](m: dict[dstr, V]&, key: dstr) -> bool
+arena_dict_contains[V](m: dict[cstr, V]&, key: cstr) -> bool
 
-arena_dict_remove[V](m: dict[dstr, V]&, key: dstr) -> bool
+arena_dict_remove[V](m: dict[cstr, V]&, key: cstr) -> bool
 
-arena_dict_clear[V](m: dict[dstr, V]&) -> void
+arena_dict_clear[V](m: dict[cstr, V]&) -> void
 ```
 
 Notes:
@@ -782,7 +782,7 @@ The bridge should be modeled like the existing container bridges.
 Recommended first bridge classification:
 
 ```text
-dict[dstr, V] <-> DynDict[V]
+dict[cstr, V] <-> DynDict[V]
 ```
 
 That implies later additions in the semantic bridge layer analogous to:
@@ -799,7 +799,7 @@ runtimeBridgeDictDynDict
 
 where compatibility requires:
 
-- the source dict key type is exactly `dstr`
+- the source dict key type is exactly `cstr`
 - the value type matches the runtime carrier's type argument exactly
 
 This should stay deliberately narrow until the runtime has real key-family hook support for more than strings.
@@ -809,7 +809,7 @@ This should stay deliberately narrow until the runtime has real key-family hook 
 The best first end-to-end dictionary milestone is:
 
 - parse and type-check `dict[K, V]`
-- semantically accept only `dict[dstr, V]` for runtime-backed operations at first
+- semantically accept only `dict[cstr, V]` for runtime-backed operations at first
 - add the `DynDict[V]` runtime carrier as a built-in compiler-known struct
 - implement `arena_dict_new`, `reserve`, `get`, `put`, `contains`, and `remove`
 - lower dict operations through helper calls rather than inline probing logic in the compiler backend

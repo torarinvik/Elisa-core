@@ -1788,7 +1788,7 @@ func TestParseStoreDecl(t *testing.T) {
 }
 
 func TestParseGetOrInsertBlockSugar(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep(values: dict[dstr[key_shape], i64], key: dstr[key_shape]):\n    slot = values.get_or_insert(key):\n        42\n")
+	file, errs := parseSourceFile(t, "def keep(values: dict[cstr[key_shape], i64], key: cstr[key_shape]):\n    slot = values.get_or_insert(key):\n        42\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1817,7 +1817,7 @@ func TestParseGetOrInsertBlockSugar(t *testing.T) {
 }
 
 func TestParseGetOrInsertBlockSugarWithSetupStatements(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep(values: dict[dstr[key_shape], i64], key: dstr[key_shape]):\n    slot = values.get_or_insert(key):\n        base = 40\n        base + 2\n")
+	file, errs := parseSourceFile(t, "def keep(values: dict[cstr[key_shape], i64], key: cstr[key_shape]):\n    slot = values.get_or_insert(key):\n        base = 40\n        base + 2\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1843,7 +1843,7 @@ func TestParseGetOrInsertBlockSugarWithSetupStatements(t *testing.T) {
 }
 
 func TestParseDictEntryGetOrInsertBlockSugar(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep(values: dict[dstr[key_shape], i64], key: dstr[key_shape]):\n    slot = values.entry(key).get_or_insert():\n        42\n")
+	file, errs := parseSourceFile(t, "def keep(values: dict[cstr[key_shape], i64], key: cstr[key_shape]):\n    slot = values.entry(key).get_or_insert():\n        42\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

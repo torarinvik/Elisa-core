@@ -212,7 +212,7 @@ For exported **function boundaries**, be stricter than the general field rule:
 These should **not** be exported directly in the first version:
 
 - `darray[...]`
-- `dstr[...]`
+- `cstr[...]`
 - `view[...]`
 - `sview[...]`
 - shape-typed logical container wrappers in general
@@ -345,12 +345,12 @@ But this should fail:
 
 ```context
 struct Bad:
-    text: dstr[row]
+    text: cstr[row]
 
 export type Bad as Bad
 ```
 
-because `dstr[row]` is not a stable C ABI field type in the recommended first version.
+because `cstr[row]` is not a stable C ABI field type in the recommended first version.
 
 ## MVP proposal
 

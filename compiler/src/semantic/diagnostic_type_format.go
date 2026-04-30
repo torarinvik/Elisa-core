@@ -141,12 +141,12 @@ func diagnosticTypeString(t Type) string {
 		return diagnosticTypeString(tt.Store) + ".row"
 	case *DStrType:
 		if tt == nil {
-			return "<invalid-dstr>"
+			return "<invalid-cstr>"
 		}
 		if isWildcardShape(tt.Shape) {
-			return "dstr"
+			return "cstr"
 		}
-		return fmt.Sprintf("dstr[%s]", tt.Shape.String())
+		return fmt.Sprintf("cstr[%s]", tt.Shape.String())
 	case *DictType:
 		if tt == nil || tt.Key == nil || tt.Value == nil {
 			return "<invalid-dict>"

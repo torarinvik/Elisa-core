@@ -36,7 +36,7 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 		a.errorf(expr.Pos(), "DListView has been removed from the language; use dview instead")
 		return invalidType, true
 	case "DStr":
-		a.errorLegacyBuiltinReplacement(expr.Pos(), "DStr", "dstr")
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "DStr", "cstr")
 		return invalidType, true
 	default:
 		return nil, false
@@ -179,14 +179,14 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 	case "string":
 		a.errorLegacyBuiltinReplacement(expr.Pos(), "string", "str")
 		return invalidType
-	case "dstr":
+	case "cstr":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
-			a.errorf(expr.Pos(), "dstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			a.errorf(expr.Pos(), "cstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 			return invalidType
 		}
-		return &DStrType{Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "dstr"}
-	case "dstring":
-		a.errorLegacyBuiltinReplacement(expr.Pos(), "dstring", "dstr")
+		return &DStrType{Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "cstr"}
+	case "cstring":
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "cstring", "cstr")
 		return invalidType
 	case "view":
 		if len(expr.TypeArgs) != 1 {

@@ -1,14 +1,14 @@
-def seed_string_ops(text: dstr[row]) -> i64:
+def seed_string_ops(text: cstr[row]) -> i64:
     mid: sview[1, 3] = text[1:3]
     return mid[0].i64() + text.len
 
 
-def mutate_25_same_view_as_text(text: dstr[row]) -> bool:
+def mutate_25_same_view_as_text(text: cstr[row]) -> bool:
     mid: sview[1, 3] = text[1:3]
     return mid == text
 
 
-def mutate_26_different_string_views(left: dstr[row], right: dstr[col]) -> bool:
+def mutate_26_different_string_views(left: cstr[row], right: cstr[col]) -> bool:
     left_mid: sview[0, 2] = left[0:2]
     right_mid: sview[0, 2] = right[0:2]
     return left_mid != right_mid

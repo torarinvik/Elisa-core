@@ -1651,7 +1651,7 @@ lexer DemoLex:
 		`"if":`,
 		"DemoTokenKind.IF",
 		"DemoTokenKind.IDENT",
-		"def demo_lex_match_literal(source: dstr, offset: usize) -> (kind: DemoTokenKind, len: usize):",
+		"def demo_lex_match_literal(source: cstr, offset: usize) -> (kind: DemoTokenKind, len: usize):",
 		`source[offset:(offset + 2)] == "=="`,
 		"return (DemoTokenKind.EQEQ, 2)",
 		"return (DemoTokenKind.EOF, 0)",
@@ -1700,7 +1700,7 @@ lexer DemoLex:
 		`"end":`,
 		"DemoTokenKind.END",
 		"DemoTokenKind.IDENT",
-		"def demo_lex_match_literal(source: dstr, offset: usize) -> (kind: DemoTokenKind, len: usize):",
+		"def demo_lex_match_literal(source: cstr, offset: usize) -> (kind: DemoTokenKind, len: usize):",
 		`source[offset:(offset + 2)] == ":="`,
 		"return (DemoTokenKind.ASSIGN, 2)",
 		`source[offset:(offset + 1)] == ":"`,
@@ -1767,7 +1767,7 @@ func TestLowerFileGeneratesTokenEnumFromGrammarAliases(t *testing.T) {
 		"IDENT = 1",
 		"BEGIN = 2",
 		"END = 3",
-		"def demo_token_kind_for_text(text: dstr) -> DemoTokenKind:",
+		"def demo_token_kind_for_text(text: cstr) -> DemoTokenKind:",
 		"return DemoTokenKind.BEGIN",
 		"return DemoTokenKind.EOF",
 		"state.expect_kind(DemoTokenKind.BEGIN)",
@@ -2108,7 +2108,7 @@ func TestLowerFileStatefulTokenLookupUsesTokenAliases(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"def token_kind_for_text(text: dstr) -> TokenKind:",
+		"def token_kind_for_text(text: cstr) -> TokenKind:",
 		`if (text == "program"):`,
 		"return TokenKind.PROGRAM",
 		`if (text == "+"):`,
@@ -2139,7 +2139,7 @@ func TestLowerFileStatefulTokenLookupUsesConfiguredCompareFunc(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"def token_kind_for_text(text: dstr) -> TokenKind:",
+		"def token_kind_for_text(text: cstr) -> TokenKind:",
 		`if pascal_text_eq_keyword(text, "program"):`,
 		"return TokenKind.PROGRAM",
 		`if pascal_text_eq_keyword(text, "+"):`,

@@ -1231,7 +1231,7 @@ store PendingGotoStore:
     name_key: u32
     depth: u32
 
-def build(values: mutable dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> i64:
+def build(values: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> i64:
     slot = values.get_or_insert(key):
         42
     for {name_key, depth} in pending.rows():
@@ -1245,7 +1245,7 @@ Current rules:
 - `rows()` yields readonly row values that work with ordinary field access and brace destructuring
 - `values.get_or_insert(key): ...` rewrites the trailing block into the default-value argument for `get_or_insert`
 - `values.entry(key).get_or_insert(): ...` does the same thing for the entry API surface
-- the generic syntax parses for more than one key family, but the current runtime-backed helper surface is primarily validated for `dict[dstr[key_shape], V]` unless matching helper overloads are supplied
+- the generic syntax parses for more than one key family, but the current runtime-backed helper surface is primarily validated for `dict[cstr[key_shape], V]` unless matching helper overloads are supplied
 - packed and row store values should be read through the fact-core lens: mutable local stores carry store-dependency facts, `freeze(move store)` consumes the local store and rebases handles onto frozen-store facts, and row scans may add optimization facts such as readonly, contiguous, or exact extent
 
 ## Pool scopes and `parallel for`

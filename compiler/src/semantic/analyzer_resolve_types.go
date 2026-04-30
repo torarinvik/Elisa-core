@@ -9,15 +9,15 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	switch n := expr.(type) {
 	case *ast.NamedType:
 		switch n.Name {
-		case "dstr":
-			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "dstr"}
+		case "cstr":
+			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "cstr"}
 		case "sview":
 			return &SViewType{}
 		case "DStr":
-			a.errorLegacyBuiltinReplacement(n.Pos(), "DStr", "dstr")
+			a.errorLegacyBuiltinReplacement(n.Pos(), "DStr", "cstr")
 			return invalidType
-		case "dstring":
-			a.errorLegacyBuiltinReplacement(n.Pos(), "dstring", "dstr")
+		case "cstring":
+			a.errorLegacyBuiltinReplacement(n.Pos(), "cstring", "cstr")
 			return invalidType
 		}
 		a.maybeRejectRuntimeCarrierTypeUse(n.Pos(), n.Name)

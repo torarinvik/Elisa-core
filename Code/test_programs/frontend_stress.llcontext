@@ -21,17 +21,17 @@ struct SourceSpan:
 struct Token:
     kind: mutable TokenKind
     span: mutable SourceSpan
-    text: mutable dstr
+    text: mutable cstr
 
 struct Symbol:
-    name: mutable dstr
+    name: mutable cstr
     kind: mutable SymbolKind
     depth: mutable int
     first_kind: mutable TokenKind
 
 struct Scope:
     parent: mutable Scope&?
-    symbols: mutable dict[dstr, Symbol]
+    symbols: mutable dict[cstr, Symbol]
     depth: mutable int
 
 struct ParserState:
@@ -39,20 +39,20 @@ struct ParserState:
     cursor: mutable usize
     current_scope: mutable Scope&?
 
-def arena_dict_new__Symbol(a: Arena&, initial_capacity: usize) -> dict[dstr, Symbol]:
-    out: dict[dstr, Symbol] = zeroed
+def arena_dict_new__Symbol(a: Arena&, initial_capacity: usize) -> dict[cstr, Symbol]:
+    out: dict[cstr, Symbol] = zeroed
     return out
 
-def arena_dict_reserve__Symbol(a: Arena&, m: dict[dstr, Symbol]&, min_capacity: usize) -> void error[RuntimeError]:
+def arena_dict_reserve__Symbol(a: Arena&, m: dict[cstr, Symbol]&, min_capacity: usize) -> void error[RuntimeError]:
     return
 
-def arena_dict_get__Symbol(m: dict[dstr, Symbol]&, key: dstr) -> Symbol&?:
+def arena_dict_get__Symbol(m: dict[cstr, Symbol]&, key: cstr) -> Symbol&?:
     return null
 
-def arena_dict_put__Symbol(a: Arena&, m: dict[dstr, Symbol]&, key: dstr, value: Symbol) -> Symbol&? error[RuntimeError]:
+def arena_dict_put__Symbol(a: Arena&, m: dict[cstr, Symbol]&, key: cstr, value: Symbol) -> Symbol&? error[RuntimeError]:
     return arena_dict_get__Symbol(m, key)
 
-def arena_dict_contains__Symbol(m: dict[dstr, Symbol]&, key: dstr) -> bool:
+def arena_dict_contains__Symbol(m: dict[cstr, Symbol]&, key: cstr) -> bool:
     return arena_dict_get__Symbol(m, key) != null
 
 def parser_peek(state: ParserState&) -> TokenKind:
@@ -68,15 +68,15 @@ def parser_advance(state: mutable ParserState&) -> TokenKind:
         state.cursor <- state.cursor + 1
     return head
 
-def scope_define(a: Arena&, scope: mutable Scope&, name: dstr, kind: SymbolKind, first_kind: TokenKind) -> bool error[RuntimeError]:
+def scope_define(a: Arena&, scope: mutable Scope&, name: cstr, kind: SymbolKind, first_kind: TokenKind) -> bool error[RuntimeError]:
     entry: Symbol = Symbol(name, kind, scope.depth, first_kind)
-    slot: Symbol&? = try arena_dict_put__Symbol(a, scope.symbols.ref[dict[dstr, Symbol]&], name, entry) else null
+    slot: Symbol&? = try arena_dict_put__Symbol(a, scope.symbols.ref[dict[cstr, Symbol]&], name, entry) else null
     return slot != null
 
-def scope_contains(scope: Scope&, name: dstr) -> bool:
+def scope_contains(scope: Scope&, name: cstr) -> bool:
     current: mutable Scope&? = scope
     while current != null:
-        if arena_dict_contains__Symbol(current.symbols.ref[dict[dstr, Symbol]&], name):
+        if arena_dict_contains__Symbol(current.symbols.ref[dict[cstr, Symbol]&], name):
             return true
         current <- current.parent
     return false
@@ -85,7 +85,7 @@ def make_tokens() -> view[Token]:
     values: Token[2] = [Token(TokenKind.Def, SourceSpan(1, 1), "def"), Token(TokenKind.Ident, SourceSpan(1, 5), "parse_file")]
     return values[0:2]
 
-def frontend_scope_stress(tokens: view[Token], local_name: dstr) -> bool error[RuntimeError]:
+def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[RuntimeError]:
     region parse(4096)
     parse_arena: Arena& = parse.ref[Arena&]
 
@@ -98,7 +98,7 @@ def frontend_scope_stress(tokens: view[Token], local_name: dstr) -> bool error[R
             return false
 
     first_kind: TokenKind = parser_advance(parser.cast[mutable ParserState&])
-    try arena_dict_reserve__Symbol(parse_arena, root.symbols.ref[dict[dstr, Symbol]&], 16)
+    try arena_dict_reserve__Symbol(parse_arena, root.symbols.ref[dict[cstr, Symbol]&], 16)
 
     global_ok: bool = try scope_define(parse_arena, root.cast[mutable Scope&], "parse_file", SymbolKind.Func, TokenKind.Def)
     local_ok: bool = try scope_define(parse_arena, child.cast[mutable Scope&], local_name, SymbolKind.Local, first_kind)
@@ -110,7 +110,7 @@ def frontend_region_token(line: int, column: int) -> int:
     token: scratch Token& = new[scratch] Token(TokenKind.Ident, SourceSpan(line, column), "token")
     return token.span.column
 
-def frontend_smoke(name: dstr) -> bool error[RuntimeError]:
+def frontend_smoke(name: cstr) -> bool error[RuntimeError]:
     tokens: view[Token] = make_tokens()
     region_column: int = frontend_region_token(2, 7)
     return (try frontend_scope_stress(tokens, name)) and region_column == 7

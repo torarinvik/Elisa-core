@@ -69,7 +69,7 @@ func TestParseMatchStoreRemainsTrailingIn(t *testing.T) {
 }
 
 func TestParseTupleMatchHeadAndPatterns(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep(length: int, source: dstr, start: usize) -> int:\n    match length, source[start], source[start + 1], source[start + 2], source[start + 3], source[start + 4]:\n        5, 'w', 'h', 'i', 'l', 'e':\n            return 1\n        _, _, _, _, _, _:\n            return 0\n")
+	file, errs := parseSourceFile(t, "def keep(length: int, source: cstr, start: usize) -> int:\n    match length, source[start], source[start + 1], source[start + 2], source[start + 3], source[start + 4]:\n        5, 'w', 'h', 'i', 'l', 'e':\n            return 1\n        _, _, _, _, _, _:\n            return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

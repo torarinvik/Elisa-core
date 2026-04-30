@@ -22,7 +22,7 @@ Every value can carry facts from several orthogonal classes:
 | --- | --- | --- |
 | Representation | scalar, struct, packed handle, view, array | ordinary types, `packed enum`, `dview`, `darray` |
 | Ref state | non-null, maybe-null, null | `T&`, `T&?`, `T!` |
-| Shape | exact length identity, const extent, view bounds | `darray[T, shape]`, `dstr[key_shape]`, dense views |
+| Shape | exact length identity, const extent, view bounds | `darray[T, shape]`, `cstr[key_shape]`, dense views |
 | Typestate | domain/protocol state | `Player[Alive]`, `Thread[T, Joinable]` |
 | Storage | stack, heap, static, named region | `heap T&`, `scratch T&`, `new[scratch]` |
 | Region deps | arena generation/checkpoint dependencies | `region`, `mark`, `restore`, `reset` |

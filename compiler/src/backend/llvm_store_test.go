@@ -14,13 +14,13 @@ func TestGenerateLLVMIRLowersStoreSugar(t *testing.T) {
     name_key: u32
     depth: u32
 
-def arena_dict_get[T](m: dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> mutable T&?:
+def arena_dict_get[T](m: dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> mutable T&?:
     return null
 
-def arena_dict_put[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable T&?:
+def arena_dict_put[T](a: mutable Arena&, m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape], value: T) -> mutable T&?:
     return null
 
-def arena_dict_get_or_insert[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable T&?:
+def arena_dict_get_or_insert[T](a: mutable Arena&, m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape], value: T) -> mutable T&?:
     return null
 
 def build(owner: Arena) -> usize:
@@ -32,7 +32,7 @@ def build(owner: Arena) -> usize:
 		pending.push(3, 4)
 		pending.truncate(1)
         pending.clear()
-        values: mutable dict[dstr[key_shape], i64] = zeroed
+        values: mutable dict[cstr[key_shape], i64] = zeroed
         slot = values.get_or_insert("seed"):
             base = 5
             base
@@ -174,7 +174,7 @@ def build(owner: Arena, key: u32) -> usize:
 	}
 	result := semantic.Analyze(file)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[dstr, V]") {
+	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[cstr, V]") {
 		t.Fatalf("expected runtime-backed dict restriction diagnostic, got:\n%s", all)
 	}
 }

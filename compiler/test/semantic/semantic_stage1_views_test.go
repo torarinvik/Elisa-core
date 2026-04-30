@@ -24,7 +24,7 @@ def string_view_index(view: StringView, index: i64) -> i64:
 def string_view_copy(view: StringView) -> u8&:
 	return view.data
 
-def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
 
 def ctx_string_view_len(view: StringView) -> i64:
@@ -33,15 +33,15 @@ def ctx_string_view_len(view: StringView) -> i64:
 def ctx_string_view_index(view: StringView, index: i64) -> i64:
 	return string_view_index(view, index)
 
-def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
+def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
 	return string_view_copy(view)
 
-def probe(text: dstr[row]) -> i64:
+def probe(text: cstr[row]) -> i64:
 	view: StringView = ctx_string_view(text, 0, 2)
 	_ = ctx_string_view_index(view, 0)
 	return ctx_string_view_len(view)
 
-def bad(text: dstr[row]) -> dstr[row]:
+def bad(text: cstr[row]) -> cstr[row]:
 	view: StringView = ctx_string_view(text, 0, 2)
 	return ctx_string_from_view(view)
 `
@@ -50,7 +50,7 @@ def bad(text: dstr[row]) -> dstr[row]:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects dstr[row], got dstr[shape_out#") || !strings.Contains(all, "note: ctx_string_from_view returns a fresh logical shape for shape_out") {
+	if !strings.Contains(all, "return type expects cstr[row], got cstr[shape_out#") || !strings.Contains(all, "note: ctx_string_from_view returns a fresh logical shape for shape_out") {
 		t.Fatalf("expected bounded string view fresh-shape diagnostic, got:\n%s", all)
 	}
 }
@@ -75,7 +75,7 @@ def string_view_eq(view: StringView, other: u8&?) -> int:
 def string_views_eq(lhs: StringView, rhs: StringView) -> int:
 	return 1
 
-def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
 
 def ctx_string_view_len(view: StringView) -> i64:
@@ -84,13 +84,13 @@ def ctx_string_view_len(view: StringView) -> i64:
 def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	return string_view_slice(view, start, end)
 
-def ctx_string_view_eq(view: StringView, other: dstr[shape_other]) -> int:
+def ctx_string_view_eq(view: StringView, other: cstr[shape_other]) -> int:
 	return string_view_eq(view, other)
 
 def ctx_string_views_eq(lhs: StringView, rhs: StringView) -> int:
 	return string_views_eq(lhs, rhs)
 
-def probe(text: dstr[row], other: dstr[col]) -> int:
+def probe(text: cstr[row], other: cstr[col]) -> int:
 	view: StringView = ctx_string_view(text, 0, 4)
 	sub: StringView = ctx_string_view_slice(view, 1, 3)
 	if ctx_string_view_eq(sub, other) != 0:

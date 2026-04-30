@@ -908,7 +908,7 @@ func lowerGrammarTokenLookupFunc(grammarDecl *ast.GrammarDecl) *ast.FuncDecl {
 		Position: pos,
 		Name:     grammarDecl.TokenLookupFunc,
 		Params: []ast.ParamDecl{
-			{Position: pos, Name: "text", Type: builtinTypeExpr(pos, "dstr")},
+			{Position: pos, Name: "text", Type: builtinTypeExpr(pos, "cstr")},
 		},
 		ReturnType: grammarDeclTokenKindType(grammarDecl, pos),
 		Body:       body,

@@ -1668,7 +1668,7 @@ struct DynArrayView:
 
 extern take_array(values: darray[i32, row]) -> void
 extern take_array_view(view: dview[i32]) -> usize
-extern take_str(text: dstr[row]) -> void
+extern take_str(text: cstr[row]) -> void
 `
 	result := parseAndAnalyze(t, "backend_runtime_types.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2487,19 +2487,19 @@ def inspect(owner: Arena) -> i32:
 }
 
 func TestGenerateLLVMIRLowersDictSurfaceTypesViaDynDictCarrier(t *testing.T) {
-	src := `extern take_runtime(values: DynDict[dstr, i32]) -> void
-extern make_runtime() -> DynDict[dstr, i32]
+	src := `extern take_runtime(values: DynDict[cstr, i32]) -> void
+extern make_runtime() -> DynDict[cstr, i32]
 
-def id[V](values: dict[dstr, V]) -> dict[dstr, V]:
+def id[V](values: dict[cstr, V]) -> dict[cstr, V]:
 	return values
 
-def keep(values: dict[dstr, i32]) -> dict[dstr, i32]:
+def keep(values: dict[cstr, i32]) -> dict[cstr, i32]:
 	return id(values)
 
-def pass_runtime(values: dict[dstr, i32]) -> void:
+def pass_runtime(values: dict[cstr, i32]) -> void:
 	take_runtime(values)
 
-def from_runtime() -> dict[dstr, i32]:
+def from_runtime() -> dict[cstr, i32]:
 	return make_runtime()
 `
 	result := parseAndAnalyze(t, "backend_dict_runtime_bridge.llcontext", src)
@@ -2509,16 +2509,16 @@ def from_runtime() -> dict[dstr, i32]:
 	}
 
 	checks := []string{
-		"%DynDict__dstr__i32 = type { ptr, i64, i64, i64, ptr }",
-		"declare void @take_runtime(%DynDict__dstr__i32)",
-		"declare %DynDict__dstr__i32 @make_runtime()",
-		"define %DynDict__dstr__i32 @id__i32(%DynDict__dstr__i32",
-		"define %DynDict__dstr__i32 @keep(%DynDict__dstr__i32",
-		"call %DynDict__dstr__i32 @id__i32(%DynDict__dstr__i32",
-		"define void @pass_runtime(%DynDict__dstr__i32",
-		"call void @take_runtime(%DynDict__dstr__i32",
-		"define %DynDict__dstr__i32 @from_runtime()",
-		"call %DynDict__dstr__i32 @make_runtime()",
+		"%DynDict__cstr__i32 = type { ptr, i64, i64, i64, ptr }",
+		"declare void @take_runtime(%DynDict__cstr__i32)",
+		"declare %DynDict__cstr__i32 @make_runtime()",
+		"define %DynDict__cstr__i32 @id__i32(%DynDict__cstr__i32",
+		"define %DynDict__cstr__i32 @keep(%DynDict__cstr__i32",
+		"call %DynDict__cstr__i32 @id__i32(%DynDict__cstr__i32",
+		"define void @pass_runtime(%DynDict__cstr__i32",
+		"call void @take_runtime(%DynDict__cstr__i32",
+		"define %DynDict__cstr__i32 @from_runtime()",
+		"call %DynDict__cstr__i32 @make_runtime()",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -2556,13 +2556,13 @@ func TestGenerateLLVMIRSpecializesDictHelperStyleFunctions(t *testing.T) {
 	src := `error RuntimeError:
 	OutOfMemory
 
-def arena_dict_get[V](m: dict[dstr, V]&, key: dstr) -> V&?:
+def arena_dict_get[V](m: dict[cstr, V]&, key: cstr) -> V&?:
 	return null
 
-def arena_dict_put[V](a: Arena&, m: dict[dstr, V]&, key: dstr, value: V) -> V&? error[RuntimeError]:
+def arena_dict_put[V](a: Arena&, m: dict[cstr, V]&, key: cstr, value: V) -> V&? error[RuntimeError]:
 	raise RuntimeError.OutOfMemory
 
-def touch(a: Arena&, m: dict[dstr, i32]&, key: dstr) -> bool:
+def touch(a: Arena&, m: dict[cstr, i32]&, key: cstr) -> bool:
 	slot: i32&? = try arena_dict_put(a, m, key, 7) else null
 	if slot == null:
 		return false
@@ -2601,14 +2601,14 @@ func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
 	checks := []string{
 		"%SourceSpan = type { i64, i64 }",
 		"%Token = type { i32, %SourceSpan, ptr }",
-		"%DynDict__dstr__Symbol = type { ptr, i64, i64, i64, ptr }",
-		"%Scope = type { ptr, %DynDict__dstr__Symbol, i64 }",
+		"%DynDict__cstr__Symbol = type { ptr, i64, i64, i64, ptr }",
+		"%Scope = type { ptr, %DynDict__cstr__Symbol, i64 }",
 		"%ParserState = type { %DynArrayView, i64, ptr }",
 		"define %DynArrayView @make_tokens()",
 		"define i32 @frontend_scope_stress(ptr",
 		"define i64 @frontend_region_token(i64",
 		"define i32 @frontend_smoke(ptr",
-		"define %DynDict__dstr__Symbol @arena_dict_new__Symbol(ptr",
+		"define %DynDict__cstr__Symbol @arena_dict_new__Symbol(ptr",
 		"define i32 @arena_dict_put__Symbol(ptr",
 		"define i1 @arena_dict_contains__Symbol(ptr",
 		"call ptr @new_region(i64 2048)",
@@ -2669,14 +2669,14 @@ error IoError:
 	NotFound
 
 extern alloc(size: usize) -> heap void&?
-extern read_file(path: u8&) -> dstr[file_text] error[IoError.NotFound, ...]
+extern read_file(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]
 
 def checked_alloc(size: usize) -> heap void& error[MemoryError.OutOfMemory, ...]:
 	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
-def load_text(path: u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
-	text: dstr[file_text] = try read_file(path)
+def load_text(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]:
+	text: cstr[file_text] = try read_file(path)
 	return text
 
 def load_with_fallback(path: u8&) -> u8&:
@@ -2694,7 +2694,7 @@ def load_with_default(path: u8&) -> u8&:
 	}
 
 	checks := []string{
-		"%ErrUnion__IoError__dstr_file_text = type { i32, ptr }",
+		"%ErrUnion__IoError__cstr_file_text = type { i32, ptr }",
 		"%ErrUnion__MemoryError__heap_void = type { i32, ptr }",
 		"declare ptr @alloc(i64)",
 		"declare i32 @read_file(ptr, ptr)",
@@ -2702,8 +2702,8 @@ def load_with_default(path: u8&) -> u8&:
 		"define i32 @load_text(ptr ",
 		"define ptr @load_with_fallback(ptr ",
 		"define ptr @load_with_default(ptr ",
-		"extractvalue %ErrUnion__IoError__dstr_file_text",
-		"insertvalue %ErrUnion__IoError__dstr_file_text",
+		"extractvalue %ErrUnion__IoError__cstr_file_text",
+		"insertvalue %ErrUnion__IoError__cstr_file_text",
 		"icmp eq i32",
 		"phi ptr",
 		"ret i32",
@@ -2902,10 +2902,10 @@ func TestGenerateLLVMIRAcceptsBareFamilyErrorSetShorthand(t *testing.T) {
 	src := `error IoError:
 	NotFound
 
-extern read_file(path: u8&) -> dstr[file_text] error[IoError]
+extern read_file(path: u8&) -> cstr[file_text] error[IoError]
 
-def load_text(path: u8&) -> dstr[file_text] error[IoError, ...]:
-	text: dstr[file_text] = try read_file(path)
+def load_text(path: u8&) -> cstr[file_text] error[IoError, ...]:
+	text: cstr[file_text] = try read_file(path)
 	return text
 `
 	result := parseAndAnalyze(t, "backend_error_set_wildcard.llcontext", src)
@@ -2915,7 +2915,7 @@ def load_text(path: u8&) -> dstr[file_text] error[IoError, ...]:
 	}
 
 	checks := []string{
-		"%ErrUnion__IoError__dstr_file_text = type { i32, ptr }",
+		"%ErrUnion__IoError__cstr_file_text = type { i32, ptr }",
 		"declare i32 @read_file(ptr, ptr)",
 		"define i32 @load_text(ptr ",
 	}
@@ -3032,10 +3032,10 @@ def read_view(view: dview[i32]) -> i32:
 }
 
 func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
-	src := `def read_codepoint(text: dstr[row]) -> char:
+	src := `def read_codepoint(text: cstr[row]) -> char:
     return text[1]
 `
-	result := parseAndAnalyze(t, "backend_runtime_dstr_index.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_cstr_index.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -3054,13 +3054,13 @@ func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
 }
 
 func TestGenerateLLVMIRAcceptsShapeErasingDStrShorthand(t *testing.T) {
-	src := `def keep(text: dstr) -> dstr:
+	src := `def keep(text: cstr) -> cstr:
     return text
 
-def erase(text: dstr[row]) -> dstr:
+def erase(text: cstr[row]) -> cstr:
     return text
 `
-	result := parseAndAnalyze(t, "backend_dstr_shorthand.llcontext", src)
+	result := parseAndAnalyze(t, "backend_cstr_shorthand.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -3101,13 +3101,13 @@ func TestGenerateLLVMIRIndexesStringViewViaRuntimeHelper(t *testing.T) {
 }
 
 func TestGenerateLLVMIRLowersRuntimeStringEqualityHelpers(t *testing.T) {
-	src := `def same_text(left: dstr[row], right: dstr[col]) -> bool:
+	src := `def same_text(left: cstr[row], right: cstr[col]) -> bool:
 	return left == right
 
-def same_view_text(view: StringView, text: dstr[row]) -> bool:
+def same_view_text(view: StringView, text: cstr[row]) -> bool:
 	return view == text
 
-def same_text_view(text: dstr[row], view: StringView) -> bool:
+def same_text_view(text: cstr[row], view: StringView) -> bool:
 	return text == view
 
 def different_views(left: StringView, right: StringView) -> bool:
@@ -3146,7 +3146,7 @@ def string_view(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = start
 	return StringView("".cast[u8&], end - start)
 
-def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
 
 def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
@@ -3155,10 +3155,10 @@ def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
 def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
 	return string_view(view.data, start, view.len)
 
-def same_shape_text(left: dstr[row], right: dstr[row]) -> bool:
+def same_shape_text(left: cstr[row], right: cstr[row]) -> bool:
 	return left == right
 
-def same_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
+def same_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 	left_view: StringView = ctx_string_view(left, 0, 2)
 	right_view: StringView = ctx_string_view(right, 0, 2)
 	return left_view == right_view
@@ -3167,11 +3167,11 @@ def fresh_disjoint_raw_views() -> bool:
 	region scratch(1024)
 	return string_view(new[scratch] 1, 0, 1) == string_view(new[scratch] 2, 0, 1)
 
-def split_disjoint_views(text: dstr[row]) -> bool:
+def split_disjoint_views(text: cstr[row]) -> bool:
 	base: StringView = ctx_string_view(text, 0, 4)
 	return ctx_string_view_prefix(base, 2) == ctx_string_view_suffix(base, 2)
 
-def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
+def different_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 	left_view: StringView = ctx_string_view(left, 0, 2)
 	right_view: StringView = ctx_string_view(right, 0, 3)
 	return left_view == right_view
@@ -3249,26 +3249,26 @@ func TestGenerateLLVMIRSpecializesDirectRuntimeStringEqualityHelpers(t *testing.
 	data: mutable u8&
 	len: mutable i64
 
-extern ctx_string_view(value: dstr[row], start: i64, end: i64) -> StringView
+extern ctx_string_view(value: cstr[row], start: i64, end: i64) -> StringView
 extern ctx_string_view_prefix(view: StringView, end: i64) -> StringView
 extern ctx_string_view_suffix(view: StringView, start: i64) -> StringView
-extern ctx_string_slice(value: dstr[row], start: i64, end: i64) -> dstr[shape_out]
-extern ctx_streq(left: dstr[row], right: dstr[row]) -> int
-extern ctx_string_view_eq(view: StringView, text: dstr[shape_other]) -> int
+extern ctx_string_slice(value: cstr[row], start: i64, end: i64) -> cstr[shape_out]
+extern ctx_streq(left: cstr[row], right: cstr[row]) -> int
+extern ctx_string_view_eq(view: StringView, text: cstr[shape_other]) -> int
 extern ctx_string_views_eq(left: StringView, right: StringView) -> int
 
-def direct_same_shape_text(left: dstr[row], right: dstr[row]) -> bool:
+def direct_same_shape_text(left: cstr[row], right: cstr[row]) -> bool:
 	return ctx_streq(left, right) != 0
 
-def direct_same_bounds_view_text(left: dstr[row], right: dstr[row]) -> bool:
+def direct_same_bounds_view_text(left: cstr[row], right: cstr[row]) -> bool:
 	view: StringView = ctx_string_view(left, 0, 4)
 	return ctx_string_view_eq(view, ctx_string_slice(right, 0, 4)) != 0
 
-def direct_split_disjoint_views(text: dstr[row]) -> bool:
+def direct_split_disjoint_views(text: cstr[row]) -> bool:
 	base: StringView = ctx_string_view(text, 0, 4)
 	return ctx_string_views_eq(ctx_string_view_prefix(base, 2), ctx_string_view_suffix(base, 2)) != 0
 
-def direct_different_bounds_view(left: dstr[row], right: dstr[row]) -> bool:
+def direct_different_bounds_view(left: cstr[row], right: cstr[row]) -> bool:
 	left_view: StringView = ctx_string_view(left, 0, 2)
 	right_view: StringView = ctx_string_view(right, 0, 3)
 	return ctx_string_views_eq(left_view, right_view) != 0
@@ -3324,24 +3324,24 @@ def direct_different_bounds_view(left: dstr[row], right: dstr[row]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesDStrLiteralEquality(t *testing.T) {
-	src := `extern ctx_streq(left: dstr[row], right: dstr[shape_other]) -> int
+	src := `extern ctx_streq(left: cstr[row], right: cstr[shape_other]) -> int
 
-def literal_right(text: dstr[row]) -> bool:
+def literal_right(text: cstr[row]) -> bool:
 	return text == "alphabet soup"
 
-def literal_left(text: dstr[row]) -> bool:
+def literal_left(text: cstr[row]) -> bool:
 	return "alphabet soup" == text
 
-def direct_literal_right(text: dstr[row]) -> bool:
+def direct_literal_right(text: cstr[row]) -> bool:
 	return ctx_streq(text, "alphabet soup") != 0
 
-def direct_literal_left(text: dstr[row]) -> bool:
+def direct_literal_left(text: cstr[row]) -> bool:
 	return ctx_streq("alphabet soup", text) != 0
 
-def direct_empty_literal(text: dstr[row]) -> bool:
+def direct_empty_literal(text: cstr[row]) -> bool:
 	return ctx_streq(text, "") != 0
 `
-	result := parseAndAnalyze(t, "backend_runtime_dstr_literal_eq.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_cstr_literal_eq.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -3377,13 +3377,13 @@ def direct_empty_literal(text: dstr[row]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesConstantStringSliceLiteralEquality(t *testing.T) {
-	src := `extern ctx_string_slice(value: dstr[row], start: i64, end: i64) -> dstr[shape_out]
-extern ctx_streq(left: dstr[shape_left], right: dstr[shape_right]) -> int
+	src := `extern ctx_string_slice(value: cstr[row], start: i64, end: i64) -> cstr[shape_out]
+extern ctx_streq(left: cstr[shape_left], right: cstr[shape_right]) -> int
 
-def slice_literal(text: dstr[row]) -> bool:
+def slice_literal(text: cstr[row]) -> bool:
 	return ctx_string_slice(text, 1, 10) == "lphabet s"
 
-def direct_slice_literal(text: dstr[row]) -> bool:
+def direct_slice_literal(text: cstr[row]) -> bool:
 	return ctx_streq(ctx_string_slice(text, 1, 10), "lphabet s") != 0
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_slice_literal_eq.llcontext", src)
@@ -3411,15 +3411,15 @@ def direct_slice_literal(text: dstr[row]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesConstantStringSliceEquality(t *testing.T) {
-	src := `extern ctx_string_slice_eq(value: dstr[row], start: i64, end: i64, other: dstr[col]) -> int
+	src := `extern ctx_string_slice_eq(value: cstr[row], start: i64, end: i64, other: cstr[col]) -> int
 
-def slice_eq_const(text: dstr[row], other: dstr[col]) -> bool:
+def slice_eq_const(text: cstr[row], other: cstr[col]) -> bool:
 	return ctx_string_slice_eq(text, 1, 3, other) != 0
 
-def slice_eq_empty(text: dstr[row], other: dstr[col]) -> bool:
+def slice_eq_empty(text: cstr[row], other: cstr[col]) -> bool:
 	return ctx_string_slice_eq(text, 2, 2, other) != 0
 
-def slice_eq_unknown(text: dstr[row], start: i64, end: i64, other: dstr[col]) -> bool:
+def slice_eq_unknown(text: cstr[row], start: i64, end: i64, other: cstr[col]) -> bool:
 	return ctx_string_slice_eq(text, start, end, other) != 0
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_slice_eq.llcontext", src)
@@ -3464,15 +3464,15 @@ def slice_eq_unknown(text: dstr[row], start: i64, end: i64, other: dstr[col]) ->
 }
 
 func TestGenerateLLVMIRSpecializesConstantStringSlicesEquality(t *testing.T) {
-	src := `extern ctx_string_slices_eq(lhs: dstr[row], lhs_start: i64, lhs_end: i64, rhs: dstr[col], rhs_start: i64, rhs_end: i64) -> int
+	src := `extern ctx_string_slices_eq(lhs: cstr[row], lhs_start: i64, lhs_end: i64, rhs: cstr[col], rhs_start: i64, rhs_end: i64) -> int
 
-def slices_eq_const(left: dstr[row], right: dstr[col]) -> bool:
+def slices_eq_const(left: cstr[row], right: cstr[col]) -> bool:
 	return ctx_string_slices_eq(left, 1, 4, right, 2, 5) != 0
 
-def slices_eq_empty(left: dstr[row], right: dstr[col]) -> bool:
+def slices_eq_empty(left: cstr[row], right: cstr[col]) -> bool:
 	return ctx_string_slices_eq(left, 3, 3, right, 7, 7) != 0
 
-def slices_eq_unknown(left: dstr[row], left_start: i64, left_end: i64, right: dstr[col], right_start: i64, right_end: i64) -> bool:
+def slices_eq_unknown(left: cstr[row], left_start: i64, left_end: i64, right: cstr[col], right_start: i64, right_end: i64) -> bool:
 	return ctx_string_slices_eq(left, left_start, left_end, right, right_start, right_end) != 0
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_slices_eq.llcontext", src)
@@ -5245,28 +5245,28 @@ def string_view(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = start
 	return StringView(src, end)
 
-def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
 
 def string_view_copy(view: StringView) -> heap u8&:
 	_ = view
 	return intern_small_string("".cast[u8&], 0)
 
-def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
+def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
 	return string_view_copy(view)
 
-def copy_small(text: dstr[row]) -> dstr:
+def copy_small(text: cstr[row]) -> cstr:
 	view: StringView = ctx_string_view(text, 0, 2)
 	return ctx_string_from_view(view)
 
-def copy_large(text: dstr[row]) -> dstr:
+def copy_large(text: cstr[row]) -> cstr:
 	view: StringView = ctx_string_view(text, 0, 12)
 	return ctx_string_from_view(view)
 
-def copy_unknown(view: StringView) -> dstr:
+def copy_unknown(view: StringView) -> cstr:
 	return ctx_string_from_view(view)
 
-def copy_small_raw(text: dstr[row]) -> heap u8&:
+def copy_small_raw(text: cstr[row]) -> heap u8&:
 	view: StringView = ctx_string_view(text, 0, 2)
 	return string_view_copy(view)
 `
@@ -5356,10 +5356,10 @@ def same_long(view: StringView) -> bool:
 }
 
 func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
-	src := `def text_len(text: dstr[row]) -> i64:
+	src := `def text_len(text: cstr[row]) -> i64:
     return text.len
 `
-	result := parseAndAnalyze(t, "backend_dstr_len.llcontext", src)
+	result := parseAndAnalyze(t, "backend_cstr_len.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -5561,7 +5561,7 @@ func TestGenerateLLVMIRLowersStringSliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	data: mutable u8&
     len: mutable i64
 
-def head_codepoint(text: dstr[row]) -> char:
+def head_codepoint(text: cstr[row]) -> char:
 	view: StringView = text[1:3]
     return view[0]
 `
@@ -5589,19 +5589,19 @@ func TestGenerateLLVMIRSpecializesExactStringSliceMaterialize(t *testing.T) {
 extern alloc_perm(size: i64) -> heap void&
 extern register_perm_string_len(ptr: u8&?, len: usize)
 extern intern_small_string(src: u8&, len: usize) -> heap u8&
-extern ctx_strlen(value: dstr[shape_in]) -> i64
-extern ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out]
+extern ctx_strlen(value: cstr[shape_in]) -> i64
+extern ctx_string_slice(value: cstr[shape_in], start: i64, end: i64) -> cstr[shape_out]
 
-def copy_small(text: dstr[row]) -> dstr:
+def copy_small(text: cstr[row]) -> cstr:
 	return ctx_string_slice(text, 1, 3)
 
-def copy_large(text: dstr[row]) -> dstr:
+def copy_large(text: cstr[row]) -> cstr:
 	return ctx_string_slice(text, 1, 13)
 
-def copy_full(text: dstr[row]) -> dstr:
+def copy_full(text: cstr[row]) -> cstr:
 	return ctx_string_slice(text, 0, text.len)
 
-def copy_unknown(text: dstr[row], start: i64, end: i64) -> dstr:
+def copy_unknown(text: cstr[row], start: i64, end: i64) -> cstr:
 	return ctx_string_slice(text, start, end)
 `
 	result := parseAndAnalyze(t, "backend_exact_string_slice_materialize.llcontext", src)
@@ -5797,13 +5797,13 @@ def bump() -> int:
 }
 
 func TestGenerateLLVMIRLowersIterableForLoopOverDynamicString(t *testing.T) {
-	src := `def checksum(text: dstr[row]) -> int:
+	src := `def checksum(text: cstr[row]) -> int:
 	total: mutable int = 0
 	for ch in text:
 		total <- total + ch
 	return total
 `
-	result := parseAndAnalyze(t, "backend_iterable_for_dstr.llcontext", src)
+	result := parseAndAnalyze(t, "backend_iterable_for_cstr.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

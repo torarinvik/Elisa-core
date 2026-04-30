@@ -4292,17 +4292,17 @@ def bad_box() -> int:
 func TestAnalyzeAcceptsBuiltinSurfaceCollectionTypes(t *testing.T) {
 	src := `extern take_array(values: array[i32, 4]) -> void
 extern take_darray(values: darray[i32, row]) -> void
-extern take_dstr(text: dstr[row]) -> void
+extern take_cstr(text: cstr[row]) -> void
 extern take_view(values: view[i32, 0, 2]) -> void
 extern take_sview(text: sview[1, 4]) -> void
 
-def use(values: array[i32, 4], dyn: darray[i32, row], text: str[5], dyn_text: dstr[row]) -> char:
+def use(values: array[i32, 4], dyn: darray[i32, row], text: str[5], dyn_text: cstr[row]) -> char:
 	sub_array: view[i32, 0, 2] = values[0:2]
 	sub_text: sview[1, 4] = text[1:4]
 	dyn_sub: sview[0, 1] = dyn_text[0:1]
 	take_array(values)
 	take_darray(dyn)
-	take_dstr(dyn_text)
+	take_cstr(dyn_text)
 	take_view(sub_array)
 	take_sview(sub_text)
 	take_sview(dyn_sub)
@@ -4317,7 +4317,7 @@ func TestAnalyzeAcceptsCharCastAndComparisonFromStringIndexing(t *testing.T) {
 	ch: char = text[0]
 	return ch.i64()
 
-def same_head(left: dstr[row], right: dstr[col]) -> bool:
+def same_head(left: cstr[row], right: cstr[col]) -> bool:
 	return left[0] == right[0]
 `
 	_, errs := parseAndAnalyze(t, "char_cast_and_compare.llcontext", src)
@@ -5655,7 +5655,7 @@ func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsStringLiteralMatchStatementOverSlice(t *testing.T) {
-	src := `def classify(text: dstr[row]) -> int:
+	src := `def classify(text: cstr[row]) -> int:
 	match text[0:2]:
 		"if":
 			return 1
@@ -7309,13 +7309,13 @@ def bump() -> int:
 }
 
 func TestAnalyzeAcceptsIterableForLoopOverDynamicString(t *testing.T) {
-	src := `def checksum(text: dstr[row]) -> int:
+	src := `def checksum(text: cstr[row]) -> int:
 	total: mutable int = 0
 	for ch in text:
 		total <- total + ch
 	return total
 `
-	result, errs := parseAndAnalyze(t, "iterable_for_dstr_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "iterable_for_cstr_ok.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "checksum", "int")
@@ -8124,16 +8124,16 @@ def bad(owner: Arena, pool: ThreadPool&) -> Task[i64, Pending]:
 }
 
 func TestAnalyzeAcceptsDictSurfaceTypesAndRuntimeBridge(t *testing.T) {
-	src := `extern take_runtime(values: DynDict[dstr[row], i32]) -> void
-extern make_runtime() -> DynDict[dstr[row], i32]
+	src := `extern take_runtime(values: DynDict[cstr[row], i32]) -> void
+extern make_runtime() -> DynDict[cstr[row], i32]
 
-def id[V](values: dict[dstr, V]) -> dict[dstr, V]:
+def id[V](values: dict[cstr, V]) -> dict[cstr, V]:
 	return values
 
-def keep(values: dict[dstr, i32]) -> dict[dstr, i32]:
+def keep(values: dict[cstr, i32]) -> dict[cstr, i32]:
 	return id(values)
 
-def use(values: dict[dstr[row], i32]) -> dict[dstr[row], i32]:
+def use(values: dict[cstr[row], i32]) -> dict[cstr[row], i32]:
 	take_runtime(values)
 	return make_runtime()
 `
@@ -8170,7 +8170,7 @@ def use(values: dict[u32, i32], key: u32) -> dict[u32, i32]:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[dstr, V]") {
+	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[cstr, V]") {
 		t.Fatalf("expected runtime-backed dict restriction diagnostic, got:\n%s", all)
 	}
 	if !strings.Contains(all, "expects dict[u32, i32] (runtime carrier), got dict[u32, i32]") {
@@ -9326,14 +9326,14 @@ error IoError:
 	NotFound
 
 extern alloc(size: usize) -> heap void&?
-extern read_file(path: u8&) -> dstr[file_text] error[IoError.NotFound, ...]
+extern read_file(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]
 
 def checked_alloc(size: usize) -> heap void& error[MemoryError.OutOfMemory, ...]:
 	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
-def load_text(path: u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
-	text: dstr[file_text] = try read_file(path)
+def load_text(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]:
+	text: cstr[file_text] = try read_file(path)
 	return text
 
 def load_with_fallback(path: u8&) -> u8&:
@@ -9662,10 +9662,10 @@ def read_view(view: dview[i32]) -> i32:
 }
 
 func TestAnalyzeAcceptsDStrIndexingAsChar(t *testing.T) {
-	src := `def read_codepoint(text: dstr[row]) -> char:
+	src := `def read_codepoint(text: cstr[row]) -> char:
 	return text[0]
 `
-	result, errs := parseAndAnalyze(t, "runtime_backed_dstr_index.llcontext", src)
+	result, errs := parseAndAnalyze(t, "runtime_backed_cstr_index.llcontext", src)
 	requireNoErrors(t, errs)
 	fn, ok := result.GlobalScope.Lookup("read_codepoint")
 	if !ok {
@@ -9681,10 +9681,10 @@ func TestAnalyzeAcceptsDStrIndexingAsChar(t *testing.T) {
 }
 
 func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
-	src := `def bad(text: dstr[row]) -> void:
+	src := `def bad(text: cstr[row]) -> void:
 	text[0] <- 1
 `
-	_, errs := parseAndAnalyze(t, "dstr_index_assignment.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_index_assignment.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -9735,19 +9735,19 @@ extern take_window(view: DynArrayView) -> void
 }
 
 func TestAnalyzeAcceptsSViewAndDStrEqualityOperators(t *testing.T) {
-	src := `def same_text(left: dstr[row], right: dstr[col]) -> bool:
+	src := `def same_text(left: cstr[row], right: cstr[col]) -> bool:
 	return left == right
 
-def same_view_text(view: sview, text: dstr[row]) -> bool:
+def same_view_text(view: sview, text: cstr[row]) -> bool:
 	return view == text
 
-def same_text_view(text: dstr[row], view: sview) -> bool:
+def same_text_view(text: cstr[row], view: sview) -> bool:
 	return text == view
 
 def different_views(left: sview, right: sview) -> bool:
 	return left != right
 
-def same_literal(text: dstr[row]) -> bool:
+def same_literal(text: cstr[row]) -> bool:
 	return text == "hello"
 `
 	_, errs := parseAndAnalyze(t, "runtime_string_equality.llcontext", src)
@@ -9755,10 +9755,10 @@ def same_literal(text: dstr[row]) -> bool:
 }
 
 func TestAnalyzeAcceptsDStrLenField(t *testing.T) {
-	src := `def text_len(text: dstr[row]) -> i64:
+	src := `def text_len(text: cstr[row]) -> i64:
 	return text.len
 `
-	_, errs := parseAndAnalyze(t, "dstr_len_field.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_len_field.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -9901,7 +9901,7 @@ func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "collections.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "dict[dstr[key_shape], i64]")
+	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "dict[cstr[key_shape], i64]")
 	requireFunctionReturnTypeString(t, result, "arena_dict_get__i64", "mutable i64&?")
 }
 
@@ -10098,7 +10098,7 @@ func TestAnalyzeRejectsMismatchedFixedArrayLiteralLength(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
-	src := `def middle(text: dstr[row]) -> sview:
+	src := `def middle(text: cstr[row]) -> sview:
 	return text[1:3]
 `
 	_, errs := parseAndAnalyze(t, "string_slice_syntax.llcontext", src)
@@ -10106,10 +10106,10 @@ func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
 }
 
 func TestAnalyzeRejectsAssigningToDStrLenField(t *testing.T) {
-	src := `def bad(text: dstr[row]) -> void:
+	src := `def bad(text: cstr[row]) -> void:
 	text.len <- 1
 `
-	_, errs := parseAndAnalyze(t, "dstr_len_assign.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_len_assign.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -10206,24 +10206,24 @@ func TestAnalyzeRejectsMismatchedDArrayShapes(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsImplicitDStrShapeParams(t *testing.T) {
-	src := `def echo(text: dstr[shape_text]) -> dstr[shape_text]:
+	src := `def echo(text: cstr[shape_text]) -> cstr[shape_text]:
 	return text
 
-def keep(text: dstr[row]) -> dstr[row]:
+def keep(text: cstr[row]) -> cstr[row]:
 	return echo(text)
 `
-	_, errs := parseAndAnalyze(t, "implicit_dstr_shape_params.llcontext", src)
+	_, errs := parseAndAnalyze(t, "implicit_cstr_shape_params.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeAcceptsShapeErasingDStrShorthand(t *testing.T) {
-	src := `def keep_surface(text: dstr) -> dstr:
+	src := `def keep_surface(text: cstr) -> cstr:
 	return text
 
-def erase_explicit(text: dstr[row]) -> dstr:
+def erase_explicit(text: cstr[row]) -> cstr:
 	return text
 `
-	_, errs := parseAndAnalyze(t, "dstr_shorthand_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_shorthand_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -10231,7 +10231,7 @@ func TestAnalyzeAcceptsShapeErasingSViewShorthand(t *testing.T) {
 	src := `def keep_surface(text: sview) -> sview:
 	return text
 
-def slice_prefix(text: dstr[row]) -> sview:
+def slice_prefix(text: cstr[row]) -> sview:
 	prefix: sview = text[0:1]
 	return prefix
 `
@@ -10240,14 +10240,14 @@ def slice_prefix(text: dstr[row]) -> sview:
 }
 
 func TestAnalyzeRejectsRecoveringExplicitShapeFromDStrShorthand(t *testing.T) {
-	src := `def bad(text: dstr) -> dstr[row]:
+	src := `def bad(text: cstr) -> cstr[row]:
 	return text
 `
-	_, errs := parseAndAnalyze(t, "dstr_shorthand_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_shorthand_reject.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "return type expects dstr[row], got dstr") {
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects cstr[row], got cstr") {
 		t.Fatalf("expected omitted-shape DStr to explicit-shape rejection, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -10270,7 +10270,7 @@ func TestAnalyzeFormatsBareSViewShorthandInDiagnostics(t *testing.T) {
 }
 
 func TestAnalyzeFormatsWhileConditionSViewUsingSurfaceNames(t *testing.T) {
-	src := `def bad(text: dstr[row]) -> void:
+	src := `def bad(text: cstr[row]) -> void:
 	while text[0:1]:
 		pass
 `
@@ -10308,7 +10308,7 @@ func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 }
 
 func TestAnalyzeFormatsCompareSViewUsingSurfaceNames(t *testing.T) {
-	src := `def bad(text: dstr[row]) -> bool:
+	src := `def bad(text: cstr[row]) -> bool:
 	return text[0:1] == 1
 `
 	_, errs := parseAndAnalyze(t, "compare_sview_surface_diagnostic.llcontext", src)
@@ -10328,7 +10328,7 @@ func TestAnalyzeFormatsIsVariantSViewUsingSurfaceNames(t *testing.T) {
 	src := `enum Flag:
 	On
 
-def bad(text: dstr[row]) -> bool:
+def bad(text: cstr[row]) -> bool:
 	return text[0:1] is Flag.On
 `
 	_, errs := parseAndAnalyze(t, "is_variant_sview_surface_diagnostic.llcontext", src)
@@ -10433,17 +10433,17 @@ func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
 	src := `def take_raw(text: u8&) -> void:
 	pass
 
-def take_logical(text: dstr[shape_text]) -> void:
+def take_logical(text: cstr[shape_text]) -> void:
 	pass
 
-def roundtrip(text: dstr[row], raw: u8&) -> dstr[row]:
+def roundtrip(text: cstr[row], raw: u8&) -> cstr[row]:
 	take_raw(text)
 	take_logical(raw)
-	bridged: dstr[row] = raw
+	bridged: cstr[row] = raw
 	raw_value: u8& = text
 	return raw_value
 `
-	_, errs := parseAndAnalyze(t, "dstr_runtime_bridge_roundtrip.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_runtime_bridge_roundtrip.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -10457,7 +10457,7 @@ def bad_array_view(values: DArrayView[i32]) -> void:
 def bad_str(text: DStr[row]) -> void:
 	pass
 
-def bad_dict(values: Dict[dstr, i32]) -> void:
+def bad_dict(values: Dict[cstr, i32]) -> void:
 	pass
 `
 	_, errs := parseAndAnalyze(t, "dynamic_shape_arity.llcontext", src)
@@ -10468,7 +10468,7 @@ def bad_dict(values: Dict[dstr, i32]) -> void:
 	for _, want := range []string{
 		"legacy built-in \"DArray\" has been replaced; use \"darray\" instead",
 		"legacy built-in \"DArrayView\" has been replaced; use \"dview\" instead",
-		"legacy built-in \"DStr\" has been replaced; use \"dstr\" instead",
+		"legacy built-in \"DStr\" has been replaced; use \"cstr\" instead",
 		"legacy built-in \"Dict\" has been replaced; use \"dict\" instead",
 	} {
 		if !strings.Contains(all, want) {
@@ -10481,7 +10481,7 @@ func TestAnalyzeRejectsLegacyStringBuiltinAliases(t *testing.T) {
 	src := `def bad_fixed(text: string[5]) -> void:
 	pass
 
-def bad_dynamic(text: dstring[row]) -> void:
+def bad_dynamic(text: cstring[row]) -> void:
 	pass
 `
 	_, errs := parseAndAnalyze(t, "legacy_string_aliases.llcontext", src)
@@ -10489,7 +10489,7 @@ def bad_dynamic(text: dstring[row]) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "legacy built-in \"string\" has been replaced; use \"str\" instead") || !strings.Contains(all, "legacy built-in \"dstring\" has been replaced; use \"dstr\" instead") {
+	if !strings.Contains(all, "legacy built-in \"string\" has been replaced; use \"str\" instead") || !strings.Contains(all, "legacy built-in \"cstring\" has been replaced; use \"cstr\" instead") {
 		t.Fatalf("expected legacy string alias diagnostics, got:\n%s", all)
 	}
 }

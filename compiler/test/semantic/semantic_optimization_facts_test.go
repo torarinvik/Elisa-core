@@ -67,10 +67,10 @@ func requireExprPackedStoreProvenance(t *testing.T, result *semantic.Result, exp
 }
 
 func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T) {
-	src := `def inspect(values: darray[i32, row], other: darray[i32, row], text: dstr[row], any_values: darray[i32], buf: array[i32, 4]) -> int:
+	src := `def inspect(values: darray[i32, row], other: darray[i32, row], text: cstr[row], any_values: darray[i32], buf: array[i32, 4]) -> int:
 	same_a: darray[i32, row] = values
 	same_b: darray[i32, row] = other
-	text_copy: dstr[row] = text
+	text_copy: cstr[row] = text
 	wildcard_copy: darray[i32] = any_values
 	slice: view[i32, 0, 2] = buf[0:2]
 	return 0
@@ -103,16 +103,16 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 	}
 
 	if !textFacts.ReadOnly || !textFacts.Contiguous || !textFacts.UnitStride {
-		t.Fatalf("expected dstr facts to be readonly contiguous unit-stride, got %#v", textFacts)
+		t.Fatalf("expected cstr facts to be readonly contiguous unit-stride, got %#v", textFacts)
 	}
 	if result.ExprSupportsDenseWrite(requireOptimizationFactsVarInitExpr(t, fn, "text_copy")) {
-		t.Fatalf("expected readonly dstr value to reject dense write helpers")
+		t.Fatalf("expected readonly cstr value to reject dense write helpers")
 	}
 	if !textFacts.HasExactExtent() {
-		t.Fatalf("expected dstr facts to preserve exact shape extent, got %#v", textFacts)
+		t.Fatalf("expected cstr facts to preserve exact shape extent, got %#v", textFacts)
 	}
 	if !sameAFacts.SameExtent(textFacts) {
-		t.Fatalf("expected shared shape identity between darray and dstr facts, got %#v vs %#v", sameAFacts, textFacts)
+		t.Fatalf("expected shared shape identity between darray and cstr facts, got %#v vs %#v", sameAFacts, textFacts)
 	}
 
 	if wildcardFacts.HasExactExtent() {
@@ -215,21 +215,21 @@ def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 def string_view_copy(view: StringView) -> u8&:
 	return view.data
 
-def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
 
 def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	return string_view_slice(view, start, end)
 
-def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
+def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
 	return string_view_copy(view)
 
-def ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out]:
+def ctx_string_slice(value: cstr[shape_in], start: i64, end: i64) -> cstr[shape_out]:
 	_ = start
 	_ = end
 	return value
 
-def inspect(a: Arena&, values: darray[i32, row]&, other: darray[i32, row]&, text: dstr[row]) -> int:
+def inspect(a: Arena&, values: darray[i32, row]&, other: darray[i32, row]&, text: cstr[row]) -> int:
 	whole_a: dview[i32] = arena_da_view(values, 0, values.count)
 	whole_b: dview[i32] = arena_da_view(other, 0, other.count)
 	sub_a: dview[i32] = arena_da_view_slice(whole_a, 1, 3)
@@ -237,8 +237,8 @@ def inspect(a: Arena&, values: darray[i32, row]&, other: darray[i32, row]&, text
 	copied: darray[i32] = arena_da_from_view(a, sub_a)
 	text_view: StringView = ctx_string_view(text, 1, 3)
 	text_sub: StringView = ctx_string_view_slice(text_view, 0, text_view.len)
-	text_copy: dstr = ctx_string_from_view(text_sub)
-	text_slice: dstr = ctx_string_slice(text, 1, 3)
+	text_copy: cstr = ctx_string_from_view(text_sub)
+	text_slice: cstr = ctx_string_slice(text, 1, 3)
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_runtime_view_helpers.llcontext", src)
@@ -443,7 +443,7 @@ def string_view(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = end
 	return StringView("", 0)
 
-def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
 
 def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
@@ -452,7 +452,7 @@ def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
 def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
 	return string_view(view.data, start, view.len)
 
-def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
+def inspect(text: cstr[row], buf: array[i32, 8]) -> int:
 	left: view[i32, 0, 2] = buf[0:2]
 	right: view[i32, 2, 4] = buf[2:4]
 	overlap: view[i32, 1, 3] = buf[1:3]

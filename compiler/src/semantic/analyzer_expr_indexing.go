@@ -247,8 +247,8 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 		return &DArrayViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
 	}
-	if dstr, ok := objType.(*DStrType); ok {
-		_ = dstr
+	if cstr, ok := objType.(*DStrType); ok {
+		_ = cstr
 		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 	}
 	if isStringViewType(objType) {

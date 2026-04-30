@@ -90,7 +90,7 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 					*order = append(*order, name)
 				}
 			}
-		case "dstr":
+		case "cstr":
 			if len(n.ValueArgs) > 0 {
 				if name, ok := shapeNameFromValueExpr(n.ValueArgs[0]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
 					seen[name] = true

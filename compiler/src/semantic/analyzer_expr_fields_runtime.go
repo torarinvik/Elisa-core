@@ -13,7 +13,7 @@ func (a *Analyzer) lookupFieldNoError(objType Type, fieldName string) (Field, bo
 }
 
 func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, pos lexer.Pos, emitDiagnostics bool) (Field, bool) {
-	if field, ok := dstrSyntheticField(objType, fieldName); ok {
+	if field, ok := cstrSyntheticField(objType, fieldName); ok {
 		return field, true
 	}
 	if field, ok := dictEntrySyntheticField(objType, fieldName); ok {
@@ -261,7 +261,7 @@ func isRuntimeStringViewType(t Type) bool {
 	return ok && st.Name == "StringView"
 }
 
-func dstrSyntheticField(t Type, fieldName string) (Field, bool) {
+func cstrSyntheticField(t Type, fieldName string) (Field, bool) {
 	if fieldName != "len" {
 		return Field{}, false
 	}

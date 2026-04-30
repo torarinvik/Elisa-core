@@ -340,7 +340,7 @@ func (s *functionState) emitFieldAddressFromObjectValue(objValue C.LLVMValueRef,
 }
 
 func (s *functionState) emitFieldValueFromObjectValue(objValue C.LLVMValueRef, objType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
-	if fieldType, ok := dstrSyntheticFieldType(objType, fieldName); ok {
+	if fieldType, ok := cstrSyntheticFieldType(objType, fieldName); ok {
 		value, err := s.emitRuntimeStringLengthValue(objValue, objType, fieldType, name+"."+fieldName)
 		return value, fieldType, err
 	}
@@ -2107,14 +2107,14 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 	switch n := expr.(type) {
 	case *ast.NamedType:
 		switch n.Name {
-		case "dstr":
-			return &semantic.DStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "dstr"}, nil
+		case "cstr":
+			return &semantic.DStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "cstr"}, nil
 		case "sview":
 			return &semantic.SViewType{}, nil
-		case "dstring":
-			return nil, legacyBuiltinReplacementError("dstring", "dstr")
+		case "cstring":
+			return nil, legacyBuiltinReplacementError("cstring", "cstr")
 		case "DStr":
-			return nil, legacyBuiltinReplacementError("DStr", "dstr")
+			return nil, legacyBuiltinReplacementError("DStr", "cstr")
 		}
 		if bound, ok := s.typeMap[n.Name]; ok {
 			return bound, nil
@@ -2532,13 +2532,13 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		return resolved, nil
 	case "string":
 		return nil, legacyBuiltinReplacementError("string", "str")
-	case "dstr":
+	case "cstr":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
-			return nil, fmt.Errorf("dstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return nil, fmt.Errorf("cstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
-		return &semantic.DStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "dstr"}, nil
-	case "dstring":
-		return nil, legacyBuiltinReplacementError("dstring", "dstr")
+		return &semantic.DStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "cstr"}, nil
+	case "cstring":
+		return nil, legacyBuiltinReplacementError("cstring", "cstr")
 	case "view":
 		if len(expr.TypeArgs) != 1 {
 			return nil, fmt.Errorf("view expects 1 type argument, got %d", len(expr.TypeArgs))
@@ -2653,7 +2653,7 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 	if t == nil {
 		switch n := expr.(type) {
 		case *ast.FieldExpr:
-			if fieldType, ok := dstrSyntheticFieldType(s.exprType(n.Object), n.Field); ok {
+			if fieldType, ok := cstrSyntheticFieldType(s.exprType(n.Object), n.Field); ok {
 				t = fieldType
 				break
 			}
@@ -2733,7 +2733,7 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 	case "DListView":
 		return nil, true, fmt.Errorf("DListView has been removed from the language; use dview instead")
 	case "DStr":
-		return nil, true, legacyBuiltinReplacementError("DStr", "dstr")
+		return nil, true, legacyBuiltinReplacementError("DStr", "cstr")
 	default:
 		return nil, false, nil
 	}

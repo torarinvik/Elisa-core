@@ -2,7 +2,7 @@
 # Test helpers - low level Contextlang runtime dialect
 # ============================================================
 
-def fail(message: dstr):
+def fail(message: cstr):
     can Abort.Panic:
         panic(message)
 

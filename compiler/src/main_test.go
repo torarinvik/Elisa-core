@@ -177,9 +177,9 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "dict_runtime",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "dict_runtime.llcontext"),
 			checks: []string{
-				"%DynDict__dstr_key_shape__i32 = type { ptr, i64, i64, i64, ptr }",
+				"%DynDict__cstr_key_shape__i32 = type { ptr, i64, i64, i64, ptr }",
 				"%ErrUnion__RuntimeError__i32 = type { i32, ptr }",
-				"define %DynDict__dstr_key_shape__i32 @arena_dict_new__i32(",
+				"define %DynDict__cstr_key_shape__i32 @arena_dict_new__i32(",
 				"define i32 @arena_dict_reserve__i32(",
 				"define ptr @arena_dict_get__i32(",
 				"define i32 @arena_dict_put__i32(",
@@ -187,7 +187,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define i1 @arena_dict_remove__i32(",
 				"define void @arena_dict_clear__i32(",
 				"define i32 @touch_dict(ptr ",
-				"call %DynDict__dstr_key_shape__i32 @arena_dict_new__i32(ptr",
+				"call %DynDict__cstr_key_shape__i32 @arena_dict_new__i32(ptr",
 				"call i32 @arena_dict_put__i32(ptr",
 			},
 		},
@@ -232,14 +232,14 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			checks: []string{
 				"%SourceSpan = type { i64, i64 }",
 				"%Token = type { i32, %SourceSpan, ptr }",
-				"%DynDict__dstr__Symbol = type { ptr, i64, i64, i64, ptr }",
-				"%Scope = type { ptr, %DynDict__dstr__Symbol, i64 }",
+				"%DynDict__cstr__Symbol = type { ptr, i64, i64, i64, ptr }",
+				"%Scope = type { ptr, %DynDict__cstr__Symbol, i64 }",
 				"%ParserState = type { %DynArrayView, i64, ptr }",
 				"define %DynArrayView @make_tokens()",
 				"define i32 @frontend_scope_stress(ptr",
 				"define i64 @frontend_region_token(i64",
 				"define i32 @frontend_smoke(ptr",
-				"define %DynDict__dstr__Symbol @arena_dict_new__Symbol(ptr",
+				"define %DynDict__cstr__Symbol @arena_dict_new__Symbol(ptr",
 				"define i32 @arena_dict_put__Symbol(ptr",
 				"define i1 @arena_dict_contains__Symbol(ptr",
 				"call ptr @new_region(i64 2048)",
@@ -2097,8 +2097,8 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 		"define void @ctx_packed_store_alloc_fixed_result_slow(ptr",
 		"define void @ctx_packed_store_reserve(ptr",
 		"define %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(ptr",
-		"%DynDict__dstr_key_shape__i64 = type { ptr, i64, i64, i64, ptr }",
-		"define %DynDict__dstr_key_shape__i64 @arena_dict_new__i64(",
+		"%DynDict__cstr_key_shape__i64 = type { ptr, i64, i64, i64, ptr }",
+		"define %DynDict__cstr_key_shape__i64 @arena_dict_new__i64(",
 		"define i32 @arena_dict_reserve__i64(",
 		"define ptr @arena_dict_get__i64(",
 		"define i32 @arena_dict_put__i64(",
@@ -2173,7 +2173,7 @@ func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	if exitCode == 0 {
 		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "runtime-backed dict operations currently support only dict[dstr, V]") {
+	if !strings.Contains(stderr.String(), "runtime-backed dict operations currently support only dict[cstr, V]") {
 		t.Fatalf("expected generic-key runtime-backed dict diagnostic, got:\n%s", stderr.String())
 	}
 }
@@ -2653,7 +2653,7 @@ func TestRunCLIFmtRoundTripsTryReturnGrantBlocks(t *testing.T) {
 	}
 }
 
-func TestRunCLIPrintsPostfixCastHookSyntaxAsCanonicalCastInAST(t *testing.T) {
+func TestRunCLIPrintsPostfixCastHookSyntaxAsPostfixShorthandInAST(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_ast.llcontext")
 	src := "const VALUE: i64 = 1.i64()\n"
@@ -2671,7 +2671,7 @@ func TestRunCLIPrintsPostfixCastHookSyntaxAsCanonicalCastInAST(t *testing.T) {
 		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
 	}
 	output := stdout.String()
-	for _, check := range []string{"const VALUE = 1 as i64"} {
+	for _, check := range []string{"const VALUE = 1.i64()"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
 		}
@@ -3379,16 +3379,16 @@ func TestRunCLIAcceptsSurfaceRuntimeBackedLocalAnnotationsInObjectBuild(t *testi
 	runtimeInclude = filepath.ToSlash(runtimeInclude)
 	src := fmt.Sprintf(`# include %q
 
-extern make_text() -> dstr
+extern make_text() -> cstr
 extern make_bytes() -> darray[u8]
 extern make_window() -> dview[u8]
-extern make_table() -> dict[dstr, i64]
+extern make_table() -> dict[cstr, i64]
 
 def local_runtime_locals() -> usize:
-	text: dstr = make_text()
+	text: cstr = make_text()
 	bytes: darray[u8] = make_bytes()
 	window: dview[u8] = make_window()
-	table: dict[dstr, i64] = make_table()
+	table: dict[cstr, i64] = make_table()
 	return text.len + bytes.count + window.len + table.count
 `, runtimeInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

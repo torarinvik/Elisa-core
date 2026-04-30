@@ -99,14 +99,14 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: dav, DynArrayView: dynArrayView}, true
 		}
 	}
-	if dstr, ok := a.(*DStrType); ok {
+	if cstr, ok := a.(*DStrType); ok {
 		if u8Ref, ok := u8RuntimeRef(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: dstr, U8Ref: u8Ref}, true
+			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: cstr, U8Ref: u8Ref}, true
 		}
 	}
-	if dstr, ok := b.(*DStrType); ok {
+	if cstr, ok := b.(*DStrType); ok {
 		if u8Ref, ok := u8RuntimeRef(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: dstr, U8Ref: u8Ref}, true
+			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: cstr, U8Ref: u8Ref}, true
 		}
 	}
 	if dict, ok := a.(*DictType); ok {

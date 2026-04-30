@@ -1,17 +1,17 @@
-def head_codepoint(text: dstr[row]) -> char:
+def head_codepoint(text: cstr[row]) -> char:
     view: sview[1, 3] = text[1:3]
     return view[0]
 
 
-def head_codepoint_i64(text: dstr[row]) -> i64:
+def head_codepoint_i64(text: cstr[row]) -> i64:
     return head_codepoint(text).i64()
 
 
-def text_len(text: dstr[row]) -> i64:
+def text_len(text: cstr[row]) -> i64:
     return text.len
 
 
-def same_view_text(view: sview[view_begin, view_end], text: dstr[row]) -> bool:
+def same_view_text(view: sview[view_begin, view_end], text: cstr[row]) -> bool:
     return view == text
 
 

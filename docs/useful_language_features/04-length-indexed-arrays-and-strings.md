@@ -102,7 +102,7 @@ Strings can follow the same pattern.
 You could distinguish:
 
 - `str[N]` — fixed string / byte string known to have logical length `N`
-- `dstr[n]` — dynamically allocated owned string with tracked length `n`
+- `cstr[n]` — dynamically allocated owned string with tracked length `n`
 - `u8[N]` — raw fixed-size byte array when you do not want string semantics
 
 Then concatenation could produce a new indexed type:
@@ -158,7 +158,7 @@ But let the type system expose a stronger logical wrapper notion, something like
 darray[T, n]
 ```
 
-where operations like `push`, `resize`, `append_many`, `truncate`, `clear`, `concat`, and `strcat` produce new logical types. In the practical surface, the allocation-sensitive ones should usually be fallible, for example `push : darray[T, n] × T -> darray[T, n+1] error[ShapeOpError]` and `concat : dstr[a] × dstr[b] -> dstr[a+b] error[ShapeOpError]`.
+where operations like `push`, `resize`, `append_many`, `truncate`, `clear`, `concat`, and `strcat` produce new logical types. In the practical surface, the allocation-sensitive ones should usually be fallible, for example `push : darray[T, n] × T -> darray[T, n+1] error[ShapeOpError]` and `concat : cstr[a] × cstr[b] -> cstr[a+b] error[ShapeOpError]`.
 
 This can still compile to the same plain-data struct representation.
 
