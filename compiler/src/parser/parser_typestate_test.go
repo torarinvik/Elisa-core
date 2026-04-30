@@ -1072,7 +1072,7 @@ func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 }
 
 func TestParseTreeVisitAndFoldExprs(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Unary(child expr: Expr)\n        Binary(child left: Expr, child right: Expr)\n        Call(child callee: Expr, children args: darray[Expr])\n\ndef kind(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Nil(expr):\n            0\n        Lua.Expr.Binary(expr):\n            expr.left.span\n\ndef score(node: Lua.Expr) -> i64:\n    return fold node as Lua.Node into i64:\n        Lua.Expr.Nil(expr, children):\n            expr.span + children.len.i64()\n        Lua.Expr.Unary(expr, expr: inner):\n            try inner + expr.span\n        Lua.Expr.Binary(expr, left, right):\n            try left + try right + expr.span\n        Lua.Expr.Call(expr, callee, args: arg_values):\n            try callee + arg_values.len.i64() + expr.span\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Unary(expr: Expr)\n        Binary(left: Expr, right: Expr)\n        Call(callee: Expr, args: darray[Expr])\n\ndef kind(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Nil(expr):\n            0\n        Lua.Expr.Binary(expr):\n            expr.left.span\n\ndef score(node: Lua.Expr) -> i64:\n    return fold node as Lua.Node into i64:\n        Lua.Expr.Nil(expr, children):\n            expr.span + children.len.i64()\n        Lua.Expr.Unary(expr, expr: inner):\n            try inner + expr.span\n        Lua.Expr.Binary(expr, left, right):\n            try left + try right + expr.span\n        Lua.Expr.Call(expr, callee, args: arg_values):\n            try callee + arg_values.len.i64() + expr.span\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1118,18 +1118,18 @@ func TestParseTreeVisitAndFoldExprs(t *testing.T) {
 		t.Fatalf("unexpected fold arms: %#v", foldExpr.Arms)
 	}
 	if len(foldExpr.Arms[1].ChildBindings) != 1 || foldExpr.Arms[1].ChildBindings[0].FieldName != "expr" || foldExpr.Arms[1].ChildBindings[0].BindName != "inner" {
-		t.Fatalf("unexpected unary fold child bindings: %#v", foldExpr.Arms[1].ChildBindings)
+		t.Fatalf("unexpected unary fold bindings: %#v", foldExpr.Arms[1].ChildBindings)
 	}
 	if len(foldExpr.Arms[2].ChildBindings) != 2 || foldExpr.Arms[2].ChildBindings[0].FieldName != "left" || foldExpr.Arms[2].ChildBindings[0].BindName != "left" || foldExpr.Arms[2].ChildBindings[1].FieldName != "right" || foldExpr.Arms[2].ChildBindings[1].BindName != "right" {
-		t.Fatalf("unexpected binary fold child bindings: %#v", foldExpr.Arms[2].ChildBindings)
+		t.Fatalf("unexpected binary fold bindings: %#v", foldExpr.Arms[2].ChildBindings)
 	}
 	if len(foldExpr.Arms[3].ChildBindings) != 2 || foldExpr.Arms[3].ChildBindings[0].FieldName != "callee" || foldExpr.Arms[3].ChildBindings[0].BindName != "callee" || foldExpr.Arms[3].ChildBindings[1].FieldName != "args" || foldExpr.Arms[3].ChildBindings[1].BindName != "arg_values" {
-		t.Fatalf("unexpected call fold child bindings: %#v", foldExpr.Arms[3].ChildBindings)
+		t.Fatalf("unexpected call fold bindings: %#v", foldExpr.Arms[3].ChildBindings)
 	}
 }
 
 func TestParseTreeRewriteExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Binary(child left: Expr, child right: Expr)\n\ndef simplify(node: Lua.Expr) -> Lua.Expr:\n    in perm:\n        return rewrite node as Lua.Expr default:\n            Lua.Expr.Binary(expr, left, right):\n                default{span = expr.span, left, right}\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Binary(left: Expr, right: Expr)\n\ndef simplify(node: Lua.Expr) -> Lua.Expr:\n    in perm:\n        return rewrite node as Lua.Expr default:\n            Lua.Expr.Binary(expr, left, right):\n                default{span = expr.span, left, right}\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1196,7 +1196,7 @@ func TestParseTreeRewriteExpr(t *testing.T) {
 }
 
 func TestParseTreeAttributeDecl(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Binary(child left: Expr, child right: Expr)\n\nattribute Lua.Node.checksum -> i64 error[LuaFrontendError]:\n    Lua.Expr.Binary(node, left, right):\n        lua_binary_checksum(node.span, left.checksum, right.checksum)\n    _:\n        0\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Binary(left: Expr, right: Expr)\n\nattribute Lua.Node.checksum -> i64 error[LuaFrontendError]:\n    Lua.Expr.Binary(node, left, right):\n        lua_binary_checksum(node.span, left.checksum, right.checksum)\n    _:\n        0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1230,7 +1230,7 @@ func TestParseTreeAttributeDecl(t *testing.T) {
 		t.Fatalf("unexpected first attribute arm: %#v", decl.Arms[0])
 	}
 	if len(decl.Arms[0].ChildBindings) != 2 || decl.Arms[0].ChildBindings[0].FieldName != "left" || decl.Arms[0].ChildBindings[1].FieldName != "right" {
-		t.Fatalf("unexpected child bindings: %#v", decl.Arms[0].ChildBindings)
+		t.Fatalf("unexpected bindings: %#v", decl.Arms[0].ChildBindings)
 	}
 	if !decl.Arms[1].Wildcard {
 		t.Fatalf("expected wildcard fallback arm, got %#v", decl.Arms[1])

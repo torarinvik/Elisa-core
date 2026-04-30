@@ -144,8 +144,8 @@ func TestParseTreeDeclPreservesGenericCategoryNames(t *testing.T) {
 	}
 }
 
-func TestParseTreePayloadRelations(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Binary(op: LuaBinaryOp, child left: Expr, child right: Expr)\n        Call(child callee: Expr, children args: darray[Expr], link origin: Expr)\n")
+func TestParseTreePayloadLinkRelation(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Binary(op: LuaBinaryOp, left: Expr, right: Expr)\n        Call(callee: Expr, args: darray[Expr], link origin: Expr)\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -164,15 +164,15 @@ func TestParseTreePayloadRelations(t *testing.T) {
 	if len(binary.Payload) != 3 {
 		t.Fatalf("expected Binary payload arity 3, got %#v", binary.Payload)
 	}
-	if binary.Payload[1].Relation != ast.EnumPayloadRelationChild || binary.Payload[2].Relation != ast.EnumPayloadRelationChild {
-		t.Fatalf("expected Binary left/right payloads to preserve child relation, got %#v", binary.Payload)
+	if binary.Payload[1].Relation != ast.EnumPayloadRelationNone || binary.Payload[2].Relation != ast.EnumPayloadRelationNone {
+		t.Fatalf("expected Binary left/right payloads to remain source-implicit in AST, got %#v", binary.Payload)
 	}
 	call := member.Variants[1]
-	if call.Payload[0].Relation != ast.EnumPayloadRelationChild || call.Payload[1].Relation != ast.EnumPayloadRelationChildren || call.Payload[2].Relation != ast.EnumPayloadRelationLink {
-		t.Fatalf("expected Call payload relations to be preserved, got %#v", call.Payload)
+	if call.Payload[0].Relation != ast.EnumPayloadRelationNone || call.Payload[1].Relation != ast.EnumPayloadRelationNone || call.Payload[2].Relation != ast.EnumPayloadRelationLink {
+		t.Fatalf("expected Call payloads to keep only the explicit link relation, got %#v", call.Payload)
 	}
 	formatted := unparse.FormatDecl(decl)
-	for _, want := range []string{"child left: Expr", "children args: darray[Expr]", "link origin: Expr"} {
+	for _, want := range []string{"left: Expr", "args: darray[Expr]", "link origin: Expr"} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted tree decl to contain %q, got:\n%s", want, formatted)
 		}
@@ -234,7 +234,7 @@ func TestParseNestedTreeCategoryDecl(t *testing.T) {
 }
 
 func TestParseTreeOptionalPayloadFields(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        IfStmt(child condition: Expr, child else_block?: Block)\n        NumericFor(child step?: Expr, children args?: darray[Expr])\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        IfStmt(condition: Expr, else_block?: Block)\n        NumericFor(step?: Expr, args?: darray[Expr])\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -253,8 +253,8 @@ func TestParseTreeOptionalPayloadFields(t *testing.T) {
 	if len(ifStmt.Payload) != 2 {
 		t.Fatalf("expected IfStmt payload arity 2, got %#v", ifStmt.Payload)
 	}
-	if ifStmt.Payload[1].Relation != ast.EnumPayloadRelationChild {
-		t.Fatalf("expected optional else_block payload to preserve child relation, got %#v", ifStmt.Payload[1])
+	if ifStmt.Payload[1].Relation != ast.EnumPayloadRelationNone {
+		t.Fatalf("expected optional else_block payload relation to remain source-implicit in AST, got %#v", ifStmt.Payload[1])
 	}
 	if _, ok := ifStmt.Payload[1].Type.(*ast.OptionalTypeExpr); !ok {
 		t.Fatalf("expected else_block payload type to be optional, got %T", ifStmt.Payload[1].Type)
@@ -263,8 +263,8 @@ func TestParseTreeOptionalPayloadFields(t *testing.T) {
 	if len(numericFor.Payload) != 2 {
 		t.Fatalf("expected NumericFor payload arity 2, got %#v", numericFor.Payload)
 	}
-	if numericFor.Payload[0].Relation != ast.EnumPayloadRelationChild || numericFor.Payload[1].Relation != ast.EnumPayloadRelationChildren {
-		t.Fatalf("expected optional payload relations to be preserved, got %#v", numericFor.Payload)
+	if numericFor.Payload[0].Relation != ast.EnumPayloadRelationNone || numericFor.Payload[1].Relation != ast.EnumPayloadRelationNone {
+		t.Fatalf("expected optional payload relations to remain source-implicit in AST, got %#v", numericFor.Payload)
 	}
 	if _, ok := numericFor.Payload[0].Type.(*ast.OptionalTypeExpr); !ok {
 		t.Fatalf("expected step payload type to be optional, got %T", numericFor.Payload[0].Type)
@@ -273,7 +273,7 @@ func TestParseTreeOptionalPayloadFields(t *testing.T) {
 		t.Fatalf("expected args payload type to be optional, got %T", numericFor.Payload[1].Type)
 	}
 	formatted := unparse.FormatDecl(decl)
-	for _, want := range []string{"child else_block?: Block", "child step?: Expr", "children args?: darray[Expr]"} {
+	for _, want := range []string{"else_block?: Block", "step?: Expr", "args?: darray[Expr]"} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted tree decl to contain %q, got:\n%s", want, formatted)
 		}

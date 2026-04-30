@@ -14,7 +14,7 @@ func TestGenerateLLVMIRLowersCloneBuiltinForDArrayAndTree(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 	block Block:
 		items: darray[Expr]
 
@@ -44,7 +44,7 @@ func TestGenerateLLVMIRLowersCloneBuiltinForTreeCategoryWithCrossCategoryChildre
 	@role(form)
 	node Form:
 		Atom(text: sview)
-		Syntax(child raw: Sequence)
+		Syntax(raw: Sequence)
 	block Sequence:
 		items: darray[Form]
 

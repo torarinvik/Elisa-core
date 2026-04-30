@@ -282,7 +282,7 @@ func TestGenerateLLVMIRLowersNestedLetOverTreeConditionBoundOptional(t *testing.
 		IntegerLit(value: i64)
 	@role(stmt)
 	node Stmt:
-		MaybeStep(child step?: Expr)
+		MaybeStep(step?: Expr)
 
 def score(stmt: Tiny.Stmt) -> i64:
 	if stmt is Tiny.Stmt.MaybeStep(step):
@@ -524,9 +524,9 @@ func TestGenerateLLVMIRLowersTreeChildrenLoops(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Nil
-		Unary(op: i32, child expr: Expr)
-		Binary(op: i32, child left: Expr, child right: Expr)
-		Call(child callee: Expr, children args: darray[Expr], link source_expr: Expr)
+		Unary(op: i32, expr: Expr)
+		Binary(op: i32, left: Expr, right: Expr)
+		Call(callee: Expr, args: darray[Expr], link source_expr: Expr)
 
 def count_nodes(node: Lua.Expr) -> i64:
 	total: mutable i64 = 1
@@ -571,7 +571,7 @@ func TestGenerateLLVMIRLowersMixedTreeChildrenToRootLoops(t *testing.T) {
 		span: i64
 	@role(stmt)
 	node Stmt:
-		IfStmt(child condition: Lua.Expr, child body: Lua.Block)
+		IfStmt(condition: Lua.Expr, body: Lua.Block)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)
@@ -602,9 +602,9 @@ func TestGenerateLLVMIRLowersTreeSequenceFieldViews(t *testing.T) {
 		span: i64
 	@role(stmt)
 	node Stmt:
-		Return(child value: Expr)
-		ElseIf(child condition: Expr, child body: Block)
-		IfStmt(child condition: Expr, child then_block: Block, children elseifs: darray[Stmt], has_else: bool, child else_block: Block)
+		Return(value: Expr)
+		ElseIf(condition: Expr, body: Block)
+		IfStmt(condition: Expr, then_block: Block, elseifs: darray[Stmt], has_else: bool, else_block: Block)
 	@role(expr)
 	node Expr:
 		Int(value: i64)
@@ -641,9 +641,9 @@ func TestGenerateLLVMIRLowersOptionalTreeChildFields(t *testing.T) {
 		span: i64
 	@role(stmt)
 	node Stmt:
-		ElseIf(child condition: Expr, child body: Block)
-		IfStmt(child condition: Expr, child then_block: Block, children elseifs: darray[Stmt], child else_block?: Block)
-		NumericFor(name_index: u32, child start: Expr, child limit: Expr, child step?: Expr, child body: Block)
+		ElseIf(condition: Expr, body: Block)
+		IfStmt(condition: Expr, then_block: Block, elseifs: darray[Stmt], else_block?: Block)
+		NumericFor(name_index: u32, start: Expr, limit: Expr, step?: Expr, body: Block)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)
@@ -696,7 +696,7 @@ func TestGenerateLLVMIRLowersTreeVisitExpr(t *testing.T) {
 	node Expr:
 		Nil
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def score(node: Lua.Expr) -> i64:
 	return visit node:
@@ -725,11 +725,11 @@ func TestGenerateLLVMIRLowersGuardedTreeVisitExpr(t *testing.T) {
 		span: i64
 	@role(stmt)
 	node Stmt:
-		ExprStmt(child expr: Expr)
+		ExprStmt(expr: Expr)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)
-		Call(child callee: Expr)
+		Call(callee: Expr)
 		Int(value: i64)
 	block Block:
 		stmts: darray[Stmt]
@@ -819,7 +819,7 @@ func TestGenerateLLVMIRLowersExactTreeVisitExpr(t *testing.T) {
 	src := `tree Lua:
 	@role(stmt)
 	node Stmt:
-		ExprStmt(child expr: Expr)
+		ExprStmt(expr: Expr)
 	@role(expr)
 	node Expr:
 		Int(value: i64)
@@ -851,8 +851,8 @@ func TestGenerateLLVMIRLowersTreeFoldExpr(t *testing.T) {
 	node Expr:
 		Nil
 		Int(value: i64)
-		Call(child callee: Expr, children args: darray[Expr])
-		Binary(child left: Expr, child right: Expr)
+		Call(callee: Expr, args: darray[Expr])
+		Binary(left: Expr, right: Expr)
 
 def score(node: Lua.Expr) -> i64:
 	return fold node as Lua.Node into i64:
@@ -882,7 +882,7 @@ func TestGenerateLLVMIRLowersDirectTreeAttributeReads(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 attribute Lua.Expr.checksum -> i64:
 	Lua.Expr.Int(expr):
@@ -910,7 +910,7 @@ func TestGenerateLLVMIRLowersProjectedTreeAttributeReads(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 attribute Lua.Expr.node_count -> usize:
 	Lua.Expr.Int(_):
@@ -941,7 +941,7 @@ func TestGenerateLLVMIRLowersTreeAttributeAggregateHelpers(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Nil
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 attribute Lua.Expr.is_leaf -> bool:
 	Lua.Expr.Nil(_):
@@ -980,7 +980,7 @@ func TestGenerateLLVMIRLowersTreeRewriteExpr(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -1009,7 +1009,7 @@ func TestGenerateLLVMIRLowersExactTreeRecordUpdates(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
 	in perm:
@@ -1038,7 +1038,7 @@ func TestGenerateLLVMIRLowersTreeRewriteDefaultExpr(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -1097,7 +1097,7 @@ func TestGenerateLLVMIRLowersTreeRewriteImplicitDefaultRecordUpdate(t *testing.T
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -1193,7 +1193,7 @@ func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Function(child body: Block)
+		Function(body: Block)
 	block Block:
 		items: darray[Expr]
 
@@ -1226,7 +1226,7 @@ func TestGenerateLLVMIRLowersGuardedTreeFoldExpr(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def score(node: Lua.Expr) -> i64:
 	return fold node as Lua.Node into i64:

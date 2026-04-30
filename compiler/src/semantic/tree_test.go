@@ -51,10 +51,10 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
     @role(expr)
     node Expr:
         Nil
-        Binary(op: i32, child left: Expr, child right: Expr)
+        Binary(op: i32, left: Expr, right: Expr)
     @role(stmt)
     node Stmt:
-        Return(child value: Expr)
+        Return(value: Expr)
     block Block:
         stmts: darray[Stmt]
     struct ElseIf:
@@ -272,24 +272,6 @@ def classify(node: Lua.Expr) -> i64:
 	}
 }
 
-func TestAnalyzeDeprecatesExplicitTreeChildPayloadRelations(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_explicit_payload_relations_deprecated.llcontext", `tree Lua:
-    @role(expr)
-    node Expr:
-        Nil
-        Binary(child left: Expr, child right: Expr)
-        Call(child callee: Expr, children args: darray[Expr])
-`)
-
-	deprecations := strings.Join(result.Deprecations(), "\n")
-	if !strings.Contains(deprecations, `explicit tree payload relation "child" is deprecated`) {
-		t.Fatalf("expected child relation deprecation, got:\n%s", deprecations)
-	}
-	if !strings.Contains(deprecations, `explicit tree payload relation "children" is deprecated`) {
-		t.Fatalf("expected children relation deprecation, got:\n%s", deprecations)
-	}
-}
-
 func TestAnalyzeSynthesizesTreeCategoryKindTypesAndShorthandComparisons(t *testing.T) {
 	result := analyzeTreeTestSource(t, "tree_kind_types.llcontext", `tree Lua:
 	common:
@@ -297,10 +279,10 @@ func TestAnalyzeSynthesizesTreeCategoryKindTypesAndShorthandComparisons(t *testi
 	@role(expr)
 	node Expr:
 		Nil
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 	@role(stmt)
 	node Stmt:
-		Return(child value: Expr)
+		Return(value: Expr)
 	block Block:
 		stmts: darray[Stmt]
 
@@ -467,7 +449,7 @@ func TestAnalyzeTreeAttributeFieldAccess(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 attribute Lua.Expr.checksum -> i64:
 	Lua.Expr.Int(expr):
@@ -496,7 +478,7 @@ func TestAnalyzeProjectedTreeAttributeFieldAccess(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 attribute Lua.Expr.node_count -> usize:
 	Lua.Expr.Int(_):
@@ -537,7 +519,7 @@ func TestAnalyzeTreeAttributeAggregateHelpers(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Nil
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 attribute Lua.Expr.is_leaf -> bool:
 	Lua.Expr.Nil(_):
@@ -918,9 +900,9 @@ func TestAnalyzeTreeChildrenLoops(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Nil
-		Unary(op: i32, child expr: Expr)
-		Binary(op: i32, child left: Expr, child right: Expr)
-		Call(child callee: Expr, children args: darray[Expr], link source_expr: Expr)
+		Unary(op: i32, expr: Expr)
+		Binary(op: i32, left: Expr, right: Expr)
+		Call(callee: Expr, args: darray[Expr], link source_expr: Expr)
 
 def count_nodes(node: Lua.Expr) -> i64:
 	total: mutable i64 = 1
@@ -942,7 +924,7 @@ func TestAnalyzeTreeChildrenMixedToRootLoop(t *testing.T) {
 		span: i64
 	@role(stmt)
 	node Stmt:
-		IfStmt(child condition: Lua.Expr, child body: Lua.Block)
+		IfStmt(condition: Lua.Expr, body: Lua.Block)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)
@@ -965,7 +947,7 @@ func TestAnalyzeTreeVisitExpr(t *testing.T) {
 	node Expr:
 		Nil
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def score(node: Lua.Expr) -> i64:
 	return visit node:
@@ -982,7 +964,7 @@ func TestAnalyzeTreeVisitExactMemberExpr(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_visit_exact_member_surface.llcontext", `tree Lua:
 	@role(stmt)
 	node Stmt:
-		ExprStmt(child expr: Expr)
+		ExprStmt(expr: Expr)
 	@role(expr)
 	node Expr:
 		Int(value: i64)
@@ -1002,9 +984,9 @@ func TestAnalyzeTreeSequenceFieldsSurfaceAsViews(t *testing.T) {
 		span: i64
 	@role(stmt)
 	node Stmt:
-		Return(child value: Expr)
-		ElseIf(child condition: Expr, child body: Block)
-		IfStmt(child condition: Expr, child then_block: Block, children elseifs: darray[Stmt], has_else: bool, child else_block: Block)
+		Return(value: Expr)
+		ElseIf(condition: Expr, body: Block)
+		IfStmt(condition: Expr, then_block: Block, elseifs: darray[Stmt], has_else: bool, else_block: Block)
 	@role(expr)
 	node Expr:
 		Int(value: i64)
@@ -1031,9 +1013,9 @@ func TestAnalyzeTreeOptionalChildFields(t *testing.T) {
 		span: i64
 	@role(stmt)
 	node Stmt:
-		ElseIf(child condition: Expr, child body: Block)
-		IfStmt(child condition: Expr, child then_block: Block, children elseifs: darray[Stmt], child else_block?: Block)
-		NumericFor(name_index: u32, child start: Expr, child limit: Expr, child step?: Expr, child body: Block)
+		ElseIf(condition: Expr, body: Block)
+		IfStmt(condition: Expr, then_block: Block, elseifs: darray[Stmt], else_block?: Block)
+		NumericFor(name_index: u32, start: Expr, limit: Expr, step?: Expr, body: Block)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)
@@ -1076,8 +1058,8 @@ func TestAnalyzeTreeFoldExpr(t *testing.T) {
 	node Expr:
 		Nil
 		Int(value: i64)
-		Call(child callee: Expr, children args: darray[Expr])
-		Binary(child left: Expr, child right: Expr)
+		Call(callee: Expr, args: darray[Expr])
+		Binary(left: Expr, right: Expr)
 
 def score(node: Lua.Expr) -> i64:
 	return fold node as Lua.Node into i64:
@@ -1099,7 +1081,7 @@ func TestAnalyzeTreeRewriteExpr(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -1118,7 +1100,7 @@ func TestAnalyzeTreeRewriteExprPreservesHeterogeneousChildTypes(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Function(child body: Block)
+		Function(body: Block)
 	block Block:
 		items: darray[Expr]
 
@@ -1151,7 +1133,7 @@ func TestAnalyzeTreeExactRecordUpdateExpr(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
 	in perm:
@@ -1170,7 +1152,7 @@ func TestAnalyzeTreeExactRecordUpdateRequiresOwner(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
 	return node{left, right}
@@ -1188,7 +1170,7 @@ func TestAnalyzeTreeRewriteDefaultExpr(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -1207,7 +1189,7 @@ func TestAnalyzeTreeRewriteImplicitDefaultExpr(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -1263,7 +1245,7 @@ func TestAnalyzeTreeRewriteRemainsExhaustiveWithoutImplicitDefault(t *testing.T)
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -1284,7 +1266,7 @@ func TestAnalyzeTreeRewriteDefaultRequiresExactArm(t *testing.T) {
 	@role(expr)
 	node Expr:
 		Int(value: i64)
-		Binary(child left: Expr, child right: Expr)
+		Binary(left: Expr, right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -1314,7 +1296,7 @@ func TestAnalyzeRejectsChildrenOnMixedStructuralItemTypes(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_mixed.llcontext", `tree Lua:
 	@role(stmt)
 	node Stmt:
-		IfStmt(child condition: Lua.Expr, child body: Lua.Block)
+		IfStmt(condition: Lua.Expr, body: Lua.Block)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)
@@ -1337,7 +1319,7 @@ func TestAnalyzeRejectsChildrenOverrideIncompatibleType(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_override_incompatible.llcontext", `tree Lua:
 	@role(stmt)
 	node Stmt:
-		IfStmt(child condition: Lua.Expr, child body: Lua.Block)
+		IfStmt(condition: Lua.Expr, body: Lua.Block)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)

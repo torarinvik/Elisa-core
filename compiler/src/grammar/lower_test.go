@@ -331,7 +331,7 @@ tree Demo:
     node Expr:
         Invalid
         Name(name_id: u32)
-        Pair(child left: Expr, child right: Expr)
+        Pair(left: Expr, right: Expr)
 
 grammarenv DemoEnv over Token using ParserState:
     cursor state
