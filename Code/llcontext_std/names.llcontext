@@ -1,0 +1,168 @@
+type NameId = u32
+
+
+const NAME_TABLE_INVALID_ID: NameId = 0
+const NAME_TABLE_INITIAL_BUCKETS: usize = 16
+
+
+const enum NameCasePolicy of i8:
+    CaseSensitive = 0
+    AsciiCaseInsensitive = 1
+
+
+struct NameEntry:
+    text: sview
+    hash: u64
+    original_hash: u64
+
+
+struct NameBucket:
+    name_id: mutable NameId
+
+
+struct NameTable:
+    owner: mutable Arena&
+    entries: mutable darray[NameEntry]
+    buckets: mutable darray[NameBucket]
+
+
+def name_table_init(owner: mutable Arena&) -> NameTable:
+    return NameTable{owner: owner, entries: [], buckets: []}
+
+
+def name_cstr_view(text: cstr) -> sview:
+    return text[0:text.len]
+
+
+def name_ascii_lower(ch: char) -> char:
+    if ch >= 'A' and ch <= 'Z':
+        return (ch.i64() + 32).char()
+    return ch
+
+
+def name_table_hash_step(hash: u64, ch: char) -> u64:
+    next: mutable u64 = hash
+    next <- next ^ ch.u64()
+    next <- next * 1099511628211
+    return next
+
+
+def name_text_hash(text: sview, policy: NameCasePolicy) -> u64:
+    hash: mutable u64 = 1469598103934665603
+    index: mutable i64 = 0
+    while index < text.len:
+        ch: mutable char = text.data[index.usize()].char()
+        if policy == NameCasePolicy.AsciiCaseInsensitive:
+            ch <- name_ascii_lower(ch)
+        hash <- name_table_hash_step(hash, ch)
+        index <- index + 1
+    return hash
+
+
+def name_text_eq(left: sview, right: sview, policy: NameCasePolicy) -> bool:
+    if left.len != right.len:
+        return false
+    index: mutable i64 = 0
+    while index < left.len:
+        left_ch: mutable char = left.data[index.usize()].char()
+        right_ch: mutable char = right.data[index.usize()].char()
+        if policy == NameCasePolicy.AsciiCaseInsensitive:
+            left_ch <- name_ascii_lower(left_ch)
+            right_ch <- name_ascii_lower(right_ch)
+        if left_ch != right_ch:
+            return false
+        index <- index + 1
+    return true
+
+
+def name_table_valid_id(table: NameTable&, name_id: NameId) -> bool:
+    if name_id == NAME_TABLE_INVALID_ID:
+        return false
+    return name_id.usize() <= table.entries.count
+
+
+def name_table_entry(table: NameTable&, name_id: NameId) -> NameEntry:
+    assert name_table_valid_id(table, name_id)
+    return table.entries[name_id.usize() - 1]
+
+
+def name_table_text(table: NameTable&, name_id: NameId) -> sview:
+    if not name_table_valid_id(table, name_id):
+        return "".cast[cstr][0:0]
+    return table.entries[name_id.usize() - 1].text
+
+
+def name_table_eq(left: NameId, right: NameId) -> bool:
+    return left == right and left != NAME_TABLE_INVALID_ID
+
+
+def name_table_bucket_capacity_for_count(count: usize) -> usize:
+    capacity: mutable usize = NAME_TABLE_INITIAL_BUCKETS
+    target: usize = count * 2 + 1
+    while capacity < target:
+        capacity <- capacity * 2
+    return capacity
+
+
+def name_table_bucket_index(hash: u64, capacity: usize) -> usize:
+    return (hash & (capacity - 1).u64()).usize()
+
+
+def name_table_insert_existing_bucket(table: mutable NameTable&, name_id: NameId) -> void:
+    if table.buckets.count == 0:
+        return
+    entry: NameEntry = name_table_entry(table, name_id)
+    index: mutable usize = name_table_bucket_index(entry.hash, table.buckets.count)
+    while table.buckets[index].name_id != NAME_TABLE_INVALID_ID:
+        index <- (index + 1) & (table.buckets.count - 1)
+    table.buckets[index].name_id <- name_id
+
+
+def name_table_rebuild_buckets(table: mutable NameTable&, capacity: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        in table.owner:
+            table.buckets <- []
+            for _ in 0..<capacity:
+                table.buckets.push(NameBucket{name_id: NAME_TABLE_INVALID_ID})
+            for index in 0..<table.entries.count:
+                table.name_table_insert_existing_bucket((index + 1).u32())
+
+
+def name_table_ensure_capacity(table: mutable NameTable&, next_count: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        if table.buckets.count != 0 and next_count * 2 < table.buckets.count:
+            return
+        capacity: usize = name_table_bucket_capacity_for_count(next_count)
+        table.name_table_rebuild_buckets(capacity) can Memory.Allocate, Abort.Panic
+
+
+def name_table_find(table: NameTable&, text: sview, hash: u64, policy: NameCasePolicy) -> NameId:
+    if table.buckets.count == 0:
+        return NAME_TABLE_INVALID_ID
+    index: mutable usize = name_table_bucket_index(hash, table.buckets.count)
+    checked: mutable usize = 0
+    while checked < table.buckets.count:
+        name_id: NameId = table.buckets[index].name_id
+        if name_id == NAME_TABLE_INVALID_ID:
+            return NAME_TABLE_INVALID_ID
+        entry: NameEntry = name_table_entry(table, name_id)
+        if entry.hash == hash and name_text_eq(entry.text, text, policy):
+            return name_id
+        index <- (index + 1) & (table.buckets.count - 1)
+        checked <- checked + 1
+    return NAME_TABLE_INVALID_ID
+
+
+def name_table_intern(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
+    can Memory.Allocate, Abort.Panic:
+        hash: u64 = name_text_hash(text, policy)
+        existing: NameId = table.name_table_find(text, hash, policy)
+        if existing != NAME_TABLE_INVALID_ID:
+            return existing
+        table.name_table_ensure_capacity(table.entries.count + 1) can Memory.Allocate, Abort.Panic
+        in table.owner:
+            original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
+            table.entries.push(NameEntry{text: text, hash: hash, original_hash: original_hash})
+            name_id: NameId = table.entries.count.u32()
+            table.name_table_insert_existing_bucket(name_id)
+            return name_id
