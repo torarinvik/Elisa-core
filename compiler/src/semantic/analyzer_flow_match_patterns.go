@@ -339,16 +339,11 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 				a.errorf(p.Pos(), "nested match arm %q expects 0 payload patterns, got %d", variantBase.Name+"."+p.Variant, len(p.Args))
 			}
 		case *TreeCategoryType:
-			if p.EnumName != variantBase.Name {
-				a.errorf(p.Pos(), "nested match pattern expects tree category %q, got %q", variantBase.Name, p.EnumName)
-				return
-			}
-			variant, ok := variantBase.Variant(p.Variant)
+			patternCategory, variant, ok := a.resolveTreeMatchPatternCategory(variantBase, p)
 			if !ok {
-				a.errorf(p.Pos(), "tree category %q has no variant %q", variantBase.Name, p.Variant)
 				return
 			}
-			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			orderedArgs := a.resolveMatchPatternArgs(p, variant, patternCategory.Name+"."+variant.Name, true)
 			for i, arg := range orderedArgs {
 				if arg == nil {
 					continue
@@ -520,8 +515,8 @@ func (a *Analyzer) matchCoversAllVariants(variantBase Type, covered map[string]b
 		if tt == nil {
 			return false
 		}
-		for _, variant := range tt.Variants {
-			if !covered[variant.Name] {
+		for _, item := range treeCategoryVariantsInTagOrder(tt) {
+			if !covered[item.QualifiedName] {
 				return false
 			}
 		}
@@ -529,6 +524,41 @@ func (a *Analyzer) matchCoversAllVariants(variantBase Type, covered map[string]b
 	default:
 		return false
 	}
+}
+
+type treeCategoryVariantItem struct {
+	Category      *TreeCategoryType
+	Variant       *EnumVariant
+	QualifiedName string
+}
+
+func treeCategoryVariantsInTagOrder(category *TreeCategoryType) []treeCategoryVariantItem {
+	if category == nil || category.Family == nil || category.Decl == nil {
+		return nil
+	}
+	items := make([]treeCategoryVariantItem, 0, len(category.Variants))
+	var visit func(decl *ast.TreeCategoryDecl)
+	visit = func(decl *ast.TreeCategoryDecl) {
+		if decl == nil {
+			return
+		}
+		memberType, _ := category.Family.Member(decl.Name)
+		memberCategory, _ := memberType.(*TreeCategoryType)
+		if memberCategory != nil {
+			for _, variant := range memberCategory.Variants {
+				items = append(items, treeCategoryVariantItem{
+					Category:      memberCategory,
+					Variant:       variant,
+					QualifiedName: memberCategory.Name + "." + variant.Name,
+				})
+			}
+		}
+		for i := range decl.Nested {
+			visit(&decl.Nested[i])
+		}
+	}
+	visit(category.Decl)
+	return items
 }
 
 func strconvQuote(s string) string {

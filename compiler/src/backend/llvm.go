@@ -498,7 +498,7 @@ func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl) error {
 	if !ok || familyType == nil {
 		return fmt.Errorf("declaration %s does not resolve to tree type", decl.Name)
 	}
-	for _, memberDecl := range decl.Members {
+	for _, memberDecl := range flattenLLVMTreeMemberDecls(decl.Members) {
 		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
 		if err != nil {
 			return err
@@ -520,7 +520,7 @@ func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl) error {
 			return fmt.Errorf("unsupported tree member type %T", memberType)
 		}
 	}
-	for _, memberDecl := range decl.Members {
+	for _, memberDecl := range flattenLLVMTreeMemberDecls(decl.Members) {
 		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
 		if err != nil {
 			return err
@@ -592,6 +592,21 @@ func treeMemberDeclName(memberDecl ast.TreeMemberDecl) string {
 	default:
 		return ""
 	}
+}
+
+func flattenLLVMTreeMemberDecls(members []ast.TreeMemberDecl) []ast.TreeMemberDecl {
+	out := make([]ast.TreeMemberDecl, 0, len(members))
+	for _, member := range members {
+		out = append(out, member)
+		if category, ok := member.(*ast.TreeCategoryDecl); ok && category != nil {
+			nested := make([]ast.TreeMemberDecl, 0, len(category.Nested))
+			for i := range category.Nested {
+				nested = append(nested, &category.Nested[i])
+			}
+			out = append(out, flattenLLVMTreeMemberDecls(nested)...)
+		}
+	}
+	return out
 }
 
 func (g *llvmGenerator) verify() error {

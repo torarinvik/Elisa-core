@@ -563,6 +563,7 @@ type TreeCategoryDecl struct {
 	Annotations []Annotation
 	Name        string
 	Variants    []EnumVariantDecl
+	Nested      []TreeCategoryDecl
 }
 
 type TreeBlockDecl struct {

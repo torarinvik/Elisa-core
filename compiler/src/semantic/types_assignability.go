@@ -149,5 +149,22 @@ func AssignableTo(dst, src Type) bool {
 			return srcTree.Family == dstNode.Family
 		}
 	}
+	if dstCategory, ok := dst.(*TreeCategoryType); ok && dstCategory != nil {
+		if srcCategory, ok := StripAggregateStateType(src).(*TreeCategoryType); ok && treeCategoryDescendsFrom(srcCategory, dstCategory) {
+			return true
+		}
+		if srcView, ok := StripAggregateStateType(src).(*TreeVariantViewType); ok && srcView.Category != nil && treeCategoryDescendsFrom(srcView.Category, dstCategory) {
+			return true
+		}
+	}
+	return false
+}
+
+func treeCategoryDescendsFrom(src *TreeCategoryType, dst *TreeCategoryType) bool {
+	for current := src; current != nil; current = current.Parent {
+		if SameType(current, dst) {
+			return true
+		}
+	}
 	return false
 }

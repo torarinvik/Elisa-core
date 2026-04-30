@@ -6723,9 +6723,9 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			if !treeOK || treeType == nil {
 				return nil, packedPayloadValueCache{}, fmt.Errorf("variant pattern %s.%s requires enum, const enum, error set, or tree-category type, got %s", p.EnumName, p.Variant, actualType.String())
 			}
-			variant, ok := treeType.Variant(p.Variant)
+			patternTreeType, variant, ok := s.resolveTreeMatchPatternCategory(treeType, p)
 			if !ok {
-				return nil, packedPayloadValueCache{}, fmt.Errorf("tree category %s has no variant %s", treeType.Name, p.Variant)
+				return nil, packedPayloadValueCache{}, fmt.Errorf("tree category %s has no variant %s", p.EnumName, p.Variant)
 			}
 			tagValue, err := s.extractTreeCategoryTagValue(actualValue, treeType)
 			if err != nil {
@@ -6740,7 +6740,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			C.LLVMBuildCondBr(s.builder, pred, matchedBB, failureBB)
 
 			C.LLVMPositionBuilderAtEnd(s.builder, matchedBB)
-			return s.emitMatchedTreeVariantPayloadPatternTest(p, actualValue, treeType, variant, successBB, failureBB)
+			return s.emitMatchedTreeVariantPayloadPatternTest(p, actualValue, patternTreeType, variant, successBB, failureBB)
 		}
 		variant, ok := enumType.Variant(p.Variant)
 		if !ok {
@@ -6977,6 +6977,38 @@ func (s *functionState) emitMatchedTreeVariantPayloadPatternTest(pattern *ast.Ma
 		}
 	}
 	return actualValue, packedPayloadValueCache{}, nil
+}
+
+func (s *functionState) resolveTreeMatchPatternCategory(expected *semantic.TreeCategoryType, pattern *ast.MatchVariantPattern) (*semantic.TreeCategoryType, *semantic.EnumVariant, bool) {
+	if expected == nil || pattern == nil {
+		return nil, nil, false
+	}
+	category := expected
+	if pattern.EnumName != expected.Name {
+		base, ok := s.g.result.NamedTypes[pattern.EnumName]
+		if !ok {
+			return nil, nil, false
+		}
+		resolvedCategory, ok := semantic.StripAggregateStateType(base).(*semantic.TreeCategoryType)
+		if !ok || resolvedCategory == nil || !treeCategoryDescendsFromBackend(resolvedCategory, expected) {
+			return nil, nil, false
+		}
+		category = resolvedCategory
+	}
+	variant, ok := category.Variant(pattern.Variant)
+	if !ok {
+		return nil, nil, false
+	}
+	return category, variant, true
+}
+
+func treeCategoryDescendsFromBackend(src *semantic.TreeCategoryType, dst *semantic.TreeCategoryType) bool {
+	for current := src; current != nil; current = current.Parent {
+		if semantic.SameType(current, dst) {
+			return true
+		}
+	}
+	return false
 }
 
 func packedEnumMatchCanUseTagSwitch(enumType *semantic.EnumType, arms []ast.MatchArm) bool {

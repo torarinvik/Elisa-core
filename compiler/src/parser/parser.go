@@ -802,7 +802,7 @@ func (p *Parser) parseTreeDeclWithAnnotations(annotations []ast.Annotation) *ast
 			continue
 		}
 		if p.peekTreeMemberHeader("node") {
-			members = append(members, p.parseTreeCategoryDecl(memberAnnotations))
+			members = append(members, p.parseTreeCategoryDecl(memberAnnotations, ""))
 			continue
 		}
 		p.errorf("expected tree member declaration, got %s", p.cur())
@@ -835,25 +835,37 @@ func (p *Parser) peekTreeMemberHeader(keyword string) bool {
 	return p.peek() == lexer.TOKEN_IDENT && p.cur().Text == keyword && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
 }
 
-func (p *Parser) parseTreeCategoryDecl(annotations []ast.Annotation) *ast.TreeCategoryDecl {
+func (p *Parser) parseTreeCategoryDecl(annotations []ast.Annotation, prefix string) *ast.TreeCategoryDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("node")
-	name := p.expect(lexer.TOKEN_IDENT).Text
+	localName := p.expect(lexer.TOKEN_IDENT).Text
+	name := prefix + localName
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
 	variants := make([]ast.EnumVariantDecl, 0, p.estimateIndentedItemCount())
+	nested := make([]ast.TreeCategoryDecl, 0)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
+		memberAnnotations := p.parseAnnotations()
+		if p.peekTreeMemberHeader("node") {
+			nested = append(nested, *p.parseTreeCategoryDecl(memberAnnotations, name+"."))
+			continue
+		}
+		if len(memberAnnotations) != 0 {
+			for _, annotation := range memberAnnotations {
+				p.errorf("tree variant does not support declaration annotation @%s", annotation.Name)
+			}
+		}
 		variants = append(variants, p.parseEnumVariantDecl())
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.TreeCategoryDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Variants: variants}
+	return &ast.TreeCategoryDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Variants: variants, Nested: nested}
 }
 
 func (p *Parser) parseTreeBlockDecl(annotations []ast.Annotation) *ast.TreeBlockDecl {

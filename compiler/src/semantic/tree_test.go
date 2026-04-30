@@ -177,6 +177,101 @@ func TestAnalyzeInfersTreePayloadRelations(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRegistersNestedTreeCategories(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_nested_categories.llcontext", `tree Lua:
+    @role(expr)
+    node Expr:
+        Unary(expr: Expr)
+        node Binary:
+            Add(left: Lua.Expr, right: Lua.Expr)
+            Sub(left: Lua.Expr, right: Lua.Expr)
+`)
+
+	family, ok := result.NamedTypes["Lua"].(*TreeType)
+	if !ok {
+		t.Fatalf("expected Lua tree type, got %T", result.NamedTypes["Lua"])
+	}
+	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
+	}
+	binaryType, ok := result.NamedTypes["Lua.Expr.Binary"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Expr.Binary tree category type, got %T", result.NamedTypes["Lua.Expr.Binary"])
+	}
+	if binaryType.Parent != exprType {
+		t.Fatalf("expected Lua.Expr.Binary parent to be Lua.Expr, got %#v", binaryType.Parent)
+	}
+	if member, ok := family.Member("Expr.Binary"); !ok || !SameType(member, binaryType) {
+		t.Fatalf("expected family member lookup for Expr.Binary to resolve to Lua.Expr.Binary, got %#v", member)
+	}
+	if len(exprType.Variants) != 1 {
+		t.Fatalf("expected Lua.Expr to keep only direct variants, got %d", len(exprType.Variants))
+	}
+	unary, ok := exprType.Variant("Unary")
+	if !ok || unary.Tag != 0 {
+		t.Fatalf("expected Lua.Expr.Unary tag 0, got %#v", unary)
+	}
+	add, ok := binaryType.Variant("Add")
+	if !ok || add.Tag != 1 {
+		t.Fatalf("expected Lua.Expr.Binary.Add tag 1, got %#v", add)
+	}
+	sub, ok := binaryType.Variant("Sub")
+	if !ok || sub.Tag != 2 {
+		t.Fatalf("expected Lua.Expr.Binary.Sub tag 2, got %#v", sub)
+	}
+	if add.PayloadRelation(0) != ast.EnumPayloadRelationChild || add.PayloadRelation(1) != ast.EnumPayloadRelationChild {
+		t.Fatalf("expected nested Add operands to infer child relations, got %#v", add.PayloadRelations)
+	}
+}
+
+func TestAnalyzeNestedTreeCategoryAssignableToParent(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_nested_category_assignability.llcontext", `tree Lua:
+    @role(expr)
+    node Expr:
+        Unary(expr: Expr)
+        node Binary:
+            Add(left: Lua.Expr, right: Lua.Expr)
+
+def build(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
+    return node[alloc = alloc] Lua.Expr.Binary.Add(left: left, right: right)
+
+def widen(node: Lua.Expr.Binary) -> Lua.Expr:
+    return node
+
+def classify(node: Lua.Expr) -> i64:
+    match node:
+        Lua.Expr.Binary.Add(left: _, right: _):
+            return 1
+        Lua.Expr.Unary(_):
+            return 2
+        _:
+            return 0
+`)
+
+	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
+	}
+	binaryType, ok := result.NamedTypes["Lua.Expr.Binary"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Expr.Binary tree category type, got %T", result.NamedTypes["Lua.Expr.Binary"])
+	}
+	if !AssignableTo(exprType, binaryType) {
+		t.Fatalf("expected nested tree category Lua.Expr.Binary to be assignable to parent Lua.Expr")
+	}
+	if AssignableTo(binaryType, exprType) {
+		t.Fatalf("expected parent tree category Lua.Expr not to be assignable to nested category Lua.Expr.Binary")
+	}
+	add, ok := binaryType.Variant("Add")
+	if !ok {
+		t.Fatalf("expected Lua.Expr.Binary.Add variant")
+	}
+	if !AssignableTo(exprType, binaryType.VariantViewType(add)) {
+		t.Fatalf("expected nested tree variant view Lua.Expr.Binary.Add to be assignable to parent Lua.Expr")
+	}
+}
+
 func TestAnalyzeDeprecatesExplicitTreeChildPayloadRelations(t *testing.T) {
 	result := analyzeTreeTestSource(t, "tree_explicit_payload_relations_deprecated.llcontext", `tree Lua:
     @role(expr)

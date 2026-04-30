@@ -7,6 +7,56 @@ import (
 	"llcontext/src/lexer"
 )
 
+func (a *Analyzer) registerTreeMemberTypes(treeQualifiedName string, treeType *TreeType, members []ast.TreeMemberDecl) {
+	if treeType == nil {
+		return
+	}
+	for _, member := range members {
+		memberName := treeMemberDeclName(member)
+		if memberName == "" {
+			continue
+		}
+		memberQualifiedName := treeMemberTypeName(treeQualifiedName, memberName)
+		if _, exists := a.namedTypes[memberQualifiedName]; exists {
+			a.errorf(member.Pos(), "%s", DuplicateTypeMessage(memberQualifiedName))
+			continue
+		}
+		var memberType Type
+		switch m := member.(type) {
+		case *ast.TreeCategoryDecl:
+			categoryType := &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
+			if parentName := treeCategoryParentMemberName(m.Name); parentName != "" {
+				parent, _ := treeType.Member(parentName)
+				categoryType.Parent, _ = parent.(*TreeCategoryType)
+			}
+			kindName := treeCategoryKindTypeName(memberQualifiedName)
+			if _, exists := a.namedTypes[kindName]; exists {
+				a.errorf(member.Pos(), "%s", DuplicateTypeMessage(kindName))
+				continue
+			}
+			kindType := &ConstEnumType{Name: kindName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
+			categoryType.KindType = kindType
+			a.namedTypes[kindName] = kindType
+			memberType = categoryType
+		case *ast.TreeBlockDecl:
+			memberType = &TreeBlockType{Name: memberQualifiedName, Family: treeType, Fields: map[string]Field{}, Decl: m}
+		case *ast.TreeStructDecl:
+			memberType = &TreeStructType{Name: memberQualifiedName, Family: treeType, Fields: map[string]Field{}, Decl: m}
+		default:
+			continue
+		}
+		a.namedTypes[memberQualifiedName] = memberType
+		treeType.MemberTypes[memberName] = memberType
+		if category, ok := member.(*ast.TreeCategoryDecl); ok {
+			nested := make([]ast.TreeMemberDecl, 0, len(category.Nested))
+			for i := range category.Nested {
+				nested = append(nested, &category.Nested[i])
+			}
+			a.registerTreeMemberTypes(treeQualifiedName, treeType, nested)
+		}
+	}
+}
+
 func (a *Analyzer) populateTreeMembers(decls []scopedDecl) {
 	for _, scoped := range decls {
 		treeDecl, ok := scoped.Decl.(*ast.TreeDecl)
@@ -32,17 +82,26 @@ func (a *Analyzer) populateTreeMembers(decls []scopedDecl) {
 				}
 			}
 			a.populateTreeNodeKindType(treeType)
-			for _, member := range treeDecl.Members {
-				switch n := member.(type) {
-				case *ast.TreeCategoryDecl:
-					a.populateTreeCategoryDecl(treeType, n)
-				case *ast.TreeBlockDecl:
-					a.populateTreeBlockDecl(treeType, n)
-				case *ast.TreeStructDecl:
-					a.populateTreeStructDecl(treeType, n)
-				}
-			}
+			a.populateTreeMemberDecls(treeType, treeDecl.Members)
 		})
+	}
+}
+
+func (a *Analyzer) populateTreeMemberDecls(treeType *TreeType, members []ast.TreeMemberDecl) {
+	for _, member := range members {
+		switch n := member.(type) {
+		case *ast.TreeCategoryDecl:
+			a.populateTreeCategoryDecl(treeType, n)
+			nested := make([]ast.TreeMemberDecl, 0, len(n.Nested))
+			for i := range n.Nested {
+				nested = append(nested, &n.Nested[i])
+			}
+			a.populateTreeMemberDecls(treeType, nested)
+		case *ast.TreeBlockDecl:
+			a.populateTreeBlockDecl(treeType, n)
+		case *ast.TreeStructDecl:
+			a.populateTreeStructDecl(treeType, n)
+		}
 	}
 }
 
@@ -51,7 +110,7 @@ func (a *Analyzer) populateTreeNodeKindType(treeType *TreeType) {
 		return
 	}
 	kindType := treeType.NodeType.KindType
-	for _, memberDecl := range treeType.Decl.Members {
+	for _, memberDecl := range flattenTreeMemberDecls(treeType.Decl.Members) {
 		switch decl := memberDecl.(type) {
 		case *ast.TreeCategoryDecl:
 			if decl == nil {
@@ -161,6 +220,21 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 	category.Variants = variants
 }
 
+func flattenTreeMemberDecls(members []ast.TreeMemberDecl) []ast.TreeMemberDecl {
+	out := make([]ast.TreeMemberDecl, 0, len(members))
+	for _, member := range members {
+		out = append(out, member)
+		if category, ok := member.(*ast.TreeCategoryDecl); ok && category != nil {
+			nested := make([]ast.TreeMemberDecl, 0, len(category.Nested))
+			for i := range category.Nested {
+				nested = append(nested, &category.Nested[i])
+			}
+			out = append(out, flattenTreeMemberDecls(nested)...)
+		}
+	}
+	return out
+}
+
 func (a *Analyzer) inferTreePayloadRelation(category *TreeCategoryType, payloadDecl ast.EnumPayloadDecl, payloadType Type) ast.EnumPayloadRelation {
 	if payloadDecl.Relation == ast.EnumPayloadRelationChild || payloadDecl.Relation == ast.EnumPayloadRelationChildren {
 		a.deprecatedf(payloadDecl.Position, "explicit tree payload relation %q is deprecated; omit it and qualify the payload type when name resolution is ambiguous", string(payloadDecl.Relation))
@@ -193,7 +267,7 @@ func treeFamilyNextExactTag(treeType *TreeType, categoryName string, memberName 
 		return 0
 	}
 	tag := uint32(0)
-	for _, member := range treeType.Decl.Members {
+	for _, member := range flattenTreeMemberDecls(treeType.Decl.Members) {
 		switch decl := member.(type) {
 		case *ast.TreeCategoryDecl:
 			if decl == nil {

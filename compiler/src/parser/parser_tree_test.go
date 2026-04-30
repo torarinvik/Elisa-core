@@ -205,6 +205,34 @@ func TestParseTreePayloadRelationsCanBeOmitted(t *testing.T) {
 	}
 }
 
+func TestParseNestedTreeCategoryDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Unary(expr: Expr)\n        node Binary:\n            Add(left: Lua.Expr, right: Lua.Expr)\n            Sub(left: Lua.Expr, right: Lua.Expr)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.TreeDecl)
+	if !ok {
+		t.Fatalf("expected tree decl, got %T", file.Decls[0])
+	}
+	expr, ok := decl.Members[0].(*ast.TreeCategoryDecl)
+	if !ok {
+		t.Fatalf("expected Expr category, got %T", decl.Members[0])
+	}
+	if expr.Name != "Expr" || len(expr.Variants) != 1 || len(expr.Nested) != 1 {
+		t.Fatalf("unexpected Expr category shape: %#v", expr)
+	}
+	binary := expr.Nested[0]
+	if binary.Name != "Expr.Binary" || len(binary.Variants) != 2 {
+		t.Fatalf("expected nested Expr.Binary category with two variants, got %#v", binary)
+	}
+	formatted := unparse.FormatDecl(decl)
+	for _, want := range []string{"node Expr:", "Unary(expr: Expr)", "node Binary:", "Add(left: Lua.Expr, right: Lua.Expr)"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted tree decl to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseTreeOptionalPayloadFields(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        IfStmt(child condition: Expr, child else_block?: Block)\n        NumericFor(child step?: Expr, children args?: darray[Expr])\n")
 	if len(errs) != 0 {

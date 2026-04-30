@@ -381,7 +381,7 @@ func TreeFamilyExactMembersInTagOrder(treeType *TreeType) []Type {
 		return nil
 	}
 	count := uint32(0)
-	for _, member := range treeType.Decl.Members {
+	for _, member := range flattenTreeMemberDecls(treeType.Decl.Members) {
 		switch decl := member.(type) {
 		case *ast.TreeCategoryDecl:
 			count += uint32(len(decl.Variants))
@@ -393,7 +393,7 @@ func TreeFamilyExactMembersInTagOrder(treeType *TreeType) []Type {
 		return nil
 	}
 	out := make([]Type, count)
-	for _, member := range treeType.Decl.Members {
+	for _, member := range flattenTreeMemberDecls(treeType.Decl.Members) {
 		switch decl := member.(type) {
 		case *ast.TreeCategoryDecl:
 			memberType, ok := treeType.Member(decl.Name)

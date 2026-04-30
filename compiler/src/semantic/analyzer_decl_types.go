@@ -217,39 +217,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				treeType.StoreType = storeType
 				a.namedTypes[storeName] = storeType
 				treeType.MemberTypes["Store"] = storeType
-				for _, member := range n.Members {
-					memberName := treeMemberDeclName(member)
-					if memberName == "" {
-						continue
-					}
-					memberQualifiedName := treeMemberTypeName(qualifiedName, memberName)
-					if _, exists := a.namedTypes[memberQualifiedName]; exists {
-						a.errorf(member.Pos(), "%s", DuplicateTypeMessage(memberQualifiedName))
-						continue
-					}
-					var memberType Type
-					switch m := member.(type) {
-					case *ast.TreeCategoryDecl:
-						categoryType := &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
-						kindName := treeCategoryKindTypeName(memberQualifiedName)
-						if _, exists := a.namedTypes[kindName]; exists {
-							a.errorf(member.Pos(), "%s", DuplicateTypeMessage(kindName))
-							continue
-						}
-						kindType := &ConstEnumType{Name: kindName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
-						categoryType.KindType = kindType
-						a.namedTypes[kindName] = kindType
-						memberType = categoryType
-					case *ast.TreeBlockDecl:
-						memberType = &TreeBlockType{Name: memberQualifiedName, Family: treeType, Fields: map[string]Field{}, Decl: m}
-					case *ast.TreeStructDecl:
-						memberType = &TreeStructType{Name: memberQualifiedName, Family: treeType, Fields: map[string]Field{}, Decl: m}
-					default:
-						continue
-					}
-					a.namedTypes[memberQualifiedName] = memberType
-					treeType.MemberTypes[memberName] = memberType
-				}
+				a.registerTreeMemberTypes(qualifiedName, treeType, n.Members)
 			case *ast.ExternTypeDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {

@@ -753,7 +753,10 @@ func printTreeMember(w io.Writer, member ast.TreeMemberDecl, level int) {
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
 		}
-		fmt.Fprintf(w, "%snode %s: (%d variants)\n", prefix, n.Name, len(n.Variants))
+		fmt.Fprintf(w, "%snode %s: (%d variants, %d nested)\n", prefix, treeCategoryPrintName(n.Name), len(n.Variants), len(n.Nested))
+		for i := range n.Nested {
+			printTreeMember(w, &n.Nested[i], level+1)
+		}
 	case *ast.TreeBlockDecl:
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
@@ -765,6 +768,13 @@ func printTreeMember(w io.Writer, member ast.TreeMemberDecl, level int) {
 		}
 		fmt.Fprintf(w, "%sstruct %s: (%d fields)\n", prefix, n.Name, len(n.Fields))
 	}
+}
+
+func treeCategoryPrintName(name string) string {
+	if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
+		return name[idx+1:]
+	}
+	return name
 }
 
 func typeStr(t ast.TypeExpr) string {

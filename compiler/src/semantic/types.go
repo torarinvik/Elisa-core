@@ -271,6 +271,7 @@ type TreeType struct {
 type TreeCategoryType struct {
 	Name       string
 	Family     *TreeType
+	Parent     *TreeCategoryType
 	Role       string
 	KindType   *ConstEnumType
 	Common     map[string]Field

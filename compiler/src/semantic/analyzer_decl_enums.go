@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strings"
+
 	"llcontext/src/ast"
 )
 
@@ -83,6 +85,14 @@ func treeMemberDeclName(member ast.TreeMemberDecl) string {
 	default:
 		return ""
 	}
+}
+
+func treeCategoryParentMemberName(name string) string {
+	idx := strings.LastIndex(name, ".")
+	if idx <= 0 {
+		return ""
+	}
+	return name[:idx]
 }
 
 func cloneTreeCommonFields(fields map[string]Field) map[string]Field {

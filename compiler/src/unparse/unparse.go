@@ -652,9 +652,12 @@ func (f *formatter) writeTreeMember(level int, member ast.TreeMemberDecl) {
 	switch n := member.(type) {
 	case *ast.TreeCategoryDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, "node "+n.Name+":")
+		f.writeLine(level, "node "+treeCategoryLocalName(n.Name)+":")
 		for _, variant := range n.Variants {
 			f.writeLine(level+1, formatEnumVariantDecl(variant))
+		}
+		for i := range n.Nested {
+			f.writeTreeMember(level+1, &n.Nested[i])
 		}
 	case *ast.TreeBlockDecl:
 		f.writeAnnotations(level, n.Annotations)
@@ -669,6 +672,13 @@ func (f *formatter) writeTreeMember(level int, member ast.TreeMemberDecl) {
 			f.writeField(level+1, field)
 		}
 	}
+}
+
+func treeCategoryLocalName(name string) string {
+	if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
+		return name[idx+1:]
+	}
+	return name
 }
 
 func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProductionDecl) {

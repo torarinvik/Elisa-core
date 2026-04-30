@@ -571,7 +571,7 @@ tree Lua:
     @role(expr)
     node Expr:
         Int(value: i64)
-        Binary(child left: Expr, child right: Expr)
+        Binary(left: Expr, right: Expr)
     block Block:
         items: darray[Expr]
 
@@ -611,6 +611,47 @@ Current rules:
 - inside an exact `rewrite` arm, `default` rebuilds the current exact member using the already rewritten child results
 - `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
 - `default` also rebuilds `children` sequence fields, materializing fresh arrays in the active tree owner when needed
+
+## Nested tree categories
+
+Tree categories can be nested when a branch of the tree wants its own sparse set of exact shapes. A flat payload keeps the shape dense and horizontal:
+
+```context
+tree Lua:
+    @role(expr)
+    node Expr:
+        Unary(expr: Expr)
+        Binary(op: LuaOperationType, left: Expr, right: Expr)
+```
+
+Moving the binary operators into a nested category makes the vertical alternatives explicit:
+
+```context
+tree Lua:
+    @role(expr)
+    node Expr:
+        Unary(expr: Expr)
+        node Binary:
+            Add(left: Lua.Expr, right: Lua.Expr)
+            Sub(left: Lua.Expr, right: Lua.Expr)
+            Div(left: Lua.Expr, right: Lua.Expr)
+```
+
+This declares `Lua.Expr.Binary` as a real tree category under `Lua.Expr`. Its exact variants are named `Lua.Expr.Binary.Add`, `Lua.Expr.Binary.Sub`, and so on. Values from the nested category are assignable to the parent category, so code can return a specific sparse shape through the broader dense handle:
+
+```context
+def make_add(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
+    return node[alloc = alloc] Lua.Expr.Binary.Add(left: left, right: right)
+
+def classify(node: Lua.Expr) -> i64:
+    match node:
+        Lua.Expr.Binary.Add(left: _, right: _):
+            return 1
+        _:
+            return 0
+```
+
+Within a tree family, unqualified sibling names still resolve when they are unambiguous. Use qualified names such as `Lua.Expr` when two trees expose the same local node name, or when the code benefits from saying exactly which family owns the child. Structural `child` and `children` relations are inferred for tree-family payloads; keep explicit `link` for non-structural references that should not be traversed as owned children.
 
 ## Lexer DSL for mixed-mode frontends
 

@@ -2118,6 +2118,48 @@ def cond_span(branch: Lua.ElseIf) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersNestedTreeCategories(t *testing.T) {
+	src := `tree Lua:
+	@role(expr)
+	node Expr:
+		Nil
+		node Binary:
+			Add(left: Expr, right: Expr)
+			Sub(left: Expr, right: Expr)
+
+def make_add() -> Lua.Expr:
+	in perm:
+		left: Lua.Expr = Lua.Expr.Nil
+		right: Lua.Expr = Lua.Expr.Nil
+		return Lua.Expr.Binary.Add(left: left, right: right)
+
+def classify(node: Lua.Expr) -> i64:
+	match node:
+		Lua.Expr.Binary.Add(left: _, right: _):
+			return 1
+		_:
+			return 0
+`
+	result := parseAndAnalyze(t, "backend_nested_tree_categories.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Lua__TreeHandle = type { ptr, i64 }",
+		"@Lua__perm_tree_store = private global %Lua__TreeStore zeroinitializer",
+		"define %Lua__TreeHandle @make_add()",
+		"define i64 @classify(",
+		"%Lua_Expr_Binary_Add__TreeTable = type",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersStringMatchStatementsWithoutPhi(t *testing.T) {
 	src := `def classify(text: StringView) -> int:
 	match text:

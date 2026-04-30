@@ -176,20 +176,15 @@ func (a *Analyzer) analyzeTopLevelTreeMatchPattern(pattern ast.MatchPattern, tre
 		}
 		return true
 	case *ast.MatchVariantPattern:
-		if p.EnumName != treeType.Name {
-			a.errorf(p.Pos(), "match arm expects tree category %q, got %q", treeType.Name, p.EnumName)
-			return false
-		}
-		variant, ok := treeType.Variant(p.Variant)
+		patternCategory, variant, ok := a.resolveTreeMatchPatternCategory(treeType, p)
 		if !ok {
-			a.errorf(p.Pos(), "tree category %q has no variant %q", treeType.Name, p.Variant)
 			return false
 		}
-		qualified := treeType.Name + "." + variant.Name
+		qualified := patternCategory.Name + "." + variant.Name
 		if covered != nil {
-			covered[variant.Name] = true
+			covered[qualified] = true
 		}
-		a.bindRefinedExprType(scope, valueExpr, treeType.VariantViewType(variant))
+		a.bindRefinedExprType(scope, valueExpr, patternCategory.VariantViewType(variant))
 		orderedArgs := a.resolveMatchPatternArgs(p, variant, qualified, false)
 		for i, arg := range orderedArgs {
 			if arg == nil {
@@ -206,6 +201,32 @@ func (a *Analyzer) analyzeTopLevelTreeMatchPattern(pattern ast.MatchPattern, tre
 		a.errorf(pattern.Pos(), "unsupported match pattern %T", pattern)
 		return false
 	}
+}
+
+func (a *Analyzer) resolveTreeMatchPatternCategory(expected *TreeCategoryType, pattern *ast.MatchVariantPattern) (*TreeCategoryType, *EnumVariant, bool) {
+	if expected == nil || pattern == nil {
+		return nil, nil, false
+	}
+	category := expected
+	if pattern.EnumName != expected.Name {
+		base, _, ok := a.lookupVisibleType(pattern.EnumName)
+		if !ok {
+			a.errorf(pattern.Pos(), "match arm expects tree category %q or nested tree category, got %q", expected.Name, pattern.EnumName)
+			return nil, nil, false
+		}
+		resolvedCategory, ok := StripAggregateStateType(base).(*TreeCategoryType)
+		if !ok || resolvedCategory == nil || !treeCategoryDescendsFrom(resolvedCategory, expected) {
+			a.errorf(pattern.Pos(), "match arm expects tree category %q or nested tree category, got %q", expected.Name, pattern.EnumName)
+			return nil, nil, false
+		}
+		category = resolvedCategory
+	}
+	variant, ok := category.Variant(pattern.Variant)
+	if !ok {
+		a.errorf(pattern.Pos(), "tree category %q has no variant %q", category.Name, pattern.Variant)
+		return nil, nil, false
+	}
+	return category, variant, true
 }
 
 func (a *Analyzer) analyzeConstEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, constEnumType *ConstEnumType) {

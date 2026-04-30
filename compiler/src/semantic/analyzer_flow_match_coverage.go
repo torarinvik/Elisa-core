@@ -194,11 +194,15 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 			}
 			return true
 		case *TreeCategoryType:
-			if variantBase == nil || p.EnumName != variantBase.Name || currVariant.EnumName != variantBase.Name || p.Variant != currVariant.Variant {
+			if variantBase == nil || p.EnumName != currVariant.EnumName || p.Variant != currVariant.Variant {
 				return false
 			}
-			variant, ok := variantBase.Variant(p.Variant)
+			patternCategory, variant, ok := a.resolveTreeMatchPatternCategory(variantBase, p)
 			if !ok {
+				return false
+			}
+			currCategory, currConcrete, ok := a.resolveTreeMatchPatternCategory(variantBase, currVariant)
+			if !ok || currCategory != patternCategory || currConcrete != variant {
 				return false
 			}
 			prevArgs, ok := orderedMatchPatternArgs(p, variant)
