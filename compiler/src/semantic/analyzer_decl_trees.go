@@ -136,10 +136,12 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 				hasUnnamedPayloads = true
 			}
 			payloadType := a.resolveType(payloadDecl.Type)
+			payloadRelation := a.inferTreePayloadRelation(category, payloadDecl, payloadType)
+			payloadDecl.Relation = payloadRelation
 			a.validateTreePayloadRelation(category, variantDecl, payloadIndex, payloadDecl, payloadType)
 			payload = append(payload, payloadType)
 			payloadNames = append(payloadNames, payloadDecl.Name)
-			payloadRelations = append(payloadRelations, payloadDecl.Relation)
+			payloadRelations = append(payloadRelations, payloadRelation)
 		}
 		if hasNamedPayloads && hasUnnamedPayloads {
 			a.errorf(variantDecl.Position, "tree category variant %q.%q must name either all payload fields or none", category.Name, variantDecl.Name)
@@ -157,6 +159,33 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 		}
 	}
 	category.Variants = variants
+}
+
+func (a *Analyzer) inferTreePayloadRelation(category *TreeCategoryType, payloadDecl ast.EnumPayloadDecl, payloadType Type) ast.EnumPayloadRelation {
+	if payloadDecl.Relation == ast.EnumPayloadRelationChild || payloadDecl.Relation == ast.EnumPayloadRelationChildren {
+		a.deprecatedf(payloadDecl.Position, "explicit tree payload relation %q is deprecated; omit it and qualify the payload type when name resolution is ambiguous", string(payloadDecl.Relation))
+		return payloadDecl.Relation
+	}
+	if payloadDecl.Relation != ast.EnumPayloadRelationNone || category == nil || category.Family == nil {
+		return payloadDecl.Relation
+	}
+	targetType := payloadType
+	if unwrapped, ok := UnwrapOptionalType(targetType); ok {
+		targetType = unwrapped
+	}
+	if elemType, ok := TreeStructuralSequenceElemType(targetType); ok {
+		if unwrapped, ok := UnwrapOptionalType(elemType); ok {
+			elemType = unwrapped
+		}
+		if _, family, ok := treePayloadTargetMemberType(elemType); ok && family == category.Family {
+			return ast.EnumPayloadRelationChildren
+		}
+		return ast.EnumPayloadRelationNone
+	}
+	if _, family, ok := treePayloadTargetMemberType(targetType); ok && family == category.Family {
+		return ast.EnumPayloadRelationChild
+	}
+	return ast.EnumPayloadRelationNone
 }
 
 func treeFamilyNextExactTag(treeType *TreeType, categoryName string, memberName string) uint32 {

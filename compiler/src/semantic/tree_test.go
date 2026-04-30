@@ -146,6 +146,55 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 	}
 }
 
+func TestAnalyzeInfersTreePayloadRelations(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_inferred_payload_relations.llcontext", `tree Lua:
+    @role(expr)
+    node Expr:
+        Nil
+        Unary(expr: Expr)
+        Binary(left: Expr, right: Expr)
+        Call(callee: Lua.Expr, args: darray[Lua.Expr])
+`)
+
+	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
+	}
+	unary, ok := exprType.Variant("Unary")
+	if !ok || unary.PayloadRelation(0) != ast.EnumPayloadRelationChild {
+		t.Fatalf("expected Unary expr payload to infer child relation, got %#v", unary)
+	}
+	binary, ok := exprType.Variant("Binary")
+	if !ok || binary.PayloadRelation(0) != ast.EnumPayloadRelationChild || binary.PayloadRelation(1) != ast.EnumPayloadRelationChild {
+		t.Fatalf("expected Binary left/right payloads to infer child relations, got %#v", binary)
+	}
+	call, ok := exprType.Variant("Call")
+	if !ok || call.PayloadRelation(0) != ast.EnumPayloadRelationChild || call.PayloadRelation(1) != ast.EnumPayloadRelationChildren {
+		t.Fatalf("expected Call callee/args payloads to infer child/children relations, got %#v", call)
+	}
+	if len(result.Deprecations()) != 0 {
+		t.Fatalf("expected inferred relations to avoid deprecations, got:\n%s", strings.Join(result.Deprecations(), "\n"))
+	}
+}
+
+func TestAnalyzeDeprecatesExplicitTreeChildPayloadRelations(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_explicit_payload_relations_deprecated.llcontext", `tree Lua:
+    @role(expr)
+    node Expr:
+        Nil
+        Binary(child left: Expr, child right: Expr)
+        Call(child callee: Expr, children args: darray[Expr])
+`)
+
+	deprecations := strings.Join(result.Deprecations(), "\n")
+	if !strings.Contains(deprecations, `explicit tree payload relation "child" is deprecated`) {
+		t.Fatalf("expected child relation deprecation, got:\n%s", deprecations)
+	}
+	if !strings.Contains(deprecations, `explicit tree payload relation "children" is deprecated`) {
+		t.Fatalf("expected children relation deprecation, got:\n%s", deprecations)
+	}
+}
+
 func TestAnalyzeSynthesizesTreeCategoryKindTypesAndShorthandComparisons(t *testing.T) {
 	result := analyzeTreeTestSource(t, "tree_kind_types.llcontext", `tree Lua:
 	common:

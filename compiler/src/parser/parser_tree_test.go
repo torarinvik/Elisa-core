@@ -179,6 +179,32 @@ func TestParseTreePayloadRelations(t *testing.T) {
 	}
 }
 
+func TestParseTreePayloadRelationsCanBeOmitted(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Binary(left: Expr, right: Expr)\n        Call(callee: Expr, args: darray[Expr])\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.TreeDecl)
+	if !ok {
+		t.Fatalf("expected tree decl, got %T", file.Decls[0])
+	}
+	member := decl.Members[0].(*ast.TreeCategoryDecl)
+	binary := member.Variants[0]
+	if binary.Payload[0].Relation != ast.EnumPayloadRelationNone || binary.Payload[1].Relation != ast.EnumPayloadRelationNone {
+		t.Fatalf("expected omitted payload relations to remain source-implicit in AST, got %#v", binary.Payload)
+	}
+	call := member.Variants[1]
+	if call.Payload[0].Relation != ast.EnumPayloadRelationNone || call.Payload[1].Relation != ast.EnumPayloadRelationNone {
+		t.Fatalf("expected omitted payload relations to remain source-implicit in AST, got %#v", call.Payload)
+	}
+	formatted := unparse.FormatDecl(decl)
+	for _, want := range []string{"Binary(left: Expr, right: Expr)", "Call(callee: Expr, args: darray[Expr])"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted tree decl to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseTreeOptionalPayloadFields(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        IfStmt(child condition: Expr, child else_block?: Block)\n        NumericFor(child step?: Expr, children args?: darray[Expr])\n")
 	if len(errs) != 0 {
