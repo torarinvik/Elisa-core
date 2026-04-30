@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strconv"
+
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 )
@@ -647,6 +649,40 @@ func (a *Analyzer) analyzeTopLevelTupleMatchPattern(pattern ast.MatchPattern, va
 		return false
 	default:
 		a.errorf(pattern.Pos(), "unsupported top-level tuple match pattern %T", pattern)
+		return false
+	}
+}
+
+func (a *Analyzer) analyzeTopLevelSequenceMatchPattern(pattern ast.MatchPattern, valueType Type, valueExpr ast.Expr, scope *Scope, index int, armCount int) bool {
+	savedScope := a.currentScope
+	a.currentScope = scope
+	defer func() { a.currentScope = savedScope }()
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		if index != armCount-1 {
+			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
+		}
+		return true
+	case *ast.MatchListPattern:
+		elemType, ok := SequenceMatchElementType(valueType)
+		if !ok {
+			a.errorf(p.Pos(), "list pattern requires an array, darray, view, or string-like value, got %s", valueType)
+			return false
+		}
+		for i, elem := range p.Elems {
+			indexExpr := &ast.IndexExpr{
+				Position: elem.Pos(),
+				Object:   valueExpr,
+				Index:    &ast.IntLit{Position: elem.Pos(), Value: strconv.Itoa(i), Suffix: "u"},
+			}
+			a.analyzeNestedMatchPattern(elem, elemType, indexExpr, scope)
+		}
+		return false
+	case *ast.MatchBindPattern:
+		a.errorf(p.Pos(), "top-level sequence match arm must use a list pattern or _")
+		return false
+	default:
+		a.errorf(pattern.Pos(), "unsupported top-level sequence match pattern %T", pattern)
 		return false
 	}
 }

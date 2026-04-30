@@ -152,6 +152,21 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 			}
 		}
 		return true
+	case *ast.MatchListPattern:
+		currList, ok := current.(*ast.MatchListPattern)
+		if !ok || len(p.Elems) != len(currList.Elems) {
+			return false
+		}
+		elemType, ok := SequenceMatchElementType(expected)
+		if !ok {
+			return false
+		}
+		for i := range p.Elems {
+			if !a.matchPatternCovers(p.Elems[i], currList.Elems[i], elemType) {
+				return false
+			}
+		}
+		return true
 	case *ast.MatchVariantPattern:
 		currVariant, ok := current.(*ast.MatchVariantPattern)
 		if !ok {
@@ -383,6 +398,12 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 			parts = append(parts, matchPatternSummary(elem))
 		}
 		return strings.Join(parts, ", ")
+	case *ast.MatchListPattern:
+		parts := make([]string, 0, len(p.Elems))
+		for _, elem := range p.Elems {
+			parts = append(parts, matchPatternSummary(elem))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
 	case *ast.MatchStructPattern:
 		parts := make([]string, 0, len(p.Args))
 		for _, arg := range p.Args {

@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -299,6 +300,9 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 	case *ast.MatchWildcardPattern:
 		return
 	case *ast.MatchBindPattern:
+		if a.analyzePredicateMatchPattern(p, expected, valueExpr) {
+			return
+		}
 		sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}
 		a.defineLocal(sym, p.Pos())
 		a.recordValueBinding(sym, valueExpr)
@@ -358,6 +362,20 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "nested literal match pattern")
 	case *ast.MatchLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "nested literal match pattern")
+	case *ast.MatchListPattern:
+		elemType, ok := SequenceMatchElementType(expected)
+		if !ok {
+			a.errorf(p.Pos(), "list pattern requires an array, darray, view, or string-like value, got %s", expected)
+			return
+		}
+		for i, elem := range p.Elems {
+			indexExpr := &ast.IndexExpr{
+				Position: elem.Pos(),
+				Object:   valueExpr,
+				Index:    &ast.IntLit{Position: elem.Pos(), Value: fmt.Sprintf("%d", i), Suffix: "u"},
+			}
+			a.analyzeNestedMatchPattern(elem, elemType, indexExpr, scope)
+		}
 	case *ast.MatchStructPattern:
 		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
 		if !ok {
@@ -373,6 +391,76 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 	default:
 		a.errorf(pattern.Pos(), "unsupported nested match pattern %T", pattern)
 	}
+}
+
+func SequenceMatchElementType(actual Type) (Type, bool) {
+	actual = StripAggregateStateType(actual)
+	switch t := actual.(type) {
+	case *ArrayType:
+		if isStringArrayType(t) {
+			return builtinCharType(), true
+		}
+		return t.Elem, true
+	case *DArrayType:
+		return t.Elem, true
+	case *ViewType:
+		return t.Elem, true
+	case *DArrayViewType:
+		return t.Elem, true
+	case *DStrType:
+		return builtinCharType(), true
+	case *RefType:
+		if t.State != RefStateNonNull {
+			return nil, false
+		}
+		return SequenceMatchElementType(t.Elem)
+	default:
+		if isStringViewType(actual) {
+			return builtinCharType(), true
+		}
+		if elem, ok := ChunksExactViewItemType(actual); ok {
+			return elem, true
+		}
+		return nil, false
+	}
+}
+
+func (a *Analyzer) analyzePredicateMatchPattern(pattern *ast.MatchBindPattern, expected Type, valueExpr ast.Expr) bool {
+	if pattern == nil || pattern.Name == "" || pattern.Name == "_" {
+		return false
+	}
+	if _, ok := a.predicateMatchPatternFuncType(pattern.Name); !ok {
+		return false
+	}
+	if valueExpr == nil {
+		return true
+	}
+	call := &ast.CallExpr{
+		Position: pattern.Position,
+		Func:     &ast.Ident{Position: pattern.Position, Name: pattern.Name},
+		Args:     []ast.Expr{valueExpr},
+	}
+	boolType := a.namedTypes["bool"]
+	if boolType == nil {
+		boolType = &BuiltinType{Name: "bool"}
+	}
+	a.analyzeValueExpr(call, boolType)
+	return true
+}
+
+func (a *Analyzer) predicateMatchPatternFuncType(name string) (*FuncType, bool) {
+	if a == nil || name == "" {
+		return nil, false
+	}
+	sym, _, ok := a.lookupVisibleGlobal(name)
+	if !ok || sym == nil {
+		return nil, false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || funcTypeExplicitParamCount(fnType) != 1 || !IsBoolType(fnType.Return) {
+		return nil, false
+	}
+	return fnType, true
 }
 
 func (a *Analyzer) analyzeLiteralMatchPatternExpr(pos lexer.Pos, literalExpr ast.Expr, expected Type, context string) {

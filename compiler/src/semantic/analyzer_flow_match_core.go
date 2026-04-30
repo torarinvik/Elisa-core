@@ -41,11 +41,15 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeTupleMatchStmt(stmt, valueType)
 		return
 	}
+	if _, ok := SequenceMatchElementType(valueType); ok {
+		a.analyzeSequenceMatchStmt(stmt, valueType)
+		return
+	}
 	if _, ok := a.resolvedStructFields(valueType); ok {
 		a.analyzeStructMatchStmt(stmt, valueType)
 		return
 	}
-	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, tree-category, string, tuple, or struct value, got %s", valueType)
+	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, tree-category, string, tuple, sequence, or struct value, got %s", valueType)
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
 	}

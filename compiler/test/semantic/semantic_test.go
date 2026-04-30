@@ -4601,6 +4601,16 @@ def sample_case() -> void can[Abort.Panic]:
 	}
 }
 
+func TestAnalyzeAcceptsBareAssertCondition(t *testing.T) {
+	src := `def sample_case(left: int, right: int) -> void can[Abort.Panic]:
+	assert left != right
+`
+	_, errs := parseAndAnalyze(t, "bare_assert_condition.llcontext", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected no semantic errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAllowsTestFunctionNonAbortPermission(t *testing.T) {
 	src := `@test
 def sample_case() -> void can[Console.Write]:
@@ -5721,7 +5731,7 @@ func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, const enum, error set, tree-category, string, tuple, or struct value, got int") {
+	if !strings.Contains(all, "match requires an enum, const enum, error set, tree-category, string, tuple, sequence, or struct value, got int") {
 		t.Fatalf("expected non-string match diagnostic, got:\n%s", all)
 	}
 }
@@ -6409,6 +6419,62 @@ def classify(node: Expr) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "enum_if_pattern_positional_literal_payload_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsExpectPatternStatement(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+
+def check(node: Expr) -> void:
+	can Abort.Panic:
+		expect node as Expr.Int(value)
+`
+	_, errs := parseAndAnalyze(t, "expect_pattern_statement_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsExpectPatternBlockCaptures(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+
+def check(node: Expr) -> int:
+	can Abort.Panic:
+		expect node as Expr.Int(value):
+			return value
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "expect_pattern_block_captures_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsExpectPatternPinnedValue(t *testing.T) {
+	src := `enum Expr:
+	Infix(op: int, left: int, right: int)
+
+def check(node: Expr, expected_op: int) -> void:
+	can Abort.Panic:
+		expect node as Expr.Infix(^expected_op, _, _)
+`
+	_, errs := parseAndAnalyze(t, "expect_pattern_pinned_value_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsExpectListPatternWithPredicate(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+
+def nonzero(value: int) -> bool:
+	return value != 0
+
+def check(values: darray[Expr]) -> void:
+	can Abort.Panic:
+		expect values as [
+			Expr.Int(nonzero),
+			_
+		]
+`
+	_, errs := parseAndAnalyze(t, "expect_list_pattern_predicate_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -10208,7 +10274,7 @@ func TestAnalyzeFormatsWhileConditionSViewUsingSurfaceNames(t *testing.T) {
 func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 	src := `def bad(values: dview[i32]) -> int:
 	match values:
-		_:
+		Token.Region:
 			return 0
 	return 0
 `
@@ -10217,7 +10283,7 @@ func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, const enum, error set, tree-category, string, tuple, or struct value, got dview[i32]") {
+	if !strings.Contains(all, "unsupported top-level sequence match pattern *ast.MatchVariantPattern") {
 		t.Fatalf("expected surface dview match diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "DynArrayView") {

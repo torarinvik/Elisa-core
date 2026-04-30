@@ -57,6 +57,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeGuardStmt() {
 				return p.parseGuardStmt()
 			}
+		case "expect":
+			if p.looksLikeExpectPatternStmt() {
+				return p.parseExpectPatternStmt()
+			}
 		case "defer":
 			if p.looksLikeDeferStmt() {
 				return p.parseDeferStmt()
@@ -903,10 +907,10 @@ func (p *Parser) parseMatchPattern() ast.MatchPattern {
 		pattern = &ast.MatchTuplePattern{Position: pattern.Pos(), Elems: elems}
 	}
 	switch pattern.(type) {
-	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern:
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern, *ast.MatchListPattern:
 		return pattern
 	default:
-		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a string literal, a tuple pattern, or _")
+		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a string literal, a tuple pattern, a list pattern, or _")
 		return pattern
 	}
 }
@@ -916,8 +920,15 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	if p.peek() == lexer.TOKEN_DOT {
 		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseMatchValuePatternExpr()}
 	}
+	if p.peek() == lexer.TOKEN_CARET {
+		p.advance()
+		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseExpr(), Pinned: true}
+	}
 	if p.peek() == lexer.TOKEN_STRING_LIT {
 		return &ast.MatchStringLiteralPattern{Position: pos, Value: p.advance().Text}
+	}
+	if p.peek() == lexer.TOKEN_LBRACKET {
+		return p.parseMatchListPattern(pos)
 	}
 	if p.peek() == lexer.TOKEN_INT_LIT || p.peek() == lexer.TOKEN_FLOAT_LIT || p.peek() == lexer.TOKEN_HEX_LIT ||
 		p.peek() == lexer.TOKEN_CHAR_LIT || p.peek() == lexer.TOKEN_TRUE || p.peek() == lexer.TOKEN_FALSE ||
@@ -957,6 +968,24 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 		p.expect(lexer.TOKEN_RPAREN)
 	}
 	return &ast.MatchVariantPattern{Position: pos, EnumName: name, Variant: variant, Args: args}
+}
+
+func (p *Parser) parseMatchListPattern(pos lexer.Pos) ast.MatchPattern {
+	p.expect(lexer.TOKEN_LBRACKET)
+	elems := make([]ast.MatchPattern, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+	if p.peek() != lexer.TOKEN_RBRACKET {
+		for {
+			elems = append(elems, p.parseNestedMatchPattern())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+			if p.peek() == lexer.TOKEN_RBRACKET {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return &ast.MatchListPattern{Position: pos, Elems: elems}
 }
 
 func buildQualifiedMatchValueExpr(pos lexer.Pos, parts []string) ast.Expr {
@@ -1471,6 +1500,13 @@ func matchPatternContainsBindNames(pattern ast.MatchPattern) bool {
 			}
 		}
 		return false
+	case *ast.MatchListPattern:
+		for _, elem := range p.Elems {
+			if matchPatternContainsBindNames(elem) {
+				return true
+			}
+		}
+		return false
 	case *ast.MatchStructPattern:
 		for _, arg := range p.Args {
 			if matchPatternContainsBindNames(arg.Pattern) {
@@ -1504,6 +1540,66 @@ func (p *Parser) parseGuardStmt() ast.Stmt {
 		Cond:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: cond},
 		Then:     []ast.Stmt{elseStmt},
 	}
+}
+
+func (p *Parser) looksLikeExpectPatternStmt() bool {
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_AS:
+			if depth == 0 {
+				return true
+			}
+		case lexer.TOKEN_ASSIGN, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			if depth == 0 {
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func (p *Parser) parseExpectPatternStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.expectIdentText("expect")
+	value := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
+	p.expect(lexer.TOKEN_AS)
+	patterns := p.parseTopLevelMatchPatterns()
+	var body []ast.Stmt
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		body = p.parseBlock()
+	} else {
+		p.expectNewline()
+	}
+	if len(body) == 0 {
+		body = []ast.Stmt{&ast.PassStmt{Position: pos}}
+	}
+
+	arms := make([]ast.MatchArm, 0, len(patterns)+1)
+	for _, pattern := range patterns {
+		arms = append(arms, ast.MatchArm{
+			Position: pattern.Pos(),
+			Pattern:  pattern,
+			Body:     body,
+		})
+	}
+	arms = append(arms, ast.MatchArm{
+		Position: pos,
+		Pattern:  &ast.MatchWildcardPattern{Position: pos},
+		Body: []ast.Stmt{&ast.PanicStmt{
+			Position: pos,
+			Message:  &ast.StringLit{Position: pos, Value: "expect pattern failed"},
+		}},
+	})
+	return &ast.MatchStmt{Position: pos, Value: value, Arms: arms}
 }
 
 func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {

@@ -290,6 +290,8 @@ Current packed-enum rules:
 - packed variants may include one tail payload, which lowers as a `dview[...]` regardless of where that payload appears in the variant field list
 - packed enums may carry affine common fields and affine payloads; when they do, the packed handle becomes affine and packed destructuring forms consume that handle after a successful `match` or `if ... as`
 - inside a successful `if ... as` branch or `match` arm, identifier scrutinees are refined to `packedview[Enum.Variant]`, so variant fields can be read from the refined value directly
+- structural test expectations can use `expect value as Pattern` or `expect value as Pattern: ...`, which are contextual sugar for a `match value` with the requested pattern and a wildcard `panic("expect pattern failed")`; this keeps reusable test DSLs project-neutral while still lowering to the ordinary match representation
+- match patterns can pin existing values with `^value`, for example `expect expr as Expr.Infix(^expected_op, _, _)`; bare identifiers still bind payloads
 
 For a compile-checked end-to-end example, see `../Code/test_programs/packed_enum_common.llcontext`.
 

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"strconv"
 
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
@@ -133,6 +134,9 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 		if p.Name == "" || p.Name == "_" {
 			return
 		}
+		if a.analyzePredicateMatchPattern(p, expected, nil) {
+			return
+		}
 		if prev, ok := out[p.Name]; ok {
 			if !SameType(prev, expected) {
 				a.errorf(p.Pos(), "condition binding %q has inconsistent types %s and %s", p.Name, prev, expected)
@@ -150,6 +154,14 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 				continue
 			}
 			a.collectConditionStructPatternBindingTypes(arg.Pattern, fields[i].Type, out)
+		}
+	case *ast.MatchListPattern:
+		elemType, ok := SequenceMatchElementType(expected)
+		if !ok {
+			return
+		}
+		for _, elem := range p.Elems {
+			a.collectConditionStructPatternBindingTypes(elem, elemType, out)
 		}
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
@@ -446,6 +458,9 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 		if p.Name == "_" {
 			return
 		}
+		if a.analyzePredicateMatchPattern(p, expected, valueExpr) {
+			return
+		}
 		sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}
 		a.defineLocalInScope(scope, sym, p.Pos())
 		if valueExpr != nil {
@@ -469,6 +484,22 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 				fieldExpr = &ast.FieldExpr{Position: arg.Position, Object: valueExpr, Field: fields[i].Name}
 			}
 			a.bindConditionStructPatternLocals(scope, arg.Pattern, fields[i].Type, fieldExpr)
+		}
+	case *ast.MatchListPattern:
+		elemType, ok := SequenceMatchElementType(expected)
+		if !ok {
+			return
+		}
+		for i, elem := range p.Elems {
+			var indexExpr ast.Expr
+			if valueExpr != nil {
+				indexExpr = &ast.IndexExpr{
+					Position: elem.Pos(),
+					Object:   valueExpr,
+					Index:    &ast.IntLit{Position: elem.Pos(), Value: strconv.Itoa(i), Suffix: "u"},
+				}
+			}
+			a.bindConditionStructPatternLocals(scope, elem, elemType, indexExpr)
 		}
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {

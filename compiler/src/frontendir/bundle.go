@@ -183,6 +183,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.MatchStringLiteralPattern{})
 		gob.Register(&ast.MatchLiteralPattern{})
 		gob.Register(&ast.MatchTuplePattern{})
+		gob.Register(&ast.MatchListPattern{})
 		gob.Register(&ast.MatchStructPattern{})
 		gob.Register(&ast.MatchVariantPattern{})
 		gob.Register(&ast.MoveBindNamePattern{})

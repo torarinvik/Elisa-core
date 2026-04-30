@@ -294,6 +294,10 @@ func (c *analyzerASTCensus) countMatchPattern(pattern ast.MatchPattern) {
 		for _, elem := range n.Elems {
 			c.countMatchPattern(elem)
 		}
+	case *ast.MatchListPattern:
+		for _, elem := range n.Elems {
+			c.countMatchPattern(elem)
+		}
 	case *ast.MatchStructPattern:
 		for _, arg := range n.Args {
 			c.countMatchPattern(arg.Pattern)

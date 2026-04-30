@@ -2985,6 +2985,9 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 	case *ast.MatchStringLiteralPattern:
 		return strconv.Quote(n.Value)
 	case *ast.MatchLiteralPattern:
+		if n.Pinned {
+			return "^" + formatExpr(n.Value)
+		}
 		return formatExpr(n.Value)
 	case *ast.MatchTuplePattern:
 		parts := make([]string, 0, len(n.Elems))
@@ -2992,6 +2995,12 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 			parts = append(parts, formatMatchPattern(elem))
 		}
 		return strings.Join(parts, ", ")
+	case *ast.MatchListPattern:
+		parts := make([]string, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			parts = append(parts, formatMatchPattern(elem))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
 	case *ast.MatchStructPattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
