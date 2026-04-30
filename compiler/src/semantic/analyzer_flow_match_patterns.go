@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"llcontext/src/ast"
@@ -377,6 +378,9 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 			a.analyzeNestedMatchPattern(elem, elemType, indexExpr, scope)
 		}
 	case *ast.MatchStructPattern:
+		if a.analyzeCountMatchPattern(p, expected) {
+			return
+		}
 		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
 		if !ok {
 			return
@@ -391,6 +395,34 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 	default:
 		a.errorf(pattern.Pos(), "unsupported nested match pattern %T", pattern)
 	}
+}
+
+func (a *Analyzer) analyzeCountMatchPattern(pattern *ast.MatchStructPattern, expected Type) bool {
+	if pattern == nil || pattern.TypeName != "count" || pattern.Brace {
+		return false
+	}
+	if _, ok := SequenceMatchElementType(expected); !ok {
+		a.errorf(pattern.Pos(), "count pattern requires an array, darray, view, or string-like value, got %s", expected)
+		return true
+	}
+	if len(pattern.Args) != 1 || pattern.Args[0].Name != "" {
+		a.errorf(pattern.Pos(), "count pattern expects one positional integer literal")
+		return true
+	}
+	literal, ok := pattern.Args[0].Pattern.(*ast.MatchLiteralPattern)
+	if !ok {
+		a.errorf(pattern.Args[0].Pattern.Pos(), "count pattern expects an integer literal")
+		return true
+	}
+	intLit, ok := literal.Value.(*ast.IntLit)
+	if !ok {
+		a.errorf(literal.Pos(), "count pattern expects an integer literal")
+		return true
+	}
+	if _, err := strconv.ParseUint(intLit.Value, 10, 64); err != nil {
+		a.errorf(intLit.Pos(), "count pattern expects a non-negative integer literal")
+	}
+	return true
 }
 
 func SequenceMatchElementType(actual Type) (Type, bool) {

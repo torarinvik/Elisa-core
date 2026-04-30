@@ -9,7 +9,7 @@ import (
 	"llcontext/src/unparse"
 )
 
-func TestParseExpectPatternStatementLowersToMatch(t *testing.T) {
+func TestParseExpectPatternStatementPreservesBlocklessBindingForm(t *testing.T) {
 	file, errs := parseSourceFile(t, `packed enum Expr:
     Int(value: int)
     Add(left: Expr, right: Expr)
@@ -26,33 +26,19 @@ def check(node: Expr) -> void:
 	if !ok {
 		t.Fatalf("expected can stmt, got %T", decl.Body[0])
 	}
-	matchStmt, ok := canStmt.Body[0].(*ast.MatchStmt)
+	expectStmt, ok := canStmt.Body[0].(*ast.ExpectPatternStmt)
 	if !ok {
-		t.Fatalf("expected expect pattern to lower to match stmt, got %T", canStmt.Body[0])
+		t.Fatalf("expected blockless expect pattern stmt, got %T", canStmt.Body[0])
 	}
-	if _, ok := matchStmt.Value.(*ast.Ident); !ok {
-		t.Fatalf("expected match value ident, got %T", matchStmt.Value)
+	if _, ok := expectStmt.Value.(*ast.Ident); !ok {
+		t.Fatalf("expected expect value ident, got %T", expectStmt.Value)
 	}
-	if len(matchStmt.Arms) != 2 {
-		t.Fatalf("expected pattern arm plus wildcard arm, got %d", len(matchStmt.Arms))
+	if len(expectStmt.Patterns) != 1 {
+		t.Fatalf("expected one expect pattern, got %d", len(expectStmt.Patterns))
 	}
-	variant, ok := matchStmt.Arms[0].Pattern.(*ast.MatchVariantPattern)
+	variant, ok := expectStmt.Patterns[0].(*ast.MatchVariantPattern)
 	if !ok || variant.EnumName != "Expr" || variant.Variant != "Int" || len(variant.Args) != 1 {
-		t.Fatalf("expected Expr.Int(value) pattern, got %#v", matchStmt.Arms[0].Pattern)
-	}
-	if _, ok := matchStmt.Arms[0].Body[0].(*ast.PassStmt); !ok {
-		t.Fatalf("expected matched arm to pass, got %T", matchStmt.Arms[0].Body[0])
-	}
-	if _, ok := matchStmt.Arms[1].Pattern.(*ast.MatchWildcardPattern); !ok {
-		t.Fatalf("expected wildcard fallback, got %T", matchStmt.Arms[1].Pattern)
-	}
-	panicStmt, ok := matchStmt.Arms[1].Body[0].(*ast.PanicStmt)
-	if !ok {
-		t.Fatalf("expected wildcard fallback panic, got %T", matchStmt.Arms[1].Body[0])
-	}
-	msg, ok := panicStmt.Message.(*ast.StringLit)
-	if !ok || msg.Value != "expect pattern failed" {
-		t.Fatalf("expected default expect panic message, got %#v", panicStmt.Message)
+		t.Fatalf("expected Expr.Int(value) pattern, got %#v", expectStmt.Patterns[0])
 	}
 }
 
@@ -104,13 +90,13 @@ def check(node: Expr, expected_op: int) -> void:
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
 	canStmt := decl.Body[0].(*ast.CanStmt)
-	matchStmt, ok := canStmt.Body[0].(*ast.MatchStmt)
+	expectStmt, ok := canStmt.Body[0].(*ast.ExpectPatternStmt)
 	if !ok {
-		t.Fatalf("expected expect pattern to lower to match stmt, got %T", canStmt.Body[0])
+		t.Fatalf("expected blockless expect pattern stmt, got %T", canStmt.Body[0])
 	}
-	variant, ok := matchStmt.Arms[0].Pattern.(*ast.MatchVariantPattern)
+	variant, ok := expectStmt.Patterns[0].(*ast.MatchVariantPattern)
 	if !ok || len(variant.Args) != 3 {
-		t.Fatalf("expected Expr.Infix pattern, got %#v", matchStmt.Arms[0].Pattern)
+		t.Fatalf("expected Expr.Infix pattern, got %#v", expectStmt.Patterns[0])
 	}
 	pinned, ok := variant.Args[0].Pattern.(*ast.MatchLiteralPattern)
 	if !ok || !pinned.Pinned {
@@ -120,9 +106,9 @@ def check(node: Expr, expected_op: int) -> void:
 	if !ok || ident.Name != "expected_op" {
 		t.Fatalf("expected pinned expected_op ident, got %#v", pinned.Value)
 	}
-	formatted := unparse.FormatStmt(matchStmt)
+	formatted := unparse.FormatStmt(expectStmt)
 	if !strings.Contains(formatted, "Expr.Infix(^expected_op, _, _)") {
-		t.Fatalf("expected formatted match to preserve pin, got:\n%s", formatted)
+		t.Fatalf("expected formatted expect to preserve pin, got:\n%s", formatted)
 	}
 }
 
@@ -139,13 +125,13 @@ def check(values: darray[Expr]) -> void:
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
 	canStmt := decl.Body[0].(*ast.CanStmt)
-	matchStmt, ok := canStmt.Body[0].(*ast.MatchStmt)
+	expectStmt, ok := canStmt.Body[0].(*ast.ExpectPatternStmt)
 	if !ok {
-		t.Fatalf("expected expect pattern to lower to match stmt, got %T", canStmt.Body[0])
+		t.Fatalf("expected blockless expect pattern stmt, got %T", canStmt.Body[0])
 	}
-	list, ok := matchStmt.Arms[0].Pattern.(*ast.MatchListPattern)
+	list, ok := expectStmt.Patterns[0].(*ast.MatchListPattern)
 	if !ok || len(list.Elems) != 2 {
-		t.Fatalf("expected two-element list pattern, got %#v", matchStmt.Arms[0].Pattern)
+		t.Fatalf("expected two-element list pattern, got %#v", expectStmt.Patterns[0])
 	}
 	variant, ok := list.Elems[0].(*ast.MatchVariantPattern)
 	if !ok || variant.EnumName != "Expr" || variant.Variant != "Int" || len(variant.Args) != 1 {
@@ -157,9 +143,9 @@ def check(values: darray[Expr]) -> void:
 	if _, ok := list.Elems[1].(*ast.MatchWildcardPattern); !ok {
 		t.Fatalf("expected wildcard second element, got %#v", list.Elems[1])
 	}
-	formatted := unparse.FormatStmt(matchStmt)
+	formatted := unparse.FormatStmt(expectStmt)
 	if !strings.Contains(formatted, "[Expr.Int(nonzero), _]") {
-		t.Fatalf("expected formatted match to preserve list pattern, got:\n%s", formatted)
+		t.Fatalf("expected formatted expect to preserve list pattern, got:\n%s", formatted)
 	}
 }
 

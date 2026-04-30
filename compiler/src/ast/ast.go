@@ -1622,6 +1622,12 @@ type MatchStmt struct {
 	DeprecatedIfStorePatternBinder bool
 }
 
+type ExpectPatternStmt struct {
+	Position lexer.Pos
+	Value    Expr
+	Patterns []MatchPattern
+}
+
 type InStoreStmt struct {
 	Position lexer.Pos
 	Store    Expr
@@ -2028,6 +2034,7 @@ func (n *ForStmt) Pos() lexer.Pos                { return n.Position }
 func (n *IterForStmt) Pos() lexer.Pos            { return n.Position }
 func (n *ParallelForStmt) Pos() lexer.Pos        { return n.Position }
 func (n *MatchStmt) Pos() lexer.Pos              { return n.Position }
+func (n *ExpectPatternStmt) Pos() lexer.Pos      { return n.Position }
 func (n *InStoreStmt) Pos() lexer.Pos            { return n.Position }
 func (n *CanStmt) Pos() lexer.Pos                { return n.Position }
 func (n *WithStmt) Pos() lexer.Pos               { return n.Position }
@@ -2207,6 +2214,7 @@ func (*ForStmt) nodeTag()                   {}
 func (*IterForStmt) nodeTag()               {}
 func (*ParallelForStmt) nodeTag()           {}
 func (*MatchStmt) nodeTag()                 {}
+func (*ExpectPatternStmt) nodeTag()         {}
 func (*InStoreStmt) nodeTag()               {}
 func (*CanStmt) nodeTag()                   {}
 func (*WithStmt) nodeTag()                  {}
@@ -2371,6 +2379,7 @@ func (*VisitExpr) exprTag()                         {}
 func (*FoldExpr) exprTag()                          {}
 func (*EmitExpr) exprTag()                          {}
 func (*MatchStmt) stmtTag()                         {}
+func (*ExpectPatternStmt) stmtTag()                 {}
 func (*TryExpr) exprTag()                           {}
 func (*CatchExpr) exprTag()                         {}
 func (*UnwrapElseExpr) exprTag()                    {}

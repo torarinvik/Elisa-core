@@ -6429,6 +6429,7 @@ func TestAnalyzeAcceptsExpectPatternStatement(t *testing.T) {
 def check(node: Expr) -> void:
 	can Abort.Panic:
 		expect node as Expr.Int(value)
+		assert value != 0
 `
 	_, errs := parseAndAnalyze(t, "expect_pattern_statement_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6475,6 +6476,21 @@ def check(values: darray[Expr]) -> void:
 		]
 `
 	_, errs := parseAndAnalyze(t, "expect_list_pattern_predicate_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsExpectCountPatternForSequencePayloads(t *testing.T) {
+	src := `enum Stmt:
+	Call(name: int, args: darray[int])
+
+def check(stmts: darray[Stmt]) -> void:
+	can Abort.Panic:
+		expect stmts as [
+			Stmt.Call(1, count(2)),
+			Stmt.Call(2, count(0))
+		]
+`
+	_, errs := parseAndAnalyze(t, "expect_count_pattern_sequence_payload_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 

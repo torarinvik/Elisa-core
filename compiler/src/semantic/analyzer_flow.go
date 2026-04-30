@@ -368,6 +368,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.applyPostIfFallthroughRefinement(n)
 	case *ast.MatchStmt:
 		a.analyzeMatchStmt(n)
+	case *ast.ExpectPatternStmt:
+		a.analyzeExpectPatternStmt(n)
 	case *ast.InStoreStmt:
 		a.analyzeInStoreStmt(n)
 	case *ast.CanStmt:

@@ -1018,6 +1018,8 @@ func (p *Parser) parseMatchStructPatternAfterName(pos lexer.Pos, typeName string
 		for {
 			if brace {
 				args = append(args, p.parseBraceMatchStructPatternArg())
+			} else if typeName == "count" {
+				args = append(args, p.parseMatchPatternArg())
 			} else {
 				args = append(args, p.parseMatchStructPatternArg())
 			}
@@ -1573,11 +1575,16 @@ func (p *Parser) parseExpectPatternStmt() ast.Stmt {
 	p.expect(lexer.TOKEN_AS)
 	patterns := p.parseTopLevelMatchPatterns()
 	var body []ast.Stmt
+	hasBody := false
 	if p.match(lexer.TOKEN_COLON) {
+		hasBody = true
 		p.expectNewline()
 		body = p.parseBlock()
 	} else {
 		p.expectNewline()
+	}
+	if !hasBody {
+		return &ast.ExpectPatternStmt{Position: pos, Value: value, Patterns: patterns}
 	}
 	if len(body) == 0 {
 		body = []ast.Stmt{&ast.PassStmt{Position: pos}}

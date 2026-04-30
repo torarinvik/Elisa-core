@@ -145,6 +145,9 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 		}
 		out[p.Name] = expected
 	case *ast.MatchStructPattern:
+		if a.analyzeCountMatchPattern(p, expected) {
+			return
+		}
 		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
 		if !ok {
 			return
@@ -471,6 +474,9 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 			a.recordRegionRefBinding(sym, valueExpr)
 		}
 	case *ast.MatchStructPattern:
+		if a.analyzeCountMatchPattern(p, expected) {
+			return
+		}
 		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
 		if !ok {
 			return

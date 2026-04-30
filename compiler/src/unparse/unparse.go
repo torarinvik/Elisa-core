@@ -1768,6 +1768,12 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 	case *ast.MatchStmt:
 		f.writeLine(level, formatMatchHeader("match", n.Value, n.Store))
 		f.writeMatchArms(level, n.Arms)
+	case *ast.ExpectPatternStmt:
+		patterns := make([]string, 0, len(n.Patterns))
+		for _, pattern := range n.Patterns {
+			patterns = append(patterns, formatMatchPattern(pattern))
+		}
+		f.writeLine(level, "expect "+formatExpr(n.Value)+" as "+strings.Join(patterns, " | "))
 	case *ast.InStoreStmt:
 		f.writeLine(level, "in "+formatExpr(n.Store)+":")
 		for _, stmt := range n.Body {

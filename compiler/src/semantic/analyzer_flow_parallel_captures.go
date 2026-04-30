@@ -135,6 +135,13 @@ func (c *parallelForCaptureCollector) collectStmt(stmt ast.Stmt, locals map[stri
 				c.collectStmt(innerStmt, armLocals)
 			}
 		}
+	case *ast.ExpectPatternStmt:
+		c.collectExpr(n.Value, locals)
+		for _, pattern := range n.Patterns {
+			for _, name := range parallelForMatchArmPatternNames(pattern) {
+				locals[name] = true
+			}
+		}
 	case *ast.InStoreStmt:
 		c.collectExpr(n.Store, locals)
 		bodyLocals := cloneParallelForLocals(locals)

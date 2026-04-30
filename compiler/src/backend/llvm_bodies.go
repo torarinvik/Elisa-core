@@ -1047,6 +1047,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitIf(n)
 	case *ast.MatchStmt:
 		return s.emitMatch(n)
+	case *ast.ExpectPatternStmt:
+		return s.emitExpectPatternStmt(n)
 	case *ast.InStoreStmt:
 		return s.emitInStore(n)
 	case *ast.CanStmt:
@@ -3991,6 +3993,9 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 			}
 			return nil
 		case *ast.MatchStructPattern:
+			if _, ok, err := countMatchPatternExpectedLen(p); ok || err != nil {
+				return err
+			}
 			fields, orderedArgs, err := s.resolveStructMatchPatternArgs(p, expected)
 			if err != nil {
 				return err
@@ -4168,6 +4173,86 @@ func (s *functionState) createConditionBindingScope(expr ast.Expr) (*codegenScop
 	return scope, true, nil
 }
 
+func (s *functionState) collectMatchPatternBindings(pattern ast.MatchPattern, expected semantic.Type, out map[string]semantic.Type) error {
+	if pattern == nil || expected == nil || out == nil {
+		return nil
+	}
+	switch p := pattern.(type) {
+	case *ast.MatchBindPattern:
+		if p.Name == "" || p.Name == "_" || s.predicateMatchPatternFuncType(p.Name) != nil {
+			return nil
+		}
+		if prev, ok := out[p.Name]; ok && !semantic.SameType(prev, expected) {
+			return fmt.Errorf("condition binding %q has inconsistent types %s and %s", p.Name, prev.String(), expected.String())
+		}
+		out[p.Name] = expected
+	case *ast.MatchStructPattern:
+		if _, ok, err := countMatchPatternExpectedLen(p); ok || err != nil {
+			return err
+		}
+		fields, orderedArgs, err := s.resolveStructMatchPatternArgs(p, expected)
+		if err != nil {
+			return err
+		}
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			if err := s.collectMatchPatternBindings(arg.Pattern, fields[i].Type, out); err != nil {
+				return err
+			}
+		}
+	case *ast.MatchListPattern:
+		elemType, ok := semantic.SequenceMatchElementType(expected)
+		if !ok {
+			return nil
+		}
+		for _, elem := range p.Elems {
+			if err := s.collectMatchPatternBindings(elem, elemType, out); err != nil {
+				return err
+			}
+		}
+	case *ast.MatchVariantPattern:
+		switch base := expected.(type) {
+		case *semantic.EnumType:
+			variant, ok := base.Variant(p.Variant)
+			if !ok {
+				return nil
+			}
+			orderedArgs, err := s.resolveMatchPatternArgs(p, variant)
+			if err != nil {
+				return err
+			}
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				if err := s.collectMatchPatternBindings(arg.Pattern, variant.Payload[i], out); err != nil {
+					return err
+				}
+			}
+		case *semantic.TreeCategoryType:
+			variant, ok := base.Variant(p.Variant)
+			if !ok {
+				return nil
+			}
+			orderedArgs, err := s.resolveMatchPatternArgs(p, variant)
+			if err != nil {
+				return err
+			}
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				if err := s.collectMatchPatternBindings(arg.Pattern, variant.Payload[i], out); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualType semantic.Type, actualExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
 	if pattern == nil || actualType == nil {
 		C.LLVMBuildBr(s.builder, successBB)
@@ -4187,6 +4272,9 @@ func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern
 		}
 		C.LLVMBuildBr(s.builder, successBB)
 		return nil
+	}
+	if handled, err := s.emitCountMatchPatternTest(pattern, actualValue, actualType, actualExpr, successBB, failureBB); handled || err != nil {
+		return err
 	}
 	if structPattern, ok := pattern.(*ast.MatchStructPattern); ok {
 		fields, orderedArgs, err := s.resolveStructMatchPatternArgs(structPattern, actualType)
@@ -4737,6 +4825,59 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		return s.emitStructMatch(stmt)
 	}
 	return fmt.Errorf("match requires an enum, const enum, error set, tree-category, string, tuple, sequence, or struct value")
+}
+
+func (s *functionState) emitExpectPatternStmt(stmt *ast.ExpectPatternStmt) error {
+	if stmt == nil {
+		return nil
+	}
+	actualType := s.exprType(stmt.Value)
+	actualValue, _, err := s.emitExpr(stmt.Value, actualType)
+	if err != nil {
+		return err
+	}
+	if len(stmt.Patterns) == 1 {
+		bindings := map[string]semantic.Type{}
+		if err := s.collectMatchPatternBindings(stmt.Patterns[0], actualType, bindings); err != nil {
+			return err
+		}
+		names := make([]string, 0, len(bindings))
+		for name := range bindings {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			alloca, err := s.createEntryAlloca(name+".expect", bindings[name])
+			if err != nil {
+				return err
+			}
+			s.defineBinding(name, valueBinding{ptr: alloca, typ: bindings[name], mutable: false})
+		}
+	}
+	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.ok"))
+	failureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.fail"))
+	if len(stmt.Patterns) == 0 {
+		C.LLVMBuildBr(s.builder, successBB)
+	} else {
+		for i, pattern := range stmt.Patterns {
+			nextFailure := failureBB
+			if i != len(stmt.Patterns)-1 {
+				nextFailure = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.next"))
+			}
+			if err := s.emitConditionPatternTestAndBind(pattern, actualValue, actualType, stmt.Value, successBB, nextFailure); err != nil {
+				return err
+			}
+			if i != len(stmt.Patterns)-1 {
+				C.LLVMPositionBuilderAtEnd(s.builder, nextFailure)
+			}
+		}
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, failureBB)
+	if err := s.emitPanicWithBacktrace(stmt.Position, &ast.StringLit{Position: stmt.Position, Value: "expect pattern failed"}); err != nil {
+		return err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	return nil
 }
 
 func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.EnumType) error {
@@ -6762,6 +6903,90 @@ func (s *functionState) emitSequenceCountValue(expr ast.Expr, actualType semanti
 	}
 }
 
+func countMatchPatternExpectedLen(pattern ast.MatchPattern) (uint64, bool, error) {
+	structPattern, ok := pattern.(*ast.MatchStructPattern)
+	if !ok || structPattern == nil || structPattern.TypeName != "count" || structPattern.Brace {
+		return 0, false, nil
+	}
+	if len(structPattern.Args) != 1 || structPattern.Args[0].Name != "" {
+		return 0, true, fmt.Errorf("count pattern expects one positional integer literal")
+	}
+	literal, ok := structPattern.Args[0].Pattern.(*ast.MatchLiteralPattern)
+	if !ok {
+		return 0, true, fmt.Errorf("count pattern expects an integer literal")
+	}
+	intLit, ok := literal.Value.(*ast.IntLit)
+	if !ok {
+		return 0, true, fmt.Errorf("count pattern expects an integer literal")
+	}
+	value, err := strconv.ParseUint(intLit.Value, 10, 64)
+	if err != nil {
+		return 0, true, fmt.Errorf("count pattern expects a non-negative integer literal")
+	}
+	return value, true, nil
+}
+
+func (s *functionState) emitSequenceCountValueFromPatternValue(actualValue C.LLVMValueRef, actualType semantic.Type, originExpr ast.Expr, name string) (C.LLVMValueRef, error) {
+	actualType = semantic.StripAggregateStateType(actualType)
+	switch t := actualType.(type) {
+	case *semantic.ArrayType:
+		return s.safeIndexArrayCountValue(t)
+	case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+		if actualValue == nil {
+			if originExpr == nil {
+				return nil, fmt.Errorf("count pattern requires a sequence value")
+			}
+			return s.emitSequenceCountValue(originExpr, actualType, name)
+		}
+		return C.LLVMBuildExtractValue(s.builder, actualValue, 1, cStringFree(name)), nil
+	case *semantic.RefType:
+		if t.State != semantic.RefStateNonNull {
+			return nil, fmt.Errorf("count pattern requires a non-null sequence reference")
+		}
+		switch elem := semantic.StripAggregateStateType(t.Elem).(type) {
+		case *semantic.ArrayType:
+			return s.safeIndexArrayCountValue(elem)
+		case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+			if actualValue == nil {
+				return nil, fmt.Errorf("count pattern requires a sequence reference value")
+			}
+			return s.emitContainerCountValue(actualValue, elem, name)
+		default:
+			return nil, fmt.Errorf("count pattern length is not implemented for %s", actualType.String())
+		}
+	case *semantic.DStrType, *semantic.SViewType:
+		if originExpr == nil {
+			return nil, fmt.Errorf("count pattern length requires an origin expression for %s", actualType.String())
+		}
+		return s.emitSequenceCountValue(originExpr, actualType, name)
+	default:
+		return nil, fmt.Errorf("count pattern length is not implemented for %s", actualType.String())
+	}
+}
+
+func (s *functionState) emitCountMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualType semantic.Type, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (bool, error) {
+	expected, ok, err := countMatchPatternExpectedLen(pattern)
+	if !ok || err != nil {
+		return ok, err
+	}
+	if _, sequence := semantic.SequenceMatchElementType(actualType); !sequence {
+		return true, fmt.Errorf("count pattern requires an array, darray, view, or string-like value, got %s", actualType.String())
+	}
+	countValue, err := s.emitSequenceCountValueFromPatternValue(actualValue, actualType, originExpr, "match.count")
+	if err != nil {
+		return true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return true, err
+	}
+	expectedValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(expected), 0)
+	countOK := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), countValue, expectedValue, cStringFree("match.count.ok"))
+	C.LLVMBuildCondBr(s.builder, countOK, successBB, failureBB)
+	return true, nil
+}
+
 func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, actualValue C.LLVMValueRef, actualType semantic.Type, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
 	if pattern == nil {
 		C.LLVMBuildBr(s.builder, successBB)
@@ -6880,6 +7105,9 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchStructPattern:
+		if handled, err := s.emitCountMatchPatternTest(p, actualValue, actualType, originExpr, successBB, failureBB); handled || err != nil {
+			return decodedActualValue, packedPayloadValueCache{}, err
+		}
 		fields, orderedArgs, err := s.resolveStructMatchPatternArgs(p, actualType)
 		if err != nil {
 			return nil, packedPayloadValueCache{}, err

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"llcontext/src/ast"
@@ -52,6 +53,159 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, tree-category, string, tuple, sequence, or struct value, got %s", valueType)
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
+	}
+}
+
+func (a *Analyzer) analyzeExpectPatternStmt(stmt *ast.ExpectPatternStmt) {
+	if stmt == nil {
+		return
+	}
+	arms := make([]ast.MatchArm, 0, len(stmt.Patterns)+1)
+	for _, pattern := range stmt.Patterns {
+		arms = append(arms, ast.MatchArm{Position: pattern.Pos(), Pattern: pattern, Body: []ast.Stmt{&ast.PassStmt{Position: pattern.Pos()}}})
+	}
+	arms = append(arms, ast.MatchArm{
+		Position: stmt.Position,
+		Pattern:  &ast.MatchWildcardPattern{Position: stmt.Position},
+		Body:     []ast.Stmt{&ast.PanicStmt{Position: stmt.Position, Message: &ast.StringLit{Position: stmt.Position, Value: "expect pattern failed"}}},
+	})
+	a.analyzeMatchStmt(&ast.MatchStmt{Position: stmt.Position, Value: stmt.Value, Arms: arms})
+	if len(stmt.Patterns) == 0 {
+		return
+	}
+	valueType := a.exprTypes[stmt.Value]
+	if valueType == nil {
+		valueType = a.analyzeExpr(stmt.Value)
+	}
+	if len(stmt.Patterns) != 1 {
+		for _, pattern := range stmt.Patterns {
+			bindings := map[string]Type{}
+			a.collectConditionStructPatternBindingTypes(pattern, valueType, bindings)
+			if len(bindings) != 0 {
+				a.errorf(pattern.Pos(), "blockless expect with multiple patterns cannot bind names")
+				return
+			}
+		}
+		return
+	}
+	a.bindExpectPatternLocals(a.currentScope, stmt.Patterns[0], valueType, stmt.Value)
+}
+
+func (a *Analyzer) bindExpectPatternLocal(scope *Scope, name string, typ Type, node ast.Node, pos lexer.Pos, valueExpr ast.Expr) {
+	if a == nil || scope == nil || name == "" || name == "_" || typ == nil {
+		return
+	}
+	if existing, ok := scope.Symbols[name]; ok {
+		if !SameType(existing.Type, typ) {
+			existing.Type = typ
+		}
+		if valueExpr != nil {
+			a.recordValueBinding(existing, valueExpr)
+			a.recordBorrowedOwnerRefBinding(existing, valueExpr)
+			a.recordFunctionValueBinding(existing, valueExpr)
+			a.recordImmutableSymbolOptimizationFacts(existing, valueExpr)
+			a.recordRegionRefBinding(existing, valueExpr)
+		}
+		return
+	}
+	sym := &Symbol{Name: name, Kind: SymbolLocal, Type: typ, Node: node, Mutable: false}
+	a.defineLocalInScope(scope, sym, pos)
+	if valueExpr != nil {
+		a.recordValueBinding(sym, valueExpr)
+		a.recordBorrowedOwnerRefBinding(sym, valueExpr)
+		a.recordFunctionValueBinding(sym, valueExpr)
+		a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
+		a.recordRegionRefBinding(sym, valueExpr)
+	}
+}
+
+func (a *Analyzer) bindExpectPatternLocals(scope *Scope, pattern ast.MatchPattern, expected Type, valueExpr ast.Expr) {
+	if a == nil || scope == nil || pattern == nil || expected == nil {
+		return
+	}
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern:
+		return
+	case *ast.MatchBindPattern:
+		if a.analyzePredicateMatchPattern(p, expected, valueExpr) {
+			return
+		}
+		a.bindExpectPatternLocal(scope, p.Name, expected, p, p.Pos(), valueExpr)
+	case *ast.MatchStructPattern:
+		if a.analyzeCountMatchPattern(p, expected) {
+			return
+		}
+		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
+		if !ok {
+			return
+		}
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			var fieldExpr ast.Expr
+			if valueExpr != nil {
+				fieldExpr = &ast.FieldExpr{Position: arg.Position, Object: valueExpr, Field: fields[i].Name}
+			}
+			a.bindExpectPatternLocals(scope, arg.Pattern, fields[i].Type, fieldExpr)
+		}
+	case *ast.MatchListPattern:
+		elemType, ok := SequenceMatchElementType(expected)
+		if !ok {
+			return
+		}
+		for i, elem := range p.Elems {
+			var indexExpr ast.Expr
+			if valueExpr != nil {
+				indexExpr = &ast.IndexExpr{
+					Position: elem.Pos(),
+					Object:   valueExpr,
+					Index:    &ast.IntLit{Position: elem.Pos(), Value: strconv.Itoa(i), Suffix: "u"},
+				}
+			}
+			a.bindExpectPatternLocals(scope, elem, elemType, indexExpr)
+		}
+	case *ast.MatchVariantPattern:
+		switch variantBase := expected.(type) {
+		case *EnumType:
+			variant, ok := variantBase.Variant(p.Variant)
+			if !ok {
+				return
+			}
+			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				var payloadExpr ast.Expr
+				if valueExpr != nil {
+					resolvedExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+					if ok {
+						payloadExpr = resolvedExpr
+					}
+				}
+				a.bindExpectPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
+			}
+		case *TreeCategoryType:
+			variant, ok := variantBase.Variant(p.Variant)
+			if !ok {
+				return
+			}
+			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				var payloadExpr ast.Expr
+				if valueExpr != nil {
+					resolvedExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+					if ok {
+						payloadExpr = resolvedExpr
+					}
+				}
+				a.bindExpectPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
+			}
+		}
 	}
 }
 

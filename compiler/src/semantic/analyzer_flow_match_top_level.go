@@ -678,6 +678,12 @@ func (a *Analyzer) analyzeTopLevelSequenceMatchPattern(pattern ast.MatchPattern,
 			a.analyzeNestedMatchPattern(elem, elemType, indexExpr, scope)
 		}
 		return false
+	case *ast.MatchStructPattern:
+		if a.analyzeCountMatchPattern(p, valueType) {
+			return false
+		}
+		a.errorf(pattern.Pos(), "unsupported top-level sequence match pattern %T", pattern)
+		return false
 	case *ast.MatchBindPattern:
 		a.errorf(p.Pos(), "top-level sequence match arm must use a list pattern or _")
 		return false

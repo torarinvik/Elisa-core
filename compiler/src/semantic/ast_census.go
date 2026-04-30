@@ -132,6 +132,11 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Value)
 		c.countExpr(n.Store)
 		c.countArms(n.Arms)
+	case *ast.ExpectPatternStmt:
+		c.countExpr(n.Value)
+		for _, pattern := range n.Patterns {
+			c.countMatchPattern(pattern)
+		}
 	case *ast.InStoreStmt:
 		c.countExpr(n.Store)
 		c.countStmts(n.Body)
