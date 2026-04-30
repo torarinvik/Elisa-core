@@ -78,7 +78,7 @@ func analyzeLoadedProgram(program *loadedProgram, stderr io.Writer) (*ast.File, 
 	}
 	if program.file != nil {
 		result := semantic.Analyze(program.file)
-		if warns := result.Warnings(); len(warns) > 0 {
+		if warns := result.Notices(); len(warns) > 0 {
 			for _, w := range warns {
 				if shouldSuppressDeprecatedWarningsForTests(w) {
 					continue

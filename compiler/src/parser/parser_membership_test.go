@@ -120,6 +120,9 @@ func TestParseIfStoreBinderRemainsTrailingIn(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected lowered match stmt, got %T", decl.Body[0])
 	}
+	if !matchStmt.DeprecatedIfStorePatternBinder {
+		t.Fatalf("expected deprecated if-store pattern binder marker, got %#v", matchStmt)
+	}
 	if matchStmt.Store == nil {
 		t.Fatalf("expected if store binder, got %#v", matchStmt)
 	}
@@ -141,5 +144,25 @@ func TestParseIfMembershipConditionUsesNormalIfPath(t *testing.T) {
 	inExpr, ok := ifStmt.Cond.(*ast.BinaryExpr)
 	if !ok || inExpr.Op != lexer.TOKEN_IN {
 		t.Fatalf("expected membership condition, got %#v", ifStmt.Cond)
+	}
+}
+
+func TestParseIfParenthesizedMembershipConditionUsesNormalIfPath(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: i64) -> bool:\n    if (value in [1, 2, 3]):\n        return true\n    return false\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected normal if stmt, got %T", decl.Body[0])
+	}
+	paren, ok := ifStmt.Cond.(*ast.ParenExpr)
+	if !ok {
+		t.Fatalf("expected parenthesized membership condition, got %#v", ifStmt.Cond)
+	}
+	inExpr, ok := paren.Inner.(*ast.BinaryExpr)
+	if !ok || inExpr.Op != lexer.TOKEN_IN {
+		t.Fatalf("expected membership condition, got %#v", paren.Inner)
 	}
 }

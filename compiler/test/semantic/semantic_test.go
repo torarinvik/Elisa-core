@@ -6311,6 +6311,27 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeDeprecatesPackedEnumIfStorePatternBinder(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def fold(node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store as Expr.Int(value: value):
+		return value
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "packed_enum_if_store_pattern_binder_deprecated.llcontext", src)
+	requireNoErrors(t, errs)
+	deprecations := strings.Join(result.Deprecations(), "\n")
+	if !strings.Contains(deprecations, "`if value in store as Pattern` is deprecated") {
+		t.Fatalf("expected if-store pattern binder deprecation, got:\n%s", deprecations)
+	}
+	if !strings.Contains(deprecations, "match value in store") {
+		t.Fatalf("expected match migration hint, got:\n%s", deprecations)
+	}
+	requireNoWarnings(t, result)
+}
+
 func TestAnalyzeAcceptsPackedEnumIfPatternBinderWithElif(t *testing.T) {
 	src := `packed enum Expr:
 	common:

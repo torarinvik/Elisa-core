@@ -9,6 +9,9 @@ import (
 )
 
 func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
+	if stmt.DeprecatedIfStorePatternBinder {
+		a.deprecatedf(stmt.Pos(), "`if value in store as Pattern` is deprecated; use `match value in store:` with pattern arms instead")
+	}
 	valueType := a.analyzeExpr(stmt.Value)
 	enumType, _, ok := resolveMatchableEnumType(valueType)
 	if ok {

@@ -1956,7 +1956,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case lexer.TOKEN_LPAREN:
 		pos := p.cur().Pos
 		p.advance()
-		inner := p.parseExpr()
+		inner := p.withInMembershipEnabled(p.parseExpr)
 		if p.peek() == lexer.TOKEN_COMMA {
 			tuple := p.parseTupleExprFromFirst(pos, inner)
 			p.expect(lexer.TOKEN_RPAREN)

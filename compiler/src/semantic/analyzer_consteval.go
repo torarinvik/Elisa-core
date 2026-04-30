@@ -334,6 +334,13 @@ func (a *Analyzer) warnf(pos lexer.Pos, format string, args ...interface{}) {
 	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
 }
 
+func (a *Analyzer) deprecatedf(pos lexer.Pos, format string, args ...interface{}) {
+	if a.suppressDiagnostics {
+		return
+	}
+	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityDeprecated, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
+}
+
 func isNullableRef(t Type) bool {
 	r, ok := t.(*RefType)
 	return ok && r.State == RefStateNullable

@@ -1608,10 +1608,11 @@ type ParallelForStmt struct {
 }
 
 type MatchStmt struct {
-	Position lexer.Pos
-	Value    Expr
-	Store    Expr
-	Arms     []MatchArm
+	Position                       lexer.Pos
+	Value                          Expr
+	Store                          Expr
+	Arms                           []MatchArm
+	DeprecatedIfStorePatternBinder bool
 }
 
 type InStoreStmt struct {

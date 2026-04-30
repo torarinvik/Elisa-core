@@ -16,8 +16,9 @@ type Diagnostic struct {
 type DiagnosticSeverity string
 
 const (
-	DiagnosticSeverityError   DiagnosticSeverity = "error"
-	DiagnosticSeverityWarning DiagnosticSeverity = "warning"
+	DiagnosticSeverityError      DiagnosticSeverity = "error"
+	DiagnosticSeverityWarning    DiagnosticSeverity = "warning"
+	DiagnosticSeverityDeprecated DiagnosticSeverity = "deprecated"
 )
 
 func (d Diagnostic) String() string {
@@ -206,6 +207,23 @@ func (r *Result) Warnings() []string {
 		}
 		out = append(out, d.String())
 	}
+	return out
+}
+
+func (r *Result) Deprecations() []string {
+	out := make([]string, 0, len(r.Diagnostics))
+	for _, d := range r.Diagnostics {
+		if d.Severity != DiagnosticSeverityDeprecated {
+			continue
+		}
+		out = append(out, d.String())
+	}
+	return out
+}
+
+func (r *Result) Notices() []string {
+	out := r.Warnings()
+	out = append(out, r.Deprecations()...)
 	return out
 }
 
