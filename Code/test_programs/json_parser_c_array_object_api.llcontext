@@ -380,7 +380,7 @@ def json_parser_ast_array_is_null_at_impl(source: u8&, index: usize) -> i64:
         destroy scratch
         return out
 def json_expect_ast_checksum(source: static u8&, expected: i64) -> bool:
-    return json_parser_ast_checksum_impl(source.cast[u8&]) == expected can Memory.Allocate, Abort.Panic
+    return json_parser_ast_checksum_impl(source as u8&) == expected can Memory.Allocate, Abort.Panic
 def json_parser_parallel_ast_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64:
     return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 def json_parser_parallel_ast_cached_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64:

@@ -129,7 +129,7 @@ func TestRunCLIEmittedLoweredGrammarSourceIsStandalone(t *testing.T) {
 func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "contextual_ternary_darray.llcontext")
-	src := "def main() -> i64:\n    region scratch(4096)\n    in scratch:\n        xs: darray[i64] = ([1] if true else [])\n        return xs.count.cast[i64]\n"
+	src := "def main() -> i64:\n    region scratch(4096)\n    in scratch:\n        xs: darray[i64] = ([1] if true else [])\n        return xs.count.i64()\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write contextual ternary fixture: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
 func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_named_runtime_call.llcontext")
-	src := "extern puts(text: u8&) -> int\nextern assert(cond: bool) -> void\n\ndef main() -> int:\n    printed: int = puts(text: do:\n        prefix: static u8& = \"hi\"\n        prefix.cast[u8&]\n    )\n    assert(cond: printed == 2)\n    return printed\n"
+	src := "extern puts(text: u8&) -> int\nextern assert(cond: bool) -> void\n\ndef main() -> int:\n    printed: int = puts(text: do:\n        prefix: static u8& = \"hi\"\n        prefix as u8&\n    )\n    assert(cond: printed == 2)\n    return printed\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write named-runtime interpreter fixture: %v", err)
 	}

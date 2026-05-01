@@ -63,7 +63,7 @@ def json_u64_digits_exceed_max(source: u8&, source_offset: usize, source_end: us
     if digit_count > 20:
         return true
 
-    max_digits: u8& = "18446744073709551615".cast[u8&]
+    max_digits: u8& = "18446744073709551615" as u8&
     pos: mutable usize = source_offset
     max_pos: mutable usize = 0
     while pos < source_end:
@@ -77,9 +77,9 @@ def json_u64_digits_exceed_max(source: u8&, source_offset: usize, source_end: us
         max_pos <- max_pos + 1
     return false
 def json_expect_invalid(source: static u8&) -> bool:
-    return json_parser_checksum_impl(source.cast[u8&]) < 0
+    return json_parser_checksum_impl(source as u8&) < 0
 def json_expect_invalid_ast(source: static u8&) -> bool:
-    return json_parser_ast_checksum_impl(source.cast[u8&]) < 0 can Memory.Allocate, Abort.Panic
+    return json_parser_ast_checksum_impl(source as u8&) < 0 can Memory.Allocate, Abort.Panic
 def json_parallel_parse_once(source: u8&, mode: i64) -> i64:
     can Memory.Allocate, Abort.Panic:
         if mode == JSON_PARALLEL_MODE_CHECKSUM:

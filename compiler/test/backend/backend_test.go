@@ -636,7 +636,7 @@ def call_bits(bits: uintptr, value: i64) -> i64:
     return fn(value)
 
 def run() -> i64:
-	bits: uintptr = inc.cast[uintptr]
+	bits: uintptr = inc as uintptr
     return call_bits(bits, 41)
 `
 	result := parseAndAnalyze(t, "backend_function_value_erasure_casts.llcontext", src)
@@ -796,13 +796,13 @@ def view_char(text: sview[0, 4]) -> char:
 
 func TestGenerateLLVMIRLowersEscapedStringLiteralBytes(t *testing.T) {
 	src := `def newline_text() -> u8&:
-	return "line\nbreak".cast[u8&]
+	return "line\nbreak" as u8&
 
 def quoted_text() -> u8&:
-	return "quote: \" slash: \\ hex: \x41".cast[u8&]
+	return "quote: \" slash: \\ hex: \x41" as u8&
 
 def unicode_text() -> u8&:
-	return "\u263A".cast[u8&]
+	return "\u263A" as u8&
 `
 	result := parseAndAnalyze(t, "backend_string_escapes.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2680,11 +2680,11 @@ def load_text(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]:
 	return text
 
 def load_with_fallback(path: u8&) -> u8&:
-	text: u8& = try read_file(path) else "".cast[u8&]
+	text: u8& = try read_file(path) else "" as u8&
 	return text
 
 def load_with_default(path: u8&) -> u8&:
-	text: u8& = try? read_file(path) default "".cast[u8&]
+	text: u8& = try? read_file(path) default "" as u8&
 	return text
 `
 	result := parseAndAnalyze(t, "backend_error_handling.llcontext", src)
@@ -3144,7 +3144,7 @@ func TestGenerateLLVMIRSpecializesSameExtentRuntimeStringEquality(t *testing.T) 
 def string_view(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
-	return StringView("".cast[u8&], end - start)
+	return StringView("" as u8&, end - start)
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
@@ -3557,7 +3557,7 @@ func TestGenerateLLVMIRSpecializesLongStringViewLiteralHelperCalls(t *testing.T)
 	src := `extern string_view_eq(view: StringView, other: u8&?) -> int
 
 def same_long(view: StringView) -> bool:
-	return string_view_eq(view, "destroy_region".cast[u8&]) != 0
+	return string_view_eq(view, "destroy_region" as u8&) != 0
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_long.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5241,7 +5241,7 @@ extern register_perm_string_len(ptr: u8&?, len: usize)
 extern intern_small_string(src: u8&, len: usize) -> heap u8&
 
 def string_view(value: u8&?, start: i64, end: i64) -> StringView:
-	src: u8& = value if value != null else "".cast[u8&]
+	src: u8& = value if value != null else "" as u8&
 	_ = start
 	return StringView(src, end)
 
@@ -5250,7 +5250,7 @@ def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 
 def string_view_copy(view: StringView) -> heap u8&:
 	_ = view
-	return intern_small_string("".cast[u8&], 0)
+	return intern_small_string("" as u8&, 0)
 
 def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
 	return string_view_copy(view)
@@ -5324,7 +5324,7 @@ func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
 	src := `extern string_view_eq(view: StringView, other: u8&?) -> int
 
 def frontend_sv_eq_literal(view: StringView, literal: static u8&) -> bool:
-	return string_view_eq(view, literal.cast[u8&]) != 0
+	return string_view_eq(view, literal as u8&) != 0
 
 def same_short(view: StringView) -> bool:
 	return frontend_sv_eq_literal(view, "def")

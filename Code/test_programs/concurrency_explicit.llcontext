@@ -43,7 +43,7 @@ def thread_worker(value: i64) -> i64:
 	return value + 1
 
 def permissioned_thread_worker(value: i64) -> i64:
-	puts("worker".cast[u8&]) can Console.Write
+	puts("worker" as u8&) can Console.Write
 	return value + 2
 
 struct SharedGate:

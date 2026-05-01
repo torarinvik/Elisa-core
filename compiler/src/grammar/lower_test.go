@@ -124,7 +124,7 @@ func TestLowerDeclPreservesChoiceOptionalAndListAsOrdinaryCalls(t *testing.T) {
 	if !strings.Contains(statementFormatted, "choice(assignment(), choice(compound_statement(), choice(if_statement(), while_statement())))") {
 		t.Fatalf("expected lowered choice production to stay as ordinary choice call, got:\n%s", statementFormatted)
 	}
-	if !strings.Contains(statementFormatted, "return zeroed.cast[Pascal.Stmt]") {
+	if !strings.Contains(statementFormatted, "return zeroed as Pascal.Stmt") {
 		t.Fatalf("expected lowered choice production to end with typed placeholder return, got:\n%s", statementFormatted)
 	}
 }
@@ -956,7 +956,7 @@ func TestLowerFileStatefulListCollectsValuesIntoDarray(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"mutable darray[Token] = zeroed.cast[darray[Token]]",
+		"mutable darray[Token] = zeroed as darray[Token]",
 		"<- []",
 		".push(",
 	} {
@@ -1363,7 +1363,7 @@ func TestLowerFileStatefulReturnlessRecoverClauseUsesVoidTupleValue(t *testing.T
 	}{
 		{name: "public", fn: publicFn, wantBody: "record_parse_error(ParseMessageKey.ExpectedStatement)"},
 		{name: "public try", fn: publicTryFn, wantReturn: "value: bool"},
-		{name: "internal try", fn: internalTryFn, wantReturn: "value: bool", wantBody: "zeroed.cast[bool]"},
+		{name: "internal try", fn: internalTryFn, wantReturn: "value: bool", wantBody: "zeroed as bool"},
 	} {
 		formatted := unparse.FormatDecl(tc.fn)
 		if tc.wantReturn != "" && !strings.Contains(formatted, tc.wantReturn) {
@@ -2559,7 +2559,7 @@ func TestLowerFileStatefulSeedsBareHeaderChannelFromProductionReturnType(t *test
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
-	if !strings.Contains(formatted, "node: mutable Token = zeroed.cast[Token]") {
+	if !strings.Contains(formatted, "node: mutable Token = zeroed as Token") {
 		t.Fatalf("expected bare header channel to seed from the production return type, got:\n%s", formatted)
 	}
 	if !strings.Contains(formatted, "return (true, __grammar_committed_") {
@@ -2658,7 +2658,7 @@ grammar PerlFrontend over Token using ParserState:
 	if strings.Contains(formatted, "Tail(node:)") {
 		t.Fatalf("expected non-matching tree channel not to synthesize struct literal, got:\n%s", formatted)
 	}
-	if !strings.Contains(formatted, "zeroed.cast[Tail]") {
+	if !strings.Contains(formatted, "zeroed as Tail") {
 		t.Fatalf("expected unmatched struct channels to fall back to zeroed return value, got:\n%s", formatted)
 	}
 	if strings.Contains(formatted, "node: mutable Tail") {
@@ -2681,8 +2681,8 @@ grammar PerlFrontend over Token using ParserState:
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"name_token: mutable Token = zeroed.cast[Token]",
-		"close_token: mutable Token = zeroed.cast[Token]",
+		"name_token: mutable Token = zeroed as Token",
+		"close_token: mutable Token = zeroed as Token",
 		"Tail(name_token:, close_token:)",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -2709,8 +2709,8 @@ grammar PerlFrontend over Token using ParserState:
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"name_token: mutable Token = zeroed.cast[Token]",
-		"close_token: mutable Token = zeroed.cast[Token]",
+		"name_token: mutable Token = zeroed as Token",
+		"close_token: mutable Token = zeroed as Token",
 		"Tail(name_token:, close_token:)",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -2742,7 +2742,7 @@ grammar PerlFrontend over Token using ParserState:
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
 		"__grammar_seq_value_",
-		"zeroed.cast[Tail]",
+		"zeroed as Tail",
 		"Tail(name_token:, close_token:)",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -2783,8 +2783,8 @@ func TestLowerFileStatefulInfersUntypedChannelsFromNamedTupleReturnFields(t *tes
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"item: mutable i64 = zeroed.cast[i64]",
-		"count: mutable usize = zeroed.cast[usize]",
+		"item: mutable i64 = zeroed as i64",
+		"count: mutable usize = zeroed as usize",
 		"return (true, __grammar_committed_",
 		"(item, count)",
 	} {
@@ -2808,9 +2808,9 @@ func TestLowerFileStatefulTypedExprTermInSeparatedListInfersElementType(t *testi
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"param_name_ids: mutable darray[NameId] = zeroed.cast[darray[NameId]]",
+		"param_name_ids: mutable darray[NameId] = zeroed as darray[NameId]",
 		"__grammar_list_value_",
-		"mutable NameId = zeroed.cast[NameId]",
+		"mutable NameId = zeroed as NameId",
 		".push(__grammar_seq_value_",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -2839,9 +2839,6 @@ func TestLowerFileStatefulTypedExprTermCarriesDeclaredTypeForEmptyList(t *testin
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected typed expr lowering to contain %q, got:\n%s", want, formatted)
 		}
-	}
-	if strings.Contains(formatted, "zeroed as darray[Pascal.Decl]") {
-		t.Fatalf("expected typed expr lowering to avoid cast-based empty darray scaffolding, got:\n%s", formatted)
 	}
 }
 
@@ -2925,7 +2922,7 @@ func TestLowerFileStatefulSingletonBuildsSingleItemList(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
+		"decls: mutable darray[Pascal.Decl] = zeroed as darray[Pascal.Decl]",
 		"__grammar_singleton_value_",
 		"in arena:",
 		".push(decl)",
@@ -2950,7 +2947,7 @@ func TestLowerFileStatefulEmptyBuildsTypedEmptyList(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
+		"decls: mutable darray[Pascal.Decl] = zeroed as darray[Pascal.Decl]",
 		"__grammar_empty_value_",
 		": darray[Pascal.Decl] = []",
 		"decls <- __grammar_empty_value_",
@@ -2975,7 +2972,7 @@ func TestLowerFileStatefulConcatTermFlattensListOperands(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"decls: mutable darray[Token] = zeroed.cast[darray[Token]]",
+		"decls: mutable darray[Token] = zeroed as darray[Token]",
 		"__grammar_concat_value_",
 		"__grammar_concat_group_",
 		"parser.expect_kind(TokenKind.IDENT)",

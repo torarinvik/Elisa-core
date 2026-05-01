@@ -646,7 +646,7 @@ func (p *Parser) parseChildrenCallArgs() ([]ast.Expr, []string) {
 	}
 	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	for {
-		arg := p.parseExpr()
+		arg := p.withAsCastEnabled(p.parseExpr)
 		if p.peek() == lexer.TOKEN_TO {
 			pos := p.cur().Pos
 			p.advance()
@@ -1446,7 +1446,7 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackU
 		if shorthand {
 			arg = &ast.Ident{Position: namePos, Name: name}
 		} else {
-			arg = p.parseExpr()
+			arg = p.withAsCastEnabled(p.parseExpr)
 		}
 		if name == "" && sawPack {
 			p.errorf("call parameter-pack application must come after all positional arguments")

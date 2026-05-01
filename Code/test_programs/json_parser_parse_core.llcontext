@@ -237,15 +237,15 @@ def json_parse_object(cursor: mutable JsonCursor&) -> i64:
 
     return total
 def json_parse_true(cursor: mutable JsonCursor&) -> i64:
-    if json_expect_literal_with_len(cursor, "true".cast[u8&], 4):
+    if json_expect_literal_with_len(cursor, "true" as u8&, 4):
         return 31
     return -1
 def json_parse_false(cursor: mutable JsonCursor&) -> i64:
-    if json_expect_literal_with_len(cursor, "false".cast[u8&], 5):
+    if json_expect_literal_with_len(cursor, "false" as u8&, 5):
         return 37
     return -1
 def json_parse_null(cursor: mutable JsonCursor&) -> i64:
-    if json_expect_literal_with_len(cursor, "null".cast[u8&], 4):
+    if json_expect_literal_with_len(cursor, "null" as u8&, 4):
         return 41
     return -1
 def json_ast_count_or_invalid(count: i64) -> i64:

@@ -3636,7 +3636,7 @@ func grammarListElementType(pos lexer.Pos, explicit ast.TypeExpr, fallback ast.T
 }
 
 func zeroedCastExpr(pos lexer.Pos, target ast.TypeExpr) ast.Expr {
-	return &ast.CastExpr{Position: pos, Operand: &ast.ZeroedLit{Position: pos}, Target: target}
+	return &ast.CastExpr{Position: pos, Operand: &ast.ZeroedLit{Position: pos}, Target: target, Origin: ast.CastExprOriginAsSyntax}
 }
 
 func successTupleReturnStmt(pos lexer.Pos, committed ast.Expr, value ast.Expr) ast.Stmt {
@@ -5708,7 +5708,7 @@ func LowerProduction(grammarDecl *ast.GrammarDecl, production ast.GrammarProduct
 		body = append(body, lowerTermStmt(ctx, term))
 	}
 	if production.ReturnType != nil && !grammarTermBlockHasExplicitReturn(production.Terms) {
-		body = append(body, &ast.ReturnStmt{Position: production.Position, Value: &ast.CastExpr{Position: production.Position, Operand: &ast.ZeroedLit{Position: production.Position}, Target: production.ReturnType}})
+		body = append(body, &ast.ReturnStmt{Position: production.Position, Value: zeroedCastExpr(production.Position, production.ReturnType)})
 	}
 	return &ast.FuncDecl{
 		Position:         production.Position,

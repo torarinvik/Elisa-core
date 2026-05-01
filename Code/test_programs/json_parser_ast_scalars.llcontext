@@ -1,5 +1,5 @@
 def json_empty_view() -> sview:
-    return string_view("".cast[u8&], 0, 0)
+    return string_view("" as u8&, 0, 0)
 def json_ast_is_number_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
     if node in store as JsonNode.Num:
         return true

@@ -74,6 +74,15 @@ func (p *Parser) withAsCastDisabled(parse func() ast.Expr) ast.Expr {
 	return parse()
 }
 
+func (p *Parser) withAsCastEnabled(parse func() ast.Expr) ast.Expr {
+	saved := p.allowAsCast
+	p.allowAsCast = true
+	defer func() {
+		p.allowAsCast = saved
+	}()
+	return parse()
+}
+
 func (p *Parser) withInMembershipDisabled(parse func() ast.Expr) ast.Expr {
 	saved := p.allowInMembership
 	p.allowInMembership = false

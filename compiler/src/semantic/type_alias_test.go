@@ -67,7 +67,7 @@ def raw(name: NameId) -> u32:
 	return !name
 
 def wrap(raw: u32) -> NameId:
-	return raw.cast[NameId]
+	return raw as NameId
 `)
 	nameID, ok := result.NamedTypes["NameId"].(*IDType)
 	if !ok {

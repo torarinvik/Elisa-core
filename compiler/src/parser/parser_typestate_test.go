@@ -2303,6 +2303,29 @@ func TestParseAsCastExprPreservesSyntax(t *testing.T) {
 	}
 }
 
+func TestParseAsCastInsideIfConditionCallArgs(t *testing.T) {
+	file, errs := parseSourceFile(t, "def accepts(text: u8&) -> bool:\n    return true\n\ndef keep() -> i64:\n    if accepts(\"hello\" as u8&):\n        return 1\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected if stmt, got %T", decl.Body[0])
+	}
+	call, ok := ifStmt.Cond.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call condition, got %T", ifStmt.Cond)
+	}
+	cast, ok := call.Args[0].(*ast.CastExpr)
+	if !ok {
+		t.Fatalf("expected as-cast call arg, got %T", call.Args[0])
+	}
+	if cast.Origin != ast.CastExprOriginAsSyntax {
+		t.Fatalf("expected as-syntax cast origin, got %v", cast.Origin)
+	}
+}
+
 func TestParseAsRefAssignmentRemainsStatementSyntax(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Arena:\n    end: Arena!\n\ndef keep(a: mutable Arena&) -> void:\n    a.end as & <- zeroed\n")
 	if len(errs) != 0 {

@@ -1,10 +1,10 @@
 def newline_text() -> u8&:
-    return "line\nbreak".cast[u8&]
+    return "line\nbreak" as u8&
 
 
 def quoted_text() -> u8&:
-    return "quote: \" slash: \\ hex: \x41".cast[u8&]
+    return "quote: \" slash: \\ hex: \x41" as u8&
 
 
 def unicode_text() -> u8&:
-    return "\u263A".cast[u8&]
+    return "\u263A" as u8&

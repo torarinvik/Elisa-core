@@ -16,20 +16,20 @@ def json_ast_string_value_from_span(source: u8&, source_offset: usize, source_le
     can Memory.Allocate, Abort.Panic:
         decoded_len: i64 = json_decoded_string_len(source, source_offset, source_len)
         if decoded_len < 0:
-            return intern_small_string("".cast[u8&], 0)
+            return intern_small_string("" as u8&, 0)
 
         if decoded_len <= 8:
             text: u8[9] = zeroed
             written: i64 = json_decode_string_into(source, source_offset, source_len, text[0].ref[u8&])
             if written < 0:
-                return intern_small_string("".cast[u8&], 0)
+                return intern_small_string("" as u8&, 0)
             text[written.usize()] <- 0
             return intern_small_string(text[0].ref[u8&], written.usize())
 
         out: heap u8& = alloc_perm((decoded_len + 1).i64()).cast[heap u8&]
         written: i64 = json_decode_string_into(source, source_offset, source_len, out.cast[u8&])
         if written < 0:
-            return intern_small_string("".cast[u8&], 0)
+            return intern_small_string("" as u8&, 0)
         out[written.usize()] <- 0
         register_perm_string_len(out.cast[u8&], written.usize())
         return out
@@ -69,7 +69,7 @@ def json_ast_string_value_with_len(source: u8&, source_len: usize, node: JsonNod
         lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
         if lexeme.checksum >= 0:
             return json_ast_string_value_from_span(source, lexeme.source_offset, lexeme.source_len)
-        return intern_small_string("".cast[u8&], 0)
+        return intern_small_string("" as u8&, 0)
 def json_ast_string_value(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8&:
     return json_ast_string_value_with_len(source, runtime_strlen(source), node, store) can Memory.Allocate, Abort.Panic
 def json_ast_string_eq_literal_with_len(source: u8&, source_len: usize, node: JsonNode, literal: u8&, store: JsonNode.Store[Local]) -> bool:

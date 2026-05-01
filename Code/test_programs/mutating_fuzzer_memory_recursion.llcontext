@@ -290,7 +290,7 @@ def mutate_192_recursive_any_ptr_walk(depth: int, ptr: u8&) -> uintptr:
 
 
 def mutate_193_use_static_any_ptr_walk() -> uintptr:
-    return mutate_192_recursive_any_ptr_walk(2, "abc".cast[u8&])
+    return mutate_192_recursive_any_ptr_walk(2, "abc" as u8&)
 
 
 def mutate_194_recursive_heap_offset_sum(depth: int, ptr: heap u8&) -> uintptr:

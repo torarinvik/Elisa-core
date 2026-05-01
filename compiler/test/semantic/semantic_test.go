@@ -952,7 +952,7 @@ def invoke_writer(fn: func(u8&) -> int can[Console.Write], text: u8&) -> int can
     return fn(text)
 
 def run() -> int can[Console.Write]:
-	return invoke_writer(puts, "hello".cast[u8&])
+	return invoke_writer(puts, "hello" as u8&)
 `
 	result, errs := parseAndAnalyze(t, "function_type_permissions.llcontext", src)
 	requireNoErrors(t, errs)
@@ -966,7 +966,7 @@ def invoke_writer[permission P](fn: func(u8&) -> int can[P], text: u8&) -> int c
     return fn(text)
 
 def run() -> int can[Console.Write]:
-	return invoke_writer(puts, "hello".cast[u8&])
+	return invoke_writer(puts, "hello" as u8&)
 `
 	result, errs := parseAndAnalyze(t, "permission_polymorphic_function_wrapper.llcontext", src)
 	requireNoErrors(t, errs)
@@ -997,7 +997,7 @@ def call_erased(raw: void&, value: i64) -> i64:
 
 def run() -> i64:
 	raw: void& = inc.cast[void&]
-	bits: uintptr = raw.cast[uintptr]
+	bits: uintptr = raw as uintptr
 	fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]
 	return call_erased(fn.cast[void&], 40)
 `
@@ -4703,7 +4703,7 @@ export func pass_array_c(value: i32[4]) -> i32[4] = pass_array
 
 func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
 	src := `def choose_text(value: u8&?) -> u8&:
-	return value if value != null else "".cast[u8&]
+	return value if value != null else "" as u8&
 `
 	_, errs := parseAndAnalyze(t, "ternary_refinement.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4752,8 +4752,8 @@ func TestAnalyzeAcceptsBareReferenceTypeSyntax(t *testing.T) {
 	value: int
 
 def read(box: Box&) -> int:
-	ptr: u8& = "hello".cast[u8&]
-	return box.value + ptr[0].cast[int]
+	ptr: u8& = "hello" as u8&
+	return box.value + ptr[0].int()
 `
 	_, errs := parseAndAnalyze(t, "bare_reference_type_accept.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4785,7 +4785,7 @@ def keep_heap(box: heap Box&?) -> heap Box&?:
 	return box.cast[Box&?].cast[heap Box&?]
 
 def coerce_text() -> u8&:
-	return "hello".cast[u8&]
+	return "hello" as u8&
 
 def use_source() -> Box&?:
 	return maybe_heap_box().cast[Box&?]
@@ -9337,7 +9337,7 @@ def load_text(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]:
 	return text
 
 def load_with_fallback(path: u8&) -> u8&:
-	text: u8& = try read_file(path) else "".cast[u8&]
+	text: u8& = try read_file(path) else "" as u8&
 	return text
 `
 	_, errs := parseAndAnalyze(t, "error_handling_ok.llcontext", src)
@@ -9630,7 +9630,7 @@ func TestAnalyzeRejectsTryOnNonFallibleExpression(t *testing.T) {
 
 func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
 	src := `def bad(value: u8&) -> u8&:
-	return value else "".cast[u8&]
+	return value else "" as u8&
 `
 	_, errs := parseAndAnalyze(t, "else_on_nonnullable_ref.llcontext", src)
 	if len(errs) == 0 {
