@@ -773,6 +773,13 @@ func (a *Analyzer) analyzeUnaryExpr(expr *ast.UnaryExpr) Type {
 			a.errorf(expr.Pos(), "unary operator requires integral operand")
 		}
 		return operand
+	case lexer.TOKEN_BANG:
+		idType, ok := operand.(*IDType)
+		if !ok {
+			a.errorf(expr.Pos(), "id unwrap operator requires id[T] operand, got %s", operand)
+			return invalidType
+		}
+		return idType.Storage
 	default:
 		return invalidType
 	}

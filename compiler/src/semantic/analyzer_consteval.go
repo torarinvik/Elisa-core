@@ -383,6 +383,9 @@ func CastConstValue(value ConstValue, dst Type) (ConstValue, bool) {
 	if storage, ok := ConstEnumStorageType(dst); ok {
 		dst = storage
 	}
+	if idType, ok := dst.(*IDType); ok {
+		dst = idType.Storage
+	}
 	if !IsNumericType(dst) || !isConstNumeric(value) {
 		return ConstValue{}, false
 	}

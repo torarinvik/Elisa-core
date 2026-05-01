@@ -45,7 +45,7 @@ func (s *functionState) emitCloneValue(sourceValue C.LLVMValueRef, sourceType se
 		return nil, fmt.Errorf("clone requires concrete source and target types")
 	}
 	switch tt := targetType.(type) {
-	case *semantic.BuiltinType, *semantic.ConstEnumType, *semantic.ErrorSetType, *semantic.NullType, *semantic.DStrType, *semantic.SViewType:
+	case *semantic.BuiltinType, *semantic.IDType, *semantic.ConstEnumType, *semantic.ErrorSetType, *semantic.NullType, *semantic.DStrType, *semantic.SViewType:
 		return s.coerceValue(sourceValue, sourceType, targetType)
 	case *semantic.ArrayType:
 		return s.emitCloneArrayValue(sourceValue, sourceType, tt, name)

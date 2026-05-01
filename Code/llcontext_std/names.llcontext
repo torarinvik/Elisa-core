@@ -1,7 +1,9 @@
-type NameId = u32
+extern Name
+
+type NameId = id[Name]
 
 
-const NAME_TABLE_INVALID_ID: NameId = 0
+global NAME_TABLE_INVALID_ID: NameId = zeroed.cast[NameId]
 const NAME_TABLE_INITIAL_BUCKETS: usize = 16
 
 
@@ -12,6 +14,7 @@ const enum NameCasePolicy of i8:
 
 struct NameEntry:
     text: sview
+    owned_text: darray[u8]
     hash: u64
     original_hash: u64
 
@@ -78,18 +81,18 @@ def name_text_eq(left: sview, right: sview, policy: NameCasePolicy) -> bool:
 def name_table_valid_id(table: NameTable&, name_id: NameId) -> bool:
     if name_id == NAME_TABLE_INVALID_ID:
         return false
-    return name_id.usize() <= table.entries.count
+    return (!name_id).usize() <= table.entries.count
 
 
 def name_table_entry(table: NameTable&, name_id: NameId) -> NameEntry:
     assert name_table_valid_id(table, name_id)
-    return table.entries[name_id.usize() - 1]
+    return table.entries[(!name_id).usize() - 1]
 
 
 def name_table_text(table: NameTable&, name_id: NameId) -> sview:
     if not name_table_valid_id(table, name_id):
         return "".cast[cstr][0:0]
-    return table.entries[name_id.usize() - 1].text
+    return table.entries[(!name_id).usize() - 1].text
 
 
 def name_table_eq(left: NameId, right: NameId) -> bool:
@@ -125,7 +128,7 @@ def name_table_rebuild_buckets(table: mutable NameTable&, capacity: usize) -> vo
             for _ in 0..<capacity:
                 table.buckets.push(NameBucket{name_id: NAME_TABLE_INVALID_ID})
             for index in 0..<table.entries.count:
-                table.name_table_insert_existing_bucket((index + 1).u32())
+                table.name_table_insert_existing_bucket((index + 1).u32().cast[NameId])
 
 
 def name_table_ensure_capacity(table: mutable NameTable&, next_count: usize) -> void:
@@ -153,7 +156,7 @@ def name_table_find(table: NameTable&, text: sview, hash: u64, policy: NameCaseP
     return NAME_TABLE_INVALID_ID
 
 
-def name_table_intern(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
+def name_table_intern_view(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
         hash: u64 = name_text_hash(text, policy)
         existing: NameId = table.name_table_find(text, hash, policy)
@@ -162,7 +165,34 @@ def name_table_intern(table: mutable NameTable&, text: sview, policy: NameCasePo
         table.name_table_ensure_capacity(table.entries.count + 1) can Memory.Allocate, Abort.Panic
         in table.owner:
             original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
-            table.entries.push(NameEntry{text: text, hash: hash, original_hash: original_hash})
-            name_id: NameId = table.entries.count.u32()
+            table.entries.push(NameEntry{text: text, owned_text: [], hash: hash, original_hash: original_hash})
+            name_id: NameId = table.entries.count.u32().cast[NameId]
             table.name_table_insert_existing_bucket(name_id)
             return name_id
+
+
+def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
+    can Memory.Allocate, Abort.Panic:
+        hash: u64 = name_text_hash(text, policy)
+        existing: NameId = table.name_table_find(text, hash, policy)
+        if existing != NAME_TABLE_INVALID_ID:
+            return existing
+        table.name_table_ensure_capacity(table.entries.count + 1) can Memory.Allocate, Abort.Panic
+        in table.owner:
+            original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
+            owned_text: mutable darray[u8] = []
+            index: mutable i64 = 0
+            while index < text.len:
+                owned_text.push(text.data[index.usize()])
+                index <- index + 1
+            owned_text.push(0)
+            stable_text: sview = owned_text.items.cast[cstr][0:text.len]
+            table.entries.push(NameEntry{text: stable_text, owned_text: owned_text, hash: hash, original_hash: original_hash})
+            name_id: NameId = table.entries.count.u32().cast[NameId]
+            table.name_table_insert_existing_bucket(name_id)
+            return name_id
+
+
+def name_table_intern(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
+    can Memory.Allocate, Abort.Panic:
+        return table.name_table_intern_copy(text, policy) can Memory.Allocate, Abort.Panic

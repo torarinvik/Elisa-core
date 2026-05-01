@@ -531,6 +531,11 @@ func (p *Parser) peekTopLevelCommaInCurrentBracketList() bool {
 
 func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 	switch name {
+	case "id", "Id", "ID":
+		p.advance()
+		tag := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.BuiltinTypeExpr{Position: pos, Name: "id", TypeArgs: []ast.TypeExpr{tag}}
 	case "array", "darray":
 		p.advance()
 		elem := p.parseTypeExpr()
@@ -967,6 +972,12 @@ func (p *Parser) parseUnary() ast.Expr {
 		p.advance()
 		operand := p.parseUnary()
 		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_TILDE, Operand: operand}
+	}
+	if p.peek() == lexer.TOKEN_BANG {
+		pos := p.cur().Pos
+		p.advance()
+		operand := p.parseUnary()
+		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_BANG, Operand: operand}
 	}
 	if p.peek() == lexer.TOKEN_AMPERSAND {
 		pos := p.cur().Pos

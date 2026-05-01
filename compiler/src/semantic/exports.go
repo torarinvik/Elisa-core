@@ -311,6 +311,8 @@ func isCABICompatibleType(t Type) bool {
 		default:
 			return false
 		}
+	case *IDType:
+		return isCABICompatibleType(tt.Storage)
 	case *RefType:
 		return true
 	case *ArrayType:

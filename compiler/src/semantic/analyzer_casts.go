@@ -57,6 +57,15 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if AssignableTo(dst, src) {
 		return true
 	}
+	if srcID, ok := src.(*IDType); ok {
+		if SameType(src, dst) {
+			return true
+		}
+		return SameType(srcID.Storage, dst)
+	}
+	if dstID, ok := dst.(*IDType); ok {
+		return SameType(dstID.Storage, src)
+	}
 	if IsNumericType(src) && IsNumericType(dst) {
 		return true
 	}

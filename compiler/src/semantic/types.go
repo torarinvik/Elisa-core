@@ -61,6 +61,11 @@ type BuiltinType struct {
 	Name string
 }
 
+type IDType struct {
+	Tag     Type
+	Storage Type
+}
+
 type TypeParamType struct {
 	Name string
 }

@@ -4263,6 +4263,8 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 		return C.LLVMBuildNeg(s.builder, value, cStringFree("negtmp")), resultType, nil
 	case lexer.TOKEN_TILDE:
 		return C.LLVMBuildNot(s.builder, value, cStringFree("invt")), resultType, nil
+	case lexer.TOKEN_BANG:
+		return value, resultType, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported unary operator %s", lexer.TokenName(expr.Op))
 	}

@@ -12,6 +12,7 @@ func (*InvalidType) isType()           {}
 func (*NeverType) isType()             {}
 func (*NullType) isType()              {}
 func (*BuiltinType) isType()           {}
+func (*IDType) isType()                {}
 func (*TypeParamType) isType()         {}
 func (*StructStateCaseType) isType()   {}
 func (*StructStateSetType) isType()    {}
@@ -61,6 +62,12 @@ func (*NeverType) String() string   { return "<never>" }
 func (*NullType) String() string    { return "null" }
 func (t *BuiltinType) String() string {
 	return t.Name
+}
+func (t *IDType) String() string {
+	if t == nil || t.Tag == nil {
+		return "id[<invalid>]"
+	}
+	return fmt.Sprintf("id[%s]", t.Tag.String())
 }
 func (t *TypeParamType) String() string { return t.Name }
 func (t *StructStateCaseType) String() string {

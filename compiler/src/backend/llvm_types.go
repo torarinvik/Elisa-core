@@ -359,6 +359,8 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		_, err = g.ensureNamedStructType(tt.Name)
 	case *semantic.AggregateStateType:
 		err = g.noteType(tt.Base)
+	case *semantic.IDType:
+		err = g.noteType(tt.Storage)
 	case *semantic.OpaqueType:
 		_, err = g.ensureNamedStructType(tt.Name)
 	case *semantic.GenericInstanceType:
@@ -696,6 +698,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.BuiltinType:
 		return g.lowerBuiltin(tt.Name)
+	case *semantic.IDType:
+		return g.lowerType(tt.Storage)
 	case *semantic.ConstEnumType:
 		return g.lowerType(tt.Storage)
 	case *semantic.ErrorSetType:

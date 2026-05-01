@@ -93,6 +93,9 @@ func SameType(a, b Type) bool {
 	case *BuiltinType:
 		tb, ok := b.(*BuiltinType)
 		return ok && ta.Name == tb.Name
+	case *IDType:
+		tb, ok := b.(*IDType)
+		return ok && SameType(ta.Tag, tb.Tag) && SameType(ta.Storage, tb.Storage)
 	case *TypeParamType:
 		tb, ok := b.(*TypeParamType)
 		return ok && ta.Name == tb.Name

@@ -55,3 +55,65 @@ type NameId = MissingType
 		t.Fatalf("expected unknown type alias diagnostic, got:\n%s", joined)
 	}
 }
+
+func TestIDTypeAliasIsStronglyTypedHandle(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "id_type_alias_ok.llcontext", `
+extern Name
+extern Symbol
+type NameId = id[Name]
+type SymbolId = id[Symbol]
+
+def raw(name: NameId) -> u32:
+	return !name
+
+def wrap(raw: u32) -> NameId:
+	return raw.cast[NameId]
+`)
+	nameID, ok := result.NamedTypes["NameId"].(*IDType)
+	if !ok {
+		t.Fatalf("expected NameId to resolve to IDType, got %T", result.NamedTypes["NameId"])
+	}
+	symbolID, ok := result.NamedTypes["SymbolId"].(*IDType)
+	if !ok {
+		t.Fatalf("expected SymbolId to resolve to IDType, got %T", result.NamedTypes["SymbolId"])
+	}
+	if SameType(nameID, symbolID) {
+		t.Fatalf("expected id[Name] and id[Symbol] to be distinct")
+	}
+	if !SameType(nameID.Storage, result.NamedTypes["u32"]) {
+		t.Fatalf("expected id storage to be u32, got %s", nameID.Storage)
+	}
+}
+
+func TestIDTypeRejectsAccidentalIntegerAndOtherIDAssignment(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "id_type_alias_reject.llcontext", `
+extern Name
+extern Symbol
+type NameId = id[Name]
+type SymbolId = ID[Symbol]
+
+def bad_integer(raw: u32) -> NameId:
+	return raw
+
+def bad_id(symbol: SymbolId) -> NameId:
+	return symbol
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "return type expects id[Name], got u32") {
+		t.Fatalf("expected raw integer assignment rejection, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "return type expects id[Name], got id[Symbol]") {
+		t.Fatalf("expected distinct id assignment rejection, got:\n%s", joined)
+	}
+}
+
+func TestIDTypeUnwrapRequiresIDOperand(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "id_type_unwrap_reject.llcontext", `
+def bad(raw: u32) -> u32:
+	return !raw
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "id unwrap operator requires id[T] operand, got u32") {
+		t.Fatalf("expected id unwrap diagnostic, got:\n%s", joined)
+	}
+}

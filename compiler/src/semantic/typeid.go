@@ -82,6 +82,11 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 	case *BuiltinType:
 		appendKeyTag(b, "builtin")
 		appendKeyString(b, tt.Name)
+	case *IDType:
+		appendKeyTag(b, "id")
+		if !appendTypeIDKey(b, tt.Tag, active, nextCycleID) || !appendTypeIDKey(b, tt.Storage, active, nextCycleID) {
+			return false
+		}
 	case *TypeParamType:
 		appendKeyTag(b, "typeparam")
 		appendKeyString(b, tt.Name)

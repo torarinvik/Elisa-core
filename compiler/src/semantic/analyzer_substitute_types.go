@@ -22,6 +22,16 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 			return resolved
 		}
 		return n
+	case *IDType:
+		tag := a.substituteTypeWithDepth(n.Tag, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(tag) {
+			return invalidType
+		}
+		storage := a.substituteTypeWithDepth(n.Storage, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(storage) {
+			return invalidType
+		}
+		return &IDType{Tag: tag, Storage: storage}
 	case *AssociatedTypeProjection:
 		receiver := a.substituteTypeWithDepth(n.Receiver, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(receiver) {

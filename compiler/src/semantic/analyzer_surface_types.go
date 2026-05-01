@@ -137,6 +137,16 @@ func (a *Analyzer) resolveNamedVariantWitnessType(named *ast.NamedType) (Type, b
 
 func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 	switch expr.Name {
+	case "id":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "id expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		tag := a.resolveType(expr.TypeArgs[0])
+		if IsInvalidType(tag) {
+			return invalidType
+		}
+		return &IDType{Tag: tag, Storage: a.namedTypes["u32"]}
 	case "array":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
 			a.errorf(expr.Pos(), "array expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

@@ -27,6 +27,8 @@ func containsTypeParam(t Type) bool {
 		return false
 	case *TypeParamType:
 		return true
+	case *IDType:
+		return containsTypeParam(n.Tag) || containsTypeParam(n.Storage)
 	case *RefStorageParamType, *RefStateParamType:
 		return true
 	case *ErrorUnionType:

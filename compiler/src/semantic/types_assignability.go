@@ -89,6 +89,12 @@ func AssignableTo(dst, src Type) bool {
 		}
 		return AssignableTo(dstOpt.Value, src)
 	}
+	if _, ok := dst.(*IDType); ok {
+		return SameType(dst, src)
+	}
+	if _, ok := src.(*IDType); ok {
+		return SameType(dst, src)
+	}
 	if dstTuple, ok := dst.(*TupleType); ok {
 		srcTuple, ok := src.(*TupleType)
 		if !ok || len(dstTuple.Fields) != len(srcTuple.Fields) {
