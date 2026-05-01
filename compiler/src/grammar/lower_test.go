@@ -2801,16 +2801,16 @@ func TestLowerFileStatefulTypedExprTermInSeparatedListInfersElementType(t *testi
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
 	cursor parser
 	channel param_name_ids
-	param_name_ids_core() -> darray[PascalNameId]:
-		param_name_ids <- separated required(seq(.IDENT(param_token), expr[PascalNameId](param_token.lexeme_key)), ParseMessageKey.ExpectedProgramParamName) by .COMMA until(.RPAREN, token(TokenKind.EOF))
+	param_name_ids_core() -> darray[NameId]:
+		param_name_ids <- separated required(seq(.IDENT(param_token), expr[NameId](param_token.lexeme_key)), ParseMessageKey.ExpectedProgramParamName) by .COMMA until(.RPAREN, token(TokenKind.EOF))
 		pass
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"param_name_ids: mutable darray[PascalNameId] = zeroed.cast[darray[PascalNameId]]",
+		"param_name_ids: mutable darray[NameId] = zeroed.cast[darray[NameId]]",
 		"__grammar_list_value_",
-		"mutable PascalNameId = zeroed.cast[PascalNameId]",
+		"mutable NameId = zeroed.cast[NameId]",
 		".push(__grammar_seq_value_",
 	} {
 		if !strings.Contains(formatted, want) {

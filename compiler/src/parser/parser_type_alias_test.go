@@ -1,9 +1,11 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"llcontext/src/ast"
+	"llcontext/src/unparse"
 )
 
 func TestParseTypeAliasDecl(t *testing.T) {
@@ -57,5 +59,38 @@ type ScopeId = ID[Scope]
 		if len(builtin.TypeArgs) != 1 {
 			t.Fatalf("decl %d: expected one tag type arg, got %d", i, len(builtin.TypeArgs))
 		}
+	}
+}
+
+func TestParseModuleDeclPreservesModuleSpelling(t *testing.T) {
+	file, errs := parseSourceFile(t, `module Handles:
+    extern Symbol
+    type SymbolId = id[Symbol]
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 1 {
+		t.Fatalf("expected 1 decl, got %d", len(file.Decls))
+	}
+	module, ok := file.Decls[0].(*ast.NamespaceDecl)
+	if !ok {
+		t.Fatalf("expected module to parse as namespace decl, got %T", file.Decls[0])
+	}
+	if !module.Module {
+		t.Fatal("expected module spelling to be preserved")
+	}
+	if module.Name != "Handles" {
+		t.Fatalf("expected module name Handles, got %q", module.Name)
+	}
+	if len(module.Decls) != 2 {
+		t.Fatalf("expected 2 module decls, got %d", len(module.Decls))
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "module Handles:") {
+		t.Fatalf("expected formatter to preserve module spelling, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, "namespace Handles:") {
+		t.Fatalf("expected formatter not to rewrite module spelling to namespace, got:\n%s", formatted)
 	}
 }

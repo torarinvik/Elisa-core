@@ -27,3 +27,21 @@ def assert_ne[T](actual: T, expected: T):
     can Abort.Panic:
         if actual == expected:
             panic("assert_ne failed")
+
+
+def id_invalid[T]() -> id[T]:
+    return zeroed.cast[id[T]]
+
+
+def id_valid[T](value: id[T]) -> bool:
+    return !value != 0
+
+
+def assert_id_valid[T](value: id[T]):
+    can Abort.Panic:
+        assert_true(id_valid[T](value))
+
+
+def assert_id_invalid[T](value: id[T]):
+    can Abort.Panic:
+        assert_false(id_valid[T](value))

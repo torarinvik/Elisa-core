@@ -639,7 +639,11 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		}
 		fmt.Fprintf(w, "%seffectalias %s = %s\n", prefix, n.Name, strings.Join(parts, " "))
 	case *ast.NamespaceDecl:
-		fmt.Fprintf(w, "%snamespace %s: (%d decls)\n", prefix, n.Name, len(n.Decls))
+		keyword := "namespace"
+		if n.Module {
+			keyword = "module"
+		}
+		fmt.Fprintf(w, "%s%s %s: (%d decls)\n", prefix, keyword, n.Name, len(n.Decls))
 		for _, decl := range n.Decls {
 			printDecl(w, decl, level+1)
 		}

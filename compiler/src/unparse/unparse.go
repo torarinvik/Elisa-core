@@ -224,7 +224,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeLine(level+1, formatParamDecl(param))
 		}
 	case *ast.NamespaceDecl:
-		f.writeLine(level, "namespace "+n.Name+":")
+		keyword := "namespace"
+		if n.Module {
+			keyword = "module"
+		}
+		f.writeLine(level, keyword+" "+n.Name+":")
 		for i, nested := range n.Decls {
 			if i > 0 {
 				f.blankLine()
@@ -1457,6 +1461,9 @@ func formatInlineCanStmt(stmt ast.Stmt, permissions []ast.PermissionRef) (string
 	if stmtContainsNodeSugar(stmt) {
 		return "", false
 	}
+	if stmtContainsCanExpr(stmt) {
+		return "", false
+	}
 	wrapExpr := func(expr ast.Expr) string {
 		return formatExprWithSurfacePermissions(expr, permissions)
 	}
@@ -1509,6 +1516,109 @@ func formatInlineCanStmt(stmt ast.Stmt, permissions []ast.PermissionRef) (string
 		return "_ = " + wrapExpr(n.Value), true
 	default:
 		return "", false
+	}
+}
+
+func stmtContainsCanExpr(stmt ast.Stmt) bool {
+	switch n := stmt.(type) {
+	case *ast.AssignStmt:
+		return exprContainsCanExpr(n.Value)
+	case *ast.AsRefAssignStmt:
+		return exprContainsCanExpr(n.Value)
+	case *ast.VarDeclStmt:
+		return exprContainsCanExpr(n.Value)
+	case *ast.TupleBindStmt:
+		return exprContainsCanExpr(n.Value)
+	case *ast.ReturnStmt:
+		return exprContainsCanExpr(n.Value)
+	case *ast.ExprStmt:
+		return exprContainsCanExpr(n.Expr)
+	case *ast.DiscardStmt:
+		return exprContainsCanExpr(n.Value)
+	default:
+		return false
+	}
+}
+
+func exprContainsCanExpr(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case nil:
+		return false
+	case *ast.CanExpr:
+		return true
+	case *ast.AllocExpr:
+		return exprContainsCanExpr(n.Owner) || exprContainsCanExpr(n.Value) || exprContainsCanExpr(n.NodeSpan)
+	case *ast.BinaryExpr:
+		return exprContainsCanExpr(n.Left) || exprContainsCanExpr(n.Right)
+	case *ast.UnaryExpr:
+		return exprContainsCanExpr(n.Operand)
+	case *ast.CallExpr:
+		if exprContainsCanExpr(n.Func) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if exprContainsCanExpr(arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.FieldExpr:
+		return exprContainsCanExpr(n.Object)
+	case *ast.IndexExpr:
+		return exprContainsCanExpr(n.Object) || exprContainsCanExpr(n.Index) || exprContainsCanExpr(n.Fallback)
+	case *ast.SliceExpr:
+		return exprContainsCanExpr(n.Object) || exprContainsCanExpr(n.Start) || exprContainsCanExpr(n.End)
+	case *ast.CastExpr:
+		return exprContainsCanExpr(n.Operand)
+	case *ast.ListLitExpr:
+		for _, item := range n.Elems {
+			if exprContainsCanExpr(item) {
+				return true
+			}
+		}
+		return false
+	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			if exprContainsCanExpr(arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.RecordUpdateExpr:
+		if exprContainsCanExpr(n.Base) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if exprContainsCanExpr(arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			if exprContainsCanExpr(elem) {
+				return true
+			}
+		}
+		return false
+	case *ast.ParenExpr:
+		return exprContainsCanExpr(n.Inner)
+	case *ast.TernaryExpr:
+		return exprContainsCanExpr(n.Value) || exprContainsCanExpr(n.Cond) || exprContainsCanExpr(n.Alt)
+	case *ast.AddrOfExpr:
+		return exprContainsCanExpr(n.Operand)
+	case *ast.SpecializeExpr:
+		return exprContainsCanExpr(n.Operand)
+	case *ast.TryExpr:
+		return exprContainsCanExpr(n.Value) || exprContainsCanExpr(n.Fallback)
+	case *ast.CatchExpr:
+		return exprContainsCanExpr(n.Value)
+	case *ast.UnwrapElseExpr:
+		return exprContainsCanExpr(n.Value) || exprContainsCanExpr(n.Fallback)
+	case *ast.OptionalBindExpr:
+		return exprContainsCanExpr(n.Value)
+	default:
+		return false
 	}
 }
 

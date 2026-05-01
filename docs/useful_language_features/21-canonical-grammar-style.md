@@ -177,7 +177,7 @@ grammar PascalExprGrammar with PascalTreeGrammarEnv:
 Use production-local channels for tuple/struct helper results:
 
 ```context
-assignment_spec() -> (name_id: PascalNameId, value: Pascal.Expr, span: Span):
+assignment_spec() -> (name_id: NameId, value: Pascal.Expr, span: Span):
     channel name_id
     channel value
     channel span

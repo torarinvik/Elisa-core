@@ -73,6 +73,7 @@ type NamespaceDecl struct {
 	Position lexer.Pos
 	Name     string
 	Decls    []Decl
+	Module   bool
 }
 
 type UsingDecl struct {

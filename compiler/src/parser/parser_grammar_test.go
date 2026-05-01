@@ -2592,8 +2592,8 @@ func TestParseGrammarDeclAllowsExprTerm(t *testing.T) {
 
 func TestParseGrammarDeclAllowsTypedExprTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
-    param_name_ids(state: mutable ParserState&) -> darray[PascalNameId]:
-        ids = separated required(seq(.IDENT(param_token), expr[PascalNameId](param_token.lexeme_key)), ParseMessageKey.ExpectedProgramParamName) by .COMMA until(.RPAREN, token(TokenKind.EOF))
+    param_name_ids(state: mutable ParserState&) -> darray[NameId]:
+        ids = separated required(seq(.IDENT(param_token), expr[NameId](param_token.lexeme_key)), ParseMessageKey.ExpectedProgramParamName) by .COMMA until(.RPAREN, token(TokenKind.EOF))
         return ids
 `)
 	if len(errs) != 0 {
@@ -2623,12 +2623,12 @@ func TestParseGrammarDeclAllowsTypedExprTerm(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected second seq term to be typed expr, got %T", seq.Terms[1])
 	}
-	if got := formatTypeExprForTest(t, exprTerm.Type); got != "PascalNameId" {
+	if got := formatTypeExprForTest(t, exprTerm.Type); got != "NameId" {
 		t.Fatalf("expected typed expr term to preserve result type, got %q", got)
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"expr[PascalNameId](param_token.lexeme_key)",
+		"expr[NameId](param_token.lexeme_key)",
 		"return ids",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -2692,8 +2692,8 @@ func TestParseGrammarDeclRejectsFlatMapListTerm(t *testing.T) {
 
 func TestParseGrammarDeclRejectsMapListTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
-    param_names(names: darray[Token]) -> darray[PascalNameId]:
-        ids = maplist[PascalNameId](names, name_token, name_token.lexeme_key)
+    param_names(names: darray[Token]) -> darray[NameId]:
+        ids = maplist[NameId](names, name_token, name_token.lexeme_key)
         return ids
 `)
 	if file == nil {

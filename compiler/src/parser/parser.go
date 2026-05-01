@@ -197,7 +197,7 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peek() == lexer.TOKEN_CONTEXT {
 		return p.parseContextDecl()
 	}
-	if p.peekIdentText("namespace") {
+	if p.peekIdentText("namespace") || p.peekIdentText("module") {
 		return p.parseNamespaceDecl()
 	}
 	if p.peekIdentText("using") {
@@ -601,12 +601,17 @@ func (p *Parser) parseQualifiedDeclName() string {
 
 func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
 	pos := p.cur().Pos
-	p.expectIdentText("namespace")
+	isModule := p.peekIdentText("module")
+	if isModule {
+		p.expectIdentText("module")
+	} else {
+		p.expectIdentText("namespace")
+	}
 	name := p.parseQualifiedDeclName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	decls := p.parseDeclBlock()
-	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls}
+	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: isModule}
 }
 
 func (p *Parser) parseUsingDecl() *ast.UsingDecl {

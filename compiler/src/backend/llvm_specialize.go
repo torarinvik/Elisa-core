@@ -58,30 +58,30 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		params = append(params, substituteType(param, typeBindings, impls))
 	}
 	return &semantic.FuncType{
-		Name:                   base.Name,
-		TypeParams:             nil,
-		RefStorageParams:       nil,
-		RefStateParams:         nil,
-		RegionParams:           append([]string(nil), base.RegionParams...),
-		PermissionParams:       append([]string(nil), base.PermissionParams...),
-		GenericParams:          nil,
-		ShapeParams:            append([]string(nil), base.ShapeParams...),
-		FreshReturnShapeParams: append([]string(nil), base.FreshReturnShapeParams...),
-		InlineMode:             base.InlineMode,
-		HasInlineMode:          base.HasInlineMode,
-		HasNoRecurse:           base.HasNoRecurse,
-		TemperatureMode:        base.TemperatureMode,
-		HasTemperatureMode:     base.HasTemperatureMode,
-		Params:                 params,
-		ExplicitParamCount:     base.ExplicitParamCount,
-		ExplicitParamNames:     append([]string(nil), base.ExplicitParamNames...),
+		Name:                      base.Name,
+		TypeParams:                nil,
+		RefStorageParams:          nil,
+		RefStateParams:            nil,
+		RegionParams:              append([]string(nil), base.RegionParams...),
+		PermissionParams:          append([]string(nil), base.PermissionParams...),
+		GenericParams:             nil,
+		ShapeParams:               append([]string(nil), base.ShapeParams...),
+		FreshReturnShapeParams:    append([]string(nil), base.FreshReturnShapeParams...),
+		InlineMode:                base.InlineMode,
+		HasInlineMode:             base.HasInlineMode,
+		HasNoRecurse:              base.HasNoRecurse,
+		TemperatureMode:           base.TemperatureMode,
+		HasTemperatureMode:        base.HasTemperatureMode,
+		Params:                    params,
+		ExplicitParamCount:        base.ExplicitParamCount,
+		ExplicitParamNames:        append([]string(nil), base.ExplicitParamNames...),
 		ExplicitParamDefaultExprs: append([]ast.Expr(nil), base.ExplicitParamDefaultExprs...),
 		ExplicitParamHasDefault:   append([]bool(nil), base.ExplicitParamHasDefault...),
-		ImplicitParamNames:     append([]string(nil), base.ImplicitParamNames...),
-		Return:                 substituteType(base.Return, typeBindings, impls),
-		Variadic:               base.Variadic,
-		SinkParams:             append([]bool(nil), base.SinkParams...),
-		SinkParamsKnown:        base.SinkParamsKnown,
+		ImplicitParamNames:        append([]string(nil), base.ImplicitParamNames...),
+		Return:                    substituteType(base.Return, typeBindings, impls),
+		Variadic:                  base.Variadic,
+		SinkParams:                append([]bool(nil), base.SinkParams...),
+		SinkParamsKnown:           base.SinkParamsKnown,
 	}
 }
 
@@ -169,6 +169,11 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 	case *semantic.RefStateParamType:
 		if _, ok := bindings[p.Name]; !ok {
 			bindings[p.Name] = actual
+		}
+	case *semantic.IDType:
+		if a, ok := actual.(*semantic.IDType); ok {
+			collectSpecializationBindings(p.Tag, a.Tag, bindings)
+			collectSpecializationBindings(p.Storage, a.Storage, bindings)
 		}
 	case *semantic.RefType:
 		if a, ok := actual.(*semantic.RefType); ok {

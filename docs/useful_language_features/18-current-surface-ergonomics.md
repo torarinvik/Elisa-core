@@ -33,12 +33,12 @@ Optional value types can be used directly in structs and tree payloads, which is
 ```context
 struct SMLDatatypeConstructor:
     constructor_span: SMLSpan
-    name_id: SMLNameId
+    name_id: NameId
     payload_type: SMLType.Type?
 
 tree SML:
     node Decl:
-        Structure(name_id: SMLNameId, signature_path?: SMLNamePath, decls: darray[Decl])
+        Structure(name_id: NameId, signature_path?: SMLNamePath, decls: darray[Decl])
 ```
 
 Constructors use the ordinary optional surface: pass the present value when it exists, or `null` when it does not. Consumers should use `if let` to unwrap the optional.
@@ -848,11 +848,11 @@ Channel synthesis is useful for parser result shapes that want several tracked f
 ```context
 grammar PascalAssignStmtGrammar over Token using ParserState:
     cursor state
-    channel name_id: PascalNameId
+    channel name_id: NameId
     channel value: Pascal.Expr
     channel span: Span = $start.span + $end.span
 
-    assignment_spec() -> (name_id: PascalNameId, value: Pascal.Expr, span: Span):
+    assignment_spec() -> (name_id: NameId, value: Pascal.Expr, span: Span):
         .IDENT(name_token)
         lookahead(.ASSIGN)
         cut
@@ -870,17 +870,17 @@ Typed grammar expression terms are useful when a grammar wants to transform a pa
 grammar PascalProgramHeaderGrammar over Token using ParserState:
     cursor state
 
-    program_header() -> (param_name_ids: darray[PascalNameId]):
+    program_header() -> (param_name_ids: darray[NameId]):
         param_name_ids <- delimited(
             .LPAREN,
-            separated required(seq(.IDENT(param_token), expr[PascalNameId](param_token.lexeme_key)), ParseMessageKey.ExpectedProgramParamName) by .COMMA until(.RPAREN, token(TokenKind.EOF)),
+            separated required(seq(.IDENT(param_token), expr[NameId](param_token.lexeme_key)), ParseMessageKey.ExpectedProgramParamName) by .COMMA until(.RPAREN, token(TokenKind.EOF)),
             .RPAREN,
             ParseMessageKey.ExpectedProgramHeaderRightParen
         )?
         pass
 ```
 
-Without the `[PascalNameId]` annotation, lowering only sees an untyped `expr(...)` term and list inference has to fall back to a helper production.
+Without the `[NameId]` annotation, lowering only sees an untyped `expr(...)` term and list inference has to fall back to a helper production.
 
 Singleton terms and list comprehensions cover the next common parser-helper shapes: wrap one parsed value in a list, transform each element from a parsed list, and filter out unwanted items without bouncing out to hand-written allocation helpers.
 

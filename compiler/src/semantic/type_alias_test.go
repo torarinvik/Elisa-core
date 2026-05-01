@@ -117,3 +117,75 @@ def bad(raw: u32) -> u32:
 		t.Fatalf("expected id unwrap diagnostic, got:\n%s", joined)
 	}
 }
+
+func TestIDTypeInfersGenericTagArgument(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "id_type_generic_infer.llcontext", `
+extern Name
+type NameId = id[Name]
+
+def id_valid[T](value: id[T]) -> bool:
+	return !value != 0
+
+def check(name: NameId) -> bool:
+	return id_valid(name)
+`)
+	sym, ok := result.GlobalScope.Lookup("check")
+	if !ok {
+		t.Fatal("expected check symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected function type, got %T", sym.Type)
+	}
+	if fnType.Return.String() != "bool" {
+		t.Fatalf("expected check return type bool, got %s", fnType.Return)
+	}
+}
+
+func TestModuleScopedTypeAliasesAllowShortHandleNames(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "module_scoped_id_aliases.llcontext", `
+module Pascal:
+    extern Symbol
+    extern Scope
+    type SymbolId = id[Symbol]
+    type ScopeId = id[Scope]
+
+    struct Pair:
+        symbol: SymbolId
+        scope: ScopeId
+
+module SML:
+    extern Symbol
+    type SymbolId = id[Symbol]
+
+using Pascal
+
+def unwrap_symbol(pair: Pair) -> u32:
+    return !pair.symbol
+`)
+	pascalSymbolID, ok := result.NamedTypes["Pascal.SymbolId"].(*IDType)
+	if !ok {
+		t.Fatalf("expected Pascal.SymbolId to resolve to IDType, got %T", result.NamedTypes["Pascal.SymbolId"])
+	}
+	smlSymbolID, ok := result.NamedTypes["SML.SymbolId"].(*IDType)
+	if !ok {
+		t.Fatalf("expected SML.SymbolId to resolve to IDType, got %T", result.NamedTypes["SML.SymbolId"])
+	}
+	if SameType(pascalSymbolID, smlSymbolID) {
+		t.Fatalf("expected module-local SymbolId aliases to remain distinct")
+	}
+	if _, exists := result.NamedTypes["SymbolId"]; exists {
+		t.Fatalf("did not expect module-local SymbolId to leak into the global type namespace")
+	}
+	sym, ok := result.GlobalScope.Lookup("unwrap_symbol")
+	if !ok {
+		t.Fatal("expected unwrap_symbol symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected function type, got %T", sym.Type)
+	}
+	if fnType.Params[0].String() != "Pascal.Pair" {
+		t.Fatalf("expected using Pascal to resolve short Pair to Pascal.Pair, got %s", fnType.Params[0])
+	}
+}

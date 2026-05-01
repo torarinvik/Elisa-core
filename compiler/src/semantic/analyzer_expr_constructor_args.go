@@ -383,6 +383,11 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if _, exists := bindings[p.Name]; !exists {
 			bindings[p.Name] = actual
 		}
+	case *IDType:
+		if act, ok := actual.(*IDType); ok {
+			a.collectTypeBindings(p.Tag, act.Tag, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+			a.collectTypeBindings(p.Storage, act.Storage, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+		}
 	case *ErrorUnionType:
 		if act, ok := actual.(*ErrorUnionType); ok {
 			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)

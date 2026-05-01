@@ -103,6 +103,29 @@ extern register(callback: func() -> void effects[FrontendEffects]) -> void
 	}
 }
 
+func TestUnparseCanBlockDoesNotInlineNestedCanExpr(t *testing.T) {
+	src := `extern g() -> i64 can[Memory.Allocate]
+
+def f() -> i64:
+    can Memory.Allocate:
+        return g() can Memory.Allocate
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	formatted := unparse.FormatFile(file)
+	if strings.Contains(formatted, "can Memory.Allocate can Memory.Allocate") {
+		t.Fatalf("expected unparse not to duplicate nested can permissions, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "can Memory.Allocate:\n        return g() can Memory.Allocate") {
+		t.Fatalf("expected unparse to keep block can around nested can expression, got:\n%s", formatted)
+	}
+	if _, errs := parseSourceFile(t, formatted); len(errs) != 0 {
+		t.Fatalf("expected formatted output to parse cleanly, got %v\n%s", errs, formatted)
+	}
+}
+
 func TestParseEffectDeclAndSignalStmt(t *testing.T) {
 	src := `effect FooEffect: pass
 effect ConsoleEffect: Write Flush
