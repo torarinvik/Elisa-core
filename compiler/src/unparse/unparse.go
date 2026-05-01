@@ -53,6 +53,10 @@ func FormatExpr(expr ast.Expr) string {
 
 func formatPostfixShorthandCastTarget(typ ast.TypeExpr) (string, bool) {
 	switch n := typ.(type) {
+	case *ast.OptionalTypeExpr:
+		if target, ok := formatPostfixShorthandCastTarget(n.Value); ok {
+			return target + "?", true
+		}
 	case *ast.NamedType:
 		switch n.Name {
 		case "void", "bool", "char", "int",

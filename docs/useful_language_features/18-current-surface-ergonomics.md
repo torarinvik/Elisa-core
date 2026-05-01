@@ -1353,15 +1353,23 @@ Current rules:
 - the usual escape forms such as `\n`, `\t`, `\r`, `\0`, `\xNN`, and `\uNNNN` are accepted
 - the builtin `char` type participates in the normal conversion surface, including helper-backed postfix forms such as `.i64()` when available
 
-## Ordinary casts and postfix cast hooks
+## Ordinary casts, low-level casts, and postfix cast hooks
 
-The newer concise cast surface is `as`:
+The concise ordinary cast surface is `as`:
 
 ```context
 alloc: mutable Arena& = &owner as mutable Arena&
 ```
 
-This remains separate from postfix cast hooks:
+Low-level reinterpretation stays deliberately loud:
+
+```context
+raw: void& = bytes.cast[void&]
+words: uintptr& = state_bits.cast[uintptr&]
+field_ref: Field& = node.field.ref[Field&]
+```
+
+This remains separate from postfix value-cast hooks:
 
 ```context
 const enum Op of i8:
@@ -1380,11 +1388,15 @@ def score(op: Op) -> i64:
 Current rules:
 
 - `as` is the concise ordinary cast/coercion surface used throughout self-hosted code
+- `.cast[T]` is the explicit low-level reinterpret cast surface
+- `.ref[T&]` is the explicit lvalue/reference reinterpretation surface
 - postfix shorthand like `op.i64()` dispatches to a visible exact `__cast__(value: Source) -> Target` hook when one exists
+- optional postfix shorthand like `text.int?()` dispatches to a visible exact `__cast__(value: Source) -> int?` hook when one exists
 - ordinary explicit casts continue to use normal cast rules rather than hook dispatch
 - the postfix hook surface is intentionally exact-source/exact-target rather than a broad overload search
+- legacy expression-arrow casts such as `value -> T` are deprecated; `->` remains for function signatures, grammar signatures, effects, and other arrow-shaped declarations
 
-That distinction matters when reading code: `value as T` is an explicit cast, while `value.T()` is a hook-backed conversion shorthand.
+That distinction matters when reading code: `value as T` is an explicit ordinary cast, `value.cast[T]` is a low-level reinterpretation, `slot.ref[T&]` is a reference reinterpretation, `value.T()` is a hook-backed conversion shorthand, and `value.T?()` is the same hook mechanism returning an optional.
 
 ## Checked `ensures` clauses
 

@@ -3,7 +3,11 @@ extern Name
 type NameId = id[Name]
 
 
-global NAME_TABLE_INVALID_ID: NameId = zeroed.cast[NameId]
+def __cast__(value: u32) -> NameId:
+    return value.cast[NameId]
+
+
+global NAME_TABLE_INVALID_ID: NameId = 0u32.NameId()
 const NAME_TABLE_INITIAL_BUCKETS: usize = 16
 
 
@@ -128,7 +132,7 @@ def name_table_rebuild_buckets(table: mutable NameTable&, capacity: usize) -> vo
             for _ in 0..<capacity:
                 table.buckets.push(NameBucket{name_id: NAME_TABLE_INVALID_ID})
             for index in 0..<table.entries.count:
-                table.name_table_insert_existing_bucket((index + 1).u32().cast[NameId])
+                table.name_table_insert_existing_bucket((index + 1).u32().NameId())
 
 
 def name_table_ensure_capacity(table: mutable NameTable&, next_count: usize) -> void:
@@ -166,7 +170,7 @@ def name_table_intern_view(table: mutable NameTable&, text: sview, policy: NameC
         in table.owner:
             original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
             table.entries.push(NameEntry{text: text, owned_text: [], hash: hash, original_hash: original_hash})
-            name_id: NameId = table.entries.count.u32().cast[NameId]
+            name_id: NameId = table.entries.count.u32().NameId()
             table.name_table_insert_existing_bucket(name_id)
             return name_id
 
@@ -188,7 +192,7 @@ def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameC
             owned_text.push(0)
             stable_text: sview = owned_text.items.cast[cstr][0:text.len]
             table.entries.push(NameEntry{text: stable_text, owned_text: owned_text, hash: hash, original_hash: original_hash})
-            name_id: NameId = table.entries.count.u32().cast[NameId]
+            name_id: NameId = table.entries.count.u32().NameId()
             table.name_table_insert_existing_bucket(name_id)
             return name_id
 

@@ -647,8 +647,11 @@ func (p *Parser) parseChildrenCallArgs() ([]ast.Expr, []string) {
 	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	for {
 		arg := p.parseExpr()
-		if p.match(lexer.TOKEN_TO) {
+		if p.peek() == lexer.TOKEN_TO {
+			pos := p.cur().Pos
+			p.advance()
 			target := p.parseTypeExpr()
+			p.errorAt(pos, "legacy children cast syntax `expr to T` is deprecated; use `expr as T` instead")
 			arg = &ast.CastExpr{Position: arg.Pos(), Operand: arg, Target: target, Origin: ast.CastExprOriginToSyntax}
 		}
 		args = append(args, arg)
@@ -1713,6 +1716,16 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.pos = savedCastPos
 			}
 
+			if isPostfixShorthandCastTarget(field) && p.peek() == lexer.TOKEN_QUESTION && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN && p.tokens[p.pos+2].Kind == lexer.TOKEN_RPAREN {
+				castPos := pos
+				p.advance()
+				p.advance()
+				p.advance()
+				target := &ast.OptionalTypeExpr{Position: castPos, Value: &ast.NamedType{Position: castPos, Name: field}}
+				expr = &ast.CastExpr{Position: castPos, Operand: expr, Target: target, Origin: ast.CastExprOriginPostfixShorthand}
+				continue
+			}
+
 			if isPostfixShorthandCastTarget(field) && p.peek() == lexer.TOKEN_LPAREN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
 				castPos := pos
 				p.advance()
@@ -1728,6 +1741,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 			pos := p.cur().Pos
 			p.advance()
 			target := p.parseTypeExpr()
+			p.errorAt(pos, "legacy expression arrow cast `expr -> T` is deprecated; use `expr as T`, `expr.T()`, or `expr.cast[T]` instead")
 			expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target}
 
 		case lexer.TOKEN_LBRACE:

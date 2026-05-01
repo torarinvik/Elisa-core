@@ -8,7 +8,7 @@ Repository-level release notes now live in `../CHANGELOG.md`.
 
 The current unreleased highlights include:
 
-- canonical cast formatting now prefers `value as Type` for ordinary `to` / postfix-shorthand casts while keeping explicit `.cast[Type]` as the loud low-level escape hatch
+- canonical cast formatting now prefers `value as Type` for ordinary casts, postfix `value.Type()` / `value.Type?()` for hook-backed value conversions, and explicit `.cast[Type]` / `.ref[Type&]` for loud low-level reinterpretation; legacy expression-arrow casts are deprecated
 - side-table storage for packed-enum `common:` fields via `@storage(side_table)`
 - first-class `effect` declarations plus explicit `signal` statements for effect tracking
 - the earlier `refstorage` / `refstate` generic work across parsing, semantics, specialization, lowering, and generated C headers

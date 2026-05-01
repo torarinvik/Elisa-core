@@ -2128,7 +2128,7 @@ func TestParseListComprehensionExpr(t *testing.T) {
 }
 
 func TestParseChildrenToOverrideExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt as Lua.Node).node\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -2149,11 +2149,18 @@ func TestParseChildrenToOverrideExpr(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected to-override arg, got %T", call.Args[0])
 	}
-	if cast.Origin != ast.CastExprOriginToSyntax {
-		t.Fatalf("expected to-syntax cast origin, got %v", cast.Origin)
+	if cast.Origin != ast.CastExprOriginAsSyntax {
+		t.Fatalf("expected as-syntax cast origin, got %v", cast.Origin)
 	}
 	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "children(stmt as Lua.Node)") {
-		t.Fatalf("expected unparse to canonicalize to-override syntax to as-cast syntax, got:\n%s", formatted)
+		t.Fatalf("expected unparse to preserve children as-cast syntax, got:\n%s", formatted)
+	}
+}
+
+func TestParseRejectsLegacyChildrenToCastSyntax(t *testing.T) {
+	_, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
+	if !strings.Contains(strings.Join(errs, "\n"), "legacy children cast syntax `expr to T` is deprecated") {
+		t.Fatalf("expected legacy children to-cast diagnostic, got %v", errs)
 	}
 }
 
@@ -2176,6 +2183,31 @@ func TestParsePostfixShorthandCastFormatsAsPostfixShorthand(t *testing.T) {
 	}
 	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "return value.u32()") {
 		t.Fatalf("expected unparse to preserve postfix cast shorthand, got:\n%s", formatted)
+	}
+}
+
+func TestParsePostfixOptionalShorthandCastFormatsAsPostfixShorthand(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: i64) -> u32?:\n    return value.u32?()\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cast, ok := ret.Value.(*ast.CastExpr)
+	if !ok {
+		t.Fatalf("expected cast expr, got %T", ret.Value)
+	}
+	if cast.Origin != ast.CastExprOriginPostfixShorthand {
+		t.Fatalf("expected postfix shorthand cast origin, got %v", cast.Origin)
+	}
+	if _, ok := cast.Target.(*ast.OptionalTypeExpr); !ok {
+		t.Fatalf("expected optional cast target, got %T", cast.Target)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "return value.u32?()") {
+		t.Fatalf("expected unparse to preserve optional postfix cast shorthand, got:\n%s", formatted)
 	}
 }
 

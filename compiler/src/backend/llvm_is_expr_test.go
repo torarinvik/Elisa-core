@@ -580,7 +580,7 @@ func TestGenerateLLVMIRLowersMixedTreeChildrenToRootLoops(t *testing.T) {
 
 def count_children(stmt: Lua.Stmt) -> i64:
 	total: mutable i64 = 0
-	for child in children(stmt to Lua.Node):
+	for child in children(stmt as Lua.Node):
 		total <- total + child.kind.i64()
 	return total
 `
@@ -659,7 +659,7 @@ def has_else(stmt: Lua.Stmt.IfStmt) -> bool:
 
 def count_children(stmt: Lua.Stmt) -> i64:
 	total: mutable i64 = 0
-	for child in children(stmt to Lua.Node):
+	for child in children(stmt as Lua.Node):
 		total <- total + child.kind.i64()
 	return total
 

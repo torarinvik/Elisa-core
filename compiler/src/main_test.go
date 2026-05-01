@@ -2126,7 +2126,7 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "invalid_escape.llcontext")
-	if err := os.WriteFile(fixturePath, []byte("def bad() -> u8&:\n    return \"oops\\q\" -> u8&\n"), 0o644); err != nil {
+	if err := os.WriteFile(fixturePath, []byte("def bad() -> u8&:\n    return \"oops\\q\".cast[u8&]\n"), 0o644); err != nil {
 		t.Fatalf("failed to write invalid fixture: %v", err)
 	}
 
@@ -2396,7 +2396,7 @@ func TestRunCLIPrintsConstEnumInAST(t *testing.T) {
 func TestRunCLICompilesConstEnumSourceToLLVM(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "const_enum_llvm.llcontext")
-	src := "const enum JsonNodeKind of i8:\n    Invalid = -1\n    Null\n    Bool = 1\n    String\n\nconst DEFAULT_KIND: JsonNodeKind = JsonNodeKind.String\n\ndef kind_raw(kind: JsonNodeKind) -> i8:\n    return kind.i8()\n\ndef is_string(kind: JsonNodeKind) -> bool:\n    return kind == JsonNodeKind.String\n\ndef default_kind() -> JsonNodeKind:\n    return DEFAULT_KIND\n\ndef make_kind() -> JsonNodeKind:\n    return 1i8 -> JsonNodeKind\n"
+	src := "const enum JsonNodeKind of i8:\n    Invalid = -1\n    Null\n    Bool = 1\n    String\n\nconst DEFAULT_KIND: JsonNodeKind = JsonNodeKind.String\n\ndef kind_raw(kind: JsonNodeKind) -> i8:\n    return kind.i8()\n\ndef is_string(kind: JsonNodeKind) -> bool:\n    return kind == JsonNodeKind.String\n\ndef default_kind() -> JsonNodeKind:\n    return DEFAULT_KIND\n\ndef make_kind() -> JsonNodeKind:\n    return 1i8.JsonNodeKind()\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write const enum LLVM fixture: %v", err)
 	}
@@ -2733,6 +2733,35 @@ func TestRunCLICompilesPostfixCastHookToHookCall(t *testing.T) {
 	}
 }
 
+func TestRunCLICompilesOptionalPostfixCastHookToHookCall(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "optional_postfix_cast_hook_llvm.llcontext")
+	src := "enum Op:\n    Add\n    Sub\n\ndef __cast__(op: Op) -> i64?:\n    if op == Op.Add:\n        return 10\n    return null\n\ndef via_optional_postfix(op: Op) -> i64?:\n    return op.i64?()\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write optional postfix cast hook LLVM fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"define %Optional__i64 @cast__Op__to__i64__L5_C1(",
+		"define %Optional__i64 @via_optional_postfix(",
+		"call %Optional__i64 @cast__Op__to__i64__L5_C1(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLICompilesMultiplePostfixCastHooksInOneFile(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "multiple_postfix_cast_hooks.llcontext")
@@ -2777,8 +2806,8 @@ func TestRunCLIRejectsArrowCastWhenOnlyPostfixHookExists(t *testing.T) {
 	if exitCode == 0 {
 		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "invalid cast from Op to i64") {
-		t.Fatalf("expected explicit cast diagnostic, got:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "legacy expression arrow cast `expr -> T` is deprecated") {
+		t.Fatalf("expected legacy arrow cast diagnostic, got:\n%s", stderr.String())
 	}
 }
 

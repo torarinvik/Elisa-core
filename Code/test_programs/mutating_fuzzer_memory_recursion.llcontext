@@ -224,7 +224,7 @@ def mutate_181_checked_write_into(buffer: u8&, size: usize, format: static u8&) 
 
 def mutate_182_alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError]:
     buffer: heap u8& = alloc_bytes(32) else raise MemoryError.OutOfMemory
-    written: int = try mutate_181_checked_write_into(buffer -> u8&, 32, "num=%d")
+    written: int = try mutate_181_checked_write_into(buffer.cast[u8&], 32, "num=%d")
     sfree_bytes(buffer)
     return written
 
@@ -234,30 +234,30 @@ def mutate_183_format_heap_buffer_or_minus_one() -> int:
 
 
 def mutate_184_static_as_any_bits(format: static u8&) -> uintptr:
-    return format -> u8&.uintptr()
+    return format.cast[u8&].uintptr()
 
 
 def mutate_185_heap_as_any_bits() -> uintptr error[MemoryError]:
     ptr: heap u8& = alloc_bytes(24) else raise MemoryError.OutOfMemory
-    bits: uintptr = ptr -> u8&.uintptr()
+    bits: uintptr = ptr.cast[u8&].uintptr()
     sfree_bytes(ptr)
     return bits
 
 
 def mutate_186_zero_any_void() -> void&:
-    return 0 -> void&
+    return 0.cast[void&]
 
 
 def mutate_187_any_void_offset_bits(offset: usize) -> uintptr error[MemoryError]:
     bytes: heap u8& = alloc_bytes(24) else raise MemoryError.OutOfMemory
-    raw: void& = bytes -> void&
-    bits: uintptr = (raw -> u8& + offset).uintptr()
+    raw: void& = bytes.cast[void&]
+    bits: uintptr = (raw.cast[u8&] + offset).uintptr()
     sfree_bytes(bytes)
     return bits
 
 
 def mutate_188_recursive_static_ptr_bits(depth: int, text: static u8&) -> uintptr:
-    bits: uintptr = text -> u8&.uintptr()
+    bits: uintptr = text.cast[u8&].uintptr()
     if depth <= 0:
         return bits
     return bits + mutate_188_recursive_static_ptr_bits(depth - 1, text)
@@ -269,15 +269,15 @@ def mutate_189_use_recursive_static_ptr_bits() -> uintptr:
 
 def mutate_190_heap_node_any_roundtrip() -> bool error[MemoryError]:
     node: heap HeapNode& = try mutate_151_require_heap_node()
-    same: bool = node -> HeapNode&.uintptr() == node.uintptr()
+    same: bool = node.cast[HeapNode&].uintptr() == node.uintptr()
     sfree_heap_node(node)
     return same
 
 
 def mutate_191_heap_bytes_format_bits() -> uintptr error[MemoryError, FormatError]:
     buffer: heap u8& = alloc_bytes(64) else raise MemoryError.OutOfMemory
-    try mutate_181_checked_write_into(buffer -> u8&, 64, "v=%d")
-    bits: uintptr = buffer -> u8&.uintptr()
+    try mutate_181_checked_write_into(buffer.cast[u8&], 64, "v=%d")
+    bits: uintptr = buffer.cast[u8&].uintptr()
     sfree_bytes(buffer)
     return bits
 
@@ -290,7 +290,7 @@ def mutate_192_recursive_any_ptr_walk(depth: int, ptr: u8&) -> uintptr:
 
 
 def mutate_193_use_static_any_ptr_walk() -> uintptr:
-    return mutate_192_recursive_any_ptr_walk(2, "abc" -> u8&)
+    return mutate_192_recursive_any_ptr_walk(2, "abc".cast[u8&])
 
 
 def mutate_194_recursive_heap_offset_sum(depth: int, ptr: heap u8&) -> uintptr:
@@ -319,24 +319,23 @@ def mutate_197_use_recursive_static_pair() -> int:
 
 
 def mutate_198_recursive_any_void_bits(depth: int, ptr: void&) -> uintptr:
-    bits: uintptr = ptr -> u8&.uintptr()
+    bits: uintptr = ptr.cast[u8&].uintptr()
     if depth <= 0:
         return bits
-    return bits + mutate_198_recursive_any_void_bits(depth - 1, (ptr -> u8& + 1) -> void&)
+    return bits + mutate_198_recursive_any_void_bits(depth - 1, (ptr.cast[u8&] + 1).cast[void&])
 
 
 def mutate_199_any_void_from_heap_bytes() -> uintptr error[MemoryError]:
     ptr: heap u8& = alloc_bytes(40) else raise MemoryError.OutOfMemory
-    bits: uintptr = mutate_198_recursive_any_void_bits(2, ptr -> void&)
+    bits: uintptr = mutate_198_recursive_any_void_bits(2, ptr.cast[void&])
     sfree_bytes(ptr)
     return bits
 
 
 def mutate_200_mixed_memory_combo(depth: int) -> uintptr error[MemoryError, FormatError]:
     ptr: heap u8& = alloc_bytes(48) else raise MemoryError.OutOfMemory
-    try mutate_181_checked_write_into(ptr -> u8&, 48, "mix=%d")
+    try mutate_181_checked_write_into(ptr.cast[u8&], 48, "mix=%d")
     bits: uintptr = mutate_194_recursive_heap_offset_sum(depth, ptr) + mutate_188_recursive_static_ptr_bits(depth, "mix")
     sfree_bytes(ptr)
     return bits
-
 
