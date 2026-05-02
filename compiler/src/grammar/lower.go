@@ -3706,6 +3706,24 @@ func listTypeExpr(pos lexer.Pos, elemType ast.TypeExpr) ast.TypeExpr {
 	return &ast.BuiltinTypeExpr{Position: pos, Name: "darray", TypeArgs: []ast.TypeExpr{elemType}}
 }
 
+func optionalTypeExpr(pos lexer.Pos, valueType ast.TypeExpr) ast.TypeExpr {
+	if valueType == nil {
+		valueType = builtinTypeExpr(pos, "bool")
+	}
+	return &ast.OptionalTypeExpr{Position: pos, Value: valueType}
+}
+
+func nullOptionalExpr(pos lexer.Pos, valueType ast.TypeExpr) ast.Expr {
+	return &ast.CastExpr{Position: pos, Operand: &ast.NullLit{Position: pos}, Target: optionalTypeExpr(pos, valueType), Origin: ast.CastExprOriginAsSyntax}
+}
+
+func presentOptionalExpr(pos lexer.Pos, value ast.Expr, valueType ast.TypeExpr) ast.Expr {
+	if value == nil {
+		value = zeroedCastExpr(pos, valueType)
+	}
+	return &ast.CastExpr{Position: pos, Operand: value, Target: optionalTypeExpr(pos, valueType), Origin: ast.CastExprOriginAsSyntax}
+}
+
 func grammarListElementTypeExpr(valueType ast.TypeExpr) ast.TypeExpr {
 	builtin, ok := grammarValueTypeExpr(valueType).(*ast.BuiltinTypeExpr)
 	if !ok || builtin.Name != "darray" || len(builtin.TypeArgs) != 1 {
@@ -4121,6 +4139,23 @@ type loweredAttempt struct {
 	Matched   ast.Expr
 	Committed ast.Expr
 	Value     ast.Expr
+}
+
+type grammarTermFacts struct {
+	ValueType ast.TypeExpr
+	CanFail   bool
+	Nullable  bool
+	First     []ast.GrammarTerm
+}
+
+func (ctx *statefulLowerContext) termFacts(term ast.GrammarTerm) grammarTermFacts {
+	first, nullable := grammarFirstTermsForTerm(term, ctx.productionMap, nil)
+	return grammarTermFacts{
+		ValueType: ctx.inferTermType(term),
+		CanFail:   ctx.termCanFail(term),
+		Nullable:  nullable,
+		First:     first,
+	}
 }
 
 func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snapshotName string) []ast.Stmt {
@@ -5026,8 +5061,10 @@ func (ctx *statefulLowerContext) lowerChoiceOptions(options []ast.GrammarTerm, s
 
 func (ctx *statefulLowerContext) lowerOptionalAttempt(term *ast.GrammarOptionalTerm) loweredAttempt {
 	inner := ctx.lowerAttempt(term.Term)
+	innerFacts := ctx.termFacts(term.Term)
 	snapshotName := ctx.fresh("optional_cursor")
-	termType := ctx.inferTermType(term.Term)
+	innerType := innerFacts.ValueType
+	termType := optionalTypeExpr(term.Position, innerType)
 	matchedName := ctx.fresh("optional_matched")
 	committedName := ctx.fresh("optional_committed")
 	valueName := ctx.fresh("optional_value")
@@ -5035,10 +5072,10 @@ func (ctx *statefulLowerContext) lowerOptionalAttempt(term *ast.GrammarOptionalT
 		&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
 		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: true}},
 		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
-		&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: zeroedCastExpr(term.Position, termType)},
+		&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: nullOptionalExpr(term.Position, innerType)},
 	}
 	stms = append(stms, inner.Stmts...)
-	stms = append(stms, &ast.IfStmt{Position: term.Position, Cond: inner.Matched, Then: append(markCommittedStmts(committedName, term.Position, inner.Committed), &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: valueName}, Value: inner.Value}), Else: []ast.Stmt{&ast.IfStmt{Position: term.Position, Cond: inner.Committed, Then: []ast.Stmt{&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.BoolLit{Position: term.Position, Value: false}}, committedAssignTrueStmt(committedName, term.Position)}, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, term.Position)}}}})
+	stms = append(stms, &ast.IfStmt{Position: term.Position, Cond: inner.Matched, Then: append(markCommittedStmts(committedName, term.Position, inner.Committed), &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: valueName}, Value: presentOptionalExpr(term.Position, inner.Value, innerType)}), Else: []ast.Stmt{&ast.IfStmt{Position: term.Position, Cond: inner.Committed, Then: []ast.Stmt{&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.BoolLit{Position: term.Position, Value: false}}, committedAssignTrueStmt(committedName, term.Position)}, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, term.Position)}}}})
 	return loweredAttempt{
 		Stmts:     stms,
 		Matched:   &ast.Ident{Position: term.Position, Name: matchedName},
@@ -5523,7 +5560,7 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 	case *ast.GrammarCutTerm:
 		return builtinTypeExpr(n.Position, "bool")
 	case *ast.GrammarOptionalTerm:
-		return ctx.inferTermType(n.Term)
+		return optionalTypeExpr(n.Position, ctx.termFacts(n.Term).ValueType)
 	case *ast.GrammarListTerm:
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
 	case *ast.GrammarRepeatTerm:

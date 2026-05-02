@@ -1173,7 +1173,7 @@ func TestLowerFileStatefulOptionalAndRepeatSuffixShorthandLowerThroughExistingTe
 	    items() -> darray[Token]:
 	        values = .IDENT* until(")", token(TokenKind.EOF))
 	        return values
-	    maybe_item() -> Token:
+	    maybe_item() -> Token?:
 	        value = .IDENT?
 	        return value
 	`)
@@ -1183,7 +1183,9 @@ func TestLowerFileStatefulOptionalAndRepeatSuffixShorthandLowerThroughExistingTe
 		"state.expect_kind(TokenKind.IDENT)",
 		"state.current_token().kind == token_kind_for_text(\")\")",
 		"__grammar_optional_cursor_",
-		"def maybe_item(state: mutable ParserState&) -> Token:",
+		"def maybe_item(state: mutable ParserState&) -> Token?:",
+		"null as Token?",
+		"as Token?",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered shorthand production to contain %q, got:\n%s", want, formatted)
