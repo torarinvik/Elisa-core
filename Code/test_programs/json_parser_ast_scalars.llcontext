@@ -1,5 +1,5 @@
 def json_empty_view() -> sview:
-    return string_view("", 0, 0)
+    return sview("", 0, 0)
 def json_ast_is_number_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
     if node in store as JsonNode.Num:
         return true
@@ -60,11 +60,11 @@ def json_ast_source_view_with_len(source: u8&, source_len: usize, node: JsonNode
     text_lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
     if text_lexeme.checksum >= 0:
         start: i64 = text_lexeme.source_offset.i64()
-        return string_view(source, start, start + text_lexeme.source_len.i64())
+        return sview(source, start, start + text_lexeme.source_len.i64())
     number_lexeme: JsonLexemeResult = json_ast_number_lexeme(source, source_len, node, store)
     if number_lexeme.checksum >= 0:
         start: i64 = number_lexeme.source_offset.i64()
-        return string_view(source, start, start + number_lexeme.source_len.i64())
+        return sview(source, start, start + number_lexeme.source_len.i64())
     return json_empty_view()
 def json_ast_source_view(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     return json_ast_source_view_with_len(source, runtime_strlen(source), node, store)
@@ -72,7 +72,7 @@ def json_ast_number_view_with_len(source: u8&, source_len: usize, node: JsonNode
     lexeme: JsonLexemeResult = json_ast_number_lexeme(source, source_len, node, store)
     if lexeme.checksum >= 0:
         start: i64 = lexeme.source_offset.i64()
-        return string_view(source, start, start + lexeme.source_len.i64())
+        return sview(source, start, start + lexeme.source_len.i64())
     return json_empty_view()
 def json_ast_number_view(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     return json_ast_number_view_with_len(source, runtime_strlen(source), node, store)

@@ -275,7 +275,7 @@ def frontend_tokenize_test_source(a: mutable Arena&, source: u8&) -> darray[Fron
 
 def frontend_expect_lookup_keyword(text: static u8&, expected: FrontendTokenKind) -> bool:
     text_ptr: u8& = text as u8&
-    return frontend_kind_eq(frontend_lookup_keyword(string_view(text_ptr, 0, runtime_strlen(text_ptr).i64())), expected)
+    return frontend_kind_eq(frontend_lookup_keyword(sview(text_ptr, 0, runtime_strlen(text_ptr).i64())), expected)
 
 
 def frontend_expect_lookup_keyword_entries(entries: FrontendKeywordEntry&, count: usize) -> bool:

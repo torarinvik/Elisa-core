@@ -3164,19 +3164,19 @@ func TestGenerateLLVMIRSpecializesSameExtentRuntimeStringEquality(t *testing.T) 
 	data: mutable u8&
 	len: mutable i64
 
-def string_view(value: u8&?, start: i64, end: i64) -> StringView:
+def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	return StringView("" as u8&, end - start)
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
-	return string_view(value, start, end)
+	return sview(value, start, end)
 
 def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
-	return string_view(view.data, 0, end)
+	return sview(view.data, 0, end)
 
 def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
-	return string_view(view.data, start, view.len)
+	return sview(view.data, start, view.len)
 
 def same_shape_text(left: cstr[row], right: cstr[row]) -> bool:
 	return left == right
@@ -3188,7 +3188,7 @@ def same_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 
 def fresh_disjoint_raw_views() -> bool:
 	region scratch(1024)
-	return string_view(new[scratch] 1, 0, 1) == string_view(new[scratch] 2, 0, 1)
+	return sview(new[scratch] 1, 0, 1) == sview(new[scratch] 2, 0, 1)
 
 def split_disjoint_views(text: cstr[row]) -> bool:
 	base: StringView = ctx_string_view(text, 0, 4)
@@ -5263,13 +5263,13 @@ extern alloc_perm(size: i64) -> heap void&
 extern register_perm_string_len(ptr: u8&?, len: usize)
 extern intern_small_string(src: u8&, len: usize) -> heap u8&
 
-def string_view(value: u8&?, start: i64, end: i64) -> StringView:
+def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	src: u8& = value if value != null else "" as u8&
 	_ = start
 	return StringView(src, end)
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
-	return string_view(value, start, end)
+	return sview(value, start, end)
 
 def string_view_copy(view: StringView) -> heap u8&:
 	_ = view

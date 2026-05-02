@@ -8,7 +8,7 @@ def json_ast_string_view_with_len(source: u8&, source_len: usize, node: JsonNode
         if lexeme.source_len < 2:
             return json_empty_view()
         start: i64 = lexeme.source_offset.i64() + 1
-        return string_view(source, start, start + (lexeme.source_len - 2).i64())
+        return sview(source, start, start + (lexeme.source_len - 2).i64())
     return json_empty_view()
 def json_ast_string_view(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     return json_ast_string_view_with_len(source, runtime_strlen(source), node, store)

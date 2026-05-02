@@ -5,7 +5,7 @@ def frontend_peek_char_at(lexer: FrontendLexer&, offset: usize) -> i64:
 def frontend_make_source_view(source: u8&, start: usize, end: usize) -> sview:
     if end <= start:
         return frontend_empty_view()
-    return string_view(source, start.i64(), end.i64())
+    return sview(source, start.i64(), end.i64())
 @inline(always)
 def frontend_advance_char(lexer: mutable FrontendLexer&) -> i64:
     if frontend_is_eof(lexer):

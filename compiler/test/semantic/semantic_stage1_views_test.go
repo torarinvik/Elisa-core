@@ -12,7 +12,7 @@ func TestAnalyzeStage1StringViewWrappersSupportBoundedViews(t *testing.T) {
 	data: mutable u8&
 	len: mutable i64
 
-def string_view(value: u8&?, start: i64, end: i64) -> StringView:
+def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	return StringView("", 0)
 
 def string_view_len(view: StringView) -> i64:
@@ -25,7 +25,7 @@ def string_view_copy(view: StringView) -> u8&:
 	return view.data
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
-	return string_view(value, start, end)
+	return sview(value, start, end)
 
 def ctx_string_view_len(view: StringView) -> i64:
 	return string_view_len(view)
@@ -60,7 +60,7 @@ func TestAnalyzeStage1StringViewHelpersAcceptSubviewAndEquality(t *testing.T) {
 	data: mutable u8&
 	len: mutable i64
 
-def string_view(value: u8&?, start: i64, end: i64) -> StringView:
+def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	return StringView("", 0)
 
 def string_view_len(view: StringView) -> i64:
@@ -76,7 +76,7 @@ def string_views_eq(lhs: StringView, rhs: StringView) -> int:
 	return 1
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
-	return string_view(value, start, end)
+	return sview(value, start, end)
 
 def ctx_string_view_len(view: StringView) -> i64:
 	return string_view_len(view)

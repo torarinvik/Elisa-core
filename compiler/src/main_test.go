@@ -3373,7 +3373,7 @@ func TestRunCLIAcceptsBareSViewLocalAnnotationInObjectBuild(t *testing.T) {
 	src := fmt.Sprintf(`# include %q
 
 def local_view(src: u8&) -> i64:
-	text: sview = string_view(src, 0, 1)
+	text: sview = sview(src, 0, 1)
 	return text.len
 `, runtimeInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

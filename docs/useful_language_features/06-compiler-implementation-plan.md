@@ -461,7 +461,7 @@ def rt_concat2(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_resu
     return text
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
-    return string_view(value, start, end)
+    return sview(value, start, end)
 
 def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
     return string_view_copy(view)

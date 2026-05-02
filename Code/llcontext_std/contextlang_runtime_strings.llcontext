@@ -198,7 +198,7 @@ def string_slice(value: u8&?, start: i64, end: i64) -> u8&:
         register_perm_string_len(out, out_len)
         return out
 
-def string_view(value: u8&?, start: i64, end: i64) -> sview:
+def sview(value: u8&?, start: i64, end: i64) -> sview:
     src: u8& = value if value != null else ""
     len: usize = runtime_strlen(src)
 

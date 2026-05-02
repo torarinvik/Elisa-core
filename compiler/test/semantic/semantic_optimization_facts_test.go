@@ -201,7 +201,7 @@ def arena_da_from_view[T](a: Arena&, view: dview[T]) -> darray[T, shape_out]:
 	_ = view
 	return zeroed
 
-def string_view(value: u8&?, start: i64, end: i64) -> StringView:
+def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
@@ -216,7 +216,7 @@ def string_view_copy(view: StringView) -> u8&:
 	return view.data
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
-	return string_view(value, start, end)
+	return sview(value, start, end)
 
 def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	return string_view_slice(view, start, end)
@@ -437,20 +437,20 @@ func TestAnalyzeInfersDisjointnessForNonOverlappingViewsAndFreshAllocations(t *t
 	data: mutable u8&
 	len: mutable i64
 
-def string_view(value: u8&?, start: i64, end: i64) -> StringView:
+def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
 	return StringView("", 0)
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
-	return string_view(value, start, end)
+	return sview(value, start, end)
 
 def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
-	return string_view(view.data, 0, end)
+	return sview(view.data, 0, end)
 
 def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
-	return string_view(view.data, start, view.len)
+	return sview(view.data, start, view.len)
 
 def inspect(text: cstr[row], buf: array[i32, 8]) -> int:
 	left: view[i32, 0, 2] = buf[0:2]
@@ -465,8 +465,8 @@ def inspect(text: cstr[row], buf: array[i32, 8]) -> int:
 	full_prefix: StringView = ctx_string_view_prefix(base, base.len)
 	full_suffix: StringView = ctx_string_view_suffix(base, 0)
 	region scratch(1024)
-	fresh_view_a: StringView = string_view(new[scratch] 3u8, 0, 1)
-	fresh_view_b: StringView = string_view(new[scratch] 4u8, 0, 1)
+	fresh_view_a: StringView = sview(new[scratch] 3u8, 0, 1)
+	fresh_view_b: StringView = sview(new[scratch] 4u8, 0, 1)
 	alloc_a: scratch i32& = new[scratch] 1
 	alloc_b: scratch i32& = new[scratch] 2
 	alloc_alias: scratch i32& = alloc_a

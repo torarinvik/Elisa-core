@@ -78,6 +78,7 @@ def use() -> void:
     raw: u8& = "hello"
     text: cstr = "world"
     view: sview = "slice me"
+    window: sview = sview(text, 0, 3)
     puts("ok")
     take_cstr("name")
     take_view("payload")
@@ -86,6 +87,7 @@ def use() -> void:
 Current rules:
 
 - contextual coercion applies when the expected type is `u8&`, `cstr`, or `sview`
+- use `sview(value, start, end)` when constructing a non-owning view over an existing string/byte pointer
 - ordinary low-level casts remain available for pointer reinterpretation and non-literal values
 - prefer the plain literal in high-level code; keep `.cast[...]` when the expression is not a literal or the conversion is intentionally low-level
 

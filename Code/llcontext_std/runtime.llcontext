@@ -100,7 +100,7 @@ def ctx_string_slice(value: cstr[shape_in], start: i64, end: i64) -> cstr[shape_
     return string_slice(value, start, end) can Memory.Allocate, Abort.Panic
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> sview:
-    return string_view(value, start, end)
+    return sview(value, start, end)
 
 def ctx_string_view_len(view: sview) -> i64:
     return string_view_len(view)
