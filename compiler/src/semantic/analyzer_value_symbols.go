@@ -42,6 +42,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				if n.ElemType != nil {
 					elemType := a.resolveType(n.ElemType)
 					if !IsInvalidType(elemType) {
+						qualifyTokenSetBareMembers(n.Value, n.ElemType)
 						expected = &ArrayType{Elem: elemType, Size: strconv.Itoa(len(n.Value.Elems)), HasConstSize: true, ConstSize: int64(len(n.Value.Elems))}
 					}
 				}
@@ -164,5 +165,38 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
 		})
+	}
+}
+
+func qualifyTokenSetBareMembers(list *ast.ListLitExpr, elemType ast.TypeExpr) {
+	if list == nil || elemType == nil {
+		return
+	}
+	typeName, ok := tokenSetBareMemberQualifierName(elemType)
+	if !ok || typeName == "" {
+		return
+	}
+	for i, elem := range list.Elems {
+		ident, ok := elem.(*ast.Ident)
+		if !ok || ident == nil || ident.Name == "" {
+			continue
+		}
+		list.Elems[i] = &ast.FieldExpr{
+			Position: ident.Position,
+			Object:   &ast.Ident{Position: elemType.Pos(), Name: typeName},
+			Field:    ident.Name,
+		}
+	}
+}
+
+func tokenSetBareMemberQualifierName(elemType ast.TypeExpr) (string, bool) {
+	switch n := elemType.(type) {
+	case *ast.NamedType:
+		if n == nil || n.Name == "" {
+			return "", false
+		}
+		return n.Name, true
+	default:
+		return "", false
 	}
 }

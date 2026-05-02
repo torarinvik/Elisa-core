@@ -1,10 +1,12 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
+	"llcontext/src/unparse"
 )
 
 func TestParseMembershipExprUsesComparisonPrecedence(t *testing.T) {
@@ -42,6 +44,29 @@ func TestParseTokenSetDecl(t *testing.T) {
 	}
 	if decl.Name != "ExprStart" || len(decl.Value.Elems) != 2 {
 		t.Fatalf("expected two-item ExprStart tokenset, got %#v", decl)
+	}
+}
+
+func TestParseTokenSetDeclWithElementTypeAndBareMembers(t *testing.T) {
+	file, errs := parseSourceFile(t, "tokenset ExprStart: TokenKind = [IF, LET]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.TokenSetDecl)
+	if !ok {
+		t.Fatalf("expected tokenset decl, got %T", file.Decls[0])
+	}
+	if decl.Name != "ExprStart" || len(decl.Value.Elems) != 2 {
+		t.Fatalf("expected two-item ExprStart tokenset, got %#v", decl)
+	}
+	if _, ok := decl.ElemType.(*ast.NamedType); !ok {
+		t.Fatalf("expected named elem type, got %T", decl.ElemType)
+	}
+	if ident, ok := decl.Value.Elems[0].(*ast.Ident); !ok || ident.Name != "IF" {
+		t.Fatalf("expected bare IF member to parse as ident, got %#v", decl.Value.Elems[0])
+	}
+	if formatted := unparse.FormatFile(file); !strings.Contains(formatted, "tokenset ExprStart: TokenKind = [IF, LET]") {
+		t.Fatalf("expected typed token set to unparse with bare members, got:\n%s", formatted)
 	}
 }
 

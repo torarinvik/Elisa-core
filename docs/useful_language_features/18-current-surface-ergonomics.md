@@ -204,15 +204,15 @@ const enum TokenKind of u32:
     INTEGER
     STRING
 
-tokenset ExprStart = [
-    TokenKind.IF,
-    TokenKind.CASE,
-    TokenKind.FN,
-    TokenKind.LET,
-    TokenKind.LPAREN,
-    TokenKind.IDENT,
-    TokenKind.INTEGER,
-    TokenKind.STRING,
+tokenset ExprStart: TokenKind = [
+    IF,
+    CASE,
+    FN,
+    LET,
+    LPAREN,
+    IDENT,
+    INTEGER,
+    STRING,
 ]
 
 def is_expr_start(kind: TokenKind) -> bool:
@@ -222,7 +222,8 @@ def is_expr_start(kind: TokenKind) -> bool:
 Current rules:
 
 - `tokenset Name = [...]` declares an immutable static list of membership candidates
-- `tokenset Name: TokenKind = [...]` can be used when an explicit element type is useful
+- `tokenset Name: TokenKind = [...]` declares the element type explicitly
+- bare members inside a typed token set are resolved against the element type, so `IF` means `TokenKind.IF`
 - the right-hand side must be a list literal
 - `value in Name` lowers through the same membership path as `value in [...]`
 - this is intended for token classifiers and other small static enum sets; use ordinary arrays when the set is runtime data

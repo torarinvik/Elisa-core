@@ -83,6 +83,37 @@ def keep(kind: TokenKind) -> bool:
 	}
 }
 
+func TestAnalyzeTokenSetDeclQualifiesBareMembersFromElementType(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "membership_tokenset_bare.llcontext", `const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+
+tokenset ExprStart: TokenKind = [IF, LET]
+
+def keep(kind: TokenKind) -> bool:
+    return kind in ExprStart
+`)
+
+	tokenSet := result.File.Decls[1].(*ast.TokenSetDecl)
+	if len(tokenSet.Value.Elems) != 2 {
+		t.Fatalf("expected two token set entries, got %#v", tokenSet.Value.Elems)
+	}
+	first, ok := tokenSet.Value.Elems[0].(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected bare member to be qualified to field expr, got %T", tokenSet.Value.Elems[0])
+	}
+	if object, ok := first.Object.(*ast.Ident); !ok || object.Name != "TokenKind" || first.Field != "IF" {
+		t.Fatalf("expected TokenKind.IF, got %#v", first)
+	}
+	decl := result.File.Decls[2].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	inExpr := ret.Value.(*ast.BinaryExpr)
+	if got := result.ExprTypes[inExpr].String(); got != "bool" {
+		t.Fatalf("expected membership expr type bool, got %s", got)
+	}
+}
+
 func TestAnalyzeMembershipRejectsNonLiteralRightHandSide(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "membership_non_literal.llcontext", `def keep(value: i64, xs: i64[2]) -> bool:
     return value in xs

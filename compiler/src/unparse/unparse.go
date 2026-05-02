@@ -253,7 +253,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.ElemType != nil {
 			line += ": " + formatTypeExpr(n.ElemType)
 		}
-		line += " = " + formatExpr(n.Value)
+		line += " = " + formatTokenSetValue(n)
 		f.writePrefixedMultiline(level, "", line)
 	case *ast.ConstEnumDecl:
 		f.writeLine(level, "const enum "+n.Name+" of "+formatTypeExpr(n.Storage)+":")
@@ -640,6 +640,47 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 		}
 	}
+}
+
+func formatTokenSetValue(decl *ast.TokenSetDecl) string {
+	if decl == nil || decl.Value == nil {
+		return "[]"
+	}
+	typeName, ok := tokenSetFormatterQualifierName(decl.ElemType)
+	if !ok || typeName == "" {
+		return formatExpr(decl.Value)
+	}
+	elems := make([]ast.Expr, 0, len(decl.Value.Elems))
+	for _, elem := range decl.Value.Elems {
+		elems = append(elems, unqualifyTokenSetElemForFormat(elem, typeName))
+	}
+	return formatExpr(&ast.ListLitExpr{Position: decl.Value.Position, Elems: elems})
+}
+
+func tokenSetFormatterQualifierName(elemType ast.TypeExpr) (string, bool) {
+	switch n := elemType.(type) {
+	case *ast.NamedType:
+		if n == nil || n.Name == "" {
+			return "", false
+		}
+		return n.Name, true
+	default:
+		return "", false
+	}
+}
+
+func unqualifyTokenSetElemForFormat(expr ast.Expr, typeName string) ast.Expr {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		if n != nil && !n.Safe && n.Field != "" {
+			if ident, ok := n.Object.(*ast.Ident); ok && ident != nil && ident.Name == typeName {
+				return &ast.Ident{Position: n.Position, Name: n.Field}
+			}
+		}
+	case *ast.ParenExpr:
+		return &ast.ParenExpr{Position: n.Position, Inner: unqualifyTokenSetElemForFormat(n.Inner, typeName)}
+	}
+	return expr
 }
 
 func (f *formatter) writeGrammarInfixTableDecl(level int, table ast.GrammarInfixTableDecl) {
