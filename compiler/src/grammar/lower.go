@@ -656,6 +656,8 @@ func desugarGrammarWhileTerm(term ast.GrammarTerm) ast.GrammarTerm {
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term)}
 	case *ast.GrammarWhenTerm:
 		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: desugarGrammarWhileTerm(n.Then), Else: desugarGrammarWhileTerm(n.Else)}
+	case *ast.GrammarMatchTerm:
+		return desugarGrammarMatchTerm(n)
 	case *ast.GrammarRecoverTerm:
 		return &ast.GrammarRecoverTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: desugarGrammarWhileTerms(n.RecoverUntil), RecoverValue: n.RecoverValue}
 	case *ast.GrammarRequiredTerm:
@@ -696,6 +698,93 @@ func desugarGrammarWhileTerm(term ast.GrammarTerm) ast.GrammarTerm {
 		return &ast.GrammarReturnTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term)}
 	default:
 		return term
+	}
+}
+
+func desugarGrammarMatchTerm(term *ast.GrammarMatchTerm) ast.GrammarTerm {
+	if term == nil {
+		return nil
+	}
+	type dispatchArm struct {
+		position lexer.Pos
+		patterns []ast.MatchPattern
+		term     ast.GrammarTerm
+	}
+	arms := make([]dispatchArm, 0, len(term.Arms))
+	var fallback ast.GrammarTerm
+	for _, arm := range term.Arms {
+		rewrittenTerm := desugarGrammarWhileTerm(arm.Term)
+		wildcard := false
+		patterns := make([]ast.MatchPattern, 0, len(arm.Patterns))
+		for _, pattern := range arm.Patterns {
+			if _, ok := pattern.(*ast.MatchWildcardPattern); ok {
+				wildcard = true
+				continue
+			}
+			patterns = append(patterns, pattern)
+		}
+		if wildcard {
+			fallback = rewrittenTerm
+		}
+		if len(patterns) != 0 {
+			arms = append(arms, dispatchArm{position: arm.Position, patterns: patterns, term: rewrittenTerm})
+		}
+	}
+	if fallback == nil {
+		fallback = &ast.GrammarEmptyTerm{Position: term.Position}
+	}
+	result := fallback
+	for i := len(arms) - 1; i >= 0; i-- {
+		arm := arms[i]
+		result = &ast.GrammarWhenTerm{
+			Position: arm.position,
+			Cond:     grammarMatchPatternsCond(term.Value, arm.patterns),
+			Then:     arm.term,
+			Else:     result,
+		}
+	}
+	return result
+}
+
+func grammarMatchPatternsCond(value ast.Expr, patterns []ast.MatchPattern) ast.Expr {
+	if len(patterns) == 0 {
+		return &ast.BoolLit{Position: value.Pos(), Value: false}
+	}
+	cond := grammarMatchPatternCond(value, patterns[0])
+	for _, pattern := range patterns[1:] {
+		cond = &ast.BinaryExpr{
+			Position: pattern.Pos(),
+			Op:       lexer.TOKEN_OR,
+			Left:     cond,
+			Right:    grammarMatchPatternCond(value, pattern),
+		}
+	}
+	return cond
+}
+
+func grammarMatchPatternCond(value ast.Expr, pattern ast.MatchPattern) ast.Expr {
+	switch n := pattern.(type) {
+	case *ast.MatchVariantPattern:
+		if len(n.Args) != 0 {
+			return &ast.BoolLit{Position: n.Position, Value: false}
+		}
+		return &ast.BinaryExpr{
+			Position: n.Position,
+			Op:       lexer.TOKEN_EQEQ,
+			Left:     value,
+			Right:    lowerQualifiedCalleeExpr(n.Position, n.EnumName+"."+n.Variant),
+		}
+	case *ast.MatchStringLiteralPattern:
+		return &ast.BinaryExpr{
+			Position: n.Position,
+			Op:       lexer.TOKEN_EQEQ,
+			Left:     value,
+			Right:    &ast.StringLit{Position: n.Position, Value: n.Value},
+		}
+	case *ast.MatchLiteralPattern:
+		return &ast.BinaryExpr{Position: n.Position, Op: lexer.TOKEN_EQEQ, Left: value, Right: n.Value}
+	default:
+		return &ast.BoolLit{Position: pattern.Pos(), Value: false}
 	}
 }
 

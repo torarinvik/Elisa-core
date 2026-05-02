@@ -154,6 +154,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.GrammarChoiceTerm{})
 		gob.Register(&ast.GrammarOptionalTerm{})
 		gob.Register(&ast.GrammarWhenTerm{})
+		gob.Register(&ast.GrammarMatchTerm{})
 		gob.Register(&ast.GrammarRecoverTerm{})
 		gob.Register(&ast.GrammarRequiredTerm{})
 		gob.Register(&ast.GrammarDelimitedTerm{})

@@ -2872,6 +2872,48 @@ func TestParseGrammarDeclAllowsWhenTerm(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsMatchTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    type_ref(state: mutable ParserState&) -> PascalType.Type:
+        type_expr = match state.current_token().kind:
+            TokenKind.CARET: pointer_type_ref()
+            TokenKind.PACKED | TokenKind.SET: compact_or_set_type_ref()
+            _: range_type_ref()
+        return type_expr
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	matchTerm, ok := bind.Term.(*ast.GrammarMatchTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be match, got %T", bind.Term)
+	}
+	if len(matchTerm.Arms) != 3 {
+		t.Fatalf("expected three match arms, got %d", len(matchTerm.Arms))
+	}
+	if len(matchTerm.Arms[1].Patterns) != 2 {
+		t.Fatalf("expected second arm to contain two dispatch patterns, got %d", len(matchTerm.Arms[1].Patterns))
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"type_expr = match state.current_token().kind:",
+		"TokenKind.PACKED | TokenKind.SET: compact_or_set_type_ref()",
+		"_: range_type_ref()",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsRequiredTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     ident(state: mutable ParserState&) -> Token:

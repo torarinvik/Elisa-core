@@ -653,6 +653,10 @@ func grammarAliasRefs(term ast.GrammarTerm, aliases map[string]ast.GrammarAliasD
 		case *ast.GrammarWhenTerm:
 			walk(n.Then)
 			walk(n.Else)
+		case *ast.GrammarMatchTerm:
+			for _, arm := range n.Arms {
+				walk(arm.Term)
+			}
 		case *ast.GrammarRecoverTerm:
 			walk(n.Term)
 			for _, until := range n.RecoverUntil {
@@ -936,6 +940,10 @@ func (p *Parser) validateGrammarFnApplicationInTerm(term ast.GrammarTerm, gramma
 	case *ast.GrammarWhenTerm:
 		p.validateGrammarFnApplicationInTerm(n.Then, grammarFns, aliases, tokenSetNames)
 		p.validateGrammarFnApplicationInTerm(n.Else, grammarFns, aliases, tokenSetNames)
+	case *ast.GrammarMatchTerm:
+		for _, arm := range n.Arms {
+			p.validateGrammarFnApplicationInTerm(arm.Term, grammarFns, aliases, tokenSetNames)
+		}
 	case *ast.GrammarRecoverTerm:
 		p.validateGrammarFnApplicationInTerm(n.Term, grammarFns, aliases, tokenSetNames)
 		p.validateGrammarFnApplicationsInTerms(n.RecoverUntil, grammarFns, aliases, tokenSetNames)
@@ -1173,7 +1181,7 @@ func (p *Parser) validateGrammarProductionTerm(productionName string, term ast.G
 		}
 	case *ast.GrammarOptionalTerm, *ast.GrammarRequiredTerm, *ast.GrammarDelimitedTerm,
 		*ast.GrammarLookaheadTerm, *ast.GrammarGuardTerm, *ast.GrammarAttemptTerm,
-		*ast.GrammarWhenTerm, *ast.GrammarRecoverTerm:
+		*ast.GrammarWhenTerm, *ast.GrammarMatchTerm, *ast.GrammarRecoverTerm:
 		// valid
 	case *ast.GrammarListTerm, *ast.GrammarRepeatTerm, *ast.GrammarFlatRepeatTerm, *ast.GrammarWhileTerm, *ast.GrammarSeparatedTerm:
 		// valid
@@ -1516,7 +1524,7 @@ func (p *Parser) parseGrammarReturnValueTerm() ast.GrammarTerm {
 
 func grammarTermNeedsTrailingNewline(term ast.GrammarTerm, next lexer.TokenKind) bool {
 	switch term.(type) {
-	case *ast.GrammarPrecedenceTerm, *ast.GrammarPostfixTerm, *ast.GrammarSuffixTerm, *ast.GrammarSeqTerm:
+	case *ast.GrammarPrecedenceTerm, *ast.GrammarPostfixTerm, *ast.GrammarSuffixTerm, *ast.GrammarSeqTerm, *ast.GrammarMatchTerm:
 		return false
 	case *ast.GrammarChoiceTerm:
 		return next == lexer.TOKEN_NEWLINE
@@ -1665,6 +1673,9 @@ func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {
 	}
 	if p.peekIdentText("when") {
 		return p.parseGrammarWhenTerm()
+	}
+	if p.peek() == lexer.TOKEN_MATCH {
+		return p.parseGrammarMatchTerm()
 	}
 	if p.peekIdentText("required") {
 		return p.parseGrammarRequiredTerm()
@@ -1855,6 +1866,66 @@ func (p *Parser) parseGrammarWhenTerm() ast.GrammarTerm {
 	elseTerm := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarWhenTerm{Position: pos, Cond: cond, Then: thenTerm, Else: elseTerm}
+}
+
+func (p *Parser) parseGrammarMatchTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_MATCH)
+	value := p.parseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	arms := make([]ast.GrammarMatchArm, 0, 4)
+	hasWildcard := false
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		arm := p.parseGrammarMatchArm()
+		for _, pattern := range arm.Patterns {
+			if _, ok := pattern.(*ast.MatchWildcardPattern); ok {
+				hasWildcard = true
+			}
+			p.validateGrammarDispatchPattern(pattern)
+		}
+		arms = append(arms, arm)
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	if !hasWildcard {
+		p.errorAt(pos, "grammar match term must include a wildcard '_' arm")
+	}
+	return &ast.GrammarMatchTerm{Position: pos, Value: value, Arms: arms}
+}
+
+func (p *Parser) parseGrammarMatchArm() ast.GrammarMatchArm {
+	pos := p.cur().Pos
+	patterns := p.parseGrammarDispatchPatterns()
+	p.expect(lexer.TOKEN_COLON)
+	term := p.parseGrammarRecoverableTermValue()
+	p.expectNewline()
+	return ast.GrammarMatchArm{Position: pos, Patterns: patterns, Term: term}
+}
+
+func (p *Parser) parseGrammarDispatchPatterns() []ast.MatchPattern {
+	patterns := []ast.MatchPattern{p.parseNestedMatchPattern()}
+	for p.peek() == lexer.TOKEN_PIPE {
+		p.advance()
+		patterns = append(patterns, p.parseNestedMatchPattern())
+	}
+	return patterns
+}
+
+func (p *Parser) validateGrammarDispatchPattern(pattern ast.MatchPattern) {
+	switch n := pattern.(type) {
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern:
+		return
+	case *ast.MatchVariantPattern:
+		if len(n.Args) == 0 {
+			return
+		}
+	}
+	p.errorAt(pattern.Pos(), "grammar match arms support simple value patterns only")
 }
 
 func (p *Parser) parseGrammarRequiredTerm() ast.GrammarTerm {

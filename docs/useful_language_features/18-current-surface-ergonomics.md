@@ -165,6 +165,30 @@ Current rules:
 - ordinary low-level casts remain available for pointer reinterpretation and non-literal values
 - prefer the plain literal in high-level code; keep `.cast[...]` when the expression is not a literal or the conversion is intentionally low-level
 
+## Grammar match terms
+
+Grammar productions can use block-form `match` as a dispatch term when choosing the next parser branch from an expression such as the current token kind.
+
+```context
+grammar PascalTypeGrammar over Token using ParserState:
+    type_ref() -> PascalType.Type:
+        type_expr = match state.current_token().kind:
+            TokenKind.CARET: pointer_type_ref()
+            TokenKind.PACKED: compact_type_ref()
+            TokenKind.SET: set_type_ref()
+            TokenKind.INDEX | TokenKind.OPERATOR: keyword_named_type_ref()
+            _: range_type_ref()
+        return type_expr
+```
+
+Current rules:
+
+- this is grammar syntax, not a general statement inside a grammar body
+- each arm maps one or more simple value patterns to a grammar term
+- a wildcard `_` arm is required so dispatch remains explicit
+- lowering desugars the grammar match into existing `when(...)` machinery, so the feature is readable surface sugar over the same low-level parser path
+- use this for parser dispatch tables; keep ordinary `match` statements for runtime control flow
+
 ## Grammar recovery policies
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.

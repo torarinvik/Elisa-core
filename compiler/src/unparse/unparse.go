@@ -894,6 +894,10 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 			f.writeBoundChoiceTerm(level, bind.Name, choice)
 			return
 		}
+		if match, ok := bind.Term.(*ast.GrammarMatchTerm); ok {
+			f.writeBoundMatchTerm(level, bind.Name, match)
+			return
+		}
 		if seq, ok := bind.Term.(*ast.GrammarSeqTerm); ok {
 			f.writeBoundSeqTerm(level, bind.Name, seq)
 			return
@@ -916,6 +920,10 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 			f.writeAssignedChoiceTerm(level, assign.Name, choice)
 			return
 		}
+		if match, ok := assign.Term.(*ast.GrammarMatchTerm); ok {
+			f.writeAssignedMatchTerm(level, assign.Name, match)
+			return
+		}
 		if seq, ok := assign.Term.(*ast.GrammarSeqTerm); ok {
 			f.writeAssignedSeqTerm(level, assign.Name, seq)
 			return
@@ -923,6 +931,10 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 	}
 	if choice, ok := term.(*ast.GrammarChoiceTerm); ok && grammarChoiceUsesBlockForm(choice) {
 		f.writeChoiceTerm(level, choice)
+		return
+	}
+	if match, ok := term.(*ast.GrammarMatchTerm); ok {
+		f.writeMatchTerm(level, match)
 		return
 	}
 	if seq, ok := term.(*ast.GrammarSeqTerm); ok {
@@ -957,7 +969,7 @@ func grammarChoiceUsesBlockForm(choice *ast.GrammarChoiceTerm) bool {
 	}
 	for _, option := range choice.Options {
 		switch option.(type) {
-		case *ast.GrammarSeqTerm, *ast.GrammarChoiceTerm, *ast.GrammarWhenTerm, *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
+		case *ast.GrammarSeqTerm, *ast.GrammarChoiceTerm, *ast.GrammarWhenTerm, *ast.GrammarMatchTerm, *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
 			return true
 		}
 	}
@@ -968,7 +980,7 @@ func grammarTermUsesBlockForm(term ast.GrammarTerm) bool {
 	switch n := term.(type) {
 	case *ast.GrammarChoiceTerm:
 		return true
-	case *ast.GrammarSeqTerm, *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
+	case *ast.GrammarSeqTerm, *ast.GrammarMatchTerm, *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
 		return true
 	case *ast.GrammarBindTerm:
 		return grammarTermUsesBlockForm(n.Term)
@@ -1009,6 +1021,43 @@ func (f *formatter) writeChoiceTerm(level int, choice *ast.GrammarChoiceTerm) {
 	f.writeLine(level, "choice:")
 	for _, option := range choice.Options {
 		f.writeGrammarTerm(level+1, option)
+	}
+}
+
+func (f *formatter) writeBoundMatchTerm(level int, name string, match *ast.GrammarMatchTerm) {
+	if match == nil {
+		f.writeLine(level, name+" = <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, name+" = match "+formatExpr(match.Value)+":")
+	f.writeGrammarMatchArms(level+1, match.Arms)
+}
+
+func (f *formatter) writeAssignedMatchTerm(level int, name string, match *ast.GrammarMatchTerm) {
+	if match == nil {
+		f.writeLine(level, name+" <- <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, name+" <- match "+formatExpr(match.Value)+":")
+	f.writeGrammarMatchArms(level+1, match.Arms)
+}
+
+func (f *formatter) writeMatchTerm(level int, match *ast.GrammarMatchTerm) {
+	if match == nil {
+		f.writeLine(level, "<invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, "match "+formatExpr(match.Value)+":")
+	f.writeGrammarMatchArms(level+1, match.Arms)
+}
+
+func (f *formatter) writeGrammarMatchArms(level int, arms []ast.GrammarMatchArm) {
+	for _, arm := range arms {
+		patterns := make([]string, 0, len(arm.Patterns))
+		for _, pattern := range arm.Patterns {
+			patterns = append(patterns, formatMatchPattern(pattern))
+		}
+		f.writeLine(level, strings.Join(patterns, " | ")+": "+formatGrammarTerm(arm.Term))
 	}
 }
 
@@ -1280,6 +1329,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "choice(" + strings.Join(options, ", ") + ")"
 	case *ast.GrammarWhenTerm:
 		return "when(" + formatExpr(n.Cond) + ", " + formatGrammarTerm(n.Then) + ", " + formatGrammarTerm(n.Else) + ")"
+	case *ast.GrammarMatchTerm:
+		return "match " + formatExpr(n.Value) + ": ..."
 	case *ast.GrammarRequiredTerm:
 		return "required(" + formatGrammarTerm(n.Term) + ", " + formatExpr(n.Message) + ")"
 	case *ast.GrammarDelimitedTerm:
