@@ -104,6 +104,17 @@ def score(node: Expr, maybe: i64?, enabled: bool) -> i64:
 `)
 }
 
+func TestAnalyzeIfLetConditionBindsNullableReferenceAsNonNull(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "if_let_nullable_ref_binding.llcontext", `struct Node:
+	value: i64
+
+def read(node: Node&?) -> i64:
+	if let present = node:
+		return present.value
+	return 0
+`)
+}
+
 func TestAnalyzeLetConditionRejectsNonOptionalValue(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "let_bind_non_optional.llcontext", `def bad(value: i64) -> bool:
 	return let item = value

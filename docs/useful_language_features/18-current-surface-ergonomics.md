@@ -58,12 +58,37 @@ def check_format_arg(self: mutable State&, precision: Expr?) -> void:
     precision?.(self.check_expr)
 ```
 
+When the present branch needs a real block, use an `if let` condition binding. The binding is available only in the truthy branch, and the bound value is the non-optional payload.
+
+```context
+def check_else_branch(self: mutable State&, else_stmt: Stmt?) -> void:
+    if let stmt = else_stmt:
+        self.check_stmt(stmt)
+        self.record_reachable_branch(stmt.span)
+```
+
+`if let` also works for nullable references. In the then-branch the binding has the non-null reference type, so ordinary field access and member calls are allowed without repeating a null guard.
+
+```context
+struct Node:
+    value: i64
+
+def read(node: Node&?) -> i64:
+    if let present = node:
+        return present.value
+    return 0
+```
+
 Current rules:
 
+- `if let name = value:` accepts value optionals such as `T?` and nullable references such as `T&?`
+- inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
+- `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
 - `value?.(fn)` unwraps `value` only when it is present and calls `fn(unwrapped_value)`
 - the result is optional unless the transform returns `void`, in which case the whole expression is `void`
 - the callable can be a plain function, an extension/UFCS-style member function such as `self.check_expr`, or another normal callable expression
-- this form is for argument-position transforms; use `expr?.field` and `expr?.method(...)` for member access/calls on the optional payload itself
+- optional transform is for one-call argument-position transforms; prefer `if let` when the present case needs several statements or a named payload
+- use `expr?.field` and `expr?.method(...)` for member access/calls on the optional payload itself
 
 ## Typed string literal coercion
 
