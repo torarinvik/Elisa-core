@@ -95,12 +95,35 @@ if let value = left:
     return value
 ```
 
+`return?` can also be used as a guarded early return with an ordinary boolean or pattern condition. Pattern bindings from the condition are available in the returned expression.
+
+```context
+def int_or_zero(node: Expr) -> i64:
+    return? value if node is Expr.Int(value)
+    return 0
+```
+
+For expression-level branches, use the normal `value if condition else fallback` form. When the condition is a direct pattern test, its bindings are available in the true branch.
+
+```context
+def int_value(node: Expr) -> i64:
+    return value if node is Expr.Int(value) else 0
+```
+
+If the true branch contains another low-precedence operator, wrap it so the intended branch value is clear:
+
+```context
+return (left == right) if rhs is Value.Int(right) else false
+```
+
 Current rules:
 
 - `if let name = value:` accepts value optionals such as `T?` and nullable references such as `T&?`
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
 - `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
 - `return? value` returns the unwrapped payload only when `value` is present; otherwise execution continues with the next statement
+- `return? value if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
+- `value if expr is Pattern(bindings) else fallback` exposes the pattern bindings only in the true branch
 - `value?.(fn)` unwraps `value` only when it is present and calls `fn(unwrapped_value)`
 - the result is optional unless the transform returns `void`, in which case the whole expression is `void`
 - the callable can be a plain function, an extension/UFCS-style member function such as `self.check_expr`, or another normal callable expression

@@ -52,6 +52,47 @@ def is_pi(node: Expr) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersPatternTernaryBindings(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def unwrap(node: Expr) -> i64:
+    return value if node is Expr.Int(value) else 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_pattern_ternary_bindings.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @unwrap(", "ternary.then", "match.pattern.ok", "store i64"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected pattern ternary lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersReturnQuestionPatternGuard(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def unwrap(node: Expr) -> i64:
+    return? value if node is Expr.Int(value)
+    return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_return_question_pattern_guard.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @unwrap(", "if.then", "match.pattern.ok", "store i64"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected return? pattern guard lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersIsExprWithAlternativeValueTargets(t *testing.T) {
 	src := `const enum Tok of i32:
 	LT = 1

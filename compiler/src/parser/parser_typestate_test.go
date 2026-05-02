@@ -42,6 +42,45 @@ func TestParseCharLiteralInConstDecl(t *testing.T) {
 	}
 }
 
+func TestParseReturnQuestionPatternGuard(t *testing.T) {
+	file, errs := parseSourceFile(t, `enum Expr:
+    Int(value: i64)
+    Missing
+
+def unwrap(node: Expr) -> i64:
+    return? value if node is Expr.Int(value)
+    return 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	if len(decl.Body) < 2 {
+		t.Fatalf("expected guarded return plus fallback, got %d statements", len(decl.Body))
+	}
+	stmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected return? guard to lower to if statement, got %T", decl.Body[0])
+	}
+	if _, ok := stmt.Cond.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected pattern guard condition, got %T", stmt.Cond)
+	}
+	if len(stmt.Then) != 1 {
+		t.Fatalf("expected one guarded return, got %d", len(stmt.Then))
+	}
+	ret, ok := stmt.Then[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected guarded return body, got %T", stmt.Then[0])
+	}
+	ident, ok := ret.Value.(*ast.Ident)
+	if !ok || ident.Name != "value" {
+		t.Fatalf("expected guarded return value binding, got %T %#v", ret.Value, ret.Value)
+	}
+}
+
 func TestParseStructDeclWithAggregateStateParam(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Holder[?]:\n    value: i32&\n")
 	if len(errs) != 0 {

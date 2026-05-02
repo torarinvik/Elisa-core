@@ -8972,19 +8972,39 @@ func (s *functionState) emitSizeofExpr(expr *ast.SizeofExpr) (C.LLVMValueRef, se
 
 func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
-	condValue, _, err := s.emitExpr(expr.Cond, s.g.result.NamedTypes["bool"])
+	parentScope := s.scope
+	condScope, hasConditionBindings, err := s.createConditionBindingScope(expr.Cond)
 	if err != nil {
 		return nil, nil, err
+	}
+	if hasConditionBindings {
+		s.scope = condScope
 	}
 	parentBlock := C.LLVMGetInsertBlock(s.builder)
 	thenBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.then"))
 	elseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.else"))
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.end"))
-	C.LLVMBuildCondBr(s.builder, condValue, thenBB, elseBB)
+	if hasConditionBindings {
+		if err := s.emitConditionBranchWithBindings(expr.Cond, thenBB, elseBB, ast.BranchHintNone); err != nil {
+			s.scope = parentScope
+			return nil, nil, err
+		}
+	} else {
+		condValue, _, err := s.emitExpr(expr.Cond, s.g.result.NamedTypes["bool"])
+		if err != nil {
+			s.scope = parentScope
+			return nil, nil, err
+		}
+		C.LLVMBuildCondBr(s.builder, condValue, thenBB, elseBB)
+	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, thenBB)
+	if hasConditionBindings {
+		s.scope = condScope
+	}
 	leftValue, _, err := s.emitExpr(expr.Value, resultType)
 	if err != nil {
+		s.scope = parentScope
 		return nil, nil, err
 	}
 	thenEnd := C.LLVMGetInsertBlock(s.builder)
@@ -8993,8 +9013,10 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, elseBB)
+	s.scope = parentScope
 	rightValue, _, err := s.emitExpr(expr.Alt, resultType)
 	if err != nil {
+		s.scope = parentScope
 		return nil, nil, err
 	}
 	elseEnd := C.LLVMGetInsertBlock(s.builder)
@@ -9003,6 +9025,7 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	s.scope = parentScope
 	phiType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, err

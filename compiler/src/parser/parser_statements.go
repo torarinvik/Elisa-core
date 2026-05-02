@@ -1266,7 +1266,16 @@ func (p *Parser) parseReturn() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_RETURN)
 	if p.match(lexer.TOKEN_QUESTION) {
-		value := p.parseValueExprAllowTuple()
+		value := p.withTernaryDisabled(p.parseValueExprAllowTuple)
+		if p.match(lexer.TOKEN_IF) {
+			cond := p.parseExpr()
+			p.expectNewlineAfterValueExpr(cond)
+			return &ast.IfStmt{
+				Position: pos,
+				Cond:     cond,
+				Then:     []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: value}},
+			}
+		}
 		p.expectNewlineAfterValueExpr(value)
 		name := "__return_optional"
 		return &ast.IfStmt{

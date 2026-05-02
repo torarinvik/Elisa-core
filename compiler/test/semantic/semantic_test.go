@@ -354,6 +354,35 @@ func TestAnalyzeTernaryPropagatesExpectedDarrayTypeToEmptyListBranch(t *testing.
 	requireExprTypeString(t, result, ter.Alt, "darray[i64]")
 }
 
+func TestAnalyzePatternTernaryBindsTrueBranchPayload(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def unwrap(node: Expr) -> i64:
+    return value if node is Expr.Int(value) else 0
+`
+
+	result, errs := parseAndAnalyze(t, "pattern_ternary_bindings.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeReturnQuestionPatternGuard(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def unwrap(node: Expr) -> i64:
+    return? value if node is Expr.Int(value)
+    return 0
+`
+
+	result, errs := parseAndAnalyze(t, "return_question_pattern_guard.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
 func TestAnalyzeCatchExprOverErrorUnion(t *testing.T) {
 	src := `error FileError:
 	NotFound
