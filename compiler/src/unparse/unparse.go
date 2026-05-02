@@ -2067,6 +2067,18 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 	case *ast.DiscardStmt:
 		f.writePrefixedMultiline(level, "", "_ = "+formatExpr(n.Value))
 	case *ast.RegionStmt:
+		if len(n.Body) != 0 || n.OwnerName != "" {
+			line := "with arena " + n.Name
+			if n.Capacity != nil {
+				line += "(" + formatExpr(n.Capacity) + ")"
+			}
+			line += " as " + n.OwnerName + ":"
+			f.writeLine(level, line)
+			for _, stmt := range n.Body {
+				f.writeStmt(level+1, stmt)
+			}
+			return
+		}
 		line := "region " + n.Name
 		if n.Capacity != nil {
 			line += "(" + formatExpr(n.Capacity) + ")"

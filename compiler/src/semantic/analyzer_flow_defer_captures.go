@@ -170,6 +170,10 @@ func (c *deferCaptureCollector) collectStmt(stmt ast.Stmt, locals map[string]boo
 	case *ast.RegionStmt:
 		c.collectExpr(n.Capacity, locals)
 		locals[n.Name] = true
+		if n.OwnerName != "" {
+			locals[n.OwnerName] = true
+		}
+		c.collectStmts(n.Body)
 	case *ast.MarkStmt:
 		locals[n.Name] = true
 	case *ast.RestoreStmt, *ast.ResetStmt, *ast.DestroyStmt, *ast.PassStmt, *ast.SignalStmt:

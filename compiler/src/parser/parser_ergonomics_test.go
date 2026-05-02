@@ -114,6 +114,32 @@ def build(left: i64, width: i64, pair: PairRow, rows: darray[PairRow]) -> i64:
 	}
 }
 
+func TestParseWithArenaScopedAllocatorShorthand(t *testing.T) {
+	file, errs := parseSourceFile(t, `def build() -> usize:
+    with arena scratch(8192) as owner:
+        xs: darray[int] = [1, 2]
+        return xs.count
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	arena, ok := decl.Body[0].(*ast.RegionStmt)
+	if !ok {
+		t.Fatalf("expected scoped arena region stmt, got %T", decl.Body[0])
+	}
+	if arena.Name != "scratch" || arena.OwnerName != "owner" || arena.Capacity == nil || len(arena.Body) != 2 {
+		t.Fatalf("unexpected scoped arena shape: %#v", arena)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "with arena scratch(8192) as owner:") {
+		t.Fatalf("expected unparse to preserve scoped arena shorthand, got:\n%s", formatted)
+	}
+}
+
 func TestParseLocalParamsStmt(t *testing.T) {
 	file, errs := parseSourceFile(t, `def build(left: i64) -> i64:
     bundle Pair explicit:

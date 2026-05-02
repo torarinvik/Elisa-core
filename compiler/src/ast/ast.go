@@ -1759,9 +1759,11 @@ type DiscardStmt struct {
 }
 
 type RegionStmt struct {
-	Position lexer.Pos
-	Name     string
-	Capacity Expr
+	Position  lexer.Pos
+	Name      string
+	Capacity  Expr
+	OwnerName string
+	Body      []Stmt
 }
 
 type DestroyStmt struct {

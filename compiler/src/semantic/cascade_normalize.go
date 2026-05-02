@@ -182,6 +182,7 @@ func normalizeCascadeStmt(stmt ast.Stmt, target ast.Expr) []ast.Stmt {
 		n.Value = normalizeCascadeExpr(n.Value, target, false)
 	case *ast.RegionStmt:
 		n.Capacity = normalizeCascadeExpr(n.Capacity, target, false)
+		n.Body = normalizeCascadeStmtList(n.Body, target)
 	}
 	return []ast.Stmt{stmt}
 }

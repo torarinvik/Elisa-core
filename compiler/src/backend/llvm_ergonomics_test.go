@@ -35,3 +35,22 @@ def build(owner: Arena) -> usize:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersWithArenaScopedAllocatorShorthand(t *testing.T) {
+	src := `def build() -> usize:
+    can Memory.Allocate:
+        with arena scratch(4096) as owner:
+            xs: darray[int] = [1, 2, 3]
+            return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_with_arena_scoped_allocator.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, want := range []string{"@new_region", "@arena_alloc", "darray.literal.alloc"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected scoped arena shorthand lowering to include %q, got:\n%s", want, output)
+		}
+	}
+}

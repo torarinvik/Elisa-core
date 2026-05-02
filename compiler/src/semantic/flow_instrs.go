@@ -51,6 +51,9 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Expr)
 	case *ast.RegionStmt:
 		appendBasicFlowExprInstrs(block, n.Capacity)
+		for _, stmt := range n.Body {
+			appendBasicFlowInstrsForNode(block, stmt)
+		}
 	case *ast.MarkStmt:
 	case *ast.RestoreStmt:
 		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrInvalidate, Location: n.RegionName, Source: n.MarkName, Position: n.Pos(), Note: "restore region checkpoint"})

@@ -66,6 +66,91 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 }
 
+func scopedArenaOwnerRefType(pos lexer.Pos) ast.TypeExpr {
+	return &ast.MutableType{Position: pos, Elem: &ast.RefType{
+		Position: pos,
+		Elem:     &ast.NamedType{Position: pos, Name: "Arena"},
+		State:    ast.RefStateNonNull,
+		Storage:  ast.RefStorageAny,
+		Explicit: true,
+	}}
+}
+
+func scopedArenaOwnerDecl(pos lexer.Pos, regionName string, ownerName string) *ast.VarDeclStmt {
+	ownerType := scopedArenaOwnerRefType(pos)
+	return &ast.VarDeclStmt{
+		Position: pos,
+		Name:     ownerName,
+		Type:     ownerType,
+		Value: &ast.CastExpr{
+			Position: pos,
+			Operand:  &ast.AddrOfExpr{Position: pos, Operand: &ast.Ident{Position: pos, Name: regionName}},
+			Target:   ownerType,
+		},
+	}
+}
+
+func scopedArenaInStoreStmt(stmt *ast.RegionStmt) *ast.InStoreStmt {
+	body := make([]ast.Stmt, 0, len(stmt.Body)+1)
+	if stmt.OwnerName != "" {
+		body = append(body, scopedArenaOwnerDecl(stmt.Position, stmt.Name, stmt.OwnerName))
+	}
+	body = append(body, stmt.Body...)
+	return &ast.InStoreStmt{
+		Position: stmt.Position,
+		Store:    &ast.Ident{Position: stmt.Position, Name: stmt.Name},
+		Body:     body,
+	}
+}
+
+func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
+	savedScope := a.currentScope
+	savedRegions := a.currentRegions
+	savedRegionMarks := a.currentRegionMarks
+	savedCheckpoints := a.currentCheckpoints
+	savedRegionRefs := a.currentRegionRefs
+	savedPackedVariantViews := a.currentPackedVariantViews
+	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
+	a.currentScope = NewScope(savedScope)
+	a.currentRegions = a.cloneRegionStates()
+	a.currentRegionMarks = a.cloneRegionMarkStates()
+	a.currentCheckpoints = a.cloneCheckpointStates()
+	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
+	a.currentPackedStores = a.clonePackedStores()
+	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
+	a.analyzeRegionDecl(stmt)
+	a.analyzeInStoreStmt(scopedArenaInStoreStmt(stmt))
+	a.currentScope = savedScope
+	a.currentRegions = savedRegions
+	a.currentRegionMarks = savedRegionMarks
+	a.currentCheckpoints = savedCheckpoints
+	a.currentRegionRefs = savedRegionRefs
+	a.currentPackedVariantViews = savedPackedVariantViews
+	a.currentPackedStores = savedPackedStores
+	a.currentPackedStoreResolutions = savedPackedStoreResolutions
+}
+
+func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) {
+	if stmt.Capacity != nil {
+		capacityType := a.analyzeExpr(stmt.Capacity)
+		if !IsNumericType(capacityType) {
+			a.errorf(stmt.Capacity.Pos(), "region capacity must be numeric, got %s", capacityType)
+		}
+	}
+	arenaType, ok := a.namedTypes["Arena"]
+	if !ok {
+		a.errorf(stmt.Pos(), "missing builtin Arena type for region lowering")
+		arenaType = invalidType
+	}
+	sym := &Symbol{Name: stmt.Name, Kind: SymbolRegion, Type: arenaType, Node: stmt, Mutable: false}
+	a.defineLocal(sym, stmt.Pos())
+	if a.currentRegions != nil {
+		a.currentRegions[sym] = regionState{}
+	}
+}
+
 func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions

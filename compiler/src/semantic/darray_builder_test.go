@@ -68,6 +68,38 @@ func TestAnalyzeDArrayBuilderLiteralAndPushSugar(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDArrayBuilderWithArenaScopedAllocatorShorthand(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_with_arena_scoped_allocator.llcontext", `def consume(owner: mutable Arena&) -> void:
+    pass
+
+def build() -> usize:
+    can Memory.Allocate:
+        with arena scratch(4096) as owner:
+            consume(owner)
+            xs: darray[i64] = [1, 2, 3]
+            return xs.count
+`)
+
+	var build *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "build" {
+			build = fn
+			break
+		}
+	}
+	if build == nil {
+		t.Fatal("expected build function declaration")
+	}
+	canStmt, ok := build.Body[0].(*ast.CanStmt)
+	if !ok || len(canStmt.Body) != 1 {
+		t.Fatalf("expected can block with scoped arena, got %T %#v", build.Body[0], build.Body[0])
+	}
+	arena, ok := canStmt.Body[0].(*ast.RegionStmt)
+	if !ok || arena.Name != "scratch" || arena.OwnerName != "owner" || len(arena.Body) != 3 {
+		t.Fatalf("expected scoped arena shorthand to analyze as region body, got %T %#v", canStmt.Body[0], canStmt.Body[0])
+	}
+}
+
 func TestAnalyzeRejectsDArrayPushOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_push_requires_scope.llcontext", `def build() -> void:
     xs: mutable darray[i64] = []

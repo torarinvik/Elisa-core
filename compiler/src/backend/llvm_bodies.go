@@ -787,6 +787,71 @@ func (s *functionState) emitBlockInCurrentScope(stmts []ast.Stmt) error {
 	return s.emitScopeCleanups(scope)
 }
 
+func backendScopedArenaOwnerRefType(pos lexer.Pos) ast.TypeExpr {
+	return &ast.MutableType{Position: pos, Elem: &ast.RefType{
+		Position: pos,
+		Elem:     &ast.NamedType{Position: pos, Name: "Arena"},
+		State:    ast.RefStateNonNull,
+		Storage:  ast.RefStorageAny,
+		Explicit: true,
+	}}
+}
+
+func backendScopedArenaOwnerDecl(pos lexer.Pos, regionName string, ownerName string) *ast.VarDeclStmt {
+	ownerType := backendScopedArenaOwnerRefType(pos)
+	return &ast.VarDeclStmt{
+		Position: pos,
+		Name:     ownerName,
+		Type:     ownerType,
+		Value: &ast.CastExpr{
+			Position: pos,
+			Operand:  &ast.AddrOfExpr{Position: pos, Operand: &ast.Ident{Position: pos, Name: regionName}},
+			Target:   ownerType,
+		},
+	}
+}
+
+func backendScopedArenaInStoreStmt(stmt *ast.RegionStmt) *ast.InStoreStmt {
+	body := make([]ast.Stmt, 0, len(stmt.Body)+1)
+	if stmt.OwnerName != "" {
+		body = append(body, backendScopedArenaOwnerDecl(stmt.Position, stmt.Name, stmt.OwnerName))
+	}
+	body = append(body, stmt.Body...)
+	return &ast.InStoreStmt{
+		Position: stmt.Position,
+		Store:    &ast.Ident{Position: stmt.Position, Name: stmt.Name},
+		Body:     body,
+	}
+}
+
+func (s *functionState) emitRegionDecl(n *ast.RegionStmt) error {
+	arenaType := s.g.result.NamedTypes["Arena"]
+	if arenaType == nil {
+		return fmt.Errorf("missing builtin Arena type for region %s", n.Name)
+	}
+	alloca, err := s.createEntryAlloca(n.Name, arenaType)
+	if err != nil {
+		return err
+	}
+	zero, err := s.zeroValue(arenaType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, zero, alloca)
+	s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
+	s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
+	return s.emitRegionInit(alloca, arenaType, n.Capacity)
+}
+
+func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
+	s.pushScope()
+	defer s.popScope()
+	if err := s.emitRegionDecl(n); err != nil {
+		return err
+	}
+	return s.emitInStore(backendScopedArenaInStoreStmt(n))
+}
+
 func (s *functionState) emitDeferredBody(binding *deferredBodyBinding) error {
 	if binding == nil || binding.stmt == nil {
 		return nil
@@ -878,22 +943,10 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	case *ast.ScopeStmt:
 		return s.emitScopeStmt(n)
 	case *ast.RegionStmt:
-		arenaType := s.g.result.NamedTypes["Arena"]
-		if arenaType == nil {
-			return fmt.Errorf("missing builtin Arena type for region %s", n.Name)
+		if len(n.Body) != 0 || n.OwnerName != "" {
+			return s.emitScopedArenaStmt(n)
 		}
-		alloca, err := s.createEntryAlloca(n.Name, arenaType)
-		if err != nil {
-			return err
-		}
-		zero, err := s.zeroValue(arenaType)
-		if err != nil {
-			return err
-		}
-		C.LLVMBuildStore(s.builder, zero, alloca)
-		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
-		s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
-		return s.emitRegionInit(alloca, arenaType, n.Capacity)
+		return s.emitRegionDecl(n)
 	case *ast.MarkStmt:
 		regionBinding, ok := s.lookupBinding(n.RegionName)
 		if !ok {

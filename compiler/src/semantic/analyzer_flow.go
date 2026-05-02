@@ -145,21 +145,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.ScopeStmt:
 		a.analyzeScopeStmt(n)
 	case *ast.RegionStmt:
-		if n.Capacity != nil {
-			capacityType := a.analyzeExpr(n.Capacity)
-			if !IsNumericType(capacityType) {
-				a.errorf(n.Capacity.Pos(), "region capacity must be numeric, got %s", capacityType)
-			}
-		}
-		arenaType, ok := a.namedTypes["Arena"]
-		if !ok {
-			a.errorf(n.Pos(), "missing builtin Arena type for region lowering")
-			arenaType = invalidType
-		}
-		sym := &Symbol{Name: n.Name, Kind: SymbolRegion, Type: arenaType, Node: n, Mutable: false}
-		a.defineLocal(sym, n.Pos())
-		if a.currentRegions != nil {
-			a.currentRegions[sym] = regionState{}
+		if len(n.Body) != 0 || n.OwnerName != "" {
+			a.analyzeScopedArenaStmt(n)
+		} else {
+			a.analyzeRegionDecl(n)
 		}
 	case *ast.MarkStmt:
 		a.analyzeMarkStmt(n)

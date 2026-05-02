@@ -186,6 +186,10 @@ func (c *parallelForCaptureCollector) collectStmt(stmt ast.Stmt, locals map[stri
 			c.collectExpr(n.Capacity, locals)
 		}
 		locals[n.Name] = true
+		if n.OwnerName != "" {
+			locals[n.OwnerName] = true
+		}
+		c.collectStmts(n.Body)
 	case *ast.DestroyStmt:
 		if !locals[n.Name] {
 			c.addError(fmt.Sprintf("parallel for body cannot destroy outer region %q", n.Name))

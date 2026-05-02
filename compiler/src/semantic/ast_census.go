@@ -171,6 +171,7 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Value)
 	case *ast.RegionStmt:
 		c.countExpr(n.Capacity)
+		c.countStmts(n.Body)
 	}
 }
 

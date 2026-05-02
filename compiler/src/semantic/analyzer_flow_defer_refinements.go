@@ -140,6 +140,9 @@ func (a *Analyzer) validateDeferStmtBodyStmt(stmt ast.Stmt) {
 		a.validateDeferStmtBodyExpr(n.Value)
 	case *ast.RegionStmt:
 		a.validateDeferStmtBodyExpr(n.Capacity)
+		for _, stmt := range n.Body {
+			a.validateDeferStmtBodyStmt(stmt)
+		}
 	case *ast.PassStmt, *ast.SignalStmt, *ast.MarkStmt, *ast.RestoreStmt, *ast.ResetStmt, *ast.DestroyStmt:
 		return
 	}

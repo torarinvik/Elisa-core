@@ -201,6 +201,9 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectExpr(n.Message)
 	case *ast.DiscardStmt:
 		c.collectExpr(n.Value)
+	case *ast.RegionStmt:
+		c.collectExpr(n.Capacity)
+		c.collectStmts(n.Body)
 	}
 }
 

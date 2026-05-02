@@ -1676,3 +1676,29 @@ Current rules:
 - mutable ref parameters still require a writable argument path; immutable locals, immutable fields, constants, and other readonly paths are rejected
 - nullable ref parameters are not implicit autoref targets
 - the compiler does not silently perform broader storage-changing or state-changing coercions beyond that conservative borrow/upcast surface; use explicit `&` and `as` when the intended conversion is not obvious from the lvalue itself
+
+## Scoped arena shorthand
+
+Tests and parser/runtime helpers often need a scratch arena plus an active allocation owner:
+
+```context
+region scratch(8192)
+in scratch:
+    owner: mutable Arena& = scratch.ref[mutable Arena&]
+    values: darray[int] = [1, 2, 3]
+```
+
+The compact form is:
+
+```context
+with arena scratch(8192) as owner:
+    values: darray[int] = [1, 2, 3]
+```
+
+This is sugar for the explicit region-plus-`in` shape:
+
+- `scratch` is a named arena region
+- the body runs as though it were inside `in scratch:`
+- `owner` is bound inside the body as a `mutable Arena&`
+- allocation ownership stays visible at the statement boundary
+- the lower-level `region` and `in` forms remain available when tests or runtime code need to inspect or control the pieces separately

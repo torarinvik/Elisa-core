@@ -80,6 +80,7 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForNode(block *CFGBlock, node ast
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Expr)
 	case *ast.RegionStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Capacity)
+		a.appendImplicitSinkFlowInstrsForStmts(block, n.Body)
 	case *ast.PoolStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Workers)
 	case *ast.LockStmt:
@@ -107,6 +108,12 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForNode(block *CFGBlock, node ast
 	case *ast.MatchStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Store)
+	}
+}
+
+func (a *Analyzer) appendImplicitSinkFlowInstrsForStmts(block *CFGBlock, stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		a.appendImplicitSinkFlowInstrsForNode(block, stmt)
 	}
 }
 

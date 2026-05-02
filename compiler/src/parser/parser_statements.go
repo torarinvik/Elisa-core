@@ -143,6 +143,9 @@ func (p *Parser) parseStmt() ast.Stmt {
 		if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "args" && p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN {
 			return p.parseArgsScopeStmt()
 		}
+		if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "arena" && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT {
+			return p.parseWithArenaStmt()
+		}
 		return p.parseWithStmt()
 	case lexer.TOKEN_WHILE:
 		return p.parseWhile()
@@ -846,6 +849,24 @@ func (p *Parser) parseWithStmt() *ast.WithStmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.WithStmt{Position: pos, Args: args, Bundles: bundles, WithItemOrder: items, Body: body}
+}
+
+func (p *Parser) parseWithArenaStmt() *ast.RegionStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_WITH)
+	p.expectIdentText("arena")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	var capacity ast.Expr
+	if p.match(lexer.TOKEN_LPAREN) {
+		capacity = p.parseExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+	p.expect(lexer.TOKEN_AS)
+	ownerName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity, OwnerName: ownerName, Body: body}
 }
 
 func (p *Parser) parseCascadeStmt() *ast.CascadeStmt {
