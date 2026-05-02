@@ -1227,9 +1227,19 @@ func (p *Parser) parseReset() *ast.ResetStmt {
 	return &ast.ResetStmt{Position: pos, Name: name}
 }
 
-func (p *Parser) parseReturn() *ast.ReturnStmt {
+func (p *Parser) parseReturn() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_RETURN)
+	if p.match(lexer.TOKEN_QUESTION) {
+		value := p.parseValueExprAllowTuple()
+		p.expectNewlineAfterValueExpr(value)
+		name := "__return_optional"
+		return &ast.IfStmt{
+			Position: pos,
+			Cond:     &ast.OptionalBindExpr{Position: pos, Name: name, Value: value},
+			Then:     []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: name}}},
+		}
+	}
 	var value ast.Expr
 	if p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
 		value = p.parseValueExprAllowTuple()

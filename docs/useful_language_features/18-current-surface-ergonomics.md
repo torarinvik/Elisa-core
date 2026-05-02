@@ -79,11 +79,28 @@ def read(node: Node&?) -> i64:
     return 0
 ```
 
+Use `return?` for the common early-return form where a function should return an optional payload if it is present, otherwise continue.
+
+```context
+def first_present(left: Item?, right: Item?) -> Item?:
+    return? left
+    return? right
+    return null
+```
+
+This is equivalent to:
+
+```context
+if let value = left:
+    return value
+```
+
 Current rules:
 
 - `if let name = value:` accepts value optionals such as `T?` and nullable references such as `T&?`
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
 - `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
+- `return? value` returns the unwrapped payload only when `value` is present; otherwise execution continues with the next statement
 - `value?.(fn)` unwraps `value` only when it is present and calls `fn(unwrapped_value)`
 - the result is optional unless the transform returns `void`, in which case the whole expression is `void`
 - the callable can be a plain function, an extension/UFCS-style member function such as `self.check_expr`, or another normal callable expression

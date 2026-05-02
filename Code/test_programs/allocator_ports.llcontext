@@ -32,7 +32,7 @@ def memory_pool_smoke() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         pool: mutable MemoryPool[PoolPair] = zeroed
         defer block:
-            memory_pool_deinit(pool.ref[MemoryPool[PoolPair]&]) can Memory.Release, Abort.Panic
+            memory_pool_deinit(pool.ref[MemoryPool[PoolPair]&])
 
         memory_pool_add_capacity(pool.ref[MemoryPool[PoolPair]&], 2)
 

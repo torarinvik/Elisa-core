@@ -61,7 +61,7 @@ def recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> void:
             return
         live: heap HeapPairNode& = node
         next_node: mutable heap HeapPairNode&? = live.next
-        node as ! <- (sfree_heap_pair_node(node) can Memory.Release)
+        node as ! <- (sfree_heap_pair_node(node))
         recursive_free_pair_chain(next_node)
 
 
@@ -113,7 +113,7 @@ def alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError]:
         buffer: mutable heap u8&? = null
         defer block:
             if buffer != null:
-                buffer as ! <- (sfree_bytes(buffer) can Memory.Release)
+                buffer as ! <- (sfree_bytes(buffer))
 
         raw: heap u8&? = alloc_bytes(32)
         buffer_live: heap u8& = raw else raise MemoryError.OutOfMemory

@@ -115,6 +115,14 @@ def read(node: Node&?) -> i64:
 `)
 }
 
+func TestAnalyzeReturnQuestionEarlyReturnsOptionalPayload(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "return_question_optional_payload.llcontext", `def first(left: i64?, right: i64?) -> i64?:
+	return? left
+	return? right
+	return null
+`)
+}
+
 func TestAnalyzeLetConditionRejectsNonOptionalValue(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "let_bind_non_optional.llcontext", `def bad(value: i64) -> bool:
 	return let item = value

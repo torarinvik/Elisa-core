@@ -140,7 +140,7 @@ def name_table_ensure_capacity(table: mutable NameTable&, next_count: usize) -> 
         if table.buckets.count != 0 and next_count * 2 < table.buckets.count:
             return
         capacity: usize = name_table_bucket_capacity_for_count(next_count)
-        table.name_table_rebuild_buckets(capacity) can Memory.Allocate, Abort.Panic
+        table.name_table_rebuild_buckets(capacity)
 
 
 def name_table_find(table: NameTable&, text: sview, hash: u64, policy: NameCasePolicy) -> NameId:
@@ -166,7 +166,7 @@ def name_table_intern_view(table: mutable NameTable&, text: sview, policy: NameC
         existing: NameId = table.name_table_find(text, hash, policy)
         if existing != NAME_TABLE_INVALID_ID:
             return existing
-        table.name_table_ensure_capacity(table.entries.count + 1) can Memory.Allocate, Abort.Panic
+        table.name_table_ensure_capacity(table.entries.count + 1)
         in table.owner:
             original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
             table.entries.push(NameEntry{text: text, owned_text: [], hash: hash, original_hash: original_hash})
@@ -181,7 +181,7 @@ def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameC
         existing: NameId = table.name_table_find(text, hash, policy)
         if existing != NAME_TABLE_INVALID_ID:
             return existing
-        table.name_table_ensure_capacity(table.entries.count + 1) can Memory.Allocate, Abort.Panic
+        table.name_table_ensure_capacity(table.entries.count + 1)
         in table.owner:
             original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
             owned_text: mutable darray[u8] = []
@@ -199,4 +199,4 @@ def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameC
 
 def name_table_intern(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
-        return table.name_table_intern_copy(text, policy) can Memory.Allocate, Abort.Panic
+        return table.name_table_intern_copy(text, policy)

@@ -582,6 +582,30 @@ func TestParseIfLetCondition(t *testing.T) {
 	}
 }
 
+func TestParseReturnQuestionLowersToIfLetReturn(t *testing.T) {
+	file, errs := parseSourceFile(t, "def first(found: i64?) -> i64?:\n    return? found\n    return null\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected return? to lower to if statement, got %T", decl.Body[0])
+	}
+	letExpr, ok := ifStmt.Cond.(*ast.OptionalBindExpr)
+	if !ok || letExpr.Name != "__return_optional" {
+		t.Fatalf("expected optional return condition binding, got %T %#v", ifStmt.Cond, ifStmt.Cond)
+	}
+	ret, ok := ifStmt.Then[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected optional return then-body, got %T", ifStmt.Then[0])
+	}
+	ident, ok := ret.Value.(*ast.Ident)
+	if !ok || ident.Name != "__return_optional" {
+		t.Fatalf("expected optional return payload ident, got %T %#v", ret.Value, ret.Value)
+	}
+}
+
 func TestParseGuardElseStatement(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(maybe: i64?) -> i64:\n    guard maybe != null else return 0\n    return 1\n")
 	if len(errs) != 0 {

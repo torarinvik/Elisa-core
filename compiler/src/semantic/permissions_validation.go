@@ -3,6 +3,7 @@ package semantic
 import (
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
+	"strings"
 )
 
 func (a *Analyzer) validatePermissionUsage(decls []scopedDecl) {
@@ -57,6 +58,20 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 		return
 	}
 	a.warnf(pos, effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing)))
+}
+
+func (a *Analyzer) warnOnRedundantLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
+	families := permissionFamiliesFromRefs(refs)
+	if len(families) == 0 {
+		return
+	}
+	for _, family := range families {
+		if !granted[family] {
+			return
+		}
+	}
+	hint := strings.TrimSpace(permissionGrantHint(refs, families))
+	a.warnf(pos, "%s grants %s redundantly; a surrounding can ...: block already grants these effects", label, hint)
 }
 
 func (a *Analyzer) validatePermissionStmts(stmts []ast.Stmt, granted map[string]bool) {
@@ -125,7 +140,11 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionExpr(n.Store, granted)
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.CanStmt:
-		families := a.resolvePermissionFamilies(n.Permissions, false)
+		refs := a.resolvePermissionRefs(n.Permissions, false)
+		if !n.SuppressPermissionInference {
+			a.warnOnRedundantLocalGrant(n.Pos(), "can block", refs, granted)
+		}
+		families := permissionFamiliesFromRefs(refs)
 		a.validatePermissionStmts(n.Body, extendGrantedPermissionFamilies(granted, families))
 	case *ast.SignalStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
@@ -267,7 +286,11 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.NodeSpan, granted)
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.CanExpr:
-		families := a.resolvePermissionFamilies(n.Permissions, false)
+		refs := a.resolvePermissionRefs(n.Permissions, false)
+		if !n.SuppressPermissionInference {
+			a.warnOnRedundantLocalGrant(n.Pos(), "inline can", refs, granted)
+		}
+		families := permissionFamiliesFromRefs(refs)
 		a.validatePermissionExpr(n.Expr, extendGrantedPermissionFamilies(granted, families))
 	case *ast.MatchExpr:
 		a.validatePermissionExpr(n.Value, granted)

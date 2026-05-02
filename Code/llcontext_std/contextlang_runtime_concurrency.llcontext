@@ -97,7 +97,7 @@ extern notify_all(cv: mutable CondVar&) -> void effects[Sync.Notify]
 
 def ctx_concurrency_alloc(size: usize) -> mutable heap void&:
 	can Memory.Allocate, Abort.Panic:
-		raw: heap void&? = malloc(size) can Memory.Allocate
+		raw: heap void&? = malloc(size)
 		if raw == null:
 			panic("concurrency allocation failed")
 		ptr: heap void& = raw.cast[heap void&]
@@ -125,9 +125,9 @@ def ctx_concurrency_work1_release(state_bits: mutable void&?):
 		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
 		remaining: i64 = ctx_concurrency_ref_release(state.refs.ref[atomic[i64]&])
 		if remaining == 0:
-			free(state.arg_bits.cast[heap void&]) can Memory.Release
-			free(state.result_bits.cast[heap void&]) can Memory.Release
-			free(state.cast[heap void&]) can Memory.Release
+			free(state.arg_bits.cast[heap void&])
+			free(state.result_bits.cast[heap void&])
+			free(state.cast[heap void&])
 
 def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> mutable heap ConcurrencyWorkStart1&:
 	can Memory.Allocate, Abort.Panic:
@@ -214,7 +214,7 @@ def ctx_task_group_release_all(group: mutable TaskGroup&):
 		while current != null:
 			next: mutable heap ConcurrencyTaskGroupNode&? = current.next
 			ctx_concurrency_work1_release(current.state_bits.cast[mutable void&])
-			free(current.cast[heap void&]) can Memory.Release
+			free(current.cast[heap void&])
 			current <- next
 
 def spawn1[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> Thread[R, Joinable]:
