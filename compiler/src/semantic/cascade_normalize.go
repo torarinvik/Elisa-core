@@ -213,6 +213,7 @@ func normalizeCascadeExpr(expr ast.Expr, target ast.Expr, rewriteShorthand bool)
 		return n
 	case *ast.CallExpr:
 		n.Func = normalizeCascadeExpr(n.Func, target, rewriteShorthand)
+		n.SafeReceiver = normalizeCascadeExpr(n.SafeReceiver, target, rewriteShorthand)
 		for i := range n.Args {
 			n.Args[i] = normalizeCascadeExpr(n.Args[i], target, rewriteShorthand)
 		}
@@ -372,6 +373,13 @@ func rewriteCascadeHead(expr ast.Expr, target ast.Expr) (ast.Expr, bool) {
 		n.Object = object
 		return n, true
 	case *ast.CallExpr:
+		if n.SafeReceiver != nil {
+			receiver, ok := rewriteCascadeHead(n.SafeReceiver, target)
+			if ok {
+				n.SafeReceiver = receiver
+				return n, true
+			}
+		}
 		fn, ok := rewriteCascadeHead(n.Func, target)
 		if !ok {
 			return expr, false

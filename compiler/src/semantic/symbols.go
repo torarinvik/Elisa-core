@@ -87,6 +87,9 @@ type AttributeFieldRef struct {
 type SafeCallInfo struct {
 	ResolvedFuncName string
 	ResolvedFuncType *FuncType
+	TransformFunc    ast.Expr
+	TransformArgs    []ast.Expr
+	ReceiverArgIndex int
 	ReceiverArgType  Type
 	TailArgs         []ast.Expr
 	ImplicitArgs     []ast.Expr

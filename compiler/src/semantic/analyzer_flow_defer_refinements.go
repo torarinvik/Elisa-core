@@ -157,6 +157,7 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 		a.validateDeferStmtBodyExpr(n.Operand)
 	case *ast.CallExpr:
 		a.validateDeferStmtBodyExpr(n.Func)
+		a.validateDeferStmtBodyExpr(n.SafeReceiver)
 		for _, arg := range n.Args {
 			a.validateDeferStmtBodyExpr(arg)
 		}

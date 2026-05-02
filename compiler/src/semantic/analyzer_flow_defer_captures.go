@@ -197,6 +197,7 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 		c.collectExpr(n.Operand, locals)
 	case *ast.CallExpr:
 		c.collectExpr(n.Func, locals)
+		c.collectExpr(n.SafeReceiver, locals)
 		for _, arg := range n.Args {
 			c.collectExpr(arg, locals)
 		}

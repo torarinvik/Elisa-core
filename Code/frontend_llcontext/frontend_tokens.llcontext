@@ -175,7 +175,7 @@ const FRONTEND_TAB_WIDTH: usize = 4
 
 
 def frontend_empty_view() -> sview:
-    return string_view("" as u8&, 0, 0)
+    return string_view("", 0, 0)
 
 
 def frontend_make_pos(line: int, col: int, offset: usize) -> FrontendPos:

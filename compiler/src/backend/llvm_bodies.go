@@ -8185,6 +8185,9 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 		if exprReadsMatchedValueField(name, n.Func) {
 			return true
 		}
+		if exprReadsMatchedValueField(name, n.SafeReceiver) {
+			return true
+		}
 		for _, arg := range n.Args {
 			if exprReadsMatchedValueField(name, arg) {
 				return true

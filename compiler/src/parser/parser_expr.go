@@ -1648,8 +1648,16 @@ func (p *Parser) parsePostfix() ast.Expr {
 				return expr
 			}
 			pos := p.cur().Pos
+			receiver := expr
 			p.advance()
 			p.expect(lexer.TOKEN_DOT)
+			if p.peek() == lexer.TOKEN_LPAREN {
+				p.advance()
+				fn := p.parseExpr()
+				p.expect(lexer.TOKEN_RPAREN)
+				expr = &ast.CallExpr{Position: pos, Func: fn, SafeReceiver: receiver, Safe: true}
+				continue
+			}
 			field := p.expect(lexer.TOKEN_IDENT).Text
 			expr = &ast.FieldExpr{Position: pos, Object: expr, Field: field, Safe: true}
 

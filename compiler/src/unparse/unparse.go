@@ -1560,6 +1560,9 @@ func exprContainsCanExpr(expr ast.Expr) bool {
 		if exprContainsCanExpr(n.Func) {
 			return true
 		}
+		if exprContainsCanExpr(n.SafeReceiver) {
+			return true
+		}
 		for _, arg := range n.Args {
 			if exprContainsCanExpr(arg) {
 				return true
@@ -1661,6 +1664,9 @@ func exprContainsNodeSugar(expr ast.Expr) bool {
 		return exprContainsNodeSugar(n.Operand)
 	case *ast.CallExpr:
 		if exprContainsNodeSugar(n.Func) {
+			return true
+		}
+		if exprContainsNodeSugar(n.SafeReceiver) {
 			return true
 		}
 		for _, arg := range n.Args {
@@ -2649,7 +2655,12 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.CallExpr:
 		funcText := formatExpr(n.Func)
 		if n.Safe {
-			if fieldExpr, ok := n.Func.(*ast.FieldExpr); ok && fieldExpr != nil {
+			if n.SafeReceiver != nil {
+				funcText = formatExpr(n.SafeReceiver) + "?.(" + formatExpr(n.Func) + ")"
+				if len(n.Args) == 0 && len(n.ParamPacks) == 0 && !n.HasArgForward && len(n.WithArgs) == 0 && len(n.WithBundles) == 0 {
+					return funcText
+				}
+			} else if fieldExpr, ok := n.Func.(*ast.FieldExpr); ok && fieldExpr != nil {
 				funcText = formatExpr(fieldExpr.Object) + "?." + fieldExpr.Field
 			}
 		}

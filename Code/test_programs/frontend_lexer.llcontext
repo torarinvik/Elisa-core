@@ -269,7 +269,7 @@ def frontend_token_checksum(tokens: darray[FrontendToken]) -> u64:
 
 
 def frontend_tokenize_test_source(a: mutable Arena&, source: u8&) -> darray[FrontendToken]:
-    tokens: darray[FrontendToken] = frontend_tokenize(a, "frontend_lexer_test.llcontext" as u8&, source) can Memory.Allocate, Abort.Panic
+    tokens: darray[FrontendToken] = frontend_tokenize(a, "frontend_lexer_test.llcontext", source) can Memory.Allocate, Abort.Panic
     return tokens
 
 
@@ -467,7 +467,7 @@ def frontend_case_kind_only_keyword_path() -> bool:
         region scratch(4096)
         a: mutable Arena& = scratch.ref[mutable Arena&]
         bytes: u8[66] = [102, 97, 108, 115, 101, 32, 116, 114, 117, 101, 32, 122, 101, 114, 111, 101, 100, 32, 119, 105, 116, 104, 32, 99, 111, 110, 116, 101, 120, 116, 32, 114, 101, 103, 105, 111, 110, 32, 110, 101, 119, 32, 100, 101, 115, 116, 114, 111, 121, 32, 49, 50, 51, 117, 54, 52, 32, 48, 120, 65, 66, 105, 51, 50, 10, 0]
-        lexer: mutable FrontendLexer = frontend_new_lexer(a, "frontend_kind_only_test.llcontext" as u8&, bytes[0].ref[u8&])
+        lexer: mutable FrontendLexer = frontend_new_lexer(a, "frontend_kind_only_test.llcontext", bytes[0].ref[u8&])
 
         if not frontend_kind_eq(frontend_next_token_kind(lexer.ref[mutable FrontendLexer&]), FrontendTokenKind.False):
             return false
@@ -552,7 +552,7 @@ def frontend_lexer_token_count_with_len_impl(source: u8&, source_len: usize) -> 
     can Memory.Allocate, Abort.Panic:
         arena: mutable Arena& = frontend_lexer_bench_arena.ref[mutable Arena&]
         arena_reset(arena)
-        return frontend_count_tokens_with_len(arena, "frontend_lexer_bench.llcontext" as u8&, source, source_len).i64()
+        return frontend_count_tokens_with_len(arena, "frontend_lexer_bench.llcontext", source, source_len).i64()
 
 
 def frontend_lexer_token_checksum_impl(source: u8&) -> u64:
@@ -564,7 +564,7 @@ def frontend_lexer_token_checksum_with_len_impl(source: u8&, source_len: usize) 
     can Memory.Allocate, Abort.Panic:
         arena: mutable Arena& = frontend_lexer_bench_arena.ref[mutable Arena&]
         arena_reset(arena)
-        tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext" as u8&, source, source_len)
+        tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext", source, source_len)
         return frontend_token_checksum(tokens)
 
 
@@ -577,7 +577,7 @@ def frontend_lexer_token_kind_at_with_len_impl(source: u8&, source_len: usize, i
     can Memory.Allocate, Abort.Panic:
         arena: mutable Arena& = frontend_lexer_bench_arena.ref[mutable Arena&]
         arena_reset(arena)
-        tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext" as u8&, source, source_len)
+        tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext", source, source_len)
         if index >= tokens.count:
             return 0
         return frontend_token_kind_code(tokens[index].kind)
@@ -592,7 +592,7 @@ def frontend_lexer_copy_token_kinds_with_len_impl(source: u8&, source_len: usize
     can Memory.Allocate, Abort.Panic:
         arena: mutable Arena& = frontend_lexer_bench_arena.ref[mutable Arena&]
         arena_reset(arena)
-        tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext" as u8&, source, source_len)
+        tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext", source, source_len)
         if capacity < tokens.count:
             return tokens.count
 

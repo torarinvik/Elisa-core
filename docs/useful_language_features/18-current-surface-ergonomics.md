@@ -48,6 +48,47 @@ if let payload_type = constructor.payload_type:
     use_payload(payload_type)
 ```
 
+Optional values can also be passed through a transform only when present. This is the preferred spelling for optional AST payload checks that used to require adapter helpers.
+
+```context
+def check_expr(self: mutable State&, expr: Expr) -> void:
+    pass
+
+def check_format_arg(self: mutable State&, precision: Expr?) -> void:
+    precision?.(self.check_expr)
+```
+
+Current rules:
+
+- `value?.(fn)` unwraps `value` only when it is present and calls `fn(unwrapped_value)`
+- the result is optional unless the transform returns `void`, in which case the whole expression is `void`
+- the callable can be a plain function, an extension/UFCS-style member function such as `self.check_expr`, or another normal callable expression
+- this form is for argument-position transforms; use `expr?.field` and `expr?.method(...)` for member access/calls on the optional payload itself
+
+## Typed string literal coercion
+
+String literals coerce contextually into the common string carrier forms, so call sites and local declarations no longer need explicit casts just to satisfy `u8&`, `cstr`, or `sview`.
+
+```context
+extern puts(text: u8&) -> int
+extern take_cstr(text: cstr) -> void
+extern take_view(text: sview) -> void
+
+def use() -> void:
+    raw: u8& = "hello"
+    text: cstr = "world"
+    view: sview = "slice me"
+    puts("ok")
+    take_cstr("name")
+    take_view("payload")
+```
+
+Current rules:
+
+- contextual coercion applies when the expected type is `u8&`, `cstr`, or `sview`
+- ordinary low-level casts remain available for pointer reinterpretation and non-literal values
+- prefer the plain literal in high-level code; keep `.cast[...]` when the expression is not a literal or the conversion is intentionally low-level
+
 ## Grammar recovery policies
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.

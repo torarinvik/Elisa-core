@@ -145,7 +145,7 @@ Current rules:
 
 ## Safe field and safe call chaining
 
-Optional chaining works with fields and supported receiver-style calls.
+Optional chaining works with fields, supported receiver-style calls, and argument-position transforms.
 
 ```context
 struct Box:
@@ -155,11 +155,19 @@ def read(maybe_box: Box?) -> int:
     _ = maybe_box?.value
     _ = maybe_box?.scale(2)
     return maybe_box?.value else 0
+
+def score(value: int) -> int:
+    return value + 1
+
+def read_transform(maybe_value: int?) -> int?:
+    return maybe_value?.(score)
 ```
 
 Current rules:
 
 - `expr?.field` is the safe field form
 - `expr?.call(...)` is the safe call form
+- `expr?.(fn)` is the safe transform form, lowering to `fn(expr)` only when `expr` is present
+- `expr?.(self.fn)` works with the same extension-method and UFCS rules as ordinary receiver calls; the unwrapped optional payload is placed into the argument slot selected by the rewritten call
 - successful type propagation yields an optional result, for example `i64?`
-- safe call chaining only works when the underlying dispatch path is otherwise valid and follows the same conservative receiver-autoref rules as ordinary receiver calls
+- safe call and transform chaining only work when the underlying dispatch path is otherwise valid and follows the same conservative receiver-autoref rules as ordinary receiver calls

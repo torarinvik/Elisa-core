@@ -120,6 +120,11 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 			return contextualType
 		}
 	}
+	if contextualExpected, ok := contextualStringLiteralType(expected); ok {
+		if contextualType, ok := a.analyzeContextualStringValueExpr(expr, contextualExpected); ok {
+			return contextualType
+		}
+	}
 	result := a.analyzeExpr(expr)
 	if expectedRef, ok := expected.(*RefType); ok && expectedRef.Mutable {
 		if actualRef, ok := result.(*RefType); ok && !actualRef.Mutable {
@@ -132,6 +137,39 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 		}
 	}
 	return result
+}
+
+func contextualStringLiteralType(expected Type) (Type, bool) {
+	if expected == nil {
+		return nil, false
+	}
+	if _, ok := expected.(*DStrType); ok {
+		return expected, true
+	}
+	if isStringViewType(expected) {
+		return expected, true
+	}
+	if _, ok := u8RuntimeRef(expected); ok {
+		return expected, true
+	}
+	return nil, false
+}
+
+func (a *Analyzer) analyzeContextualStringValueExpr(expr ast.Expr, expected Type) (Type, bool) {
+	switch n := expr.(type) {
+	case *ast.StringLit:
+		a.recordAnalyzedExprType(n, expected)
+		return expected, true
+	case *ast.ParenExpr:
+		innerType, ok := a.analyzeContextualStringValueExpr(n.Inner, expected)
+		if !ok {
+			return nil, false
+		}
+		a.recordAnalyzedExprType(n, innerType)
+		return innerType, true
+	default:
+		return nil, false
+	}
 }
 
 func implicitCallLikeRefUpcastType(expected *RefType, actual Type) (Type, bool) {

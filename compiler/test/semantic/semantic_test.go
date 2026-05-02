@@ -62,6 +62,22 @@ func requireNoWarnings(t *testing.T, result *semantic.Result) {
 	}
 }
 
+func TestAnalyzeContextuallyCoercesStringLiteralsToCStrAndSView(t *testing.T) {
+	src := `extern take_cstr(text: cstr) -> void
+extern take_sview(text: sview) -> void
+
+def use() -> void:
+    text: cstr = "hello"
+    view: sview = "world"
+    take_cstr("hello")
+    take_sview("world")
+    _ = text
+    _ = view
+`
+	_, errs := parseAndAnalyze(t, "string_literal_contextual_cstr_sview.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func requireDeclaredFunctionPermissionRefs(t *testing.T, result *semantic.Result, name string, expected ...string) {
 	t.Helper()
 	sym, ok := result.GlobalScope.Lookup(name)

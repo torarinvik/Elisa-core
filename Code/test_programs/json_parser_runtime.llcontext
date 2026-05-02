@@ -63,7 +63,7 @@ def json_u64_digits_exceed_max(source: u8&, source_offset: usize, source_end: us
     if digit_count > 20:
         return true
 
-    max_digits: u8& = "18446744073709551615" as u8&
+    max_digits: u8& = "18446744073709551615"
     pos: mutable usize = source_offset
     max_pos: mutable usize = 0
     while pos < source_end:

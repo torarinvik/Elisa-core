@@ -187,6 +187,7 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 		c.countExpr(n.Operand)
 	case *ast.CallExpr:
 		c.countExpr(n.Func)
+		c.countExpr(n.SafeReceiver)
 		for _, arg := range n.Args {
 			c.countExpr(arg)
 		}

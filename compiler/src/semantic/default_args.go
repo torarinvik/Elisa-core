@@ -79,8 +79,9 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		return &ast.ListLitExpr{Position: n.Position, Elems: elems}
 	case *ast.CallExpr:
 		fn := cloneDefaultArgExpr(n.Func)
+		safeReceiver := cloneDefaultArgExpr(n.SafeReceiver)
 		args := cloneDefaultArgExprs(n.Args)
-		if (n.Func != nil && fn == nil) || (len(n.Args) != 0 && args == nil) {
+		if (n.Func != nil && fn == nil) || (n.SafeReceiver != nil && safeReceiver == nil) || (len(n.Args) != 0 && args == nil) {
 			return nil
 		}
 		paramPacks := cloneDefaultParamPackUses(n.ParamPacks)
@@ -106,6 +107,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		return &ast.CallExpr{
 			Position:      n.Position,
 			Func:          fn,
+			SafeReceiver:  safeReceiver,
 			HasArgForward: n.HasArgForward,
 			ArgForwardPos: n.ArgForwardPos,
 			Args:          args,

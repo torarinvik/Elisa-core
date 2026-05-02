@@ -209,7 +209,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 			err = fmt.Errorf("unsupported shorthand member %q during LLVM lowering", shorthandMemberDisplayBackend(n))
 		}
 	case *ast.StringLit:
-		value, actualType, err = s.emitStringLiteral(n)
+		value, actualType, err = s.emitStringLiteral(n, expected)
 	case *ast.CharLit:
 		value, actualType, err = s.emitCharLiteral(n)
 	case *ast.BoolLit:
@@ -1108,13 +1108,31 @@ func (s *functionState) emitFloatLiteral(expr *ast.FloatLit) (C.LLVMValueRef, se
 	return C.LLVMConstReal(llvmType, C.double(parsed)), t, nil
 }
 
-func (s *functionState) emitStringLiteral(expr *ast.StringLit) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	name := cString("str")
 	defer C.free(unsafe.Pointer(name))
 	text := cString(expr.Value)
 	defer C.free(unsafe.Pointer(text))
 	value := C.LLVMBuildGlobalStringPtr(s.builder, text, name)
-	return value, s.exprType(expr), nil
+	resultType := s.exprType(expr)
+	if expected != nil && isStringViewCarrierType(expected) {
+		resultType = expected
+	}
+	if isStringViewCarrierType(resultType) {
+		viewLLVMType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		i64Type, err := s.g.lowerType(s.g.result.NamedTypes["i64"])
+		if err != nil {
+			return nil, nil, err
+		}
+		viewValue := C.LLVMGetUndef(viewLLVMType)
+		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, value, 0, cStringFree("str.view.data"))
+		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, C.LLVMConstInt(i64Type, C.ulonglong(len(expr.Value)), 0), 1, cStringFree("str.view.len"))
+		return viewValue, resultType, nil
+	}
+	return value, resultType, nil
 }
 
 func (s *functionState) emitCharLiteral(expr *ast.CharLit) (C.LLVMValueRef, semantic.Type, error) {
@@ -4739,6 +4757,9 @@ func (s *functionState) emitSafeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 }
 
 func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr.SafeReceiver != nil {
+		return s.emitSafeTransformCallExpr(expr)
+	}
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
 		return nil, nil, fmt.Errorf("optional call requires member-call syntax")
@@ -4896,6 +4917,162 @@ func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, se
 		return nil, nil, err
 	}
 	phi := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("safe.call.result"))
+	values := []C.LLVMValueRef{wrappedValue, noneValue}
+	blocks := []C.LLVMBasicBlockRef{presentEnd, noneEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) emitSafeTransformCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+	resultType := s.exprType(expr)
+	presentValue, receiverValue, receiverType, err := s.emitSafeChainReceiverValue(expr.SafeReceiver)
+	if err != nil {
+		return nil, nil, err
+	}
+	presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.transform.present"))
+	noneBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.transform.none"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.transform.merge"))
+	C.LLVMBuildCondBr(s.builder, presentValue, presentBB, noneBB)
+
+	var (
+		wrappedValue C.LLVMValueRef
+		noneValue    C.LLVMValueRef
+		presentEnd   C.LLVMBasicBlockRef
+		noneEnd      C.LLVMBasicBlockRef
+	)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
+	info := (*semantic.SafeCallInfo)(nil)
+	if s != nil && s.g != nil && s.g.result != nil && s.g.result.SafeCalls != nil {
+		info = s.g.result.SafeCalls[expr]
+	}
+	transformFunc := expr.Func
+	transformArgs := append([]ast.Expr(nil), expr.Args...)
+	receiverArgIndex := 0
+	var implicitArgs []ast.Expr
+	receiverArgType := receiverType
+	if info != nil {
+		if info.TransformFunc != nil {
+			transformFunc = info.TransformFunc
+		}
+		if len(info.TransformArgs) != 0 {
+			transformArgs = append([]ast.Expr(nil), info.TransformArgs...)
+			receiverArgIndex = info.ReceiverArgIndex
+		} else {
+			transformArgs = append([]ast.Expr{nil}, info.TailArgs...)
+		}
+		implicitArgs = info.ImplicitArgs
+		if info.ReceiverArgType != nil {
+			receiverArgType = info.ReceiverArgType
+		}
+	}
+	fakeReceiver := &ast.ZeroedLit{Position: expr.SafeReceiver.Pos()}
+	synthetic := &ast.CallExpr{
+		Position:                  expr.Position,
+		Func:                      transformFunc,
+		Args:                      append([]ast.Expr(nil), transformArgs...),
+		ResolvedImplicitArgsValid: len(implicitArgs) != 0,
+		ResolvedImplicitArgs:      append([]ast.Expr(nil), implicitArgs...),
+	}
+	if receiverArgIndex < 0 || receiverArgIndex > len(synthetic.Args) {
+		receiverArgIndex = 0
+	}
+	if len(synthetic.Args) == 0 {
+		synthetic.Args = []ast.Expr{fakeReceiver}
+		receiverArgIndex = 0
+	} else {
+		synthetic.Args[receiverArgIndex] = fakeReceiver
+	}
+	if s.g.result.ExprTypes != nil {
+		s.g.result.ExprTypes[fakeReceiver] = receiverArgType
+		defer delete(s.g.result.ExprTypes, fakeReceiver)
+	}
+	callee, funcType, err := s.resolveCallTarget(synthetic)
+	if err != nil {
+		return nil, nil, err
+	}
+	expectedReceiverType := receiverArgType
+	if receiverArgIndex < len(funcType.Params) {
+		expectedReceiverType = funcType.Params[receiverArgIndex]
+	}
+	receiverArg, _, err := s.emitPreparedUFCSReceiverValue(receiverValue, receiverType, expectedReceiverType, "safe.transform.receiver")
+	if err != nil {
+		return nil, nil, err
+	}
+	args := make([]C.LLVMValueRef, 0, len(synthetic.Args)+len(implicitArgs))
+	for i, arg := range synthetic.Args {
+		if i == receiverArgIndex {
+			args = append(args, receiverArg)
+			continue
+		}
+		paramIndex := i
+		var expected semantic.Type
+		if paramIndex < len(funcType.Params) {
+			expected = funcType.Params[paramIndex]
+		}
+		value, _, err := s.emitCallArg(arg, expected, funcType, paramIndex)
+		if err != nil {
+			return nil, nil, err
+		}
+		args = append(args, value)
+	}
+	implicitStart := len(synthetic.Args)
+	for i, arg := range implicitArgs {
+		paramIndex := implicitStart + i
+		var expected semantic.Type
+		if paramIndex < len(funcType.Params) {
+			expected = funcType.Params[paramIndex]
+		}
+		value, _, err := s.emitCallArg(arg, expected, funcType, paramIndex)
+		if err != nil {
+			return nil, nil, err
+		}
+		args = append(args, value)
+	}
+	callValue, callType, err := s.emitResolvedCall(callee, funcType, true, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	if isVoidType(resultType) {
+		presentEnd = C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	} else {
+		optionalType, ok := resultType.(*semantic.OptionalType)
+		if !ok || optionalType == nil || optionalType.Value == nil {
+			return nil, nil, fmt.Errorf("optional transform call requires an optional result type")
+		}
+		callValue, err = s.coerceValue(callValue, callType, optionalType.Value)
+		if err != nil {
+			return nil, nil, err
+		}
+		wrappedValue, err = s.buildOptionalSome(optionalType, callValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		presentEnd = C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, noneBB)
+	if !isVoidType(resultType) {
+		optionalType := resultType.(*semantic.OptionalType)
+		noneValue, err = s.buildOptionalNone(optionalType)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	noneEnd = C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if isVoidType(resultType) {
+		return nil, resultType, nil
+	}
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("safe.transform.result"))
 	values := []C.LLVMValueRef{wrappedValue, noneValue}
 	blocks := []C.LLVMBasicBlockRef{presentEnd, noneEnd}
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))

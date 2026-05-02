@@ -193,6 +193,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Operand, granted)
 	case *ast.CallExpr:
 		a.validatePermissionExpr(n.Func, granted)
+		a.validatePermissionExpr(n.SafeReceiver, granted)
 		for _, arg := range n.Args {
 			a.validatePermissionExpr(arg, granted)
 		}

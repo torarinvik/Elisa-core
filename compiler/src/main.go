@@ -1011,7 +1011,14 @@ func exprStr(e ast.Expr) string {
 			}
 			args = append(args, exprStr(a))
 		}
-		line := fmt.Sprintf("%s(%s)", exprStr(n.Func), strings.Join(args, ", "))
+		funcText := exprStr(n.Func)
+		if n.Safe && n.SafeReceiver != nil {
+			funcText = fmt.Sprintf("%s?.(%s)", exprStr(n.SafeReceiver), exprStr(n.Func))
+			if len(n.Args) == 0 {
+				return funcText
+			}
+		}
+		line := fmt.Sprintf("%s(%s)", funcText, strings.Join(args, ", "))
 		if len(n.WithArgs) != 0 || len(n.WithBundles) != 0 {
 			line += " with " + formatMainWithValueClause(n.WithBundles, n.WithArgs)
 		}

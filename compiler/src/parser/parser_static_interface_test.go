@@ -233,6 +233,42 @@ def read(maybe_box: Box?, maybe_ref: Box&?) -> int:
 	}
 }
 
+func TestParseOptionalTransformCall(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+def bump(value: int) -> int:
+    return value + 1
+
+def read(maybe_value: int?) -> int?:
+    return maybe_value?.(bump)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	funcDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	ret, ok := funcDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", funcDecl.Body[0])
+	}
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok || !call.Safe {
+		t.Fatalf("expected safe transform call, got %T %#v", ret.Value, ret.Value)
+	}
+	receiver, ok := call.SafeReceiver.(*ast.Ident)
+	if !ok || receiver.Name != "maybe_value" {
+		t.Fatalf("expected transform receiver maybe_value, got %T %#v", call.SafeReceiver, call.SafeReceiver)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "bump" {
+		t.Fatalf("expected transform callee bump, got %T %#v", call.Func, call.Func)
+	}
+	if got := unparse.FormatExpr(call); got != "maybe_value?.(bump)" {
+		t.Fatalf("expected safe transform to unparse canonically, got %q", got)
+	}
+}
+
 func TestParseNullableAssignStmt(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 struct Box:

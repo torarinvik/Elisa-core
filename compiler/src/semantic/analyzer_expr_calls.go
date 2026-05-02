@@ -376,6 +376,9 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 	if a == nil || expr == nil {
 		return invalidType
 	}
+	if expr.SafeReceiver != nil {
+		return a.analyzeSafeTransformCallExpr(expr)
+	}
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Object == nil || fieldExpr.Field == "" {
 		a.errorf(expr.Pos(), "optional call requires member-call syntax")
@@ -479,6 +482,60 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 		ImplicitArgs:     append([]ast.Expr(nil), synthetic.ResolvedImplicitArgs...),
 	}
 	if ft.Return == nil || isVoidType(resultType) {
+		return a.namedTypes["void"]
+	}
+	return optionalizeSafeChainResult(resultType)
+}
+
+func (a *Analyzer) analyzeSafeTransformCallExpr(expr *ast.CallExpr) Type {
+	receiverType := a.analyzeExpr(expr.SafeReceiver)
+	baseReceiverType, ok := a.safeChainReceiverType(receiverType)
+	if !ok {
+		a.errorf(expr.Pos(), nullableRefRequirementMessage("optional chaining receiver", receiverType.String()))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	placeholder := &ast.ZeroedLit{Position: expr.SafeReceiver.Pos()}
+	synthetic := &ast.CallExpr{
+		Position:      expr.Position,
+		Func:          expr.Func,
+		Args:          append([]ast.Expr{placeholder}, expr.Args...),
+		ArgNames:      append([]string{""}, expr.ArgNames...),
+		WithArgs:      append([]ast.WithArg(nil), expr.WithArgs...),
+		WithBundles:   append([]ast.WithBundleUse(nil), expr.WithBundles...),
+		WithItemOrder: append([]ast.WithItem(nil), expr.WithItemOrder...),
+	}
+	resultType := a.analyzeCallExpr(synthetic)
+	resolvedFuncType, _ := a.exprTypes[synthetic.Func].(*FuncType)
+	orderedArgs := synthetic.ResolvedArgs
+	if !synthetic.ResolvedArgsValid {
+		orderedArgs = synthetic.Args
+	}
+	receiverArgIndex := 0
+	for i, arg := range orderedArgs {
+		if arg == placeholder {
+			receiverArgIndex = i
+			break
+		}
+	}
+	receiverArgType := baseReceiverType
+	if analyzedReceiverArgType := a.exprTypes[placeholder]; analyzedReceiverArgType != nil {
+		receiverArgType = analyzedReceiverArgType
+	} else if resolvedFuncType != nil && receiverArgIndex < len(resolvedFuncType.Params) {
+		receiverArgType = ufcsPreparedReceiverType(baseReceiverType, resolvedFuncType.Params[receiverArgIndex])
+	}
+	a.safeCalls[expr] = &SafeCallInfo{
+		TransformFunc:    synthetic.Func,
+		TransformArgs:    append([]ast.Expr(nil), orderedArgs...),
+		ReceiverArgIndex: receiverArgIndex,
+		ResolvedFuncType: resolvedFuncType,
+		ReceiverArgType:  receiverArgType,
+		TailArgs:         append([]ast.Expr(nil), synthetic.Args[1:]...),
+		ImplicitArgs:     append([]ast.Expr(nil), synthetic.ResolvedImplicitArgs...),
+	}
+	if isVoidType(resultType) {
 		return a.namedTypes["void"]
 	}
 	return optionalizeSafeChainResult(resultType)

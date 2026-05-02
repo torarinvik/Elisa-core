@@ -794,6 +794,29 @@ def view_char(text: sview[0, 4]) -> char:
 	}
 }
 
+func TestGenerateLLVMIRCoercesStringLiteralToSView(t *testing.T) {
+	src := `def literal_view() -> sview:
+    view: sview = "hello"
+    return view
+`
+	result := parseAndAnalyze(t, "backend_string_literal_sview_context.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	checks := []string{
+		"%StringView = type { ptr, i64 }",
+		"define %StringView @literal_view()",
+		"%StringView { ptr @str, i64 5 }",
+		"i64 5",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersEscapedStringLiteralBytes(t *testing.T) {
 	src := `def newline_text() -> u8&:
 	return "line\nbreak" as u8&

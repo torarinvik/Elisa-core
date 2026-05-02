@@ -95,7 +95,7 @@ def name_table_entry(table: NameTable&, name_id: NameId) -> NameEntry:
 
 def name_table_text(table: NameTable&, name_id: NameId) -> sview:
     if not name_table_valid_id(table, name_id):
-        return "".cast[cstr][0:0]
+        return ("" as cstr)[0:0]
     return table.entries[(!name_id).usize() - 1].text
 
 

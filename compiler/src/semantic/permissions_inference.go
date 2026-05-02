@@ -216,6 +216,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Operand)
 	case *ast.CallExpr:
 		c.collectExpr(n.Func)
+		c.collectExpr(n.SafeReceiver)
 		for _, arg := range n.Args {
 			c.collectExpr(arg)
 		}

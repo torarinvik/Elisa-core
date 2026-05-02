@@ -36,8 +36,8 @@ def string_len(value: u8&?) -> i64:
     return runtime_strlen(value).i64()
 
 def streq(lhs: u8&?, rhs: u8&?) -> int:
-    left: u8& = lhs if lhs != null else "" as u8&
-    right: u8& = rhs if rhs != null else "" as u8&
+    left: u8& = lhs if lhs != null else ""
+    right: u8& = rhs if rhs != null else ""
 
     if left == right:
         return 1
@@ -130,7 +130,7 @@ def rt_reset_scratch():
     reset_scratch()
 
 def rt_puts(value: u8&?) -> int:
-    return puts(value if value != null else "" as u8&) can Console.Write
+    return puts(value if value != null else "") can Console.Write
 
 # ------------------------------------------------------------
 # Fatal error handler (weak linkage)
@@ -139,6 +139,6 @@ def rt_puts(value: u8&?) -> int:
 # weak
 def ctx_llvm_codegen_fatal(msg: u8&?):
     can Console, Abort.Exit:
-        actual_msg: u8& = msg if msg != null else "<null>" as u8&
-        fprintf(stderr, "ctx_llvm_codegen_fatal: %s\n" as u8&, actual_msg)
+        actual_msg: u8& = msg if msg != null else "<null>"
+        fprintf(stderr, "ctx_llvm_codegen_fatal: %s\n", actual_msg)
         exit(1)

@@ -1114,6 +1114,7 @@ type MoveExpr struct {
 type CallExpr struct {
 	Position      lexer.Pos
 	Func          Expr
+	SafeReceiver  Expr
 	HasArgForward bool
 	ArgForwardPos lexer.Pos
 	Args          []Expr

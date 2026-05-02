@@ -194,6 +194,9 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 		if exprReferencesVariantFields(n.Func, name) {
 			return true
 		}
+		if exprReferencesVariantFields(n.SafeReceiver, name) {
+			return true
+		}
 		for _, arg := range n.Args {
 			if exprReferencesVariantFields(arg, name) {
 				return true

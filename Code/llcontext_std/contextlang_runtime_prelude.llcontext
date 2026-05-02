@@ -139,7 +139,7 @@ def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
 # ------------------------------------------------------------
 
 def runtime_strlen(value: u8&?) -> usize:
-	src: u8& = value if value != null else "" as u8&
+	src: u8& = value if value != null else ""
 
 	if src[0] == 0:
 		return 0
@@ -195,15 +195,15 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 
 def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
 	can Memory.Allocate, Console.Format, Abort.Panic:
-		len: int = snprintf(null, 0, "%lld" as u8&, value)
+		len: int = snprintf(null, 0, "%lld", value)
 
 		if len > 0 and len <= 8:
 			text: u8[9]
-			snprintf(text[0].ref[u8&], len.usize() + 1, "%lld" as u8&, value)
+			snprintf(text[0].ref[u8&], len.usize() + 1, "%lld", value)
 			return intern_small_string(text[0].ref[u8&], len.usize())
 
 		out: heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]
-		snprintf(out.cast[u8&?], len.usize() + 1, "%lld" as u8&, value)
+		snprintf(out.cast[u8&?], len.usize() + 1, "%lld", value)
 
 		if arena == perm_arena.ref[Arena&]:
 			register_perm_string_len(out.cast[u8&], len.usize())
@@ -212,7 +212,7 @@ def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
 
 def bool_to_string_into(arena: Arena&, value: int) -> u8&:
 	_ = arena
-	return "True" as u8& if value != 0 else "False" as u8&
+	return "True" if value != 0 else "False"
 
 def char_to_string_into(arena: Arena&, value: i64) -> heap u8&:
 	can Memory.Allocate, Abort.Panic:
@@ -234,7 +234,7 @@ def string_builder_next_cap(min_cap: i64) -> i64:
 
 def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
 	can Memory.Allocate, Abort.Panic:
-		src: u8& = initial if initial != null else "" as u8&
+		src: u8& = initial if initial != null else ""
 		len: usize = runtime_strlen(src)
 
 		builder: heap StringBuilder& = alloc_perm(sizeof(StringBuilder).i64()).cast[heap StringBuilder&]
@@ -250,7 +250,7 @@ def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
 
 def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
 	can Memory.Allocate, Abort.Panic:
-		src: u8& = suffix if suffix != null else "" as u8&
+		src: u8& = suffix if suffix != null else ""
 		suffix_len: usize = runtime_strlen(src)
 
 		if builder == null:
@@ -280,11 +280,11 @@ def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -
 def string_builder_finish(builder: heap StringBuilder&?) -> heap u8&:
 	can Memory.Allocate, Abort.Panic:
 		if builder == null:
-			return intern_small_string("" as u8&, 0)
+			return intern_small_string("", 0)
 
 		b: heap StringBuilder& = builder
 		if b.len <= 0:
-			return intern_small_string("" as u8&, 0)
+			return intern_small_string("", 0)
 
 		assert b.data != null
 

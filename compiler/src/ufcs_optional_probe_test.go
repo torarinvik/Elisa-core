@@ -105,6 +105,62 @@ def main() -> i64:
 	}
 }
 
+func TestRunCLICompilesOptionalTransformCallProbe(t *testing.T) {
+	sourcePath := writeImplicitContextFixture(t, "optional_transform_call_probe.llcontext", `def bump(value: i64) -> i64:
+    return value + 2
+
+def read(maybe_value: i64?) -> i64:
+    if let value = maybe_value?.(bump):
+        return value
+    return 0
+
+def main() -> i64:
+    return read(40)
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected optional transform call probe to compile, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "define i64 @main()") {
+		t.Fatalf("expected llvm output to contain main definition, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "safe.transform.present") {
+		t.Fatalf("expected optional transform call probe to lower optional control flow, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLICompilesOptionalTransformMemberCallProbe(t *testing.T) {
+	sourcePath := writeImplicitContextFixture(t, "optional_transform_member_call_probe.llcontext", `struct Checker:
+    delta: i64
+
+def adjust(self: Checker&, value: i64) -> i64:
+    return value + self.delta
+
+def read(self: Checker&, maybe_value: i64?) -> i64:
+    if let value = maybe_value?.(self.adjust):
+        return value
+    return 0
+
+def main() -> i64:
+    checker: mutable Checker = Checker(2)
+    checker_ref: Checker& = (&checker).cast[Checker&]
+    return checker_ref.read(40)
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected optional member transform call probe to compile, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "define i64 @main()") {
+		t.Fatalf("expected llvm output to contain main definition, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunCLICompilesOptionalFieldProbe(t *testing.T) {
 	sourcePath := writeImplicitContextFixture(t, "optional_field_probe.llcontext", `struct Counter:
     value: i64

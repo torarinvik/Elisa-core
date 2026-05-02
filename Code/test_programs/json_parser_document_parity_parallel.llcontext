@@ -20,7 +20,7 @@ def json_parser_parity_suite_impl() -> int:
             return 0
         if not json_expect_ast_checksum("[-12,3.5,null]", 136):
             return 0
-        if json_parser_ast_node_count_impl("{\"a\":[1,2,3],\"b\":[4,5],\"c\":null}" as u8&) != 12:
+        if json_parser_ast_node_count_impl("{\"a\":[1,2,3],\"b\":[4,5],\"c\":null}") != 12:
             return 0
         if not json_expect_invalid("[1,2}"):
             return 0
@@ -59,19 +59,19 @@ def json_parser_parity_suite_impl() -> int:
             destroy scratch
             return 0
 
-        name_node: JsonNode = json_ast_object_get(result.node, source_any, "name" as u8&, store)
-        quote_node: JsonNode = json_ast_object_get(result.node, source_any, "quote" as u8&, store)
-        smile_node: JsonNode = json_ast_object_get(result.node, source_any, "smile" as u8&, store)
+        name_node: JsonNode = json_ast_object_get(result.node, source_any, "name", store)
+        quote_node: JsonNode = json_ast_object_get(result.node, source_any, "quote", store)
+        smile_node: JsonNode = json_ast_object_get(result.node, source_any, "smile", store)
         if json_node_is_invalid(name_node, store) or json_node_is_invalid(quote_node, store) or json_node_is_invalid(smile_node, store):
             destroy scratch
             return 0
-        if not json_ast_string_eq_literal(source_any, name_node, "line\nbreak" as u8&, store):
+        if not json_ast_string_eq_literal(source_any, name_node, "line\nbreak", store):
             destroy scratch
             return 0
-        if not json_ast_string_eq_literal(source_any, quote_node, "\"" as u8&, store):
+        if not json_ast_string_eq_literal(source_any, quote_node, "\"", store):
             destroy scratch
             return 0
-        if not json_ast_string_eq_literal(source_any, smile_node, "\u263A" as u8&, store):
+        if not json_ast_string_eq_literal(source_any, smile_node, "\u263A", store):
             destroy scratch
             return 0
         destroy scratch
@@ -87,13 +87,13 @@ def json_parser_parity_suite_impl() -> int:
             destroy numbers_scratch
             return 0
 
-        small_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "small" as u8&, numbers_store)
-        big_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "big" as u8&, numbers_store)
-        neg_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "neg" as u8&, numbers_store)
-        frac_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "frac" as u8&, numbers_store)
-        exp_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "exp" as u8&, numbers_store)
-        huge_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "huge" as u8&, numbers_store)
-        tiny_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "tiny" as u8&, numbers_store)
+        small_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "small", numbers_store)
+        big_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "big", numbers_store)
+        neg_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "neg", numbers_store)
+        frac_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "frac", numbers_store)
+        exp_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "exp", numbers_store)
+        huge_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "huge", numbers_store)
+        tiny_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "tiny", numbers_store)
 
         small_u64: u64 = try json_ast_number_u64_value(numbers_any, small_node, numbers_store) else 0
         small_i64: i64 = try json_ast_number_i64_value(numbers_any, small_node, numbers_store) else -1
