@@ -147,7 +147,7 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			return ConstValue{}, false
 		}
 		if n.Op == lexer.TOKEN_IN {
-			list, ok := n.Right.(*ast.ListLitExpr)
+			list, ok := a.membershipCandidateList(n.Right)
 			if !ok || list == nil {
 				return ConstValue{}, false
 			}

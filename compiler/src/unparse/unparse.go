@@ -248,6 +248,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		line += " = " + formatExpr(n.Value)
 		f.writePrefixedMultiline(level, "", line)
+	case *ast.TokenSetDecl:
+		line := "tokenset " + n.Name
+		if n.ElemType != nil {
+			line += ": " + formatTypeExpr(n.ElemType)
+		}
+		line += " = " + formatExpr(n.Value)
+		f.writePrefixedMultiline(level, "", line)
 	case *ast.ConstEnumDecl:
 		f.writeLine(level, "const enum "+n.Name+" of "+formatTypeExpr(n.Storage)+":")
 		for _, member := range n.Members {

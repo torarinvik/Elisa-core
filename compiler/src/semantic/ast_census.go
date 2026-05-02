@@ -27,6 +27,8 @@ func (c *analyzerASTCensus) countDecl(decl ast.Decl) {
 	switch n := decl.(type) {
 	case *ast.ConstDecl:
 		c.countExpr(n.Value)
+	case *ast.TokenSetDecl:
+		c.countExpr(n.Value)
 	case *ast.ConstEnumDecl:
 		for _, member := range n.Members {
 			c.countExpr(member.Value)

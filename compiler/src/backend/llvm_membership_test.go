@@ -23,3 +23,27 @@ func TestGenerateLLVMIRLowersMembershipExpr(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersTokenSetMembershipExpr(t *testing.T) {
+	src := `const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+
+tokenset ExprStart = [TokenKind.IF, TokenKind.LET]
+
+def keep(kind: TokenKind) -> bool:
+    return kind in ExprStart
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_tokenset_membership.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @keep(i32 ", "membership.next.0", "membership.result"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tokenset membership lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}

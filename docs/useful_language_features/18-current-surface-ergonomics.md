@@ -189,6 +189,44 @@ Current rules:
 - lowering desugars the grammar match into existing `when(...)` machinery, so the feature is readable surface sugar over the same low-level parser path
 - use this for parser dispatch tables; keep ordinary `match` statements for runtime control flow
 
+## Reusable token sets
+
+Ordinary source can name static token-kind sets and use them with the membership operator. This keeps parser support helpers from growing long repeated `kind == A or kind == B` chains.
+
+```context
+const enum TokenKind of u32:
+    IF
+    CASE
+    FN
+    LET
+    LPAREN
+    IDENT
+    INTEGER
+    STRING
+
+tokenset ExprStart = [
+    TokenKind.IF,
+    TokenKind.CASE,
+    TokenKind.FN,
+    TokenKind.LET,
+    TokenKind.LPAREN,
+    TokenKind.IDENT,
+    TokenKind.INTEGER,
+    TokenKind.STRING,
+]
+
+def is_expr_start(kind: TokenKind) -> bool:
+    return kind in ExprStart
+```
+
+Current rules:
+
+- `tokenset Name = [...]` declares an immutable static list of membership candidates
+- `tokenset Name: TokenKind = [...]` can be used when an explicit element type is useful
+- the right-hand side must be a list literal
+- `value in Name` lowers through the same membership path as `value in [...]`
+- this is intended for token classifiers and other small static enum sets; use ordinary arrays when the set is runtime data
+
 ## Grammar recovery policies
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.

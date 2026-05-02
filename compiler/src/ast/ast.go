@@ -24,6 +24,13 @@ type ConstDecl struct {
 	Value    Expr
 }
 
+type TokenSetDecl struct {
+	Position lexer.Pos
+	Name     string
+	ElemType TypeExpr
+	Value    *ListLitExpr
+}
+
 type ConstEnumDecl struct {
 	Position lexer.Pos
 	Name     string
@@ -1808,8 +1815,11 @@ type StaticElifClause struct {
 
 // ---------- Tag implementations ----------
 
-func (n *ConstDecl) Pos() lexer.Pos     { return n.Position }
-func (n *ConstEnumDecl) Pos() lexer.Pos { return n.Position }
+func (n *ConstDecl) Pos() lexer.Pos    { return n.Position }
+func (n *TokenSetDecl) Pos() lexer.Pos { return n.Position }
+func (n *ConstEnumDecl) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 	return n.Position
 }
@@ -2077,6 +2087,7 @@ func (n *ResetStmt) Pos() lexer.Pos              { return n.Position }
 func (n *ScopeStmt) Pos() lexer.Pos              { return n.Position }
 
 func (*ConstDecl) nodeTag()                 {}
+func (*TokenSetDecl) nodeTag()              {}
 func (*ConstEnumDecl) nodeTag()             {}
 func (*ConstEnumMemberDecl) nodeTag()       {}
 func (*ErrorDecl) nodeTag()                 {}
@@ -2258,6 +2269,7 @@ func (*RestoreCheckpointStmt) nodeTag()     {}
 func (*ResetStmt) nodeTag()                 {}
 
 func (*ConstDecl) declTag()        {}
+func (*TokenSetDecl) declTag()     {}
 func (*ConstEnumDecl) declTag()    {}
 func (*ErrorDecl) declTag()        {}
 func (*EffectsDecl) declTag()      {}

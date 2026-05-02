@@ -1420,11 +1420,12 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 			body := p.parseBlock()
 			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Patterns: patterns, Body: body}
 		}
-		if isElif {
-			p.errorf("elif pattern binder requires `as Enum.Variant(...)` after store expression")
-		} else {
-			p.errorf("if pattern binder requires `as Enum.Variant(...)` after store expression")
-		}
+		p.pos = headStart
+		cond := p.withAsCastDisabled(p.parseExpr)
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		body := p.parseBlock()
+		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()

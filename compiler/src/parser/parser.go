@@ -215,6 +215,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("type") {
 		return p.parseTypeAliasDecl()
 	}
+	if p.peekIdentText("tokenset") {
+		return p.parseTokenSetDecl()
+	}
 	if p.peekIdentText("attribute") {
 		return p.parseAttributeDecl()
 	}
@@ -939,6 +942,25 @@ func (p *Parser) parseConstDecl() *ast.ConstDecl {
 	p.expectNewlineAfterValueExpr(value)
 
 	return &ast.ConstDecl{Position: pos, Name: name, Type: typ, Value: value}
+}
+
+func (p *Parser) parseTokenSetDecl() *ast.TokenSetDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("tokenset")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	var elemType ast.TypeExpr
+	if p.match(lexer.TOKEN_COLON) {
+		elemType = p.parseTypeExpr()
+	}
+	p.expect(lexer.TOKEN_ASSIGN)
+	value := p.parseExpr()
+	p.expectNewlineAfterValueExpr(value)
+	list, ok := value.(*ast.ListLitExpr)
+	if !ok {
+		p.errorAt(value.Pos(), "tokenset initializer must be a list literal")
+		list = &ast.ListLitExpr{Position: value.Pos()}
+	}
+	return &ast.TokenSetDecl{Position: pos, Name: name, ElemType: elemType, Value: list}
 }
 
 func (p *Parser) parseConstEnumDecl() *ast.ConstEnumDecl {

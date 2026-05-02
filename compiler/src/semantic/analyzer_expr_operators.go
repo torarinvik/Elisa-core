@@ -193,10 +193,14 @@ func staticTypeExprForType(pos lexer.Pos, typ Type) ast.Expr {
 func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
 	left := a.analyzeExpr(expr.Left)
 	resultType := a.namedTypes["bool"]
-	list, ok := expr.Right.(*ast.ListLitExpr)
+	list, ok := a.membershipCandidateList(expr.Right)
 	if !ok || list == nil {
 		right := a.analyzeExpr(expr.Right)
-		a.errorf(expr.Right.Pos(), "membership operator currently requires a list literal on the right-hand side, got %s", right)
+		if _, isPackedStore := right.(*PackedEnumStoreType); isPackedStore {
+			a.errorf(expr.Right.Pos(), "if pattern binder requires `as Enum.Variant(...)` after store expression")
+			return resultType
+		}
+		a.errorf(expr.Right.Pos(), "membership operator requires a list literal or tokenset on the right-hand side, got %s", right)
 		return resultType
 	}
 
@@ -225,6 +229,32 @@ func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
 	}
 	a.recordAnalyzedExprType(list, &ArrayType{Elem: elemType, Size: strconv.Itoa(len(list.Elems)), HasConstSize: true, ConstSize: int64(len(list.Elems))})
 	return resultType
+}
+
+func (a *Analyzer) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr, bool) {
+	if list, ok := expr.(*ast.ListLitExpr); ok {
+		return list, true
+	}
+	ident, ok := expr.(*ast.Ident)
+	if !ok || ident == nil {
+		return nil, false
+	}
+	var sym *Symbol
+	var found bool
+	if a.currentScope != nil {
+		sym, found = a.currentScope.Lookup(ident.Name)
+	}
+	if !found {
+		sym, _, found = a.lookupVisibleGlobal(ident.Name)
+	}
+	if !found || sym == nil {
+		return nil, false
+	}
+	decl, ok := sym.Node.(*ast.TokenSetDecl)
+	if !ok || decl == nil {
+		return nil, false
+	}
+	return decl.Value, true
 }
 
 func typesComparableForEquality(left Type, right Type) bool {

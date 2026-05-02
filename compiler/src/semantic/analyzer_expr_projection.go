@@ -614,6 +614,11 @@ func (a *Analyzer) immutableValueExprForSymbol(sym *Symbol) (ast.Expr, bool) {
 			return nil, false
 		}
 		return decl.Value, true
+	case *ast.TokenSetDecl:
+		if decl == nil || decl.Value == nil {
+			return nil, false
+		}
+		return decl.Value, true
 	case *ast.GlobalDecl:
 		if decl == nil || decl.Value == nil {
 			return nil, false

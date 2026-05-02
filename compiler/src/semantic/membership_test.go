@@ -55,13 +55,41 @@ func TestAnalyzeMembershipAllowsEmptyListLiteral(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMembershipAllowsTokenSetDecl(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "membership_tokenset.llcontext", `const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+
+tokenset ExprStart = [TokenKind.IF, TokenKind.LET]
+
+def keep(kind: TokenKind) -> bool:
+    return kind in ExprStart
+`)
+
+	decl := result.File.Decls[2].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	inExpr := ret.Value.(*ast.BinaryExpr)
+	if got := result.ExprTypes[inExpr].String(); got != "bool" {
+		t.Fatalf("expected membership expr type bool, got %s", got)
+	}
+	tokenSet := result.File.Decls[1].(*ast.TokenSetDecl)
+	arrayType, ok := result.ExprTypes[tokenSet.Value].(*ArrayType)
+	if !ok || arrayType == nil {
+		t.Fatalf("expected tokenset list type, got %T %#v", result.ExprTypes[tokenSet.Value], result.ExprTypes[tokenSet.Value])
+	}
+	if !arrayType.HasConstSize || arrayType.ConstSize != 2 {
+		t.Fatalf("expected fixed-size tokenset array, got %#v", arrayType)
+	}
+}
+
 func TestAnalyzeMembershipRejectsNonLiteralRightHandSide(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "membership_non_literal.llcontext", `def keep(value: i64, xs: i64[2]) -> bool:
     return value in xs
 `)
 
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "membership operator currently requires a list literal on the right-hand side") {
+	if !strings.Contains(all, "membership operator requires a list literal or tokenset on the right-hand side") {
 		t.Fatalf("expected membership rhs diagnostic, got:\n%s", all)
 	}
 }

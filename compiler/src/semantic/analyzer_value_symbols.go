@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strconv"
+
 	"llcontext/src/ast"
 )
 
@@ -33,6 +35,17 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						declType = a.inferLiteralType(n.Value)
 					}
 				}
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
+			case *ast.TokenSetDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				var expected Type
+				if n.ElemType != nil {
+					elemType := a.resolveType(n.ElemType)
+					if !IsInvalidType(elemType) {
+						expected = &ArrayType{Elem: elemType, Size: strconv.Itoa(len(n.Value.Elems)), HasConstSize: true, ConstSize: int64(len(n.Value.Elems))}
+					}
+				}
+				declType := a.analyzeListLitExprWithExpected(n.Value, expected)
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
 			case *ast.ConstEnumDecl:
 			case *ast.GlobalDecl:

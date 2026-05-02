@@ -31,6 +31,20 @@ func TestParseMembershipExprUsesComparisonPrecedence(t *testing.T) {
 	}
 }
 
+func TestParseTokenSetDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, "tokenset ExprStart = [TokenKind.IF, TokenKind.LET]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.TokenSetDecl)
+	if !ok {
+		t.Fatalf("expected tokenset decl, got %T", file.Decls[0])
+	}
+	if decl.Name != "ExprStart" || len(decl.Value.Elems) != 2 {
+		t.Fatalf("expected two-item ExprStart tokenset, got %#v", decl)
+	}
+}
+
 func TestParseMembershipExprAllowsNonLiteralRightHandSide(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(value: i64, xs: i64[2]) -> bool:\n    return value in xs\n")
 	if len(errs) != 0 {
@@ -140,6 +154,22 @@ func TestParseIfMembershipConditionUsesNormalIfPath(t *testing.T) {
 	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
 	if !ok {
 		t.Fatalf("expected normal if stmt, got %T", decl.Body[0])
+	}
+	inExpr, ok := ifStmt.Cond.(*ast.BinaryExpr)
+	if !ok || inExpr.Op != lexer.TOKEN_IN {
+		t.Fatalf("expected membership condition, got %#v", ifStmt.Cond)
+	}
+}
+
+func TestParseIfMembershipConditionAllowsNamedRightHandSide(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: i64, xs: i64[2]) -> bool:\n    if value in xs:\n        return true\n    return false\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected if statement, got %T", decl.Body[0])
 	}
 	inExpr, ok := ifStmt.Cond.(*ast.BinaryExpr)
 	if !ok || inExpr.Op != lexer.TOKEN_IN {

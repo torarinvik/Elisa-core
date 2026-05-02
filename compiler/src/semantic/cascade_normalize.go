@@ -17,6 +17,8 @@ func normalizeCascadeDecls(decls []ast.Decl) {
 		switch n := decl.(type) {
 		case *ast.ConstDecl:
 			n.Value = normalizeCascadeExpr(n.Value, nil, false)
+		case *ast.TokenSetDecl:
+			n.Value = normalizeCascadeExpr(n.Value, nil, false).(*ast.ListLitExpr)
 		case *ast.ConstEnumDecl:
 			for i := range n.Members {
 				n.Members[i].Value = normalizeCascadeExpr(n.Members[i].Value, nil, false)

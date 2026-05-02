@@ -23,6 +23,13 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 						a.errorf(n.Value.Pos(), "const %q initializer must be a compile-time %s value", n.Name, sym.Type)
 					}
 				}
+			case *ast.TokenSetDecl:
+				if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
+					valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
+					if !AssignableTo(sym.Type, valueType) {
+						a.errorf(n.Pos(), "tokenset %q expects %s, got %s", n.Name, sym.Type, valueType)
+					}
+				}
 			case *ast.GlobalDecl:
 				if n.Value != nil {
 					if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {

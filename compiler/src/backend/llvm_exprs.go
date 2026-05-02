@@ -1440,9 +1440,9 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 }
 
 func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
-	list, ok := expr.Right.(*ast.ListLitExpr)
+	list, ok := s.membershipCandidateList(expr.Right)
 	if !ok || list == nil {
-		return nil, nil, fmt.Errorf("membership operator requires a list literal on the right-hand side")
+		return nil, nil, fmt.Errorf("membership operator requires a list literal or tokenset on the right-hand side")
 	}
 	resultType := s.g.result.NamedTypes["bool"]
 	boolLLVMType := C.LLVMInt1TypeInContext(s.g.context)
@@ -1479,6 +1479,25 @@ func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (C.LLVMValueRef
 	phi := C.LLVMBuildPhi(s.builder, boolLLVMType, cStringFree("membership.result"))
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
 	return phi, resultType, nil
+}
+
+func (s *functionState) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr, bool) {
+	if list, ok := expr.(*ast.ListLitExpr); ok {
+		return list, true
+	}
+	ident, ok := expr.(*ast.Ident)
+	if !ok || ident == nil || s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
+		return nil, false
+	}
+	sym, ok := s.g.result.GlobalScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return nil, false
+	}
+	decl, ok := sym.Node.(*ast.TokenSetDecl)
+	if !ok || decl == nil {
+		return nil, false
+	}
+	return decl.Value, true
 }
 
 func (s *functionState) emitMembershipCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rightExpr ast.Expr) (C.LLVMValueRef, error) {
