@@ -6944,7 +6944,11 @@ func (s *functionState) emitSequenceCountValueFromPatternValue(actualValue C.LLV
 			}
 			return s.emitSequenceCountValue(originExpr, actualType, name)
 		}
-		return C.LLVMBuildExtractValue(s.builder, actualValue, 1, cStringFree(name)), nil
+		sourceAlloca, err := s.emitStackTempValue(actualValue, actualType, name+".source")
+		if err != nil {
+			return nil, err
+		}
+		return s.emitContainerCountValue(sourceAlloca, t, name)
 	case *semantic.RefType:
 		if t.State != semantic.RefStateNonNull {
 			return nil, fmt.Errorf("count pattern requires a non-null sequence reference")
@@ -6998,14 +7002,14 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 		C.LLVMBuildBr(s.builder, successBB)
 		return nil
 	}
-	if originExpr == nil {
-		return fmt.Errorf("list pattern lowering requires an origin expression")
+	if originExpr == nil && actualValue == nil {
+		return fmt.Errorf("list pattern lowering requires an origin expression or sequence value")
 	}
 	elemType, ok := semantic.SequenceMatchElementType(actualType)
 	if !ok {
 		return fmt.Errorf("list pattern requires an array, darray, view, or string-like value, got %s", actualType.String())
 	}
-	countValue, err := s.emitSequenceCountValue(originExpr, actualType, "match.list.len")
+	countValue, err := s.emitSequenceCountValueFromPatternValue(actualValue, actualType, originExpr, "match.list.len")
 	if err != nil {
 		return err
 	}
@@ -7037,16 +7041,36 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 		return nil
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, itemsBB)
+	var sourceAlloca C.LLVMValueRef
 	for i := 0; i < expectedCount; i++ {
 		elem := pattern.Elems[i]
-		indexExpr := &ast.IndexExpr{
-			Position: elem.Pos(),
-			Object:   originExpr,
-			Index:    &ast.IntLit{Position: elem.Pos(), Value: strconv.Itoa(i), Suffix: "u"},
-		}
-		elemValue, _, err := s.emitExpr(indexExpr, elemType)
-		if err != nil {
-			return err
+		var indexExpr ast.Expr
+		var elemValue C.LLVMValueRef
+		if actualValue == nil && originExpr != nil {
+			indexExpr = &ast.IndexExpr{
+				Position: elem.Pos(),
+				Object:   originExpr,
+				Index:    &ast.IntLit{Position: elem.Pos(), Value: strconv.Itoa(i), Suffix: "u"},
+			}
+			var err error
+			elemValue, _, err = s.emitExpr(indexExpr, elemType)
+			if err != nil {
+				return err
+			}
+		} else {
+			if sourceAlloca == nil {
+				var err error
+				sourceAlloca, err = s.emitStackTempValue(actualValue, actualType, "match.list.source")
+				if err != nil {
+					return err
+				}
+			}
+			indexValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(i), 0)
+			var err error
+			elemValue, _, err = s.emitIterLoopElementValue(nil, sourceAlloca, actualType, indexValue, "match.list")
+			if err != nil {
+				return err
+			}
 		}
 		nextSuccess := successBB
 		if i != expectedCount-1 {
@@ -7150,7 +7174,10 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		for i, fieldIndex := range matchedIndexes {
 			arg := orderedArgs[fieldIndex]
-			fieldValue := C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(fields[fieldIndex].Index), cStringFree("match.struct.field"))
+			fieldValue, err := s.emitStructMatchFieldValue(actualValue, actualType, fields[fieldIndex], "match.struct.field")
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
 			var fieldOrigin ast.Expr
 			if originExpr != nil {
 				fieldOrigin = &ast.FieldExpr{Position: arg.Position, Object: originExpr, Field: fields[fieldIndex].Decl.Name}
@@ -7255,6 +7282,33 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		return s.emitMatchedVariantPayloadPatternTest(p, actualValue, decodedActualValue, enumType, variant, store, originExpr, successBB, failureBB)
 	default:
 		return nil, packedPayloadValueCache{}, fmt.Errorf("unsupported match pattern %T", pattern)
+	}
+}
+
+func (s *functionState) emitStructMatchFieldValue(actualValue C.LLVMValueRef, actualType semantic.Type, field structLiteralField, name string) (C.LLVMValueRef, error) {
+	switch tt := semantic.StripAggregateStateType(actualType).(type) {
+	case *semantic.TreeBlockType, *semantic.TreeStructType:
+		surfaceField, ok := semantic.TreeExactSurfaceFieldInfo(tt, field.Decl.Name)
+		if !ok {
+			return nil, fmt.Errorf("%s has no field %s", actualType.String(), field.Decl.Name)
+		}
+		stateValue := s.emitTreeHandleStateValue(actualValue, name)
+		rowIndex, err := s.emitTreeHandleIndexValue(actualValue, name)
+		if err != nil {
+			return nil, err
+		}
+		tablePtr, err := s.emitTreeStateTablePtr(stateValue, treeExactMemberFamily(tt), tt, name)
+		if err != nil {
+			return nil, err
+		}
+		value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, field.Decl.Name, rowIndex, name)
+		if err != nil {
+			return nil, err
+		}
+		surfaceValue, _, err := s.treeFieldSurfaceValue(value, rawType, surfaceField.Type, name)
+		return surfaceValue, err
+	default:
+		return C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(field.Index), cStringFree(name)), nil
 	}
 }
 

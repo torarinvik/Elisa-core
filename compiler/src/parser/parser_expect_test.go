@@ -251,6 +251,29 @@ def check(root: Decl) -> void:
 	}
 }
 
+func TestParseExpectPatternAllowsTrailingCommaInNestedVariantArgs(t *testing.T) {
+	file, errs := parseSourceFile(t, `enum Expr:
+    Pair(left: int, right: int)
+
+def check(expr: Expr) -> void:
+    can Abort.Panic:
+        expect expr as Expr.Pair(
+            _,
+            _,
+        )
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	canStmt := decl.Body[0].(*ast.CanStmt)
+	expectStmt := canStmt.Body[0].(*ast.ExpectPatternStmt)
+	variant, ok := expectStmt.Patterns[0].(*ast.MatchVariantPattern)
+	if !ok || len(variant.Args) != 2 {
+		t.Fatalf("expected two-arg variant pattern, got %#v", expectStmt.Patterns[0])
+	}
+}
+
 func TestParseExpectIdentifierCallRemainsExpressionStatement(t *testing.T) {
 	file, errs := parseSourceFile(t, `def expect(value: int) -> void:
     pass

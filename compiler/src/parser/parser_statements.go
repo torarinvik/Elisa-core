@@ -966,6 +966,9 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 				if !p.match(lexer.TOKEN_COMMA) {
 					break
 				}
+				if p.peek() == lexer.TOKEN_RPAREN {
+					break
+				}
 			}
 		}
 		p.expect(lexer.TOKEN_RPAREN)

@@ -94,6 +94,55 @@ def check(block: Block) -> void:
 	}
 }
 
+func TestGenerateLLVMIRLowersExpectVariantPayloadFieldShapeListRestPattern(t *testing.T) {
+	src := `struct Block:
+    stmts: int[3]
+
+enum Stmt:
+    While(condition: int, body: Block)
+
+def check(stmt: Stmt) -> void:
+    can Abort.Panic:
+        expect stmt as Stmt.While(_, {stmts: [1, 2, ...]})
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_expect_variant_payload_field_shape_list_rest.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"expect.ok", "expect.fail", "match.list.items", "match.literal.eq"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected variant-payload field-shape/list-rest expect lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersExpectTreeBlockFieldShapeListPattern(t *testing.T) {
+	src := `tree Perl:
+    block Block:
+        stmts: darray[Stmt]
+
+    node Stmt:
+        While(condition: int, body: Block)
+        Last
+        Next
+
+def check(stmt: Perl.Stmt) -> void:
+    can Abort.Panic:
+        expect stmt as Perl.Stmt.While(_, {stmts: [Perl.Stmt.Next, Perl.Stmt.Last]})
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_expect_tree_block_field_shape_list.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"expect.ok", "expect.fail", "match.struct.field", "match.list.items"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree-block field-shape/list expect lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersStructFieldPatternsInIsAndMatch(t *testing.T) {
 	src := `const enum Tok of i32:
 	INTEGER = 1
