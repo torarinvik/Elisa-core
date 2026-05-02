@@ -6451,6 +6451,30 @@ def check(node: Expr) -> void:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsExpectLetPatternStatement(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+
+def check(node: Expr) -> int:
+	can Abort.Panic:
+		expect let Expr.Int(value) = node
+		return value
+`
+	_, errs := parseAndAnalyze(t, "expect_let_pattern_statement_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsAssertPatternCondition(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+
+def check(node: Expr) -> void:
+	assert node is Expr.Int(_)
+`
+	_, errs := parseAndAnalyze(t, "assert_pattern_condition_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsExpectPatternBlockCaptures(t *testing.T) {
 	src := `enum Expr:
 	Int(value: int)

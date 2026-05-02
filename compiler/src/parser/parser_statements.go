@@ -1555,6 +1555,29 @@ func (p *Parser) parseGuardStmt() ast.Stmt {
 }
 
 func (p *Parser) looksLikeExpectPatternStmt() bool {
+	if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "let" {
+		depth := 0
+		for i := p.pos + 2; i < len(p.tokens); i++ {
+			tok := p.tokens[i]
+			switch tok.Kind {
+			case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+				depth++
+			case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+				if depth > 0 {
+					depth--
+				}
+			case lexer.TOKEN_ASSIGN:
+				if depth == 0 {
+					return true
+				}
+			case lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+				if depth == 0 {
+					return false
+				}
+			}
+		}
+		return false
+	}
 	depth := 0
 	for i := p.pos + 1; i < len(p.tokens); i++ {
 		tok := p.tokens[i]
@@ -1581,9 +1604,17 @@ func (p *Parser) looksLikeExpectPatternStmt() bool {
 func (p *Parser) parseExpectPatternStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("expect")
-	value := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
-	p.expect(lexer.TOKEN_AS)
-	patterns := p.parseTopLevelMatchPatterns()
+	var value ast.Expr
+	var patterns []ast.MatchPattern
+	if p.matchIdentText("let") {
+		patterns = p.parseTopLevelMatchPatterns()
+		p.expect(lexer.TOKEN_ASSIGN)
+		value = p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
+	} else {
+		value = p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
+		p.expect(lexer.TOKEN_AS)
+		patterns = p.parseTopLevelMatchPatterns()
+	}
 	var body []ast.Stmt
 	hasBody := false
 	if p.match(lexer.TOKEN_COLON) {

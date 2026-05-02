@@ -107,6 +107,38 @@ Current rules:
 - optional transform is for one-call argument-position transforms; prefer `if let` when the present case needs several statements or a named payload
 - use `expr?.field` and `expr?.method(...)` for member access/calls on the optional payload itself
 
+## Expect pattern binding
+
+Use `expect let Pattern = value` when a test or helper wants to assert a shape and bind its payloads. It is the declarative form of the old `if value is Pattern(...): ... else: assert false` pyramid.
+
+```context
+def infix_op(expr: Perl.Expr) -> PerlInfixOp:
+    can Abort.Panic:
+        expect let Perl.Expr.Infix(op, _, _) = expr
+        return op
+```
+
+The older `expect value as Pattern` spelling remains valid. The `expect let` spelling is often easier to scan when the important thing is the expected shape first and the source value second.
+
+```context
+expect let Pascal.Decl.TypeDecl(_, PascalType.Type.Name(type_name_id)) = block.decls[0]
+assert type_name_id != NAME_TABLE_INVALID_ID
+```
+
+For checks that do not need payload bindings, ordinary assertion conditions can use the existing `is` pattern test directly:
+
+```context
+assert node is Expr.Int(_)
+```
+
+Current rules:
+
+- `expect let Pattern = value` lowers to the same expectation node as `expect value as Pattern`
+- blockless `expect let` can bind payload names for following statements
+- `expect let Pattern = value:` keeps the existing block form and lowers to a match with a panic fallback
+- failed expectations panic through the same `Abort.Panic` path as existing `expect ... as ...`
+- use `if let name = optional:` for optional unwrapping; `expect let` is for pattern matching over concrete values
+
 ## Typed string literal coercion
 
 String literals coerce contextually into the common string carrier forms, so call sites and local declarations no longer need explicit casts just to satisfy `u8&`, `cstr`, or `sview`.

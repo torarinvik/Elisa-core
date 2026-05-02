@@ -42,6 +42,67 @@ def check(node: Expr) -> void:
 	}
 }
 
+func TestParseExpectLetPatternStatementPreservesBlocklessBindingForm(t *testing.T) {
+	file, errs := parseSourceFile(t, `packed enum Expr:
+    Int(value: int)
+    Add(left: Expr, right: Expr)
+
+def check(node: Expr) -> void:
+    can Abort.Panic:
+        expect let Expr.Int(value) = node
+        assert value != 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	canStmt, ok := decl.Body[0].(*ast.CanStmt)
+	if !ok {
+		t.Fatalf("expected can stmt, got %T", decl.Body[0])
+	}
+	expectStmt, ok := canStmt.Body[0].(*ast.ExpectPatternStmt)
+	if !ok {
+		t.Fatalf("expected blockless expect-let pattern stmt, got %T", canStmt.Body[0])
+	}
+	if _, ok := expectStmt.Value.(*ast.Ident); !ok {
+		t.Fatalf("expected expect-let value ident, got %T", expectStmt.Value)
+	}
+	if len(expectStmt.Patterns) != 1 {
+		t.Fatalf("expected one expect-let pattern, got %d", len(expectStmt.Patterns))
+	}
+	variant, ok := expectStmt.Patterns[0].(*ast.MatchVariantPattern)
+	if !ok || variant.EnumName != "Expr" || variant.Variant != "Int" || len(variant.Args) != 1 {
+		t.Fatalf("expected Expr.Int(value) pattern, got %#v", expectStmt.Patterns[0])
+	}
+}
+
+func TestParseExpectLetPatternBlockLowersToMatchStmt(t *testing.T) {
+	file, errs := parseSourceFile(t, `enum Expr:
+    Int(value: int)
+
+def check(node: Expr) -> int:
+    can Abort.Panic:
+        expect let Expr.Int(value) = node:
+            return value
+    return 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	canStmt := decl.Body[0].(*ast.CanStmt)
+	matchStmt, ok := canStmt.Body[0].(*ast.MatchStmt)
+	if !ok {
+		t.Fatalf("expected expect-let block to lower to match stmt, got %T", canStmt.Body[0])
+	}
+	if len(matchStmt.Arms) != 2 {
+		t.Fatalf("expected pattern arm plus wildcard arm, got %d", len(matchStmt.Arms))
+	}
+	if _, ok := matchStmt.Arms[1].Body[0].(*ast.PanicStmt); !ok {
+		t.Fatalf("expected wildcard fallback panic, got %T", matchStmt.Arms[1].Body[0])
+	}
+}
+
 func TestParseExpectPatternBlockPreservesCaptureBody(t *testing.T) {
 	file, errs := parseSourceFile(t, `enum Expr:
     Int(value: int)
