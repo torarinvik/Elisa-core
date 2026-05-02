@@ -39,10 +39,7 @@ def streq(lhs: u8&?, rhs: u8&?) -> int:
     left: u8& = lhs if lhs != null else ""
     right: u8& = rhs if rhs != null else ""
 
-    if left == right:
-        return 1
-
-    return 1 if strcmp(left, right) == 0 else 0
+    return 1 if left == right or strcmp(left, right) == 0 else 0
 
 # ============================================================
 # Stage 1 runtime forwarding wrappers

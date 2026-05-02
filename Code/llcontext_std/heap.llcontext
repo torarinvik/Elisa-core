@@ -27,10 +27,7 @@ def fixed_buffer_align_forward(value: usize, alignment: usize) -> usize:
         return value
 
     remainder: usize = value % alignment
-    if remainder == 0:
-        return value
-
-    return value + (alignment - remainder)
+    return value if remainder == 0 else value + (alignment - remainder)
 
 def fixed_buffer_owns_ptr(a: FixedBufferAllocator&, ptr: void&) -> bool:
     if a.data == null:

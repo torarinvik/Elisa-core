@@ -56,10 +56,7 @@ def arena_deque_buffer_index[T](d: Deque[T]&, logical_index: usize) -> usize:
         assert logical_index < d.capacity
 
         head_len: usize = d.capacity - d.head
-        if logical_index < head_len:
-            return d.head + logical_index
-
-        return logical_index - head_len
+        return (d.head + logical_index) if logical_index < head_len else logical_index - head_len
 
 def arena_deque_copy_linearized[T](d: Deque[T]&, dst: mutable T&):
     if d.count == 0:
@@ -165,10 +162,7 @@ def arena_deque_push_back[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -
         return d
 
 def arena_deque_front[T](d: Deque[T]&) -> T&?:
-    if d.count == 0 or d.items == null:
-        return null
-
-    return &d.items[d.head]
+    return null if d.count == 0 or d.items == null else &d.items[d.head]
 
 def arena_deque_back[T](d: Deque[T]&) -> T&?:
     can Abort.Panic:
