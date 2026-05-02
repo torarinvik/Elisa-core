@@ -78,6 +78,120 @@ def use() -> void:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeReportsStatefulGrammarWhenTermMismatchedBranchTypes(t *testing.T) {
+	src := `struct Token:
+    kind: TokenKind
+
+struct ParserState:
+    cursor: mutable usize
+
+const enum TokenKind of i16:
+    EOF = 0
+    IDENT = 1
+
+def current_token(state: ParserState&) -> Token:
+    return zeroed as Token
+
+def expect_kind(state: mutable ParserState&, kind: TokenKind) -> Token:
+    return zeroed as Token
+
+grammar DemoGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    eof TokenKind.EOF
+    token_field kind
+    current current_token
+    expect_kind expect_kind
+    token:
+        IDENT
+    atom() -> Token:
+        value = when(state.current_token().kind == TokenKind.IDENT, .IDENT, expr(1))
+        return value
+`
+	_, errs := parseAndAnalyze(t, "grammar_when_mismatched_branch_types.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatalf("expected mismatched when-term branch values to fail semantic analysis")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot assign") || !strings.Contains(all, "Token") {
+		t.Fatalf("expected lowered when-term type mismatch diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeReportsStatefulGrammarChoiceMismatchedBranchTypes(t *testing.T) {
+	src := `struct Token:
+    kind: TokenKind
+
+struct ParserState:
+    cursor: mutable usize
+
+const enum TokenKind of i16:
+    EOF = 0
+    IDENT = 1
+
+def current_token(state: ParserState&) -> Token:
+    return zeroed as Token
+
+def expect_kind(state: mutable ParserState&, kind: TokenKind) -> Token:
+    return zeroed as Token
+
+grammar DemoGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    eof TokenKind.EOF
+    token_field kind
+    current current_token
+    expect_kind expect_kind
+    token:
+        IDENT
+    atom() -> Token:
+        value = choice(.IDENT, expr(1))
+        return value
+`
+	_, errs := parseAndAnalyze(t, "grammar_choice_mismatched_branch_types.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatalf("expected mismatched choice branch values to fail semantic analysis")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot assign") || !strings.Contains(all, "Token") {
+		t.Fatalf("expected lowered choice type mismatch diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsStatefulGrammarChoicePromotingValueBranchToOptional(t *testing.T) {
+	src := `struct Token:
+    kind: TokenKind
+
+struct ParserState:
+    cursor: mutable usize
+
+const enum TokenKind of i16:
+    EOF = 0
+    IDENT = 1
+
+def current_token(state: ParserState&) -> Token:
+    return zeroed as Token
+
+def expect_kind(state: mutable ParserState&, kind: TokenKind) -> Token:
+    return zeroed as Token
+
+grammar DemoGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    eof TokenKind.EOF
+    token_field kind
+    current current_token
+    expect_kind expect_kind
+    token:
+        IDENT
+    atom() -> Token?:
+        value = choice(.IDENT, expr[Token?](null))
+        return value
+`
+	_, errs := parseAndAnalyze(t, "grammar_choice_promotes_value_to_optional.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func requireDeclaredFunctionPermissionRefs(t *testing.T, result *semantic.Result, name string, expected ...string) {
 	t.Helper()
 	sym, ok := result.GlobalScope.Lookup(name)

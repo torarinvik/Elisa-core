@@ -306,6 +306,59 @@ func TestLowerDeclExpandsFirstTermLookahead(t *testing.T) {
 	}
 }
 
+func TestGrammarFirstFactsWalkNullablePrefixes(t *testing.T) {
+	pos := lexer.Pos{File: "grammar_facts_test.llcontext", Line: 1, Col: 1}
+	productions := map[string]resolvedGrammarProduction{
+		"maybe_prefix": {
+			Production: ast.GrammarProductionDecl{
+				Name: "maybe_prefix",
+				Terms: []ast.GrammarTerm{
+					&ast.GrammarOptionalTerm{
+						Position: pos,
+						Term:     &ast.GrammarTokenKindTerm{Position: pos, Kind: "IDENT"},
+					},
+					&ast.GrammarTokenKindTerm{Position: pos, Kind: "BEGIN"},
+				},
+			},
+		},
+		"empty_tail": {
+			Production: ast.GrammarProductionDecl{
+				Name: "empty_tail",
+				Terms: []ast.GrammarTerm{
+					&ast.GrammarOptionalTerm{
+						Position: pos,
+						Term:     &ast.GrammarTokenKindTerm{Position: pos, Kind: "END"},
+					},
+				},
+			},
+		},
+	}
+	first, nullable := grammarFirstTermsForTerm(&ast.GrammarCallTerm{Position: pos, Name: "maybe_prefix"}, productions, nil)
+	if nullable {
+		t.Fatalf("expected maybe_prefix to require BEGIN after nullable prefix")
+	}
+	if got := grammarFirstTokenKinds(first); strings.Join(got, ",") != "IDENT,BEGIN" {
+		t.Fatalf("expected first set [IDENT BEGIN], got %#v", got)
+	}
+	first, nullable = grammarFirstTermsForTerm(&ast.GrammarCallTerm{Position: pos, Name: "empty_tail"}, productions, nil)
+	if !nullable {
+		t.Fatalf("expected empty_tail to be nullable")
+	}
+	if got := grammarFirstTokenKinds(first); strings.Join(got, ",") != "END" {
+		t.Fatalf("expected first set [END], got %#v", got)
+	}
+}
+
+func grammarFirstTokenKinds(terms []ast.GrammarTerm) []string {
+	kinds := make([]string, 0, len(terms))
+	for _, term := range terms {
+		if kind, ok := term.(*ast.GrammarTokenKindTerm); ok {
+			kinds = append(kinds, kind.Kind)
+		}
+	}
+	return kinds
+}
+
 func TestLowerFilePreservesInlineNodeConstructionInStatefulGrammar(t *testing.T) {
 	file := parseGrammarTestFile(t, `struct Span:
     start: i32
@@ -1279,6 +1332,35 @@ func TestLowerFileStatefulWhenTermBranchesWithoutRunningBothSides(t *testing.T) 
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered when-term production to contain %q, got:\n%s", want, formatted)
 		}
+	}
+}
+
+func TestLowerFileStatefulChoicePromotesValueBranchToOptional(t *testing.T) {
+	file := parseGrammarTestFile(t, `struct Token:
+    kind: TokenKind
+
+struct ParserState:
+    cursor: mutable usize
+
+const enum TokenKind of i16:
+    EOF = 0
+    IDENT = 1
+
+grammar DemoGrammar over Token using ParserState:
+    cursor state
+    token_kind TokenKind
+    eof TokenKind.EOF
+    token_field kind
+    token:
+        IDENT
+    atom() -> Token?:
+        value = choice(.IDENT, expr[Token?](null))
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "as Token?") {
+		t.Fatalf("expected lowered choice to promote Token branch to Token?, got:\n%s", formatted)
 	}
 }
 
@@ -2986,6 +3068,31 @@ func TestLowerFileStatefulConcatTermFlattensListOperands(t *testing.T) {
 	}
 	if strings.Contains(formatted, "darray[void]") {
 		t.Fatalf("expected concat lowering to preserve list element type, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulConcatMergesListElementTypePastUntypedEmpty(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor parser
+	channel decls
+	declarations(decl: Pascal.Decl) -> darray[Pascal.Decl]:
+		decls <- empty + singleton[Pascal.Decl](decl)
+		pass
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"decls: mutable darray[Pascal.Decl] = zeroed as darray[Pascal.Decl]",
+		"__grammar_concat_value_",
+		"darray[Pascal.Decl] = []",
+		".push(decl)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected concat lowering to merge element type past untyped empty and contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "darray[void]") {
+		t.Fatalf("expected concat lowering to avoid darray[void] for untyped empty plus typed singleton, got:\n%s", formatted)
 	}
 }
 
