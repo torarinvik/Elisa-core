@@ -670,6 +670,12 @@ func (a *Analyzer) analyzeTopLevelSequenceMatchPattern(pattern ast.MatchPattern,
 			return false
 		}
 		for i, elem := range p.Elems {
+			if _, ok := elem.(*ast.MatchRestPattern); ok {
+				if i != len(p.Elems)-1 {
+					a.errorf(elem.Pos(), "list pattern rest marker must be the final element")
+				}
+				continue
+			}
 			indexExpr := &ast.IndexExpr{
 				Position: elem.Pos(),
 				Object:   valueExpr,

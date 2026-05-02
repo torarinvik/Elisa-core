@@ -3987,6 +3987,9 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 				return nil
 			}
 			for _, elem := range p.Elems {
+				if _, ok := elem.(*ast.MatchRestPattern); ok {
+					continue
+				}
 				if err := collectPattern(elem, elemType, out); err != nil {
 					return err
 				}
@@ -4208,6 +4211,9 @@ func (s *functionState) collectMatchPatternBindings(pattern ast.MatchPattern, ex
 			return nil
 		}
 		for _, elem := range p.Elems {
+			if _, ok := elem.(*ast.MatchRestPattern); ok {
+				continue
+			}
 			if err := s.collectMatchPatternBindings(elem, elemType, out); err != nil {
 				return err
 			}
@@ -7008,18 +7014,31 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 	if err != nil {
 		return err
 	}
-	expectedLen := C.LLVMConstInt(usizeLLVMType, C.ulonglong(len(pattern.Elems)), 0)
-	lenOK := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), countValue, expectedLen, cStringFree("match.list.len.ok"))
+	hasRest := false
+	expectedCount := len(pattern.Elems)
+	if expectedCount != 0 {
+		if _, ok := pattern.Elems[expectedCount-1].(*ast.MatchRestPattern); ok {
+			hasRest = true
+			expectedCount--
+		}
+	}
+	expectedLen := C.LLVMConstInt(usizeLLVMType, C.ulonglong(expectedCount), 0)
+	predicate := C.LLVMIntPredicate(C.LLVMIntEQ)
+	if hasRest {
+		predicate = C.LLVMIntPredicate(C.LLVMIntUGE)
+	}
+	lenOK := C.LLVMBuildICmp(s.builder, predicate, countValue, expectedLen, cStringFree("match.list.len.ok"))
 	itemsBB := successBB
-	if len(pattern.Elems) != 0 {
+	if expectedCount != 0 {
 		itemsBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.list.items"))
 	}
 	C.LLVMBuildCondBr(s.builder, lenOK, itemsBB, failureBB)
-	if len(pattern.Elems) == 0 {
+	if expectedCount == 0 {
 		return nil
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, itemsBB)
-	for i, elem := range pattern.Elems {
+	for i := 0; i < expectedCount; i++ {
+		elem := pattern.Elems[i]
 		indexExpr := &ast.IndexExpr{
 			Position: elem.Pos(),
 			Object:   originExpr,
@@ -7030,13 +7049,13 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 			return err
 		}
 		nextSuccess := successBB
-		if i != len(pattern.Elems)-1 {
+		if i != expectedCount-1 {
 			nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.list.pattern.next"))
 		}
 		if _, _, err := s.emitMatchPatternTest(elem, elemValue, nil, elemType, nil, indexExpr, nil, nextSuccess, failureBB); err != nil {
 			return err
 		}
-		if i != len(pattern.Elems)-1 {
+		if i != expectedCount-1 {
 			C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
 		}
 	}
@@ -7087,11 +7106,15 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		for i, elem := range p.Elems {
 			fieldValue := C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(fields[i].Index), cStringFree("match.tuple.field"))
+			var fieldOrigin ast.Expr
+			if originExpr != nil {
+				fieldOrigin = &ast.FieldExpr{Position: elem.Pos(), Object: originExpr, Field: fields[i].Decl.Name}
+			}
 			nextSuccess := successBB
 			if i != len(p.Elems)-1 {
 				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.tuple.pattern.next"))
 			}
-			if _, _, err := s.emitMatchPatternTest(elem, fieldValue, nil, fields[i].Type, nil, nil, nil, nextSuccess, failureBB); err != nil {
+			if _, _, err := s.emitMatchPatternTest(elem, fieldValue, nil, fields[i].Type, nil, fieldOrigin, nil, nextSuccess, failureBB); err != nil {
 				return nil, packedPayloadValueCache{}, err
 			}
 			if i != len(p.Elems)-1 {
@@ -7103,6 +7126,9 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if err := s.emitListMatchPatternTest(p, actualValue, actualType, originExpr, successBB, failureBB); err != nil {
 			return nil, packedPayloadValueCache{}, err
 		}
+		return decodedActualValue, packedPayloadValueCache{}, nil
+	case *ast.MatchRestPattern:
+		C.LLVMBuildBr(s.builder, successBB)
 		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchStructPattern:
 		if handled, err := s.emitCountMatchPatternTest(p, actualValue, actualType, originExpr, successBB, failureBB); handled || err != nil {
@@ -7125,11 +7151,15 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		for i, fieldIndex := range matchedIndexes {
 			arg := orderedArgs[fieldIndex]
 			fieldValue := C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(fields[fieldIndex].Index), cStringFree("match.struct.field"))
+			var fieldOrigin ast.Expr
+			if originExpr != nil {
+				fieldOrigin = &ast.FieldExpr{Position: arg.Position, Object: originExpr, Field: fields[fieldIndex].Decl.Name}
+			}
 			nextSuccess := successBB
 			if i != len(matchedIndexes)-1 {
 				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.struct.pattern.next"))
 			}
-			if _, _, err := s.emitMatchPatternTest(arg.Pattern, fieldValue, nil, fields[fieldIndex].Type, nil, nil, nil, nextSuccess, failureBB); err != nil {
+			if _, _, err := s.emitMatchPatternTest(arg.Pattern, fieldValue, nil, fields[fieldIndex].Type, nil, fieldOrigin, nil, nextSuccess, failureBB); err != nil {
 				return nil, packedPayloadValueCache{}, err
 			}
 			if i != len(matchedIndexes)-1 {
@@ -7530,7 +7560,7 @@ func (s *functionState) resolveStructMatchPatternArgs(pattern *ast.MatchStructPa
 	}
 	switch tt := semantic.StripAggregateStateType(actualType).(type) {
 	case *semantic.StructType:
-		if tt == nil || tt.Name != pattern.TypeName || tt.Decl == nil {
+		if tt == nil || (pattern.TypeName != "" && tt.Name != pattern.TypeName) || tt.Decl == nil {
 			got := "<invalid>"
 			if tt != nil {
 				got = tt.Name
@@ -7539,7 +7569,7 @@ func (s *functionState) resolveStructMatchPatternArgs(pattern *ast.MatchStructPa
 		}
 	case *semantic.GenericInstanceType:
 		base, _ := tt.Base.(*semantic.StructType)
-		if base == nil || base.Name != pattern.TypeName || base.Decl == nil {
+		if base == nil || (pattern.TypeName != "" && base.Name != pattern.TypeName) || base.Decl == nil {
 			got := semantic.StripAggregateStateType(actualType).String()
 			if base != nil {
 				got = base.Name
@@ -7547,7 +7577,7 @@ func (s *functionState) resolveStructMatchPatternArgs(pattern *ast.MatchStructPa
 			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
 		}
 	case *semantic.TreeBlockType:
-		if tt == nil || tt.Name != pattern.TypeName || tt.Decl == nil {
+		if tt == nil || (pattern.TypeName != "" && tt.Name != pattern.TypeName) || tt.Decl == nil {
 			got := "<invalid>"
 			if tt != nil {
 				got = tt.Name
@@ -7555,7 +7585,7 @@ func (s *functionState) resolveStructMatchPatternArgs(pattern *ast.MatchStructPa
 			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
 		}
 	case *semantic.TreeStructType:
-		if tt == nil || tt.Name != pattern.TypeName || tt.Decl == nil {
+		if tt == nil || (pattern.TypeName != "" && tt.Name != pattern.TypeName) || tt.Decl == nil {
 			got := "<invalid>"
 			if tt != nil {
 				got = tt.Name

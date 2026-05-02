@@ -155,6 +155,9 @@ func (a *Analyzer) bindExpectPatternLocals(scope *Scope, pattern ast.MatchPatter
 			return
 		}
 		for i, elem := range p.Elems {
+			if _, ok := elem.(*ast.MatchRestPattern); ok {
+				continue
+			}
 			var indexExpr ast.Expr
 			if valueExpr != nil {
 				indexExpr = &ast.IndexExpr{

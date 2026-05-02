@@ -124,3 +124,28 @@ func TestAnalyzeMembershipRejectsNonLiteralRightHandSide(t *testing.T) {
 		t.Fatalf("expected membership rhs diagnostic, got:\n%s", all)
 	}
 }
+
+func TestAnalyzeExpectPatternSupportsAnonymousFieldShapeAndListRest(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "expect_field_shape_list_rest.llcontext", `struct Block:
+    stmts: int[3]
+
+enum Decl:
+    Program(name: int, params: int, block: Block)
+
+def check(root: Decl) -> void:
+    can Abort.Panic:
+        expect root as Decl.Program(_, _, {stmts: [1, 2, ...]})
+`)
+
+	decl := result.File.Decls[2].(*ast.FuncDecl)
+	canStmt := decl.Body[0].(*ast.CanStmt)
+	expectStmt := canStmt.Body[0].(*ast.ExpectPatternStmt)
+	variant := expectStmt.Patterns[0].(*ast.MatchVariantPattern)
+	shape := variant.Args[2].Pattern.(*ast.MatchStructPattern)
+	if shape.TypeName != "" || !shape.Brace {
+		t.Fatalf("expected anonymous brace field shape, got %#v", shape)
+	}
+	if len(shape.ResolvedArgs) == 0 {
+		t.Fatalf("expected semantic analysis to resolve anonymous field-shape args")
+	}
+}

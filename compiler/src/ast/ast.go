@@ -1442,6 +1442,10 @@ type MatchListPattern struct {
 	Elems    []MatchPattern
 }
 
+type MatchRestPattern struct {
+	Position lexer.Pos
+}
+
 type MatchStructPattern struct {
 	Position     lexer.Pos
 	TypeName     string
@@ -2037,6 +2041,7 @@ func (n *MatchStringLiteralPattern) Pos() lexer.Pos {
 func (n *MatchLiteralPattern) Pos() lexer.Pos { return n.Position }
 func (n *MatchTuplePattern) Pos() lexer.Pos   { return n.Position }
 func (n *MatchListPattern) Pos() lexer.Pos    { return n.Position }
+func (n *MatchRestPattern) Pos() lexer.Pos    { return n.Position }
 func (n *MatchStructPattern) Pos() lexer.Pos  { return n.Position }
 func (n *MatchVariantPattern) Pos() lexer.Pos { return n.Position }
 func (n *MoveBindNamePattern) Pos() lexer.Pos { return n.Position }
@@ -2221,6 +2226,7 @@ func (*MatchStringLiteralPattern) nodeTag() {}
 func (*MatchLiteralPattern) nodeTag()       {}
 func (*MatchTuplePattern) nodeTag()         {}
 func (*MatchListPattern) nodeTag()          {}
+func (*MatchRestPattern) nodeTag()          {}
 func (*MatchStructPattern) nodeTag()        {}
 func (*MatchVariantPattern) nodeTag()       {}
 func (*MoveBindNamePattern) nodeTag()       {}
@@ -2382,6 +2388,7 @@ func (*MatchStringLiteralPattern) matchPatternTag() {}
 func (*MatchLiteralPattern) matchPatternTag()       {}
 func (*MatchTuplePattern) matchPatternTag()         {}
 func (*MatchListPattern) matchPatternTag()          {}
+func (*MatchRestPattern) matchPatternTag()          {}
 func (*MatchStructPattern) matchPatternTag()        {}
 func (*MatchVariantPattern) matchPatternTag()       {}
 func (*MoveBindNamePattern) moveBindPatternTag()    {}

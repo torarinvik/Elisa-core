@@ -3231,6 +3231,8 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 			parts = append(parts, formatMatchPattern(elem))
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
+	case *ast.MatchRestPattern:
+		return "..."
 	case *ast.MatchStructPattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
@@ -3241,6 +3243,9 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 			parts = append(parts, part)
 		}
 		if n.Brace {
+			if n.TypeName == "" {
+				return "{" + strings.Join(parts, ", ") + "}"
+			}
 			return n.TypeName + "{" + strings.Join(parts, ", ") + "}"
 		}
 		if len(parts) == 0 {

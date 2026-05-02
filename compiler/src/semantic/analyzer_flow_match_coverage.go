@@ -157,6 +157,9 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 		if !ok || len(p.Elems) != len(currList.Elems) {
 			return false
 		}
+		if matchListPatternHasRest(p) || matchListPatternHasRest(currList) {
+			return false
+		}
 		elemType, ok := SequenceMatchElementType(expected)
 		if !ok {
 			return false
@@ -283,17 +286,29 @@ func structPatternMatchesType(pattern *ast.MatchStructPattern, expected Type) bo
 	}
 	switch tt := StripAggregateStateType(expected).(type) {
 	case *StructType:
-		return tt != nil && tt.Name == pattern.TypeName && tt.Decl != nil
+		return tt != nil && (pattern.TypeName == "" || tt.Name == pattern.TypeName) && tt.Decl != nil
 	case *GenericInstanceType:
 		base, _ := tt.Base.(*StructType)
-		return base != nil && base.Name == pattern.TypeName && base.Decl != nil
+		return base != nil && (pattern.TypeName == "" || base.Name == pattern.TypeName) && base.Decl != nil
 	case *TreeBlockType:
-		return tt != nil && tt.Name == pattern.TypeName
+		return tt != nil && (pattern.TypeName == "" || tt.Name == pattern.TypeName)
 	case *TreeStructType:
-		return tt != nil && tt.Name == pattern.TypeName
+		return tt != nil && (pattern.TypeName == "" || tt.Name == pattern.TypeName)
 	default:
 		return false
 	}
+}
+
+func matchListPatternHasRest(pattern *ast.MatchListPattern) bool {
+	if pattern == nil {
+		return false
+	}
+	for _, elem := range pattern.Elems {
+		if _, ok := elem.(*ast.MatchRestPattern); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func orderedStructMatchPatternArgs(pattern *ast.MatchStructPattern, fields []moveBindResolvedField) ([]*ast.MatchPatternArg, bool) {
@@ -404,6 +419,8 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 			parts = append(parts, matchPatternSummary(elem))
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
+	case *ast.MatchRestPattern:
+		return "..."
 	case *ast.MatchStructPattern:
 		parts := make([]string, 0, len(p.Args))
 		for _, arg := range p.Args {

@@ -164,6 +164,9 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 			return
 		}
 		for _, elem := range p.Elems {
+			if _, ok := elem.(*ast.MatchRestPattern); ok {
+				continue
+			}
 			a.collectConditionStructPatternBindingTypes(elem, elemType, out)
 		}
 	case *ast.MatchVariantPattern:
@@ -497,6 +500,9 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 			return
 		}
 		for i, elem := range p.Elems {
+			if _, ok := elem.(*ast.MatchRestPattern); ok {
+				continue
+			}
 			var indexExpr ast.Expr
 			if valueExpr != nil {
 				indexExpr = &ast.IndexExpr{

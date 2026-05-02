@@ -74,6 +74,26 @@ def is_rel(kind: Tok) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersExpectFieldShapeListRestPattern(t *testing.T) {
+	src := `struct Block:
+    stmts: int[3]
+
+def check(block: Block) -> void:
+    can Abort.Panic:
+        expect block as {stmts: [1, 2, ...]}
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_expect_field_shape_list_rest.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"expect.ok", "expect.fail", "match.list.items", "match.literal.eq"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected field-shape/list-rest expect lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersStructFieldPatternsInIsAndMatch(t *testing.T) {
 	src := `const enum Tok of i32:
 	INTEGER = 1

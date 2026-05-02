@@ -930,6 +930,9 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	if p.peek() == lexer.TOKEN_LBRACKET {
 		return p.parseMatchListPattern(pos)
 	}
+	if p.peek() == lexer.TOKEN_LBRACE {
+		return p.parseMatchStructPatternAfterName(pos, "")
+	}
 	if p.peek() == lexer.TOKEN_INT_LIT || p.peek() == lexer.TOKEN_FLOAT_LIT || p.peek() == lexer.TOKEN_HEX_LIT ||
 		p.peek() == lexer.TOKEN_CHAR_LIT || p.peek() == lexer.TOKEN_TRUE || p.peek() == lexer.TOKEN_FALSE ||
 		p.peek() == lexer.TOKEN_NULL || p.peek() == lexer.TOKEN_MINUS || p.peek() == lexer.TOKEN_LPAREN {
@@ -975,6 +978,14 @@ func (p *Parser) parseMatchListPattern(pos lexer.Pos) ast.MatchPattern {
 	elems := make([]ast.MatchPattern, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 	if p.peek() != lexer.TOKEN_RBRACKET {
 		for {
+			if p.peek() == lexer.TOKEN_ELLIPSIS {
+				restPos := p.advance().Pos
+				elems = append(elems, &ast.MatchRestPattern{Position: restPos})
+				if p.peek() != lexer.TOKEN_RBRACKET {
+					p.errorf("list pattern rest marker must be the final element")
+				}
+				break
+			}
 			elems = append(elems, p.parseNestedMatchPattern())
 			if !p.match(lexer.TOKEN_COMMA) {
 				break

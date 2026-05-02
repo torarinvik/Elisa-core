@@ -210,6 +210,47 @@ def check(values: darray[Expr]) -> void:
 	}
 }
 
+func TestParseExpectPatternSupportsAnonymousFieldShapeAndListRest(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct Block:
+    stmts: int[3]
+
+enum Decl:
+    Program(name: int, params: int, block: Block)
+
+def check(root: Decl) -> void:
+    can Abort.Panic:
+        expect root as Decl.Program(_, _, {stmts: [1, 2, ...]})
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[2].(*ast.FuncDecl)
+	canStmt := decl.Body[0].(*ast.CanStmt)
+	expectStmt, ok := canStmt.Body[0].(*ast.ExpectPatternStmt)
+	if !ok {
+		t.Fatalf("expected blockless expect pattern stmt, got %T", canStmt.Body[0])
+	}
+	variant, ok := expectStmt.Patterns[0].(*ast.MatchVariantPattern)
+	if !ok || variant.EnumName != "Decl" || variant.Variant != "Program" || len(variant.Args) != 3 {
+		t.Fatalf("expected Decl.Program pattern, got %#v", expectStmt.Patterns[0])
+	}
+	shape, ok := variant.Args[2].Pattern.(*ast.MatchStructPattern)
+	if !ok || !shape.Brace || shape.TypeName != "" || len(shape.Args) != 1 || shape.Args[0].Name != "stmts" {
+		t.Fatalf("expected anonymous field-shape pattern, got %#v", variant.Args[2].Pattern)
+	}
+	list, ok := shape.Args[0].Pattern.(*ast.MatchListPattern)
+	if !ok || len(list.Elems) != 3 {
+		t.Fatalf("expected list pattern with rest, got %#v", shape.Args[0].Pattern)
+	}
+	if _, ok := list.Elems[2].(*ast.MatchRestPattern); !ok {
+		t.Fatalf("expected final rest marker, got %#v", list.Elems[2])
+	}
+	formatted := unparse.FormatStmt(expectStmt)
+	if !strings.Contains(formatted, "Decl.Program(_, _, {stmts: [1, 2, ...]})") {
+		t.Fatalf("expected formatted expect to preserve field-shape pattern, got:\n%s", formatted)
+	}
+}
+
 func TestParseExpectIdentifierCallRemainsExpressionStatement(t *testing.T) {
 	file, errs := parseSourceFile(t, `def expect(value: int) -> void:
     pass

@@ -125,6 +125,34 @@ expect let Pascal.Decl.TypeDecl(_, PascalType.Type.Name(type_name_id)) = block.d
 assert type_name_id != NAME_TABLE_INVALID_ID
 ```
 
+Tests can also match whole sequence and tree/struct shapes directly. This keeps common AST assertions declarative without hiding the raw tree constructors.
+
+```context
+expect block.stmts as [
+    Pascal.Stmt.Assign(_, _),
+    Pascal.Stmt.IfStmt(_, _, _),
+]
+
+expect ast.root as Pascal.Decl.Program(_, _, {
+    stmts: [
+        Pascal.Stmt.Assign(_, _),
+        Pascal.Stmt.IfStmt(_, _, _),
+    ],
+})
+```
+
+Anonymous brace patterns such as `{stmts: [...]}` mean “match these fields on the value whose type is already known”. Use a named brace pattern such as `Block{stmts: [...]}` when spelling the concrete struct type improves locality.
+
+List patterns are exact by default. A final `...` makes the pattern a prefix check:
+
+```context
+expect block.stmts as [
+    Pascal.Stmt.StandardRoutine(^PascalStandardRoutineKind.NEW, _),
+    Pascal.Stmt.StandardRoutine(^PascalStandardRoutineKind.DISPOSE, _),
+    ...,
+]
+```
+
 For checks that do not need payload bindings, ordinary assertion conditions can use the existing `is` pattern test directly:
 
 ```context
@@ -135,6 +163,9 @@ Current rules:
 
 - `expect let Pattern = value` lowers to the same expectation node as `expect value as Pattern`
 - blockless `expect let` can bind payload names for following statements
+- `expect value as [a, b]` checks sequence shape and length
+- `expect value as [a, b, ...]` checks a sequence prefix
+- `expect value as {field: pattern}` matches fields on a known struct/tree-block value
 - `expect let Pattern = value:` keeps the existing block form and lowers to a match with a panic fallback
 - failed expectations panic through the same `Abort.Panic` path as existing `expect ... as ...`
 - use `if let name = optional:` for optional unwrapping; `expect let` is for pattern matching over concrete values

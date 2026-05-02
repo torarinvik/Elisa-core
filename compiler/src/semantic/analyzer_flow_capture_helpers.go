@@ -162,6 +162,9 @@ func parallelForMatchArmPatternNames(pattern ast.MatchPattern) []string {
 	case *ast.MatchListPattern:
 		var out []string
 		for _, elem := range p.Elems {
+			if _, ok := elem.(*ast.MatchRestPattern); ok {
+				continue
+			}
 			out = append(out, parallelForMatchArmPatternNames(elem)...)
 		}
 		return out

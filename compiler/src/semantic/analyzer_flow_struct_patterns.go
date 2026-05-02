@@ -235,7 +235,7 @@ func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, ac
 	}
 	switch tt := actual.(type) {
 	case *StructType:
-		if tt.Name != pattern.TypeName {
+		if pattern.TypeName != "" && tt.Name != pattern.TypeName {
 			a.errorf(pattern.Pos(), "struct pattern expects struct %q, got %q", pattern.TypeName, tt.Name)
 			return nil, nil, false
 		}
@@ -245,7 +245,7 @@ func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, ac
 		}
 	case *GenericInstanceType:
 		base, _ := tt.Base.(*StructType)
-		if base == nil || base.Name != pattern.TypeName {
+		if base == nil || (pattern.TypeName != "" && base.Name != pattern.TypeName) {
 			got := actual.String()
 			if base != nil {
 				got = base.Name
@@ -258,12 +258,12 @@ func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, ac
 			return nil, nil, false
 		}
 	case *TreeBlockType:
-		if tt.Name != pattern.TypeName {
+		if pattern.TypeName != "" && tt.Name != pattern.TypeName {
 			a.errorf(pattern.Pos(), "struct pattern expects struct %q, got %q", pattern.TypeName, tt.Name)
 			return nil, nil, false
 		}
 	case *TreeStructType:
-		if tt.Name != pattern.TypeName {
+		if pattern.TypeName != "" && tt.Name != pattern.TypeName {
 			a.errorf(pattern.Pos(), "struct pattern expects struct %q, got %q", pattern.TypeName, tt.Name)
 			return nil, nil, false
 		}
