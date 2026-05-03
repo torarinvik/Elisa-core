@@ -23,15 +23,13 @@ def fixed_buffer_allocator_init(buffer: u8&, size: usize) -> FixedBufferAllocato
     return FixedBufferAllocator(buffer, size, 0)
 
 def fixed_buffer_align_forward(value: usize, alignment: usize) -> usize:
-    if alignment <= 1:
-        return value
+    value return if alignment <= 1
 
     remainder: usize = value % alignment
     return value if remainder == 0 else value + (alignment - remainder)
 
 def fixed_buffer_owns_ptr(a: FixedBufferAllocator&, ptr: void&) -> bool:
-    if a.data == null:
-        return false
+    false return if a.data == null
 
     base: uintptr = a.data.cast[u8&].uintptr()
     raw: uintptr = ptr.cast[u8&].uintptr()
@@ -39,8 +37,7 @@ def fixed_buffer_owns_ptr(a: FixedBufferAllocator&, ptr: void&) -> bool:
     return raw >= base and raw < limit
 
 def fixed_buffer_owns_range(a: FixedBufferAllocator&, ptr: void&, size_bytes: usize) -> bool:
-    if a.data == null:
-        return false
+    false return if a.data == null
 
     base: uintptr = a.data.cast[u8&].uintptr()
     raw: uintptr = ptr.cast[u8&].uintptr()
@@ -49,8 +46,7 @@ def fixed_buffer_owns_range(a: FixedBufferAllocator&, ptr: void&, size_bytes: us
     return raw >= base and end_raw <= limit
 
 def fixed_buffer_is_last_allocation(a: FixedBufferAllocator&, ptr: void&, size_bytes: usize) -> bool:
-    if a.data == null:
-        return false
+    false return if a.data == null
 
     base: uintptr = a.data.cast[u8&].uintptr()
     raw: uintptr = ptr.cast[u8&].uintptr()
@@ -69,16 +65,13 @@ def fixed_buffer_reset(a: mutable FixedBufferAllocator&):
     a.end_index <- 0
 
 def fixed_buffer_alloc_align(a: mutable FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> mutable void&?:
-    if a.data == null:
-        return null
+    null return if a.data == null
 
     base: u8& = a.data.cast[u8&]
     adjusted_addr: usize = fixed_buffer_align_forward((base + a.end_index).uintptr().usize(), alignment)
     adjusted_index: usize = (adjusted_addr.uintptr() - base.uintptr()).usize()
-    if adjusted_index > a.capacity:
-        return null
-    if size_bytes > a.capacity - adjusted_index:
-        return null
+    null return if adjusted_index > a.capacity
+    null return if size_bytes > a.capacity - adjusted_index
 
     result: void& = (base + adjusted_index).cast[void&]
     a.end_index <- adjusted_index + size_bytes
@@ -100,14 +93,11 @@ def fixed_buffer_alloc_or_panic(a: mutable FixedBufferAllocator&, size_bytes: us
         return raw.cast[void&]
 
 def fixed_buffer_resize(a: mutable FixedBufferAllocator&, ptr: void&, old_size: usize, new_size: usize) -> bool:
-    if not fixed_buffer_owns_range(a, ptr, old_size):
-        return false
+    false return if not fixed_buffer_owns_range(a, ptr, old_size)
 
-    if not fixed_buffer_is_last_allocation(a, ptr, old_size):
-        return new_size <= old_size
+    new_size <= old_size return if not fixed_buffer_is_last_allocation(a, ptr, old_size)
 
-    if a.data == null:
-        return false
+    false return if a.data == null
 
     if new_size <= old_size:
         a.end_index <- a.end_index - (old_size - new_size)
@@ -115,8 +105,7 @@ def fixed_buffer_resize(a: mutable FixedBufferAllocator&, ptr: void&, old_size: 
 
     base: uintptr = a.data.cast[u8&].uintptr()
     start_index: usize = (ptr.cast[u8&].uintptr() - base).usize()
-    if start_index + new_size > a.capacity:
-        return false
+    false return if start_index + new_size > a.capacity
 
     a.end_index <- start_index + new_size
     return true

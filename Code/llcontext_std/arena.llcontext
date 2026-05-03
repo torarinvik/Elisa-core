@@ -243,8 +243,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
 
 def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
-        if newsz <= oldsz:
-            return oldptr.cast[heap void&]
+        oldptr.cast[heap void&] return if newsz <= oldsz
 
         newptr: heap void& = arena_alloc(a, newsz)
         newptr_bytes: heap u8& = newptr.cast[heap u8&]
@@ -279,8 +278,7 @@ def arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool:
     right: u8& = rhs.cast[u8&]
 
     for i in 0..<n:
-        if left[i] != right[i]:
-            return false
+        false return if left[i] != right[i]
 
     return true
 

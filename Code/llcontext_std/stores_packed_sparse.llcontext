@@ -77,8 +77,7 @@ def ctx_packed_store_encode_variant_sparse(ptr: void&, state_bits: mutable void&
 
         handles: uintptr& = state.handles.items
         for i in 0..<state.handles.count:
-            if handles[i] == raw:
-                return i.u32()
+            i.u32() return if handles[i] == raw
 
         panic("variant-sparse packed store encode missing row pointer")
 def ctx_packed_store_decode_variant_sparse(index: u32, state_bits: mutable void&) -> mutable void&:

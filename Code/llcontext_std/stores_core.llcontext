@@ -122,8 +122,7 @@ def packed_store_register_region(a: mutable Arena&, state: mutable PackedStoreSt
         regions.items[global_index] <- r
 @inline(always)
 def packed_store_lookup_region(state: mutable PackedStoreState&, global_index: usize) -> heap Region&?:
-    if state.regions.items == null:
-        return null
+    null return if state.regions.items == null
     return null if global_index >= state.regions.count else state.regions.items[global_index]
 def ctx_packed_store_state_new(a: mutable Arena&, row_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:

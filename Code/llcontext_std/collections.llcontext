@@ -38,8 +38,7 @@ struct DictProbeResult:
 
 def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, needed: usize) -> mutable darray[T, shape_out]&:
     can Memory.Allocate, Abort.Panic:
-        if needed <= da.capacity:
-            return da
+        da return if needed <= da.capacity
 
         new_capacity: mutable usize = da.capacity
         if new_capacity == 0:
@@ -66,16 +65,14 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
 
 def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
     elem_size: usize = sizeof(T)
-    if da.items == null or da.count == 0:
-        return DynArrayView(null, 0, elem_size)
+    DynArrayView(null, 0, elem_size) return if da.items == null or da.count == 0
 
     lo: mutable usize = start if start < da.count else da.count
     hi: mutable usize = end if end < da.count else da.count
     if hi < lo:
         hi <- lo
 
-    if hi == lo:
-        return DynArrayView(null, 0, elem_size)
+    DynArrayView(null, 0, elem_size) return if hi == lo
 
     return DynArrayView((da.items + lo).cast[void&], hi - lo, elem_size)
 
@@ -83,16 +80,14 @@ def arena_da_view_len[T](view: dview[T]) -> usize:
     return view.len
 
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
-    if view.data == null or view.len == 0:
-        return DynArrayView(null, 0, view.elem_size)
+    DynArrayView(null, 0, view.elem_size) return if view.data == null or view.len == 0
 
     lo: mutable usize = start if start < view.len else view.len
     hi: mutable usize = end if end < view.len else view.len
     if hi < lo:
         hi <- lo
 
-    if hi == lo:
-        return DynArrayView(null, 0, view.elem_size)
+    DynArrayView(null, 0, view.elem_size) return if hi == lo
 
     offset: usize = lo * view.elem_size
     return DynArrayView((view.data.cast[u8&] + offset).cast[void&], hi - lo, view.elem_size)
@@ -137,8 +132,7 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
     assert left.len == right.len
     assert left.elem_size == right.elem_size
-    if left.len == 0:
-        return true
+    true return if left.len == 0
 
     assert left.data != null
     assert right.data != null
@@ -148,8 +142,7 @@ def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
 
 def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_out]:
     can Memory.Allocate, Abort.Panic:
-        if view.len == 0:
-            return zeroed
+        zeroed return if view.len == 0
 
         items: T& = arena_alloc(a, view.len * sizeof(T)).cast[T&]
         assert view.data != null
@@ -227,8 +220,7 @@ def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -
 # ------------------------------------------------------------
 
 def arena_dict_next_capacity(min_capacity: usize) -> usize:
-    if min_capacity == 0:
-        return 0
+    0 return if min_capacity == 0
 
     cap: mutable usize = DICT_INIT_CAP
     while cap < min_capacity:
@@ -236,14 +228,12 @@ def arena_dict_next_capacity(min_capacity: usize) -> usize:
     return cap
 
 def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
-    if m.count == 0 or m.items == null:
-        return DictProbeResult(0, false)
+    DictProbeResult(0, false) return if m.count == 0 or m.items == null
 
     assert m.items != null
     items: DictBucket[K, T]& = m.items
     for index in 0..<m.count:
-        if items[index].key == key:
-            return DictProbeResult(index, true)
+        DictProbeResult(index, true) return if items[index].key == key
 
     return DictProbeResult(m.count, false)
 
@@ -257,8 +247,7 @@ def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, 
         out.arena as & <- a
 
         capacity: usize = arena_dict_next_capacity(initial_capacity)
-        if capacity == 0:
-            return out
+        out return if capacity == 0
 
         items: mutable DictBucket[K, T]& = arena_alloc(a, capacity * sizeof(DictBucket[K, T])).cast[DictBucket[K, T]&]
         arena_dict_zero_buckets(items, capacity)
@@ -293,12 +282,10 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         return
 
 def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
-    if m.count == 0 or m.items == null:
-        return null
+    null return if m.count == 0 or m.items == null
 
     probe: DictProbeResult = arena_dict_find_index(m, key)
-    if not probe.found:
-        return null
+    null return if not probe.found
 
     assert m.items != null
     items: mutable DictBucket[K, T]& = m.items
@@ -337,20 +324,17 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
 def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
     can Memory.Allocate, Abort.Panic:
         existing: mutable T&? = arena_dict_get(m, key)
-        if existing != null:
-            return existing
+        existing return if existing != null
         return try arena_dict_put(a, m, key, value)
 
 def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
     return arena_dict_get(m, key) != null
 
 def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
-    if m.count == 0 or m.items == null:
-        return false
+    false return if m.count == 0 or m.items == null
 
     probe: DictProbeResult = arena_dict_find_index(m, key)
-    if not probe.found:
-        return false
+    false return if not probe.found
 
     assert m.items != null
     items: mutable DictBucket[K, T]& = m.items

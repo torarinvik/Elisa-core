@@ -14,11 +14,9 @@ def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
         left_len: usize = runtime_strlen(left)
         right_len: usize = runtime_strlen(right)
 
-        if left_len == 0:
-            return right
+        right return if left_len == 0
 
-        if right_len == 0:
-            return left
+        left return if right_len == 0
 
         if left_len + right_len <= 8:
             text: u8[9]
@@ -42,11 +40,9 @@ def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
         left_len: usize = runtime_strlen(left)
         right_len: usize = runtime_strlen(right)
 
-        if left_len == 0:
-            return right
+        right return if left_len == 0
 
-        if right_len == 0:
-            return left
+        left return if right_len == 0
 
         if left_len + right_len <= 8:
             text: u8[9]
@@ -69,8 +65,7 @@ def string_index(value: u8&?, index: i64) -> i64:
     src: u8& = value if value != null else ""
     len: usize = runtime_strlen(src)
 
-    if index < 0 or index.usize() >= len:
-        return -1
+    -1 return if index < 0 or index.usize() >= len
 
     return src[index.usize()].i64()
 
@@ -98,14 +93,11 @@ def string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
     slice_len: usize = hi - lo
     rhs_len: usize = runtime_strlen(rhs)
 
-    if slice_len != rhs_len:
-        return 0
+    0 return if slice_len != rhs_len
 
-    if slice_len == 0:
-        return 1
+    1 return if slice_len == 0
 
-    if src + lo == rhs:
-        return 1
+    1 return if src + lo == rhs
 
     return 1 if memcmp((src + lo).cast[void&], rhs.cast[void&], slice_len) == 0 else 0
 
@@ -149,14 +141,11 @@ def string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_sta
     left_slice_len: usize = left_hi - left_lo
     right_slice_len: usize = right_hi - right_lo
 
-    if left_slice_len != right_slice_len:
-        return 0
+    0 return if left_slice_len != right_slice_len
 
-    if left_slice_len == 0:
-        return 1
+    1 return if left_slice_len == 0
 
-    if left + left_lo == right + right_lo:
-        return 1
+    1 return if left + left_lo == right + right_lo
 
     return 1 if memcmp((left + left_lo).cast[void&], (right + right_lo).cast[void&], left_slice_len) == 0 else 0
 
@@ -181,16 +170,13 @@ def string_slice(value: u8&?, start: i64, end: i64) -> u8&:
         if hi < lo:
             hi <- lo
 
-        if lo == 0 and hi == len:
-            return src
+        src return if lo == 0 and hi == len
 
         out_len: usize = hi - lo
 
-        if out_len == 0:
-            return ""
+        "" return if out_len == 0
 
-        if out_len <= 8:
-            return intern_small_string(src + lo, out_len).cast[u8&]
+        intern_small_string(src + lo, out_len).cast[u8&] return if out_len <= 8
 
         out: u8& = alloc_perm((out_len + 1).i64()).cast[u8&]
         memcpy(out.cast[mutable void&], (src + lo).cast[void&], out_len)
@@ -243,8 +229,7 @@ def string_view_suffix(view: sview, start: i64) -> sview:
     return string_view_slice(view, start, view.len)
 
 def string_view_index(view: sview, index: i64) -> i64:
-    if index < 0 or index >= view.len:
-        return -1
+    -1 return if index < 0 or index >= view.len
 
     return view.data[index.usize()].i64()
 
@@ -252,32 +237,24 @@ def string_view_eq(view: sview, other: u8&?) -> int:
     rhs: u8& = other if other != null else ""
     rhs_len: usize = runtime_strlen(rhs)
 
-    if view.len < 0 or view.len.usize() != rhs_len:
-        return 0
-    if view.len == 0:
-        return 1
-    if view.data == rhs:
-        return 1
+    0 return if view.len < 0 or view.len.usize() != rhs_len
+    1 return if view.len == 0
+    1 return if view.data == rhs
 
     return 1 if memcmp(view.data.cast[void&], rhs.cast[void&], view.len.usize()) == 0 else 0
 
 def string_views_eq(lhs: sview, rhs: sview) -> int:
-    if lhs.len != rhs.len:
-        return 0
-    if lhs.len == 0:
-        return 1
-    if lhs.data == rhs.data:
-        return 1
+    0 return if lhs.len != rhs.len
+    1 return if lhs.len == 0
+    1 return if lhs.data == rhs.data
 
     return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs.len.usize()) == 0 else 0
 
 def string_view_copy(view: sview) -> heap u8&:
     can Memory.Allocate, Abort.Panic:
-        if view.len <= 0:
-            return intern_small_string("", 0)
+        intern_small_string("", 0) return if view.len <= 0
 
-        if view.len <= 8:
-            return intern_small_string(view.data, view.len.usize())
+        intern_small_string(view.data, view.len.usize()) return if view.len <= 8
 
         out: heap u8& = alloc_perm((view.len + 1).usize()).cast[heap u8&]
         memcpy(out.cast[mutable void&], view.data.cast[void&], view.len.usize())

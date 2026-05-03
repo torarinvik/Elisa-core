@@ -2,19 +2,16 @@ def packed_store_variant_rows_table(state: mutable PackedStoreState&) -> mutable
     return state.variant_rows.ref[darray[PackedStoreVariantRows]&]
 def packed_store_find_variant_rows(state: mutable PackedStoreState&, tag: u32) -> mutable PackedStoreVariantRows&?:
     variants: darray[PackedStoreVariantRows]& = packed_store_variant_rows_table(state)
-    if variants.items == null:
-        return null
+    null return if variants.items == null
 
     for i in 0..<variants.count:
-        if variants.items[i].tag == tag:
-            return &variants.items[i]
+        &variants.items[i] return if variants.items[i].tag == tag
 
     return null
 def packed_store_get_or_create_variant_rows(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32) -> mutable PackedStoreVariantRows&:
     can Memory.Allocate, Abort.Panic:
         found: PackedStoreVariantRows&? = packed_store_find_variant_rows(state, tag)
-        if found != null:
-            return found
+        found return if found != null
 
         variants: mutable darray[PackedStoreVariantRows]& = packed_store_variant_rows_table(state)
         created: mutable PackedStoreVariantRows = zeroed

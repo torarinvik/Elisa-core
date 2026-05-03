@@ -174,8 +174,7 @@ def ctx_packed_store_encode_index(a: mutable Arena&, ptr: void&, state_bits: mut
         assert state.handles.items != null
         handles: uintptr& = state.handles.items
         for i in 0..<state.handles.count:
-            if handles[i] == encoded:
-                return i.u32()
+            i.u32() return if handles[i] == encoded
         panic("packed store encode index missing handle")
 def ctx_packed_store_decode_index(a: mutable Arena&, index: u32, state_bits: mutable void&) -> mutable void&:
     can Abort.Panic:

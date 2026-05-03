@@ -88,8 +88,7 @@ def arena_deque_copy_linearized[T](d: Deque[T]&, dst: mutable T&):
 
 def arena_deque_reserve[T](a: mutable Arena&, d: mutable Deque[T]&, needed: usize) -> mutable Deque[T]&:
     can Memory.Allocate, Abort.Panic:
-        if needed <= d.capacity:
-            return d
+        d return if needed <= d.capacity
 
         new_capacity: mutable usize = d.capacity
         if new_capacity == 0:
@@ -135,16 +134,14 @@ def arena_deque_push_back_assume_capacity[T](d: mutable Deque[T]&, item: T):
 
 def arena_deque_push_front_bounded[T](d: mutable Deque[T]&, item: T) -> bool:
     can Abort.Panic:
-        if d.count >= d.capacity:
-            return false
+        false return if d.count >= d.capacity
 
         arena_deque_push_front_assume_capacity(d, item)
         return true
 
 def arena_deque_push_back_bounded[T](d: mutable Deque[T]&, item: T) -> bool:
     can Abort.Panic:
-        if d.count >= d.capacity:
-            return false
+        false return if d.count >= d.capacity
 
         arena_deque_push_back_assume_capacity(d, item)
         return true
@@ -166,8 +163,7 @@ def arena_deque_front[T](d: Deque[T]&) -> T&?:
 
 def arena_deque_back[T](d: Deque[T]&) -> T&?:
     can Abort.Panic:
-        if d.count == 0 or d.items == null:
-            return null
+        null return if d.count == 0 or d.items == null
 
         physical_index: usize = arena_deque_buffer_index(d, d.count - 1)
         return &d.items[physical_index]
@@ -182,8 +178,7 @@ def arena_deque_at[T](d: Deque[T]&, index: usize) -> T&:
 
 def arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool:
     can Abort.Panic:
-        if d.count == 0 or d.items == null:
-            return false
+        false return if d.count == 0 or d.items == null
 
         out[0] <- d.items[d.head]
         if d.count == 1:
@@ -197,8 +192,7 @@ def arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool:
 
 def arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool:
     can Abort.Panic:
-        if d.count == 0 or d.items == null:
-            return false
+        false return if d.count == 0 or d.items == null
 
         physical_index: usize = arena_deque_buffer_index(d, d.count - 1)
         out[0] <- d.items[physical_index]
