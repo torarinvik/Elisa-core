@@ -69,7 +69,10 @@ def string_index(value: u8&?, index: i64) -> i64:
     src: u8& = value if value != null else ""
     len: usize = runtime_strlen(src)
 
-    return -1 if index < 0 or index.usize() >= len else src[index.usize()].i64()
+    if index < 0 or index.usize() >= len:
+        return -1
+
+    return src[index.usize()].i64()
 
 def string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
     src: u8& = value if value != null else ""
@@ -240,7 +243,10 @@ def string_view_suffix(view: sview, start: i64) -> sview:
     return string_view_slice(view, start, view.len)
 
 def string_view_index(view: sview, index: i64) -> i64:
-    return -1 if index < 0 or index >= view.len else view.data[index.usize()].i64()
+    if index < 0 or index >= view.len:
+        return -1
+
+    return view.data[index.usize()].i64()
 
 def string_view_eq(view: sview, other: u8&?) -> int:
     rhs: u8& = other if other != null else ""

@@ -282,6 +282,42 @@ Current rules:
 - `value in Name` lowers through the same membership path as `value in [...]`
 - this is intended for token classifiers and other small static enum sets; use ordinary arrays when the set is runtime data
 
+## Enum mapping tables
+
+Use `enum map` for small total mappings from one enum-like type to another. This keeps token-to-AST/operator conversion tables declarative while lowering to an ordinary function.
+
+```context
+enum map binary_op: TokenKind -> PascalBinaryOp:
+    STAR => MUL
+    SLASH => DIV
+    DIV => DIV
+    MOD => MOD
+    EQ => EQ
+    NOTEQ => NOTEQ
+    _ => ADD
+```
+
+This is equivalent to a generated function:
+
+```context
+def binary_op(value: TokenKind) -> PascalBinaryOp:
+    if value == TokenKind.STAR:
+        return PascalBinaryOp.MUL
+    if value == TokenKind.SLASH:
+        return PascalBinaryOp.DIV
+    ...
+    return PascalBinaryOp.ADD
+```
+
+Current rules:
+
+- `enum map name: SourceEnum -> TargetEnum:` declares a function named `name`
+- each non-default arm compares the input `value` against a source enum member and returns a target enum member
+- bare arm members are qualified by the declared source or target type, so `STAR => MUL` means `TokenKind.STAR => PascalBinaryOp.MUL`
+- fully qualified members are also accepted when the short form would be unclear
+- a wildcard `_ => ...` arm is required
+- use this for dense classification maps; keep ordinary `match` or `if` when the mapping does extra computation
+
 ## Grammar recovery policies
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.

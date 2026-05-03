@@ -218,6 +218,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("tokenset") {
 		return p.parseTokenSetDecl()
 	}
+	if p.peek() == lexer.TOKEN_ENUM && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "map" {
+		return p.parseEnumMapDecl()
+	}
 	if p.peekIdentText("attribute") {
 		return p.parseAttributeDecl()
 	}
@@ -292,6 +295,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	case lexer.TOKEN_CONTEXT:
 		return p.parseContextDecl()
 	case lexer.TOKEN_ENUM:
+		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "map" {
+			return p.parseEnumMapDecl()
+		}
 		return p.parseEnumDecl()
 	case lexer.TOKEN_GLOBAL:
 		return p.parseGlobalDecl()
