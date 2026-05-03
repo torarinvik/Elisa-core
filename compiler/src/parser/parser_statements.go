@@ -728,9 +728,27 @@ func (p *Parser) parseLockStmt() *ast.LockStmt {
 	return &ast.LockStmt{Position: pos, Mutex: mutex, GuardName: guardName, Body: body}
 }
 
-func (p *Parser) parseMatch() *ast.MatchStmt {
+func (p *Parser) parseMatch() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_MATCH)
+	if p.match(lexer.TOKEN_QUESTION) {
+		name := "__match_optional"
+		var value ast.Expr
+		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
+			name = p.cur().Text
+			p.advance()
+			p.advance()
+			value = p.parseMatchHeadExpr()
+		} else {
+			value = p.parseMatchHeadExpr()
+		}
+		arms := p.parseMatchArms()
+		return &ast.IfStmt{
+			Position: pos,
+			Cond:     &ast.OptionalBindExpr{Position: pos, Name: name, Value: value},
+			Then:     []ast.Stmt{&ast.MatchStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: name}, Arms: arms}},
+		}
+	}
 	value := p.parseMatchHeadExpr()
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {

@@ -81,6 +81,52 @@ def unwrap(node: Expr) -> i64:
 	}
 }
 
+func TestParseOptionalMatchLowersToOptionalBindThenMatch(t *testing.T) {
+	file, errs := parseSourceFile(t, `enum Expr:
+    Int(value: i64)
+    Missing
+
+def check(maybe: Expr?) -> i64:
+    match? node = maybe:
+        Expr.Int(value):
+            return value
+        _:
+            return 0
+    return -1
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected match? to lower to if statement, got %T", decl.Body[0])
+	}
+	cond, ok := ifStmt.Cond.(*ast.OptionalBindExpr)
+	if !ok || cond.Name != "node" {
+		t.Fatalf("expected optional bind condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
+	}
+	if ident, ok := cond.Value.(*ast.Ident); !ok || ident.Name != "maybe" {
+		t.Fatalf("expected optional bind source maybe, got %T %#v", cond.Value, cond.Value)
+	}
+	if len(ifStmt.Then) != 1 {
+		t.Fatalf("expected one guarded match, got %d", len(ifStmt.Then))
+	}
+	matchStmt, ok := ifStmt.Then[0].(*ast.MatchStmt)
+	if !ok {
+		t.Fatalf("expected guarded match statement, got %T", ifStmt.Then[0])
+	}
+	if ident, ok := matchStmt.Value.(*ast.Ident); !ok || ident.Name != "node" {
+		t.Fatalf("expected match over unwrapped value, got %T %#v", matchStmt.Value, matchStmt.Value)
+	}
+	if len(matchStmt.Arms) != 2 {
+		t.Fatalf("expected two match arms, got %d", len(matchStmt.Arms))
+	}
+}
+
 func TestParseStructDeclWithAggregateStateParam(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Holder[?]:\n    value: i32&\n")
 	if len(errs) != 0 {

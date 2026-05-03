@@ -140,6 +140,31 @@ def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
 
 This keeps the common all-present case flat while still lowering to ordinary nested optional binds, so the lower-level control flow remains inspectable when needed.
 
+Use `match? name = optional:` when the present branch immediately wants to match on the unwrapped value.
+
+```context
+def describe(maybe: Expr?) -> i64:
+    match? expr = maybe:
+        Expr.Int(value):
+            return value
+        _:
+            return 0
+    return -1
+```
+
+This lowers to an ordinary optional bind followed by a statement-form `match`:
+
+```context
+if let expr = maybe:
+    match expr:
+        Expr.Int(value):
+            return value
+        _:
+            return 0
+```
+
+When the unwrapped name is not needed outside the match head, `match? optional:` uses an internal binding.
+
 If the true branch contains another low-precedence operator, wrap it so the intended branch value is clear:
 
 ```context
@@ -155,6 +180,7 @@ Current rules:
 - `return? value if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
 - `value return if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
 - `return? with name = optional, other = optional:` returns the body expression only when every binding is present; otherwise execution continues
+- `match? name = optional:` matches the unwrapped value only when the optional is present; otherwise execution continues after the match statement
 - `value if expr is Pattern(bindings) else fallback` exposes the pattern bindings only in the true branch
 - `value?.(fn)` unwraps `value` only when it is present and calls `fn(unwrapped_value)`
 - the result is optional unless the transform returns `void`, in which case the whole expression is `void`
