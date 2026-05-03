@@ -1475,13 +1475,14 @@ func (p *Parser) parsePanic() *ast.PanicStmt {
 }
 
 type ifClause struct {
-	Position lexer.Pos
-	Hint     ast.BranchHint
-	Cond     ast.Expr
-	Value    ast.Expr
-	Store    ast.Expr
-	Patterns []ast.MatchPattern
-	Body     []ast.Stmt
+	Position         lexer.Pos
+	Hint             ast.BranchHint
+	Cond             ast.Expr
+	Value            ast.Expr
+	Store            ast.Expr
+	Patterns         []ast.MatchPattern
+	OptionalBindings []optionalReturnWithBinding
+	Body             []ast.Stmt
 }
 
 func (p *Parser) parseBranchHint() ast.BranchHint {
@@ -1517,6 +1518,9 @@ func (p *Parser) parseIf() ast.Stmt {
 func (p *Parser) parseIfClause(isElif bool) ifClause {
 	pos := p.cur().Pos
 	hint := p.parseBranchHint()
+	if p.peekIdentText("let") {
+		return p.parseIfLetClause(pos, hint, isElif)
+	}
 	headStart := p.pos
 	head := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
 	if p.peek() == lexer.TOKEN_IN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET {
@@ -1568,6 +1572,36 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 	p.expectNewline()
 	body := p.parseBlock()
 	return ifClause{Position: pos, Hint: hint, Cond: head, Body: body}
+}
+
+func (p *Parser) parseIfLetClause(pos lexer.Pos, hint ast.BranchHint, isElif bool) ifClause {
+	if hint != ast.BranchHintNone {
+		if isElif {
+			p.errorf("elif likely/unlikely hint cannot be combined with optional binders")
+		} else {
+			p.errorf("if likely/unlikely hint cannot be combined with optional binders")
+		}
+	}
+	p.expectIdentText("let")
+	bindings := make([]optionalReturnWithBinding, 0, 2)
+	for {
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_ASSIGN)
+		value := p.parseNot()
+		bindings = append(bindings, optionalReturnWithBinding{name: name, value: value})
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+		p.skipNewlines()
+	}
+	var cond ast.Expr
+	if p.match(lexer.TOKEN_AND) {
+		cond = p.parseExpr()
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return ifClause{Position: pos, Cond: cond, OptionalBindings: bindings, Body: body}
 }
 
 func (p *Parser) parseGuardConditionExpr() ast.Expr {
@@ -1807,12 +1841,35 @@ func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
 			}}
 			continue
 		}
+		if len(clause.OptionalBindings) != 0 {
+			tail = []ast.Stmt{buildOptionalIfLetChain(clause.Position, clause.OptionalBindings, clause.Cond, clause.Body, tail, 0)}
+			continue
+		}
 		tail = []ast.Stmt{&ast.IfStmt{Position: clause.Position, Hint: clause.Hint, Cond: clause.Cond, Then: clause.Body, Else: tail}}
 	}
 	if len(tail) == 0 {
 		return &ast.PassStmt{}
 	}
 	return tail[0]
+}
+
+func buildOptionalIfLetChain(pos lexer.Pos, bindings []optionalReturnWithBinding, cond ast.Expr, body []ast.Stmt, elseBlock []ast.Stmt, index int) ast.Stmt {
+	if index >= len(bindings) {
+		if cond != nil {
+			return &ast.IfStmt{Position: pos, Cond: cond, Then: body, Else: elseBlock}
+		}
+		if len(body) == 1 {
+			return body[0]
+		}
+		return &ast.IfStmt{Position: pos, Cond: &ast.BoolLit{Position: pos, Value: true}, Then: body, Else: elseBlock}
+	}
+	binding := bindings[index]
+	return &ast.IfStmt{
+		Position: pos,
+		Cond:     &ast.OptionalBindExpr{Position: pos, Name: binding.name, Value: binding.value},
+		Then:     []ast.Stmt{buildOptionalIfLetChain(pos, bindings, cond, body, elseBlock, index+1)},
+		Else:     elseBlock,
+	}
 }
 
 func (p *Parser) parseWhile() *ast.WhileStmt {
@@ -2080,6 +2137,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			Cond:     cond,
 			Then:     []ast.Stmt{&ast.ReturnStmt{Position: returnPos, Value: expr}},
 		}
+	}
+
+	if p.matchIdentText("then") {
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		body := p.parseBlock()
+		return &ast.IfStmt{Position: pos, Cond: expr, Then: body}
 	}
 
 	switch p.peek() {

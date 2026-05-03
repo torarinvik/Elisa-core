@@ -289,6 +289,17 @@ def integer_range_contains(lower: Expr, upper: Expr, value: Expr) -> bool?:
 
 This is only for optional-return control flow. Use plain `if let` when the present branch performs diagnostics, mutation, or multiple statements.
 
+For those side-effecting branches, prefer the multi-binding form over a nested ladder:
+
+```context
+if let lower_value = integer_literal(lower), upper_value = integer_literal(upper):
+    lower_value > upper_value then:
+        record_diagnostic()
+    return
+```
+
+The `then:` block is just a compact statement-form `if` for short guards. Use the ordinary `if condition:` spelling when the condition or branch needs more room.
+
 Use direct recovery constructors for repeated recovery shapes:
 
 ```context

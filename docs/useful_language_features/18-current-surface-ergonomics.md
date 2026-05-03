@@ -140,6 +140,17 @@ def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
 
 This keeps the common all-present case flat while still lowering to ordinary nested optional binds, so the lower-level control flow remains inspectable when needed.
 
+When the present branch performs diagnostics, mutation, or several statements, use multi-binding `if let` instead. Each binding is unwrapped left-to-right, and the branch runs only when every optional is present.
+
+```context
+if let actual_lower = lower_value, actual_upper = upper_value:
+    actual_lower > actual_upper then:
+        record_diagnostic()
+    return
+```
+
+This lowers to the same ordinary optional-bind ladder you would write by hand. A short condition can be kept as a statement block with `then:` when that makes the guard read naturally.
+
 Use `match? name = optional:` when the present branch immediately wants to match on the unwrapped value.
 
 ```context
@@ -174,8 +185,10 @@ return (left == right) if rhs is Value.Int(right) else false
 Current rules:
 
 - `if let name = value:` accepts value optionals such as `T?` and nullable references such as `T&?`
+- `if let a = first, b = second:` runs only when every optional binding is present; bindings are evaluated left-to-right
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
 - `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
+- `condition then:` lowers to an ordinary `if condition:` statement block and is intended for short guard-style branches
 - `return? value` returns the unwrapped payload only when `value` is present; otherwise execution continues with the next statement
 - `return? value if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
 - `value return if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement

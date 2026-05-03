@@ -657,13 +657,56 @@ func TestParseIfLetCondition(t *testing.T) {
 	}
 	decl := file.Decls[0].(*ast.FuncDecl)
 	ifStmt := decl.Body[0].(*ast.IfStmt)
-	cond, ok := ifStmt.Cond.(*ast.BinaryExpr)
-	if !ok || cond.Op != lexer.TOKEN_AND {
-		t.Fatalf("expected and-condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
-	}
-	letExpr, ok := cond.Left.(*ast.OptionalBindExpr)
+	letExpr, ok := ifStmt.Cond.(*ast.OptionalBindExpr)
 	if !ok || letExpr.Name != "value" {
-		t.Fatalf("expected let-bind condition on left, got %T %#v", cond.Left, cond.Left)
+		t.Fatalf("expected let-bind condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
+	}
+	guard, ok := ifStmt.Then[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected let tail condition to lower to nested if, got %T", ifStmt.Then[0])
+	}
+	if cond, ok := guard.Cond.(*ast.BinaryExpr); !ok || cond.Op != lexer.TOKEN_GT {
+		t.Fatalf("expected tail condition, got %T %#v", guard.Cond, guard.Cond)
+	}
+}
+
+func TestParseIfLetMultipleBindingsLowersToNestedIfs(t *testing.T) {
+	file, errs := parseSourceFile(t, `def keep(lower: i64?, upper: i64?) -> void:
+    if let actual_lower = lower, actual_upper = upper:
+        actual_lower > actual_upper then:
+            return
+        return
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	outer, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected outer optional bind if, got %T", decl.Body[0])
+	}
+	outerBind, ok := outer.Cond.(*ast.OptionalBindExpr)
+	if !ok || outerBind.Name != "actual_lower" {
+		t.Fatalf("expected actual_lower optional bind, got %T %#v", outer.Cond, outer.Cond)
+	}
+	inner, ok := outer.Then[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected nested optional bind if, got %T", outer.Then[0])
+	}
+	innerBind, ok := inner.Cond.(*ast.OptionalBindExpr)
+	if !ok || innerBind.Name != "actual_upper" {
+		t.Fatalf("expected actual_upper optional bind, got %T %#v", inner.Cond, inner.Cond)
+	}
+	bodyWrapper, ok := inner.Then[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected multi-statement body wrapper, got %T", inner.Then[0])
+	}
+	guard, ok := bodyWrapper.Then[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected condition then block to lower to if, got %T", bodyWrapper.Then[0])
+	}
+	if _, ok := guard.Cond.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected condition then binary condition, got %T %#v", guard.Cond, guard.Cond)
 	}
 }
 
