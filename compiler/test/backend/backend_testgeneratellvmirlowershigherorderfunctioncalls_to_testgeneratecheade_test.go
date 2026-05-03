@@ -319,6 +319,55 @@ def same_box(left: Box&, right: Box&) -> bool:
 		}
 	}
 }
+func TestGenerateLLVMIRLowersOptionalStructFieldNullComparisons(t *testing.T) {
+	src := `tree PascalType:
+	node Type:
+		Name(id: u32)
+
+struct Symbol:
+	type_expr: PascalType.Type?
+
+def has_type_expr(symbol: Symbol) -> bool:
+	return symbol.type_expr != null
+
+def lacks_type_expr(symbol: Symbol) -> bool:
+	return symbol.type_expr == null
+`
+	result := parseAndAnalyze(t, "backend_optional_struct_field_null_compare.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	for _, check := range []string{"define i1 @has_type_expr", "define i1 @lacks_type_expr", "optional.present"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+func TestGenerateLLVMIRLowersOptionalNullChecksInTernaryConditions(t *testing.T) {
+	src := `tree PascalType:
+	node Type:
+		Name(id: u32)
+
+def both_present(left: PascalType.Type?, right: PascalType.Type?) -> bool:
+	return true if left != null and right != null else false
+
+def both_missing(left: PascalType.Type?, right: PascalType.Type?) -> bool:
+	return true if left == null and right == null else false
+`
+	result := parseAndAnalyze(t, "backend_optional_ternary_condition_null_compare.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	for _, check := range []string{"define i1 @both_present", "define i1 @both_missing", "cond.and.rhs", "optionalisnull"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
 func TestGenerateLLVMIRTernaryUsesPhi(t *testing.T) {
 	src := `def choose(flag: bool, left: i32, right: i32) -> i32:
     return left if flag else right

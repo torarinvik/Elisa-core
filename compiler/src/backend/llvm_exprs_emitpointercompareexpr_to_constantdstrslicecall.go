@@ -130,6 +130,14 @@ func (s *functionState) emitOptionalCompareExpr(expr *ast.BinaryExpr, leftType s
 		}
 	}
 	if optionalType == nil {
+		if _, isNull := expr.Right.(*ast.NullLit); isNull {
+			if leftOptional, ok := s.optionalCompareStoredType(expr.Left); ok {
+				optionalExpr = expr.Left
+				optionalType = leftOptional
+			}
+		}
+	}
+	if optionalType == nil {
 		if rightOptional, ok := rightType.(*semantic.OptionalType); ok && semantic.IsNullType(leftType) {
 			optionalExpr = expr.Right
 			optionalType = rightOptional
@@ -144,9 +152,17 @@ func (s *functionState) emitOptionalCompareExpr(expr *ast.BinaryExpr, leftType s
 		}
 	}
 	if optionalType == nil {
+		if _, isNull := expr.Left.(*ast.NullLit); isNull {
+			if rightOptional, ok := s.optionalCompareStoredType(expr.Right); ok {
+				optionalExpr = expr.Right
+				optionalType = rightOptional
+			}
+		}
+	}
+	if optionalType == nil {
 		return nil, nil, false, nil
 	}
-	optionalValue, _, err := s.emitExpr(optionalExpr, optionalType)
+	optionalValue, err := s.emitOptionalCompareOperandValue(optionalExpr, optionalType)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -158,6 +174,46 @@ func (s *functionState) emitOptionalCompareExpr(expr *ast.BinaryExpr, leftType s
 		return C.LLVMBuildNot(s.builder, presentValue, cStringFree("optionalisnull")), resultType, true, nil
 	}
 	return presentValue, resultType, true, nil
+}
+func (s *functionState) optionalCompareStoredType(expr ast.Expr) (*semantic.OptionalType, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.optionalCompareStoredType(n.Inner)
+	case *ast.Ident:
+		if binding, ok := s.lookupBinding(n.Name); ok {
+			if optionalType, ok := binding.typ.(*semantic.OptionalType); ok {
+				return optionalType, true
+			}
+		}
+	case *ast.FieldExpr:
+		if ptr, fieldType, err := s.emitFieldAddress(n); err == nil && ptr != nil {
+			if optionalType, ok := fieldType.(*semantic.OptionalType); ok {
+				return optionalType, true
+			}
+		}
+	}
+	return nil, false
+}
+func (s *functionState) emitOptionalCompareOperandValue(expr ast.Expr, optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.emitOptionalCompareOperandValue(n.Inner, optionalType)
+	case *ast.Ident:
+		if binding, ok := s.lookupBinding(n.Name); ok {
+			if storedOptional, ok := binding.typ.(*semantic.OptionalType); ok && semantic.SameType(storedOptional, optionalType) {
+				return s.loadValue(binding.ptr, storedOptional, n.Name)
+			}
+		}
+	case *ast.FieldExpr:
+		ptr, fieldType, err := s.emitFieldAddress(n)
+		if err == nil {
+			if storedOptional, ok := fieldType.(*semantic.OptionalType); ok && semantic.SameType(storedOptional, optionalType) {
+				return s.loadValue(ptr, storedOptional, n.Field)
+			}
+		}
+	}
+	optionalValue, _, err := s.emitExpr(expr, optionalType)
+	return optionalValue, err
 }
 func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
 	leftRef, leftIsRef := leftType.(*semantic.RefType)

@@ -94,18 +94,9 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 	thenBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.then"))
 	elseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.else"))
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.end"))
-	if hasConditionBindings {
-		if err := s.emitConditionBranchWithBindings(expr.Cond, thenBB, elseBB, ast.BranchHintNone); err != nil {
-			s.scope = parentScope
-			return nil, nil, err
-		}
-	} else {
-		condValue, _, err := s.emitExpr(expr.Cond, s.g.result.NamedTypes["bool"])
-		if err != nil {
-			s.scope = parentScope
-			return nil, nil, err
-		}
-		C.LLVMBuildCondBr(s.builder, condValue, thenBB, elseBB)
+	if err := s.emitConditionBranchWithBindings(expr.Cond, thenBB, elseBB, ast.BranchHintNone); err != nil {
+		s.scope = parentScope
+		return nil, nil, err
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, thenBB)
