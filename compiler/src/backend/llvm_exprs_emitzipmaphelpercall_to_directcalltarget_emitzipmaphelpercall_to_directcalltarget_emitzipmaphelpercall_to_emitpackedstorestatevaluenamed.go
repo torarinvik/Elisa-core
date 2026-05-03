@@ -1,0 +1,510 @@
+//go:build cgo
+
+package backend
+
+/*
+#include <stdlib.h>
+#include <string.h>
+#include <llvm-c/Core.h>
+
+static int llcontextLLVMIsZeroValue(LLVMValueRef value) {
+	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
+}
+
+static LLVMMetadataRef llctxAliasMDString(LLVMContextRef ctx, const char* value) {
+	if (value == NULL) {
+		return LLVMMDStringInContext2(ctx, "", 0);
+	}
+	return LLVMMDStringInContext2(ctx, value, strlen(value));
+}
+
+static LLVMMetadataRef llctxAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
+	return LLVMMDNodeInContext2(ctx, operands, count);
+}
+
+static unsigned llctxMetadataKindID(LLVMContextRef ctx, const char* kindName) {
+	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
+}
+
+static void llctxSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
+	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
+		return;
+	}
+	LLVMMetadataRef list = llctxAliasMDNode(ctx, scopes, count);
+	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
+	LLVMSetMetadata(inst, llctxMetadataKindID(ctx, kindName), listValue);
+}
+
+static LLVMMetadataRef llctxCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
+	LLVMMetadataRef operands[1];
+	operands[0] = llctxAliasMDString(ctx, domainName);
+	return llctxAliasMDNode(ctx, operands, 1);
+}
+
+static LLVMMetadataRef llctxCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
+	LLVMMetadataRef operands[2];
+	operands[0] = llctxAliasMDString(ctx, scopeName);
+	operands[1] = domain;
+	return llctxAliasMDNode(ctx, operands, 2);
+}
+
+static void llctxAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
+	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
+	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
+		return;
+	}
+	LLVMMetadataRef domain = llctxCreateAliasScopeDomain(ctx, domainName);
+	LLVMMetadataRef aliasScope = llctxCreateAliasScope(ctx, domain, aliasScopeName);
+	LLVMMetadataRef aliasScopes[1];
+	aliasScopes[0] = aliasScope;
+	llctxSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
+
+	LLVMMetadataRef noAliasScopes[2];
+	size_t noAliasCount = 0;
+	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
+		noAliasScopes[noAliasCount++] = llctxCreateAliasScope(ctx, domain, noAliasScope1Name);
+	}
+	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
+		noAliasScopes[noAliasCount++] = llctxCreateAliasScope(ctx, domain, noAliasScope2Name);
+	}
+	if (noAliasCount != 0) {
+		llctxSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
+	}
+}
+*/
+import "C"
+
+import (
+	"fmt"
+	"llcontext/src/ast"
+	"llcontext/src/semantic"
+)
+
+func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 4 {
+		return nil, nil, true, fmt.Errorf("zip_map expects 4 arguments, got %d", len(expr.Args))
+	}
+	dstType, dstElemType, ok := zipMapViewInfo(s.exprType(expr.Args[0]))
+	if !ok {
+		return nil, nil, true, fmt.Errorf("zip_map destination expects a dense view")
+	}
+	src1Type, src1ElemType, ok := zipMapViewInfo(s.exprType(expr.Args[1]))
+	if !ok {
+		return nil, nil, true, fmt.Errorf("zip_map source 1 expects a dense view")
+	}
+	src2Type, src2ElemType, ok := zipMapViewInfo(s.exprType(expr.Args[2]))
+	if !ok {
+		return nil, nil, true, fmt.Errorf("zip_map source 2 expects a dense view")
+	}
+	callbackType, ok := s.exprType(expr.Args[3]).(*semantic.FuncType)
+	if !ok || callbackType == nil {
+		return nil, nil, true, fmt.Errorf("zip_map callback expects a function value")
+	}
+	dstValue, _, err := s.emitExpr(expr.Args[0], dstType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src1Value, _, err := s.emitExpr(expr.Args[1], src1Type)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src2Value, _, err := s.emitExpr(expr.Args[2], src2Type)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	callbackValue, _, err := s.emitExpr(expr.Args[3], callbackType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dstDataPtr, err := s.emitDenseViewDataPointer(dstValue, dstElemType, "zip_map.dst")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src1DataPtr, err := s.emitDenseViewDataPointer(src1Value, src1ElemType, "zip_map.src1")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src2DataPtr, err := s.emitDenseViewDataPointer(src2Value, src2ElemType, "zip_map.src2")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dstSrc1Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[0], expr.Args[1])
+	dstSrc2Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[0], expr.Args[2])
+	src1Src2Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[1], expr.Args[2])
+	domainName := ""
+	dstScopeName := ""
+	src1ScopeName := ""
+	src2ScopeName := ""
+	hasScopedNoAlias := dstSrc1Disjoint || dstSrc2Disjoint || src1Src2Disjoint
+	if hasScopedNoAlias {
+		domainName = fmt.Sprintf("llctx.zip_map.%p.domain", expr)
+		dstScopeName = domainName + ".dst"
+		src1ScopeName = domainName + ".src1"
+		src2ScopeName = domainName + ".src2"
+	}
+	totalValue := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("zip_map.total"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.cond"))
+	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.body"))
+	loopEndBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.end"))
+	C.LLVMBuildBr(s.builder, loopCondBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
+	indexValue := C.LLVMBuildPhi(s.builder, usizeLLVMType, cStringFree("zip_map.index"))
+	initIndexValues := []C.LLVMValueRef{zero}
+	initIndexBlocks := []C.LLVMBasicBlockRef{entryBlock}
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(initIndexValues), llvmBlockSlicePtr(initIndexBlocks), 1)
+	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, totalValue, cStringFree("zip_map.has_more"))
+	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
+	dstElemPtr, err := s.emitDenseViewIndexedAddress(dstDataPtr, dstElemType, indexValue, "zip_map.dst")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src1ElemPtr, err := s.emitDenseViewIndexedAddress(src1DataPtr, src1ElemType, indexValue, "zip_map.src1")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src2ElemPtr, err := s.emitDenseViewIndexedAddress(src2DataPtr, src2ElemType, indexValue, "zip_map.src2")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src1Elem, err := s.loadValue(src1ElemPtr, src1ElemType, "zip_map.src1.elem")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if hasScopedNoAlias {
+		var noAliasScopes []string
+		if dstSrc1Disjoint {
+			noAliasScopes = append(noAliasScopes, dstScopeName)
+		}
+		if src1Src2Disjoint {
+			noAliasScopes = append(noAliasScopes, src2ScopeName)
+		}
+		s.attachAliasScopeMetadataWithNames(src1Elem, domainName, src1ScopeName, noAliasScopes)
+	}
+	src2Elem, err := s.loadValue(src2ElemPtr, src2ElemType, "zip_map.src2.elem")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if hasScopedNoAlias {
+		var noAliasScopes []string
+		if dstSrc2Disjoint {
+			noAliasScopes = append(noAliasScopes, dstScopeName)
+		}
+		if src1Src2Disjoint {
+			noAliasScopes = append(noAliasScopes, src1ScopeName)
+		}
+		s.attachAliasScopeMetadataWithNames(src2Elem, domainName, src2ScopeName, noAliasScopes)
+	}
+	resultValue, err := s.emitFunctionValueCall(callbackValue, callbackType, []C.LLVMValueRef{src1Elem, src2Elem}, "zip_map.call")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	coerced, err := s.coerceValue(resultValue, callbackType.Return, dstElemType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	store := C.LLVMBuildStore(s.builder, coerced, dstElemPtr)
+	if hasScopedNoAlias {
+		var noAliasScopes []string
+		if dstSrc1Disjoint {
+			noAliasScopes = append(noAliasScopes, src1ScopeName)
+		}
+		if dstSrc2Disjoint {
+			noAliasScopes = append(noAliasScopes, src2ScopeName)
+		}
+		s.attachAliasScopeMetadataWithNames(store, domainName, dstScopeName, noAliasScopes)
+	}
+	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree("zip_map.index.next"))
+	bodyEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, loopCondBB)
+	nextIndexValues := []C.LLVMValueRef{nextIndex}
+	nextIndexBlocks := []C.LLVMBasicBlockRef{bodyEnd}
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(nextIndexValues), llvmBlockSlicePtr(nextIndexBlocks), 1)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
+	return nil, s.g.result.NamedTypes["void"], true, nil
+}
+func zipMapViewInfo(t semantic.Type) (semantic.Type, semantic.Type, bool) {
+	switch tt := t.(type) {
+	case *semantic.ViewType:
+		if tt == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Elem, true
+	case *semantic.DArrayViewType:
+		if tt == nil || tt.SurfaceName == "packedtags" {
+			return nil, nil, false
+		}
+		return tt, tt.Elem, true
+	default:
+		return nil, nil, false
+	}
+}
+func (s *functionState) emitDenseViewDataPointer(viewValue C.LLVMValueRef, elemType semantic.Type, name string) (C.LLVMValueRef, error) {
+	if s == nil || s.g == nil {
+		return nil, fmt.Errorf("missing function state for dense view data extraction")
+	}
+	if elemType == nil {
+		return nil, fmt.Errorf("missing dense view element type")
+	}
+	return C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree(name+".data")), nil
+}
+func (s *functionState) emitDenseViewIndexedAddress(dataPtr C.LLVMValueRef, elemType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if s == nil || s.g == nil {
+		return nil, fmt.Errorf("missing function state for dense view indexing")
+	}
+	elemLLVMType, err := s.g.lowerType(elemType)
+	if err != nil {
+		return nil, err
+	}
+	indices := []C.LLVMValueRef{indexValue}
+	return C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name+".ptr")), nil
+}
+func (s *functionState) emitArenaViewSliceValue(viewValue C.LLVMValueRef, viewType *semantic.DArrayViewType, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if viewType == nil {
+		return nil, fmt.Errorf("missing dview type for slice helper lowering")
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	helperType := &semantic.FuncType{
+		Name:   "arena_da_view_slice",
+		Params: []semantic.Type{viewType, usizeType, usizeType},
+		Return: viewType,
+	}
+	callee, err := s.g.ensureFunctionDeclared("arena_da_view_slice", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{viewValue, startValue, endValue}, name), nil
+}
+func (s *functionState) emitChunksExactValidation(chunkSizeValue C.LLVMValueRef, totalValue C.LLVMValueRef, prefix string) error {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	nonZeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".nonzero"))
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".fail"))
+	isNonZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), chunkSizeValue, zero, cStringFree(prefix+".chunk.nonzero"))
+	C.LLVMBuildCondBr(s.builder, isNonZero, nonZeroBB, failBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	trapFn, err := s.ensureTrapFunction()
+	if err != nil {
+		return err
+	}
+	trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
+	if err != nil {
+		return err
+	}
+	s.buildCall(trapType, trapFn, nil, "")
+	C.LLVMBuildUnreachable(s.builder)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, nonZeroBB)
+	remainder := C.LLVMBuildURem(s.builder, totalValue, chunkSizeValue, cStringFree(prefix+".remainder"))
+	isExact := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), remainder, zero, cStringFree(prefix+".exact"))
+	C.LLVMBuildCondBr(s.builder, isExact, okBB, failBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	return nil
+}
+func (s *functionState) emitPackedStoreConstructorValue(expr *ast.CallExpr, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || len(expr.Args) != 1 {
+		return nil, nil, fmt.Errorf("packed store constructor expects exactly one arena argument")
+	}
+	value, err := s.emitPackedStoreValue(expr.Args[0], storeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, storeType, nil
+}
+func (s *functionState) emitTreeStoreConstructorValue(expr *ast.CallExpr, storeType *semantic.TreeStoreType) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || len(expr.Args) != 1 {
+		return nil, nil, fmt.Errorf("tree store constructor expects exactly one arena argument")
+	}
+	value, err := s.emitTreeStoreValue(expr.Args[0], storeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, storeType, nil
+}
+func (s *functionState) emitTreeStoreValue(arenaExpr ast.Expr, storeType *semantic.TreeStoreType) (C.LLVMValueRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing tree store type")
+	}
+	arenaPtr, _, err := s.emitAddressOrTemp(arenaExpr)
+	if err != nil {
+		return nil, err
+	}
+	return s.emitTreeStoreValueFromArenaRef(arenaPtr, storeType)
+}
+func (s *functionState) emitTreeStoreArenaValue(storeValue C.LLVMValueRef, storeType *semantic.TreeStoreType) (C.LLVMValueRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing tree store type")
+	}
+	return s.emitTreeStoreArenaValueNamed(storeValue, "tree.store.arena.value"), nil
+}
+func (s *functionState) emitTreeStoreValueFromExpr(expr ast.Expr) (C.LLVMValueRef, *semantic.TreeStoreType, error) {
+	if expr == nil {
+		return nil, nil, fmt.Errorf("missing tree store expression")
+	}
+	objectType := s.exprType(expr)
+	if objectType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for tree store expression")
+	}
+	if storeType, ok := objectType.(*semantic.TreeStoreType); ok {
+		value, _, err := s.emitExpr(expr, storeType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return value, storeType, nil
+	}
+	refType, ok := objectType.(*semantic.RefType)
+	if !ok || refType.State != semantic.RefStateNonNull {
+		return nil, nil, fmt.Errorf("tree store access requires a store value or proven non-null store reference")
+	}
+	storeType, ok := refType.Elem.(*semantic.TreeStoreType)
+	if !ok {
+		return nil, nil, fmt.Errorf("tree store access requires a tree store, got %s", objectType.String())
+	}
+	ptrValue, _, err := s.emitExpr(expr, objectType)
+	if err != nil {
+		return nil, nil, err
+	}
+	storeValue, err := s.loadValue(ptrValue, storeType, "tree.store.load")
+	if err != nil {
+		return nil, nil, err
+	}
+	return storeValue, storeType, nil
+}
+func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing packed enum store type")
+	}
+	arenaPtr, _, err := s.emitAddressOrTemp(arenaExpr)
+	if err != nil {
+		return nil, err
+	}
+	if storeType.Enum == nil {
+		return nil, fmt.Errorf("packed enum store %s is missing enum metadata", storeType.Name)
+	}
+	rowType, err := s.g.ensurePackedEnumStorageType(storeType.Enum)
+	if err != nil {
+		return nil, err
+	}
+	rowSizeBytes, err := s.g.abiSizeOfLLVMType(rowType)
+	if err != nil {
+		return nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	rowSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(rowSizeBytes), 0)
+	storeLLVMType, err := s.g.lowerPackedEnumStoreType(storeType)
+	if err != nil {
+		return nil, err
+	}
+	sideWords, err := s.g.packedEnumCommonSideTableWordCount(storeType.Enum)
+	if err != nil {
+		return nil, err
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	stateHelperName := "ctx_packed_store_state_new"
+	stateHelperParams := []semantic.Type{arenaRefType, usizeType}
+	stateArgs := []C.LLVMValueRef{arenaPtr, rowSizeValue}
+	if s.g.packedLoweringForStore(storeType) == packedEnumABIVariantSparse {
+		if sideWords > 0 {
+			stateHelperName = "ctx_packed_store_state_new_variant_sparse_with_side_words"
+			stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
+			stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(sideWords), 0))
+		} else {
+			stateHelperName = "ctx_packed_store_state_new_variant_sparse"
+		}
+	} else if storeType.Enum != nil && storeType.Enum.HasPackedPrefixOverride && storeType.Enum.PackedPrefixOverride == "common-only" && s.g.packedLoweringForStore(storeType) == packedEnumABIIndexSOA {
+		prefixWords, err := s.g.packedEnumCommonPrefixWordCount(storeType.Enum)
+		if err != nil {
+			return nil, err
+		}
+		if sideWords > 0 {
+			stateHelperName = "ctx_packed_store_state_new_with_prefix_and_side_words"
+			stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType, usizeType}
+			stateArgs = append(stateArgs,
+				C.LLVMConstInt(usizeLLVMType, C.ulonglong(prefixWords), 0),
+				C.LLVMConstInt(usizeLLVMType, C.ulonglong(sideWords), 0),
+			)
+		} else {
+			stateHelperName = "ctx_packed_store_state_new_with_prefix_words"
+			stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
+			stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(prefixWords), 0))
+		}
+	} else if sideWords > 0 {
+		stateHelperName = "ctx_packed_store_state_new_with_side_words"
+		stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
+		stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(sideWords), 0))
+	}
+	stateHelperType := &semantic.FuncType{Name: stateHelperName, Params: stateHelperParams, Return: voidRefType}
+	stateCallee, err := s.g.ensureFunctionDeclared(stateHelperName, stateHelperType)
+	if err != nil {
+		return nil, err
+	}
+	stateLLVMFnType, err := s.g.lowerFunctionType(stateHelperType)
+	if err != nil {
+		return nil, err
+	}
+	stateValue := s.buildCall(stateLLVMFnType, stateCallee, stateArgs, "packed.store.state")
+	storeValue := C.LLVMGetUndef(storeLLVMType)
+	storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, arenaPtr, 0, cStringFree("packed.store.arena"))
+	storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, rowSizeValue, 1, cStringFree("packed.store.row_bytes"))
+	storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, stateValue, 2, cStringFree("packed.store.state"))
+	return storeValue, nil
+}
+func (s *functionState) emitPackedStoreArenaValue(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
+	return s.emitPackedStoreArenaValueNamed(storeValue, storeType, "packed.store.arena.value")
+}
+func (s *functionState) emitPackedStoreFieldValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, index C.unsigned, name string) (C.LLVMValueRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing packed enum store type")
+	}
+	if block := C.LLVMGetInsertBlock(s.builder); block != nil && storeValue != nil {
+		key := packedStoreExtractCacheKey{block: block, store: storeValue, index: index}
+		if cached, ok := s.lookupPackedStoreFieldValue(key); ok && cached != nil {
+			return cached, nil
+		}
+		value := C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name))
+		s.cachePackedStoreFieldValue(key, value)
+		return value, nil
+	}
+	return C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name)), nil
+}
+func (s *functionState) emitPackedStoreArenaValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
+	return s.emitPackedStoreFieldValueNamed(storeValue, storeType, 0, name)
+}
+func (s *functionState) emitPackedStoreRowBytesValue(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
+	return s.emitPackedStoreRowBytesValueNamed(storeValue, storeType, "packed.store.row_bytes.value")
+}
+func (s *functionState) emitPackedStoreRowBytesValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
+	return s.emitPackedStoreFieldValueNamed(storeValue, storeType, 1, name)
+}
+func (s *functionState) emitPackedStoreStateValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
+	return s.emitPackedStoreFieldValueNamed(storeValue, storeType, 2, name)
+}

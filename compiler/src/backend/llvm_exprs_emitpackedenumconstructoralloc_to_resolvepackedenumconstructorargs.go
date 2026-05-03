@@ -1,0 +1,543 @@
+//go:build cgo
+
+package backend
+
+/*
+#include <stdlib.h>
+#include <string.h>
+#include <llvm-c/Core.h>
+
+static int llcontextLLVMIsZeroValue(LLVMValueRef value) {
+	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
+}
+
+static LLVMMetadataRef llctxAliasMDString(LLVMContextRef ctx, const char* value) {
+	if (value == NULL) {
+		return LLVMMDStringInContext2(ctx, "", 0);
+	}
+	return LLVMMDStringInContext2(ctx, value, strlen(value));
+}
+
+static LLVMMetadataRef llctxAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
+	return LLVMMDNodeInContext2(ctx, operands, count);
+}
+
+static unsigned llctxMetadataKindID(LLVMContextRef ctx, const char* kindName) {
+	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
+}
+
+static void llctxSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
+	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
+		return;
+	}
+	LLVMMetadataRef list = llctxAliasMDNode(ctx, scopes, count);
+	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
+	LLVMSetMetadata(inst, llctxMetadataKindID(ctx, kindName), listValue);
+}
+
+static LLVMMetadataRef llctxCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
+	LLVMMetadataRef operands[1];
+	operands[0] = llctxAliasMDString(ctx, domainName);
+	return llctxAliasMDNode(ctx, operands, 1);
+}
+
+static LLVMMetadataRef llctxCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
+	LLVMMetadataRef operands[2];
+	operands[0] = llctxAliasMDString(ctx, scopeName);
+	operands[1] = domain;
+	return llctxAliasMDNode(ctx, operands, 2);
+}
+
+static void llctxAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
+	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
+	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
+		return;
+	}
+	LLVMMetadataRef domain = llctxCreateAliasScopeDomain(ctx, domainName);
+	LLVMMetadataRef aliasScope = llctxCreateAliasScope(ctx, domain, aliasScopeName);
+	LLVMMetadataRef aliasScopes[1];
+	aliasScopes[0] = aliasScope;
+	llctxSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
+
+	LLVMMetadataRef noAliasScopes[2];
+	size_t noAliasCount = 0;
+	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
+		noAliasScopes[noAliasCount++] = llctxCreateAliasScope(ctx, domain, noAliasScope1Name);
+	}
+	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
+		noAliasScopes[noAliasCount++] = llctxCreateAliasScope(ctx, domain, noAliasScope2Name);
+	}
+	if (noAliasCount != 0) {
+		llctxSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
+	}
+}
+*/
+import "C"
+
+import (
+	"fmt"
+	"llcontext/src/ast"
+	"llcontext/src/semantic"
+)
+
+func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, storeValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
+	if enumType == nil || variant == nil || !enumType.Packed {
+		return nil, nil, fmt.Errorf("missing packed enum constructor metadata")
+	}
+	orderedArgs, commonArgs, err := s.resolvePackedEnumConstructorArgs(callExpr, enumType, variant, args, argNames)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(orderedArgs) != len(variant.Payload) {
+		return nil, nil, fmt.Errorf("enum constructor %s.%s expects %d arguments, got %d", enumType.Name, variant.Name, len(variant.Payload), len(args))
+	}
+	tagValue, err := s.enumTagConstant(variant.Tag)
+	if err != nil {
+		return nil, nil, err
+	}
+	if s.canInlinePackedEnumVariant(enumType, variant) {
+		var payloadValue C.LLVMValueRef
+		var payloadType semantic.Type
+		if len(orderedArgs) == 1 {
+			payloadType = variant.Payload[0]
+			payloadValue, _, err = s.emitExpr(orderedArgs[0], payloadType)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		inlineHandle, err := s.buildInlinePackedEnumHandle(tagValue, payloadValue, payloadType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return inlineHandle, enumType, nil
+	}
+	rowType, err := s.g.ensurePackedEnumStorageType(enumType)
+	if err != nil {
+		return nil, nil, err
+	}
+	sideWords, err := s.g.packedEnumCommonSideTableWordCount(enumType)
+	if err != nil {
+		return nil, nil, err
+	}
+	tailPlan, err := s.preparePackedEnumTailPayloadPlan(variant, orderedArgs)
+	if err != nil {
+		return nil, nil, err
+	}
+	allocPtr, enumValue, rowSizeValue, err := s.emitPackedEnumStorageAlloc(storeValue, enumType, tailPlan, tagValue)
+	if err != nil {
+		return nil, nil, err
+	}
+	rowValue := C.LLVMConstNull(rowType)
+	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, tagValue, 0, cStringFree("packed.enum.tag.ins"))
+	commonValues := make(map[string]C.LLVMValueRef, len(enumType.Decl.Common))
+	for _, commonDecl := range enumType.Decl.Common {
+		arg, ok := commonArgs[commonDecl.Name]
+		if !ok {
+			continue
+		}
+		layout, err := s.g.packedEnumCommonFieldLayout(enumType, commonDecl.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		fieldValue, _, err := s.emitExpr(arg, layout.Field.Type)
+		if err != nil {
+			return nil, nil, err
+		}
+		commonValues[commonDecl.Name] = fieldValue
+		if layout.StoredInline {
+			rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, fieldValue, C.unsigned(layout.RowFieldIndex), cStringFree("packed.enum.common.ins"))
+		}
+	}
+	C.LLVMBuildStore(s.builder, rowValue, allocPtr)
+	if len(variant.Payload) > 0 {
+		payloadPtr, err := s.enumPayloadPtr(allocPtr, enumType)
+		if err != nil {
+			return nil, nil, err
+		}
+		var tailDataPtr C.LLVMValueRef
+		if tailPlan != nil {
+			tailDataPtr, err = s.emitPackedEnumTailDataPtr(allocPtr, rowSizeValue)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		if len(variant.Payload) == 1 {
+			argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, 0, orderedArgs[0], tailPlan, tailDataPtr)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !llvmValueIsZeroConstant(argValue) {
+				C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+			}
+		} else {
+			payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
+			if err != nil {
+				return nil, nil, err
+			}
+			aggregate := C.LLVMGetUndef(payloadType)
+			allZero := true
+			for i, payload := range variant.Payload {
+				_ = payload
+				argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, i, orderedArgs[i], tailPlan, tailDataPtr)
+				if err != nil {
+					return nil, nil, err
+				}
+				if !llvmValueIsZeroConstant(argValue) {
+					allZero = false
+				}
+				aggregate = C.LLVMBuildInsertValue(s.builder, aggregate, argValue, C.unsigned(i), cStringFree("packed.enum.payload.ins"))
+			}
+			if !allZero {
+				C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+			}
+		}
+	}
+	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: enumType.StoreType}
+	if sideWords > 0 {
+		wordBytes := uint64(s.g.wordBits / 8)
+		if wordBytes == 0 {
+			wordBytes = 8
+		}
+		sideBufferType := &semantic.ArrayType{Elem: s.g.result.NamedTypes["uintptr"], HasConstSize: true, ConstSize: int64(sideWords)}
+		sideBufferPtr, err := s.createEntryAlloca("packed.side.words", sideBufferType)
+		if err != nil {
+			return nil, nil, err
+		}
+		sideBufferLLVMType, err := s.g.lowerType(sideBufferType)
+		if err != nil {
+			return nil, nil, err
+		}
+		C.LLVMBuildStore(s.builder, C.LLVMConstNull(sideBufferLLVMType), sideBufferPtr)
+		for _, commonDecl := range enumType.Decl.Common {
+			layout, err := s.g.packedEnumCommonFieldLayout(enumType, commonDecl.Name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if layout.StoredInline {
+				continue
+			}
+			fieldValue, ok := commonValues[commonDecl.Name]
+			if !ok {
+				continue
+			}
+			if err := s.emitPackSideTableFieldValue(sideBufferPtr, layout.SideWordOffset*wordBytes, fieldValue, layout.Field.Type, "packed.side.pack"); err != nil {
+				return nil, nil, err
+			}
+		}
+		if err := ops.recordSideWords(sideBufferPtr, "packed.side.record"); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := ops.recordPrefixWords(allocPtr, "packed.prefix.record"); err != nil {
+		return nil, nil, err
+	}
+	mode := s.g.packedModeForEnum(enumType)
+	if mode != packedEnumABIVariantSparse && tailPlan != nil {
+		if err := s.emitPackedStoreRecordTag(storeValue, enumType.StoreType, tagValue); err != nil {
+			return nil, nil, err
+		}
+	}
+	return enumValue, enumType, nil
+}
+func (s *functionState) canInlinePackedEnumVariant(enumType *semantic.EnumType, variant *semantic.EnumVariant) bool {
+	return false
+}
+func (s *functionState) buildInlinePackedEnumHandle(tagValue C.LLVMValueRef, payloadValue C.LLVMValueRef, payloadType semantic.Type) (C.LLVMValueRef, error) {
+	uintptrLLVMType, err := s.g.lowerBuiltin("uintptr")
+	if err != nil {
+		return nil, err
+	}
+	handleValue := C.LLVMBuildZExt(s.builder, tagValue, uintptrLLVMType, cStringFree("packed.inline.tag.zext"))
+	handleValue = C.LLVMBuildShl(s.builder, handleValue, C.LLVMConstInt(uintptrLLVMType, 49, 0), cStringFree("packed.inline.tag.shift"))
+	if payloadValue != nil && payloadType != nil {
+		payloadBits := C.LLVMBuildZExt(s.builder, payloadValue, uintptrLLVMType, cStringFree("packed.inline.payload.zext"))
+		payloadBits = C.LLVMBuildShl(s.builder, payloadBits, C.LLVMConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.payload.shift"))
+		handleValue = C.LLVMBuildOr(s.builder, handleValue, payloadBits, cStringFree("packed.inline.payload.or"))
+	}
+	return C.LLVMBuildOr(s.builder, handleValue, C.LLVMConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.handle")), nil
+}
+func (s *functionState) emitPackedStoreRecordTag(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, tagValue C.LLVMValueRef) error {
+	if storeType == nil {
+		return fmt.Errorf("missing packed store type for tag record")
+	}
+	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
+	return ops.recordTag(tagValue, "packed.tag.record")
+}
+
+type packedEnumTailPayloadPlan struct {
+	index         int
+	viewType      *semantic.DArrayViewType
+	elemSizeValue C.LLVMValueRef
+	lenValue      C.LLVMValueRef
+	byteCount     C.LLVMValueRef
+	sourceData    C.LLVMValueRef
+	literal       *ast.ListLitExpr
+}
+
+func (s *functionState) preparePackedEnumTailPayloadPlan(variant *semantic.EnumVariant, orderedArgs []ast.Expr) (*packedEnumTailPayloadPlan, error) {
+	if variant == nil {
+		return nil, nil
+	}
+	tailIndex, ok := variant.TailPayloadIndex()
+	if !ok {
+		return nil, nil
+	}
+	viewType, ok := variant.TailPayloadViewType()
+	if !ok || viewType == nil {
+		return nil, fmt.Errorf("packed enum %s tail payload metadata is inconsistent", variant.Name)
+	}
+	if tailIndex >= len(orderedArgs) {
+		return nil, fmt.Errorf("packed enum %s tail payload argument is missing", variant.Name)
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	elemSize, err := s.sizeOfType(viewType.Elem)
+	if err != nil {
+		return nil, err
+	}
+	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	arg := orderedArgs[tailIndex]
+	if literal, ok := arg.(*ast.ListLitExpr); ok {
+		lenValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(len(literal.Elems)), 0)
+		byteCount := C.LLVMConstInt(usizeLLVMType, C.ulonglong(uint64(len(literal.Elems))*elemSize), 0)
+		return &packedEnumTailPayloadPlan{index: tailIndex, viewType: viewType, elemSizeValue: elemSizeValue, lenValue: lenValue, byteCount: byteCount, literal: literal}, nil
+	}
+	sourceType := s.exprType(arg)
+	if _, ok := sourceType.(*semantic.DArrayViewType); !ok {
+		if _, ok := sourceType.(*semantic.ViewType); !ok {
+			return nil, fmt.Errorf("packed enum %s tail payload expects a list literal or view-compatible source, got %s", variant.Name, sourceType.String())
+		}
+	}
+	viewValue, _, err := s.emitExpr(arg, sourceType)
+	if err != nil {
+		return nil, err
+	}
+	lenValue := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("packed.tail.src.len"))
+	sourceData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("packed.tail.src.data"))
+	byteCount := C.LLVMBuildMul(s.builder, lenValue, elemSizeValue, cStringFree("packed.tail.bytes"))
+	return &packedEnumTailPayloadPlan{index: tailIndex, viewType: viewType, elemSizeValue: elemSizeValue, lenValue: lenValue, byteCount: byteCount, sourceData: sourceData}, nil
+}
+func (s *functionState) emitPackedEnumTailDataPtr(allocPtr C.LLVMValueRef, rowSizeValue C.LLVMValueRef) (C.LLVMValueRef, error) {
+	i8Type, err := s.g.lowerBuiltin("u8")
+	if err != nil {
+		return nil, err
+	}
+	indices := []C.LLVMValueRef{rowSizeValue}
+	return C.LLVMBuildGEP2(s.builder, i8Type, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.tail.data")), nil
+}
+func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.EnumVariant, index int, arg ast.Expr, tailPlan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if tailPlan != nil && index == tailPlan.index {
+		return s.emitPackedEnumTailPayloadValue(tailPlan, tailDataPtr)
+	}
+	argValue, _, err := s.emitExpr(arg, variant.Payload[index])
+	if err != nil {
+		return nil, err
+	}
+	return argValue, nil
+}
+func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if plan == nil || plan.viewType == nil {
+		return nil, fmt.Errorf("missing packed enum tail payload plan")
+	}
+	viewLLVMType, err := s.g.lowerType(plan.viewType)
+	if err != nil {
+		return nil, err
+	}
+	if plan.literal != nil {
+		elemLLVMType, err := s.g.lowerType(plan.viewType.Elem)
+		if err != nil {
+			return nil, err
+		}
+		usizeType := s.g.result.NamedTypes["usize"]
+		usizeLLVMType, err := s.g.lowerType(usizeType)
+		if err != nil {
+			return nil, err
+		}
+		for i, elem := range plan.literal.Elems {
+			elemValue, _, err := s.emitExpr(elem, plan.viewType.Elem)
+			if err != nil {
+				return nil, err
+			}
+			indexValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(i), 0)
+			indices := []C.LLVMValueRef{indexValue}
+			elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, tailDataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.tail.elem.ptr"))
+			C.LLVMBuildStore(s.builder, elemValue, elemPtr)
+		}
+	} else {
+		if err := s.emitPackedEnumTailMemcpy(tailDataPtr, plan.sourceData, plan.byteCount); err != nil {
+			return nil, err
+		}
+	}
+	viewValue := C.LLVMGetUndef(viewLLVMType)
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, tailDataPtr, 0, cStringFree("packed.tail.view.data"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, plan.lenValue, 1, cStringFree("packed.tail.view.len"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, plan.elemSizeValue, 2, cStringFree("packed.tail.view.elem_size"))
+	return viewValue, nil
+}
+func (s *functionState) emitPackedEnumTailMemcpy(dstData C.LLVMValueRef, srcData C.LLVMValueRef, byteCount C.LLVMValueRef) error {
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	usizeType := s.g.result.NamedTypes["usize"]
+	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	})
+	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstData, srcData, byteCount}, "packed.tail.memcpy")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+	return nil
+}
+func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType, tailPlan *packedEnumTailPayloadPlan, fixedTagValue C.LLVMValueRef) (C.LLVMValueRef, C.LLVMValueRef, C.LLVMValueRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, nil, nil, fmt.Errorf("missing packed enum storage metadata")
+	}
+	storeType := enumType.StoreType
+	if storeType == nil {
+		return nil, nil, nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
+	}
+	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
+	rowSizeValue, err := ops.rowBytesValue("packed.alloc.store")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	totalSizeValue := rowSizeValue
+	if tailPlan != nil {
+		totalSizeValue = C.LLVMBuildAdd(s.builder, rowSizeValue, tailPlan.byteCount, cStringFree("packed.alloc.bytes"))
+	}
+	return ops.allocateStorage(enumType, totalSizeValue, tailPlan != nil, fixedTagValue, "packed.alloc.store")
+}
+func (s *functionState) resolveEnumConstructorArgs(callExpr *ast.CallExpr, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, error) {
+	if variant == nil {
+		return nil, fmt.Errorf("missing enum constructor metadata")
+	}
+	if callExpr != nil && callExpr.ResolvedArgsValid && len(callExpr.ResolvedArgs) == len(variant.Payload) && callExpr.ResolvedCommonArgs == nil {
+		return callExpr.ResolvedArgs, nil
+	}
+	namedCount := 0
+	for _, name := range argNames {
+		if name != "" {
+			namedCount++
+		}
+	}
+	if namedCount == 0 {
+		if callExpr != nil {
+			callExpr.ResolvedArgsValid = true
+			callExpr.ResolvedArgs = args
+			callExpr.ResolvedCommonArgs = nil
+		}
+		return args, nil
+	}
+	if namedCount != len(args) {
+		return nil, fmt.Errorf("enum constructor %s.%s cannot mix positional and named arguments", enumType.Name, variant.Name)
+	}
+	if !variant.HasNamedPayloads() {
+		return nil, fmt.Errorf("enum constructor %s.%s does not declare named payload fields", enumType.Name, variant.Name)
+	}
+	ordered := make([]ast.Expr, len(variant.Payload))
+	seen := make([]bool, len(variant.Payload))
+	for i, arg := range args {
+		name := ""
+		if i < len(argNames) {
+			name = argNames[i]
+		}
+		index, ok := variant.PayloadIndex(name)
+		if !ok {
+			return nil, fmt.Errorf("enum constructor %s.%s has no payload field %q", enumType.Name, variant.Name, name)
+		}
+		if seen[index] {
+			return nil, fmt.Errorf("enum constructor %s.%s payload field %q is specified more than once", enumType.Name, variant.Name, name)
+		}
+		ordered[index] = arg
+		seen[index] = true
+	}
+	for i, wasSeen := range seen {
+		if !wasSeen {
+			label := variant.PayloadLabel(i)
+			if label == "" {
+				return nil, fmt.Errorf("enum constructor %s.%s is missing argument %d", enumType.Name, variant.Name, i+1)
+			}
+			return nil, fmt.Errorf("enum constructor %s.%s is missing payload field %q", enumType.Name, variant.Name, label)
+		}
+	}
+	if callExpr != nil {
+		callExpr.ResolvedArgsValid = true
+		callExpr.ResolvedArgs = ordered
+		callExpr.ResolvedCommonArgs = nil
+	}
+	return ordered, nil
+}
+func (s *functionState) resolvePackedEnumConstructorArgs(callExpr *ast.CallExpr, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, map[string]ast.Expr, error) {
+	if enumType == nil || variant == nil {
+		return nil, nil, fmt.Errorf("missing packed enum constructor metadata")
+	}
+	if callExpr != nil && callExpr.ResolvedArgsValid && len(callExpr.ResolvedArgs) == len(variant.Payload) {
+		return callExpr.ResolvedArgs, callExpr.ResolvedCommonArgs, nil
+	}
+	namedCount := 0
+	for _, name := range argNames {
+		if name != "" {
+			namedCount++
+		}
+	}
+	if namedCount == 0 {
+		if callExpr != nil {
+			callExpr.ResolvedArgsValid = true
+			callExpr.ResolvedArgs = args
+			callExpr.ResolvedCommonArgs = nil
+		}
+		return args, nil, nil
+	}
+	if namedCount != len(args) {
+		return nil, nil, fmt.Errorf("enum constructor %s.%s cannot mix positional and named arguments", enumType.Name, variant.Name)
+	}
+	ordered := make([]ast.Expr, len(variant.Payload))
+	seenPayload := make([]bool, len(variant.Payload))
+	commonArgs := make(map[string]ast.Expr)
+	for i, arg := range args {
+		name := ""
+		if i < len(argNames) {
+			name = argNames[i]
+		}
+		if index, ok := variant.PayloadIndex(name); ok {
+			if seenPayload[index] {
+				return nil, nil, fmt.Errorf("enum constructor %s.%s payload field %q is specified more than once", enumType.Name, variant.Name, name)
+			}
+			ordered[index] = arg
+			seenPayload[index] = true
+			continue
+		}
+		if _, ok := enumType.Common[name]; ok {
+			if _, exists := commonArgs[name]; exists {
+				return nil, nil, fmt.Errorf("packed enum constructor %s.%s common field %q is specified more than once", enumType.Name, variant.Name, name)
+			}
+			commonArgs[name] = arg
+			continue
+		}
+		return nil, nil, fmt.Errorf("packed enum constructor %s.%s has no payload or common field %q", enumType.Name, variant.Name, name)
+	}
+	for i, wasSeen := range seenPayload {
+		if !wasSeen {
+			label := variant.PayloadLabel(i)
+			if label == "" {
+				return nil, nil, fmt.Errorf("enum constructor %s.%s is missing argument %d", enumType.Name, variant.Name, i+1)
+			}
+			return nil, nil, fmt.Errorf("enum constructor %s.%s is missing payload field %q", enumType.Name, variant.Name, label)
+		}
+	}
+	if callExpr != nil {
+		callExpr.ResolvedArgsValid = true
+		callExpr.ResolvedArgs = ordered
+		callExpr.ResolvedCommonArgs = commonArgs
+	}
+	return ordered, commonArgs, nil
+}

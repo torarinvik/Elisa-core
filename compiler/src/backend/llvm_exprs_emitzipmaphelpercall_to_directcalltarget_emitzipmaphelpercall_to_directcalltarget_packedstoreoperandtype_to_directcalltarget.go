@@ -1,0 +1,181 @@
+//go:build cgo
+
+package backend
+
+/*
+#include <stdlib.h>
+#include <string.h>
+#include <llvm-c/Core.h>
+
+static int llcontextLLVMIsZeroValue(LLVMValueRef value) {
+	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
+}
+
+static LLVMMetadataRef llctxAliasMDString(LLVMContextRef ctx, const char* value) {
+	if (value == NULL) {
+		return LLVMMDStringInContext2(ctx, "", 0);
+	}
+	return LLVMMDStringInContext2(ctx, value, strlen(value));
+}
+
+static LLVMMetadataRef llctxAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
+	return LLVMMDNodeInContext2(ctx, operands, count);
+}
+
+static unsigned llctxMetadataKindID(LLVMContextRef ctx, const char* kindName) {
+	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
+}
+
+static void llctxSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
+	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
+		return;
+	}
+	LLVMMetadataRef list = llctxAliasMDNode(ctx, scopes, count);
+	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
+	LLVMSetMetadata(inst, llctxMetadataKindID(ctx, kindName), listValue);
+}
+
+static LLVMMetadataRef llctxCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
+	LLVMMetadataRef operands[1];
+	operands[0] = llctxAliasMDString(ctx, domainName);
+	return llctxAliasMDNode(ctx, operands, 1);
+}
+
+static LLVMMetadataRef llctxCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
+	LLVMMetadataRef operands[2];
+	operands[0] = llctxAliasMDString(ctx, scopeName);
+	operands[1] = domain;
+	return llctxAliasMDNode(ctx, operands, 2);
+}
+
+static void llctxAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
+	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
+	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
+		return;
+	}
+	LLVMMetadataRef domain = llctxCreateAliasScopeDomain(ctx, domainName);
+	LLVMMetadataRef aliasScope = llctxCreateAliasScope(ctx, domain, aliasScopeName);
+	LLVMMetadataRef aliasScopes[1];
+	aliasScopes[0] = aliasScope;
+	llctxSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
+
+	LLVMMetadataRef noAliasScopes[2];
+	size_t noAliasCount = 0;
+	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
+		noAliasScopes[noAliasCount++] = llctxCreateAliasScope(ctx, domain, noAliasScope1Name);
+	}
+	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
+		noAliasScopes[noAliasCount++] = llctxCreateAliasScope(ctx, domain, noAliasScope2Name);
+	}
+	if (noAliasCount != 0) {
+		llctxSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
+	}
+}
+*/
+import "C"
+
+import (
+	"fmt"
+	"llcontext/src/ast"
+	"llcontext/src/semantic"
+)
+
+func packedStoreOperandType(t semantic.Type) (*semantic.PackedEnumStoreType, bool) {
+	if storeType, ok := t.(*semantic.PackedEnumStoreType); ok {
+		return storeType, true
+	}
+	refType, ok := t.(*semantic.RefType)
+	if !ok || refType.State != semantic.RefStateNonNull {
+		return nil, false
+	}
+	storeType, ok := refType.Elem.(*semantic.PackedEnumStoreType)
+	return storeType, ok
+}
+func (s *functionState) emitPackedStoreValueFromExpr(expr ast.Expr) (C.LLVMValueRef, *semantic.PackedEnumStoreType, error) {
+	if expr == nil {
+		return nil, nil, fmt.Errorf("missing packed store expression")
+	}
+	objectType := s.exprType(expr)
+	if objectType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for packed store expression")
+	}
+	if storeType, ok := objectType.(*semantic.PackedEnumStoreType); ok {
+		value, _, err := s.emitExpr(expr, storeType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return value, storeType, nil
+	}
+	refType, ok := objectType.(*semantic.RefType)
+	if !ok || refType.State != semantic.RefStateNonNull {
+		return nil, nil, fmt.Errorf("packed store access requires a store value or proven non-null store reference")
+	}
+	storeType, ok := refType.Elem.(*semantic.PackedEnumStoreType)
+	if !ok {
+		return nil, nil, fmt.Errorf("packed store access requires a packed store, got %s", objectType.String())
+	}
+	ptrValue, _, err := s.emitExpr(expr, objectType)
+	if err != nil {
+		return nil, nil, err
+	}
+	storeValue, err := s.loadValue(ptrValue, storeType, "packed.store.load")
+	if err != nil {
+		return nil, nil, err
+	}
+	return storeValue, storeType, nil
+}
+func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *semantic.FuncType, error) {
+	if fieldExpr, ok := expr.Func.(*ast.FieldExpr); ok {
+		if sym, fnType, handled, err := s.resolveStaticInterfaceMethod(fieldExpr); handled {
+			if err != nil {
+				return nil, nil, err
+			}
+			value, err := s.g.ensureFunctionDeclared(sym.Name, fnType)
+			return value, fnType, err
+		}
+	}
+	if ident, ok := expr.Func.(*ast.Ident); ok {
+		if sym, ok := s.g.result.GlobalScope.Lookup(ident.Name); ok {
+			fnType, ok := sym.Type.(*semantic.FuncType)
+			if !ok {
+				return nil, nil, fmt.Errorf("call target %s does not resolve to a function type", ident.Name)
+			}
+			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(decl.GenericParams) > 0 {
+				argTypes := make([]semantic.Type, 0, len(expr.Args))
+				for _, arg := range expr.Args {
+					argTypes = append(argTypes, s.exprType(arg))
+				}
+				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes)
+				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
+				return value, specialized, err
+			}
+			specialized := s.specializeFunctionType(fnType)
+			value, err := s.g.ensureFunctionDeclared(ident.Name, specialized)
+			return value, specialized, err
+		}
+	}
+	callee, calleeType, err := s.emitExpr(expr.Func, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	fnType, ok := calleeType.(*semantic.FuncType)
+	if !ok {
+		return nil, nil, fmt.Errorf("call target does not have a function type")
+	}
+	return callee, fnType, nil
+}
+func (s *functionState) directCallTarget(expr ast.Expr) bool {
+	if fieldExpr, ok := expr.(*ast.FieldExpr); ok {
+		_, _, handled, err := s.resolveStaticInterfaceMethod(fieldExpr)
+		return handled && err == nil
+	}
+	ident, ok := expr.(*ast.Ident)
+	if !ok || s == nil || s.g == nil || s.g.result == nil {
+		return false
+	}
+	sym, ok := s.g.result.GlobalScope.Lookup(ident.Name)
+	if !ok {
+		return false
+	}
+	return sym.Kind == semantic.SymbolFunc || sym.Kind == semantic.SymbolExternFunc
+}

@@ -1,0 +1,548 @@
+package parser
+
+import (
+	"llcontext/src/ast"
+	"llcontext/src/lexer"
+	"strings"
+	"testing"
+)
+
+func parseSourceFile(t *testing.T, src string) (*ast.File, []string) {
+	t.Helper()
+	l := lexer.New("test.llcontext", []byte(src))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lexer errors: %v", errs)
+	}
+	p := New(tokens)
+	file := p.ParseFile("test.llcontext")
+	return file, p.Errors()
+}
+func TestParseCharLiteralInConstDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, "const VALUE: char = '\\n'\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.ConstDecl)
+	if !ok {
+		t.Fatalf("expected const decl, got %T", file.Decls[0])
+	}
+	lit, ok := decl.Value.(*ast.CharLit)
+	if !ok {
+		t.Fatalf("expected char literal, got %T", decl.Value)
+	}
+	if lit.Value != "\n" {
+		t.Fatalf("expected decoded newline char literal, got %q", lit.Value)
+	}
+	if named, ok := decl.Type.(*ast.NamedType); !ok || named.Name != "char" {
+		t.Fatalf("expected const type char, got %T %#v", decl.Type, decl.Type)
+	}
+}
+func TestParseReturnQuestionPatternGuard(t *testing.T) {
+	file, errs := parseSourceFile(t, `enum Expr:
+    Int(value: i64)
+    Missing
+
+def unwrap(node: Expr) -> i64:
+    return? value if node is Expr.Int(value)
+    return 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	if len(decl.Body) < 2 {
+		t.Fatalf("expected guarded return plus fallback, got %d statements", len(decl.Body))
+	}
+	stmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected return? guard to lower to if statement, got %T", decl.Body[0])
+	}
+	if _, ok := stmt.Cond.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected pattern guard condition, got %T", stmt.Cond)
+	}
+	if len(stmt.Then) != 1 {
+		t.Fatalf("expected one guarded return, got %d", len(stmt.Then))
+	}
+	ret, ok := stmt.Then[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected guarded return body, got %T", stmt.Then[0])
+	}
+	ident, ok := ret.Value.(*ast.Ident)
+	if !ok || ident.Name != "value" {
+		t.Fatalf("expected guarded return value binding, got %T %#v", ret.Value, ret.Value)
+	}
+}
+func TestParseOptionalMatchLowersToOptionalBindThenMatch(t *testing.T) {
+	file, errs := parseSourceFile(t, `enum Expr:
+    Int(value: i64)
+    Missing
+
+def check(maybe: Expr?) -> i64:
+    match? node = maybe:
+        Expr.Int(value):
+            return value
+        _:
+            return 0
+    return -1
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected match? to lower to if statement, got %T", decl.Body[0])
+	}
+	cond, ok := ifStmt.Cond.(*ast.OptionalBindExpr)
+	if !ok || cond.Name != "node" {
+		t.Fatalf("expected optional bind condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
+	}
+	if ident, ok := cond.Value.(*ast.Ident); !ok || ident.Name != "maybe" {
+		t.Fatalf("expected optional bind source maybe, got %T %#v", cond.Value, cond.Value)
+	}
+	if len(ifStmt.Then) != 1 {
+		t.Fatalf("expected one guarded match, got %d", len(ifStmt.Then))
+	}
+	matchStmt, ok := ifStmt.Then[0].(*ast.MatchStmt)
+	if !ok {
+		t.Fatalf("expected guarded match statement, got %T", ifStmt.Then[0])
+	}
+	if ident, ok := matchStmt.Value.(*ast.Ident); !ok || ident.Name != "node" {
+		t.Fatalf("expected match over unwrapped value, got %T %#v", matchStmt.Value, matchStmt.Value)
+	}
+	if len(matchStmt.Arms) != 2 {
+		t.Fatalf("expected two match arms, got %d", len(matchStmt.Arms))
+	}
+}
+func TestParseStructDeclWithAggregateStateParam(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Holder[?]:\n    value: i32&\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if !decl.HasStateParam {
+		t.Fatal("expected struct declaration to record aggregate state parameter")
+	}
+	if decl.StateParamCount != 1 {
+		t.Fatalf("expected one aggregate state parameter, got %d", decl.StateParamCount)
+	}
+	if len(decl.TypeParams) != 0 {
+		t.Fatalf("expected no type params, got %v", decl.TypeParams)
+	}
+}
+func TestParseStructDeclWithMultipleAggregateStateParams(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Holder[?, ?]:\n    value: i32&\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if decl.StateParamCount != 2 {
+		t.Fatalf("expected two aggregate state parameters, got %d", decl.StateParamCount)
+	}
+}
+func TestParseStructDeclWithTypeAndAggregateStateParams(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Holder[T][?]:\n    value: T\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if len(decl.TypeParams) != 1 || decl.TypeParams[0] != "T" {
+		t.Fatalf("expected one type param T, got %v", decl.TypeParams)
+	}
+	if !decl.HasStateParam {
+		t.Fatal("expected struct declaration to record aggregate state parameter")
+	}
+	if decl.StateParamCount != 1 {
+		t.Fatalf("expected one aggregate state parameter, got %d", decl.StateParamCount)
+	}
+}
+func TestParseStructDeclWithTypeAndMultipleAggregateStateParams(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Holder[T][?, ?]:\n    value: T\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if len(decl.TypeParams) != 1 || decl.TypeParams[0] != "T" {
+		t.Fatalf("expected one type param T, got %v", decl.TypeParams)
+	}
+	if decl.StateParamCount != 2 {
+		t.Fatalf("expected two aggregate state parameters, got %d", decl.StateParamCount)
+	}
+}
+func TestParseAggregateStateInstantiationTypeExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: Foo[&]) -> Foo[!]:\n    pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	paramType, ok := decl.Params[0].Type.(*ast.AggregateStateTypeExpr)
+	if !ok {
+		t.Fatalf("expected aggregate state param type, got %T", decl.Params[0].Type)
+	}
+	if paramType.State != ast.RefStateNonNull {
+		t.Fatalf("expected non-null aggregate state, got %v", paramType.State)
+	}
+	base, ok := paramType.Base.(*ast.NamedType)
+	if !ok || base.Name != "Foo" {
+		t.Fatalf("expected base named type Foo, got %T %v", paramType.Base, paramType.Base)
+	}
+	retType, ok := decl.ReturnType.(*ast.AggregateStateTypeExpr)
+	if !ok {
+		t.Fatalf("expected aggregate state return type, got %T", decl.ReturnType)
+	}
+	if retType.State != ast.RefStateNull {
+		t.Fatalf("expected null aggregate state, got %v", retType.State)
+	}
+}
+func TestParseAggregateStateInstantiationAfterGenericArgs(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep[T](value: Foo[T][&]) -> Foo[T][?]:\n    pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	paramType, ok := decl.Params[0].Type.(*ast.AggregateStateTypeExpr)
+	if !ok {
+		t.Fatalf("expected aggregate state param type, got %T", decl.Params[0].Type)
+	}
+	base, ok := paramType.Base.(*ast.GenericType)
+	if !ok {
+		t.Fatalf("expected generic base type, got %T", paramType.Base)
+	}
+	if base.Name != "Foo" || len(base.Args) != 1 {
+		t.Fatalf("expected Foo[T], got %#v", base)
+	}
+	arg, ok := base.Args[0].(*ast.NamedType)
+	if !ok || arg.Name != "T" {
+		t.Fatalf("expected generic arg T, got %T %#v", base.Args[0], base.Args[0])
+	}
+	if paramType.State != ast.RefStateNonNull {
+		t.Fatalf("expected non-null aggregate state, got %v", paramType.State)
+	}
+	retType, ok := decl.ReturnType.(*ast.AggregateStateTypeExpr)
+	if !ok || retType.State != ast.RefStateNullable {
+		t.Fatalf("expected maybe aggregate state return type, got %T %#v", decl.ReturnType, decl.ReturnType)
+	}
+}
+func TestParseAggregateStateInstantiationWithMultipleStates(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: Foo[!, &]) -> Foo[?, !]:\n    pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	paramType, ok := decl.Params[0].Type.(*ast.AggregateStateTypeExpr)
+	if !ok {
+		t.Fatalf("expected aggregate state param type, got %T", decl.Params[0].Type)
+	}
+	if len(paramType.States) != 2 || paramType.States[0] != ast.RefStateNull || paramType.States[1] != ast.RefStateNonNull {
+		t.Fatalf("expected [!, &] aggregate states, got %#v", paramType.States)
+	}
+	retType, ok := decl.ReturnType.(*ast.AggregateStateTypeExpr)
+	if !ok {
+		t.Fatalf("expected aggregate state return type, got %T", decl.ReturnType)
+	}
+	if len(retType.States) != 2 || retType.States[0] != ast.RefStateNullable || retType.States[1] != ast.RefStateNull {
+		t.Fatalf("expected [?, !] aggregate states, got %#v", retType.States)
+	}
+}
+func TestParseStructDeclRejectsNonPlaceholderStateMarker(t *testing.T) {
+	_, errs := parseSourceFile(t, "struct Holder[?, &]:\n    value: i32\n")
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for non-placeholder struct state declaration")
+	}
+	if !strings.Contains(errs[0], "struct state parameter declaration must use only [?] placeholders") {
+		t.Fatalf("expected struct state parameter diagnostic, got %v", errs)
+	}
+}
+func TestParseStructDeclWithNamedRefQualifiers(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Holder[refstorage store, refstate state]:\n    value: store i32&[state]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if len(decl.RefStorageParams) != 1 || decl.RefStorageParams[0] != "store" {
+		t.Fatalf("expected refstorage param [store], got %v", decl.RefStorageParams)
+	}
+	if len(decl.RefStateParams) != 1 || decl.RefStateParams[0] != "state" {
+		t.Fatalf("expected refstate param [state], got %v", decl.RefStateParams)
+	}
+	if len(decl.GenericParams) != 2 || decl.GenericParams[0].Kind != ast.GenericParamRefStorage || decl.GenericParams[1].Kind != ast.GenericParamRefState {
+		t.Fatalf("expected ordered mixed generic params, got %#v", decl.GenericParams)
+	}
+	refType, ok := decl.Fields[0].Type.(*ast.RefType)
+	if !ok {
+		t.Fatalf("expected ref field type, got %T", decl.Fields[0].Type)
+	}
+	if refType.StorageParam != "store" {
+		t.Fatalf("expected storage param store, got %q", refType.StorageParam)
+	}
+	if refType.StateParam != "state" {
+		t.Fatalf("expected state param state, got %q", refType.StateParam)
+	}
+}
+func TestParseNamedRefStateAttachesToNearestRef(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Holder[refstate s]:\n    value: i32&&[s]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.StructDecl)
+	outer, ok := decl.Fields[0].Type.(*ast.RefType)
+	if !ok {
+		t.Fatalf("expected outer ref type, got %T", decl.Fields[0].Type)
+	}
+	inner, ok := outer.Elem.(*ast.RefType)
+	if !ok {
+		t.Fatalf("expected nested inner ref type, got %T", outer.Elem)
+	}
+	if outer.StateParam != "s" {
+		t.Fatalf("expected outer ref to carry state param s, got %q", outer.StateParam)
+	}
+	if inner.StateParam != "" {
+		t.Fatalf("expected inner ref to have no named state param, got %q", inner.StateParam)
+	}
+}
+func TestParseLegacyNullableRefArraySuffixStillWorks(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: heap i32&?[COUNT]) -> void:\n    pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	arrayType, ok := decl.Params[0].Type.(*ast.ArrayType)
+	if !ok {
+		t.Fatalf("expected array type, got %T", decl.Params[0].Type)
+	}
+	refType, ok := arrayType.Elem.(*ast.RefType)
+	if !ok {
+		t.Fatalf("expected array element ref type, got %T", arrayType.Elem)
+	}
+	if refType.State != ast.RefStateNullable {
+		t.Fatalf("expected nullable ref state, got %v", refType.State)
+	}
+	if refType.StateParam != "" {
+		t.Fatalf("expected no named refstate param, got %q", refType.StateParam)
+	}
+}
+func TestParsePackedIfPatternWithViewAliasBinding(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Lit(value: value):\n        lit: packedview[Expr.Lit] = node\n        return value + lit.span\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	matchStmt, ok := decl.Body[0].(*ast.MatchStmt)
+	if !ok {
+		t.Fatalf("expected lowered match stmt, got %T", decl.Body[0])
+	}
+	if len(matchStmt.Arms) != 2 {
+		t.Fatalf("expected match arm plus wildcard, got %d", len(matchStmt.Arms))
+	}
+	pattern, ok := matchStmt.Arms[0].Pattern.(*ast.MatchVariantPattern)
+	if !ok {
+		t.Fatalf("expected Expr.Lit pattern, got %T", matchStmt.Arms[0].Pattern)
+	}
+	if pattern.EnumName != "Expr" || pattern.Variant != "Lit" {
+		t.Fatalf("expected Expr.Lit pattern, got %#v", pattern)
+	}
+	if len(pattern.Args) != 1 {
+		t.Fatalf("expected one binding arg, got %d", len(pattern.Args))
+	}
+	bindPattern, ok := pattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || bindPattern.Name != "value" {
+		t.Fatalf("expected value payload binding, got %T %#v", pattern.Args[0].Pattern, pattern.Args[0].Pattern)
+	}
+	if _, ok := matchStmt.Arms[0].Body[0].(*ast.VarDeclStmt); !ok {
+		t.Fatalf("expected packedview alias binding in match body, got %T", matchStmt.Arms[0].Body[0])
+	}
+}
+func TestParsePackedIfNestedPayloadPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n    Add(left: Expr, right: Expr)\n\ndef left_value(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Add(Expr.Int(value), rhs):\n        return value\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	matchStmt, ok := decl.Body[0].(*ast.MatchStmt)
+	if !ok {
+		t.Fatalf("expected lowered match stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := matchStmt.Arms[0].Pattern.(*ast.MatchVariantPattern)
+	if !ok || len(pattern.Args) != 2 {
+		t.Fatalf("expected two payload patterns, got %#v", matchStmt.Arms[0].Pattern)
+	}
+	leftPattern, ok := pattern.Args[0].Pattern.(*ast.MatchVariantPattern)
+	if !ok || leftPattern.EnumName != "Expr" || leftPattern.Variant != "Int" || len(leftPattern.Args) != 1 {
+		t.Fatalf("expected nested Expr.Int(value) pattern, got %#v", pattern.Args[0].Pattern)
+	}
+	leftBind, ok := leftPattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || leftBind.Name != "value" {
+		t.Fatalf("expected nested bind pattern value, got %T %#v", leftPattern.Args[0].Pattern, leftPattern.Args[0].Pattern)
+	}
+	rightBind, ok := pattern.Args[1].Pattern.(*ast.MatchBindPattern)
+	if !ok || rightBind.Name != "rhs" {
+		t.Fatalf("expected rhs bind pattern, got %T %#v", pattern.Args[1].Pattern, pattern.Args[1].Pattern)
+	}
+}
+func TestParseEnumVariantIsCondition(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    Add(left: int, right: int)\n\ndef is_int(node: Expr) -> bool:\n    if node is Expr.Int:\n        return true\n    return false\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected if stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ifStmt.Cond.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected binary condition, got %T", ifStmt.Cond)
+	}
+	if cond.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected is operator, got %s", lexer.TokenName(cond.Op))
+	}
+	typeExpr, ok := cond.Right.(*ast.TypeExprExpr)
+	if !ok {
+		t.Fatalf("expected typed is RHS, got %T", cond.Right)
+	}
+	named, ok := typeExpr.Type.(*ast.NamedType)
+	if !ok || named.Name != "Expr.Int" {
+		t.Fatalf("expected Expr.Int typed RHS, got %#v", typeExpr.Type)
+	}
+}
+func TestParseEnumVariantIsConditionWithPayloadPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Float(PI: f64)\n\ndef is_pi(node: Expr) -> bool:\n    return node is Expr.Float(3.14)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected binary condition, got %T", ret.Value)
+	}
+	variantTarget, ok := cond.Right.(*ast.VariantTestExpr)
+	if !ok {
+		t.Fatalf("expected variant is target, got %T", cond.Right)
+	}
+	if variantTarget.Pattern == nil || variantTarget.Pattern.EnumName != "Expr" || variantTarget.Pattern.Variant != "Float" {
+		t.Fatalf("expected Expr.Float payload test, got %#v", variantTarget.Pattern)
+	}
+	if len(variantTarget.Pattern.Args) != 1 {
+		t.Fatalf("expected one payload pattern, got %#v", variantTarget.Pattern.Args)
+	}
+	if _, ok := variantTarget.Pattern.Args[0].Pattern.(*ast.MatchLiteralPattern); !ok {
+		t.Fatalf("expected positional literal payload pattern, got %T", variantTarget.Pattern.Args[0].Pattern)
+	}
+}
+func TestParseIsConditionWithAlternativeTargets(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    LT = 1\n    LTEQ = 2\n    GT = 3\n\ndef is_rel(kind: Tok) -> bool:\n    return kind is .LT | .LTEQ | .GT\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || cond.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected is-expression return, got %T %#v", ret.Value, ret.Value)
+	}
+	alts, ok := cond.Right.(*ast.IsPatternExpr)
+	if !ok {
+		t.Fatalf("expected multi-target is-pattern RHS, got %T", cond.Right)
+	}
+	if len(alts.Targets) != 3 {
+		t.Fatalf("expected three is-pattern targets, got %#v", alts.Targets)
+	}
+	for i, target := range alts.Targets {
+		if _, ok := target.(*ast.ShorthandMemberExpr); !ok {
+			t.Fatalf("expected shorthand member target at %d, got %T", i, target)
+		}
+	}
+}
+func TestParseStructFieldMatchPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    INTEGER = 1\n\nstruct Span:\n    start: int\n    finish: int\n\nstruct Token:\n    kind: Tok\n    span: Span\n    value: int\n\ndef score(tok: Token) -> int:\n    match tok:\n        Token(kind: .INTEGER, span: Span(start: start), value: value):\n            return start + value\n        _:\n            return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[3].(*ast.FuncDecl)
+	matchStmt, ok := decl.Body[0].(*ast.MatchStmt)
+	if !ok {
+		t.Fatalf("expected match stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := matchStmt.Arms[0].Pattern.(*ast.MatchStructPattern)
+	if !ok {
+		t.Fatalf("expected struct match pattern, got %T", matchStmt.Arms[0].Pattern)
+	}
+	if pattern.TypeName != "Token" || len(pattern.Args) != 3 {
+		t.Fatalf("unexpected top-level struct pattern %#v", pattern)
+	}
+	kindPattern, ok := pattern.Args[0].Pattern.(*ast.MatchLiteralPattern)
+	if !ok {
+		t.Fatalf("expected literal kind pattern, got %T", pattern.Args[0].Pattern)
+	}
+	if _, ok := kindPattern.Value.(*ast.ShorthandMemberExpr); !ok {
+		t.Fatalf("expected shorthand member kind pattern, got %T", kindPattern.Value)
+	}
+	spanPattern, ok := pattern.Args[1].Pattern.(*ast.MatchStructPattern)
+	if !ok {
+		t.Fatalf("expected nested span struct pattern, got %T", pattern.Args[1].Pattern)
+	}
+	if spanPattern.TypeName != "Span" || len(spanPattern.Args) != 1 || spanPattern.Args[0].Name != "start" {
+		t.Fatalf("unexpected nested span pattern %#v", spanPattern)
+	}
+	startBind, ok := spanPattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || startBind.Name != "start" {
+		t.Fatalf("expected start bind pattern, got %T %#v", spanPattern.Args[0].Pattern, spanPattern.Args[0].Pattern)
+	}
+	valueBind, ok := pattern.Args[2].Pattern.(*ast.MatchBindPattern)
+	if !ok || valueBind.Name != "value" {
+		t.Fatalf("expected value bind pattern, got %T %#v", pattern.Args[2].Pattern, pattern.Args[2].Pattern)
+	}
+}

@@ -1,0 +1,568 @@
+package unparse
+
+import (
+	"llcontext/src/ast"
+	"llcontext/src/lexer"
+	"strconv"
+	"strings"
+)
+
+func formatExpr(expr ast.Expr) string {
+	if expr == nil {
+		return ""
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name
+	case *ast.IntLit:
+		if n.Suffix != "" {
+			return n.Value + n.Suffix
+		}
+		return n.Value
+	case *ast.FloatLit:
+		if n.Suffix != "" {
+			return n.Value + n.Suffix
+		}
+		return n.Value
+	case *ast.StringLit:
+		return strconv.Quote(n.Value)
+	case *ast.CharLit:
+		return formatCharLiteral(n.Value)
+	case *ast.BoolLit:
+		if n.Value {
+			return "true"
+		}
+		return "false"
+	case *ast.NullLit:
+		return "null"
+	case *ast.ZeroedLit:
+		return "zeroed"
+	case *ast.BinaryExpr:
+		return "(" + formatExpr(n.Left) + " " + lexer.TokenName(n.Op) + " " + formatExpr(n.Right) + ")"
+	case *ast.UnaryExpr:
+		op := lexer.TokenName(n.Op)
+		if op == "not" {
+			return "(not " + formatExpr(n.Operand) + ")"
+		}
+		return "(" + op + formatExpr(n.Operand) + ")"
+	case *ast.MoveExpr:
+		return "move " + formatExpr(n.Operand)
+	case *ast.CallExpr:
+		funcText := formatExpr(n.Func)
+		if n.Safe {
+			if n.SafeReceiver != nil {
+				funcText = formatExpr(n.SafeReceiver) + "?.(" + formatExpr(n.Func) + ")"
+				if len(n.Args) == 0 && len(n.ParamPacks) == 0 && !n.HasArgForward && len(n.WithArgs) == 0 && len(n.WithBundles) == 0 {
+					return funcText
+				}
+			} else if fieldExpr, ok := n.Func.(*ast.FieldExpr); ok && fieldExpr != nil {
+				funcText = formatExpr(fieldExpr.Object) + "?." + fieldExpr.Field
+			}
+		}
+		partCapacity := len(n.Args) + len(n.ParamPacks)
+		if n.HasArgForward {
+			partCapacity++
+		}
+		parts := make([]string, 0, partCapacity)
+		multiline := strings.Contains(funcText, "\n")
+		if n.HasArgForward {
+			parts = append(parts, "..")
+		}
+		if len(n.ArgItemOrder) != 0 {
+			for _, item := range n.ArgItemOrder {
+				if item.IsPack {
+					parts = append(parts, formatValueParamPackUse(item.Pack))
+					continue
+				}
+				argText := formatExpr(n.Args[item.ArgIndex])
+				if strings.Contains(argText, "\n") {
+					multiline = true
+					argText = indentMultilineText(argText, indentUnit)
+				}
+				if name := n.ArgName(item.ArgIndex); name != "" {
+					if item.ArgIndex < len(n.ArgShorthand) && n.ArgShorthand[item.ArgIndex] {
+						parts = append(parts, name+":")
+					} else {
+						parts = append(parts, name+": "+argText)
+					}
+				} else {
+					parts = append(parts, argText)
+				}
+			}
+		} else {
+			for i, arg := range n.Args {
+				argText := formatExpr(arg)
+				if strings.Contains(argText, "\n") {
+					multiline = true
+					argText = indentMultilineText(argText, indentUnit)
+				}
+				if name := n.ArgName(i); name != "" {
+					if i < len(n.ArgShorthand) && n.ArgShorthand[i] {
+						parts = append(parts, name+":")
+					} else {
+						parts = append(parts, name+": "+argText)
+					}
+				} else {
+					parts = append(parts, argText)
+				}
+			}
+		}
+		line := ""
+		if multiline {
+			line = funcText + "(\n" + strings.Join(parts, ",\n") + "\n)"
+		} else {
+			line = funcText + "(" + strings.Join(parts, ", ") + ")"
+		}
+		if len(n.WithArgs) != 0 || len(n.WithBundles) != 0 {
+			line += " with " + formatWithValueClause(n.WithBundles, n.WithArgs, n.WithItemOrder)
+		}
+		return line
+	case *ast.FieldExpr:
+		if n.Safe {
+			return formatExpr(n.Object) + "?." + n.Field
+		}
+		return formatExpr(n.Object) + "." + n.Field
+	case *ast.ShorthandMemberExpr:
+		return "." + strings.Join(n.Parts, ".")
+	case *ast.IndexExpr:
+		line := formatExpr(n.Object) + "[" + formatExpr(n.Index) + "]"
+		if n.Fallback != nil {
+			line += " else " + formatExpr(n.Fallback)
+		}
+		return line
+	case *ast.SliceExpr:
+		return formatExpr(n.Object) + "[" + formatExpr(n.Start) + ":" + formatExpr(n.End) + "]"
+	case *ast.ListLitExpr:
+		parts := make([]string, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			parts = append(parts, formatExpr(elem))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case *ast.ListComprehensionExpr:
+		line := "[" + formatExpr(n.Value) + " for " + n.Name + " in " + formatExpr(n.Source)
+		if n.Filter != nil {
+			line += " if " + formatExpr(n.Filter)
+		}
+		return line + "]"
+	case *ast.QueryExpr:
+		keyword := "any"
+		switch n.Kind {
+		case ast.QueryExprAny:
+			keyword = "any"
+		case ast.QueryExprAll:
+			keyword = "all"
+		case ast.QueryExprFirst:
+			keyword = "first"
+		case ast.QueryExprCount:
+			keyword = "count"
+		}
+		return keyword + " " + n.Name + " in " + formatExpr(n.Source) + " where " + formatExpr(n.Filter)
+	case *ast.CastExpr:
+		if n.Origin == ast.CastExprOriginPostfixShorthand {
+			if target, ok := formatPostfixShorthandCastTarget(n.Target); ok {
+				return formatExpr(n.Operand) + "." + target + "()"
+			}
+		}
+		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax {
+			return formatExpr(n.Operand) + " as " + formatTypeExpr(n.Target)
+		}
+		if addr, ok := n.Operand.(*ast.AddrOfExpr); ok && addr != nil {
+			if isRefCastTarget(n.Target) {
+				return formatExpr(addr.Operand) + ".ref[" + formatTypeExpr(n.Target) + "]"
+			}
+		}
+		return formatExpr(n.Operand) + ".cast[" + formatTypeExpr(n.Target) + "]"
+	case *ast.CascadeExpr:
+		return "cascade " + formatExpr(n.Target) + " => " + formatCascadeExprValue(n.Value)
+	case *ast.LambdaExpr:
+		return formatLambdaExpr(n)
+	case *ast.SizeofExpr:
+		return "sizeof(" + formatTypeExpr(n.Type) + ")"
+	case *ast.TernaryExpr:
+		return "(" + formatExpr(n.Value) + " if " + formatExpr(n.Cond) + " else " + formatExpr(n.Alt) + ")"
+	case *ast.AddrOfExpr:
+		return "&" + formatExpr(n.Operand)
+	case *ast.SpecializeExpr:
+		parts := make([]string, 0, len(n.TypeArgs))
+		for _, arg := range n.TypeArgs {
+			parts = append(parts, formatTypeExpr(arg))
+		}
+		return formatExpr(n.Operand) + "[" + strings.Join(parts, ", ") + "]"
+	case *ast.StructLitExpr:
+		typeName := formatStructLiteralTypeName(n.Name, n.TypeArgs)
+		if n.Brace {
+			parts := make([]string, 0, len(n.Args))
+			for i, arg := range n.Args {
+				parts = append(parts, formatStructLiteralField(n.ArgName(i), arg, true))
+			}
+			return typeName + "{" + strings.Join(parts, ", ") + "}"
+		}
+		parts := make([]string, 0, len(n.Args))
+		for i, arg := range n.Args {
+			parts = append(parts, formatStructLiteralField(n.ArgName(i), arg, false))
+		}
+		return typeName + "(" + strings.Join(parts, ", ") + ")"
+	case *ast.RecordUpdateExpr:
+		parts := make([]string, 0, len(n.Args))
+		for i, arg := range n.Args {
+			parts = append(parts, formatNamedExprField(n.ArgName(i), arg, " = "))
+		}
+		return formatExpr(n.Base) + "{" + strings.Join(parts, ", ") + "}"
+	case *ast.TupleExpr:
+		parts := make([]string, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			parts = append(parts, formatExpr(elem))
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
+	case *ast.ExprBlock:
+		lines := []string{"do:"}
+		for _, stmt := range n.Stmts {
+			formatted := strings.TrimRight(FormatStmt(stmt), "\n")
+			for _, line := range strings.Split(formatted, "\n") {
+				lines = append(lines, indentUnit+line)
+			}
+		}
+		valueText := strings.TrimRight(formatExpr(n.Value), "\n")
+		if matchExpr, ok := n.Value.(*ast.MatchExpr); ok {
+			valueText = strings.TrimRight(formatMatchBody(matchExpr.Value, matchExpr.Store, matchExpr.Arms), "\n")
+		}
+		for _, line := range strings.Split(valueText, "\n") {
+			lines = append(lines, indentUnit+line)
+		}
+		return strings.Join(lines, "\n")
+	case *ast.VariantTestExpr:
+		if n.Pattern == nil {
+			return "<variant-test>"
+		}
+		return formatMatchPattern(n.Pattern)
+	case *ast.StructTestExpr:
+		if n.Pattern == nil {
+			return "<struct-test>"
+		}
+		return formatMatchPattern(n.Pattern)
+	case *ast.IsPatternExpr:
+		parts := make([]string, 0, len(n.Targets))
+		for _, target := range n.Targets {
+			parts = append(parts, formatExpr(target))
+		}
+		return strings.Join(parts, " | ")
+	case *ast.TypeExprExpr:
+		return formatTypeExpr(n.Type)
+	case *ast.ParenExpr:
+		return "(" + formatExpr(n.Inner) + ")"
+	case *ast.RaiseExpr:
+		return "raise " + formatExpr(n.Error)
+	case *ast.TryExpr:
+		if n.Fallback != nil && n.UsesDefaultShorthandForm {
+			return "try? " + formatExpr(n.Value) + " default " + formatExpr(n.Fallback)
+		}
+		line := "try " + formatExpr(n.Value)
+		if n.Fallback != nil {
+			line += " else " + formatExpr(n.Fallback)
+		}
+		return line
+	case *ast.CatchExpr:
+		return formatCatchExpr(n)
+	case *ast.UnwrapElseExpr:
+		return formatExpr(n.Value) + " else " + formatExpr(n.Fallback)
+	case *ast.OptionalBindExpr:
+		return "let " + n.Name + " = " + formatExpr(n.Value)
+	case *ast.AllocExpr:
+		if n.NodeSugar {
+			options := make([]string, 0, 2)
+			if n.Owner != nil {
+				if ident, ok := n.Owner.(*ast.Ident); !ok || ident.Name != "alloc" {
+					options = append(options, "alloc = "+formatExpr(n.Owner))
+				}
+			}
+			if n.NodeSpan != nil {
+				options = append(options, "span = "+formatExpr(n.NodeSpan))
+			}
+			if len(options) != 0 {
+				return "node[" + strings.Join(options, ", ") + "] " + formatNodeSugarValue(n)
+			}
+			return "node " + formatNodeSugarValue(n)
+		}
+		if n.Owner != nil {
+			return "new[" + formatExpr(n.Owner) + "] " + formatExpr(n.Value)
+		}
+		return "new " + formatExpr(n.Value)
+	case *ast.CanExpr:
+		return formatExprWithSurfacePermissions(n.Expr, n.Permissions)
+	case *ast.MatchExpr:
+		return formatMatchExpr(n)
+	case *ast.VisitExpr:
+		return formatVisitExpr(n)
+	case *ast.FoldExpr:
+		return formatFoldExpr(n)
+	case *ast.EmitExpr:
+		if n.Nothing || n.Value == nil {
+			return "emit nothing"
+		}
+		if n.All {
+			return "emit all " + formatExpr(n.Value)
+		}
+		return "emit " + formatExpr(n.Value)
+	default:
+		return "<expr>"
+	}
+}
+func isRefCastTarget(t ast.TypeExpr) bool {
+	switch n := t.(type) {
+	case *ast.RefType:
+		return true
+	case *ast.MutableType:
+		return isRefCastTarget(n.Elem)
+	default:
+		return false
+	}
+}
+func formatStructLiteralTypeName(name string, typeArgs []ast.TypeExpr) string {
+	if len(typeArgs) == 0 {
+		return name
+	}
+	parts := make([]string, 0, len(typeArgs))
+	for _, arg := range typeArgs {
+		parts = append(parts, formatTypeExpr(arg))
+	}
+	return name + "[" + strings.Join(parts, ", ") + "]"
+}
+func formatNamedExprField(name string, value ast.Expr, separator string) string {
+	if name == "" {
+		return formatExpr(value)
+	}
+	if ident, ok := value.(*ast.Ident); ok && ident != nil && ident.Name == name {
+		return name
+	}
+	return name + separator + formatExpr(value)
+}
+func formatStructLiteralField(name string, value ast.Expr, brace bool) string {
+	if name == "" {
+		return formatExpr(value)
+	}
+	if ident, ok := value.(*ast.Ident); ok && ident != nil && ident.Name == name {
+		if brace {
+			return name
+		}
+		return name + ":"
+	}
+	return name + ": " + formatExpr(value)
+}
+func formatMatchPatternField(arg ast.MatchPatternArg, brace bool) string {
+	if arg.Name == "" {
+		return ""
+	}
+	if brace {
+		if bind, ok := arg.Pattern.(*ast.MatchBindPattern); ok && bind != nil && bind.Name == arg.Name {
+			return arg.Name
+		}
+	}
+	return arg.Name + ": " + formatMatchPattern(arg.Pattern)
+}
+func formatMatchExpr(expr *ast.MatchExpr) string {
+	if expr == nil {
+		return "match <nil>:"
+	}
+	return formatMatchBody(expr.Value, expr.Store, expr.Arms)
+}
+func formatMatchBody(value ast.Expr, store ast.Expr, arms []ast.MatchArm) string {
+	var builder strings.Builder
+	builder.WriteString(formatMatchHeader("match", value, store))
+	for _, arm := range arms {
+		builder.WriteByte('\n')
+		builder.WriteString(indentUnit)
+		builder.WriteString(formatMatchPattern(arm.Pattern))
+		builder.WriteString(":")
+		for _, stmt := range arm.Body {
+			builder.WriteByte('\n')
+			stmtText := indentMultiline(FormatStmt(stmt), 2)
+			builder.WriteString(strings.TrimRight(stmtText, "\n"))
+		}
+	}
+	return builder.String()
+}
+func formatCatchExpr(expr *ast.CatchExpr) string {
+	if expr == nil {
+		return "catch <nil>:"
+	}
+	var builder strings.Builder
+	builder.WriteString("catch ")
+	builder.WriteString(formatExpr(expr.Value))
+	builder.WriteString(":")
+	writeArm := func(arm ast.CatchArm) {
+		builder.WriteByte('\n')
+		builder.WriteString(indentUnit)
+		builder.WriteString(arm.Name)
+		builder.WriteString(":")
+		for _, stmt := range arm.Body {
+			builder.WriteByte('\n')
+			stmtText := indentMultiline(FormatStmt(stmt), 2)
+			builder.WriteString(strings.TrimRight(stmtText, "\n"))
+		}
+	}
+	writeArm(expr.Success)
+	for _, arm := range expr.Arms {
+		writeArm(arm)
+	}
+	return builder.String()
+}
+func formatVisitExpr(expr *ast.VisitExpr) string {
+	if expr == nil {
+		return "visit <nil>:"
+	}
+	var builder strings.Builder
+	builder.WriteString("visit ")
+	builder.WriteString(formatExpr(expr.Value))
+	if expr.Root != nil {
+		builder.WriteString(" as ")
+		builder.WriteString(formatTypeExpr(expr.Root))
+	}
+	builder.WriteString(":")
+	formatVisitArmsInto(&builder, expr.Arms)
+	return builder.String()
+}
+func formatFoldExpr(expr *ast.FoldExpr) string {
+	if expr == nil {
+		return "fold <nil> as <type> into <type>:"
+	}
+	keyword := expr.Keyword
+	if keyword == "" {
+		keyword = "fold"
+	}
+	var builder strings.Builder
+	builder.WriteString(keyword)
+	builder.WriteByte(' ')
+	builder.WriteString(formatExpr(expr.Value))
+	builder.WriteString(" as ")
+	builder.WriteString(formatTypeExpr(expr.Root))
+	if keyword == "rewrite" {
+		if expr.RewriteDefault {
+			builder.WriteString(" default")
+		}
+	} else {
+		builder.WriteString(" into ")
+		builder.WriteString(formatTypeExpr(expr.ResultType))
+	}
+	builder.WriteString(":")
+	formatVisitArmsInto(&builder, expr.Arms)
+	return builder.String()
+}
+func formatVisitArmsInto(builder *strings.Builder, arms []ast.VisitArm) {
+	for _, arm := range arms {
+		builder.WriteByte('\n')
+		builder.WriteString(indentUnit)
+		builder.WriteString(formatVisitArm(arm))
+		builder.WriteString(":")
+		for _, stmt := range arm.Body {
+			builder.WriteByte('\n')
+			stmtText := indentMultiline(FormatStmt(stmt), 2)
+			builder.WriteString(strings.TrimRight(stmtText, "\n"))
+		}
+	}
+}
+func formatVisitArm(arm ast.VisitArm) string {
+	if arm.Wildcard {
+		line := "_"
+		if arm.Guard != nil {
+			line += " when " + formatExpr(arm.Guard)
+		}
+		return line
+	}
+	line := arm.TargetName
+	if arm.BindName == "" && arm.ChildResultsName == "" && len(arm.ChildBindings) == 0 {
+		if arm.Guard != nil {
+			line += " when " + formatExpr(arm.Guard)
+		}
+		return line
+	}
+	line += "("
+	if arm.BindName != "" {
+		line += arm.BindName
+	}
+	if arm.ChildResultsName != "" {
+		if arm.BindName != "" {
+			line += ", "
+		}
+		line += arm.ChildResultsName
+	} else if len(arm.ChildBindings) != 0 {
+		for i, binding := range arm.ChildBindings {
+			if arm.BindName != "" || i != 0 {
+				line += ", "
+			}
+			line += binding.FieldName
+			if binding.BindName != "" && binding.BindName != binding.FieldName {
+				line += ": "
+				line += binding.BindName
+			}
+		}
+	}
+	line += ")"
+	if arm.Guard != nil {
+		line += " when " + formatExpr(arm.Guard)
+	}
+	return line
+}
+func formatMatchPattern(pattern ast.MatchPattern) string {
+	switch n := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return "_"
+	case *ast.MatchBindPattern:
+		return n.Name
+	case *ast.MatchStringLiteralPattern:
+		return strconv.Quote(n.Value)
+	case *ast.MatchLiteralPattern:
+		if n.Pinned {
+			return "^" + formatExpr(n.Value)
+		}
+		return formatExpr(n.Value)
+	case *ast.MatchTuplePattern:
+		parts := make([]string, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			parts = append(parts, formatMatchPattern(elem))
+		}
+		return strings.Join(parts, ", ")
+	case *ast.MatchListPattern:
+		parts := make([]string, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			parts = append(parts, formatMatchPattern(elem))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case *ast.MatchRestPattern:
+		return "..."
+	case *ast.MatchStructPattern:
+		parts := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			part := formatMatchPatternField(arg, n.Brace)
+			if part == "" {
+				part = formatMatchPattern(arg.Pattern)
+			}
+			parts = append(parts, part)
+		}
+		if n.Brace {
+			if n.TypeName == "" {
+				return "{" + strings.Join(parts, ", ") + "}"
+			}
+			return n.TypeName + "{" + strings.Join(parts, ", ") + "}"
+		}
+		if len(parts) == 0 {
+			return n.TypeName + "()"
+		}
+		return n.TypeName + "(" + strings.Join(parts, ", ") + ")"
+	case *ast.MatchVariantPattern:
+		parts := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			if arg.Name != "" {
+				parts = append(parts, arg.Name+": "+formatMatchPattern(arg.Pattern))
+			} else {
+				parts = append(parts, formatMatchPattern(arg.Pattern))
+			}
+		}
+		line := n.EnumName + "." + n.Variant
+		if len(parts) != 0 {
+			line += "(" + strings.Join(parts, ", ") + ")"
+		}
+		return line
+	default:
+		return "<pattern>"
+	}
+}
