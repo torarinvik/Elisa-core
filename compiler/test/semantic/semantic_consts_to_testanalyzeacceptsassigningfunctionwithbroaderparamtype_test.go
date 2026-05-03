@@ -312,6 +312,28 @@ def keep(owner: Arena) -> mutable Arena&:
 	}
 	requireExprTypeString(t, result, cast, "mutable Arena&")
 }
+
+func TestAnalyzeAcceptsConstEnumCastToOptionalSameEnum(t *testing.T) {
+	src := `const enum Mode of i8:
+    READ = 0
+    WRITE = 1
+
+def make_mode() -> Mode?:
+    return Mode.READ as Mode?
+`
+
+	result, errs := parseAndAnalyze(t, "const_enum_optional_cast.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	decl := requireFuncDecl(t, result, "make_mode")
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	requireExprTypeString(t, result, ret.Value, "Mode?")
+}
+
 func TestAnalyzeTernaryPropagatesExpectedDarrayTypeToEmptyListBranch(t *testing.T) {
 	src := `def choose(flag: bool) -> darray[i64]:
     values: darray[i64] = [1] if flag else []

@@ -42,6 +42,9 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if SameType(src, dst) || IsInvalidType(src) || IsInvalidType(dst) {
 		return true
 	}
+	if AssignableTo(dst, src) {
+		return true
+	}
 	if _, ok := src.(*ConstEnumType); ok {
 		return SameType(src, dst) || IsNumericType(dst)
 	}
@@ -52,9 +55,6 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 		return true
 	}
 	if _, ok := dst.(*TypeParamType); ok {
-		return true
-	}
-	if AssignableTo(dst, src) {
 		return true
 	}
 	if srcID, ok := src.(*IDType); ok {
