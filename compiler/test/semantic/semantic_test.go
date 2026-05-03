@@ -10169,6 +10169,29 @@ def fallback_value(flag: bool) -> int:
 	requireFunctionReturnTypeString(t, result, "fallback_value", "int")
 }
 
+func TestAnalyzeAcceptsReturnQuestionWithOptionalBindings(t *testing.T) {
+	src := `def maybe_value(value: i64, keep: bool) -> i64?:
+	if keep:
+		return value
+	return null
+
+
+def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
+	return? with lower_value = lower, upper_value = upper, value_int = value:
+		value_int >= lower_value and value_int <= upper_value
+	return null
+
+
+def call_range(keep: bool) -> bool?:
+	return in_range(maybe_value(1, keep), maybe_value(5, keep), maybe_value(3, keep))
+`
+	result, errs := parseAndAnalyze(t, "return_question_with_optional_bindings.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "in_range", "bool?")
+	requireFunctionReturnTypeString(t, result, "call_range", "bool?")
+}
+
 func TestAnalyzeAcceptsErrorUnionTryDefaultShorthand(t *testing.T) {
 	src := `error FileError:
 	NotFound

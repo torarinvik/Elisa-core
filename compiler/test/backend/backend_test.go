@@ -2979,6 +2979,32 @@ def fallback_value(flag: bool) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersReturnQuestionWithOptionalBindings(t *testing.T) {
+	src := `def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
+	return? with lower_value = lower, upper_value = upper, value_int = value:
+		value_int >= lower_value and value_int <= upper_value
+	return null
+`
+	result := parseAndAnalyze(t, "backend_return_question_with_optional_bindings.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Optional__i64 = type { i1, i64 }",
+		"%Optional__bool = type { i1, i1 }",
+		"define %Optional__bool @in_range(",
+		"extractvalue %Optional__i64",
+		"insertvalue %Optional__bool",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersOptionalNullChecksAndSmartCastUse(t *testing.T) {
 	src := `struct Box:
 	value: i32

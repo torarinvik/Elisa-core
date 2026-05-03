@@ -110,6 +110,19 @@ def int_value(node: Expr) -> i64:
     return value if node is Expr.Int(value) else 0
 ```
 
+When an early optional return depends on several optional inputs, use `return? with`. Each binding unwraps an optional in order; if any binding is absent, execution continues after the statement. The body expression runs only when all bindings are present.
+
+```context
+def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
+    return? with lower_value = lower,
+                 upper_value = upper,
+                 value_int = value:
+        value_int >= lower_value and value_int <= upper_value
+    return null
+```
+
+This keeps the common all-present case flat while still lowering to ordinary nested optional binds, so the lower-level control flow remains inspectable when needed.
+
 If the true branch contains another low-precedence operator, wrap it so the intended branch value is clear:
 
 ```context
@@ -123,6 +136,7 @@ Current rules:
 - `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
 - `return? value` returns the unwrapped payload only when `value` is present; otherwise execution continues with the next statement
 - `return? value if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
+- `return? with name = optional, other = optional:` returns the body expression only when every binding is present; otherwise execution continues
 - `value if expr is Pattern(bindings) else fallback` exposes the pattern bindings only in the true branch
 - `value?.(fn)` unwraps `value` only when it is present and calls `fn(unwrapped_value)`
 - the result is optional unless the transform returns `void`, in which case the whole expression is `void`

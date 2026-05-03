@@ -1266,6 +1266,9 @@ func (p *Parser) parseReturn() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_RETURN)
 	if p.match(lexer.TOKEN_QUESTION) {
+		if p.peek() == lexer.TOKEN_WITH {
+			return p.parseOptionalReturnWith(pos)
+		}
 		value := p.withTernaryDisabled(p.parseValueExprAllowTuple)
 		if p.match(lexer.TOKEN_IF) {
 			cond := p.parseExpr()
@@ -1290,6 +1293,78 @@ func (p *Parser) parseReturn() ast.Stmt {
 	}
 	p.expectNewlineAfterValueExpr(value)
 	return &ast.ReturnStmt{Position: pos, Value: value}
+}
+
+type optionalReturnWithBinding struct {
+	name  string
+	value ast.Expr
+}
+
+func (p *Parser) parseOptionalReturnWith(pos lexer.Pos) ast.Stmt {
+	p.expect(lexer.TOKEN_WITH)
+	bindings := make([]optionalReturnWithBinding, 0, 2)
+	for {
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_ASSIGN)
+		value := p.withTernaryDisabled(p.parseExpr)
+		bindings = append(bindings, optionalReturnWithBinding{name: name, value: value})
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+		p.skipOptionalReturnWithBindingTrivia()
+	}
+	if len(bindings) == 0 {
+		p.errorAt(pos, "return? with requires at least one optional binding")
+	}
+	value := p.parseOptionalReturnWithValue(pos)
+	return buildOptionalReturnWithChain(pos, bindings, value, 0)
+}
+
+func (p *Parser) skipOptionalReturnWithBindingTrivia() {
+	p.skipNewlines()
+	if p.peek() == lexer.TOKEN_INDENT {
+		p.advance()
+	}
+}
+
+func (p *Parser) parseOptionalReturnWithValue(pos lexer.Pos) ast.Expr {
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	consumedBlockIndent := false
+	if p.match(lexer.TOKEN_INDENT) {
+		consumedBlockIndent = true
+	} else {
+		// Multiline binding lists can leave the lexer unwinding continuation
+		// indentation before the expression body.
+		for p.peek() == lexer.TOKEN_DEDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_EOF {
+			p.advance()
+			if p.peek() != lexer.TOKEN_DEDENT {
+				break
+			}
+		}
+	}
+	value := p.parseValueExprAllowTuple()
+	p.expectNewlineAfterValueExpr(value)
+	if consumedBlockIndent {
+		p.expect(lexer.TOKEN_DEDENT)
+	}
+	if value == nil {
+		p.errorAt(pos, "return? with requires a value expression body")
+		return &ast.NullLit{Position: pos}
+	}
+	return value
+}
+
+func buildOptionalReturnWithChain(pos lexer.Pos, bindings []optionalReturnWithBinding, value ast.Expr, index int) ast.Stmt {
+	if index >= len(bindings) {
+		return &ast.ReturnStmt{Position: pos, Value: value}
+	}
+	binding := bindings[index]
+	return &ast.IfStmt{
+		Position: pos,
+		Cond:     &ast.OptionalBindExpr{Position: pos, Name: binding.name, Value: binding.value},
+		Then:     []ast.Stmt{buildOptionalReturnWithChain(pos, bindings, value, index+1)},
+	}
 }
 
 func (p *Parser) parseValueExprAllowTuple() ast.Expr {

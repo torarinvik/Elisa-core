@@ -645,6 +645,51 @@ func TestParseReturnQuestionLowersToIfLetReturn(t *testing.T) {
 	}
 }
 
+func TestParseReturnQuestionWithOptionalBindingsLowersToNestedIfs(t *testing.T) {
+	file, errs := parseSourceFile(t, `def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
+    return? with lower_value = lower,
+                 upper_value = upper,
+                 value_int = value:
+        value_int >= lower_value and value_int <= upper_value
+    return null
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	outer, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected return? with to lower to if statement, got %T", decl.Body[0])
+	}
+	outerBind, ok := outer.Cond.(*ast.OptionalBindExpr)
+	if !ok || outerBind.Name != "lower_value" {
+		t.Fatalf("expected lower_value optional bind, got %T %#v", outer.Cond, outer.Cond)
+	}
+	middle, ok := outer.Then[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected nested optional bind, got %T", outer.Then[0])
+	}
+	middleBind, ok := middle.Cond.(*ast.OptionalBindExpr)
+	if !ok || middleBind.Name != "upper_value" {
+		t.Fatalf("expected upper_value optional bind, got %T %#v", middle.Cond, middle.Cond)
+	}
+	inner, ok := middle.Then[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected innermost optional bind, got %T", middle.Then[0])
+	}
+	innerBind, ok := inner.Cond.(*ast.OptionalBindExpr)
+	if !ok || innerBind.Name != "value_int" {
+		t.Fatalf("expected value_int optional bind, got %T %#v", inner.Cond, inner.Cond)
+	}
+	ret, ok := inner.Then[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected final return, got %T", inner.Then[0])
+	}
+	if _, ok := ret.Value.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected final return expression, got %T %#v", ret.Value, ret.Value)
+	}
+}
+
 func TestParseGuardElseStatement(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(maybe: i64?) -> i64:\n    guard maybe != null else return 0\n    return 1\n")
 	if len(errs) != 0 {
