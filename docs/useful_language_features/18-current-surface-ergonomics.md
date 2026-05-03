@@ -997,6 +997,37 @@ Current rules:
 - prefer generated `literals` tables for fixed punctuation and operator tokens; use `longest` when longer literals must win over prefixes
 - `tokens GrammarName` is the default way to import literal and keyword aliases from a shared grammar token manifest instead of restating them in the lexer
 - `keyword_compare helper` is the escape hatch for regular-but-non-exact keyword surfaces such as case-insensitive matching
+- generated token and keyword tables expose assertion helpers so tests can validate the whole table without restating every row:
+
+```context
+grammar PascalTokenGrammar:
+    token_lookup token_kind_for_text
+    token:
+        PROGRAM "program"
+        BEGIN "begin"
+        ASSIGN ":="
+
+@test
+def pascal_keyword_lookup_matches_surface_tokens() -> void:
+    can Abort.Panic:
+        token_kind_for_text_assert_table()
+        assert_eq(token_kind_for_text("PROGRAM"), TokenKind.PROGRAM)
+        assert_eq(token_kind_for_text("?"), TokenKind.EOF)
+```
+
+For lexer-local keyword tables, the generated helper follows the lexer name:
+
+```context
+lexer PascalLex:
+    keywords fallback IDENT:
+        "begin" -> BEGIN
+
+@test
+def pascal_lexer_keyword_table_is_complete() -> void:
+    can Abort.Panic:
+        pascal_lex_assert_keyword_table()
+```
+
 - keep layout and comment skipping, string and char literal readers, modes, interpolation, directives and includes, numeric edge cases, and context-sensitive operators manual unless the surface is proven regular
 - treat lexer support as mixed-mode: generated helpers own lookup tables, while handwritten code still owns cursor movement, state transitions, diagnostics, and context-sensitive decisions
 

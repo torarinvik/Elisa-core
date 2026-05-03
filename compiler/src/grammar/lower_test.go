@@ -1805,6 +1805,9 @@ lexer DemoLex:
 		`"end":`,
 		"DemoTokenKind.END",
 		"DemoTokenKind.IDENT",
+		"def demo_lex_assert_keyword_table() -> void effects[Abort.Panic]:",
+		`assert_eq(demo_lex_keyword_kind("begin"), DemoTokenKind.BEGIN)`,
+		`assert_eq(demo_lex_keyword_kind("end"), DemoTokenKind.END)`,
 		"def demo_lex_match_literal(source: cstr, offset: usize) -> (kind: DemoTokenKind, len: usize):",
 		`source[offset:(offset + 2)] == ":="`,
 		"return (DemoTokenKind.ASSIGN, 2)",
@@ -2219,6 +2222,9 @@ func TestLowerFileStatefulTokenLookupUsesTokenAliases(t *testing.T) {
 		`if (text == "+"):`,
 		"return TokenKind.PLUS",
 		"return TokenKind.EOF",
+		"def token_kind_for_text_assert_table() -> void effects[Abort.Panic]:",
+		`assert_eq(token_kind_for_text("program"), TokenKind.PROGRAM)`,
+		`assert_eq(token_kind_for_text("+"), TokenKind.PLUS)`,
 		"state.expect_kind(TokenKind.PROGRAM)",
 	} {
 		if !strings.Contains(formatted, want) {

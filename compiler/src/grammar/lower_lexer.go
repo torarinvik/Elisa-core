@@ -21,11 +21,38 @@ func lowerLexerDecls(decl *ast.LexerDecl, grammarScope map[string]*ast.GrammarDe
 	}
 	if decl.Keywords != nil {
 		out = append(out, lowerLexerKeywordDecl(decl, *decl.Keywords))
+		if keywordAssert := lowerLexerKeywordAssertDecl(decl, *decl.Keywords); keywordAssert != nil {
+			out = append(out, keywordAssert)
+		}
 	}
 	if decl.Literals != nil {
 		out = append(out, lowerLexerLiteralDecl(decl, *decl.Literals))
 	}
 	return out
+}
+
+func lowerLexerKeywordAssertDecl(decl *ast.LexerDecl, keywords ast.LexerKeywordDecl) *ast.FuncDecl {
+	if len(keywords.Entries) == 0 {
+		return nil
+	}
+	pos := keywords.Position
+	lookup := &ast.Ident{Position: pos, Name: lexerHelperName(decl.Name, "keyword_kind")}
+	body := make([]ast.Stmt, 0, len(keywords.Entries))
+	for _, entry := range keywords.Entries {
+		body = append(body, tokenLookupAssertStmt(
+			entry.Position,
+			lookup,
+			[]ast.Expr{&ast.StringLit{Position: entry.Position, Value: entry.Text}},
+			lexerKindExpr(decl, entry.Position, entry.Kind),
+		))
+	}
+	return &ast.FuncDecl{
+		Position:   pos,
+		Name:       lexerHelperName(decl.Name, "assert_keyword_table"),
+		Effects:    abortPanicEffects(pos),
+		ReturnType: builtinTypeExpr(pos, "void"),
+		Body:       abortPanicBody(pos, body),
+	}
 }
 
 func resolveLexerTokenAliases(decl *ast.LexerDecl, grammarScope map[string]*ast.GrammarDecl, envScope map[string]*ast.GrammarEnvDecl) *ast.LexerDecl {

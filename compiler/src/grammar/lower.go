@@ -336,6 +336,9 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 		if lookup := lowerGrammarTokenLookupFunc(normalizedDecl); lookup != nil {
 			out = append(out, lookup)
 		}
+		if lookupAssert := lowerGrammarTokenLookupAssertFunc(normalizedDecl); lookupAssert != nil {
+			out = append(out, lookupAssert)
+		}
 		for _, fn := range public {
 			out = append(out, fn)
 		}
@@ -355,6 +358,9 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 	}
 	if lookup := lowerGrammarTokenLookupFunc(normalizedDecl); lookup != nil {
 		out = append(out, lookup)
+	}
+	if lookupAssert := lowerGrammarTokenLookupAssertFunc(normalizedDecl); lookupAssert != nil {
+		out = append(out, lookupAssert)
 	}
 	for _, production := range rewrittenProductions {
 		receiver := grammarReceiverInfoForProduction(normalizedDecl, production)
@@ -1004,6 +1010,83 @@ func lowerGrammarTokenLookupFunc(grammarDecl *ast.GrammarDecl) *ast.FuncDecl {
 		},
 		ReturnType: grammarDeclTokenKindType(grammarDecl, pos),
 		Body:       body,
+	}
+}
+
+func lowerGrammarTokenLookupAssertFunc(grammarDecl *ast.GrammarDecl) *ast.FuncDecl {
+	if grammarDecl == nil || grammarDecl.TokenLookupFunc == "" {
+		return nil
+	}
+	pos := grammarDecl.Position
+	body := make([]ast.Stmt, 0, len(grammarDecl.TokenAliases))
+	for _, alias := range grammarDecl.TokenAliases {
+		if !alias.HasLiteral || alias.Literal == "" {
+			continue
+		}
+		body = append(body, tokenLookupAssertStmt(
+			alias.Position,
+			&ast.Ident{Position: alias.Position, Name: grammarDecl.TokenLookupFunc},
+			[]ast.Expr{&ast.StringLit{Position: alias.Position, Value: alias.Literal}},
+			grammarTokenKindExpr(alias.Position, grammarDeclTokenKindType(grammarDecl, alias.Position), alias.Kind),
+		))
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return &ast.FuncDecl{
+		Position:   pos,
+		Name:       grammarDecl.TokenLookupFunc + "_assert_table",
+		Effects:    abortPanicEffects(pos),
+		ReturnType: builtinTypeExpr(pos, "void"),
+		Body:       abortPanicBody(pos, body),
+	}
+}
+
+func tokenLookupAssertStmt(pos lexer.Pos, lookup ast.Expr, args []ast.Expr, expected ast.Expr) ast.Stmt {
+	return &ast.ExprStmt{
+		Position: pos,
+		Expr: &ast.CallExpr{
+			Position: pos,
+			Func:     &ast.Ident{Position: pos, Name: "assert_eq"},
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Position: pos,
+					Func:     lookup,
+					Args:     args,
+				},
+				expected,
+			},
+		},
+	}
+}
+
+func abortPanicEffects(pos lexer.Pos) []ast.SignatureEffectItem {
+	return []ast.SignatureEffectItem{{
+		Position:   pos,
+		Permission: ptrPermissionRef(abortPanicPermission(pos)),
+	}}
+}
+
+func ptrPermissionRef(value ast.PermissionRef) *ast.PermissionRef {
+	return &value
+}
+
+func abortPanicBody(pos lexer.Pos, body []ast.Stmt) []ast.Stmt {
+	if len(body) == 0 {
+		return nil
+	}
+	return []ast.Stmt{&ast.CanStmt{
+		Position:    pos,
+		Permissions: []ast.PermissionRef{abortPanicPermission(pos)},
+		Body:        body,
+	}}
+}
+
+func abortPanicPermission(pos lexer.Pos) ast.PermissionRef {
+	return ast.PermissionRef{
+		Position: pos,
+		Name:     "Abort",
+		Member:   "Panic",
 	}
 }
 
