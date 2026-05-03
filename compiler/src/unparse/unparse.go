@@ -2860,6 +2860,19 @@ func formatExpr(expr ast.Expr) string {
 			line += " if " + formatExpr(n.Filter)
 		}
 		return line + "]"
+	case *ast.QueryExpr:
+		keyword := "any"
+		switch n.Kind {
+		case ast.QueryExprAny:
+			keyword = "any"
+		case ast.QueryExprAll:
+			keyword = "all"
+		case ast.QueryExprFirst:
+			keyword = "first"
+		case ast.QueryExprCount:
+			keyword = "count"
+		}
+		return keyword + " " + n.Name + " in " + formatExpr(n.Source) + " where " + formatExpr(n.Filter)
 	case *ast.CastExpr:
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
 			if target, ok := formatPostfixShorthandCastTarget(n.Target); ok {

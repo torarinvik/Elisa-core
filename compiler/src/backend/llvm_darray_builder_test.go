@@ -76,6 +76,32 @@ func TestGenerateLLVMIRLowersListComprehensionExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersQueryExprFamily(t *testing.T) {
+	src := `def has_positive(items: darray[i64]) -> bool:
+    return any item in items where item > 0
+
+def all_positive(items: darray[i64]) -> bool:
+    return all item in items where item > 0
+
+def first_positive(items: darray[i64]) -> i64?:
+    return first item in items where item > 0
+
+def positive_count(items: darray[i64]) -> usize:
+    return count item in items where item > 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_query_expr_family.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if strings.Count(output, "iter.cond") < 4 {
+		t.Fatalf("expected query expressions to lower through iterable loop blocks, got:\n%s", output)
+	}
+	if !strings.Contains(output, "query.result") {
+		t.Fatalf("expected query expressions to lower through query result temporaries, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

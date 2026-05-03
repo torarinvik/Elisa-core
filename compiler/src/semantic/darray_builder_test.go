@@ -157,6 +157,61 @@ func TestAnalyzeListComprehensionExpr(t *testing.T) {
 	}
 }
 
+func TestAnalyzeQueryExprFamily(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "query_expr_family.llcontext", `def has_positive(items: darray[i64]) -> bool:
+    return any item in items where item > 0
+
+def all_positive(items: darray[i64]) -> bool:
+    return all item in items where item > 0
+
+def first_positive(items: darray[i64]) -> i64?:
+    return first item in items where item > 0
+
+def positive_count(items: darray[i64]) -> usize:
+    return count item in items where item > 0
+`)
+
+	seen := map[ast.QueryExprKind]bool{}
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || len(fn.Body) == 0 {
+			continue
+		}
+		ret, ok := fn.Body[0].(*ast.ReturnStmt)
+		if !ok {
+			continue
+		}
+		query, ok := ret.Value.(*ast.QueryExpr)
+		if !ok {
+			continue
+		}
+		seen[query.Kind] = true
+		switch query.Kind {
+		case ast.QueryExprAny, ast.QueryExprAll:
+			if builtin, ok := result.ExprTypes[query].(*BuiltinType); !ok || builtin.Name != "bool" {
+				t.Fatalf("expected bool query type, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+			}
+		case ast.QueryExprFirst:
+			opt, ok := result.ExprTypes[query].(*OptionalType)
+			if !ok || opt == nil {
+				t.Fatalf("expected first query to resolve to optional type, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+			}
+			if builtin, ok := opt.Value.(*BuiltinType); !ok || builtin.Name != "i64" {
+				t.Fatalf("expected first query optional payload i64, got %#v", opt.Value)
+			}
+		case ast.QueryExprCount:
+			if builtin, ok := result.ExprTypes[query].(*BuiltinType); !ok || builtin.Name != "usize" {
+				t.Fatalf("expected count query type usize, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+			}
+		}
+	}
+	for _, kind := range []ast.QueryExprKind{ast.QueryExprAny, ast.QueryExprAll, ast.QueryExprFirst, ast.QueryExprCount} {
+		if !seen[kind] {
+			t.Fatalf("missing analyzed query kind %v", kind)
+		}
+	}
+}
+
 func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.llcontext", `def build(items: darray[i64]) -> darray[i64]:
     return [item + 1 for item in items]

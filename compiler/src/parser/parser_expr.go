@@ -101,6 +101,42 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, Filter: filter}
 }
 
+func (p *Parser) parseQueryExpr() ast.Expr {
+	pos := p.cur().Pos
+	kindText := p.expect(lexer.TOKEN_IDENT).Text
+	kind := ast.QueryExprAny
+	switch kindText {
+	case "any":
+		kind = ast.QueryExprAny
+	case "all":
+		kind = ast.QueryExprAll
+	case "first":
+		kind = ast.QueryExprFirst
+	case "count":
+		kind = ast.QueryExprCount
+	default:
+		p.errorAt(pos, "unknown query expression %q", kindText)
+	}
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_IN)
+	source := p.withTernaryDisabled(p.parseExpr)
+	p.expectIdentText("where")
+	filter := p.parseExpr()
+	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter}
+}
+
+func (p *Parser) looksLikeQueryExpr() bool {
+	if p.peek() != lexer.TOKEN_IDENT || p.pos+3 >= len(p.tokens) {
+		return false
+	}
+	switch p.cur().Text {
+	case "any", "all", "first", "count":
+	default:
+		return false
+	}
+	return p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_IN
+}
+
 func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
@@ -1933,6 +1969,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		errExpr := p.parseOr()
 		return &ast.RaiseExpr{Position: pos, Error: errExpr}
 	case lexer.TOKEN_IDENT:
+		if p.looksLikeQueryExpr() {
+			return p.parseQueryExpr()
+		}
 		if p.cur().Text == "do" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
 			pos := p.cur().Pos
 			p.advance()

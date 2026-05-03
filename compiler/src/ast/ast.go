@@ -1199,6 +1199,23 @@ type ListComprehensionExpr struct {
 	Filter   Expr
 }
 
+type QueryExprKind int
+
+const (
+	QueryExprAny QueryExprKind = iota
+	QueryExprAll
+	QueryExprFirst
+	QueryExprCount
+)
+
+type QueryExpr struct {
+	Position lexer.Pos
+	Kind     QueryExprKind
+	Name     string
+	Source   Expr
+	Filter   Expr
+}
+
 type CastExprOrigin int
 
 const (
@@ -2003,6 +2020,7 @@ func (n *ListLitExpr) Pos() lexer.Pos { return n.Position }
 func (n *ListComprehensionExpr) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *QueryExpr) Pos() lexer.Pos      { return n.Position }
 func (n *CastExpr) Pos() lexer.Pos       { return n.Position }
 func (n *CascadeExpr) Pos() lexer.Pos    { return n.Position }
 func (n *LambdaExpr) Pos() lexer.Pos     { return n.Position }
@@ -2196,6 +2214,7 @@ func (*IndexExpr) nodeTag()                 {}
 func (*SliceExpr) nodeTag()                 {}
 func (*ListLitExpr) nodeTag()               {}
 func (*ListComprehensionExpr) nodeTag()     {}
+func (*QueryExpr) nodeTag()                 {}
 func (*CastExpr) nodeTag()                  {}
 func (*CascadeExpr) nodeTag()               {}
 func (*LambdaExpr) nodeTag()                {}
@@ -2383,6 +2402,7 @@ func (*ShorthandMemberExpr) exprTag()   {}
 func (*IndexExpr) exprTag()             {}
 func (*SliceExpr) exprTag()             {}
 func (*ListComprehensionExpr) exprTag() {}
+func (*QueryExpr) exprTag()             {}
 
 func (*MatchWildcardPattern) matchPatternTag()      {}
 func (*MatchBindPattern) matchPatternTag()          {}

@@ -224,6 +224,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitListLitExpr(n, expected)
 	case *ast.ListComprehensionExpr:
 		value, actualType, err = s.emitListComprehensionExpr(n)
+	case *ast.QueryExpr:
+		value, actualType, err = s.emitQueryExpr(n)
 	case *ast.BinaryExpr:
 		value, actualType, err = s.emitBinaryExpr(n)
 	case *ast.UnaryExpr:
@@ -1274,6 +1276,63 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 				Source:   expr.Source,
 				Filter:   expr.Filter,
 				Body:     []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: pushCall}},
+			},
+		},
+		Value: resultIdent,
+	}
+	return s.emitExprBlock(block, resultType)
+}
+
+func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, semantic.Type, error) {
+	resultType := s.exprType(expr)
+	if resultType == nil {
+		return nil, nil, fmt.Errorf("query expression requires a resolved result type")
+	}
+	resultName := s.g.nextSyntheticName("query.result.")
+	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
+	var init ast.Expr
+	var body []ast.Stmt
+	filter := expr.Filter
+	switch expr.Kind {
+	case ast.QueryExprAny:
+		init = &ast.BoolLit{Position: expr.Position, Value: false}
+		body = []ast.Stmt{&ast.AssignStmt{Position: expr.Position, Target: resultIdent, Value: &ast.BoolLit{Position: expr.Position, Value: true}}}
+	case ast.QueryExprAll:
+		init = &ast.BoolLit{Position: expr.Position, Value: true}
+		filter = &ast.UnaryExpr{Position: expr.Position, Op: lexer.TOKEN_NOT, Operand: expr.Filter}
+		body = []ast.Stmt{&ast.AssignStmt{Position: expr.Position, Target: resultIdent, Value: &ast.BoolLit{Position: expr.Position, Value: false}}}
+	case ast.QueryExprCount:
+		init = &ast.IntLit{Position: expr.Position, Value: "0", Suffix: "usize"}
+		body = []ast.Stmt{&ast.AugAssignStmt{Position: expr.Position, Op: lexer.TOKEN_PLUSEQ, Target: resultIdent, Value: &ast.IntLit{Position: expr.Position, Value: "1", Suffix: "usize"}}}
+	case ast.QueryExprFirst:
+		optionalType, ok := resultType.(*semantic.OptionalType)
+		if !ok || optionalType == nil {
+			return nil, nil, fmt.Errorf("first query expression requires an optional result type")
+		}
+		init = &ast.NullLit{Position: expr.Position}
+		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[init] = optionalType
+		}
+		nullCheck := &ast.BinaryExpr{Position: expr.Position, Op: lexer.TOKEN_EQEQ, Left: resultIdent, Right: &ast.NullLit{Position: expr.Position}}
+		filter = &ast.BinaryExpr{Position: expr.Position, Op: lexer.TOKEN_AND, Left: nullCheck, Right: expr.Filter}
+		body = []ast.Stmt{&ast.AssignStmt{Position: expr.Position, Target: resultIdent, Value: &ast.Ident{Position: expr.Position, Name: expr.Name}}}
+	default:
+		return nil, nil, fmt.Errorf("unknown query expression kind %d", expr.Kind)
+	}
+	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		s.g.result.ExprTypes[init] = resultType
+	}
+	block := &ast.ExprBlock{
+		Position: expr.Position,
+		Stmts: []ast.Stmt{
+			&ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: init},
+			&ast.IterForStmt{
+				Position: expr.Position,
+				Pattern:  &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
+				Mode:     ast.IterBindValue,
+				Source:   expr.Source,
+				Filter:   filter,
+				Body:     body,
 			},
 		},
 		Value: resultIdent,

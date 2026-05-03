@@ -318,6 +318,35 @@ Current rules:
 - a wildcard `_ => ...` arm is required
 - use this for dense classification maps; keep ordinary `match` or `if` when the mapping does extra computation
 
+## Query predicates
+
+Use query predicates for compact scans over iterable data when the loop only computes existence, universality, the first matching item, or a count.
+
+```context
+def has_name(names: darray[NameId], wanted: NameId) -> bool:
+    return any name in names where name == wanted
+
+def all_nonzero(values: darray[i64]) -> bool:
+    return all value in values where value != 0
+
+def first_positive(values: darray[i64]) -> i64?:
+    return first value in values where value > 0
+
+def positive_count(values: darray[i64]) -> usize:
+    return count value in values where value > 0
+```
+
+Current rules:
+
+- `any name in source where predicate` returns `bool`
+- `all name in source where predicate` returns `bool`
+- `first name in source where predicate` returns the element as `T?`
+- `count name in source where predicate` returns `usize`
+- the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `enumerate(...)`, and tree child views
+- range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now
+- the predicate is analyzed in a scope where the loop name is bound to the iterable element type
+- use explicit loops when the body has side effects or needs multiple statements
+
 ## Grammar recovery policies
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.
