@@ -645,6 +645,30 @@ func TestParseReturnQuestionLowersToIfLetReturn(t *testing.T) {
 	}
 }
 
+func TestParsePostfixReturnIfLowersToGuardReturn(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: i64, stop: bool) -> i64:\n    value return if stop\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected postfix return-if to lower to if statement, got %T", decl.Body[0])
+	}
+	cond, ok := ifStmt.Cond.(*ast.Ident)
+	if !ok || cond.Name != "stop" {
+		t.Fatalf("expected stop condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
+	}
+	ret, ok := ifStmt.Then[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected guard return then-body, got %T", ifStmt.Then[0])
+	}
+	value, ok := ret.Value.(*ast.Ident)
+	if !ok || value.Name != "value" {
+		t.Fatalf("expected returned value ident, got %T %#v", ret.Value, ret.Value)
+	}
+}
+
 func TestParseReturnQuestionWithOptionalBindingsLowersToNestedIfs(t *testing.T) {
 	file, errs := parseSourceFile(t, `def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
     return? with lower_value = lower,

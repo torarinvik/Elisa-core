@@ -110,6 +110,23 @@ def int_value(node: Expr) -> i64:
     return value if node is Expr.Int(value) else 0
 ```
 
+For non-optional guard returns, use postfix `return if` when the returned value is the important part and the guard is a short condition.
+
+```context
+def fallback_type(type_expr: Type?, depth: usize) -> SymbolId:
+    INVALID_SYMBOL_ID return if type_expr == null or depth > 32
+    return resolve_type_identity(type_expr)
+```
+
+This lowers to an ordinary statement-form guard:
+
+```context
+if type_expr == null or depth > 32:
+    return INVALID_SYMBOL_ID
+```
+
+Prefer the ordinary `if` form when the condition or returned expression needs multiple lines, diagnostics, mutation, or comments.
+
 When an early optional return depends on several optional inputs, use `return? with`. Each binding unwraps an optional in order; if any binding is absent, execution continues after the statement. The body expression runs only when all bindings are present.
 
 ```context
@@ -136,6 +153,7 @@ Current rules:
 - `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
 - `return? value` returns the unwrapped payload only when `value` is present; otherwise execution continues with the next statement
 - `return? value if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
+- `value return if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
 - `return? with name = optional, other = optional:` returns the body expression only when every binding is present; otherwise execution continues
 - `value if expr is Pattern(bindings) else fallback` exposes the pattern bindings only in the true branch
 - `value?.(fn)` unwraps `value` only when it is present and calls `fn(unwrapped_value)`

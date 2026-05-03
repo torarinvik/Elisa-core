@@ -2047,6 +2047,23 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		}
 	}
 
+	if p.peek() == lexer.TOKEN_RETURN {
+		returnPos := p.cur().Pos
+		p.advance()
+		if !p.match(lexer.TOKEN_IF) {
+			p.errorAt(returnPos, "postfix return guard expects `if`")
+			p.expectNewlineAfterValueExpr(expr)
+			return &ast.ReturnStmt{Position: returnPos, Value: expr}
+		}
+		cond := p.parseExpr()
+		p.expectNewlineAfterValueExpr(cond)
+		return &ast.IfStmt{
+			Position: pos,
+			Cond:     cond,
+			Then:     []ast.Stmt{&ast.ReturnStmt{Position: returnPos, Value: expr}},
+		}
+	}
+
 	switch p.peek() {
 	case lexer.TOKEN_LARROW:
 		p.advance()
