@@ -276,6 +276,19 @@ else_stmt = else_clause()?
 args = delimited(.LPAREN, expression() |> separated_by(stop: RParenSync), .RPAREN, ExpectedRightParen)?
 ```
 
+When ordinary llcontext support code needs to return an optional value only after several optional inputs are present, prefer `return? with` over a nested `if let` ladder:
+
+```context
+def integer_range_contains(lower: Expr, upper: Expr, value: Expr) -> bool?:
+    return? with lower_value = integer_literal(lower),
+                 upper_value = integer_literal(upper),
+                 actual_value = integer_literal(value):
+        actual_value >= lower_value and actual_value <= upper_value
+    return null
+```
+
+This is only for optional-return control flow. Use plain `if let` when the present branch performs diagnostics, mutation, or multiple statements.
+
 Use direct recovery constructors for repeated recovery shapes:
 
 ```context
