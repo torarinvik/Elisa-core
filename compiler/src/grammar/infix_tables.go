@@ -47,7 +47,7 @@ func resolveGrammarTermInfixTables(term ast.GrammarTerm, tables map[string]ast.G
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: resolveGrammarTermInfixTables(n.Term, tables)}
 	case *ast.GrammarWhenTerm:
-		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: resolveGrammarTermInfixTables(n.Then, tables), Else: resolveGrammarTermInfixTables(n.Else, tables)}
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, TokenKindGate: n.TokenKindGate, Then: resolveGrammarTermInfixTables(n.Then, tables), Else: resolveGrammarTermInfixTables(n.Else, tables)}
 	case *ast.GrammarRecoverTerm:
 		return &ast.GrammarRecoverTerm{Position: n.Position, Term: resolveGrammarTermInfixTables(n.Term, tables), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: resolveGrammarTermListInfixTables(n.RecoverUntil, tables), RecoverValue: n.RecoverValue}
 	case *ast.GrammarRequiredTerm:

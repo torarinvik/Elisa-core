@@ -1335,6 +1335,27 @@ func TestLowerFileStatefulWhenTermBranchesWithoutRunningBothSides(t *testing.T) 
 	}
 }
 
+func TestLowerFileStatefulOptionalTokenGateTermUsesCurrentToken(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	    cursor state
+	    body() -> Token:
+	        node = .IDENT? then .IDENT else .INTEGER
+	        return node
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_when_cond_",
+		"state.current_token().kind == TokenKind.IDENT",
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.INTEGER)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered optional token gate to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulChoicePromotesValueBranchToOptional(t *testing.T) {
 	file := parseGrammarTestFile(t, `struct Token:
     kind: TokenKind

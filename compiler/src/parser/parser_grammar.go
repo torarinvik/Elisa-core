@@ -1589,6 +1589,9 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 	for {
 		switch {
 		case p.match(lexer.TOKEN_QUESTION):
+			if tokenKind, ok := term.(*ast.GrammarTokenKindTerm); ok && p.peekIdentText("then") {
+				return p.parseGrammarOptionalTokenGateTerm(tokenKind)
+			}
 			term = &ast.GrammarOptionalTerm{Position: term.Pos(), Term: term}
 		case p.match(lexer.TOKEN_STAR):
 			var until []ast.GrammarTerm
@@ -1600,6 +1603,26 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 			return term
 		}
 	}
+}
+
+func (p *Parser) parseGrammarOptionalTokenGateTerm(tokenKind *ast.GrammarTokenKindTerm) ast.GrammarTerm {
+	p.expectIdentText("then")
+	thenTerm := p.parseGrammarRecoverableTermValue()
+	elseTerm := ast.GrammarTerm(&ast.GrammarExprTerm{Position: tokenKind.Position, Expr: &ast.NullLit{Position: tokenKind.Position}})
+	if p.match(lexer.TOKEN_ELSE) {
+		elseTerm = p.parseGrammarTokenGateElseTerm()
+	}
+	return &ast.GrammarWhenTerm{Position: tokenKind.Position, TokenKindGate: tokenKind.Kind, Then: thenTerm, Else: elseTerm}
+}
+
+func (p *Parser) parseGrammarTokenGateElseTerm() ast.GrammarTerm {
+	term := p.parseGrammarRecoverableTermValue()
+	if exprTerm, ok := term.(*ast.GrammarExprTerm); ok && exprTerm != nil {
+		if list, ok := exprTerm.Expr.(*ast.ListLitExpr); ok && list != nil && len(list.Elems) == 0 {
+			return &ast.GrammarEmptyTerm{Position: list.Position}
+		}
+	}
+	return term
 }
 
 func (p *Parser) parseGrammarChoiceTermValue() ast.GrammarTerm {

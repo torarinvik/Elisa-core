@@ -658,7 +658,7 @@ func desugarGrammarWhileTerm(term ast.GrammarTerm) ast.GrammarTerm {
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: desugarGrammarWhileTerm(n.Term)}
 	case *ast.GrammarWhenTerm:
-		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: desugarGrammarWhileTerm(n.Then), Else: desugarGrammarWhileTerm(n.Else)}
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, TokenKindGate: n.TokenKindGate, Then: desugarGrammarWhileTerm(n.Then), Else: desugarGrammarWhileTerm(n.Else)}
 	case *ast.GrammarMatchTerm:
 		return desugarGrammarMatchTerm(n)
 	case *ast.GrammarRecoverTerm:
@@ -1241,7 +1241,7 @@ func expandGrammarTermGrammarAliases(term ast.GrammarTerm, aliases map[string]as
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: expandGrammarTermGrammarAliases(n.Term, aliases, seen)}
 	case *ast.GrammarWhenTerm:
-		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: expandGrammarTermGrammarAliases(n.Then, aliases, seen), Else: expandGrammarTermGrammarAliases(n.Else, aliases, seen)}
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, TokenKindGate: n.TokenKindGate, Then: expandGrammarTermGrammarAliases(n.Then, aliases, seen), Else: expandGrammarTermGrammarAliases(n.Else, aliases, seen)}
 	case *ast.GrammarRecoverTerm:
 		return &ast.GrammarRecoverTerm{Position: n.Position, Term: expandGrammarTermGrammarAliases(n.Term, aliases, seen), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: expandGrammarTermListGrammarAliases(n.RecoverUntil, aliases, seen), RecoverValue: n.RecoverValue}
 	case *ast.GrammarRequiredTerm:
@@ -1452,7 +1452,7 @@ func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings)}
 	case *ast.GrammarWhenTerm:
-		return &ast.GrammarWhenTerm{Position: n.Position, Cond: expandGrammarExprGrammarFns(n.Cond, bindings), Then: expandGrammarTermGrammarFns(n.Then, grammarFns, bindings), Else: expandGrammarTermGrammarFns(n.Else, grammarFns, bindings)}
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: expandGrammarExprGrammarFns(n.Cond, bindings), TokenKindGate: n.TokenKindGate, Then: expandGrammarTermGrammarFns(n.Then, grammarFns, bindings), Else: expandGrammarTermGrammarFns(n.Else, grammarFns, bindings)}
 	case *ast.GrammarRecoverTerm:
 		return &ast.GrammarRecoverTerm{Position: n.Position, Term: expandGrammarTermGrammarFns(n.Term, grammarFns, bindings), RecoverPolicy: n.RecoverPolicy, RecoverMsg: expandGrammarExprGrammarFns(n.RecoverMsg, bindings), RecoverUntil: expandGrammarTermListGrammarFns(n.RecoverUntil, grammarFns, bindings), RecoverValue: expandGrammarExprGrammarFns(n.RecoverValue, bindings)}
 	case *ast.GrammarRequiredTerm:
@@ -1736,7 +1736,7 @@ func rewriteGrammarTermTokenAliases(term ast.GrammarTerm, aliases map[string]str
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases)}
 	case *ast.GrammarWhenTerm:
-		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: rewriteGrammarTermTokenAliases(n.Then, aliases), Else: rewriteGrammarTermTokenAliases(n.Else, aliases)}
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, TokenKindGate: n.TokenKindGate, Then: rewriteGrammarTermTokenAliases(n.Then, aliases), Else: rewriteGrammarTermTokenAliases(n.Else, aliases)}
 	case *ast.GrammarRecoverTerm:
 		return &ast.GrammarRecoverTerm{Position: n.Position, Term: rewriteGrammarTermTokenAliases(n.Term, aliases), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: rewriteGrammarTermListTokenAliases(n.RecoverUntil, aliases), RecoverValue: n.RecoverValue}
 	case *ast.GrammarRequiredTerm:
@@ -3529,11 +3529,13 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 }
 
 func (ctx *statefulLowerContext) lowerWhenAttempt(term *ast.GrammarWhenTerm) loweredAttempt {
-	thenAttempt := ctx.lowerAttempt(term.Then)
-	elseAttempt := ctx.lowerAttempt(term.Else)
-	thenFacts := ctx.termFacts(term.Then)
-	elseFacts := ctx.termFacts(term.Else)
 	termType := ctx.termValueTypeOrProduction(term.Position, term)
+	thenTerm := grammarSpecializeUntypedEmptyTerm(term.Then, termType)
+	elseTerm := grammarSpecializeUntypedEmptyTerm(term.Else, termType)
+	thenAttempt := ctx.lowerAttempt(thenTerm)
+	elseAttempt := ctx.lowerAttempt(elseTerm)
+	thenFacts := ctx.termFacts(thenTerm)
+	elseFacts := ctx.termFacts(elseTerm)
 	condName := ctx.fresh("when_cond")
 	matchedName := ctx.fresh("when_matched")
 	committedName := ctx.fresh("when_committed")
@@ -3555,7 +3557,7 @@ func (ctx *statefulLowerContext) lowerWhenAttempt(term *ast.GrammarWhenTerm) low
 	)
 	return loweredAttempt{
 		Stmts: []ast.Stmt{
-			&ast.VarDeclStmt{Position: term.Position, Name: condName, Value: term.Cond},
+			&ast.VarDeclStmt{Position: term.Position, Name: condName, Value: ctx.grammarWhenCondExpr(term)},
 			&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
 			&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
 			&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: zeroedCastExpr(term.Position, termType)},
@@ -3565,6 +3567,26 @@ func (ctx *statefulLowerContext) lowerWhenAttempt(term *ast.GrammarWhenTerm) low
 		Committed: &ast.Ident{Position: term.Position, Name: committedName},
 		Value:     valueIdent,
 	}
+}
+
+func grammarSpecializeUntypedEmptyTerm(term ast.GrammarTerm, valueType ast.TypeExpr) ast.GrammarTerm {
+	empty, ok := term.(*ast.GrammarEmptyTerm)
+	if !ok || empty == nil || empty.Type != nil {
+		return term
+	}
+	return &ast.GrammarEmptyTerm{Position: empty.Position, Type: grammarListElementType(empty.Position, nil, valueType)}
+}
+
+func (ctx *statefulLowerContext) grammarWhenCondExpr(term *ast.GrammarWhenTerm) ast.Expr {
+	if term.TokenKindGate == "" {
+		return term.Cond
+	}
+	return grammarTokenKindMatchExpr(
+		term.Position,
+		ctx.currentTokenExpr(term.Position),
+		ctx.tokenKindField,
+		grammarTokenKindExpr(term.Position, ctx.tokenKindType, term.TokenKindGate),
+	)
 }
 
 func (ctx *statefulLowerContext) lowerDelimitedAttempt(term *ast.GrammarDelimitedTerm) loweredAttempt {
@@ -4758,7 +4780,11 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 	case *ast.GrammarChoiceTerm:
 		return lowerChoiceExpr(ctx, n.Position, n.Options)
 	case *ast.GrammarWhenTerm:
-		return &ast.TernaryExpr{Position: n.Position, Value: lowerTermExpr(ctx, n.Then), Cond: n.Cond, Alt: lowerTermExpr(ctx, n.Else)}
+		cond := n.Cond
+		if n.TokenKindGate != "" {
+			cond = grammarTokenKindMatchExpr(n.Position, currentTokenExpr(ctx.tokenReceiver, "", n.Position), ctx.tokenKindField, grammarTokenKindExpr(n.Position, ctx.tokenKindType, n.TokenKindGate))
+		}
+		return &ast.TernaryExpr{Position: n.Position, Value: lowerTermExpr(ctx, n.Then), Cond: cond, Alt: lowerTermExpr(ctx, n.Else)}
 	case *ast.GrammarRequiredTerm:
 		return lowerTermExpr(ctx, n.Term)
 	case *ast.GrammarDelimitedTerm:

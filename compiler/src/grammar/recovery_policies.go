@@ -60,7 +60,7 @@ func resolveGrammarTermRecoveryPolicies(term ast.GrammarTerm, policies map[strin
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies)}
 	case *ast.GrammarWhenTerm:
-		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: resolveGrammarTermRecoveryPolicies(n.Then, policies), Else: resolveGrammarTermRecoveryPolicies(n.Else, policies)}
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, TokenKindGate: n.TokenKindGate, Then: resolveGrammarTermRecoveryPolicies(n.Then, policies), Else: resolveGrammarTermRecoveryPolicies(n.Else, policies)}
 	case *ast.GrammarRecoverTerm:
 		message, until, fallback := resolveGrammarRecoveryPolicy(n.RecoverPolicy, n.RecoverMsg, n.RecoverUntil, n.RecoverValue, policies)
 		return &ast.GrammarRecoverTerm{Position: n.Position, Term: resolveGrammarTermRecoveryPolicies(n.Term, policies), RecoverMsg: message, RecoverUntil: until, RecoverValue: fallback}

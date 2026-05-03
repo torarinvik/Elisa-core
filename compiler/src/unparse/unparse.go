@@ -1376,6 +1376,13 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		}
 		return "choice(" + strings.Join(options, ", ") + ")"
 	case *ast.GrammarWhenTerm:
+		if n.TokenKindGate != "" {
+			text := "." + n.TokenKindGate + "? then " + formatGrammarTerm(n.Then)
+			if !grammarWhenElseIsImplicitNull(n.Else) {
+				text += " else " + formatGrammarTokenGateElse(n.Else)
+			}
+			return text
+		}
 		return "when(" + formatExpr(n.Cond) + ", " + formatGrammarTerm(n.Then) + ", " + formatGrammarTerm(n.Else) + ")"
 	case *ast.GrammarMatchTerm:
 		return "match " + formatExpr(n.Value) + ": ..."
@@ -1513,6 +1520,22 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	default:
 		return "<grammar-term>"
 	}
+}
+
+func grammarWhenElseIsImplicitNull(term ast.GrammarTerm) bool {
+	exprTerm, ok := term.(*ast.GrammarExprTerm)
+	if !ok || exprTerm == nil {
+		return false
+	}
+	_, ok = exprTerm.Expr.(*ast.NullLit)
+	return ok
+}
+
+func formatGrammarTokenGateElse(term ast.GrammarTerm) string {
+	if empty, ok := term.(*ast.GrammarEmptyTerm); ok && empty != nil && empty.Type == nil {
+		return "[]"
+	}
+	return formatGrammarTerm(term)
 }
 
 func formatGrammarUntil(until []ast.GrammarTerm) string {

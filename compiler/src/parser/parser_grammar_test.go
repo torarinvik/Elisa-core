@@ -2872,6 +2872,56 @@ func TestParseGrammarDeclAllowsWhenTerm(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsOptionalTokenGateTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    unit_body() -> darray[Pascal.Decl]:
+        interface_uses = .USES? then uses_clause() else []
+        initialization_block = .INITIALIZATION? then unit_initialization_block_optional()
+        return interface_uses
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	firstBind := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	firstGate, ok := firstBind.Term.(*ast.GrammarWhenTerm)
+	if !ok || firstGate.TokenKindGate != "USES" {
+		t.Fatalf("expected USES optional token gate, got %T %#v", firstBind.Term, firstBind.Term)
+	}
+	if _, ok := firstGate.Else.(*ast.GrammarEmptyTerm); !ok {
+		t.Fatalf("expected explicit [] else branch as empty grammar term, got %T", firstGate.Else)
+	}
+	secondBind := decl.Productions[0].Terms[1].(*ast.GrammarBindTerm)
+	secondGate, ok := secondBind.Term.(*ast.GrammarWhenTerm)
+	if !ok || secondGate.TokenKindGate != "INITIALIZATION" {
+		t.Fatalf("expected INITIALIZATION optional token gate, got %T %#v", secondBind.Term, secondBind.Term)
+	}
+	if !grammarWhenElseIsImplicitNullForTest(secondGate.Else) {
+		t.Fatalf("expected omitted else branch to become implicit null expr, got %T %#v", secondGate.Else, secondGate.Else)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"interface_uses = .USES? then uses_clause() else []",
+		"initialization_block = .INITIALIZATION? then unit_initialization_block_optional()",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func grammarWhenElseIsImplicitNullForTest(term ast.GrammarTerm) bool {
+	exprTerm, ok := term.(*ast.GrammarExprTerm)
+	if !ok {
+		return false
+	}
+	_, ok = exprTerm.Expr.(*ast.NullLit)
+	return ok
+}
+
 func TestParseGrammarDeclAllowsMatchTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     type_ref(state: mutable ParserState&) -> PascalType.Type:

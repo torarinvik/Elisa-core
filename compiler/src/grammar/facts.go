@@ -350,6 +350,12 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		}
 		return selected
 	case *ast.GrammarWhenTerm:
+		if empty, ok := n.Then.(*ast.GrammarEmptyTerm); ok && empty != nil && empty.Type == nil {
+			return ctx.inferTermType(n.Else)
+		}
+		if empty, ok := n.Else.(*ast.GrammarEmptyTerm); ok && empty != nil && empty.Type == nil {
+			return ctx.inferTermType(n.Then)
+		}
 		return mergeGrammarAlternativeType(ctx.inferTermType(n.Then), ctx.inferTermType(n.Else))
 	case *ast.GrammarRequiredTerm:
 		return ctx.inferTermType(n.Term)

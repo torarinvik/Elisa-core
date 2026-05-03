@@ -70,7 +70,7 @@ func resolveGrammarTermFirstSets(term ast.GrammarTerm, productions map[string]re
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: resolveGrammarTermFirstSets(n.Term, productions)}
 	case *ast.GrammarWhenTerm:
-		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: resolveGrammarTermFirstSets(n.Then, productions), Else: resolveGrammarTermFirstSets(n.Else, productions)}
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, TokenKindGate: n.TokenKindGate, Then: resolveGrammarTermFirstSets(n.Then, productions), Else: resolveGrammarTermFirstSets(n.Else, productions)}
 	case *ast.GrammarRecoverTerm:
 		return &ast.GrammarRecoverTerm{Position: n.Position, Term: resolveGrammarTermFirstSets(n.Term, productions), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: resolveGrammarFirstRefsInStopList(n.RecoverUntil, productions), RecoverValue: n.RecoverValue}
 	case *ast.GrammarRequiredTerm:

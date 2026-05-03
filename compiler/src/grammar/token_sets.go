@@ -157,7 +157,7 @@ func resolveGrammarTermTokenSets(term ast.GrammarTerm, tokenSets map[string]ast.
 	case *ast.GrammarOptionalTerm:
 		return &ast.GrammarOptionalTerm{Position: n.Position, Term: resolveGrammarTermTokenSets(n.Term, tokenSets)}
 	case *ast.GrammarWhenTerm:
-		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, Then: resolveGrammarTermTokenSets(n.Then, tokenSets), Else: resolveGrammarTermTokenSets(n.Else, tokenSets)}
+		return &ast.GrammarWhenTerm{Position: n.Position, Cond: n.Cond, TokenKindGate: n.TokenKindGate, Then: resolveGrammarTermTokenSets(n.Then, tokenSets), Else: resolveGrammarTermTokenSets(n.Else, tokenSets)}
 	case *ast.GrammarRecoverTerm:
 		return &ast.GrammarRecoverTerm{Position: n.Position, Term: resolveGrammarTermTokenSets(n.Term, tokenSets), RecoverPolicy: n.RecoverPolicy, RecoverMsg: n.RecoverMsg, RecoverUntil: resolveGrammarTokenSetRefsInStopList(n.RecoverUntil, tokenSets), RecoverValue: n.RecoverValue}
 	case *ast.GrammarRequiredTerm:

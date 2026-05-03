@@ -343,10 +343,11 @@ type GrammarOptionalTerm struct {
 }
 
 type GrammarWhenTerm struct {
-	Position lexer.Pos
-	Cond     Expr
-	Then     GrammarTerm
-	Else     GrammarTerm
+	Position      lexer.Pos
+	Cond          Expr
+	TokenKindGate string
+	Then          GrammarTerm
+	Else          GrammarTerm
 }
 
 type GrammarMatchArm struct {
