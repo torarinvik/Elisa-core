@@ -65,9 +65,11 @@ def string_index(value: u8&?, index: i64) -> i64:
     src: u8& = value if value != null else ""
     len: usize = runtime_strlen(src)
 
-    -1 return if index < 0 or index.usize() >= len
+    #-1 return if index < 0 or index.usize() >= len
+    #return src[index.usize()].i64()
+    return -1  if index < 0 or index.usize() >= len else src[index.usize()].i64()
 
-    return src[index.usize()].i64()
+    
 
 def string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
     src: u8& = value if value != null else ""
@@ -95,9 +97,9 @@ def string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
 
     0 return if slice_len != rhs_len
 
-    1 return if slice_len == 0
-
-    1 return if src + lo == rhs
+    #1 return if slice_len == 0
+    #1 return if src + lo == rhs
+    1 return if slice_len == 0 or src + lo == rhs
 
     return 1 if memcmp((src + lo).cast[void&], rhs.cast[void&], slice_len) == 0 else 0
 
@@ -143,9 +145,9 @@ def string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_sta
 
     0 return if left_slice_len != right_slice_len
 
-    1 return if left_slice_len == 0
-
-    1 return if left + left_lo == right + right_lo
+    #1 return if left_slice_len == 0
+    #1 return if left + left_lo == right + right_lo
+    1 return if left_slice_len == 0 or left + left_lo == right + right_lo 
 
     return 1 if memcmp((left + left_lo).cast[void&], (right + right_lo).cast[void&], left_slice_len) == 0 else 0
 
@@ -238,16 +240,20 @@ def string_view_eq(view: sview, other: u8&?) -> int:
     rhs_len: usize = runtime_strlen(rhs)
 
     0 return if view.len < 0 or view.len.usize() != rhs_len
-    1 return if view.len == 0
-    1 return if view.data == rhs
+    #1 return if view.len == 0
+    #1 return if view.data == rhs
+
+    1 return if view.len == 0 or view.data == rhs
 
     return 1 if memcmp(view.data.cast[void&], rhs.cast[void&], view.len.usize()) == 0 else 0
 
 def string_views_eq(lhs: sview, rhs: sview) -> int:
     0 return if lhs.len != rhs.len
-    1 return if lhs.len == 0
-    1 return if lhs.data == rhs.data
 
+    #1 return if lhs.len == 0
+    #1 return if lhs.data == rhs.data
+    1 return if lhs.len == 0 or lhs.data == rhs.data
+    
     return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs.len.usize()) == 0 else 0
 
 def string_view_copy(view: sview) -> heap u8&:
