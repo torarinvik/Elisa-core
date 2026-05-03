@@ -263,8 +263,8 @@ def frontend_hash_token(hash: u64, token: FrontendToken) -> u64:
 
 def frontend_token_checksum(tokens: darray[FrontendToken]) -> u64:
     hash: mutable u64 = frontend_token_hash_mix(FRONTEND_TOKEN_HASH_OFFSET, tokens.count.u64())
-    for i in 0..<tokens.count:
-        hash <- frontend_hash_token(hash, tokens[i])
+    for token in tokens:
+        hash <- frontend_hash_token(hash, token)
     return hash
 
 
@@ -284,4 +284,3 @@ def frontend_expect_lookup_keyword_entries(entries: FrontendKeywordEntry&, count
         if not frontend_expect_lookup_keyword(entry.text, entry.kind):
             return false
     return true
-

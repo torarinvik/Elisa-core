@@ -363,7 +363,7 @@ def fallback(maybe: i64?) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @score(", "define i64 @fallback(", "cond.and.rhs", "cond.let.bind", "store i64"} {
+	for _, check := range []string{"define i64 @score(", "define i64 @fallback(", "cond.let.bind", "match.pattern.ok", "store i64"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected variant/let condition lowering to include %q, got:\n%s", check, output)
 		}

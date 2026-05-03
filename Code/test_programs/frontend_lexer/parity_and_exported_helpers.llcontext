@@ -308,8 +308,8 @@ def frontend_lexer_copy_token_kinds_with_len_impl(source: u8&, source_len: usize
         if capacity < tokens.count:
             return tokens.count
 
-        for i in 0..<tokens.count:
-            out[i] <- frontend_token_kind_code(tokens[i].kind)
+        for i, token in enumerate(tokens):
+            out[i] <- frontend_token_kind_code(token.kind)
         return tokens.count
 
 export func frontend_lexer_parity_suite() -> int = frontend_lexer_parity_suite_impl
