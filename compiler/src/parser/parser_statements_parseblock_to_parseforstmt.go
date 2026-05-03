@@ -372,17 +372,24 @@ func (p *Parser) looksLikeCheckpointStmt() bool {
 	return false
 }
 func (p *Parser) looksLikeForStmt() bool {
-	if p.pos+2 >= len(p.tokens) {
+	return p.looksLikeForStmtAt(p.pos)
+}
+
+func (p *Parser) looksLikeForStmtAt(pos int) bool {
+	if pos < 0 || pos+2 >= len(p.tokens) {
 		return false
 	}
-	switch p.tokens[p.pos+1].Kind {
+	if p.tokens[pos].Kind != lexer.TOKEN_IDENT || p.tokens[pos].Text != "for" {
+		return false
+	}
+	switch p.tokens[pos+1].Kind {
 	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE, lexer.TOKEN_LBRACE:
 	default:
 		return false
 	}
 	depth := 0
 	seenIn := false
-	for i := p.pos + 1; i < len(p.tokens); i++ {
+	for i := pos + 1; i < len(p.tokens); i++ {
 		tok := p.tokens[i]
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
@@ -526,22 +533,27 @@ func (p *Parser) parseForStmt() ast.Stmt {
 			p.errorf("range for loop does not support ref binders")
 		}
 		op := p.advance()
-		end := p.parseExpr()
+		end := p.parseForHeaderExpr()
 		var step ast.Expr
 		if p.match(lexer.TOKEN_RANGE) {
-			step = p.parseExpr()
+			step = p.parseForHeaderExpr()
 		}
-		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		body := p.parseBlock()
+		body := p.parseForStmtBody()
 		return &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
 	}
 	var filter ast.Expr
 	if p.match(lexer.TOKEN_IF) {
 		filter = p.parseExpr()
 	}
+	body := p.parseForStmtBody()
+	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, Filter: filter, Body: body}
+}
+
+func (p *Parser) parseForStmtBody() []ast.Stmt {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
+		return []ast.Stmt{p.parseForStmt()}
+	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
-	body := p.parseBlock()
-	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, Filter: filter, Body: body}
+	return p.parseBlock()
 }

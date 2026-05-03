@@ -176,6 +176,63 @@ func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
 		t.Fatalf("expected formatter to preserve enumerate tuple loop syntax, got:\n%s", formatted)
 	}
 }
+
+func TestParseChainedIterableForStatementLowersToNestedLoops(t *testing.T) {
+	file, errs := parseSourceFile(t, "def collect(groups: darray[darray[int]]) -> void:\n    for group in groups for value in group:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	outer, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected outer iterable for stmt, got %T", decl.Body[0])
+	}
+	if pattern, ok := outer.Pattern.(*ast.MoveBindNamePattern); !ok || pattern.Name != "group" {
+		t.Fatalf("expected outer binder group, got %T %#v", outer.Pattern, outer.Pattern)
+	}
+	if len(outer.Body) != 1 {
+		t.Fatalf("expected outer body to contain nested loop, got %d statements", len(outer.Body))
+	}
+	inner, ok := outer.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected inner iterable for stmt, got %T", outer.Body[0])
+	}
+	if pattern, ok := inner.Pattern.(*ast.MoveBindNamePattern); !ok || pattern.Name != "value" {
+		t.Fatalf("expected inner binder value, got %T %#v", inner.Pattern, inner.Pattern)
+	}
+	if len(inner.Body) != 1 {
+		t.Fatalf("expected inner body to contain original loop body, got %d statements", len(inner.Body))
+	}
+}
+
+func TestParseChainedRangeForStatementLowersToNestedLoops(t *testing.T) {
+	file, errs := parseSourceFile(t, "def mix(rounds: usize, len: usize) -> void:\n    for round in 0..<rounds for i in 0..<len:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	outer, ok := decl.Body[0].(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected outer range for stmt, got %T", decl.Body[0])
+	}
+	if outer.Name != "round" {
+		t.Fatalf("expected outer binder round, got %q", outer.Name)
+	}
+	if len(outer.Body) != 1 {
+		t.Fatalf("expected outer body to contain nested loop, got %d statements", len(outer.Body))
+	}
+	inner, ok := outer.Body[0].(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected inner range for stmt, got %T", outer.Body[0])
+	}
+	if inner.Name != "i" {
+		t.Fatalf("expected inner binder i, got %q", inner.Name)
+	}
+	if len(inner.Body) != 1 {
+		t.Fatalf("expected inner body to contain original loop body, got %d statements", len(inner.Body))
+	}
+}
+
 func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
 	file, errs := parseSourceFile(t, "extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]\n\ndef walk(items: darray[int]) -> void:\n    for value in rev(items):\n        pass\n    scope pool_new(2):\n        pass\n    checkpoint mark = items:\n        pass\n    restore mark\n")
 	if len(errs) != 0 {

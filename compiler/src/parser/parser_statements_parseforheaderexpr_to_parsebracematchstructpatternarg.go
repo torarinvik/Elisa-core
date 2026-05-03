@@ -29,6 +29,17 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 				p.pos = end
 				return expr
 			}
+		case lexer.TOKEN_IDENT:
+			if depth == 0 && p.looksLikeForStmtAt(end) {
+				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
+				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
+				sub := New(subTokens)
+				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
+				expr := sub.parseExpr()
+				p.errors = append(p.errors, sub.Errors()...)
+				p.pos = end
+				return expr
+			}
 		}
 		end++
 	}
