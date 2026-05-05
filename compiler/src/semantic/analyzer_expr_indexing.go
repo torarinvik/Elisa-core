@@ -230,6 +230,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		a.errorf(expr.End.Pos(), "slice end must be integral, got %s", endType)
 	}
 	if array, ok := objType.(*ArrayType); ok {
+		a.checkConstantArraySliceBounds(array, expr.Start, expr.End)
 		if isStringArrayType(array) {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
@@ -260,6 +261,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			return invalidType
 		}
 		if array, ok := ref.Elem.(*ArrayType); ok {
+			a.checkConstantArraySliceBounds(array, expr.Start, expr.End)
 			if isStringArrayType(array) {
 				return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 			}

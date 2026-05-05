@@ -334,6 +334,10 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	if err != nil {
 		return nil, nil, err
 	}
+	if info.helperName == "arena_da_view_slice" {
+		call, err := s.emitDenseViewSliceValue(objectValue, info.resultType, startValue, endValue, "slicetmp")
+		return call, info.resultType, err
+	}
 	helperType := &semantic.FuncType{
 		Name:   info.helperName,
 		Params: []semantic.Type{info.operandType, info.indexType, info.indexType},

@@ -502,9 +502,9 @@ def head_view(view: dview[i32]) -> i32:
 		"%DynArrayView = type { ptr, i64, i64 }",
 		"define i32 @head_owned(%DynArray__i32",
 		"define i32 @head_view(%DynArrayView",
-		"declare %DynArrayView @arena_da_view_slice(%DynArrayView, i64, i64)",
 		"extractvalue %DynArray__i32",
-		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
+		"darrayslice.view.len.out = sub i64",
+		"slicetmp.len.out = sub i64",
 		"getelementptr i32, ptr",
 	}
 	for _, check := range checks {

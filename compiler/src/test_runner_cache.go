@@ -104,7 +104,11 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 	testRunnerCacheWriteString(hash, "clang="+clangPath)
 	testRunnerCacheWriteBytes(hash, "runner", []byte(runnerSource))
 	testRunnerCacheWriteBytes(hash, "shim", []byte(shimSource))
-	for _, foreignFile := range foreignFiles {
+	resolvedForeignFiles, err := withDefaultNativeRuntimeForeignFiles(foreignFiles)
+	if err != nil {
+		return testRunnerCacheArtifact{}, err
+	}
+	for _, foreignFile := range resolvedForeignFiles {
 		trimmed := strings.TrimSpace(foreignFile)
 		if trimmed == "" {
 			continue

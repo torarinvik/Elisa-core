@@ -545,6 +545,32 @@ def read_last() -> u8:
 	_, errs := parseAndAnalyze(t, "constant_in_bounds_array_index.llcontext", src)
 	requireNoErrors(t, errs)
 }
+func TestAnalyzeRejectsConstantOutOfBoundsArraySlice(t *testing.T) {
+	src := `def bad() -> view[u8]:
+    buf: u8[4] = zeroed
+    return buf[2:5]
+`
+	_, errs := parseAndAnalyze(t, "constant_oob_array_slice.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "constant slice end 5 out of bounds for u8[4]") {
+		t.Fatalf("expected out-of-bounds slice diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+func TestAnalyzeRejectsConstantReversedArraySlice(t *testing.T) {
+	src := `def bad() -> view[u8]:
+    buf: u8[4] = zeroed
+    return buf[3:1]
+`
+	_, errs := parseAndAnalyze(t, "constant_reversed_array_slice.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "constant slice start 3 is after end 1 for u8[4]") {
+		t.Fatalf("expected reversed slice diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
 func TestAnalyzeAcceptsModuloExpressionsAndConstModulo(t *testing.T) {
 	src := `const IDX: usize = 10 % 3
 

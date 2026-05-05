@@ -54,6 +54,13 @@ static StringView llcontext_string_view_clamped(uint8_t *value, int64_t start, i
     return view;
 }
 
+static void *llcontext_offset_ptr(void *data, size_t offset_bytes) {
+    if (data == NULL) {
+        return NULL;
+    }
+    return (uint8_t *)data + offset_bytes;
+}
+
 static int64_t llcontext_bytes_equal(const uint8_t *left, const uint8_t *right, int64_t len) {
     if (len <= 0) {
         return 1;
@@ -102,10 +109,14 @@ CTX_RUNTIME_WEAK int64_t ctx_string_view_len(StringView view) {
 }
 
 CTX_RUNTIME_WEAK StringView ctx_string_view_slice(StringView view, int64_t start, int64_t end) {
-    int64_t lo = llcontext_clamp_i64(start, 0, view.len);
-    int64_t hi = llcontext_clamp_i64(end, lo, view.len);
+    int64_t len = view.len < 0 ? 0 : view.len;
+    if (view.data == NULL) {
+        len = 0;
+    }
+    int64_t lo = llcontext_clamp_i64(start, 0, len);
+    int64_t hi = llcontext_clamp_i64(end, lo, len);
     StringView out;
-    out.data = view.data + lo;
+    out.data = (uint8_t *)llcontext_offset_ptr(view.data, (size_t)lo);
     out.len = hi - lo;
     return out;
 }
@@ -120,6 +131,9 @@ CTX_RUNTIME_WEAK StringView ctx_string_view_suffix(StringView view, int64_t star
 
 CTX_RUNTIME_WEAK int64_t ctx_string_view_index(StringView view, int64_t index) {
     if (index < 0 || index >= view.len) {
+        return 0;
+    }
+    if (view.data == NULL) {
         return 0;
     }
     return (int64_t)view.data[index];
@@ -153,11 +167,17 @@ CTX_RUNTIME_WEAK int64_t ctx_string_slices_eq(uint8_t *lhs, int64_t lhs_start, i
 }
 
 CTX_RUNTIME_WEAK uint8_t *ctx_string_from_view(StringView view) {
+    if (view.len < 0) {
+        view.len = 0;
+    }
+    if (view.data == NULL) {
+        view.len = 0;
+    }
     uint8_t *out = (uint8_t *)malloc((size_t)view.len + 1u);
     if (out == NULL) {
         abort();
     }
-    if (view.len > 0) {
+    if (view.len > 0 && view.data != NULL) {
         memcpy(out, view.data, (size_t)view.len);
     }
     out[view.len] = 0;
@@ -167,17 +187,25 @@ CTX_RUNTIME_WEAK uint8_t *ctx_string_from_view(StringView view) {
 CTX_RUNTIME_WEAK DynArrayView arena_da_view(void *data, int64_t len, int64_t elem_size) {
     DynArrayView view;
     view.data = data;
-    view.len = len;
-    view.elem_size = elem_size;
+    view.len = len < 0 ? 0 : len;
+    view.elem_size = elem_size < 0 ? 0 : elem_size;
+    if (view.data == NULL) {
+        view.len = 0;
+    }
     return view;
 }
 
 CTX_RUNTIME_WEAK DynArrayView arena_da_view_slice(DynArrayView view, int64_t start, int64_t end) {
-    int64_t lo = llcontext_clamp_i64(start, 0, view.len);
-    int64_t hi = llcontext_clamp_i64(end, lo, view.len);
+    int64_t len = view.len < 0 ? 0 : view.len;
+    int64_t elem_size = view.elem_size < 0 ? 0 : view.elem_size;
+    if (view.data == NULL) {
+        len = 0;
+    }
+    int64_t lo = llcontext_clamp_i64(start, 0, len);
+    int64_t hi = llcontext_clamp_i64(end, lo, len);
     DynArrayView out;
-    out.data = (uint8_t *)view.data + (size_t)lo * (size_t)view.elem_size;
+    out.data = llcontext_offset_ptr(view.data, (size_t)lo * (size_t)elem_size);
     out.len = hi - lo;
-    out.elem_size = view.elem_size;
+    out.elem_size = elem_size;
     return out;
 }

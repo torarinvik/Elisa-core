@@ -39,6 +39,26 @@ func (a *Analyzer) checkConstantArrayIndexBounds(arr *ArrayType, indexExpr ast.E
 	}
 }
 
+func (a *Analyzer) checkConstantArraySliceBounds(arr *ArrayType, startExpr ast.Expr, endExpr ast.Expr) {
+	if arr == nil || !arr.HasConstSize {
+		return
+	}
+	start, startOK := a.evalConstExpr(startExpr)
+	end, endOK := a.evalConstExpr(endExpr)
+	if !startOK || !endOK || start.Kind != ConstInt || end.Kind != ConstInt {
+		return
+	}
+	if start.Int < 0 || start.Int > arr.ConstSize {
+		a.errorf(startExpr.Pos(), "constant slice start %d out of bounds for %s", start.Int, arr)
+	}
+	if end.Int < 0 || end.Int > arr.ConstSize {
+		a.errorf(endExpr.Pos(), "constant slice end %d out of bounds for %s", end.Int, arr)
+	}
+	if start.Int > end.Int {
+		a.errorf(startExpr.Pos(), "constant slice start %d is after end %d for %s", start.Int, end.Int, arr)
+	}
+}
+
 func (a *Analyzer) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
 	value, ok := a.evalConstExpr(expr)
 	if !ok || value.Kind != ConstBool {

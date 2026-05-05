@@ -272,24 +272,38 @@ func (s *functionState) emitDenseViewIndexedAddress(dataPtr C.LLVMValueRef, elem
 	return C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name+".ptr")), nil
 }
 func (s *functionState) emitArenaViewSliceValue(viewValue C.LLVMValueRef, viewType *semantic.DArrayViewType, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	return s.emitDenseViewSliceValue(viewValue, viewType, startValue, endValue, name)
+}
+func (s *functionState) emitDenseViewSliceValue(viewValue C.LLVMValueRef, viewType semantic.Type, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	if viewType == nil {
 		return nil, fmt.Errorf("missing dview type for slice helper lowering")
 	}
+	viewLLVMType, err := s.g.lowerType(viewType)
+	if err != nil {
+		return nil, err
+	}
 	usizeType := s.g.result.NamedTypes["usize"]
-	helperType := &semantic.FuncType{
-		Name:   "arena_da_view_slice",
-		Params: []semantic.Type{viewType, usizeType, usizeType},
-		Return: viewType,
-	}
-	callee, err := s.g.ensureFunctionDeclared("arena_da_view_slice", helperType)
+	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
 	}
-	llvmFnType, err := s.g.lowerFunctionType(helperType)
-	if err != nil {
-		return nil, err
-	}
-	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{viewValue, startValue, endValue}, name), nil
+	dataValue := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree(name+".data"))
+	lenValue := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree(name+".len"))
+	elemSizeValue := C.LLVMBuildExtractValue(s.builder, viewValue, 2, cStringFree(name+".elem_size"))
+	lo := s.emitUnsignedMin(startValue, lenValue, usizeLLVMType, name+".lo")
+	endClamped := s.emitUnsignedMin(endValue, lenValue, usizeLLVMType, name+".end.clamped")
+	endAfterStart := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGE), endClamped, lo, cStringFree(name+".end.after.start"))
+	hi := C.LLVMBuildSelect(s.builder, endAfterStart, endClamped, lo, cStringFree(name+".hi"))
+	sliceLen := C.LLVMBuildSub(s.builder, hi, lo, cStringFree(name+".len.out"))
+	offset := C.LLVMBuildMul(s.builder, lo, elemSizeValue, cStringFree(name+".offset"))
+	i8Type := C.LLVMInt8TypeInContext(s.g.context)
+	indices := []C.LLVMValueRef{offset}
+	sliceData := C.LLVMBuildGEP2(s.builder, i8Type, dataValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name+".data.out"))
+	out := C.LLVMGetUndef(viewLLVMType)
+	out = C.LLVMBuildInsertValue(s.builder, out, sliceData, 0, cStringFree(name+".view.data"))
+	out = C.LLVMBuildInsertValue(s.builder, out, sliceLen, 1, cStringFree(name+".view.len"))
+	out = C.LLVMBuildInsertValue(s.builder, out, elemSizeValue, 2, cStringFree(name+".view.elem_size"))
+	return out, nil
 }
 func (s *functionState) emitChunksExactValidation(chunkSizeValue C.LLVMValueRef, totalValue C.LLVMValueRef, prefix string) error {
 	usizeType := s.g.result.NamedTypes["usize"]

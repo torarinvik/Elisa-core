@@ -41,7 +41,8 @@ def read_array_view_index() -> i32:
 		"declare %DynArrayView @make_array_view()",
 		"call %DynArray__i32 @make_array()",
 		"call %DynArrayView @make_array_view()",
-		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
+		"darrayslice.view.len.out = sub i64",
+		"getelementptr i8, ptr",
 		"extractvalue %DynArray__i32",
 		"getelementptr i32, ptr",
 		"alloca %DynArray__i32",
@@ -371,7 +372,8 @@ func TestGenerateLLVMIRLowersIterableForLoopOverChunksExactView(t *testing.T) {
 		"iter.body",
 		"iter.end",
 		"mul i64",
-		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
+		"chunks.item.len.out = sub i64",
+		"getelementptr i8, ptr",
 	} {
 		if !strings.Contains(ir, check) {
 			t.Fatalf("expected checksum IR to contain %q, got:\n%s", check, ir)
@@ -398,7 +400,8 @@ func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 		"%SplitView__i32 = type { %DynArrayView, %DynArrayView }",
 		"%ChunksExactView__i32 = type { %DynArrayView, i64, i64 }",
 		"define void @run(%DynArray__i32",
-		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
+		"split.left.len.out = sub i64",
+		"chunks.item.len.out = sub i64",
 		"urem i64",
 		"call void @llvm.trap()",
 	}
