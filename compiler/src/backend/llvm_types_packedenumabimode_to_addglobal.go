@@ -386,6 +386,16 @@ func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncTyp
 	g.functions[name] = value
 	return value, nil
 }
+func (g *llvmGenerator) llvmSymbolName(name string) string {
+	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+		return name
+	}
+	sym, ok := g.result.GlobalScope.Lookup(name)
+	if !ok || sym == nil || strings.TrimSpace(sym.LinkName) == "" {
+		return name
+	}
+	return sym.LinkName
+}
 func (g *llvmGenerator) ensureDeclaredFunctionType(name string, value C.LLVMValueRef, fn *semantic.FuncType) error {
 	if g == nil || value == nil || fn == nil {
 		return nil
@@ -427,7 +437,7 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	if err != nil {
 		return nil, err
 	}
-	nameC := cString(name)
+	nameC := cString(g.llvmSymbolName(name))
 	defer C.free(unsafe.Pointer(nameC))
 	value := C.LLVMAddFunction(g.module, nameC, fnType)
 	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
@@ -635,7 +645,7 @@ func (g *llvmGenerator) addGlobal(name string, t semantic.Type, external bool) (
 	if err != nil {
 		return nil, err
 	}
-	nameC := cString(name)
+	nameC := cString(g.llvmSymbolName(name))
 	defer C.free(unsafe.Pointer(nameC))
 	value := C.LLVMAddGlobal(g.module, globalType, nameC)
 	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)

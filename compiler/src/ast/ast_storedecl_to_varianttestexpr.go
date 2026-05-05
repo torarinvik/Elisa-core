@@ -187,9 +187,10 @@ type ExternFuncDecl struct {
 	Variadic          bool
 }
 type ExternVarDecl struct {
-	Position lexer.Pos
-	Name     string
-	Type     TypeExpr
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	Type        TypeExpr
 }
 type ExternTypeDecl struct {
 	Position lexer.Pos

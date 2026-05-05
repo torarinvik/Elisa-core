@@ -11,11 +11,34 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name":
 		return true
 	default:
 		return false
 	}
+}
+
+func isSupportedExternVarAnnotation(name string) bool {
+	switch name {
+	case "link_name":
+		return true
+	default:
+		return false
+	}
+}
+
+func externLinkNameFromAnnotations(annotations []ast.Annotation) (string, bool) {
+	for _, annotation := range annotations {
+		if annotation.Name != "link_name" || len(annotation.Args) != 1 {
+			continue
+		}
+		linkName := strings.TrimSpace(annotation.Args[0])
+		if linkName == "" {
+			continue
+		}
+		return linkName, true
+	}
+	return "", false
 }
 
 func normalizePackedProfileAnnotationArg(value string) (string, bool) {
@@ -283,6 +306,10 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			continue
 		}
 		switch annotation.Name {
+		case "link_name":
+			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
+				a.errorf(annotation.Position, "@link_name on extern function %q expects exactly one non-empty symbol name", fn.Name)
+			}
 		case "borrows_return":
 			a.applyExternBorrowsReturnAnnotation(fn, fnType, annotation)
 		case "borrows_return_field":
@@ -291,6 +318,27 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			a.applyExternBorrowsReturnRebasedAnnotation(fn, fnType, annotation)
 		case "borrows_return_field_rebased":
 			a.applyExternBorrowsReturnFieldRebasedAnnotation(fn, fnType, annotation)
+		}
+	}
+}
+
+func (a *Analyzer) applyExternVarAnnotations(decl *ast.ExternVarDecl) {
+	if decl == nil || len(decl.Annotations) == 0 {
+		return
+	}
+	seen := make(map[string]lexer.Pos, len(decl.Annotations))
+	for _, annotation := range decl.Annotations {
+		if prev, exists := seen[annotation.Name]; exists {
+			a.errorf(annotation.Position, "duplicate @%s annotation on extern var %q (first seen at %s:%d:%d)", annotation.Name, decl.Name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seen[annotation.Name] = annotation.Position
+		if !isSupportedExternVarAnnotation(annotation.Name) {
+			a.errorf(annotation.Position, "unknown extern var annotation @%s on %q", annotation.Name, decl.Name)
+			continue
+		}
+		if annotation.Name == "link_name" && (len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "") {
+			a.errorf(annotation.Position, "@link_name on extern var %q expects exactly one non-empty symbol name", decl.Name)
 		}
 	}
 }

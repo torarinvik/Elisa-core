@@ -28,16 +28,16 @@ type nativeBuildTiming struct {
 	CacheHit     bool
 }
 
-func buildNativeExecutable(result *semantic.Result, foreignFiles []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), error) {
+func buildNativeExecutable(result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), error) {
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("clang is required to build native executables: %w", err)
 	}
-	exePath, cleanup, _, err := buildNativeExecutableWithClang(clangPath, result, foreignFiles, outputPath, optLevel, packedProfile, stderr)
+	exePath, cleanup, _, err := buildNativeExecutableWithClang(clangPath, result, foreignFiles, linkFlags, outputPath, optLevel, packedProfile, stderr)
 	return exePath, cleanup, err
 }
 
-func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
+func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
 	if result == nil {
 		return "", func() {}, nativeBuildTiming{}, fmt.Errorf("semantic result is nil")
 	}
@@ -107,6 +107,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		linkArgs = append(linkArgs, runtimeObjectPath)
 	}
 	linkArgs = append(linkArgs, foreignFiles...)
+	linkArgs = append(linkArgs, linkFlags...)
 	linkArgs = append(linkArgs, "-o", exePath)
 
 	linkCmd := exec.Command(clangPath, linkArgs...)

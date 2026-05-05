@@ -41,8 +41,8 @@ func debugTestRunnerCache(stderr io.Writer, status string, artifact testRunnerCa
 	fmt.Fprintf(stderr, "[ cache    ] %s key=%s exe=%s\n", status, prefix, artifact.executable)
 }
 
-func locateCachedTestRunner(runnerSource string, shimSource string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile) (testRunnerCacheArtifact, bool, error) {
-	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, foreignFiles, optLevel, packedProfile)
+func locateCachedTestRunner(runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile) (testRunnerCacheArtifact, bool, error) {
+	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, foreignFiles, linkFlags, optLevel, packedProfile)
 	if err != nil {
 		return testRunnerCacheArtifact{}, false, err
 	}
@@ -90,7 +90,7 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 	return nil
 }
 
-func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile) (testRunnerCacheArtifact, error) {
+func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile) (testRunnerCacheArtifact, error) {
 	hash := sha256.New()
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
@@ -116,6 +116,13 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 		if err := testRunnerCacheHashFile(hash, trimmed); err != nil {
 			return testRunnerCacheArtifact{}, err
 		}
+	}
+	for _, linkFlag := range linkFlags {
+		trimmed := strings.TrimSpace(linkFlag)
+		if trimmed == "" {
+			continue
+		}
+		testRunnerCacheWriteString(hash, "linkflag="+trimmed)
 	}
 	if runtimePath, err := defaultElisaCoreRuntimeSupportPath(); err == nil {
 		runtimeSource, readErr := readSourceWithIncludes(runtimePath, map[string]bool{})

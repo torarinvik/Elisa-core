@@ -415,6 +415,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		f.writeAnnotations(level, n.Annotations)
 		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Variadic))
 	case *ast.ExternVarDecl:
+		f.writeAnnotations(level, n.Annotations)
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))
 	case *ast.ExternTypeDecl:
 		f.writeLine(level, "extern "+n.Name)

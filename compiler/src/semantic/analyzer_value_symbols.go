@@ -108,7 +108,9 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 							visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 							qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
 							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
-							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, Mutable: false}
+							a.applyExternFuncAnnotations(fnDecl, fnType)
+							linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
+							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
 							a.functionTypes[qualifiedName] = fnType
 							a.defineGlobal(sym, fnDecl.Pos())
 							a.registerExtensionMethod(visibleName, receiver, sym, fnDecl, fnType)
@@ -132,7 +134,9 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					case *ast.ExternFuncDecl:
 						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
 						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
-						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, Mutable: false}
+						a.applyExternFuncAnnotations(fnDecl, fnType)
+						linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
+						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
 						a.functionTypes[qualifiedName] = fnType
 						a.defineGlobal(sym, fnDecl.Pos())
 					}
@@ -148,14 +152,17 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					fnType.ReturnBorrowedOwnerRefsKnown = true
 				}
 				a.functionTypes[qualifiedName] = fnType
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
+				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false}, n.Pos())
 			case *ast.ExternVarDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				declType := a.resolveType(n.Type)
 				if a.containsAffineHandleValues(declType, map[string]bool{}) {
 					a.errorf(n.Pos(), "extern var %q cannot store affine handle values of type %s", n.Name, declType)
 				}
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
+				a.applyExternVarAnnotations(n)
+				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, LinkName: linkName, Mutable: true}, n.Pos())
 			case *ast.TreeDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:

@@ -426,7 +426,7 @@ func runnableTestCases(cases []selectedTestCase) []selectedTestCase {
 	}
 	return out
 }
-func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stdout io.Writer, stderr io.Writer) int {
+func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stdout io.Writer, stderr io.Writer) int {
 	suiteStart := time.Now()
 	writeTestPhaseLine(stderr, "selected_tests", "read_source")
 	source, err := readSourceWithIncludes(inputFile, map[string]bool{})
@@ -475,7 +475,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		var nativeTiming nativeBuildTiming
 		var analyzeTime time.Duration
 		var shimWriteTime time.Duration
-		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, foreignFiles, optLevel, packedProfile, stderr)
+		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, foreignFiles, linkFlags, optLevel, packedProfile, stderr)
 		compileTotal = time.Since(compileStart)
 		analyzeTotal = analyzeTime
 		nativeObjectTotal = nativeTiming.ObjectWrite

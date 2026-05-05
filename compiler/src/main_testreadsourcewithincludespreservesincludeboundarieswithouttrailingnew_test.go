@@ -364,6 +364,21 @@ func TestParseArgsAcceptsOptimizationShorthands(t *testing.T) {
 		})
 	}
 }
+func TestParseArgsAcceptsLinkerFlags(t *testing.T) {
+	options, err := parseArgs([]string{"-L", "/opt/example/lib", "-lLLVM-C", "-link", "-Wl,-rpath,/opt/example/lib", "fixture.elisa"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	expected := []string{"-L/opt/example/lib", "-lLLVM-C", "-Wl,-rpath,/opt/example/lib"}
+	if len(options.linkFlags) != len(expected) {
+		t.Fatalf("expected %d link flags, got %#v", len(expected), options.linkFlags)
+	}
+	for i, flag := range expected {
+		if options.linkFlags[i] != flag {
+			t.Fatalf("expected link flag %d to be %q, got %#v", i, flag, options.linkFlags)
+		}
+	}
+}
 func TestParseArgsRejectsRemovedPackedABI(t *testing.T) {
 	tests := []struct {
 		name string

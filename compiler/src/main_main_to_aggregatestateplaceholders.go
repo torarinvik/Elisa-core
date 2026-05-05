@@ -171,6 +171,7 @@ type cliOptions struct {
 	addr          string
 	filter        string
 	foreignFiles  []string
+	linkFlags     []string
 	linkNative    bool
 	runNative     bool
 	packedProfile backend.PackedLoweringProfile
@@ -244,6 +245,50 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("missing value after -o")
 			}
 			options.output = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-link="):
+			value := strings.TrimSpace(strings.TrimPrefix(arg, "-link="))
+			if value == "" {
+				return cliOptions{}, fmt.Errorf("missing value after -link")
+			}
+			options.linkFlags = append(options.linkFlags, value)
+		case arg == "-link":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -link")
+			}
+			value := strings.TrimSpace(args[i])
+			if value == "" {
+				return cliOptions{}, fmt.Errorf("missing value after -link")
+			}
+			options.linkFlags = append(options.linkFlags, value)
+		case strings.HasPrefix(arg, "-L="):
+			value := strings.TrimSpace(strings.TrimPrefix(arg, "-L="))
+			if value == "" {
+				return cliOptions{}, fmt.Errorf("missing value after -L")
+			}
+			options.linkFlags = append(options.linkFlags, "-L"+value)
+		case arg == "-L":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -L")
+			}
+			value := strings.TrimSpace(args[i])
+			if value == "" {
+				return cliOptions{}, fmt.Errorf("missing value after -L")
+			}
+			options.linkFlags = append(options.linkFlags, "-L"+value)
+		case strings.HasPrefix(arg, "-l") && len(arg) > len("-l"):
+			options.linkFlags = append(options.linkFlags, arg)
+		case arg == "-l":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -l")
+			}
+			value := strings.TrimSpace(args[i])
+			if value == "" {
+				return cliOptions{}, fmt.Errorf("missing value after -l")
+			}
+			options.linkFlags = append(options.linkFlags, "-l"+value)
 		case strings.HasPrefix(arg, "-"):
 			return cliOptions{}, fmt.Errorf("unknown option %q", arg)
 		default:
@@ -267,7 +312,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 func printUsage(w io.Writer) {
 	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject}
-	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
+	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore build|run|test|bench [target] [--project <dir|project.json>]")

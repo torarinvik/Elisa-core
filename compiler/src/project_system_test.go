@@ -231,6 +231,55 @@ func TestRunCLIProjectDepsReportsInterfacesAndForeignSources(t *testing.T) {
 	}
 }
 
+func TestRunCLIProjectRunSupportsDirectLibraryLinkFlags(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	projectRoot := writeNativeLibraryLinkProjectFixture(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"run", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected native library link project run to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during native library link run, got:\n%s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected successful native library link run not to print stdout, got:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"project", "view", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected project view to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Link flags:") || !strings.Contains(stdout.String(), "-lm") {
+		t.Fatalf("expected project view to report link flags, got:\n%s", stdout.String())
+	}
+}
+func TestRunCLIProjectRunSupportsLinkNameExternFFI(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	projectRoot := writeNativeLinkNameProjectFixture(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"run", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected link_name ffi project run to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during link_name ffi run, got:\n%s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected successful link_name ffi run not to print stdout, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunCLIProjectNativeBuildAndRunWithForeignSources(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
@@ -405,6 +454,63 @@ func writeNativeForeignProjectFixture(t *testing.T) string {
 	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), "extern foreign_message() -> u8&\nextern puts(text: u8&) -> int can[Console.Write]\n\ndef main() -> int can[Console.Write]:\n    can Console.Write:\n        puts(foreign_message())\n        return 0\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.elisa"), "extern foreign_value() -> int\n\n@test\ndef foreign_case() -> void can[Abort.Panic]:\n    can Abort.Panic:\n        if foreign_value() != 42:\n            panic(\"expected foreign value\")\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "native", "runtime.c"), "#include <stdint.h>\n\nint64_t foreign_value(void) { return 42; }\nchar *foreign_message(void) { return \"native hello\"; }\n")
+	return projectRoot
+}
+
+func writeNativeLibraryLinkProjectFixture(t *testing.T) string {
+	t.Helper()
+	projectRoot := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(projectRoot, "src"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	projectJSON := `{
+  "version": "0.1.0",
+  "targets": {
+    "app": {
+      "entry": "src/main.elisa",
+      "emit": "obj",
+      "run-emit": "obj",
+      "output": "build/app_native",
+      "opt": "O0",
+      "link-flags": ["-lm"]
+    }
+  }
+}
+`
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), "extern cos(x: f64) -> f64\n\ndef main() -> int:\n    value: f64 = cos(0.0)\n    return 0 if value == 1.0 else 1\n")
+	return projectRoot
+}
+func writeNativeLinkNameProjectFixture(t *testing.T) string {
+	t.Helper()
+	projectRoot := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(projectRoot, "src"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	projectJSON := `{
+  "version": "0.1.0",
+  "targets": {
+    "app": {
+      "entry": "src/main.elisa",
+      "emit": "obj",
+      "run-emit": "obj",
+      "output": "build/app_native",
+      "opt": "O0",
+      "link-flags": ["-lm"]
+    }
+  }
+}
+`
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), "@link_name(cos)\nextern c_cos(x: f64) -> f64\n\ndef main() -> int:\n    value: f64 = c_cos(0.0)\n    return 0 if value == 1.0 else 1\n")
 	return projectRoot
 }
 

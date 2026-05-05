@@ -21,6 +21,7 @@ type manifestDependencyReport struct {
 	Interface   string   `json:"interface,omitempty"`
 	IncludeDirs []string `json:"includeDirs,omitempty"`
 	Foreign     []string `json:"foreign,omitempty"`
+	LinkFlags   []string `json:"linkFlags,omitempty"`
 	Sources     []string `json:"sources,omitempty"`
 }
 
@@ -32,6 +33,7 @@ type projectDependencyReport struct {
 	DependencySearchPaths []string                   `json:"dependencySearchPaths,omitempty"`
 	Sources               []string                   `json:"sources"`
 	Foreign               []string                   `json:"foreign,omitempty"`
+	LinkFlags             []string                   `json:"linkFlags,omitempty"`
 	Dependencies          []manifestDependencyReport `json:"dependencies,omitempty"`
 }
 
@@ -146,6 +148,7 @@ func buildProjectDependencyReport(target *resolvedProjectTarget) (*projectDepend
 		IncludeDirs:           append([]string(nil), target.includeDirs...),
 		DependencySearchPaths: append([]string(nil), target.dependencySearchPaths...),
 		Foreign:               append([]string(nil), target.foreignFiles...),
+		LinkFlags:             append([]string(nil), target.linkFlags...),
 	}
 	seen := map[string]bool{}
 	for _, entry := range orderedProjectDependencyEntries(target) {
@@ -169,6 +172,7 @@ func buildProjectDependencyReport(target *resolvedProjectTarget) (*projectDepend
 			Interface:   manifest.interfacePath,
 			IncludeDirs: append([]string(nil), manifest.includeDirs...),
 			Foreign:     append([]string(nil), manifest.foreignFiles...),
+			LinkFlags:   append([]string(nil), manifest.linkFlags...),
 		}
 		if manifest.entryPath != "" {
 			files, err := collectSourceDependencies(manifest.entryPath, sourceExpandOptions{includeDirs: target.includeDirs})
@@ -220,6 +224,14 @@ func formatProjectDependencyReport(report *projectDependencyReport, jsonOutput b
 			out.WriteByte('\n')
 		}
 	}
+	if len(report.LinkFlags) != 0 {
+		out.WriteString("Link flags:\n")
+		for _, flag := range report.LinkFlags {
+			out.WriteString("  - ")
+			out.WriteString(flag)
+			out.WriteByte('\n')
+		}
+	}
 	if len(report.Dependencies) != 0 {
 		out.WriteString("Dependencies:\n")
 		for _, dep := range report.Dependencies {
@@ -237,6 +249,11 @@ func formatProjectDependencyReport(report *projectDependencyReport, jsonOutput b
 			if dep.Interface != "" {
 				out.WriteString("    interface: ")
 				out.WriteString(dep.Interface)
+				out.WriteByte('\n')
+			}
+			if len(dep.LinkFlags) != 0 {
+				out.WriteString("    linkFlags: ")
+				out.WriteString(strings.Join(dep.LinkFlags, ", "))
 				out.WriteByte('\n')
 			}
 			if len(dep.Foreign) != 0 {

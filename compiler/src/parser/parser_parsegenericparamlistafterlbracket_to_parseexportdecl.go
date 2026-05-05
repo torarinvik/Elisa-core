@@ -421,7 +421,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	// extern TypeName  (opaque type - no parens, no colon)
 	if p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_EOF {
 		if len(annotations) != 0 {
-			p.errorf("function annotations on extern declarations require an extern function, got extern type %q", name)
+			p.errorf("annotations on extern declarations require an extern function or extern var, got extern type %q", name)
 		}
 		p.expectNewline()
 		return &ast.ExternTypeDecl{Position: pos, Name: name}
@@ -429,13 +429,10 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 
 	// extern name: Type  (variable)
 	if p.peek() == lexer.TOKEN_COLON {
-		if len(annotations) != 0 {
-			p.errorf("function annotations on extern declarations require an extern function, got extern var %q", name)
-		}
 		p.advance()
 		typ := p.parseTypeExpr()
 		p.expectNewline()
-		return &ast.ExternVarDecl{Position: pos, Name: name, Type: typ}
+		return &ast.ExternVarDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Type: typ}
 	}
 
 	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()

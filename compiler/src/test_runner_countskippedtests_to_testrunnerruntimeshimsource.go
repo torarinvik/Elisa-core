@@ -31,14 +31,14 @@ func formatTestLine(status string, name string, detail string) string {
 	}
 	return fmt.Sprintf("[ "+width+" ] %s%s", status, name, detail)
 }
-func compileTestRunnerExecutable(clangPath string, runnerSource string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
-	return compileTestRunnerExecutableWithShim(clangPath, runnerSource, testRunnerRuntimeShimSource(), foreignFiles, optLevel, packedProfile, stderr)
+func compileTestRunnerExecutable(clangPath string, runnerSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
+	return compileTestRunnerExecutableWithShim(clangPath, runnerSource, testRunnerRuntimeShimSource(), foreignFiles, linkFlags, optLevel, packedProfile, stderr)
 }
-func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, shimSource string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
+func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
 	cacheLookupStart := time.Now()
 	cacheArtifact := testRunnerCacheArtifact{}
 	if testRunnerCacheEnabled() {
-		artifact, hit, err := locateCachedTestRunner(runnerSource, shimSource, foreignFiles, optLevel, packedProfile)
+		artifact, hit, err := locateCachedTestRunner(runnerSource, shimSource, foreignFiles, linkFlags, optLevel, packedProfile)
 		cacheArtifact = artifact
 		lookupElapsed := time.Since(cacheLookupStart)
 		if err != nil {
@@ -75,7 +75,7 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 	}
 	shimElapsed := time.Since(shimStart)
 	linkForeignFiles := append([]string{shimPath}, foreignFiles...)
-	exePath, nativeCleanup, timing, err := buildNativeExecutableWithClang(clangPath, runnerResult, linkForeignFiles, filepath.Join(tempDir, "generated_runner"), optLevel, packedProfile, stderr)
+	exePath, nativeCleanup, timing, err := buildNativeExecutableWithClang(clangPath, runnerResult, linkForeignFiles, linkFlags, filepath.Join(tempDir, "generated_runner"), optLevel, packedProfile, stderr)
 	timing.CacheLookup = time.Since(cacheLookupStart)
 	if err != nil {
 		return "", cleanup, timing, analyzeElapsed, shimElapsed, err

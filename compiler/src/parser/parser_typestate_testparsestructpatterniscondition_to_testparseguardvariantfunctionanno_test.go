@@ -564,3 +564,34 @@ func TestParseGuardVariantFunctionAnnotation(t *testing.T) {
 		t.Fatalf("expected guard_variant(node, Expr.Int), got %#v", decl.Annotations[0].Args)
 	}
 }
+func TestParseLinkNameExternAnnotations(t *testing.T) {
+	file, errs := parseSourceFile(t, "@link_name(cos)\nextern c_cos(x: f64) -> f64\n\n@link_name(errno)\nextern c_errno: int\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.ExternFuncDecl)
+	if !ok {
+		t.Fatalf("expected extern func decl, got %T", file.Decls[0])
+	}
+	if len(fn.Annotations) != 1 || fn.Annotations[0].Name != "link_name" {
+		t.Fatalf("expected @link_name on extern func, got %#v", fn.Annotations)
+	}
+	if len(fn.Annotations[0].Args) != 1 || fn.Annotations[0].Args[0] != "cos" {
+		t.Fatalf("expected @link_name(cos), got %#v", fn.Annotations[0].Args)
+	}
+	varDecl, ok := file.Decls[1].(*ast.ExternVarDecl)
+	if !ok {
+		t.Fatalf("expected extern var decl, got %T", file.Decls[1])
+	}
+	if len(varDecl.Annotations) != 1 || varDecl.Annotations[0].Name != "link_name" {
+		t.Fatalf("expected @link_name on extern var, got %#v", varDecl.Annotations)
+	}
+	if len(varDecl.Annotations[0].Args) != 1 || varDecl.Annotations[0].Args[0] != "errno" {
+		t.Fatalf("expected @link_name(errno), got %#v", varDecl.Annotations[0].Args)
+	}
+	formatted := unparse.FormatFile(file)
+	expected := "@link_name(cos)\nextern c_cos(x: f64) -> f64\n\n@link_name(errno)\nextern c_errno: int\n"
+	if formatted != expected {
+		t.Fatalf("expected formatted extern annotations to round-trip, got:\n%s", formatted)
+	}
+}

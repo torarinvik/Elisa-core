@@ -111,9 +111,14 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	for _, path := range append(append([]string{}, project.config.Foreign...), definition.Foreign...) {
 		foreignFiles = append(foreignFiles, projectRelativePath(project.root, path))
 	}
+	linkFlags := make([]string, 0, len(project.config.LinkFlags)+len(definition.LinkFlags)+len(options.linkFlags))
+	linkFlags = append(linkFlags, project.config.LinkFlags...)
+	linkFlags = append(linkFlags, definition.LinkFlags...)
+	linkFlags = append(linkFlags, options.linkFlags...)
 	for _, manifest := range dependencyOrder {
 		includeDirs = append(includeDirs, manifest.includeDirs...)
 		foreignFiles = append(foreignFiles, manifest.foreignFiles...)
+		linkFlags = append(linkFlags, manifest.linkFlags...)
 	}
 	emitMode := emitLLVM
 	if strings.TrimSpace(definition.Emit) != "" {
@@ -158,6 +163,7 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		dependencySearchPaths: resolver.searchPaths,
 		dependencyOrder:       dependencyOrder,
 		foreignFiles:          dedupeStrings(foreignFiles),
+		linkFlags:             dedupeStrings(linkFlags),
 		projectExec:           append([]string{}, project.config.Exec...),
 		targetExec:            append([]string{}, definition.Exec...),
 		optLevel:              optLevel,
@@ -268,6 +274,7 @@ func (r *projectResolver) resolveManifest(name string) (*resolvedManifest, error
 		manifestPath: manifestPath,
 		includeDirs:  make([]string, 0, len(definition.IncludeDirs)),
 		foreignFiles: make([]string, 0, len(definition.Foreign)),
+		linkFlags:    append([]string{}, definition.LinkFlags...),
 		exec:         append([]string{}, definition.Exec...),
 	}
 	if strings.TrimSpace(definition.Entry) != "" {
@@ -526,6 +533,12 @@ func runProjectView(project *resolvedProject, options projectCLIOptions, stdout 
 		fmt.Fprintf(stdout, "Foreign sources:\n")
 		for _, foreign := range selected.foreignFiles {
 			fmt.Fprintf(stdout, "  - %s\n", foreign)
+		}
+	}
+	if len(selected.linkFlags) != 0 {
+		fmt.Fprintf(stdout, "Link flags:\n")
+		for _, flag := range selected.linkFlags {
+			fmt.Fprintf(stdout, "  - %s\n", flag)
 		}
 	}
 	fmt.Fprintf(stdout, "Exec hooks: project=%d target=%d dependencies=%d\n", len(selected.projectExec), len(selected.targetExec), countDependencyHooks(selected.dependencyOrder))

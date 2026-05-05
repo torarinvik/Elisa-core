@@ -252,6 +252,7 @@ type Symbol struct {
 	Kind       SymbolKind
 	Type       Type
 	Node       ast.Node
+	LinkName   string
 	AliasOf    *Symbol
 	ParamIndex int
 	Mutable    bool

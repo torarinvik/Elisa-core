@@ -46,6 +46,7 @@ type projectCLIOptions struct {
 	output        string
 	emitOverride  string
 	filter        string
+	linkFlags     []string
 	trust         trustLevel
 	optLevel      backend.OptimizationLevel
 	hasOptLevel   bool
@@ -59,6 +60,7 @@ type projectDefinition struct {
 	Dependencies          []string                           `json:"dependencies,omitempty"`
 	IncludeDirs           []string                           `json:"include-dirs,omitempty"`
 	Foreign               []string                           `json:"foreign,omitempty"`
+	LinkFlags             []string                           `json:"link-flags,omitempty"`
 	Exec                  []string                           `json:"exec,omitempty"`
 	Targets               map[string]projectTargetDefinition `json:"targets"`
 }
@@ -70,6 +72,7 @@ type projectTargetDefinition struct {
 	Dependencies []string `json:"dependencies,omitempty"`
 	IncludeDirs  []string `json:"include-dirs,omitempty"`
 	Foreign      []string `json:"foreign,omitempty"`
+	LinkFlags    []string `json:"link-flags,omitempty"`
 	Exec         []string `json:"exec,omitempty"`
 	Opt          string   `json:"opt,omitempty"`
 	PackedABI    string   `json:"packed-abi,omitempty"`
@@ -81,6 +84,7 @@ type manifestDefinition struct {
 	Dependencies []string `json:"dependencies,omitempty"`
 	IncludeDirs  []string `json:"include-dirs,omitempty"`
 	Foreign      []string `json:"foreign,omitempty"`
+	LinkFlags    []string `json:"link-flags,omitempty"`
 	Exec         []string `json:"exec,omitempty"`
 }
 type resolvedProject struct {
@@ -96,6 +100,7 @@ type resolvedManifest struct {
 	interfacePath string
 	includeDirs   []string
 	foreignFiles  []string
+	linkFlags     []string
 	dependencies  []*resolvedManifest
 	exec          []string
 }
@@ -110,6 +115,7 @@ type resolvedProjectTarget struct {
 	dependencySearchPaths []string
 	dependencyOrder       []*resolvedManifest
 	foreignFiles          []string
+	linkFlags             []string
 	projectExec           []string
 	targetExec            []string
 	optLevel              backend.OptimizationLevel
@@ -189,6 +195,7 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		output:        target.outputPath,
 		filter:        options.filter,
 		foreignFiles:  append([]string(nil), target.foreignFiles...),
+		linkFlags:     append([]string(nil), target.linkFlags...),
 		packedProfile: target.packedProfile,
 		hasOptLevel:   target.hasOptLevel,
 		optLevel:      target.optLevel,
@@ -334,6 +341,50 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 				return projectCLIOptions{}, fmt.Errorf("missing value after -o")
 			}
 			options.output = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-link="):
+			value := strings.TrimSpace(strings.TrimPrefix(arg, "-link="))
+			if value == "" {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -link")
+			}
+			options.linkFlags = append(options.linkFlags, value)
+		case arg == "-link":
+			i++
+			if i >= len(args) {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -link")
+			}
+			value := strings.TrimSpace(args[i])
+			if value == "" {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -link")
+			}
+			options.linkFlags = append(options.linkFlags, value)
+		case strings.HasPrefix(arg, "-L="):
+			value := strings.TrimSpace(strings.TrimPrefix(arg, "-L="))
+			if value == "" {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -L")
+			}
+			options.linkFlags = append(options.linkFlags, "-L"+value)
+		case arg == "-L":
+			i++
+			if i >= len(args) {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -L")
+			}
+			value := strings.TrimSpace(args[i])
+			if value == "" {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -L")
+			}
+			options.linkFlags = append(options.linkFlags, "-L"+value)
+		case strings.HasPrefix(arg, "-l") && len(arg) > len("-l"):
+			options.linkFlags = append(options.linkFlags, arg)
+		case arg == "-l":
+			i++
+			if i >= len(args) {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -l")
+			}
+			value := strings.TrimSpace(args[i])
+			if value == "" {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -l")
+			}
+			options.linkFlags = append(options.linkFlags, "-l"+value)
 		case arg == "-h" || arg == "--help":
 			return projectCLIOptions{}, fmt.Errorf("help requested")
 		case strings.HasPrefix(arg, "-"):
@@ -380,9 +431,9 @@ func printProjectUsage(w io.Writer) {
 	fmt.Fprintln(w, "Project commands:")
 	fmt.Fprintln(w, "  elisacore init <name> [--path <dir>]")
 	fmt.Fprintln(w, "  elisacore init-lib <name> [--path <dir>]")
-	fmt.Fprintln(w, "  elisacore build [target] [--project <dir|project.json>] [-emit <mode>] [-o <output>] [--trust <none|include|full>] [-O0|-O2|-O3]")
-	fmt.Fprintln(w, "  elisacore run [target] [--project <dir|project.json>] [--trust <none|include|full>]")
-	fmt.Fprintln(w, "  elisacore test [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>] [-O0|-O2|-O3]")
+	fmt.Fprintln(w, "  elisacore build [target] [--project <dir|project.json>] [-emit <mode>] [-o <output>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>] [-O0|-O2|-O3]")
+	fmt.Fprintln(w, "  elisacore run [target] [--project <dir|project.json>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>]")
+	fmt.Fprintln(w, "  elisacore test [target] [--project <dir|project.json>] [-filter <substring>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>] [-O0|-O2|-O3]")
 	fmt.Fprintln(w, "  elisacore bench [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>]")
 	fmt.Fprintln(w, "  elisacore project view [target] [--project <dir|project.json>]")
 	fmt.Fprintln(w, "  elisacore project deps [target] [--project <dir|project.json>] [--json]")
