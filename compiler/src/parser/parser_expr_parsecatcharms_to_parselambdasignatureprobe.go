@@ -84,6 +84,17 @@ func (p *Parser) parseLambdaExpr() ast.Expr {
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
 	}
+	if p.match(lexer.TOKEN_FATARROW) {
+		bodyExpr := p.parseExpr()
+		return &ast.LambdaExpr{
+			Position:            pos,
+			Keyword:             keyword,
+			UsesShorthandParams: shorthand,
+			Params:              params,
+			ReturnType:          retType,
+			BodyExpr:            bodyExpr,
+		}
+	}
 	p.expect(lexer.TOKEN_COLON)
 	if p.match(lexer.TOKEN_NEWLINE) {
 		body := p.parseBlock()
@@ -485,7 +496,7 @@ func (p *Parser) looksLikeLambdaExpr() bool {
 	if !probe.parseLambdaSignatureProbe() {
 		return false
 	}
-	return probe.peek() == lexer.TOKEN_COLON
+	return probe.peek() == lexer.TOKEN_COLON || probe.peek() == lexer.TOKEN_FATARROW
 }
 func (p *Parser) parseLambdaSignatureProbe() bool {
 	if p.peek() == lexer.TOKEN_LPAREN {

@@ -307,6 +307,9 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	if value, resultType, handled, err := s.emitFixedArraySliceExpr(expr); handled {
 		return value, resultType, err
 	}
+	if value, resultType, handled, err := s.emitDArraySliceExpr(expr); handled {
+		return value, resultType, err
+	}
 	info, ok := runtimeSliceOperandInfo(s.exprType(expr.Object), s.exprType(expr))
 	if !ok {
 		return nil, nil, fmt.Errorf("slice is not implemented for %s", s.exprType(expr.Object).String())
@@ -351,6 +354,66 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	}
 	call := s.buildCall(llvmFnType, callee, args, callName)
 	return call, info.resultType, nil
+}
+func (s *functionState) emitDArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	objectType := s.exprType(expr.Object)
+	darrayType, objectIsRef := darraySliceBaseType(objectType)
+	if darrayType == nil {
+		return nil, nil, false, nil
+	}
+	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
+	if !ok {
+		return nil, nil, true, fmt.Errorf("dynamic array slice must produce a dview, got %s", s.exprType(expr).String())
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	startValue, _, err := s.emitExpr(expr.Start, usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	endValue, _, err := s.emitExpr(expr.End, usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	var arrayValue C.LLVMValueRef
+	if objectIsRef {
+		objectPtr, _, err := s.emitExpr(expr.Object, objectType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		arrayLLVMType, err := s.g.lowerType(darrayType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		arrayValue = C.LLVMBuildLoad2(s.builder, arrayLLVMType, objectPtr, cStringFree("darrayslice.array"))
+	} else {
+		arrayValue, _, err = s.emitExpr(expr.Object, objectType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+	}
+	viewValue, err := s.buildDynArrayViewValue(arrayValue, darrayType, resultType, "darrayslice")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	sliceValue, err := s.emitArenaViewSliceValue(viewValue, resultType, startValue, endValue, "darrayslice.view")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return sliceValue, resultType, true, nil
+}
+func darraySliceBaseType(objectType semantic.Type) (*semantic.DArrayType, bool) {
+	if darrayType, ok := objectType.(*semantic.DArrayType); ok {
+		return darrayType, false
+	}
+	refType, ok := objectType.(*semantic.RefType)
+	if !ok || refType.State != semantic.RefStateNonNull {
+		return nil, false
+	}
+	darrayType, ok := refType.Elem.(*semantic.DArrayType)
+	if !ok {
+		return nil, false
+	}
+	return darrayType, true
 }
 func (s *functionState) emitFixedArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	arrayType, arrayPtr, handled, err := s.fixedArraySliceBase(expr.Object)

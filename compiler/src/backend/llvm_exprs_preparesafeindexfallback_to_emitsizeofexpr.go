@@ -417,15 +417,6 @@ type runtimeSliceInfo struct {
 func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type) (runtimeSliceInfo, bool) {
 	i64Type := &semantic.BuiltinType{Name: "i64"}
 	usizeType := &semantic.BuiltinType{Name: "usize"}
-	if view, ok := objectType.(*semantic.DArrayType); ok {
-		return runtimeSliceInfo{
-			helperName:  "arena_da_view",
-			operandType: &semantic.RefType{Elem: objectType, State: semantic.RefStateNonNull},
-			resultType:  &semantic.DArrayViewType{Elem: view.Elem},
-			indexType:   usizeType,
-			useAddress:  true,
-		}, true
-	}
 	if view, ok := objectType.(*semantic.ViewType); ok {
 		return runtimeSliceInfo{
 			helperName:  "arena_da_view_slice",
@@ -454,14 +445,6 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 	ref, ok := objectType.(*semantic.RefType)
 	if !ok || ref.State != semantic.RefStateNonNull {
 		return runtimeSliceInfo{}, false
-	}
-	if view, ok := ref.Elem.(*semantic.DArrayType); ok {
-		return runtimeSliceInfo{
-			helperName:  "arena_da_view",
-			operandType: objectType,
-			resultType:  &semantic.DArrayViewType{Elem: view.Elem},
-			indexType:   usizeType,
-		}, true
 	}
 	if view, ok := ref.Elem.(*semantic.ViewType); ok {
 		return runtimeSliceInfo{helperName: "arena_da_view_slice", operandType: ref.Elem, resultType: &semantic.ViewType{Elem: view.Elem}, indexType: usizeType}, true

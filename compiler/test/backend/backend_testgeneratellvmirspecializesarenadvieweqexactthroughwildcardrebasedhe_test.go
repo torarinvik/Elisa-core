@@ -502,9 +502,8 @@ def head_view(view: dview[i32]) -> i32:
 		"%DynArrayView = type { ptr, i64, i64 }",
 		"define i32 @head_owned(%DynArray__i32",
 		"define i32 @head_view(%DynArrayView",
-		"declare %DynArrayView @arena_da_view(ptr, i64, i64)",
 		"declare %DynArrayView @arena_da_view_slice(%DynArrayView, i64, i64)",
-		"call %DynArrayView @arena_da_view(ptr",
+		"extractvalue %DynArray__i32",
 		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
 		"getelementptr i32, ptr",
 	}
@@ -512,6 +511,9 @@ def head_view(view: dview[i32]) -> i32:
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+	if strings.Contains(output, "call %DynArrayView @arena_da_view(ptr") {
+		t.Fatalf("expected darray slice syntax to build a view before slicing, got:\n%s", output)
 	}
 }
 func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testing.T) {

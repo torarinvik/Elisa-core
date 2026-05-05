@@ -69,3 +69,28 @@ func TestParseLambdaExprRemainsContextualAndPreservesLambdaRune(t *testing.T) {
 		t.Fatalf("expected formatted output to preserve lambda rune, got:\n%s", formatted)
 	}
 }
+
+func TestParseLambdaExprAcceptsInlineFatArrowBody(t *testing.T) {
+	file, errs := parseSourceFile(t, "def build() -> func(i64) -> i64:\n    return lambda (value: i64) => value + 1\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	lambda, ok := ret.Value.(*ast.LambdaExpr)
+	if !ok {
+		t.Fatalf("expected lambda expr, got %T", ret.Value)
+	}
+	if lambda.BodyExpr == nil || len(lambda.Body) != 0 {
+		t.Fatalf("expected expression-bodied lambda, got expr=%T body=%d", lambda.BodyExpr, len(lambda.Body))
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "return lambda (value: i64): (value + 1)") {
+		t.Fatalf("expected formatted output to round-trip lambda body, got:\n%s", formatted)
+	}
+}

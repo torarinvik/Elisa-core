@@ -41,7 +41,8 @@ def read_array_view_index() -> i32:
 		"declare %DynArrayView @make_array_view()",
 		"call %DynArray__i32 @make_array()",
 		"call %DynArrayView @make_array_view()",
-		"call %DynArrayView @arena_da_view(ptr",
+		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
+		"extractvalue %DynArray__i32",
 		"getelementptr i32, ptr",
 		"alloca %DynArray__i32",
 		"alloca %DynArrayView",
@@ -50,6 +51,9 @@ def read_array_view_index() -> i32:
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+	if strings.Contains(output, "call %DynArrayView @arena_da_view(ptr") {
+		t.Fatalf("expected darray slice syntax to build a view before slicing, got:\n%s", output)
 	}
 }
 func TestGenerateLLVMIRLowersArrayLiteralAndInferredLocalViaFixedArrayLowering(t *testing.T) {
