@@ -430,7 +430,7 @@ def write_slot(job: WriteJob) -> i64:
 
 @test
 def pool_backed_case() -> void:
-	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+	can Thread.Spawn, Thread.Join, Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		partials: i64[2] = zeroed
 		pool workers(2):
 			group: mutable TaskGroup = task_group_new()

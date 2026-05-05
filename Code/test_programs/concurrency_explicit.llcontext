@@ -20,7 +20,7 @@ def atomic_roundtrip() -> i64:
 		return prior_add + prior_xor + prior_or + prior_and + prior_sub + previous + current
 
 def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: mutable TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar) -> bool:
-	can Thread.Detach, Pool.WaitAll, Sync.Unlock, Abort.Panic, Atomics.CompareExchange, Atomics.Load, Memory.Allocate, Memory.Release:
+	can Thread.Detach, Thread.Join, Pool.WaitAll, Sync.Unlock, Abort.Panic, Atomics.CompareExchange, Atomics.Load, Memory.Allocate, Memory.Release:
 		result: bool = (
 			thread.handle == 0 and
 			thread.state == null and
@@ -72,19 +72,19 @@ def typed_thread_detach_permissioned(value: i64):
 		detach(move thread)
 
 def typed_pool_roundtrip(pool: mutable ThreadPool&, value: i64) -> i64:
-	can Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+	can Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		task: Task[i64, Pending] = submit[pool] thread_worker(value)
 		return await task
 
 def typed_group_waitall(pool: mutable ThreadPool&, value: i64):
-	can Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+	can Thread.Spawn, Thread.Join, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		group: mutable TaskGroup = task_group_new()
 		task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
 		task_group_add(group.ref[TaskGroup&], move task)
 		wait all group
 
 def typed_pool_scope(value: i64) -> i64:
-	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+	can Thread.Spawn, Thread.Join, Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		pool workers(2):
 			task: Task[i64, Pending] = submit thread_worker(value)
 			return await task

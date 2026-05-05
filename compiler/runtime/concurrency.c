@@ -2,6 +2,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#if defined(__clang__) || defined(__GNUC__)
+#define CTX_RUNTIME_WEAK __attribute__((weak))
+#else
+#define CTX_RUNTIME_WEAK
+#endif
+
 typedef void *(*ctx_entry_fn)(void *);
 
 typedef struct {
@@ -63,18 +69,18 @@ static ctx_task_group_state *ctx_ensure_group_state(ctx_task_group *group) {
     return state;
 }
 
-ctx_thread_pool pool_new(uint64_t threads) {
+CTX_RUNTIME_WEAK ctx_thread_pool pool_new(uint64_t threads) {
     ctx_pool_state *state = (ctx_pool_state *)ctx_xmalloc(sizeof(*state));
     state->worker_count = threads;
     return (ctx_thread_pool){.handle = state};
 }
 
-void pool_shutdown(ctx_thread_pool *pool) {
+CTX_RUNTIME_WEAK void pool_shutdown(ctx_thread_pool *pool) {
     free(pool->handle);
     pool->handle = NULL;
 }
 
-ctx_task_raw pool_submit_raw(ctx_thread_pool *pool, void *entry, void *arg) {
+CTX_RUNTIME_WEAK ctx_task_raw pool_submit_raw(ctx_thread_pool *pool, void *entry, void *arg) {
     (void)pool;
 
     ctx_task_state *state = (ctx_task_state *)ctx_xmalloc(sizeof(*state));
@@ -90,7 +96,7 @@ ctx_task_raw pool_submit_raw(ctx_thread_pool *pool, void *entry, void *arg) {
     return (ctx_task_raw){.handle = (uintptr_t)state, .state = NULL};
 }
 
-void *pool_await_raw(ctx_task_raw task) {
+CTX_RUNTIME_WEAK void *pool_await_raw(ctx_task_raw task) {
     ctx_task_state *state = (ctx_task_state *)(uintptr_t)task.handle;
     void *result = NULL;
     if (state == NULL) {
@@ -110,11 +116,11 @@ void *pool_await_raw(ctx_task_raw task) {
     return result;
 }
 
-ctx_task_group task_group_new_raw(void) {
+CTX_RUNTIME_WEAK ctx_task_group task_group_new_raw(void) {
     return (ctx_task_group){.handle = NULL, .cleanup = NULL};
 }
 
-void task_group_add_raw(ctx_task_group *group, ctx_task_raw task) {
+CTX_RUNTIME_WEAK void task_group_add_raw(ctx_task_group *group, ctx_task_raw task) {
     ctx_task_state *task_state = (ctx_task_state *)(uintptr_t)task.handle;
     ctx_task_group_state *group_state;
     if (task_state == NULL) {
@@ -133,7 +139,7 @@ void task_group_add_raw(ctx_task_group *group, ctx_task_raw task) {
     group_state->tail = task_state;
 }
 
-void task_group_wait_all_raw(ctx_task_group *group) {
+CTX_RUNTIME_WEAK void task_group_wait_all_raw(ctx_task_group *group) {
     ctx_task_group_state *group_state = (ctx_task_group_state *)group->handle;
     ctx_task_state *current;
 

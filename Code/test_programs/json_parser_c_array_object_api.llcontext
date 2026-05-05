@@ -382,9 +382,9 @@ def json_parser_ast_array_is_null_at_impl(source: u8&, index: usize) -> i64:
 def json_expect_ast_checksum(source: static u8&, expected: i64) -> bool:
     return json_parser_ast_checksum_impl(source as u8&) == expected can Memory.Allocate, Abort.Panic
 def json_parser_parallel_ast_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64:
-    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
+    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST) can Thread.Spawn, Thread.Join, Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 def json_parser_parallel_ast_cached_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64:
-    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST_CACHED) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
+    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST_CACHED) can Thread.Spawn, Thread.Join, Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 
 
 export func json_parser_parity_suite() -> int = json_parser_parity_suite_impl

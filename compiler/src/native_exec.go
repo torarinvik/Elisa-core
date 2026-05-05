@@ -120,14 +120,6 @@ func withDefaultNativeRuntimeForeignFiles(foreignFiles []string) ([]string, erro
 		return nil, fmt.Errorf("failed to locate default native runtime support %s: %w", defaultRuntimeSupport, err)
 	}
 	resolved = append(resolved, defaultRuntimeSupport)
-	if hasConcurrencyRuntimeForeignFile(resolved) {
-		return dedupeStrings(resolved), nil
-	}
-	defaultConcurrencyRuntime := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
-	if _, err := os.Stat(defaultConcurrencyRuntime); err != nil {
-		return nil, fmt.Errorf("failed to locate default concurrency runtime shim %s: %w", defaultConcurrencyRuntime, err)
-	}
-	resolved = append(resolved, defaultConcurrencyRuntime)
 	return dedupeStrings(resolved), nil
 }
 
@@ -150,7 +142,8 @@ func hasConcurrencyRuntimeForeignFile(foreignFiles []string) bool {
 }
 
 func nativeExecutableNeedsPThread(foreignFiles []string) bool {
-	return hasConcurrencyRuntimeForeignFile(foreignFiles)
+	_ = foreignFiles
+	return true
 }
 
 func runNativeExecutable(exePath string, stdout io.Writer, stderr io.Writer) error {
