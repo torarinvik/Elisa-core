@@ -20,7 +20,7 @@ def fold_common() -> int:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
 		return node.span + node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -52,7 +52,7 @@ def fold_common() -> int:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
 		return node.span + node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -86,7 +86,7 @@ def fold_common() -> int:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
 		return node.span + node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -120,7 +120,7 @@ def fold_common_frozen() -> int:
 	in frozen:
 		return node.span + node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -149,7 +149,7 @@ def fold_common_frozen() -> int:
 	in frozen:
 		return node.span + node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -183,7 +183,7 @@ def fold_child_common_frozen() -> int:
 		return child_alias.span + child_alias.span
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_field_cache_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_field_cache_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -214,7 +214,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 		Expr.End:
 			return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_field_cache_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_field_cache_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -249,7 +249,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 		Expr.Stop:
 			return node.span + node.weight
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_common_preload_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_common_preload_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -284,7 +284,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 		Expr.Stop:
 			return node.span + node.weight
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_common_preload_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_common_preload_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -322,7 +322,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 		Expr.Lit(value):
 			return node.span + value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_nested_matched_value_field_cache_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_nested_matched_value_field_cache_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -357,7 +357,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 		Expr.End:
 			return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_switch_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_switch_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -383,7 +383,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 			return 0
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_stmt_exhaustive_no_undef_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_stmt_exhaustive_no_undef_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -409,7 +409,7 @@ def fold_common_frozen_direct() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return node.span + node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_field_cache_direct_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -443,7 +443,7 @@ def fold_common_frozen_wrapped_direct() -> int:
 	boxed: Box = wrap_node(node)
 	return boxed.node.span + boxed.node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_field_cache_direct_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -480,7 +480,7 @@ def fold_common_frozen_helper_indexed_direct() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return wrapped.items[0u].node.span + wrapped.items[0u].node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_field_cache_direct_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -515,7 +515,7 @@ def fold_side_common_frozen_wrapped_direct() -> int:
 	boxed: Box = wrap_node(node)
 	return boxed.node.span + boxed.node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_side_field_cache_direct_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_side_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)

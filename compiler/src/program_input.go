@@ -7,16 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/frontendir"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/frontendir"
+	"elisacore/src/semantic"
 )
 
 const (
-	sourceExtension     = ".llcontext"
-	interfaceExtension  = ".llcontexti"
-	frontendIRExtension = ".llctxir"
-	loweredExtension    = ".lowered.llcontext"
+	sourceExtension     = ".elisa"
+	interfaceExtension  = ".elisai"
+	frontendIRExtension = ".elisair"
+	loweredExtension    = ".lowered.elisa"
 )
 
 func isSurfaceSourcePath(path string) bool {

@@ -1,18 +1,18 @@
 package lexer_test
 
 import (
-	"llcontext/src/lexer"
+	"elisacore/src/lexer"
 	"strings"
 	"testing"
 )
 
 func collectTokens(src string) []lexer.Token {
-	l := lexer.New("test.llcontext", []byte(src))
+	l := lexer.New("test.elisa", []byte(src))
 	return l.Tokenize()
 }
 
 func collectTokensWithErrors(src string) ([]lexer.Token, []string) {
-	l := lexer.New("test.llcontext", []byte(src))
+	l := lexer.New("test.elisa", []byte(src))
 	tokens := l.Tokenize()
 	return tokens, l.Errors()
 }

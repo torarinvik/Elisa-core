@@ -10,7 +10,7 @@
 
 ```bash
 bash ./compiler/scripts/capture_lua_frontend_baseline.sh \
-  --out /tmp/llcontext-lua-baseline-check \
+  --out /tmp/elisacore-lua-baseline-check \
   --parse-iterations 1 \
   --sample-iterations 1 \
   --repeats 1

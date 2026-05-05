@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"llcontext/src/lexer"
+	"elisacore/src/lexer"
 )
 
 func runtimeCarrierSurfaceReplacement(typeName string) (string, bool) {
@@ -57,13 +57,13 @@ func runtimeCarrierCarrierPathIsInternal(path string) bool {
 	normalized := filepath.ToSlash(path)
 	base := filepath.Base(normalized)
 	switch base {
-	case "generated_runner.llcontext", "execute_pool_tests_fixture.llcontext":
+	case "generated_runner.elisa", "execute_pool_tests_fixture.elisa":
 		return true
 	}
 	internalRoots := []string{
-		"compiler/runtime/llcontext_std/",
-		"Code/frontend_llcontext/",
-		"Code/llcontext_lua/",
+		"compiler/runtime/elisacore_std/",
+		"Code/frontend_elisacore/",
+		"Code/elisacore_lua/",
 		"Code/test_programs/",
 		"Code/benchmarks/",
 		"Code/lua/",

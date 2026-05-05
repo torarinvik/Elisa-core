@@ -3,7 +3,7 @@ package semantic
 import (
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestMergeFunctionValueTypesDropsDifferingExplicitParamNames(t *testing.T) {

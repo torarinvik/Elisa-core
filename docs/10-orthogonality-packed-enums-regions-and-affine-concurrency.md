@@ -1,7 +1,7 @@
 # Orthogonality Rules For Packed Enums, Regions, And Affine Concurrency
 
 This document defines the sound unified model for low-level parallel features in
-`llcontext`.
+`elisacore`.
 
 This is the packed/concurrency companion to `22-value-fact-core.md`. The older
 "three axes" language below maps directly onto fact classes:
@@ -94,7 +94,7 @@ stops being predictable.
 
 The language should instead make this flow explicit:
 
-```context
+```elisa
 region parse_arena(1_000_000u)
 store: Expr.Store[Local] = Expr.Store(parse_arena)
 
@@ -129,7 +129,7 @@ These forms all follow the same design direction:
 
 They are all statement-oriented capability binders.
 
-That is a good fit for `llcontext` because the language already prefers explicit
+That is a good fit for `elisacore` because the language already prefers explicit
 control points over hidden control flow. New parallel features should keep using
 that style instead of introducing a second, expression-heavy resource dialect.
 
@@ -199,7 +199,7 @@ or an equivalent capability split.
 
 Implemented packed destructuring uses:
 
-```context
+```elisa
 move expr in store as Expr.Add(left, right)
 if expr in store as Expr.Add(Expr.Int(value), rhs):
   return value
@@ -291,7 +291,7 @@ unified model wants structural propagation.
 
 Examples that should conceptually preserve region dependencies:
 
-```context
+```elisa
 value: Token&
 holder: Holder = Holder(value, 1)
 move holder as Holder(alias, n)
@@ -342,7 +342,7 @@ Affine values:
 
 Examples:
 
-```context
+```elisa
 result: i64 = join(move worker)
 move job as Job(thread, priority)
 move node in store as Expr.Add(left, right)
@@ -416,7 +416,7 @@ This should reject:
 
 For compiler workloads, the implemented publication bridge is:
 
-```context
+```elisa
 frozen: Expr.Store[Frozen] = freeze(move store)
 ```
 
@@ -433,7 +433,7 @@ The semantic effect is:
 Opaque helpers sometimes preserve provenance without exposing their body. The
 implemented extern contract family is:
 
-```context
+```elisa
 @borrows_return(path)
 @borrows_return_field(field, path, ...)
 @borrows_return_rebased(path)

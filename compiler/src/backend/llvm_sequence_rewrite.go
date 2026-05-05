@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 type sequenceRewriteCodegenContext struct {

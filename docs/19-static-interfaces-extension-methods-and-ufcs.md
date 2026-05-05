@@ -8,7 +8,7 @@ Like `18-current-surface-ergonomics.md`, this is a practical description of the 
 
 Static interfaces describe compile-time capabilities and associated types.
 
-```context
+```elisa
 struct BuilderTag:
     tag: int
 
@@ -47,7 +47,7 @@ Current implementation model:
 
 Parser and tree code can make custom span/range types participate in `left.span + right.span` by providing a visible `SpanLike` static-interface impl.
 
-```context
+```elisa
 struct Span:
     start: i64
     end: i64
@@ -78,13 +78,13 @@ Current rules:
 
 The preferred current generic-call surface is direct bracket specialization on the callee.
 
-```context
+```elisa
 value: int = identity[int](7)
 ```
 
 The older helper-like spelling still exists in some tests and older code:
 
-```context
+```elisa
 value: int = identity.specialize[int]()(7)
 ```
 
@@ -97,7 +97,7 @@ Current rule:
 
 Receiver-scoped `impl Type:` blocks define extension methods.
 
-```context
+```elisa
 const enum Tok of i8:
     PLUS = 0
 
@@ -124,7 +124,7 @@ Important precedence rule:
 
 The compiler also supports UFCS-style rewriting for ordinary free functions whose first parameter is a value receiver.
 
-```context
+```elisa
 struct Box:
     value: i64
 
@@ -147,7 +147,7 @@ Current rules:
 
 Optional chaining works with fields, supported receiver-style calls, and argument-position transforms.
 
-```context
+```elisa
 struct Box:
     value: int
 

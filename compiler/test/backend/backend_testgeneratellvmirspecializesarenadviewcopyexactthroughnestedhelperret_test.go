@@ -1,7 +1,7 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"strings"
 	"testing"
 )
@@ -28,7 +28,7 @@ def copy_nested_helper_indexed(values: array[i32, 4]) -> void:
 	wrapped: NestedHolder = wrap_nested_indexed_views(values[0:2], values[2:4])
 	arena_da_copy_exact(wrapped.holder.items[0].left, wrapped.holder.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -63,7 +63,7 @@ def copy_rebased_helper_indexed(values: array[i32, 4]) -> void:
 	wrapped: ViewWindow = wrap_sub(items[1:2], 0, 1)
 	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_rebased_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_rebased_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -98,7 +98,7 @@ def copy_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 	wrapped: ViewWindow = wrap_sub_wild(items[1:3], 0, 2)
 	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_wildcard_rebased_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -136,7 +136,7 @@ def copy_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 	wrapped: Wrapper = wrap_submeta_wild(items[1:3], 0, 2)
 	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_wildcard_rebased_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -171,7 +171,7 @@ def copy_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
 	wrapped: ViewWindow = wrap_sub_wild(items[0:1], 0, 1)
 	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_wildcard_rebased_helper_indexed_overlap_guardrails.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -214,7 +214,7 @@ def copy_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
 	wrapped: Wrapper = wrap_submeta_wild(items[0:1], 0, 1)
 	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_wildcard_rebased_helper_indexed_overlap_guardrails.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -257,7 +257,7 @@ def copy_nested_rebased_helper_indexed(values: array[i32, 4]) -> void:
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_rebased_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_rebased_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -295,7 +295,7 @@ def copy_nested_helper(values: array[i32, 4]) -> void:
 	boxed: NestedViews = wrap_nested_views(values[0:2], values[2:4])
 	arena_da_copy_exact(boxed.inner.left, boxed.inner.right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -354,7 +354,7 @@ def fill_split(values: darray[i32, 4]&) -> void:
 def fill_unknown(view: dview[i32]) -> void:
 	arena_da_fill(view, 7)
 `
-	result := parseAndAnalyze(t, "backend_dview_fill_zero.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_fill_zero.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -436,7 +436,7 @@ def fill_nonuniform(values: darray[i32, 4]&) -> void:
 def fill_nonuniform_unknown(view: dview[i32]) -> void:
 	arena_da_fill(view, 7)
 `
-	result := parseAndAnalyze(t, "backend_dview_fill_repeated_byte.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_fill_repeated_byte.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 type analyzerASTCensus struct {
 	exprs        int

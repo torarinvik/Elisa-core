@@ -1,9 +1,0 @@
-include "../../compiler/runtime/llcontext_std/contextlang_runtime.llcontext"
-
-include "./json_parser_types.llcontext"
-include "./json_parser_strings.llcontext"
-include "./json_parser_runtime.llcontext"
-include "./json_parser_parse_core.llcontext"
-include "./json_parser_ast_views.llcontext"
-include "./json_parser_checksums_tests.llcontext"
-include "./json_parser_document_api.llcontext"

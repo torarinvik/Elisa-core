@@ -1,6 +1,6 @@
 package ast
 
-import "llcontext/src/lexer"
+import "elisacore/src/lexer"
 
 type StoreDecl struct {
 	Position    lexer.Pos

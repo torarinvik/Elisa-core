@@ -6,7 +6,7 @@ import (
 )
 
 func TestAnalyzeStaticInterfaceZeroArgMethodCall(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "static_interface_zero_arg.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "static_interface_zero_arg.elisa", `
 struct BuilderTag:
     tag: int
 
@@ -30,7 +30,7 @@ def build[B: Builder]() -> B.State:
 }
 
 func TestAnalyzeStaticInterfaceZeroArgMethodCallWithAssociatedLocal(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "static_interface_zero_arg_local.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "static_interface_zero_arg_local.elisa", `
 struct BuilderTag:
     tag: int
 
@@ -55,7 +55,7 @@ def build[B: Builder]() -> B.State:
 }
 
 func TestAnalyzeSpanAlgebraUsesSpanLikeProtocol(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "spanlike_protocol.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "spanlike_protocol.elisa", `
 struct Span:
     start: i64
     end: i64
@@ -80,7 +80,7 @@ def join(left: Span, right: Span) -> Span:
 }
 
 func TestAnalyzeStaticInterfaceExplicitSpecializationWithBoundTypeParam(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "static_interface_bound_forward.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "static_interface_bound_forward.elisa", `
 struct BuilderTag:
     tag: int
 
@@ -107,7 +107,7 @@ def outer[B: Builder]() -> B.State:
 }
 
 func TestAnalyzeDerivedParseBuilderSynthesizesMissingMethods(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "derived_parse_builder.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "derived_parse_builder.elisa", `
 tree Lua:
     common:
         span: i64
@@ -151,7 +151,7 @@ def build(owner: Arena) -> Lua.Expr:
 }
 
 func TestAnalyzeDerivedNullBuilderSynthesizesMissingMethods(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "derived_null_builder.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "derived_null_builder.elisa", `
 struct SinkBuilder:
     tag: int
 
@@ -186,7 +186,7 @@ def entry() -> int:
 }
 
 func TestAnalyzeStaticInterfaceTupleReturnAndDestructure(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "static_interface_tuple_return.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "static_interface_tuple_return.elisa", `
 struct BuilderTag:
     tag: int
 
@@ -216,7 +216,7 @@ def use_pair[B: Builder](value: int) -> B.Node:
 }
 
 func TestAnalyzeStaticInterfaceRejectsUnknownInterface(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_interface_unknown.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_interface_unknown.elisa", `
 struct BuilderTag:
     tag: int
 

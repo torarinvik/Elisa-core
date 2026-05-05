@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestAnalyzeImplicitAutorefOnDirectCall(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_direct_call.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_direct_call.elisa", `struct ScratchArena:
     value: i64
 
 def read(alloc: ScratchArena&) -> i64:
@@ -39,7 +39,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitAutorefAllowsMutableRefFromMutableLocal(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_mutable_local.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_mutable_local.elisa", `struct ScratchArena:
 	value: mutable i64
 
 def bump(alloc: mutable ScratchArena&) -> i64:
@@ -71,7 +71,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitAutorefRejectsMutableRefFromImmutableLocal(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_autoref_mutable_local_rejected.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_autoref_mutable_local_rejected.elisa", `struct ScratchArena:
 	value: mutable i64
 
 def bump(alloc: mutable ScratchArena&) -> i64:
@@ -90,7 +90,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitAutorefOnNestedFieldProjection(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_nested_field.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_nested_field.elisa", `struct ScratchArena:
     value: i64
 
 struct Holder:
@@ -128,7 +128,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitAutorefRejectsMutableRefFromImmutableField(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_autoref_mutable_field_rejected.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_autoref_mutable_field_rejected.elisa", `struct ScratchArena:
 	value: mutable i64
 
 struct Holder:
@@ -150,7 +150,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitAutorefOnExtensionMethodReceiver(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_extension_method.llcontext", `struct Builder:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_extension_method.elisa", `struct Builder:
     value: i64
 
 impl Builder:
@@ -187,7 +187,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitAutorefOnTrailingWithArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_trailing_with.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_trailing_with.elisa", `struct ScratchArena:
     value: i64
 
 bundle ArenaCtx implicit:
@@ -221,7 +221,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitRefUpcastOnExistingRefArg(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_ref_upcast_existing_ref.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_ref_upcast_existing_ref.elisa", `struct ScratchArena:
     value: i64
 
 def read(alloc: ScratchArena&) -> i64:
@@ -249,7 +249,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitAutorefAllowsNullableRefTargets(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_nullable_target.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_nullable_target.elisa", `struct ScratchArena:
     value: i64
 
 def read(alloc: ScratchArena&?) -> i64:
@@ -280,7 +280,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeImplicitAutorefOnStructLiteralArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_struct_literal.llcontext", `struct ScratchArena:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_struct_literal.elisa", `struct ScratchArena:
     value: i64
 
 struct Holder:

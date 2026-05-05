@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 type treeVisitRootKind int

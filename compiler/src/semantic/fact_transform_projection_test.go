@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestFactTransformsFromCFGFlowInstrsProjectsAllCoreInstructionKinds(t *testing.T) {

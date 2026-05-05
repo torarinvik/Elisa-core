@@ -1,7 +1,7 @@
 package semantic_test
 
 import (
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +14,7 @@ func TestAnalyzeRejectsLegacyWildcardErrorSetShorthand(t *testing.T) {
 
 extern read_value() -> int error[FileError.*]
 `
-	_, errs := parseAndAnalyze(t, "error_set_wildcard_mixed.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_set_wildcard_mixed.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -35,7 +35,7 @@ extern read_value() -> int error[FileError.NotFound, ...]
 def bubble() -> int error[AppError.NotFound, ...]:
 	return try read_value()
 `
-	_, errs := parseAndAnalyze(t, "error_set_widening_rejects_missing_tags.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_set_widening_rejects_missing_tags.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -59,7 +59,7 @@ extern read_value() -> int error[AppError]
 def bubble() -> int error[NetworkError, FileError]:
 	return try read_value()
 `
-	_, errs := parseAndAnalyze(t, "error_canonical_try_diag.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_canonical_try_diag.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -75,7 +75,7 @@ def bad() -> int:
 	raise IoError.NotFound
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "raise_outside_error_union.llcontext", src)
+	_, errs := parseAndAnalyze(t, "raise_outside_error_union.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -89,7 +89,7 @@ func TestAnalyzeRejectsLegacyPipeErrorSyntax(t *testing.T) {
 
 extern read_file(path: u8&) -> int | IoError
 `
-	_, errs := parseAndAnalyze(t, "legacy_pipe_error_syntax.llcontext", src)
+	_, errs := parseAndAnalyze(t, "legacy_pipe_error_syntax.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected parser error, got none")
 	}
@@ -106,7 +106,7 @@ func TestAnalyzeRejectsTryOnNonFallibleExpression(t *testing.T) {
 	value: int = try 7
 	return value
 `
-	_, errs := parseAndAnalyze(t, "try_on_non_fallible.llcontext", src)
+	_, errs := parseAndAnalyze(t, "try_on_non_fallible.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -118,7 +118,7 @@ func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
 	src := `def bad(value: u8&) -> u8&:
 	return value else "" as u8&
 `
-	_, errs := parseAndAnalyze(t, "else_on_nonnullable_ref.llcontext", src)
+	_, errs := parseAndAnalyze(t, "else_on_nonnullable_ref.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -142,14 +142,14 @@ def read_array(values: darray[i32, row]) -> i32:
 def read_view(view: dview[i32]) -> i32:
 	return view[0]
 `
-	_, errs := parseAndAnalyze(t, "runtime_backed_array_index.llcontext", src)
+	_, errs := parseAndAnalyze(t, "runtime_backed_array_index.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsDStrIndexingAsChar(t *testing.T) {
 	src := `def read_codepoint(text: cstr[row]) -> char:
 	return text[0]
 `
-	result, errs := parseAndAnalyze(t, "runtime_backed_cstr_index.llcontext", src)
+	result, errs := parseAndAnalyze(t, "runtime_backed_cstr_index.elisa", src)
 	requireNoErrors(t, errs)
 	fn, ok := result.GlobalScope.Lookup("read_codepoint")
 	if !ok {
@@ -167,7 +167,7 @@ func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
 	src := `def bad(text: cstr[row]) -> void:
 	text[0] <- 1
 `
-	_, errs := parseAndAnalyze(t, "cstr_index_assignment.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_index_assignment.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -179,7 +179,7 @@ func TestAnalyzeAcceptsSViewIndexingAsChar(t *testing.T) {
 	src := `def read_codepoint(view: sview) -> char:
 	return view[0]
 `
-	result, errs := parseAndAnalyze(t, "ctx_string_view_index.llcontext", src)
+	result, errs := parseAndAnalyze(t, "ctx_string_view_index.elisa", src)
 	requireNoErrors(t, errs)
 	fn, ok := result.GlobalScope.Lookup("read_codepoint")
 	if !ok {
@@ -194,7 +194,7 @@ func TestAnalyzeAcceptsSViewIndexingAsChar(t *testing.T) {
 	}
 }
 func TestAnalyzeRejectsInternalRuntimeCarrierTypesInUserFiles(t *testing.T) {
-	fixturePath := filepath.Join(t.TempDir(), "runtime_carrier_warning.llcontext")
+	fixturePath := filepath.Join(t.TempDir(), "runtime_carrier_warning.elisa")
 	src := `extern take_view(view: StringView) -> void
 extern take_raw[T](values: DynArray[T]) -> void
 extern take_window(view: DynArrayView) -> void
@@ -230,14 +230,14 @@ def different_views(left: sview, right: sview) -> bool:
 def same_literal(text: cstr[row]) -> bool:
 	return text == "hello"
 `
-	_, errs := parseAndAnalyze(t, "runtime_string_equality.llcontext", src)
+	_, errs := parseAndAnalyze(t, "runtime_string_equality.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsDStrLenField(t *testing.T) {
 	src := `def text_len(text: cstr[row]) -> i64:
 	return text.len
 `
-	_, errs := parseAndAnalyze(t, "cstr_len_field.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_len_field.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
@@ -245,7 +245,7 @@ func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
 	part: view[i32] = values[1:3]
 	return part
 `
-	_, errs := parseAndAnalyze(t, "view_alias_and_slice.llcontext", src)
+	_, errs := parseAndAnalyze(t, "view_alias_and_slice.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
@@ -254,7 +254,7 @@ func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
 	sub: dview[i32] = view[0:1]
 	return part[0] + sub[0]
 `
-	_, errs := parseAndAnalyze(t, "array_and_array_view_slice.llcontext", src)
+	_, errs := parseAndAnalyze(t, "array_and_array_view_slice.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
@@ -263,7 +263,7 @@ func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
 	sub: view[i32] = view[0:2]
 	return part[0] + sub[1]
 `
-	_, errs := parseAndAnalyze(t, "fixed_array_slice.llcontext", src)
+	_, errs := parseAndAnalyze(t, "fixed_array_slice.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsNestedCollectionAccessOnReturnedValues(t *testing.T) {
@@ -279,7 +279,7 @@ def read_array_slice_index() -> i32:
 def read_array_view_index() -> i32:
 	return make_array_view()[0]
 `
-	_, errs := parseAndAnalyze(t, "nested_collection_access_returns.llcontext", src)
+	_, errs := parseAndAnalyze(t, "nested_collection_access_returns.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsArrayLiteralWithInferredLocalAndViewSlice(t *testing.T) {
@@ -288,7 +288,7 @@ func TestAnalyzeAcceptsArrayLiteralWithInferredLocalAndViewSlice(t *testing.T) {
 	part: view[int] = values[1:3]
 	return part[0]
 `
-	_, errs := parseAndAnalyze(t, "array_literal_inferred_local.llcontext", src)
+	_, errs := parseAndAnalyze(t, "array_literal_inferred_local.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzePreservesStackStorageForAddressableLocalSubobjects(t *testing.T) {
@@ -320,19 +320,19 @@ def from_local_array_elem() -> int:
 		values: ScratchPair[2] = [ScratchPair(1, 2), ScratchPair(5, 6)]
 		return try checked_pair(&values[1]) else 0
 `
-	_, errs := parseAndAnalyze(t, "stack_storage_local_subobjects.llcontext", src)
+	_, errs := parseAndAnalyze(t, "stack_storage_local_subobjects.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsAllocatorOwnershipFixturePatterns(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "test_programs", "allocator_ownership.llcontext"), map[string]bool{})
-	_, errs := parseAndAnalyze(t, "allocator_ownership.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "test_programs", "allocator_ownership.elisa"), map[string]bool{})
+	_, errs := parseAndAnalyze(t, "allocator_ownership.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "arena.llcontext"), map[string]bool{})
-	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "arena.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "arena.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireDeclaredFunctionPermissionRefs(t, result, "malloc", "Memory.Allocate")
@@ -350,8 +350,8 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 }
 func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "arena.llcontext"), map[string]bool{})
-	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "arena.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "arena.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "malloc", "heap mutable void&?")
@@ -366,8 +366,8 @@ func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 }
 func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "collections.llcontext"), map[string]bool{})
-	result, errs := parseAndAnalyze(t, "collections.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "collections.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "collections.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "dict[cstr[key_shape], i64]")
@@ -375,16 +375,16 @@ func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 }
 func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "stores.llcontext"), map[string]bool{})
-	result, errs := parseAndAnalyze(t, "stores.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "stores.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "stores.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ctx_packed_store_state_new", "heap mutable void&")
 }
 func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
-	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime_prelude.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "elisacore_runtime_prelude.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireDeclaredFunctionPermissionRefs(t, result, "snprintf", "Console.Format")
@@ -394,8 +394,8 @@ func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T)
 }
 func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
-	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime_prelude.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "elisacore_runtime_prelude.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "alloc_perm", "heap mutable void&")
@@ -409,8 +409,8 @@ func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 }
 func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext"), map[string]bool{})
-	result, errs := parseAndAnalyze(t, "contextlang_runtime.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "elisacore_runtime.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionPermissionRefs(t, result, "int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
@@ -443,7 +443,7 @@ def fallback_value(flag: bool) -> int:
 	value: int? = maybe_value(flag)
 	return try value else 11
 `
-	result, errs := parseAndAnalyze(t, "value_optionals_try_else.llcontext", src)
+	result, errs := parseAndAnalyze(t, "value_optionals_try_else.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "maybe_value", "int?")
@@ -465,7 +465,7 @@ def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
 def call_range(keep: bool) -> bool?:
 	return in_range(maybe_value(1, keep), maybe_value(5, keep), maybe_value(3, keep))
 `
-	result, errs := parseAndAnalyze(t, "return_question_with_optional_bindings.llcontext", src)
+	result, errs := parseAndAnalyze(t, "return_question_with_optional_bindings.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "in_range", "bool?")
@@ -480,7 +480,7 @@ extern read_value(flag: bool) -> int error[FileError]
 def fallback_value(flag: bool) -> int:
 	return try? read_value(flag) default 11
 `
-	result, errs := parseAndAnalyze(t, "error_union_try_default.llcontext", src)
+	result, errs := parseAndAnalyze(t, "error_union_try_default.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "fallback_value", "int")
@@ -495,7 +495,7 @@ func TestAnalyzeRejectsOptionalTryDefaultShorthand(t *testing.T) {
 def bad(flag: bool) -> int:
 	return try? maybe_value(flag) default 11
 `
-	_, errs := parseAndAnalyze(t, "optional_try_default.llcontext", src)
+	_, errs := parseAndAnalyze(t, "optional_try_default.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -513,7 +513,7 @@ func TestAnalyzeRejectsTryOptionalWithoutElse(t *testing.T) {
 def bad(flag: bool) -> int:
 	return try maybe_value(flag)
 `
-	_, errs := parseAndAnalyze(t, "value_optionals_try_without_else.llcontext", src)
+	_, errs := parseAndAnalyze(t, "value_optionals_try_without_else.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -538,7 +538,7 @@ def unwrap_or(flag: bool) -> int:
 		return 11
 	return value.value
 `
-	result, errs := parseAndAnalyze(t, "value_optionals_smart_cast.llcontext", src)
+	result, errs := parseAndAnalyze(t, "value_optionals_smart_cast.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "unwrap_or", "int")
@@ -548,14 +548,14 @@ func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {
 	values: i32[3] = [1, 2, 3]
 	return values[0]
 `
-	_, errs := parseAndAnalyze(t, "typed_array_literal_init.llcontext", src)
+	_, errs := parseAndAnalyze(t, "typed_array_literal_init.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsEmptyArrayLiteralWithoutContext(t *testing.T) {
 	src := `def bad() -> void:
 	values = []
 `
-	_, errs := parseAndAnalyze(t, "empty_array_literal_needs_context.llcontext", src)
+	_, errs := parseAndAnalyze(t, "empty_array_literal_needs_context.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

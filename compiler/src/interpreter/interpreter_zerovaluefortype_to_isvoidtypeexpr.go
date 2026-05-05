@@ -1,9 +1,9 @@
 package interpreter
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
 	"strconv"
 	"strings"
 )

@@ -1,0 +1,7 @@
+include "./frontend_lexer_core.elisa"
+include "./frontend_lexer_tokens.elisa"
+include "./frontend_lexer_strings.elisa"
+include "./frontend_lexer_cursor.elisa"
+include "./frontend_lexer_comments.elisa"
+include "./frontend_lexer_numbers.elisa"
+include "./frontend_lexer_identifiers.elisa"

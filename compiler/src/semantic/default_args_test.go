@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestAnalyzeDefaultArgsOnDirectCall(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "default_args_direct.llcontext", `def add(x: i64, y: i64 = 7) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "default_args_direct.elisa", `def add(x: i64, y: i64 = 7) -> i64:
     return x + y
 
 def build() -> i64:
@@ -36,7 +36,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeDefaultArgsWithContextualLiterals(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "default_args_contextual_literals.llcontext", `def consume(values: darray[i64] = [], cond: i64? = null) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "default_args_contextual_literals.elisa", `def consume(values: darray[i64] = [], cond: i64? = null) -> i64:
     if cond == null:
         return values.count
     return 1
@@ -63,7 +63,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeDefaultArgsThroughLocalAlias(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "default_args_local_alias.llcontext", `def add(x: i64, y: i64 = 7) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "default_args_local_alias.elisa", `def add(x: i64, y: i64 = 7) -> i64:
     return x + y
 
 def build() -> i64:
@@ -86,7 +86,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeCallArgForwardingFillsSameNameParams(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "call_arg_forwarding_basic.llcontext", `def consume(parser: i64, offset: i64, width: i64 = 9) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "call_arg_forwarding_basic.elisa", `def consume(parser: i64, offset: i64, width: i64 = 9) -> i64:
     return parser + offset + width
 
 def build(parser: i64, offset: i64) -> i64:
@@ -111,7 +111,7 @@ def build(parser: i64, offset: i64) -> i64:
 }
 
 func TestAnalyzeCallArgForwardingExplicitArgsOverrideForwardedOnes(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "call_arg_forwarding_override.llcontext", `def consume(parser: i64, offset: i64, width: i64 = 9) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "call_arg_forwarding_override.elisa", `def consume(parser: i64, offset: i64, width: i64 = 9) -> i64:
     return parser + offset + width
 
 def build(parser: i64, offset: i64) -> i64:
@@ -127,7 +127,7 @@ def build(parser: i64, offset: i64) -> i64:
 }
 
 func TestAnalyzeCallArgForwardingIgnoresNonValueSymbols(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "call_arg_forwarding_non_value_ignored.llcontext", `struct value:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "call_arg_forwarding_non_value_ignored.elisa", `struct value:
     inner: i64
 
 def consume(value: i64) -> i64:
@@ -143,7 +143,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeCallArgForwardingRejectsVariadicCalls(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "call_arg_forwarding_variadic_rejected.llcontext", `extern consume(fmt: i64, ...) -> void
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "call_arg_forwarding_variadic_rejected.elisa", `extern consume(fmt: i64, ...) -> void
 
 def build(fmt: i64) -> void:
     consume(..)
@@ -155,7 +155,7 @@ def build(fmt: i64) -> void:
 }
 
 func TestAnalyzeNamedDefaultArgsFillTrailingSubset(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "default_args_named_subset.llcontext", `def sum3(x: i64, y: i64 = 1, z: i64 = 2) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "default_args_named_subset.elisa", `def sum3(x: i64, y: i64 = 1, z: i64 = 2) -> i64:
     return x + y + z
 
 def build() -> i64:
@@ -180,7 +180,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeExtensionMethodDefaultArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "default_args_extension_method.llcontext", `struct Box:
+	result := analyzeFunctionAnalysisTestSource(t, "default_args_extension_method.elisa", `struct Box:
     value: i64
 
 impl Box:
@@ -210,7 +210,7 @@ def read(box: Box) -> i64:
 }
 
 func TestAnalyzeRejectsNonTrailingDefaultParam(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "default_args_non_trailing_rejected.llcontext", `def bad(x: i64 = 1, y: i64) -> i64:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "default_args_non_trailing_rejected.elisa", `def bad(x: i64 = 1, y: i64) -> i64:
     return x + y
 `)
 	all := strings.Join(result.Errors(), "\n")
@@ -220,7 +220,7 @@ func TestAnalyzeRejectsNonTrailingDefaultParam(t *testing.T) {
 }
 
 func TestAnalyzeRejectsParamReferencedInDefault(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "default_args_param_reference_rejected.llcontext", `def bad(x: i64, y: i64 = x) -> i64:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "default_args_param_reference_rejected.elisa", `def bad(x: i64, y: i64 = x) -> i64:
     return x + y
 `)
 	all := strings.Join(result.Errors(), "\n")

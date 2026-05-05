@@ -3,9 +3,9 @@
 package backend
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
 	"strings"
 )
 

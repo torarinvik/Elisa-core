@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 func requireFunctionType(t *testing.T, result *semantic.Result, name string) *semantic.FuncType {
@@ -55,7 +55,7 @@ def run(flag: bool, thread: Thread[i64, Joinable]) -> i64:
 		result: i64 = branch_take(flag, thread)
 		return result
 `
-	result, errs := parseAndAnalyze(t, "sink_inference_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "sink_inference_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -86,7 +86,7 @@ def maybe_take(flag: bool, thread: Thread[i64, Joinable]) -> i64:
 def run(flag: bool, thread: Thread[i64, Joinable]) -> i64:
 	return maybe_take(flag, thread)
 `
-	_, errs := parseAndAnalyze(t, "sink_inference_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "sink_inference_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected implicit sink call to be rejected when the callee does not consume on all paths")
 	}
@@ -101,7 +101,7 @@ func TestAnalyzeRecordsReturnIsolationSummary(t *testing.T) {
 	slot[0] <- 3
 	return slot
 `
-	result, errs := parseAndAnalyze(t, "return_isolation_summary.llcontext", src)
+	result, errs := parseAndAnalyze(t, "return_isolation_summary.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -134,7 +134,7 @@ def alias_flow(seed: i32, box: heap Box&?) -> i32:
 		return left[0]
 	return left[0] + box.value
 `
-	result, errs := parseAndAnalyze(t, "function_analysis_cfg_alias.llcontext", src)
+	result, errs := parseAndAnalyze(t, "function_analysis_cfg_alias.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 

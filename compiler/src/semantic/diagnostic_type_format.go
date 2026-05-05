@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func formatDiagnosticArgs(args []interface{}) []interface{} {

@@ -9,7 +9,7 @@ import (
 )
 
 func TestWriteLLVMObjectFileWithOptO0InitializesTargetMachineForEmission(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "emit_object_o0.llcontext", `def main() -> int:
+	result := parseAndAnalyzeBackendTest(t, "emit_object_o0.elisa", `def main() -> int:
 	return 0
 `)
 	outputPath := filepath.Join(t.TempDir(), "emit_object_o0.o")

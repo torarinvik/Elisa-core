@@ -15,7 +15,7 @@ func TestRunCLIExecutesEnumPayloadDArraySlice(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "enum_payload_darray_slice.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "enum_payload_darray_slice.elisa")
 	src := `enum MiniStmt:
     Empty
     Repeat(body: darray[MiniStmt])

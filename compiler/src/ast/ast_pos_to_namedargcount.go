@@ -1,6 +1,6 @@
 package ast
 
-import "llcontext/src/lexer"
+import "elisacore/src/lexer"
 
 func (n *GrammarReturnTerm) Pos() lexer.Pos {
 	return n.Position

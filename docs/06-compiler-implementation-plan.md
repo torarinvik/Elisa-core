@@ -21,7 +21,7 @@ Implemented today:
 - the built-in `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]` surface syntax, with `view[T]` retained as a shorthand for compile-time array views
 - pointer arithmetic lowering (`ref + int`, `int + ref`, `ref - int`)
 - explicit reference comparisons (`ref == null`, `ref != null`, `ref == ref`)
-- end-to-end fixture coverage through the real CLI pipeline for `Code/test_programs/pointer_alloc.llcontext` and `Code/test_programs/shape_ops.llcontext`
+- end-to-end fixture coverage through the real CLI pipeline for `Code/test_programs/pointer_alloc.elisa` and `Code/test_programs/shape_ops.elisa`
 
 The user-facing built-in spellings are lowercase only: use `str[...]` and `cstr[...]`, not legacy aliases like `string[...]` or `cstring[...]`.
 
@@ -73,7 +73,7 @@ This phase is cheap and gives a lot of shape safety immediately.
 
 Add syntax and semantic meaning for:
 
-```context
+```elisa
 darray[T, n]
 cstr[n]
 view[T, begin, end]
@@ -184,7 +184,7 @@ Likely just:
 
 Teach the parser to recognize:
 
-```context
+```elisa
 darray[T, n]
 cstr[n]
 view[T, begin, end]
@@ -202,7 +202,7 @@ That keeps syntax work small.
 
 I would use:
 
-```context
+```elisa
 darray[T, n]
 cstr[n]
 view[T, begin, end]
@@ -406,14 +406,14 @@ Current coverage includes fresh-shape behavior for shape-changing APIs and regre
 
 Beyond semantic/backend unit regressions, the compiler now also has CLI-level fixture tests that compile real source files from `Code/test_programs/`:
 
-- `pointer_alloc.llcontext`
-- `shape_ops.llcontext`
+- `pointer_alloc.elisa`
+- `shape_ops.elisa`
 
 Those tests exercise the actual include expansion, parse, semantic, and emit pipeline for LLVM IR, and also cover bitcode/object emission for a fixture program.
 
 ### Example regression style
 
-```context
+```elisa
 error ShapeOpError:
     AllocationFailed
 
@@ -423,7 +423,7 @@ def grow(a: darray[u8, row]) -> darray[u8, shape_after] error[ShapeOpError]:
 
 and:
 
-```context
+```elisa
 def bad(a: darray[u8, row]) -> darray[u8, row] error[ShapeOpError]:
     return try resize(a, 16)   # should still fail if resize returns fresh shape_after
 ```
@@ -445,14 +445,14 @@ Recommended rollout is now:
 The codebase is already following this staged approach:
 
 - low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `StringBuilder`, `StringView`, and raw `u8&` string values
-- `arena.llcontext` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
-- `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `rt_concat2`, `ctx_string_slice`, and the `ctx_string_view*` helpers for string subviews
-- `arena.llcontext` now also exposes typed non-owning `dview[T]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
+- `arena.elisa` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
+- `elisacore_runtime.elisa` stage 1 wrappers now expose typed logical APIs such as `rt_concat2`, `ctx_string_slice`, and the `ctx_string_view*` helpers for string subviews
+- `arena.elisa` now also exposes typed non-owning `dview[T]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
 - the semantic layer bridges these wrappers back onto the underlying runtime representations rather than forcing an immediate full runtime rewrite
 
 For example, the stage 1 wrappers now look like this:
 
-```context
+```elisa
 error RuntimeError:
     AllocationFailed
 
@@ -469,7 +469,7 @@ def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
 
 And the arena-backed container helpers now look like this:
 
-```context
+```elisa
 def arena_da_append[T](a: Arena&, da: darray[T, shape_in]&, item: T) -> darray[T, shape_out]& error[RuntimeError]:
     # implementation mutates storage/capacity as needed
     return da
@@ -549,7 +549,7 @@ The next natural runtime-backed collection after `darray` / `view` is a dictiona
 
 The long-term surface goal is:
 
-```context
+```elisa
 dict[K, V]
 ```
 
@@ -557,7 +557,7 @@ where the key type `K` and value type `V` may differ.
 
 That means values like these should be ordinary and well-typed:
 
-```context
+```elisa
 dict[cstr, Expr]
 dict[u64, cstr]
 dict[TokenKind, i32]
@@ -565,7 +565,7 @@ dict[TokenKind, i32]
 
 The recommended MVP, however, is intentionally narrower:
 
-```context
+```elisa
 dict[cstr, V]
 ```
 
@@ -575,7 +575,7 @@ That first slice is enough to support parser-/compiler-style maps, symbol tables
 
 The language-level type should still be presented as:
 
-```context
+```elisa
 dict[K, V]
 ```
 
@@ -833,4 +833,4 @@ If `darray` is “contiguous storage plus logical shape”, then the first dict 
 
 > a flat open-addressed table plus borrowed lookup / owned-on-insert string keys.
 
-That is the best fit for the current Contextlang runtime style and the compiler-like workloads the language is clearly growing toward.
+That is the best fit for the current Elisa core runtime style and the compiler-like workloads the language is clearly growing toward.

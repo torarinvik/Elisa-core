@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"unicode"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func orderedWithItems(bundles []ast.WithBundleUse, args []ast.WithArg, order []ast.WithItem) []ast.WithItem {

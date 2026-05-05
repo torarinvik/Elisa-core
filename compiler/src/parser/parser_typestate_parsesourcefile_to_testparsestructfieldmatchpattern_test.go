@@ -1,21 +1,21 @@
 package parser
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"strings"
 	"testing"
 )
 
 func parseSourceFile(t *testing.T, src string) (*ast.File, []string) {
 	t.Helper()
-	l := lexer.New("test.llcontext", []byte(src))
+	l := lexer.New("test.elisa", []byte(src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected lexer errors: %v", errs)
 	}
 	p := New(tokens)
-	file := p.ParseFile("test.llcontext")
+	file := p.ParseFile("test.elisa")
 	return file, p.Errors()
 }
 func TestParseCharLiteralInConstDecl(t *testing.T) {

@@ -117,14 +117,14 @@ def load_corpus_manifest(repo_root: Path, manifest_path: Path | None) -> list[tu
 
 
 def make_inline_control(lua_src_dir: Path, keep_temp: bool) -> tuple[Path | None, Path | None]:
-    ast_path = lua_src_dir / "lua_ast.llcontext"
-    frontend_path = lua_src_dir / "lua_frontend.llcontext"
+    ast_path = lua_src_dir / "lua_ast.elisa"
+    frontend_path = lua_src_dir / "lua_frontend.elisa"
 
     ast_text = ast_path.read_text(encoding="utf-8")
     marker = "    common:\n        @storage(side_table)\n        span: LuaSpan"
     if marker not in ast_text:
         if keep_temp:
-            print("inline_control=disabled (lua_ast.llcontext no longer uses the side-table span marker)")
+            print("inline_control=disabled (lua_ast.elisa no longer uses the side-table span marker)")
         return None, None
     inline_ast_text = ast_text.replace(marker, "    common:\n        span: LuaSpan", 1)
 
@@ -133,23 +133,23 @@ def make_inline_control(lua_src_dir: Path, keep_temp: bool) -> tuple[Path | None
         encoding="utf-8",
         dir=lua_src_dir,
         prefix=".lua_ast_inline_bench_",
-        suffix=".llcontext",
+        suffix=".elisa",
         delete=False,
     ) as ast_tmp:
         ast_tmp.write(inline_ast_text)
         inline_ast_path = Path(ast_tmp.name)
 
     frontend_text = frontend_path.read_text(encoding="utf-8")
-    inline_frontend_text = frontend_text.replace('"lua_ast.llcontext"', f'"{inline_ast_path.name}"', 1)
+    inline_frontend_text = frontend_text.replace('"lua_ast.elisa"', f'"{inline_ast_path.name}"', 1)
     if inline_frontend_text == frontend_text:
-        raise RuntimeError("expected lua_frontend.llcontext to include lua_ast.llcontext")
+        raise RuntimeError("expected lua_frontend.elisa to include lua_ast.elisa")
 
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
         dir=lua_src_dir,
         prefix=".lua_frontend_inline_bench_",
-        suffix=".llcontext",
+        suffix=".elisa",
         delete=False,
     ) as frontend_tmp:
         frontend_tmp.write(inline_frontend_text)
@@ -353,7 +353,7 @@ def main() -> int:
 
     repo_root = Path(__file__).resolve().parents[2]
     compiler_dir = repo_root / "compiler"
-    lua_src_dir = repo_root / "Code" / "llcontext_lua" / "src"
+    lua_src_dir = repo_root / "Code" / "elisacore_lua" / "src"
     manifest_path = Path(args.corpus_manifest) if args.corpus_manifest else repo_root / "Code" / "benchmarks" / "lua_frontend_corpus_manifest.txt"
     modes = parse_modes(args.modes)
     opt_levels = parse_opt_levels(args.opt_level, args.opt_levels)
@@ -388,7 +388,7 @@ def main() -> int:
             inline_parallel_out.mkdir(parents=True, exist_ok=True)
             current_bench_by_opt[opt_level] = build_benchmark_executable(
                 compiler_dir=compiler_dir,
-                source_path=lua_src_dir / "lua_frontend.llcontext",
+                source_path=lua_src_dir / "lua_frontend.elisa",
                 out_dir=current_out,
                 opt_level=opt_level,
                 harness_path=harness_path,
@@ -404,7 +404,7 @@ def main() -> int:
             if parallel_workers and parallel_modes:
                 current_parallel_bench_by_opt[opt_level] = build_benchmark_executable(
                     compiler_dir=compiler_dir,
-                    source_path=lua_src_dir / "lua_frontend.llcontext",
+                    source_path=lua_src_dir / "lua_frontend.elisa",
                     out_dir=current_parallel_out,
                     opt_level=opt_level,
                     harness_path=parallel_harness_path,

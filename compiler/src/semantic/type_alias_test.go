@@ -6,7 +6,7 @@ import (
 )
 
 func TestTypeAliasRegistersNamedType(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "type_alias_ok.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "type_alias_ok.elisa", `
 type NameId = u32
 
 struct Box:
@@ -36,7 +36,7 @@ def read(box: Box) -> NameId:
 }
 
 func TestTypeAliasDuplicateErrors(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_duplicate.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_duplicate.elisa", `
 type NameId = u32
 type NameId = usize
 `)
@@ -47,7 +47,7 @@ type NameId = usize
 }
 
 func TestTypeAliasUnknownTargetTypeErrors(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_unknown_target.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_unknown_target.elisa", `
 type NameId = MissingType
 `)
 	joined := strings.Join(result.Errors(), "\n")
@@ -57,7 +57,7 @@ type NameId = MissingType
 }
 
 func TestIDTypeAliasIsStronglyTypedHandle(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "id_type_alias_ok.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "id_type_alias_ok.elisa", `
 extern Name
 extern Symbol
 type NameId = id[Name]
@@ -86,7 +86,7 @@ def wrap(raw: u32) -> NameId:
 }
 
 func TestIDTypeRejectsAccidentalIntegerAndOtherIDAssignment(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "id_type_alias_reject.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "id_type_alias_reject.elisa", `
 extern Name
 extern Symbol
 type NameId = id[Name]
@@ -108,7 +108,7 @@ def bad_id(symbol: SymbolId) -> NameId:
 }
 
 func TestIDTypeUnwrapRequiresIDOperand(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "id_type_unwrap_reject.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "id_type_unwrap_reject.elisa", `
 def bad(raw: u32) -> u32:
 	return !raw
 `)
@@ -119,7 +119,7 @@ def bad(raw: u32) -> u32:
 }
 
 func TestIDTypeInfersGenericTagArgument(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "id_type_generic_infer.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "id_type_generic_infer.elisa", `
 extern Name
 type NameId = id[Name]
 
@@ -143,7 +143,7 @@ def check(name: NameId) -> bool:
 }
 
 func TestModuleScopedTypeAliasesAllowShortHandleNames(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "module_scoped_id_aliases.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "module_scoped_id_aliases.elisa", `
 module Pascal:
     extern Symbol
     extern Scope

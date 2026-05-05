@@ -1,8 +1,8 @@
 package parser
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func (p *Parser) parseGrammarAtomicTermValue() ast.GrammarTerm {

@@ -33,7 +33,7 @@ def total(seed: i64) -> i64:
         total = total + score(node)
     return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_regular_enum_values.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_regular_enum_values.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

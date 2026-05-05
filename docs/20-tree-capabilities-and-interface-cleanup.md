@@ -1,6 +1,6 @@
 # Tree capabilities and interface cleanup
 
-This note records the canonical direction for keeping llcontext low-level at the bottom and DSL-like at the top without splitting the language into unrelated feature islands.
+This note records the canonical direction for keeping Elisa core low-level at the bottom and DSL-like at the top without splitting the language into unrelated feature islands.
 
 The guiding rule is the fact-core rule from `22-value-fact-core.md`: tree and
 grammar sugar may hide constructor boilerplate, but it must not hide fact
@@ -12,7 +12,7 @@ rollback can invalidate facts derived from speculative allocations.
 
 Compile-time interfaces are available as `protocol` for capability-style contracts and `static interface` for the explicit low-level spelling.
 
-```llcontext
+```elisacore
 protocol ParseBuilder:
     type ExprNode
     type StmtNode
@@ -23,13 +23,13 @@ protocol ParseBuilder:
 
 `protocol` is compile-time only; it formats as `protocol` and uses the same implementation machinery as `static interface`. The old `interface Name:` spelling remains accepted as a compatibility alias.
 
-Runtime/dynamic interfaces are intentionally left unclaimed by this spelling. If llcontext grows vtable-like runtime interfaces later, they should use a separate explicit feature instead of overloading the current static system.
+Runtime/dynamic interfaces are intentionally left unclaimed by this spelling. If Elisa core grows vtable-like runtime interfaces later, they should use a separate explicit feature instead of overloading the current static system.
 
 ## Ambient inputs
 
 Parser and tree code should prefer implicit bundles for ambient dependencies such as the active parser, allocator, intern table, diagnostics sink, or concrete builder.
 
-```llcontext
+```elisacore
 bundle ParseCtx implicit:
     parser: mutable Parser&
     alloc: mutable Arena&
@@ -41,14 +41,14 @@ def parse_atom[B: ParseBuilder]() with ParseCtx -> B.ExprNode:
 
 This keeps low-level control available: callers can still pass or override the bundle explicitly.
 
-```llcontext
+```elisacore
 return parse_atom[AstBuilder]() with ParseCtx(parser:, alloc:)
 return parse_atom[AstBuilder]() with ParseCtx(.., alloc = scratch.ref[mutable Arena&])
 ```
 
 Explicit bundles remain part of the same model, but they are call-shaping bundles rather than ambient ones. They can also be local to a block when the pack is only meaningful inside a narrow parser/helper region.
 
-```llcontext
+```elisacore
 bundle Pair explicit:
     left: i64
     right: i64 = 7
@@ -65,7 +65,7 @@ def build(left: i64) -> i64:
 
 When a call needs implicit parameters and no active implicit scope supplies them, the compiler may use same-named in-scope values as the ambient arguments. This is especially useful for generated parser functions that already have a low-level `alloc` parameter but should be able to call higher-level helpers declared `with AllocCtx`.
 
-```llcontext
+```elisacore
 bundle AllocCtx implicit:
     alloc: mutable Arena&
 
@@ -80,7 +80,7 @@ def generated_parser_step(alloc: mutable Arena&, token: Token) -> Pascal.Expr:
 
 Tree frontends should compose small protocols instead of growing one monolithic builder contract when possible.
 
-```llcontext
+```elisacore
 protocol SpanLike:
     type Range
     def combine(left: Range, right: Range) -> Range
@@ -95,14 +95,14 @@ protocol TreeBuilder:
 
 The language can layer compact DSL syntax over those contracts:
 
-```llcontext
+```elisacore
 span: Span = left.span + right.span
 return node[span = span] Pascal.Expr.Binary(left: left, right: right)
 ```
 
 With a visible `SpanLike` impl for `Span`, that lowers to static-interface dispatch. The low-level equivalent remains available:
 
-```llcontext
+```elisacore
 span: Span = combine_span(left.span, right.span)
 return new[alloc] Pascal.Expr.Binary(span: span, left: left, right: right)
 ```

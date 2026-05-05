@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 )
 
 func TestGenerateLLVMIRLowersStoreSugar(t *testing.T) {
@@ -46,7 +46,7 @@ def build(owner: Arena) -> usize:
 		_ = entry_slot
         return pending.name_key.count + pending.depth.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_store.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_store.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -91,7 +91,7 @@ def build(owner: Arena) -> usize:
             total <- total + row.depth
         return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_store_rows.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_store_rows.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -112,7 +112,7 @@ error Error:
 def build() -> i64 effects FrontendEffects:
     return 42
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_effects_decl.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_effects_decl.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -130,7 +130,7 @@ func TestGenerateLLVMIRIgnoresExplicitBundleDeclarations(t *testing.T) {
 def entry(value: i64) -> i64:
 	return value + 2
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_params_decl.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_params_decl.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -162,13 +162,13 @@ def build(owner: Arena, key: u32) -> usize:
         _ = values.entry(key).get_or_insert(7)
         return values.count
 `
-	l := lexer.New("backend_generic_dict.llcontext", []byte(src))
+	l := lexer.New("backend_generic_dict.elisa", []byte(src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) > 0 {
 		t.Fatalf("lexer errors:\n%s", strings.Join(errs, "\n"))
 	}
 	p := parser.New(tokens)
-	file := p.ParseFile("backend_generic_dict.llcontext")
+	file := p.ParseFile("backend_generic_dict.elisa")
 	if errs := p.Errors(); len(errs) > 0 {
 		t.Fatalf("parse errors:\n%s", strings.Join(errs, "\n"))
 	}
@@ -186,7 +186,7 @@ func TestGenerateLLVMIRForDoExprBlock(t *testing.T) {
         base + 7
     return value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -206,7 +206,7 @@ def build() -> i64:
     )
     return value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block_call.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block_call.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -230,7 +230,7 @@ def build() -> i64:
     , values[1])
     return value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block_grouped_forms.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block_grouped_forms.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -253,7 +253,7 @@ def build() -> i64:
     )
     return value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_named_function_call_args.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_named_function_call_args.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -276,7 +276,7 @@ def build() -> i64:
         seed + 1
     )
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_named_generic_function_call_args.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_named_generic_function_call_args.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -297,7 +297,7 @@ def build() -> i64:
         seed
     )
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_named_local_function_alias_call_args.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_named_local_function_alias_call_args.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -324,7 +324,7 @@ def build() -> i64:
         seed
     )
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_named_local_field_function_alias_call_args.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_named_local_field_function_alias_call_args.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -351,7 +351,7 @@ def build(box: Box) -> i64:
         seed
     )
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_named_extension_method_call_args.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_named_extension_method_call_args.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

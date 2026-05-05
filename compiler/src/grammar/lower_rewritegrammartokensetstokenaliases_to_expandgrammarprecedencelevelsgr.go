@@ -1,6 +1,6 @@
 package grammar
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func rewriteGrammarTokenSetsTokenAliases(tokenSets []ast.GrammarTokenSetDecl, aliases map[string]string) []ast.GrammarTokenSetDecl {
 	if len(tokenSets) == 0 {

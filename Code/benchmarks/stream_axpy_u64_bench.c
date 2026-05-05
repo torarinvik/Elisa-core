@@ -109,34 +109,34 @@ int main(void) {
 
     uint64_t *base_dst = (uint64_t *)malloc(len * sizeof(*base_dst));
     uint64_t *base_src = (uint64_t *)malloc(len * sizeof(*base_src));
-    uint64_t *work_llctx_dst = (uint64_t *)malloc(len * sizeof(*work_llctx_dst));
-    uint64_t *work_llctx_src = (uint64_t *)malloc(len * sizeof(*work_llctx_src));
+    uint64_t *work_elisa_core_dst = (uint64_t *)malloc(len * sizeof(*work_elisa_core_dst));
+    uint64_t *work_elisa_core_src = (uint64_t *)malloc(len * sizeof(*work_elisa_core_src));
     uint64_t *work_c_dst = (uint64_t *)malloc(len * sizeof(*work_c_dst));
     uint64_t *work_c_src = (uint64_t *)malloc(len * sizeof(*work_c_src));
-    if (base_dst == NULL || base_src == NULL || work_llctx_dst == NULL || work_llctx_src == NULL || work_c_dst == NULL || work_c_src == NULL) {
+    if (base_dst == NULL || base_src == NULL || work_elisa_core_dst == NULL || work_elisa_core_src == NULL || work_c_dst == NULL || work_c_src == NULL) {
         fprintf(stderr, "allocation failed\n");
-        free(base_dst); free(base_src); free(work_llctx_dst); free(work_llctx_src); free(work_c_dst); free(work_c_src);
+        free(base_dst); free(base_src); free(work_elisa_core_dst); free(work_elisa_core_src); free(work_c_dst); free(work_c_src);
         return 1;
     }
 
     fill_input(base_dst, len, seed_dst);
     fill_input(base_src, len, seed_src);
 
-    memcpy(work_llctx_dst, base_dst, len * sizeof(*work_llctx_dst));
-    memcpy(work_llctx_src, base_src, len * sizeof(*work_llctx_src));
+    memcpy(work_elisa_core_dst, base_dst, len * sizeof(*work_elisa_core_dst));
+    memcpy(work_elisa_core_src, base_src, len * sizeof(*work_elisa_core_src));
     memcpy(work_c_dst, base_dst, len * sizeof(*work_c_dst));
     memcpy(work_c_src, base_src, len * sizeof(*work_c_src));
 
-    uint64_t llctx_check = llctx_stream_axpy_u64(work_llctx_dst, work_llctx_src, (uintptr_t)len, rounds, scale);
+    uint64_t elisa_core_check = elisa_core_stream_axpy_u64(work_elisa_core_dst, work_elisa_core_src, (uintptr_t)len, rounds, scale);
     uint64_t c_check = c_stream_axpy_u64(work_c_dst, work_c_src, (uintptr_t)len, rounds, scale);
-    if (llctx_check != c_check || memcmp(work_llctx_dst, work_c_dst, len * sizeof(*work_c_dst)) != 0) {
-        fprintf(stderr, "llcontext and C kernels produced different results\n");
-        free(base_dst); free(base_src); free(work_llctx_dst); free(work_llctx_src); free(work_c_dst); free(work_c_src);
+    if (elisa_core_check != c_check || memcmp(work_elisa_core_dst, work_c_dst, len * sizeof(*work_c_dst)) != 0) {
+        fprintf(stderr, "elisacore and C kernels produced different results\n");
+        free(base_dst); free(base_src); free(work_elisa_core_dst); free(work_elisa_core_src); free(work_c_dst); free(work_c_src);
         return 2;
     }
 
     bench_result results[] = {
-        run_bench("llcontext", llctx_stream_axpy_u64, base_dst, base_src, work_llctx_dst, work_llctx_src, len, rounds, scale, samples),
+        run_bench("elisacore", elisa_core_stream_axpy_u64, base_dst, base_src, work_elisa_core_dst, work_elisa_core_src, len, rounds, scale, samples),
         run_bench("native C", c_stream_axpy_u64, base_dst, base_src, work_c_dst, work_c_src, len, rounds, scale, samples),
     };
 
@@ -145,9 +145,9 @@ int main(void) {
     for (size_t i = 0; i < ARRAY_LEN(results); ++i) {
         print_result(&results[i]);
     }
-    printf("\nllcontext / C throughput ratio: %.3fx\n", results[0].gib_per_s / results[1].gib_per_s);
+    printf("\nelisacore / C throughput ratio: %.3fx\n", results[0].gib_per_s / results[1].gib_per_s);
     printf("bench sink=%" PRIu64 "\n", bench_sink);
 
-    free(base_dst); free(base_src); free(work_llctx_dst); free(work_llctx_src); free(work_c_dst); free(work_c_src);
+    free(base_dst); free(base_src); free(work_elisa_core_dst); free(work_elisa_core_src); free(work_c_dst); free(work_c_src);
     return 0;
 }

@@ -36,7 +36,7 @@ def inspect(values: darray[i32, row]&) -> int:
 	full_suffix: dview[i32] = arena_da_view_suffix(base, 0)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_dview_split_helpers.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_dview_split_helpers.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -86,7 +86,7 @@ def inspect(values: darray[i32, 4]&) -> int:
 	right: dview[i32] = arena_da_view_slice(base, 2, 4)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_equal_extent_size.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_equal_extent_size.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -129,7 +129,7 @@ def inspect(values: darray[i32, 4]&) -> int:
 	full: dview[i32] = base[0:base.len]
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_direct_dview_slice_syntax.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_direct_dview_slice_syntax.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -178,7 +178,7 @@ def inspect(values: array[i32, 8]) -> int:
 	right_projected: view[i32] = window[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_standard_view_slice_helper_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_standard_view_slice_helper_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -230,7 +230,7 @@ def inspect(owner: Arena) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_standard_view_slice_helper_frozen_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_standard_view_slice_helper_frozen_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -283,7 +283,7 @@ def inspect(owner: Arena) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_store_only.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_store_only.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -407,7 +407,7 @@ def inspect(owner: Arena) -> int:
 	_ = suffix
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_tag_view.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_tag_view.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -459,7 +459,7 @@ def inspect(owner: Arena) -> int error[ProbeError]:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_try_frozen_packed_provenance.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_try_frozen_packed_provenance.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 

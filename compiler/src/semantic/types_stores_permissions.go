@@ -3,7 +3,7 @@ package semantic
 import (
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func permissionFamiliesString(families []string) string {

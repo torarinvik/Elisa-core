@@ -39,7 +39,7 @@ Options:
   --scalar-iterations N      Iterations for native scalar sample run (default: 3)
   --parallel-iterations N    Iterations for native parallel sample run (default: 3)
   --parallel-workers N       Worker count for native parallel sample run (default: 10)
-  --cache-debug              Enable LLCONTEXT_CACHE_DEBUG=1 for Go benchmark runs
+  --cache-debug              Enable ELISACORE_CACHE_DEBUG=1 for Go benchmark runs
   --skip-baselines           Skip the baseline benchmark snapshot phase
   --skip-go-profiles         Skip Go CPU/heap profile generation
   --skip-native-samples      Skip macOS native `sample` captures
@@ -120,8 +120,8 @@ build_native_ultra() {
     echo "object_path=$object_path"
     echo "exe_path=$exe_path"
     cd "$COMPILER_DIR"
-    go run ./src -O3 -emit header -o "$header_path" ../Code/benchmarks/packed_lowering_ml_ast_ultra_core.llcontext
-    go run ./src -O3 -emit obj -o "$object_path" ../Code/benchmarks/packed_lowering_ml_ast_ultra_core.llcontext
+    go run ./src -O3 -emit header -o "$header_path" ../Code/benchmarks/packed_lowering_ml_ast_ultra_core.elisa
+    go run ./src -O3 -emit obj -o "$object_path" ../Code/benchmarks/packed_lowering_ml_ast_ultra_core.elisa
     clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I "$build_dir" \
       ../Code/benchmarks/packed_lowering_ml_ast_bench.c \
       ../Code/benchmarks/json_parser_runtime_shims.c \
@@ -248,15 +248,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$OUT_DIR" ]]; then
-  OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/llcontext-ultra-profile.XXXXXX")"
+  OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/elisacore-ultra-profile.XXXXXX")"
 else
   mkdir -p "$OUT_DIR"
 fi
 
 if [[ "$CACHE_DEBUG" == "1" ]]; then
-  export LLCONTEXT_CACHE_DEBUG=1
+  export ELISACORE_CACHE_DEBUG=1
 else
-  export LLCONTEXT_CACHE_DEBUG=""
+  export ELISACORE_CACHE_DEBUG=""
 fi
 
 echo "output_dir=$OUT_DIR"
@@ -289,7 +289,7 @@ if [[ "$RUN_LLVM_INSPECT" == "1" ]]; then
   echo
   echo "==> emitting Ultra LLVM IR"
   LLVM_OUT="$OUT_DIR/packed_lowering_ml_ast_ultra.ll"
-  go run ./src -O3 -emit llvm -o "$LLVM_OUT" ../Code/benchmarks/packed_lowering_ml_ast_ultra_bench.llcontext 2>&1 | tee "$OUT_DIR/emit_ultra_llvm.log"
+  go run ./src -O3 -emit llvm -o "$LLVM_OUT" ../Code/benchmarks/packed_lowering_ml_ast_ultra_bench.elisa 2>&1 | tee "$OUT_DIR/emit_ultra_llvm.log"
   emit_llvm_summary "$LLVM_OUT" "$OUT_DIR/emit_ultra_llvm_summary.txt"
 fi
 

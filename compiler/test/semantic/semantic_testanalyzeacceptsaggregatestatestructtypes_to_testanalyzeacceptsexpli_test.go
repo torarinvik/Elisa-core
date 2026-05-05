@@ -1,7 +1,7 @@
 package semantic_test
 
 import (
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 	"strings"
 	"testing"
 )
@@ -16,7 +16,7 @@ def widen(value: Holder[&]) -> Holder:
 def read(value: Holder[&]) -> i32:
     return value.value
 `
-	result, errs := parseAndAnalyze(t, "aggregate_state_structs.llcontext", src)
+	result, errs := parseAndAnalyze(t, "aggregate_state_structs.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "widen", "Holder[?]")
@@ -32,7 +32,7 @@ def widen(value: Holder[&, !]) -> Holder:
 def read(value: Holder[&, ?]) -> i32:
     return value.value
 `
-	result, errs := parseAndAnalyze(t, "aggregate_state_structs_multi.llcontext", src)
+	result, errs := parseAndAnalyze(t, "aggregate_state_structs_multi.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "widen", "Holder[?, ?]")
@@ -45,7 +45,7 @@ func TestAnalyzeRejectsAggregateStateArityMismatch(t *testing.T) {
 def bad(value: Pair[&]) -> Pair[&]:
     return value
 `
-	_, errs := parseAndAnalyze(t, "aggregate_state_arity_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "aggregate_state_arity_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -60,7 +60,7 @@ func TestAnalyzeRejectsAggregateStateOnPlainStruct(t *testing.T) {
 def bad(value: Plain[&]) -> Plain[&]:
     return value
 `
-	_, errs := parseAndAnalyze(t, "aggregate_state_plain_struct_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "aggregate_state_plain_struct_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -90,7 +90,7 @@ def route(player: Player) -> int:
 		return take_alive(player)
 	return take_dead(player)
 `
-	result, errs := parseAndAnalyze(t, "derived_struct_states_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "derived_struct_states_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "make_alive", "Player[Alive | Dead]")
@@ -113,7 +113,7 @@ func TestAnalyzeRejectsExplicitDerivedStateConstructorMismatch(t *testing.T) {
 def bad() -> Player[Alive]:
 	return Player[Alive](0)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_constructor_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_constructor_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -137,7 +137,7 @@ def bad(player: mutable Player[Alive]) -> int:
 	player.health <- 0
 	return take_alive(player)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_field_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_field_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -162,7 +162,7 @@ def bad(player: mutable Player[Alive], cond: bool) -> int:
 		player.health <- 0
 	return take_alive(player)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_conditional_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_conditional_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -187,7 +187,7 @@ def ok(player: mutable Player[Alive]) -> int:
 	player.score <- 1
 	return take_alive(player)
 `
-	result, errs := parseAndAnalyze(t, "derived_struct_state_unrelated_mutation_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "derived_struct_state_unrelated_mutation_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "int")
@@ -210,7 +210,7 @@ def bad(team: mutable Team) -> int:
 	team.player.health <- 0
 	return take_alive(team.player)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_nested_field_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_nested_field_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -235,7 +235,7 @@ def bad(player: mutable Player[Alive]) -> int:
 	alias.health <- 0
 	return take_alive(player)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_ref_alias_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_ref_alias_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -262,7 +262,7 @@ def bad(player: mutable Player[Alive]) -> int:
 	kill((&player).cast[Player[Alive]&])
 	return take_alive(player)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_ref_call_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_ref_call_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -292,7 +292,7 @@ def bad(team: mutable Team) -> int:
 	kill_team((&team).cast[Team&])
 	return take_alive(team.player)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_wrapper_ref_call_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_wrapper_ref_call_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -319,7 +319,7 @@ def ok(job: mutable ParseJob[Pending]) -> int:
 	job.stage <- 1
 	return take_ready(job)
 `
-	result, errs := parseAndAnalyze(t, "derived_struct_state_parser_direct_transition_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "derived_struct_state_parser_direct_transition_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "int")
@@ -338,7 +338,7 @@ def bad(job: ParseJob[Pending]&) -> void:
 	job.checksum <- 7
 	job.stage <- 1
 `
-	_, errs := parseAndAnalyze(t, "readonly_ref_param_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "readonly_ref_param_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -360,7 +360,7 @@ def finish_ok(job: mutable ParseJob&) -> void:
 def bad(job: ParseJob&) -> void:
 	finish_ok(job)
 `
-	_, errs := parseAndAnalyze(t, "readonly_ref_arg_to_mutable_param_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "readonly_ref_arg_to_mutable_param_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -393,7 +393,7 @@ def bad(job: mutable ParseJob[Pending]) -> int:
 	finish_ok((&job).cast[mutable ParseJob[Pending]&])
 	return take_ready(job)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_parser_ref_call_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_parser_ref_call_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -425,7 +425,7 @@ def ok(job: mutable ParseJob[Pending]) -> int:
 		return take_ready(job)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "derived_struct_state_parser_ref_call_reprove_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "derived_struct_state_parser_ref_call_reprove_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "int")
@@ -449,7 +449,7 @@ def bad(sock: mutable Socket[Open]) -> int:
 	close_socket((&sock).cast[mutable Socket[Open]&])
 	return take_open(sock)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_socket_ref_call_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_socket_ref_call_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -478,7 +478,7 @@ def bad(buf: mutable ScratchBuffer[Uninitialized]) -> int:
 	init_buffer((&buf).cast[mutable ScratchBuffer[Uninitialized]&])
 	return take_initialized(buf)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_buffer_ref_call_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "derived_struct_state_buffer_ref_call_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -496,7 +496,7 @@ def invoke_writer(fn: func(u8&) -> int can[Console.Write], text: u8&) -> int can
 def run() -> int can[Console.Write]:
 	return invoke_writer(puts, "hello" as u8&)
 `
-	result, errs := parseAndAnalyze(t, "function_type_permissions.llcontext", src)
+	result, errs := parseAndAnalyze(t, "function_type_permissions.elisa", src)
 	requireNoErrors(t, errs)
 	requireFunctionReturnTypeString(t, result, "invoke_writer", "int")
 }
@@ -509,7 +509,7 @@ def invoke_writer[permission P](fn: func(u8&) -> int can[P], text: u8&) -> int c
 def run() -> int can[Console.Write]:
 	return invoke_writer(puts, "hello" as u8&)
 `
-	result, errs := parseAndAnalyze(t, "permission_polymorphic_function_wrapper.llcontext", src)
+	result, errs := parseAndAnalyze(t, "permission_polymorphic_function_wrapper.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "invoke_writer", "int")
@@ -518,7 +518,7 @@ func TestAnalyzeRejectsPermissionParamMemberAccess(t *testing.T) {
 	src := `def bad[permission P](fn: func() -> void can[P.Write]) -> void:
     fn()
 `
-	_, errs := parseAndAnalyze(t, "permission_param_member_access_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "permission_param_member_access_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -540,7 +540,7 @@ def run() -> i64:
 	fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]
 	return call_erased(fn.cast[void&], 40)
 `
-	result, errs := parseAndAnalyze(t, "function_value_erasure_casts.llcontext", src)
+	result, errs := parseAndAnalyze(t, "function_value_erasure_casts.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "call_erased", "i64")
@@ -557,7 +557,7 @@ def run() -> i64:
     fn: func(i64) -> i64 = id.specialize[i64]()
     return apply_i64(fn, 7)
 `
-	result, errs := parseAndAnalyze(t, "explicit_generic_function_specialization.llcontext", src)
+	result, errs := parseAndAnalyze(t, "explicit_generic_function_specialization.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "apply_i64", "i64")

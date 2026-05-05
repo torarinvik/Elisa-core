@@ -3,7 +3,7 @@ package semantic
 import (
 	"fmt"
 
-	"llcontext/src/lexer"
+	"elisacore/src/lexer"
 )
 
 func freshReturnTracker(t Type) map[string]freshReturnStatus {

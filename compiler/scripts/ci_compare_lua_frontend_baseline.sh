@@ -98,7 +98,7 @@ if [ ! -d "$BASELINE_DIR" ]; then
 fi
 
 if [ -z "$CANDIDATE_OUT" ]; then
-    CANDIDATE_OUT="$(mktemp -d "${TMPDIR:-/tmp}/llcontext-lua-candidate.XXXXXX")"
+    CANDIDATE_OUT="$(mktemp -d "${TMPDIR:-/tmp}/elisacore-lua-candidate.XXXXXX")"
 else
     mkdir -p "$CANDIDATE_OUT"
 fi

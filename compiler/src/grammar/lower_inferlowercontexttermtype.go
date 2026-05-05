@@ -1,6 +1,6 @@
 package grammar
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func inferLowerContextTermType(term ast.GrammarTerm, fallback ast.TypeExpr) ast.TypeExpr {
 	switch n := term.(type) {

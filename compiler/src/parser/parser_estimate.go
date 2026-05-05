@@ -1,6 +1,6 @@
 package parser
 
-import "llcontext/src/lexer"
+import "elisacore/src/lexer"
 
 func (p *Parser) estimateTopLevelItemCount() int {
 	return p.estimateIndentedItemsFrom(p.pos, lexer.TOKEN_EOF)

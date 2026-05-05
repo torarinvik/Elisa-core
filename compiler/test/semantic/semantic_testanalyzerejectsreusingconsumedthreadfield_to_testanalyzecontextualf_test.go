@@ -1,8 +1,8 @@
 package semantic_test
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -19,7 +19,7 @@ def bad(holder: mutable Holder) -> void:
     _ = value
     detach(move holder.thread)
 `
-	_, errs := parseAndAnalyze(t, "consumed_thread_field_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "consumed_thread_field_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -35,7 +35,7 @@ def bad(holder: mutable Holder) -> void:
     borrow: stack Thread[i64, Joinable]& = &holder.thread
     _ = borrow
 `
-	_, errs := parseAndAnalyze(t, "affine_handle_addr_of_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_handle_addr_of_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -51,7 +51,7 @@ global current_thread: Thread[i64, Joinable] = zeroed
 global current_holder: Holder = zeroed
 extern foreign_task: Task[i64, Pending]
 `
-	_, errs := parseAndAnalyze(t, "affine_handle_globals_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_handle_globals_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -77,7 +77,7 @@ def bad_local(holder: Holder) -> void:
     alias: Holder& = &holder
     _ = alias
 `
-	_, errs := parseAndAnalyze(t, "affine_handle_refs_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_handle_refs_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -101,7 +101,7 @@ def bad(holder: Holder) -> void:
     _ = value
     copy: Holder = holder
 `
-	_, errs := parseAndAnalyze(t, "affine_container_copy_after_field_move_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_container_copy_after_field_move_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -118,7 +118,7 @@ def bad(holder: Holder) -> void:
     copy: Holder = move holder
     _ = move holder
 `
-	_, errs := parseAndAnalyze(t, "affine_container_move_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_container_move_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -138,7 +138,7 @@ def bad(thread: Thread[i64, Joinable]) -> i64:
     holder: Holder = Holder(move thread, 1)
     return join(move thread)
 `
-	_, errs := parseAndAnalyze(t, "affine_struct_literal_move_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_struct_literal_move_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -154,7 +154,7 @@ def bad(thread: Thread[i64, Joinable]) -> i64:
     items: array[Thread[i64, Joinable], 1] = [move thread]
     return join(move thread)
 `
-	_, errs := parseAndAnalyze(t, "affine_array_literal_move_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_array_literal_move_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -173,7 +173,7 @@ def bad(thread: Thread[i64, Joinable]) -> i64:
     job: Job = Job.Run(thread: move thread)
     return join(move thread)
 `
-	_, errs := parseAndAnalyze(t, "affine_enum_constructor_move_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_enum_constructor_move_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -192,7 +192,7 @@ def bad(holder: Holder) -> i64:
     copy: Holder = move holder
     return join(move holder.thread)
 `
-	_, errs := parseAndAnalyze(t, "affine_parent_move_field_use_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_parent_move_field_use_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -209,7 +209,7 @@ def bad(items: array[Thread[i64, Joinable], 1]) -> i64:
     _ = first
     return join(move items[0])
 `
-	_, errs := parseAndAnalyze(t, "affine_index_move_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "affine_index_move_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -223,7 +223,7 @@ func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
     value: mutable int = true
     return value
 `
-	_, errs := parseAndAnalyze(t, "type_mismatch.llcontext", src)
+	_, errs := parseAndAnalyze(t, "type_mismatch.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -239,7 +239,7 @@ func TestAnalyzeAcceptsFloatArithmeticAndCastShorthand(t *testing.T) {
 def narrow(value: f64) -> f32:
     return value.f32()
 `
-	result, errs := parseAndAnalyze(t, "float_arithmetic_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "float_arithmetic_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "combine", "f64")
@@ -249,7 +249,7 @@ func TestAnalyzeRejectsFloatModulo(t *testing.T) {
 	src := `def bad(value: f64) -> f64:
     return value % 2.0
 `
-	_, errs := parseAndAnalyze(t, "float_modulo_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "float_modulo_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -262,7 +262,7 @@ func TestAnalyzeRejectsFloatArrayIndex(t *testing.T) {
 	src := `def bad(values: i32[4], idx: f64) -> i32:
     return values[idx]
 `
-	_, errs := parseAndAnalyze(t, "float_index_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "float_index_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -277,7 +277,7 @@ func TestAnalyzeAcceptsConstFloatCastsInCompileTimeIntegerContexts(t *testing.T)
 def sized() -> i32[COUNT]:
     return [1, 2, 3]
 `
-	result, errs := parseAndAnalyze(t, "const_float_cast_compile_time_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "const_float_cast_compile_time_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	count, ok := result.ConstValues["COUNT"]
@@ -313,7 +313,7 @@ def u64_to_f64(value: u64) -> f64:
 def usize_to_f64(value: usize) -> f64:
 	return value.f64()
 `
-	result, errs := parseAndAnalyze(t, "float_cast_matrix_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "float_cast_matrix_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "f64_to_i64", "i64")
@@ -335,7 +335,7 @@ const F32_FROM_U64: f32 = 9.i32().u64().f32()
 def total() -> f64:
 	return I64_FROM_F64.f64() + U32_FROM_F64.f64() + U64_FROM_F64.f64() + F64_FROM_U32 + F32_FROM_U64.f64()
 `
-	result, errs := parseAndAnalyze(t, "const_float_cast_matrix_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "const_float_cast_matrix_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	checks := map[string]semantic.ConstValue{
@@ -373,7 +373,7 @@ const BIG_TO_I8: i8 = 200.0.i8()
 const BIG_TO_I64: i64 = 9223372036854775808.0.i64()
 const BIG_TO_U64: u64 = 9223372036854775808.0.u64()
 `
-	_, errs := parseAndAnalyze(t, "const_float_cast_edge_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "const_float_cast_edge_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -414,7 +414,7 @@ def contextual_struct() -> FloatPair:
 def contextual_array() -> f32[2]:
 	return [7.5, 8.5]
 `
-	result, errs := parseAndAnalyze(t, "contextual_float_literals_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "contextual_float_literals_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 

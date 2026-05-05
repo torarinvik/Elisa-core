@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
-OUTPUT_PATH="${1:-${LLCONTEXT_JSON_BENCH_INPUT:-/tmp/zimdjson-dom-large.json}}"
+OUTPUT_PATH="${1:-${ELISACORE_JSON_BENCH_INPUT:-/tmp/zimdjson-dom-large.json}}"
 
 if [[ -e "$OUTPUT_PATH" && ! -f "$OUTPUT_PATH" ]]; then
     echo "json parser bench input path is not a regular file: $OUTPUT_PATH" >&2

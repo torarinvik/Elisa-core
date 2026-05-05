@@ -18,7 +18,7 @@ func writeImplicitContextFixture(t *testing.T, name string, src string) string {
 }
 
 func TestRunCLIInterpretsImplicitContextGenericCalls(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "implicit_context_interpret.llcontext", `bundle MathCtx implicit:
+	sourcePath := writeImplicitContextFixture(t, "implicit_context_interpret.elisa", `bundle MathCtx implicit:
     offset: i64
 
 def add_offset(x: i64) with MathCtx -> i64:
@@ -49,7 +49,7 @@ def main() -> i64:
 }
 
 func TestRunCLIFmtNormalizesLegacySpecializeAndWithSurface(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "implicit_context_fmt.llcontext", `bundle MathCtx implicit:
+	sourcePath := writeImplicitContextFixture(t, "implicit_context_fmt.elisa", `bundle MathCtx implicit:
     offset: i64
 
 def generic_id[T](value: T) with MathCtx -> T:
@@ -76,7 +76,7 @@ def main() -> i64:
 }
 
 func TestRunCLIRejectsExportTargetsWithImplicitParams(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "implicit_context_export_fail.llcontext", `bundle MathCtx implicit:
+	sourcePath := writeImplicitContextFixture(t, "implicit_context_export_fail.elisa", `bundle MathCtx implicit:
     offset: i64
 
 def helper(x: i64) with MathCtx -> i64:
@@ -97,7 +97,7 @@ export func helper_export(x: i64) -> i64 = helper
 }
 
 func TestRunCLIRejectsCastHooksWithImplicitParams(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "implicit_context_cast_fail.llcontext", `bundle CastCtx implicit:
+	sourcePath := writeImplicitContextFixture(t, "implicit_context_cast_fail.elisa", `bundle CastCtx implicit:
     offset: i64
 
 def __cast__(x: i64) with CastCtx -> i64:

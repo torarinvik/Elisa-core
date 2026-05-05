@@ -3,7 +3,7 @@ package semantic
 import (
 	"strconv"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {

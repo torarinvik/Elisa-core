@@ -1,6 +1,6 @@
 package grammar
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func grammarInfixTableMap(tables []ast.GrammarInfixTableDecl) map[string]ast.GrammarInfixTableDecl {
 	if len(tables) == 0 {

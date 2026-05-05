@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"strings"
 
-	"llcontext/src/backend"
-	"llcontext/src/frontendir"
-	"llcontext/src/grammar"
-	"llcontext/src/interpreter"
-	"llcontext/src/unparse"
+	"elisacore/src/backend"
+	"elisacore/src/frontendir"
+	"elisacore/src/grammar"
+	"elisacore/src/interpreter"
+	"elisacore/src/unparse"
 )
 
 type compileServerRequest struct {
@@ -39,7 +39,7 @@ func serveCompileServer(addr string, stdout io.Writer, stderr io.Writer) error {
 		addr = "127.0.0.1:8080"
 	}
 	if stderr != nil {
-		fmt.Fprintf(stderr, "llcontext compile server listening on http://%s\n", addr)
+		fmt.Fprintf(stderr, "elisacore compile server listening on http://%s\n", addr)
 	}
 	return http.ListenAndServe(addr, newCompileServerMux(stdout, stderr))
 }
@@ -199,7 +199,7 @@ func loadedProgramFromRequest(req compileServerRequest) (*loadedProgram, error) 
 		return &loadedProgram{filename: filename, source: append([]byte(nil), bundle.ResolvedSource...), file: bundle.File}, nil
 	}
 	if filename == "" {
-		filename = "request.llcontext"
+		filename = "request.elisa"
 	}
 	return &loadedProgram{filename: filename, source: []byte(req.Source)}, nil
 }

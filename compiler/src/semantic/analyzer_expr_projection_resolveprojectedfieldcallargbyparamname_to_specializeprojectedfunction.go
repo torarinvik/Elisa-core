@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func resolveProjectedFieldCallArgByParamName(call *ast.CallExpr, decl *ast.ExternFuncDecl, paramName string) (ast.Expr, bool) {
 	if call == nil || decl == nil || paramName == "" {

@@ -2,13 +2,13 @@ package main
 
 import (
 	"bytes"
+	"elisacore/src/ast"
+	"elisacore/src/backend"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 	"fmt"
 	"io"
-	"llcontext/src/ast"
-	"llcontext/src/backend"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,7 +130,7 @@ func emitSemanticWarningsIfNoErrors(file *ast.File, stderr io.Writer) {
 	}
 }
 func suppressDeprecatedWarningsForTests() bool {
-	return os.Getenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS") == "1"
+	return os.Getenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS") == "1"
 }
 func shouldSuppressDeprecatedWarningsForTests(warning string) bool {
 	if !suppressDeprecatedWarningsForTests() {
@@ -267,11 +267,11 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 func printUsage(w io.Writer) {
 	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject}
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s] [-addr <host:port>] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
-	fmt.Fprintln(w, "       llcontext init <name> [--path <dir>]")
-	fmt.Fprintln(w, "       llcontext init-lib <name> [--path <dir>]")
-	fmt.Fprintln(w, "       llcontext build|run|test|bench [target] [--project <dir|project.json>]")
-	fmt.Fprintln(w, "       llcontext project view|deps [target] [--project <dir|project.json>] [--json]")
+	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
+	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>]")
+	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
+	fmt.Fprintln(w, "       elisacore build|run|test|bench [target] [--project <dir|project.json>]")
+	fmt.Fprintln(w, "       elisacore project view|deps [target] [--project <dir|project.json>] [--json]")
 	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; use @packed_profile(canonical|retained_reads|build_heavy) for supported enum-level tuning.\n", backend.PackedEnumABIVariantSparse)
 }
 func parseOptimizationArg(value string) (backend.OptimizationLevel, error) {

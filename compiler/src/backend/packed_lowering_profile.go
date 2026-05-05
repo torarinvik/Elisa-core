@@ -1,6 +1,6 @@
 package backend
 
-import "llcontext/src/semantic"
+import "elisacore/src/semantic"
 
 type PackedLoweringContract string
 

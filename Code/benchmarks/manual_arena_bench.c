@@ -35,7 +35,7 @@ static uint64_t now_ns(void) {
 #endif
 }
 
-static void llctx_da_append_i32(Arena *a, bench_i32_array *da, int item) {
+static void elisa_core_da_append_i32(Arena *a, bench_i32_array *da, int item) {
     if (da->count >= da->capacity) {
         size_t new_capacity = da->capacity == 0 ? ARENA_DA_INIT_CAP : da->capacity * 2;
         size_t old_size = da->capacity * sizeof(*da->items);
@@ -54,7 +54,7 @@ static void llctx_da_append_i32(Arena *a, bench_i32_array *da, int item) {
     da->count += 1;
 }
 
-static void llctx_da_append_many_i32(Arena *a, bench_i32_array *da, const int *items, size_t item_count) {
+static void elisa_core_da_append_many_i32(Arena *a, bench_i32_array *da, const int *items, size_t item_count) {
     size_t needed = da->count + item_count;
 
     if (needed > da->capacity) {
@@ -105,15 +105,15 @@ static bench_result run_append_macro(size_t n, int rounds) {
     return out;
 }
 
-static bench_result run_append_llctx(size_t n, int rounds) {
-    bench_result out = {.name = "llcontext-lowered append", .best_ns = UINT64_MAX, .ns_per_op = 0.0, .checksum = 0};
+static bench_result run_append_elisa_core(size_t n, int rounds) {
+    bench_result out = {.name = "elisacore-lowered append", .best_ns = UINT64_MAX, .ns_per_op = 0.0, .checksum = 0};
 
     for (int round = 0; round < rounds; ++round) {
         Arena arena = {0};
         bench_i32_array da = {0};
         uint64_t started = now_ns();
         for (size_t i = 0; i < n; ++i) {
-            llctx_da_append_i32(&arena, &da, (int)i);
+            elisa_core_da_append_i32(&arena, &da, (int)i);
         }
         uint64_t elapsed = now_ns() - started;
         if (elapsed < out.best_ns) {
@@ -159,8 +159,8 @@ static bench_result run_append_many_macro(size_t n, size_t chunk_size, int round
     return out;
 }
 
-static bench_result run_append_many_llctx(size_t n, size_t chunk_size, int rounds) {
-    bench_result out = {.name = "llcontext-lowered append_many", .best_ns = UINT64_MAX, .ns_per_op = 0.0, .checksum = 0};
+static bench_result run_append_many_elisa_core(size_t n, size_t chunk_size, int rounds) {
+    bench_result out = {.name = "elisacore-lowered append_many", .best_ns = UINT64_MAX, .ns_per_op = 0.0, .checksum = 0};
 
     for (int round = 0; round < rounds; ++round) {
         Arena arena = {0};
@@ -175,7 +175,7 @@ static bench_result run_append_many_llctx(size_t n, size_t chunk_size, int round
             for (size_t i = 0; i < take; ++i) {
                 chunk[i] = (int)(base + i);
             }
-            llctx_da_append_many_i32(&arena, &da, chunk, take);
+            elisa_core_da_append_many_i32(&arena, &da, chunk, take);
         }
         uint64_t elapsed = now_ns() - started;
         if (elapsed < out.best_ns) {
@@ -205,9 +205,9 @@ int main(void) {
 
     bench_result results[] = {
         run_append_macro(n, rounds),
-        run_append_llctx(n, rounds),
+        run_append_elisa_core(n, rounds),
         run_append_many_macro(n, chunk, rounds),
-        run_append_many_llctx(n, chunk, rounds),
+        run_append_many_elisa_core(n, chunk, rounds),
     };
 
     printf("manual interim arena benchmark\n");
@@ -216,9 +216,9 @@ int main(void) {
         print_result(&results[i]);
     }
 
-    printf("\nappend speed ratio (macro / llcontext-lowered): %.3fx\n",
+    printf("\nappend speed ratio (macro / elisacore-lowered): %.3fx\n",
            results[0].ns_per_op / results[1].ns_per_op);
-    printf("append_many speed ratio (macro / llcontext-lowered): %.3fx\n",
+    printf("append_many speed ratio (macro / elisacore-lowered): %.3fx\n",
            results[2].ns_per_op / results[3].ns_per_op);
     printf("bench sink=%zu\n", (size_t)bench_sink);
     return 0;

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	golexer "llcontext/src/lexer"
+	golexer "elisacore/src/lexer"
 )
 
 const frontendLexerHashOffset uint64 = 1469598103934665603
@@ -46,7 +46,7 @@ func buildFrontendLexerChecksumHarness(t *testing.T) string {
 	}
 
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "frontend_lexer_runtime_shims.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "frontend_lexer.h")
@@ -190,13 +190,13 @@ func TestRunCLIFrontendLexerChecksumMatchesGoLexer(t *testing.T) {
 		name string
 		path string
 	}{
-		{name: "simple-ident", path: writeCase("simple_ident.llcontext", "hello\n")},
-		{name: "operators-and-indent", path: writeCase("ops_indent.llcontext", "def foo:\n    x <- 1\n    y <- 2\nz <- 3\n")},
-		{name: "region-syntax", path: writeCase("region_syntax.llcontext", "region parse\nvalue: i32& = new[parse] 1\ndestroy parse\n")},
-		{name: "string-and-comment", path: writeCase("string_comment.llcontext", "\"hello\\nworld\" # comment\n")},
-		{name: "char-literals", path: writeCase("char_literals.llcontext", "'a' '\\n' '\\x41' '\\u0041'\n")},
-		{name: "all-keywords", path: writeCase("all_keywords.llcontext", "as if in or and def not to try catch elif else enum heap null pass repr tail true with const error false match panic raise stack while export extern global packed return sizeof static struct zeroed aligned mutable context region new destroy\n")},
-		{name: "self-hosted-source", path: filepath.Join(repoRoot, "Code", "frontend_llcontext", "frontend_lexer.llcontext")},
+		{name: "simple-ident", path: writeCase("simple_ident.elisa", "hello\n")},
+		{name: "operators-and-indent", path: writeCase("ops_indent.elisa", "def foo:\n    x <- 1\n    y <- 2\nz <- 3\n")},
+		{name: "region-syntax", path: writeCase("region_syntax.elisa", "region parse\nvalue: i32& = new[parse] 1\ndestroy parse\n")},
+		{name: "string-and-comment", path: writeCase("string_comment.elisa", "\"hello\\nworld\" # comment\n")},
+		{name: "char-literals", path: writeCase("char_literals.elisa", "'a' '\\n' '\\x41' '\\u0041'\n")},
+		{name: "all-keywords", path: writeCase("all_keywords.elisa", "as if in or and def not to try catch elif else enum heap null pass repr tail true with const error false match panic raise stack while export extern global packed return sizeof static struct zeroed aligned mutable context region new destroy\n")},
+		{name: "self-hosted-source", path: filepath.Join(repoRoot, "Code", "frontend_elisacore", "frontend_lexer.elisa")},
 	}
 
 	for _, tc := range cases {

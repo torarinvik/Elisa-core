@@ -6,7 +6,7 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/Core.h>
 
-static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
+static void elisacoreAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
 	unsigned Kind = LLVMGetEnumAttributeKindForName(Name, NameLen);
 	if (Kind == 0) {
 		return;
@@ -15,23 +15,23 @@ static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, co
 	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
 }
 
-static LLVMTypeRef llcontextGlobalValueType(LLVMValueRef Value) {
+static LLVMTypeRef elisacoreGlobalValueType(LLVMValueRef Value) {
 	return LLVMGlobalGetValueType(Value);
 }
 
-static void llcontextSetAlignment(LLVMValueRef Value, unsigned Bytes) {
+static void elisacoreSetAlignment(LLVMValueRef Value, unsigned Bytes) {
 	LLVMSetAlignment(Value, Bytes);
 }
 
-static char* llcontextPrintType(LLVMTypeRef Type) {
+static char* elisacorePrintType(LLVMTypeRef Type) {
 	return LLVMPrintTypeToString(Type);
 }
 */
 import "C"
 
 import (
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/semantic"
 	"strings"
 	"unsafe"
 )
@@ -394,12 +394,12 @@ func (g *llvmGenerator) ensureDeclaredFunctionType(name string, value C.LLVMValu
 	if err != nil {
 		return err
 	}
-	actualType := C.llcontextGlobalValueType(value)
+	actualType := C.elisacoreGlobalValueType(value)
 	if actualType == expectedType {
 		return nil
 	}
-	actualText := disposeLLVMMessage(C.llcontextPrintType(actualType), "<unknown>")
-	expectedText := disposeLLVMMessage(C.llcontextPrintType(expectedType), "<unknown>")
+	actualText := disposeLLVMMessage(C.elisacorePrintType(actualType), "<unknown>")
+	expectedText := disposeLLVMMessage(C.elisacorePrintType(expectedType), "<unknown>")
 	if actualText == expectedText {
 		return nil
 	}
@@ -487,7 +487,7 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 	if g == nil || g.result == nil || g.result.File == nil {
 		return false
 	}
-	if !strings.HasSuffix(g.result.File.Filename, "native_runtime_support.llcontext") {
+	if !strings.HasSuffix(g.result.File.Filename, "native_runtime_support.elisa") {
 		return false
 	}
 	switch name {
@@ -581,7 +581,7 @@ func (g *llvmGenerator) addFunctionEnumAttribute(fn C.LLVMValueRef, name string)
 	}
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))
-	C.llcontextAddAlwaysInlineAttr(g.context, fn, nameC, C.size_t(len(name)))
+	C.elisacoreAddAlwaysInlineAttr(g.context, fn, nameC, C.size_t(len(name)))
 }
 func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 	switch name {

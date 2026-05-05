@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 )
 
 func TestAnalyzeScopeCheckpointAndReverseIterableLoop(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "scope_checkpoint.llcontext", `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
+	result := analyzeFunctionAnalysisTestSource(t, "scope_checkpoint.elisa", `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
 
 def build(owner: Arena, items: darray[int]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
@@ -30,7 +30,7 @@ def build(owner: Arena, items: darray[int]) -> usize:
 }
 
 func TestAnalyzeGroupedCheckpointStmt(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "grouped_scope_checkpoint.llcontext", `def build(owner: Arena) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "grouped_scope_checkpoint.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = [1, 2]
@@ -46,7 +46,7 @@ func TestAnalyzeGroupedCheckpointStmt(t *testing.T) {
 }
 
 func TestAnalyzeRejectsInvalidGroupedCheckpointTarget(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "grouped_scope_checkpoint_invalid.llcontext", `def build(value: i64) -> void:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "grouped_scope_checkpoint_invalid.elisa", `def build(value: i64) -> void:
     checkpoint value, value:
         pass
 `)
@@ -57,7 +57,7 @@ func TestAnalyzeRejectsInvalidGroupedCheckpointTarget(t *testing.T) {
 }
 
 func TestAnalyzeInvalidatedRegionRefDiagnosticUsesFactVocabulary(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_fact_invalidated_use.llcontext", `def build(seed: i32) -> i32:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_fact_invalidated_use.elisa", `def build(seed: i32) -> i32:
     region scratch(1024)
     mark scratch as cp
     value: scratch i32& = new[scratch] seed
@@ -71,7 +71,7 @@ func TestAnalyzeInvalidatedRegionRefDiagnosticUsesFactVocabulary(t *testing.T) {
 }
 
 func TestAnalyzeRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
-	l := lexer.New("legacy_reverse_iter_error.llcontext", []byte(`def build(items: darray[int]) -> void:
+	l := lexer.New("legacy_reverse_iter_error.elisa", []byte(`def build(items: darray[int]) -> void:
     for rev value in items:
         pass
 `))
@@ -80,14 +80,14 @@ func TestAnalyzeRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
 		t.Fatalf("unexpected lex errors: %v", errs)
 	}
 	p := parser.New(tokens)
-	_ = p.ParseFile("legacy_reverse_iter_error.llcontext")
+	_ = p.ParseFile("legacy_reverse_iter_error.elisa")
 	if all := strings.Join(p.Errors(), "\n"); !strings.Contains(all, "legacy reverse iterable loop syntax `for rev ... in ...:` is no longer supported") {
 		t.Fatalf("expected legacy reverse iterable parser diagnostic, got:\n%s", all)
 	}
 }
 
 func TestParseRejectsLegacyReverseRangeLoopSyntax(t *testing.T) {
-	l := lexer.New("reverse_range_rejected.llcontext", []byte(`def build() -> void:
+	l := lexer.New("reverse_range_rejected.elisa", []byte(`def build() -> void:
     for rev i in 0..<10:
         pass
     `))
@@ -96,14 +96,14 @@ func TestParseRejectsLegacyReverseRangeLoopSyntax(t *testing.T) {
 		t.Fatalf("unexpected lex errors: %v", errs)
 	}
 	p := parser.New(tokens)
-	_ = p.ParseFile("reverse_range_rejected.llcontext")
+	_ = p.ParseFile("reverse_range_rejected.elisa")
 	if all := strings.Join(p.Errors(), "\n"); !strings.Contains(all, "legacy reverse iterable loop syntax `for rev ... in ...:` is no longer supported") {
 		t.Fatalf("expected legacy reverse range parser diagnostic, got:\n%s", all)
 	}
 }
 
 func TestAnalyzeRejectsDuplicateLocalBinding(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_local_binding.llcontext", `def build() -> i64:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_local_binding.elisa", `def build() -> i64:
     value: i64 = 1
     value: i64 = 2
     return value
@@ -115,7 +115,7 @@ func TestAnalyzeRejectsDuplicateLocalBinding(t *testing.T) {
 }
 
 func TestAnalyzeUndefinedAssignmentTargetSuggestsLocalBinding(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "undefined_assignment_target_hint.llcontext", `def build() -> void:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "undefined_assignment_target_hint.elisa", `def build() -> void:
     value <- 1
 `)
 	all := strings.Join(result.Errors(), "\n")
@@ -125,7 +125,7 @@ func TestAnalyzeUndefinedAssignmentTargetSuggestsLocalBinding(t *testing.T) {
 }
 
 func TestAnalyzeRejectsDuplicateGlobalDeclaration(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_global_declaration.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_global_declaration.elisa", `
 global answer: i64 = 1
 global answer: i64 = 2
 `)
@@ -136,7 +136,7 @@ global answer: i64 = 2
 }
 
 func TestAnalyzeStoreAndDictSugar(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "store_dict_sugar.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "store_dict_sugar.elisa", `
 store PendingGotoStore:
     name_key: u32
     depth: u32
@@ -195,7 +195,7 @@ def build(owner: Arena, key: cstr[key_shape]) -> usize:
 }
 
 func TestAnalyzeStoreRowsIteration(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "store_rows_iteration.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "store_rows_iteration.elisa", `
 store PendingGotoStore:
     name_key: usize
     depth: usize
@@ -221,7 +221,7 @@ def build(owner: Arena) -> usize:
 }
 
 func TestAnalyzeRejectsStoreRowMutationAndRefBinding(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_rows_readonly.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_rows_readonly.elisa", `
 store PendingGotoStore:
     name_key: usize
     depth: usize
@@ -246,7 +246,7 @@ def build(owner: Arena) -> void:
 }
 
 func TestAnalyzeRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "generic_key_dict_sugar.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "generic_key_dict_sugar.elisa", `
 struct Key:
     id: u32
 
@@ -297,7 +297,7 @@ def build(owner: Arena, key: Key, id: u32) -> usize:
 }
 
 func TestAnalyzeDoExprBlock(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block.llcontext", `def build() -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block.elisa", `def build() -> i64:
     value = do:
         base = 9
         base + 4
@@ -309,7 +309,7 @@ func TestAnalyzeDoExprBlock(t *testing.T) {
 }
 
 func TestAnalyzeCallWithDoExprBlockArg(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block_call.llcontext", `extern consume(x: i64) -> i64
+	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block_call.elisa", `extern consume(x: i64) -> i64
 
 def build() -> i64:
     value = consume(do:
@@ -324,7 +324,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeGroupedDoExprBlockForms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block_grouped_forms.llcontext", `extern consume(x: i64, y: i64) -> i64
+	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block_grouped_forms.elisa", `extern consume(x: i64, y: i64) -> i64
 
 def build() -> i64:
     values: i64[2] = [do:
@@ -343,7 +343,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeNamedFunctionCallArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args.llcontext", `extern consume(x: i64, y: i64) -> i64
+	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args.elisa", `extern consume(x: i64, y: i64) -> i64
 
 def build() -> i64:
     value = consume(y: 7, x: do:
@@ -358,7 +358,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeNamedFunctionCallArgsRejectUnknownName(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "named_function_call_args_unknown.llcontext", `extern consume(x: i64, y: i64) -> i64
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "named_function_call_args_unknown.elisa", `extern consume(x: i64, y: i64) -> i64
 
 def build() -> i64:
     return consume(z: 7, x: 1)
@@ -370,7 +370,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeNamedFunctionCallArgsRejectPositionalAfterNamed(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "named_function_call_args_positional_after_named.llcontext", `extern consume(x: i64, y: i64) -> i64
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "named_function_call_args_positional_after_named.elisa", `extern consume(x: i64, y: i64) -> i64
 
 def build() -> i64:
     return consume(x: 1, 7)
@@ -382,7 +382,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeNamedGenericFunctionCallArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "named_generic_function_call_args.llcontext", `def pick_second[T](first: T, second: T) -> T:
+	result := analyzeFunctionAnalysisTestSource(t, "named_generic_function_call_args.elisa", `def pick_second[T](first: T, second: T) -> T:
     return second
 
 def build() -> i64:
@@ -397,7 +397,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeNamedFunctionCallArgsThroughLocalAlias(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_local_alias.llcontext", `def add(x: i64, y: i64) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_local_alias.elisa", `def add(x: i64, y: i64) -> i64:
     return x + y
 
 def build() -> i64:
@@ -413,7 +413,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeNamedFunctionCallArgsThroughGlobalAlias(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_global_alias.llcontext", `def add(x: i64, y: i64) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_global_alias.elisa", `def add(x: i64, y: i64) -> i64:
     return x + y
 
 global runner: func(i64, i64) -> i64 = add
@@ -430,7 +430,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeNamedFunctionCallArgsThroughGlobalFieldAlias(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_global_field_alias.llcontext", `struct CallbackBox:
+	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_global_field_alias.elisa", `struct CallbackBox:
     run: func(i64, i64) -> i64
 
 def add(x: i64, y: i64) -> i64:

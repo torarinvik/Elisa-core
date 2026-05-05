@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func (t *EnumType) Variant(name string) (*EnumVariant, bool) {

@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func cloneBorrowReturnAnnotationSteps(steps []borrowReturnAnnotationStep) []borrowReturnAnnotationStep {

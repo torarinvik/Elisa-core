@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func cloneExprBindings(src map[string]ast.Expr) map[string]ast.Expr {
 	if len(src) == 0 {

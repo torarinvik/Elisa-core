@@ -1,8 +1,8 @@
 package parser
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func isPostfixShorthandCastTarget(name string) bool {

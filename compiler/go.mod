@@ -1,4 +1,4 @@
-module llcontext
+module elisacore
 
 go 1.25.0
 

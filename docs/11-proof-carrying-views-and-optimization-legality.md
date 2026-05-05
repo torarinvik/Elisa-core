@@ -1,7 +1,7 @@
 # Proof-Carrying Views And Optimization Legality
 
 This document proposes the next optimization-oriented design direction for
-`llcontext`.
+`elisacore`.
 
 The goal is **not** to add explicit SIMD syntax, target intrinsics, or pragma
 style optimization hints.
@@ -299,7 +299,7 @@ That means:
 
 ## Summary
 
-The right next move for `llcontext` optimization support is:
+The right next move for `elisacore` optimization support is:
 
 - no explicit SIMD syntax yet
 - no user-facing alias proofs by default

@@ -2,7 +2,7 @@
 
 /*
  * The self-hosted lexer object currently pulls in a few runtime support symbols
- * from the shared llcontext runtime even though the lexer harness never calls
+ * from the shared elisacore runtime even though the lexer harness never calls
  * those code paths. These tiny shims satisfy the linker for benchmark and
  * generated-header harness binaries on macOS.
  */

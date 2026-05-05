@@ -1,0 +1,9 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+include "./json_parser_types.elisa"
+include "./json_parser_strings.elisa"
+include "./json_parser_runtime.elisa"
+include "./json_parser_parse_core.elisa"
+include "./json_parser_ast_views.elisa"
+include "./json_parser_checksums_tests.elisa"
+include "./json_parser_document_api.elisa"

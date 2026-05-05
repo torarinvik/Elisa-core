@@ -1,6 +1,6 @@
 package grammar
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func grammarTokenSetMap(tokenSets []ast.GrammarTokenSetDecl) map[string]ast.GrammarTokenSetDecl {
 	if len(tokenSets) == 0 {

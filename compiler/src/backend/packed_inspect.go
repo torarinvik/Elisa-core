@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 func DescribePackedLowering(result *semantic.Result, profile PackedLoweringProfile) (string, error) {

@@ -1,0 +1,432 @@
+# ============================================================
+# Elisa core Runtime - explicit concurrency carriers and helpers
+# First slice: explicit runtime-facing surface, POSIX seam, generic atomics
+# ============================================================
+
+# ------------------------------------------------------------
+# Core runtime carriers
+# ------------------------------------------------------------
+
+struct Thread[T, S]:
+	handle: mutable uintptr
+	state: mutable void&?
+
+struct Task[T, S]:
+	handle: mutable uintptr
+	state: mutable void&?
+
+struct ThreadPool:
+	handle: mutable void&?
+
+struct TaskGroup:
+	handle: mutable void&?
+	cleanup: mutable void&?
+
+struct Mutex:
+	handle: mutable void&?
+
+struct MutexGuard[S]:
+	handle: mutable void&?
+
+struct CondVar:
+	handle: mutable void&?
+
+struct atomic[T]:
+	value: mutable T
+
+struct ConcurrencyBox[T]:
+	value: mutable T
+
+struct ConcurrencyWorkStart1:
+	fn_bits: mutable uintptr
+	arg_bits: mutable void&
+	result_bits: mutable void&
+	refs: mutable atomic[i64]
+
+struct ConcurrencyTaskGroupNode:
+	next: mutable heap ConcurrencyTaskGroupNode&?
+	state_bits: mutable void&
+
+struct ConcurrencyRawTaskNode:
+	next: mutable heap ConcurrencyRawTaskNode&?
+	handle: mutable uintptr
+
+struct ConcurrencyPoolState:
+	worker_count: mutable usize
+
+enum MemoryOrder:
+	Relaxed
+	Acquire
+	Release
+	AcqRel
+	SeqCst
+
+# ------------------------------------------------------------
+# Low-level POSIX seam declarations
+# ------------------------------------------------------------
+
+extern pthread_create(thread: mutable uintptr&, attr: void&?, start_routine: void&, arg: void&?) -> int effects[Thread.Spawn]
+extern pthread_join(thread: uintptr, retval: mutable void&?) -> int effects[Thread.Join]
+extern pthread_detach(thread: uintptr) -> int effects[Thread.Detach]
+
+extern pthread_mutex_lock(mutex: void&) -> int effects[Sync.Lock]
+extern pthread_mutex_unlock(mutex: void&) -> int effects[Sync.Unlock]
+extern pthread_cond_wait(cond: void&, mutex: void&) -> int effects[Sync.Wait]
+extern pthread_cond_signal(cond: void&) -> int effects[Sync.Notify]
+extern pthread_cond_broadcast(cond: void&) -> int effects[Sync.Notify]
+
+# ------------------------------------------------------------
+# First-slice explicit runtime-facing handles
+# ------------------------------------------------------------
+
+extern mutex_lock(mu: mutable Mutex&) -> MutexGuard[Held] effects[Sync.Lock]
+extern mutex_unlock(g: MutexGuard[Held]) -> void effects[Sync.Unlock]
+extern cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held] effects[Sync.Wait]
+extern notify_one(cv: mutable CondVar&) -> void effects[Sync.Notify]
+extern notify_all(cv: mutable CondVar&) -> void effects[Sync.Notify]
+
+# ------------------------------------------------------------
+# Typed wrapper helpers
+# ------------------------------------------------------------
+
+def ctx_concurrency_alloc(size: usize) -> mutable heap void&:
+	can Memory.Allocate, Abort.Panic:
+		raw: heap void&? = malloc(size)
+		if raw == null:
+			panic("concurrency allocation failed")
+		ptr: heap void& = raw.cast[heap void&]
+		return ptr
+
+def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
+	raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyBox[T])) can Memory.Allocate, Abort.Panic
+	box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
+	box.value <- value
+	return box
+
+def ctx_concurrency_join_handle(handle: uintptr):
+	can Thread.Join, Abort.Panic:
+		status: int = pthread_join(handle, null)
+		if status != 0:
+			panic("pthread_join failed")
+
+def spawn_raw(entry: void&, arg: void&?) -> Thread[void&?, Joinable]:
+	can Thread.Spawn, Abort.Panic:
+		out: Thread[void&?, Joinable] = zeroed
+		status: int = pthread_create(out.handle.ref[mutable uintptr&], null, entry, arg)
+		if status != 0:
+			panic("pthread_create failed")
+		out.state <- arg
+		return move out
+
+def join_raw(thread: Thread[void&?, Joinable]) -> void&?:
+	can Thread.Join, Abort.Panic:
+		handle: uintptr = thread.handle
+		state_bits: void&? = thread.state
+		_ = move thread
+		ctx_concurrency_join_handle(handle)
+		return state_bits
+
+def detach_raw(thread: Thread[void&?, Joinable]):
+	can Thread.Detach, Abort.Panic:
+		handle: uintptr = thread.handle
+		_ = move thread
+		status: int = pthread_detach(handle)
+		if status != 0:
+			panic("pthread_detach failed")
+
+def pool_new(threads: usize) -> ThreadPool:
+	can Pool.Create, Memory.Allocate, Abort.Panic:
+		raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyPoolState))
+		state: heap ConcurrencyPoolState& = raw.cast[heap ConcurrencyPoolState&]
+		state.worker_count <- threads
+		out: ThreadPool = zeroed
+		out.handle <- state.cast[void&]
+		return move out
+
+def pool_shutdown(pool: mutable ThreadPool&):
+	can Pool.Shutdown, Memory.Release:
+		if pool.handle != null:
+			free(pool.handle.cast[heap void&])
+			pool.handle <- null
+
+def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Task[void&?, Pending]:
+	can Pool.Submit, Thread.Spawn, Abort.Panic:
+		_ = pool
+		thread: Thread[void&?, Joinable] = spawn_raw(entry, arg)
+		out: Task[void&?, Pending] = zeroed
+		out.handle <- thread.handle
+		out.state <- thread.state
+		_ = move thread
+		return move out
+
+def pool_await_raw(task: Task[void&?, Pending]) -> void&?:
+	can Pool.Await, Thread.Join, Abort.Panic:
+		handle: uintptr = task.handle
+		state_bits: void&? = task.state
+		_ = move task
+		ctx_concurrency_join_handle(handle)
+		return state_bits
+
+def task_group_new_raw() -> TaskGroup:
+	out: TaskGroup = zeroed
+	return move out
+
+def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending]):
+	can Memory.Allocate, Abort.Panic:
+		handle: uintptr = task.handle
+		_ = move task
+		raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyRawTaskNode))
+		node: heap ConcurrencyRawTaskNode& = raw.cast[heap ConcurrencyRawTaskNode&]
+		node.handle <- handle
+		if group.handle == null:
+			node.next <- null
+		else:
+			node.next <- group.handle.cast[heap ConcurrencyRawTaskNode&]
+		group.handle <- node.cast[void&]
+
+def task_group_wait_all_raw(group: mutable TaskGroup&):
+	can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic:
+		current: mutable heap ConcurrencyRawTaskNode&? = group.handle.cast[heap ConcurrencyRawTaskNode&?]
+		group.handle <- null
+		while current != null:
+			next: mutable heap ConcurrencyRawTaskNode&? = current.next
+			ctx_concurrency_join_handle(current.handle)
+			free(current.cast[heap void&])
+			current <- next
+
+def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64:
+	while true:
+		current: i64 = load(slot, MemoryOrder.Acquire) can Atomics.Load
+		next: i64 = current - 1
+		if compare_exchange(slot, current, next, MemoryOrder.AcqRel, MemoryOrder.Acquire) can Atomics.CompareExchange:
+			return next
+	return 0
+
+def ctx_concurrency_work1_release(state_bits: mutable void&?):
+	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
+		if state_bits == null:
+			return
+		live_bits: void& = state_bits.cast[void&]
+		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
+		remaining: i64 = ctx_concurrency_ref_release(state.refs.ref[atomic[i64]&])
+		if remaining == 0:
+			free(state.arg_bits.cast[heap void&])
+			free(state.result_bits.cast[heap void&])
+			free(state.cast[heap void&])
+
+def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> mutable heap ConcurrencyWorkStart1&:
+	can Memory.Allocate, Abort.Panic:
+		arg_box: heap ConcurrencyBox[A]& = ctx_concurrency_box_new(arg)
+		result_seed: R = zeroed
+		result_box: heap ConcurrencyBox[R]& = ctx_concurrency_box_new(result_seed)
+		raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyWorkStart1))
+		state: heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]
+		state.fn_bits <- fn as uintptr
+		state.arg_bits <- arg_box.cast[void&]
+		state.result_bits <- result_box.cast[void&]
+		state.refs.value <- 2
+		return state
+
+def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -> void&:
+	can P, Memory.Release, Atomics.Load, Atomics.CompareExchange:
+		state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]
+		fn: func(A) -> R effects[P] = state.fn_bits.cast[func(A) -> R effects[P]]
+		arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]
+		result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
+		result_box.value <- fn(arg_box.value)
+		ctx_concurrency_work1_release(state.cast[mutable void&])
+		return state.cast[void&]
+
+def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
+	can Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		if state_bits == null:
+			panic("concurrency work returned no state")
+		live_bits: void& = state_bits.cast[void&]
+		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
+		result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
+		result: R = result_box.value
+		ctx_concurrency_work1_release(state.cast[mutable void&])
+		return result
+
+def ctx_thread_from_raw[R, S](raw: Thread[void&?, S]) -> Thread[R, S]:
+	out: Thread[R, S] = zeroed
+	out.handle <- raw.handle
+	out.state <- raw.state
+	return move out
+
+def ctx_thread_to_raw[R, S](thread: Thread[R, S]) -> Thread[void&?, S]:
+	out: Thread[void&?, S] = zeroed
+	out.handle <- thread.handle
+	out.state <- thread.state
+	return move out
+
+def ctx_task_from_raw[R, S](raw: Task[void&?, S]) -> Task[R, S]:
+	out: Task[R, S] = zeroed
+	out.handle <- raw.handle
+	out.state <- raw.state
+	return move out
+
+def ctx_task_to_raw[R, S](task: Task[R, S]) -> Task[void&?, S]:
+	out: Task[void&?, S] = zeroed
+	out.handle <- task.handle
+	out.state <- task.state
+	return move out
+
+def task_group_new() -> TaskGroup:
+	group: TaskGroup = task_group_new_raw()
+	group.cleanup <- null
+	return move group
+
+def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
+	can Memory.Allocate, Abort.Panic:
+		if state_bits == null:
+			return
+		raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyTaskGroupNode))
+		node: heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]
+		if group.cleanup == null:
+			node.next <- null
+		else:
+			node.next <- group.cleanup.cast[heap ConcurrencyTaskGroupNode&]
+		node.state_bits <- state_bits.cast[void&]
+		group.cleanup <- node.cast[void&]
+
+def ctx_task_group_release_all(group: mutable TaskGroup&):
+	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
+		if group.cleanup == null:
+			return
+		current: mutable heap ConcurrencyTaskGroupNode&? = group.cleanup.cast[heap ConcurrencyTaskGroupNode&?]
+		group.cleanup <- null
+		while current != null:
+			next: mutable heap ConcurrencyTaskGroupNode&? = current.next
+			ctx_concurrency_work1_release(current.state_bits.cast[mutable void&])
+			free(current.cast[heap void&])
+			current <- next
+
+def spawn1[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> Thread[R, Joinable]:
+	can Thread.Spawn, Memory.Allocate, Abort.Panic:
+		from_raw: func(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw.specialize[R, Joinable]()
+		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
+		raw: Thread[void&?, Joinable] = spawn_raw(
+			ctx_concurrency_work1_entry.specialize[A, R]().cast[void&],
+			state.cast[void&]
+		)
+		raw.state <- state.cast[void&]
+		return from_raw(move raw)
+
+def join[R](thread: Thread[R, Joinable]) -> R:
+	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		take_result: func(void&?) -> R effects[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result.specialize[R]()
+		state_bits: void&? = thread.state
+		raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
+		_ = join_raw(move raw)
+		result: R = take_result(state_bits)
+		return result
+
+def detach[R](thread: Thread[R, Joinable]):
+	can Thread.Detach, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		state_bits: void&? = thread.state
+		raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
+		detach_raw(move raw)
+		ctx_concurrency_work1_release(state_bits)
+
+def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R effects[P], arg: A) -> Task[R, Pending]:
+	can Pool.Submit, Thread.Spawn, Memory.Allocate, Abort.Panic:
+		from_raw: func(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw.specialize[R, Pending]()
+		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
+		raw: Task[void&?, Pending] = pool_submit_raw(
+			pool,
+			ctx_concurrency_work1_entry.specialize[A, R]().cast[void&],
+			state.cast[void&]
+		)
+		raw.state <- state.cast[void&]
+		return from_raw(move raw)
+
+def pool_await[R](task: Task[R, Pending]) -> R:
+	can Pool.Await, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		take_result: func(void&?) -> R effects[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result.specialize[R]()
+		state_bits: void&? = task.state
+		raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
+		_ = pool_await_raw(move raw)
+		result: R = take_result(state_bits)
+		return result
+
+def task_group_add[R](group: mutable TaskGroup&, task: Task[R, Pending]):
+	can Memory.Allocate, Abort.Panic:
+		state_bits: void&? = task.state
+		raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
+		task_group_add_raw(group, move raw)
+		ctx_task_group_push_state(group, state_bits)
+
+def task_group_wait_all(group: mutable TaskGroup&):
+	can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		task_group_wait_all_raw(group)
+		ctx_task_group_release_all(group)
+
+# ------------------------------------------------------------
+# Generic atomic helpers
+# ------------------------------------------------------------
+
+def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
+	can Atomics.Load:
+		_ = order
+		return slot.value
+
+def store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder):
+	can Atomics.Store:
+		_ = order
+		slot.value <- value
+
+def exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T:
+	can Atomics.Exchange:
+		_ = order
+		old_value: T = slot.value
+		slot.value <- value
+		return old_value
+
+def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool:
+	can Atomics.CompareExchange:
+		_ = success
+		_ = failure
+		if slot.value == expected:
+			slot.value <- desired
+			return true
+		return false
+
+def fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+	can Atomics.Rmw:
+		_ = order
+		old_value: i64 = slot.value
+		slot.value <- old_value + value
+		return old_value
+
+def fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+	can Atomics.Rmw:
+		_ = order
+		old_value: i64 = slot.value
+		slot.value <- old_value - value
+		return old_value
+
+def fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+	can Atomics.Rmw:
+		_ = order
+		old_value: i64 = slot.value
+		slot.value <- old_value | value
+		return old_value
+
+def fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+	can Atomics.Rmw:
+		_ = order
+		old_value: i64 = slot.value
+		slot.value <- old_value & value
+		return old_value
+
+def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+	can Atomics.Rmw:
+		_ = order
+		old_value: i64 = slot.value
+		slot.value <- old_value ^ value
+		return old_value
+
+def fence(order: MemoryOrder):
+	can Atomics.Fence:
+		_ = order

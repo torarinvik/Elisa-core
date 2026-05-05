@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"llcontext/src/lexer"
+	"elisacore/src/lexer"
 )
 
 func repoRootFromLexerBench(b *testing.B) string {
@@ -20,7 +20,7 @@ func repoRootFromLexerBench(b *testing.B) string {
 
 func BenchmarkTokenizeSelfHostedFrontendSource(b *testing.B) {
 	repoRoot := repoRootFromLexerBench(b)
-	sourcePath := filepath.Join(repoRoot, "Code", "frontend_llcontext", "frontend_lexer.llcontext")
+	sourcePath := filepath.Join(repoRoot, "Code", "frontend_elisacore", "frontend_lexer.elisa")
 	raw, err := os.ReadFile(sourcePath)
 	if err != nil {
 		b.Fatalf("failed to read %s: %v", sourcePath, err)
@@ -51,7 +51,7 @@ func countTokens(sourcePath string, raw []byte) int {
 
 func BenchmarkCountTokensSelfHostedFrontendSource(b *testing.B) {
 	repoRoot := repoRootFromLexerBench(b)
-	sourcePath := filepath.Join(repoRoot, "Code", "frontend_llcontext", "frontend_lexer.llcontext")
+	sourcePath := filepath.Join(repoRoot, "Code", "frontend_elisacore", "frontend_lexer.elisa")
 	raw, err := os.ReadFile(sourcePath)
 	if err != nil {
 		b.Fatalf("failed to read %s: %v", sourcePath, err)

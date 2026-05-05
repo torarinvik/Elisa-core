@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 )
 
 func TestAnalyzeStructAlignAnnotationSetsTypeMetadata(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "align_semantics.llcontext", `@align(32)
+	result := parseAndAnalyzeBackendTest(t, "align_semantics.elisa", `@align(32)
 struct Vec4:
     x: f32
     y: f32
@@ -27,7 +27,7 @@ struct Vec4:
 }
 
 func TestAnalyzeCachelineAlignedStructSetsTypeMetadata(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "cacheline_semantics.llcontext", `@cacheline_aligned
+	result := parseAndAnalyzeBackendTest(t, "cacheline_semantics.elisa", `@cacheline_aligned
 struct Counter:
     value: i64
 `)
@@ -41,7 +41,7 @@ struct Counter:
 }
 
 func TestAnalyzeStructAlignAnnotationRejectsNonPowerOfTwo(t *testing.T) {
-	result := analyzeInlineTestSource(t, "align_invalid.llcontext", `@align(24)
+	result := analyzeInlineTestSource(t, "align_invalid.elisa", `@align(24)
 struct Vec4:
     x: f32
 `)
@@ -52,7 +52,7 @@ struct Vec4:
 }
 
 func TestAnalyzeCachelineAlignedStructRejectsArguments(t *testing.T) {
-	result := analyzeInlineTestSource(t, "cacheline_invalid.llcontext", `@cacheline_aligned(128)
+	result := analyzeInlineTestSource(t, "cacheline_invalid.elisa", `@cacheline_aligned(128)
 struct Counter:
     value: i64
 `)
@@ -63,7 +63,7 @@ struct Counter:
 }
 
 func TestGenerateLLVMIRAppliesStructAlignmentToGlobalsAndAllocas(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_align.llcontext", `@align(64)
+	result := parseAndAnalyzeBackendTest(t, "backend_align.elisa", `@align(64)
 struct Counter:
     value: i64
 
@@ -88,7 +88,7 @@ def fold() -> i64:
 }
 
 func TestGenerateCHeaderRendersAlignedStructAndGlobal(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "header_align.llcontext", `@align(64)
+	result := parseAndAnalyzeBackendTest(t, "header_align.elisa", `@align(64)
 struct Counter:
     value: i64
 

@@ -45,7 +45,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$OUT_DIR" ]; then
-    OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/llcontext-lua-execution-profile.XXXXXX")"
+    OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/elisacore-lua-execution-profile.XXXXXX")"
 else
     mkdir -p "$OUT_DIR"
 fi
@@ -85,7 +85,7 @@ REF_COMMAND="$PYTHON_BIN $SCRIPT_DIR/run_lua_frontend_reference_execution_benchm
     --setting "repeats=$REPEATS" \
     --setting "corpus_manifest=$CORPUS_MANIFEST" \
     --setting "keep_temp=$KEEP_TEMP" \
-    --command "llcontext_execution=$LL_COMMAND" \
+    --command "elisacore_execution=$LL_COMMAND" \
     --command "reference_execution=$REF_COMMAND"
 
 cat > "$OUT_DIR/README.txt" <<EOF2
@@ -93,10 +93,10 @@ Lua frontend execution profiling bundle
 =====================================
 
 execution_benchmark.log
-    Human-readable llcontext execution benchmark sweep output.
+    Human-readable elisacore execution benchmark sweep output.
 
 execution_benchmark.json
-    Structured llcontext execution benchmark results.
+    Structured elisacore execution benchmark results.
 
 reference_execution_benchmark.log
     Human-readable PUC Lua reference execution benchmark sweep output.

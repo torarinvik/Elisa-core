@@ -11,8 +11,8 @@ import "C"
 import (
 	"fmt"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

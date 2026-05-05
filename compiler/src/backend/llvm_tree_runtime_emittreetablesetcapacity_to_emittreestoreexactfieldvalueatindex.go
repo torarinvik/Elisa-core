@@ -8,8 +8,8 @@ package backend
 import "C"
 
 import (
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/semantic"
 )
 
 func (s *functionState) emitTreeTableSetCapacity(tablePtr C.LLVMValueRef, memberType semantic.Type, capacityValue C.LLVMValueRef, name string) error {

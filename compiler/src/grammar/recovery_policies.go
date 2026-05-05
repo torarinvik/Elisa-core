@@ -1,6 +1,6 @@
 package grammar
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func grammarRecoveryPolicyMap(policies []ast.GrammarRecoveryDecl) map[string]ast.GrammarRecoveryDecl {
 	if len(policies) == 0 {

@@ -3,7 +3,7 @@ package semantic
 import (
 	"fmt"
 
-	"llcontext/src/lexer"
+	"elisacore/src/lexer"
 )
 
 func (a *Analyzer) semanticLimitPos() lexer.Pos {

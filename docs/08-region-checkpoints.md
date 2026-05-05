@@ -8,7 +8,7 @@ existing `region`, `new[...]`, and `destroy` operations:
 
 ## Syntax
 
-```context
+```elisa
 region scratch(1024u)
 
 mark scratch as cp
@@ -19,7 +19,7 @@ reset scratch
 destroy scratch
 ```
 
-```context
+```elisa
 scope pool_new(2):
     pass
 
@@ -50,7 +50,7 @@ All three are statements, not expressions.
 `scope expr:` evaluates a scoped resource expression and runs the nested body
 with the compiler's ordinary scoped-cleanup machinery.
 
-```context
+```elisa
 scope pool_new(2):
     pass
 ```
@@ -64,7 +64,7 @@ resource lifetime and cleanup, not a new expression form.
 Named checkpoints snapshot rollback state for a checkpointable target and bind
 that snapshot to a name.
 
-```context
+```elisa
 checkpoint mark = items:
     items.push(4)
 
@@ -74,7 +74,7 @@ restore mark
 Grouped checkpoints create an anonymous rollback block over more than one
 target.
 
-```context
+```elisa
 checkpoint xs, ys:
     xs.push(5)
     ys.push(6)
@@ -118,7 +118,7 @@ After `restore`, `reset`, or `destroy`, those tracked locals become invalid if t
 
 That means code like this is rejected:
 
-```context
+```elisa
 def bad() -> i32:
     region scratch
     mark scratch as cp
@@ -141,7 +141,7 @@ So the feature is safe for common parser/compiler scratch patterns, while leavin
 
 Nested checkpoints are allowed.
 
-```context
+```elisa
 def nested(seed: i32) -> i32:
     region scratch(1024u)
     base: scratch i32& = new[scratch] seed
@@ -170,7 +170,7 @@ rewound portion of the target.
 
 ## Lowering model
 
-The implementation lowers directly to runtime helpers that already exist in `arena.llcontext`:
+The implementation lowers directly to runtime helpers that already exist in `arena.elisa`:
 
 - `mark` → `arena_snapshot(...)`
 - `restore` → `arena_rewind(...)`

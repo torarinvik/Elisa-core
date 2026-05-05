@@ -1,7 +1,7 @@
 # Iterators And `for in` Mini-Spec
 
-This document proposes the first general iterable surface for Contextlang /
-`llcontext`.
+This document proposes the first general iterable surface for Elisa core /
+`elisacore`.
 
 It is still mainly a design note for the broader sequential iterable model.
 Since it was written, the compiler has also shipped companion implemented
@@ -14,7 +14,7 @@ iterator traits.
 
 The goal is to generalize the existing range-shaped loop surface:
 
-```context
+```elisa
 for index in 0u..<items.len:
     ...
 ```
@@ -83,21 +83,21 @@ The first surface should support three binder modes.
 
 ### Value iteration
 
-```context
+```elisa
 for item in items:
     use(item)
 ```
 
 ### Readonly-ref iteration
 
-```context
+```elisa
 for ref item in items:
     inspect(item)
 ```
 
 ### Mutable-ref iteration
 
-```context
+```elisa
 for mutable ref item in items:
     normalize(item)
 ```
@@ -116,7 +116,7 @@ already moving toward for statement-oriented binders.
 
 Example shape:
 
-```context
+```elisa
 for Pair(key, value) in entries:
     consume_pair(key, value)
 
@@ -141,14 +141,14 @@ That means:
 
 So this kind of thing is fine when the item type is known to match:
 
-```context
+```elisa
 for Pair(key, value) in entries:
     ...
 ```
 
 But this kind of filtering surface should remain deferred:
 
-```context
+```elisa
 for Expr.Add(left, right) in nodes:
     ...
 ```
@@ -160,7 +160,7 @@ control flow, which the language has repeatedly tried to avoid.
 
 ### 1. Value binder
 
-```context
+```elisa
 for item in items:
     ...
 ```
@@ -176,7 +176,7 @@ In the first slice:
 
 ### 2. Readonly-ref binder
 
-```context
+```elisa
 for ref item in items:
     ...
 ```
@@ -194,7 +194,7 @@ locations.
 
 ### 3. Mutable-ref binder
 
-```context
+```elisa
 for mutable ref item in items:
     ...
 ```
@@ -221,7 +221,7 @@ The first slice should stay compiler-known and builtin.
 
 Examples:
 
-```context
+```elisa
 for i in 0u..<len:
     ...
 ```
@@ -303,14 +303,14 @@ should avoid.
 So the first tree-aware category should be an **explicit child iterable** such
 as:
 
-```context
+```elisa
 for ref child in children(node):
     visit(child)
 ```
 
 and:
 
-```context
+```elisa
 for mutable ref child in children(node):
     rewrite(child)
 ```
@@ -374,7 +374,7 @@ Binder modes should apply to the loop binder as a whole.
 
 Examples:
 
-```context
+```elisa
 for Pair(key, value) in entries:
     ...
 
@@ -527,7 +527,7 @@ iterable categories and legality facts.
 
 ## Summary
 
-The right first iterator feature for `llcontext` is:
+The right first iterator feature for `elisacore` is:
 
 - builtin iterable categories first
 - `for in` over values, readonly refs, and mutable refs

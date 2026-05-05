@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func namedStateStructBase(t Type) (*StructType, bool) {

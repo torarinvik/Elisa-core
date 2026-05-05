@@ -5,7 +5,7 @@ package backend
 /*
 #include <llvm-c/Core.h>
 
-static int llcontextConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
+static int elisacoreConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
 	if (LLVMIsAConstantInt(Value) == NULL) {
 		return 0;
 	}
@@ -15,7 +15,7 @@ static int llcontextConstIntGetZExtValue(LLVMValueRef Value, unsigned long long*
 */
 import "C"
 
-import "llcontext/src/semantic"
+import "elisacore/src/semantic"
 
 func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordOffset C.LLVMValueRef, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
 	stateValue, err := ops.stateValue(name + ".state")

@@ -1,10 +1,10 @@
 # Export and C ABI Mini-Spec
 
-This document proposes an explicit `export` feature for Contextlang so concrete functions and C-compatible struct layouts can be exposed to C with stable names and predictable calling conventions.
+This document proposes an explicit `export` feature for Elisa core so concrete functions and C-compatible struct layouts can be exposed to C with stable names and predictable calling conventions.
 
 The main goal is:
 
-> let Contextlang code compile into object files that can be linked into C programs **without** relying on mangled internal specialization names as the public interface.
+> let Elisa core code compile into object files that can be linked into C programs **without** relying on mangled internal specialization names as the public interface.
 
 ## Core principle
 
@@ -77,7 +77,7 @@ and still provide a clean public symbol such as `vec2i_add`.
 
 ### Exporting a concrete type instantiation
 
-```context
+```elisa
 struct Vec[T]:
     x: T
     y: T
@@ -93,7 +93,7 @@ Meaning:
 
 ### Exporting a concrete function with an explicit ABI-facing surface
 
-```context
+```elisa
 def vec_add[T](left: Vec[T], right: Vec[T]) -> Vec[T]:
     return Vec[T](left.x + right.x, left.y + right.y)
 
@@ -113,13 +113,13 @@ This explicit form should be the primary surface syntax because it makes the ABI
 
 The earlier alias-style shorthand can still be treated as future sugar over the explicit form:
 
-```context
+```elisa
 export func vec_add[i32] as vec2i_add
 ```
 
 Conceptually, that is just shorthand for:
 
-```context
+```elisa
 export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add[i32]
 ```
 
@@ -127,7 +127,7 @@ export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add[i32]
 
 For non-generic functions, a shorthand attribute form is also reasonable:
 
-```context
+```elisa
 @export("vec2i_len")
 def vec2i_len(v: Vec2i) -> i32:
     return v.x + v.y
@@ -137,7 +137,7 @@ This is optional sugar; the core feature should still be the explicit `export fu
 
 ### Exporting a global
 
-```context
+```elisa
 global MAGIC: i32 = 1337
 
 export global MAGIC as ctx_magic
@@ -147,7 +147,7 @@ This should only be allowed for concrete C-ABI-compatible types.
 
 ## Concrete example
 
-```context
+```elisa
 struct Vec[T]:
     x: T
     y: T
@@ -192,7 +192,7 @@ These are good MVP candidates:
 
 - fixed-width integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
 - `char` (current byte/code-unit scalar)
-- pointers / references lowered as raw pointers when the lifetime/ownership contract is intentionally C-facing rather than a Contextlang-only proof such as `stack T&`
+- pointers / references lowered as raw pointers when the lifetime/ownership contract is intentionally C-facing rather than a Elisa core-only proof such as `stack T&`
 - structs whose fields are all themselves C-ABI-compatible
 - opaque handle-like pointers once explicit opaque/exported types exist
 
@@ -225,7 +225,7 @@ The same guideline applies to the internal CamelCase runtime carriers such as `D
 
 If code needs to cross the ABI boundary with container-like data, it should do so through explicit C-facing bridge types such as:
 
-```context
+```elisa
 struct BytesView:
     data: u8&
     len: usize
@@ -237,14 +237,14 @@ Only **concrete instantiations** should be exportable.
 
 This is good:
 
-```context
+```elisa
 export type Vec[i32] as Vec2i
 export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add[i32]
 ```
 
 This should be rejected:
 
-```context
+```elisa
 export type Vec[T] as Vec
 export func vec_add[T] as vec_add
 ```
@@ -255,7 +255,7 @@ The same rule now applies to pointer-qualifier generics.
 
 This is fine:
 
-```context
+```elisa
 struct Handle[refstorage store, refstate state]:
     ptr: store u8&[state]
 
@@ -264,7 +264,7 @@ export type Handle[heap, &] as HeapHandle
 
 But exporting an unresolved qualifier parameter is still invalid:
 
-```context
+```elisa
 export type Handle[store, state] as HandleGeneric   # reject
 ```
 
@@ -295,8 +295,8 @@ The compiler-side export table can now also drive a generated C header.
 Current workflow:
 
 ```text
-llcontext -emit obj -o math2d.o math2d.llcontext
-llcontext -emit header -o math2d.h math2d.llcontext
+elisacore -emit obj -o math2d.o math2d.elisa
+elisacore -emit header -o math2d.h math2d.elisa
 ```
 
 The generated header should include:
@@ -310,7 +310,7 @@ The generated header should include:
 
 The first version should be conservative.
 
-If an exported function returns pointers or accepts pointer-owning contracts, the ABI surface must be explicit about ownership. C will not preserve Contextlang-level invariants automatically.
+If an exported function returns pointers or accepts pointer-owning contracts, the ABI surface must be explicit about ownership. C will not preserve Elisa core-level invariants automatically.
 
 Practical recommendation for MVP:
 
@@ -331,7 +331,7 @@ That includes fully substituting any `refstorage` and `refstate` parameters that
 
 For example:
 
-```context
+```elisa
 struct Pair[T]:
     left: T
     right: T
@@ -343,7 +343,7 @@ should succeed.
 
 But this should fail:
 
-```context
+```elisa
 struct Bad:
     text: cstr[row]
 
@@ -378,7 +378,7 @@ The first useful version of `export` should support:
 
 The feature should be considered real only when the repository can do the following:
 
-1. compile a `.llcontext` file with exported concrete types/functions to an object file
+1. compile a `.elisa` file with exported concrete types/functions to an object file
 2. emit a matching C header
 3. compile a small C file that includes the generated header
 4. link the C file against the produced object file
@@ -386,9 +386,9 @@ The feature should be considered real only when the repository can do the follow
 
 ### Suggested first validation fixture
 
-Contextlang module:
+Elisa core module:
 
-```context
+```elisa
 struct Vec[T]:
     x: T
     y: T
@@ -452,13 +452,13 @@ This feature is worth doing, but only if it stays disciplined.
 
 The best rule is:
 
-> `export` should expose a deliberately small, concrete, C-ABI-stable surface — not attempt to make every rich Contextlang type automatically appear natural in C.
+> `export` should expose a deliberately small, concrete, C-ABI-stable surface — not attempt to make every rich Elisa core type automatically appear natural in C.
 
 That means explicit wrappers are a feature, not a failure.
 
 Done this way, `export` becomes a very strong capability:
 
-- generics stay ergonomic inside Contextlang
+- generics stay ergonomic inside Elisa core
 - C sees only stable concrete ABI shapes
 - mangling stops leaking into the public interface
 - object-file emission already in the compiler becomes immediately more useful

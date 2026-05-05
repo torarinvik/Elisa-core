@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/unparse"
 )
 
 func generateReferenceDoc(sourcePath string, file *ast.File) string {

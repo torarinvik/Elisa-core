@@ -3,10 +3,10 @@
 package backend
 
 import (
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
 	"regexp"
 	"strings"
 	"testing"
@@ -104,7 +104,7 @@ def fold() -> int:
 			Expr.Lit(value):
 				return value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_default.elisa", src)
 	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
@@ -134,7 +134,7 @@ def fold() -> int:
 			Expr.Lit(value):
 				return value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_legacy.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_legacy.elisa", src)
 	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
@@ -164,7 +164,7 @@ def sum_pair() -> int:
 		node: Pair = new Pair.Both(span: 7, left: 2, right: 3)
 		return node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_profile_build_heavy.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_profile_build_heavy.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -205,7 +205,7 @@ def sum_pair() -> int:
 			Pair.End:
 				return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -239,7 +239,7 @@ def sum_pair() -> int:
 			Pair.End:
 				return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -278,7 +278,7 @@ def fold_frozen() -> int:
 		Expr.End:
 			return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -311,7 +311,7 @@ def fold_frozen() -> int:
 		Expr.End:
 			return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -348,7 +348,7 @@ def fold_frozen(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 		Expr.Lit(value: value):
 			return value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_payload_decode_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_payload_decode_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -383,7 +383,7 @@ def fold_frozen(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 		Expr.Lit(value: value):
 			return value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_payload_decode_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_payload_decode_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -452,7 +452,7 @@ def fold_frozen() -> i64:
 	frozen_clauses: Clause.Store[Frozen] = freeze(move clauses)
 	return score_expr(node, frozen_exprs, frozen_clauses, frozen_types)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_adjacent_frozen_handle_payload_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_adjacent_frozen_handle_payload_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -516,7 +516,7 @@ def fold_frozen() -> i64:
 	frozen_clauses: Clause.Store[Frozen] = freeze(move clauses)
 	return score_expr(node, frozen_exprs, frozen_clauses, frozen_types)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_adjacent_frozen_handle_payload_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_adjacent_frozen_handle_payload_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -556,7 +556,7 @@ def fold_frozen_mixed() -> int:
 		Expr.End:
 			return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_payload_decode_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_payload_decode_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)

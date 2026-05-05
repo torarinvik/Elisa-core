@@ -1,10 +1,10 @@
 package semantic_test
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -70,7 +70,7 @@ def use() -> void:
     _ = text
     _ = view
 `
-	_, errs := parseAndAnalyze(t, "string_literal_contextual_cstr_sview.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_literal_contextual_cstr_sview.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeReportsStatefulGrammarWhenTermMismatchedBranchTypes(t *testing.T) {
@@ -103,7 +103,7 @@ grammar DemoGrammar over Token using ParserState:
         value = when(state.current_token().kind == TokenKind.IDENT, .IDENT, expr(1))
         return value
 `
-	_, errs := parseAndAnalyze(t, "grammar_when_mismatched_branch_types.llcontext", src)
+	_, errs := parseAndAnalyze(t, "grammar_when_mismatched_branch_types.elisa", src)
 	if len(errs) == 0 {
 		t.Fatalf("expected mismatched when-term branch values to fail semantic analysis")
 	}
@@ -142,7 +142,7 @@ grammar DemoGrammar over Token using ParserState:
         value = choice(.IDENT, expr(1))
         return value
 `
-	_, errs := parseAndAnalyze(t, "grammar_choice_mismatched_branch_types.llcontext", src)
+	_, errs := parseAndAnalyze(t, "grammar_choice_mismatched_branch_types.elisa", src)
 	if len(errs) == 0 {
 		t.Fatalf("expected mismatched choice branch values to fail semantic analysis")
 	}
@@ -181,7 +181,7 @@ grammar DemoGrammar over Token using ParserState:
         value = choice(.IDENT, expr[Token?](null))
         return value
 `
-	_, errs := parseAndAnalyze(t, "grammar_choice_promotes_value_to_optional.llcontext", src)
+	_, errs := parseAndAnalyze(t, "grammar_choice_promotes_value_to_optional.elisa", src)
 	requireNoErrors(t, errs)
 }
 func requireDeclaredFunctionPermissionRefs(t *testing.T, result *semantic.Result, name string, expected ...string) {
@@ -294,7 +294,7 @@ def keep(owner: Arena) -> mutable Arena&:
     return &owner as mutable Arena&
 `
 
-	result, errs := parseAndAnalyze(t, "as_cast.llcontext", src)
+	result, errs := parseAndAnalyze(t, "as_cast.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -322,7 +322,7 @@ def make_mode() -> Mode?:
     return Mode.READ as Mode?
 `
 
-	result, errs := parseAndAnalyze(t, "const_enum_optional_cast.llcontext", src)
+	result, errs := parseAndAnalyze(t, "const_enum_optional_cast.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -340,7 +340,7 @@ func TestAnalyzeTernaryPropagatesExpectedDarrayTypeToEmptyListBranch(t *testing.
     return values
 `
 
-	result, errs := parseAndAnalyze(t, "ternary_darray_inference.llcontext", src)
+	result, errs := parseAndAnalyze(t, "ternary_darray_inference.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -368,7 +368,7 @@ def unwrap(node: Expr) -> i64:
     return value if node is Expr.Int(value) else 0
 `
 
-	result, errs := parseAndAnalyze(t, "pattern_ternary_bindings.llcontext", src)
+	result, errs := parseAndAnalyze(t, "pattern_ternary_bindings.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -382,7 +382,7 @@ def unwrap(node: Expr) -> i64:
     return 0
 `
 
-	result, errs := parseAndAnalyze(t, "return_question_pattern_guard.llcontext", src)
+	result, errs := parseAndAnalyze(t, "return_question_pattern_guard.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -403,7 +403,7 @@ def load(flag: bool) -> i64:
 			2
 `
 
-	result, errs := parseAndAnalyze(t, "catch_expr.llcontext", src)
+	result, errs := parseAndAnalyze(t, "catch_expr.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -433,7 +433,7 @@ def load(flag: bool) -> i64:
 			1
 `
 
-	_, errs := parseAndAnalyze(t, "catch_non_exhaustive.llcontext", src)
+	_, errs := parseAndAnalyze(t, "catch_non_exhaustive.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error for non-exhaustive catch")
 	}
@@ -510,14 +510,14 @@ def read_box() -> int:
     box.value <- 7
     return box.value
 `
-	_, errs := parseAndAnalyze(t, "inline_valid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "inline_valid.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeUndefinedIdentifier(t *testing.T) {
 	src := `def bad() -> int:
     return missing
 `
-	_, errs := parseAndAnalyze(t, "undefined_ident.llcontext", src)
+	_, errs := parseAndAnalyze(t, "undefined_ident.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -531,7 +531,7 @@ func TestAnalyzeWrongCallArity(t *testing.T) {
 def use_alloc() -> int:
     return alloc()
 `
-	_, errs := parseAndAnalyze(t, "wrong_arity.llcontext", src)
+	_, errs := parseAndAnalyze(t, "wrong_arity.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -549,7 +549,7 @@ def bump(value: int) -> int:
 def run() -> int:
 	return apply_identity(bump, 41)
 `
-	result, errs := parseAndAnalyze(t, "higher_order_function_types.llcontext", src)
+	result, errs := parseAndAnalyze(t, "higher_order_function_types.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "apply_identity", "T")
@@ -566,7 +566,7 @@ def bad() -> int:
 	wider: func(Box&?) -> int = only_nonnull
 	return wider(null)
 `
-	_, errs := parseAndAnalyze(t, "function_param_contravariance_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "function_param_contravariance_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -590,7 +590,7 @@ def ok() -> int:
 	narrower: func(Box&) -> int = allow_null
 	return narrower(box)
 `
-	result, errs := parseAndAnalyze(t, "function_param_contravariance_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "function_param_contravariance_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "int")

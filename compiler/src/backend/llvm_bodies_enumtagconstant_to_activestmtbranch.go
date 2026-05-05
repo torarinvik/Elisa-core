@@ -6,13 +6,13 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/Core.h>
 
-void llctxSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
+void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
 */
 import "C"
 
 import (
+	"elisacore/src/ast"
 	"fmt"
-	"llcontext/src/ast"
 )
 
 func (s *functionState) enumTagConstant(tag uint32) (C.LLVMValueRef, error) {

@@ -12,7 +12,7 @@ func TestGenerateLLVMIRLowersMembershipExpr(t *testing.T) {
     return value in [1, 2, 3]
 `
 
-	result := parseAndAnalyzeBackendTest(t, "backend_membership.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_membership.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -36,7 +36,7 @@ def keep(kind: TokenKind) -> bool:
     return kind in ExprStart
 `
 
-	result := parseAndAnalyzeBackendTest(t, "backend_tokenset_membership.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tokenset_membership.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"unsafe"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 type structPaddingWarning struct {

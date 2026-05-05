@@ -32,7 +32,7 @@ def ok(owner: Arena, pool: ThreadPool&) -> i64:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "thread_transfer_frozen_store_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "thread_transfer_frozen_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -55,7 +55,7 @@ def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64:
 	_ = pool_submit1(pool_ref, worker, SharedGate(mu, cv))
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "thread_transfer_runtime_carriers_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "thread_transfer_runtime_carriers_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -71,7 +71,7 @@ def worker(cell: static i32&) -> i64:
 def ok() -> Thread[i64, Joinable]:
 	return spawn1(worker, shared_cell())
 `
-	result, errs := parseAndAnalyze(t, "spawn1_static_ref_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "spawn1_static_ref_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -90,7 +90,7 @@ def bad(pool: ThreadPool&, cell: i32&) -> i64:
 	_ = pool_submit1(pool, worker, cell)
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "thread_transfer_non_static_ref_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_transfer_non_static_ref_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -122,7 +122,7 @@ def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64:
 	_ = pool_submit1(pool_ref, echo, gate)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "thread_transfer_runtime_carrier_result_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "thread_transfer_runtime_carrier_result_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -144,7 +144,7 @@ def ok(pool: ThreadPool&) -> i64:
 	_ = pool_submit1(pool, worker, 0)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "thread_transfer_static_ref_result_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "thread_transfer_static_ref_result_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -166,7 +166,7 @@ def bad(pool: ThreadPool&) -> i64:
 	_ = pool_submit1(pool, worker, 0)
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "thread_transfer_non_static_ref_result_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_transfer_non_static_ref_result_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -201,7 +201,7 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 	box: Box = wrap_node(node)
 	return spawn1(worker, box)
 `
-	_, errs := parseAndAnalyze(t, "spawn1_nested_unpublished_store_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "spawn1_nested_unpublished_store_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -235,7 +235,7 @@ def ok(owner: Arena) -> Thread[i64, Joinable]:
 	_ = frozen
 	return spawn1(worker, box)
 `
-	result, errs := parseAndAnalyze(t, "spawn1_nested_frozen_store_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "spawn1_nested_frozen_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -262,7 +262,7 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 	items: array[Box, 1] = [wrap_node(node)]
 	return spawn1(worker, items[0:1])
 `
-	_, errs := parseAndAnalyze(t, "spawn1_nested_view_unpublished_store_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "spawn1_nested_view_unpublished_store_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -296,7 +296,7 @@ def ok(owner: Arena) -> Thread[i64, Joinable]:
 	_ = frozen
 	return spawn1(worker, items[0:1])
 `
-	result, errs := parseAndAnalyze(t, "spawn1_nested_view_frozen_store_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "spawn1_nested_view_frozen_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -319,7 +319,7 @@ def bad(owner: Arena, pool: ThreadPool&) -> Task[i64, Pending]:
 	_ = frozen
 	return pool_submit1(pool, worker, node)
 `
-	_, errs := parseAndAnalyze(t, "pool_submit_local_region_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "pool_submit_local_region_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -342,7 +342,7 @@ def use(values: dict[cstr[row], i32]) -> dict[cstr[row], i32]:
 	take_runtime(values)
 	return make_runtime()
 `
-	_, errs := parseAndAnalyze(t, "dict_surface_and_bridge_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "dict_surface_and_bridge_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsGenericDictKeyTypes(t *testing.T) {
@@ -353,7 +353,7 @@ func TestAnalyzeAcceptsGenericDictKeyTypes(t *testing.T) {
 def ok(values: dict[i32, i32], keyed: dict[Pair, i32]) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "dict_generic_keys_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "dict_generic_keys_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsGenericDictRuntimeBridgeAndSugar(t *testing.T) {
@@ -368,7 +368,7 @@ def use(values: dict[u32, i32], key: u32) -> dict[u32, i32]:
 	take_runtime(values)
 	return make_runtime()
 `
-	_, errs := parseAndAnalyze(t, "dict_generic_runtime_bridge_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "dict_generic_runtime_bridge_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -386,7 +386,7 @@ func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {
 	destroy scratch
 	value: i32& = new[scratch] 1
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_destroyed_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_destroyed_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -402,7 +402,7 @@ func TestAnalyzeRejectsUsingReferenceInvalidatedByRestore(t *testing.T) {
 	restore scratch from cp
 	return value[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_ref.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_ref.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -419,7 +419,7 @@ func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T)
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -440,7 +440,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_struct_field_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_struct_field_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -461,7 +461,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_struct_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_struct_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -482,7 +482,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_struct_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_struct_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsMoveAsPackedVariantDestructure(t *testing.T) {
@@ -495,7 +495,7 @@ def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
 	_ = rhs
 	return lhs
 `
-	result, errs := parseAndAnalyze(t, "move_as_packed_variant_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "move_as_packed_variant_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left", "Expr")
@@ -510,7 +510,7 @@ def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
 	_ = rhs
 	return value
 `
-	result, errs := parseAndAnalyze(t, "move_as_packed_variant_nested_pattern_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "move_as_packed_variant_nested_pattern_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left_value", "int")
@@ -526,7 +526,7 @@ def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
 		_ = rhs
 		return lhs
 `
-	result, errs := parseAndAnalyze(t, "move_as_packed_variant_inferred_store_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "move_as_packed_variant_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left", "Expr")
@@ -541,7 +541,7 @@ def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
 	_ = rhs
 	return lhs
 `
-	result, errs := parseAndAnalyze(t, "move_as_packed_variant_active_store_param_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "move_as_packed_variant_active_store_param_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left", "Expr")
@@ -556,7 +556,7 @@ def left(view_node: packedview[Expr.Add]) -> Expr:
 	_ = rhs
 	return lhs
 `
-	result, errs := parseAndAnalyze(t, "move_as_packedview_param_inferred_store_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "move_as_packedview_param_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left", "Expr")

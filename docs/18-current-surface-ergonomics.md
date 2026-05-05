@@ -8,7 +8,7 @@ Unlike several of the earlier files here, this is not a forward-looking proposal
 
 Variant `is` tests can destructure named payloads directly. Named payload patterns in `is` tests may be partial, so a condition can inspect or bind only the fields it needs.
 
-```context
+```elisa
 def is_nil_left(node: Lua.Expr) -> bool:
     return node is Lua.Expr.Binary(left: Lua.Expr.Nil)
 
@@ -30,7 +30,7 @@ Current rules:
 
 Optional value types can be used directly in structs and tree payloads, which is preferable to paired `has_*` booleans plus dummy sentinel values.
 
-```context
+```elisa
 struct SMLDatatypeConstructor:
     constructor_span: SMLSpan
     name_id: NameId
@@ -43,14 +43,14 @@ tree SML:
 
 Constructors use the ordinary optional surface: pass the present value when it exists, or `null` when it does not. Consumers should use `if let` to unwrap the optional.
 
-```context
+```elisa
 if let payload_type = constructor.payload_type:
     use_payload(payload_type)
 ```
 
 Optional values can also be passed through a transform only when present. This is the preferred spelling for optional AST payload checks that used to require adapter helpers.
 
-```context
+```elisa
 def check_expr(self: mutable State&, expr: Expr) -> void:
     pass
 
@@ -60,7 +60,7 @@ def check_format_arg(self: mutable State&, precision: Expr?) -> void:
 
 When the present branch needs a real block, use an `if let` condition binding. The binding is available only in the truthy branch, and the bound value is the non-optional payload.
 
-```context
+```elisa
 def check_else_branch(self: mutable State&, else_stmt: Stmt?) -> void:
     if let stmt = else_stmt:
         self.check_stmt(stmt)
@@ -69,7 +69,7 @@ def check_else_branch(self: mutable State&, else_stmt: Stmt?) -> void:
 
 `if let` also works for nullable references. In the then-branch the binding has the non-null reference type, so ordinary field access and member calls are allowed without repeating a null guard.
 
-```context
+```elisa
 struct Node:
     value: i64
 
@@ -81,7 +81,7 @@ def read(node: Node&?) -> i64:
 
 Use `return?` for the common early-return form where a function should return an optional payload if it is present, otherwise continue.
 
-```context
+```elisa
 def first_present(left: Item?, right: Item?) -> Item?:
     return? left
     return? right
@@ -90,14 +90,14 @@ def first_present(left: Item?, right: Item?) -> Item?:
 
 This is equivalent to:
 
-```context
+```elisa
 if let value = left:
     return value
 ```
 
 `return?` can also be used as a guarded early return with an ordinary boolean or pattern condition. Pattern bindings from the condition are available in the returned expression.
 
-```context
+```elisa
 def int_or_zero(node: Expr) -> i64:
     return? value if node is Expr.Int(value)
     return 0
@@ -105,14 +105,14 @@ def int_or_zero(node: Expr) -> i64:
 
 For expression-level branches, use the normal `value if condition else fallback` form. When the condition is a direct pattern test, its bindings are available in the true branch.
 
-```context
+```elisa
 def int_value(node: Expr) -> i64:
     return value if node is Expr.Int(value) else 0
 ```
 
 For non-optional guard returns, use postfix `return if` when the returned value is the important part and the guard is a short condition.
 
-```context
+```elisa
 def fallback_type(type_expr: Type?, depth: usize) -> SymbolId:
     INVALID_SYMBOL_ID return if type_expr == null or depth > 32
     return resolve_type_identity(type_expr)
@@ -120,7 +120,7 @@ def fallback_type(type_expr: Type?, depth: usize) -> SymbolId:
 
 This lowers to an ordinary statement-form guard:
 
-```context
+```elisa
 if type_expr == null or depth > 32:
     return INVALID_SYMBOL_ID
 ```
@@ -129,7 +129,7 @@ Prefer the ordinary `if` form when the condition or returned expression needs mu
 
 When an early optional return depends on several optional inputs, use `return? with`. Each binding unwraps an optional in order; if any binding is absent, execution continues after the statement. The body expression runs only when all bindings are present.
 
-```context
+```elisa
 def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
     return? with lower_value = lower,
                  upper_value = upper,
@@ -142,7 +142,7 @@ This keeps the common all-present case flat while still lowering to ordinary nes
 
 When the present branch performs diagnostics, mutation, or several statements, use multi-binding `if let` instead. Each binding is unwrapped left-to-right, and the branch runs only when every optional is present.
 
-```context
+```elisa
 if let actual_lower = lower_value, actual_upper = upper_value:
     actual_lower > actual_upper then:
         record_diagnostic()
@@ -153,7 +153,7 @@ This lowers to the same ordinary optional-bind ladder you would write by hand. A
 
 Use `match? name = optional:` when the present branch immediately wants to match on the unwrapped value.
 
-```context
+```elisa
 def describe(maybe: Expr?) -> i64:
     match? expr = maybe:
         Expr.Int(value):
@@ -165,7 +165,7 @@ def describe(maybe: Expr?) -> i64:
 
 This lowers to an ordinary optional bind followed by a statement-form `match`:
 
-```context
+```elisa
 if let expr = maybe:
     match expr:
         Expr.Int(value):
@@ -178,7 +178,7 @@ When the unwrapped name is not needed outside the match head, `match? optional:`
 
 If the true branch contains another low-precedence operator, wrap it so the intended branch value is clear:
 
-```context
+```elisa
 return (left == right) if rhs is Value.Int(right) else false
 ```
 
@@ -205,7 +205,7 @@ Current rules:
 
 Use `expect let Pattern = value` when a test or helper wants to assert a shape and bind its payloads. It is the declarative form of the old `if value is Pattern(...): ... else: assert false` pyramid.
 
-```context
+```elisa
 def infix_op(expr: Perl.Expr) -> PerlInfixOp:
     can Abort.Panic:
         expect let Perl.Expr.Infix(op, _, _) = expr
@@ -214,14 +214,14 @@ def infix_op(expr: Perl.Expr) -> PerlInfixOp:
 
 The older `expect value as Pattern` spelling remains valid. The `expect let` spelling is often easier to scan when the important thing is the expected shape first and the source value second.
 
-```context
+```elisa
 expect let Pascal.Decl.TypeDecl(_, PascalType.Type.Name(type_name_id)) = block.decls[0]
 assert type_name_id != NAME_TABLE_INVALID_ID
 ```
 
 Tests can also match whole sequence and tree/struct shapes directly. This keeps common AST assertions declarative without hiding the raw tree constructors.
 
-```context
+```elisa
 expect block.stmts as [
     Pascal.Stmt.Assign(_, _),
     Pascal.Stmt.IfStmt(_, _, _),
@@ -239,7 +239,7 @@ Anonymous brace patterns such as `{stmts: [...]}` mean “match these fields on 
 
 List patterns are exact by default. A final `...` makes the pattern a prefix check:
 
-```context
+```elisa
 expect block.stmts as [
     Pascal.Stmt.StandardRoutine(^PascalStandardRoutineKind.NEW, _),
     Pascal.Stmt.StandardRoutine(^PascalStandardRoutineKind.DISPOSE, _),
@@ -249,7 +249,7 @@ expect block.stmts as [
 
 For checks that do not need payload bindings, ordinary assertion conditions can use the existing `is` pattern test directly:
 
-```context
+```elisa
 assert node is Expr.Int(_)
 ```
 
@@ -268,7 +268,7 @@ Current rules:
 
 String literals coerce contextually into the common string carrier forms, so call sites and local declarations no longer need explicit casts just to satisfy `u8&`, `cstr`, or `sview`.
 
-```context
+```elisa
 extern puts(text: u8&) -> int
 extern take_cstr(text: cstr) -> void
 extern take_view(text: sview) -> void
@@ -294,7 +294,7 @@ Current rules:
 
 Grammar productions can use block-form `match` as a dispatch term when choosing the next parser branch from an expression such as the current token kind.
 
-```context
+```elisa
 grammar PascalTypeGrammar over Token using ParserState:
     type_ref() -> PascalType.Type:
         type_expr = match state.current_token().kind:
@@ -318,7 +318,7 @@ Current rules:
 
 Ordinary source can name static token-kind sets and use them with the membership operator. This keeps parser support helpers from growing long repeated `kind == A or kind == B` chains.
 
-```context
+```elisa
 const enum TokenKind of u32:
     IF
     CASE
@@ -357,7 +357,7 @@ Current rules:
 
 Use `enum map` for small total mappings from one enum-like type to another. This keeps token-to-AST/operator conversion tables declarative while lowering to an ordinary function.
 
-```context
+```elisa
 enum map binary_op: TokenKind -> PascalBinaryOp:
     STAR => MUL
     SLASH => DIV
@@ -370,7 +370,7 @@ enum map binary_op: TokenKind -> PascalBinaryOp:
 
 This is equivalent to a generated function:
 
-```context
+```elisa
 def binary_op(value: TokenKind) -> PascalBinaryOp:
     if value == TokenKind.STAR:
         return PascalBinaryOp.MUL
@@ -393,7 +393,7 @@ Current rules:
 
 Use query predicates for compact scans over iterable data when the loop only computes existence, universality, the first matching item, or a count.
 
-```context
+```elisa
 def has_name(names: darray[NameId], wanted: NameId) -> bool:
     return any name in names where name == wanted
 
@@ -422,7 +422,7 @@ Current rules:
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.
 
-```context
+```elisa
 grammar PascalStmtGrammar over Token using ParserState:
     cursor state
 
@@ -449,7 +449,7 @@ Current rules:
 
 Grammars can name reusable token/sync sets for repeated recovery and list boundaries.
 
-```context
+```elisa
 grammar PascalStmtGrammar over Token using ParserState:
     token:
         SEMICOLON ";"
@@ -476,7 +476,7 @@ grammar PascalStmtGrammar over Token using ParserState:
 
 Generated start sets can also be referenced with `first(production_name)`. Lowering computes the reachable first tokens for that production after grammar normalization, so a tokenset or recovery clause can stay tied to the actual production entry surface instead of manually duplicating its starter tokens.
 
-```context
+```elisa
 grammar PascalStmtGrammar over Token using ParserState:
     token:
         BEGIN "begin"
@@ -496,7 +496,7 @@ grammar PascalStmtGrammar over Token using ParserState:
 
 The same `first(...)` form also works directly in grammar-term position when you want a one-off predictive probe without introducing a named token set first.
 
-```context
+```elisa
 block() -> Pascal.Stmt:
     lookahead(first(statement))
     statements = separated statement() by .END until(StatementOrEnd)
@@ -505,7 +505,7 @@ block() -> Pascal.Stmt:
 
 Shared helper grammars can define common sync fragments once and importing grammars can compose them into local sets or use them directly in lookahead choices.
 
-```context
+```elisa
 grammar PascalListGrammar over Token using ParserState:
     token:
         EOF
@@ -541,7 +541,7 @@ Current rules:
 
 When a reusable token union describes a grammar-domain atom rather than a recovery or synchronization boundary, use `token family`. Token families lower through the same token-set expansion machinery, but make the intent at the declaration site clearer.
 
-```context
+```elisa
 grammar SMLExprGrammar over Token using ParserState:
     token:
         IDENT
@@ -577,7 +577,7 @@ Current rules:
 
 Grammar support declarations can be colocated with the productions that use them. This keeps local aliases, token sets, channels, recovery policies, infix tables, and token literal declarations near the parser surface they support instead of forcing every helper to the top of the grammar block.
 
-```context
+```elisa
 grammar PascalTypeDeclGrammar over Token using ParserState:
     type_decl_name() -> Token:
         name = required(.IDENT, ParseMessageKey.ExpectedTypeName)
@@ -613,7 +613,7 @@ Current rules:
 
 Grammar functions are compile-time grammar-term templates. They let a grammar name a reusable parser shape and pass grammar terms or token-set references into it.
 
-```context
+```elisa
 grammar PascalListGrammar over Token using ParserState:
     token:
         COMMA ","
@@ -636,7 +636,7 @@ grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
 
 The same call can be written as a compile-time grammar pipeline when the first argument is the thing being transformed:
 
-```context
+```elisa
 grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
     args() -> darray[Pascal.Expr]:
         values = expression() |> separated_by(stop: RParenSync)
@@ -645,7 +645,7 @@ grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
 
 Aliases can be parameterized when the call site needs a domain name but still wants to supply local grammar fragments, token sets, or expression values:
 
-```context
+```elisa
 grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
     token:
         COMMA ","
@@ -663,9 +663,9 @@ grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
         return values
 ```
 
-They can also accept expression parameters for the bits that should stay ordinary llcontext code, such as diagnostics and fallback AST construction:
+They can also accept expression parameters for the bits that should stay ordinary Elisa core code, such as diagnostics and fallback AST construction:
 
-```context
+```elisa
 grammar RecoveryGrammar over Token using ParserState:
     grammar type recovered[T](item: grammar -> T, message: expr, stop: tokenset, fallback: expr) -> grammar -> T:
         item recover(message, until(stop), fallback)
@@ -707,7 +707,7 @@ Current rules:
 
 Default values are supported on trailing parameters of ordinary functions and `extern` declarations.
 
-```context
+```elisa
 def sum3(x: i64, y: i64 = 1, z: i64 = 2) -> i64:
     return x + y + z
 
@@ -733,7 +733,7 @@ If a shorthand named argument such as `missing:` has no in-scope value named `mi
 
 Top-level `effect` declarations introduce named effect families directly in source. An effect with members behaves like a permission family with explicit members; `pass` declares a marker effect with no members.
 
-```context
+```elisa
 effect FooEffect:
     pass
 
@@ -764,7 +764,7 @@ Current rules for `effect` and `signal`:
 
 Top-level `effectalias` declarations package an error-set clause and a permission clause into one reusable alias. Signatures use one bracketed `effects[...]` row, so aliases, direct errors, and direct capabilities can live in the same place.
 
-```context
+```elisa
 effectalias FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
 
 def parse() -> i64 effects[FrontendEffects]:
@@ -789,7 +789,7 @@ Current rules:
 
 Function types and other body-less surfaces use declaration syntax such as `effects[Console.Write]`. Function declarations with bodies can usually omit signature permissions because effect inference records them from local grants and effectful operations. Inside a body, effectful use sites still need an explicit local grant.
 
-```context
+```elisa
 def write_once(text: u8&) -> int:
     return puts(text) can Console.Write
 
@@ -822,7 +822,7 @@ Style guidance:
 
 Bundles are the canonical model for named groups of inputs. `implicit` bundles are ambient dependencies, while `explicit` bundles are reusable named argument packs.
 
-```context
+```elisa
 bundle ParseCtx implicit:
     parser: i64
     alloc: i64
@@ -855,7 +855,7 @@ def build(left: i64) -> i64:
 
 Implicit bundle values have two call-site surfaces:
 
-```context
+```elisa
 with ParseCtx(.., alloc = override_alloc):
     return inner()
 
@@ -896,7 +896,7 @@ Explicit bundle call rules:
 
 Brace forms now work consistently across destructuring, literal construction, `is` patterns, `match` patterns, and record updates.
 
-```context
+```elisa
 struct Row:
     left: int
     right: int
@@ -925,7 +925,7 @@ Current rules:
 
 The same brace destructuring grammar also works for store-row values:
 
-```context
+```elisa
 for {name_key, depth} in pending.rows():
     total <- total + name_key + depth
 ```
@@ -934,7 +934,7 @@ for {name_key, depth} in pending.rows():
 
 Exact tree members reuse the same brace-update surface as structs.
 
-```context
+```elisa
 tree Lua:
     common:
         span: i64
@@ -986,7 +986,7 @@ Current rules:
 
 Tree categories can be nested when a branch of the tree wants its own sparse set of exact shapes. A flat payload keeps the shape dense and horizontal:
 
-```context
+```elisa
 tree Lua:
     @role(expr)
     node Expr:
@@ -996,7 +996,7 @@ tree Lua:
 
 Moving the binary operators into a nested category makes the vertical alternatives explicit:
 
-```context
+```elisa
 tree Lua:
     @role(expr)
     node Expr:
@@ -1009,7 +1009,7 @@ tree Lua:
 
 This declares `Lua.Expr.Binary` as a real tree category under `Lua.Expr`. Its exact variants are named `Lua.Expr.Binary.Add`, `Lua.Expr.Binary.Sub`, and so on. Values from the nested category are assignable to the parent category, so code can return a specific sparse shape through the broader dense handle:
 
-```context
+```elisa
 def make_add(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
     return node[alloc = alloc] Lua.Expr.Binary.Add(left: left, right: right)
 
@@ -1027,7 +1027,7 @@ Within a tree family, unqualified sibling names still resolve when they are unam
 
 The current lexer surface is aimed at handwritten frontends that want generated helpers for regular token tables without giving up manual cursor control for the irregular parts of a language.
 
-```context
+```elisa
 lexer PascalLex:
     token_kind PascalTokenKind
     tokens PascalTokenGrammar
@@ -1056,7 +1056,7 @@ Current rules:
 - `keyword_compare helper` is the escape hatch for regular-but-non-exact keyword surfaces such as case-insensitive matching
 - generated token and keyword tables expose assertion helpers so tests can validate the whole table without restating every row:
 
-```context
+```elisa
 grammar PascalTokenGrammar:
     token_lookup token_kind_for_text
     token:
@@ -1074,7 +1074,7 @@ def pascal_keyword_lookup_matches_surface_tokens() -> void:
 
 For lexer-local keyword tables, the generated helper follows the lexer name:
 
-```context
+```elisa
 lexer PascalLex:
     keywords fallback IDENT:
         "begin" -> BEGIN
@@ -1092,7 +1092,7 @@ def pascal_lexer_keyword_table_is_complete() -> void:
 
 The current grammar surface is aimed at handwritten recursive-descent frontends that still want a compact parser DSL for the repetitive parts: tokens, recovery, lists, infix tables, precedence, postfix/suffix, and prefix forms.
 
-```context
+```elisa
 grammar PascalExprGrammar over Token using ParserState:
     cursor state
     alloc alloc
@@ -1183,7 +1183,7 @@ Current header declarations:
 - list comprehensions such as `[value for item in source]` and `[value for item in source if cond]` build a `darray` directly in grammar code, so inline list transforms and filter-style expansions do not need dedicated `maplist` or `flatmaplist` helpers
 - postfix, suffix, and precedence arms can use an indented block form when bindings would otherwise get cramped on one line
 
-```llcontext
+```elisacore
 grammarenv SMLGrammarEnv over SMLToken using SMLParserState:
     cursor state
     alloc alloc
@@ -1220,7 +1220,7 @@ extend grammar PerlExprGrammar:
 
 Inside grammar sequence result positions, `+` is the canonical way to compose list-producing grammar values. Prefer it over tiny helper functions whose only job is to allocate, append the left list, append the right list, and return the merged result.
 
-```context
+```elisa
 const_prefixed_decl_sections() -> darray[Pascal.Decl]:
     node <- seq:
         const_decls = const_decl_section()
@@ -1234,7 +1234,7 @@ This is grammar DSL list composition, not a promise that general-purpose `darray
 
 When branching on parser state, snapshot cursor-dependent values before multiple guarded branches if any branch could consume input. This keeps alternatives from accidentally observing a later cursor position.
 
-```context
+```elisa
 declarations() -> darray[Pascal.Decl]:
     kind = expr(state.current_token().kind)
     const_decls = when(kind == TokenKind.CONST, const_prefixed_decl_sections(), empty[Pascal.Decl])
@@ -1246,7 +1246,7 @@ declarations() -> darray[Pascal.Decl]:
 
 Channel synthesis is useful for parser result shapes that want several tracked fields without repeating the final assembly step. For local helper results, the lightest form is a named tuple:
 
-```context
+```elisa
 grammar PascalAssignStmtGrammar over Token using ParserState:
     cursor state
     channel name_id: NameId
@@ -1267,7 +1267,7 @@ That lowers through the normal grammar try/public wrappers and finishes with a s
 
 Typed grammar expression terms are useful when a grammar wants to transform a parsed token into a richer value inline and keep that element type through a list combinator:
 
-```context
+```elisa
 grammar PascalProgramHeaderGrammar over Token using ParserState:
     cursor state
 
@@ -1285,7 +1285,7 @@ Without the `[NameId]` annotation, lowering only sees an untyped `expr(...)` ter
 
 Singleton terms and list comprehensions cover the next common parser-helper shapes: wrap one parsed value in a list, transform each element from a parsed list, and filter out unwanted items without bouncing out to hand-written allocation helpers.
 
-```context
+```elisa
 grammar PascalFrontend over Token using ParserState:
     cursor state
 
@@ -1315,7 +1315,7 @@ Use `empty` when a branch produces no list items. Use `singleton` when a product
 
 When the result shape is shared more broadly, the same mechanism also works for structs:
 
-```context
+```elisa
 struct BuiltSummary:
     items: darray[i64]
     checksum_total: i64
@@ -1337,7 +1337,7 @@ That lowers through the normal grammar try/public wrappers and finishes with a s
 
 `token:` is the canonical style for token aliases:
 
-```context
+```elisa
 token:
     IDENT
     INTEGER
@@ -1347,7 +1347,7 @@ token:
 
 The older repeated declaration form still parses for compatibility, but the formatter normalizes aliases back into the grouped block form:
 
-```context
+```elisa
 token .IDENT
 token .INTEGER
 token .LPAREN "("
@@ -1358,7 +1358,7 @@ token .RPAREN ")"
 
 Grammar productions are ordinary named parser functions whose bodies contain grammar terms plus normal expressions.
 
-```context
+```elisa
 statement() -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(.SEMICOLON, .END, token(TokenKind.EOF))):
     node <- statement_core()
     return node
@@ -1392,14 +1392,14 @@ Current core terms:
 
 Choices can be written either with `choice(...)` or token/term pipes:
 
-```context
+```elisa
 op = .PLUS | .MINUS | .OR
 atom = choice(.IDENT(token), .INTEGER(token), grouped_expr())
 ```
 
 For larger alternatives, block `choice:` is the preferred readable form:
 
-```context
+```elisa
 node <- choice:
     seq:
         .IDENT(name_token)
@@ -1411,7 +1411,7 @@ node <- choice:
 
 Sequences use block form as the canonical style:
 
-```context
+```elisa
 pair = seq:
     .LPAREN
     value = expression()
@@ -1429,13 +1429,13 @@ Current sequence rules:
 
 Prefix operators have dedicated sugar:
 
-```context
+```elisa
 prefix(.PLUS, .MINUS, .NOT) atom() -> make_unary_expr(alloc, op, operand)
 ```
 
 This desugars to the existing lower-level terms:
 
-```context
+```elisa
 seq:
     op = choice(.PLUS, .MINUS, .NOT)
     operand = atom()
@@ -1448,7 +1448,7 @@ The generated names are currently `op` and `operand`; use those in the result ex
 
 The list-family helpers use readable DSL-style forms as the canonical style.
 
-```context
+```elisa
 statements = separated statement() by .SEMICOLON until(.END, token(TokenKind.EOF))
 names = separated required(.IDENT, ParseMessageKey.ExpectedDeclName) by .COMMA until(.COLON, token(TokenKind.EOF))
 decls = [variable_decl_group()] while token in tokens != [.BEGIN, token(TokenKind.EOF)]
@@ -1472,7 +1472,7 @@ Current list-family terms:
 
 Grammar-scoped infix tables are the preferred surface for reusable expression ladders. They keep the grammar header readable and let productions opt into the shared ladder with a single `infix(Name)` use.
 
-```context
+```elisa
 infix table ExprTable(additive):
     atom = choice(integer(), name(), grouped())
     left multiplicative(left = atom()):
@@ -1500,7 +1500,7 @@ Current infix/precedence rules:
 
 For a standalone non-frontend example, the same surface works well for tiny DSLs and calculator-style grammars:
 
-```context
+```elisa
 grammar Arithmetic over Token using ParserState:
     cursor state
 
@@ -1520,7 +1520,7 @@ grammar Arithmetic over Token using ParserState:
 
 Suffix and postfix are related loop surfaces for expression tails and statement-like continuations:
 
-```context
+```elisa
 condition() -> Pascal.Expr:
     node <- suffix(left = expression()):
         op = .EQ | .NOTEQ right = expression() -> make_binary_expr(alloc, left, op, right)
@@ -1531,11 +1531,11 @@ Use `suffix` when the seed value should be repeatedly transformed by arms. Use `
 
 ### Lowering and inspection
 
-The grammar DSL lowers into ordinary llcontext functions. The compiler exposes inspection modes for debugging generated parser code:
+The grammar DSL lowers into ordinary Elisa core functions. The compiler exposes inspection modes for debugging generated parser code:
 
 ```sh
-go run ./src -emit lower path/to/file.llcontext
-go run ./src -emit grammar-lowered path/to/file.llcontext
+go run ./src -emit lower path/to/file.elisa
+go run ./src -emit grammar-lowered path/to/file.elisa
 ```
 
 Current implementation notes:
@@ -1546,13 +1546,13 @@ Current implementation notes:
 - the grammar header can now decouple token value and token-kind names, for example `grammar SMLExprGrammar over SMLToken using SMLParserState:` with `token_kind SMLTokenKind` and `eof SMLTokenKind.EOF`
 - span algebra `left.span + right.span` resolves through a visible `protocol SpanLike` / `static interface SpanLike` impl when available, and still recognizes legacy helper functions such as `combine_span` or `lua_span_union` for compatibility
 - recovery and required terms depend on the grammar `cursor` declaration to restore or advance parser state correctly
-- tree AST construction remains ordinary llcontext code, so teams can use canonical `node[span = ...] Tree.Node(...)` sugar or drop to low-level `new[alloc] Tree.Node(span: ..., ...)` when exact control is clearer
+- tree AST construction remains ordinary Elisa core code, so teams can use canonical `node[span = ...] Tree.Node(...)` sugar or drop to low-level `new[alloc] Tree.Node(span: ..., ...)` when exact control is clearer
 
 ## Filtered iterable `for`
 
 Iterable loops may now include an inline filter after the source expression.
 
-```context
+```elisa
 for {left, right: value} in items if left != 0:
     total <- total + value
 ```
@@ -1567,7 +1567,7 @@ Current rules:
 
 `do:` introduces an expression-valued block with setup statements followed by a final value expression.
 
-```context
+```elisa
 def keep() -> i64:
     value = do:
         base = 40
@@ -1592,7 +1592,7 @@ Current rules:
 
 Index fallback adds an explicit recovery expression to an index operation.
 
-```context
+```elisa
 def read(xs: darray[int], i: usize) -> int:
     return xs[i] else 0
 ```
@@ -1607,7 +1607,7 @@ Current rules:
 
 The current compiler accepts two explicit defer modes.
 
-```context
+```elisa
 def keep() -> int:
     defer block:
         pass
@@ -1627,7 +1627,7 @@ Current rules:
 
 The current surface includes compact syntax for row-oriented stores and defaulting dictionary helpers.
 
-```context
+```elisa
 store PendingGotoStore:
     name_key: u32
     depth: u32
@@ -1653,7 +1653,7 @@ Current rules:
 
 The current explicit parallel loop surface is pool-scoped rather than implicit.
 
-```context
+```elisa
 def visit(frozen: Expr.Store[Frozen]) -> void effects[Pool.Submit, Pool.WaitAll]:
     pool workers(2u):
         parallel for node in frozen:
@@ -1679,7 +1679,7 @@ Current rules:
 
 Receiver-oriented shorthand is available in both statement and expression form.
 
-```context
+```elisa
 cascade report:
     .inner.value <- value
     .flag <- true
@@ -1700,7 +1700,7 @@ Current rules:
 
 Anonymous function literals now have dedicated surface syntax.
 
-```context
+```elisa
 def build() -> func(i64) -> i64:
     return lambda (value: i64) -> i64:
         return value + 1
@@ -1721,7 +1721,7 @@ Current rules:
 
 `rewrite` is the tree-transform spelling for bottom-up tree reconstruction. It uses the selected traversal root for recursion, while preserving the static type of the source expression and each named child binding.
 
-```context
+```elisa
 def simplify(node: Expr) -> Expr:
     in perm:
         return rewrite node as Expr:
@@ -1743,7 +1743,7 @@ Current rules:
 
 Single-quoted character literals are now part of the accepted surface.
 
-```context
+```elisa
 const NEWLINE: char = '\n'
 const LETTER: char = 'A'
 ```
@@ -1758,13 +1758,13 @@ Current rules:
 
 The concise ordinary cast surface is `as`:
 
-```context
+```elisa
 alloc: mutable Arena& = &owner as mutable Arena&
 ```
 
 Low-level reinterpretation stays deliberately loud:
 
-```context
+```elisa
 raw: void& = bytes.cast[void&]
 words: uintptr& = state_bits.cast[uintptr&]
 field_ref: Field& = node.field.ref[Field&]
@@ -1772,7 +1772,7 @@ field_ref: Field& = node.field.ref[Field&]
 
 This remains separate from postfix value-cast hooks:
 
-```context
+```elisa
 const enum Op of i8:
     Add = 0
     Sub = 1
@@ -1803,7 +1803,7 @@ That distinction matters when reading code: `value as T` is an explicit ordinary
 
 Function and extern declarations may carry checked poststate summaries for ref-visible paths.
 
-```context
+```elisa
 struct ParseJob[state Pending | Ready | Failed]:
     stage: mutable int
 
@@ -1836,7 +1836,7 @@ Current rules:
 
 The compiler may insert a borrow automatically at call sites when the callee expects a compatible ref and the argument is an obvious addressable lvalue.
 
-```context
+```elisa
 struct ScratchArena:
     value: i64
 
@@ -1871,7 +1871,7 @@ Current rules:
 
 Tests and parser/runtime helpers often need a scratch arena plus an active allocation owner:
 
-```context
+```elisa
 region scratch(8192)
 in scratch:
     owner: mutable Arena& = scratch.ref[mutable Arena&]
@@ -1880,7 +1880,7 @@ in scratch:
 
 The compact form is:
 
-```context
+```elisa
 with arena scratch(8192) as owner:
     values: darray[int] = [1, 2, 3]
 ```

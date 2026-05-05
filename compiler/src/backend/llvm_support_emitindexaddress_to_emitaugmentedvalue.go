@@ -9,10 +9,10 @@ package backend
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/semantic"
 )
 
 func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {

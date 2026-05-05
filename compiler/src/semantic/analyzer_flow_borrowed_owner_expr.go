@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func projectBorrowedOwnerRefFieldState(state borrowedOwnerRefState, field string) (borrowedOwnerRefState, bool) {

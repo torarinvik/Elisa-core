@@ -1,8 +1,8 @@
 package semantic_test
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"testing"
 )
 
@@ -69,7 +69,7 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 	slice: view[i32, 0, 2] = buf[0:2]
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_shape_backed.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_shape_backed.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -139,7 +139,7 @@ func TestAnalyzeMarksFreshRegionAllocationsAsExclusive(t *testing.T) {
 	alias: i32& = slot
 	return alias[0]
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_region_alloc_exclusive.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_region_alloc_exclusive.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -233,7 +233,7 @@ def inspect(a: Arena&, values: darray[i32, row]&, other: darray[i32, row]&, text
 	text_slice: cstr = ctx_string_slice(text, 1, 3)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_runtime_view_helpers.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_runtime_view_helpers.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -318,7 +318,7 @@ def inspect(owner: Arena) -> i32:
 		return values[0]
 	return -1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_node_table_values.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_node_table_values.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -385,7 +385,7 @@ def inspect(owner: Arena) -> i32:
 		return values[0]
 	return -1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_node_table_values_hidden_frozen_field_root.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_node_table_values_hidden_frozen_field_root.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -461,7 +461,7 @@ def inspect(text: cstr[row], buf: array[i32, 8]) -> int:
 	alloc_alias: scratch i32& = alloc_a
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_disjoint_views.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_disjoint_views.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 

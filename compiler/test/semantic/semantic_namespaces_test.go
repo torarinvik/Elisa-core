@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 )
 
 func requireNamedType(t *testing.T, result *semantic.Result, name string) semantic.Type {
@@ -33,7 +33,7 @@ def run() -> int:
 	box: math.Box = make_box(7)
 	return read(box)
 `
-	result, errs := parseAndAnalyze(t, "namespace_using_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "namespace_using_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireNamedType(t, result, "math.Box")
@@ -53,7 +53,7 @@ namespace app:
 	def run() -> int:
 		return inc(41)
 `
-	result, errs := parseAndAnalyze(t, "namespace_top_level_using_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "namespace_top_level_using_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "math.inc", "int")
@@ -68,7 +68,7 @@ func TestAnalyzeNamespacesDoNotLeakWithoutUsing(t *testing.T) {
 def run() -> int:
 	return inc(41)
 `
-	_, errs := parseAndAnalyze(t, "namespace_no_using_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "namespace_no_using_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

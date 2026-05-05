@@ -1,8 +1,8 @@
 package semantic
 
 import (
+	"elisacore/src/lexer"
 	"fmt"
-	"llcontext/src/lexer"
 	"sort"
 	"strings"
 )

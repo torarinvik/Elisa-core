@@ -1,6 +1,0 @@
-include "./stores_core.llcontext"
-include "./stores_types.llcontext"
-include "./stores_packed_encoding.llcontext"
-include "./stores_packed_dense.llcontext"
-include "./stores_rows.llcontext"
-include "./stores_packed_sparse.llcontext"

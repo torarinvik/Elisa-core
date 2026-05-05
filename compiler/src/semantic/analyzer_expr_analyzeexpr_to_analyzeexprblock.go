@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	defer func() {

@@ -15,7 +15,7 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugar(t *testing.T) {
         ys: mutable darray[i64] = [3, 4]
         return xs.count + ys.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_darray_builder.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_builder.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -40,7 +40,7 @@ func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
         xr.extend([1, 2, 3])
         return xs.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_darray_extend.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_extend.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -60,7 +60,7 @@ func TestGenerateLLVMIRLowersListComprehensionExpr(t *testing.T) {
         xs = [item + 1 for item in items if item > 0]
         return xs.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_list_comprehension.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_list_comprehension.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -89,7 +89,7 @@ def first_positive(items: darray[i64]) -> i64?:
 def positive_count(items: darray[i64]) -> usize:
     return count item in items where item > 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_query_expr_family.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_query_expr_family.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -111,7 +111,7 @@ func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 		xr.reserve(8)
         return xs.capacity
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_darray_reserve.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_reserve.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -134,7 +134,7 @@ func TestGenerateLLVMIRLowersDArrayClearAndTruncateSugar(t *testing.T) {
         xr.clear()
         return xs.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_darray_clear_truncate.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_clear_truncate.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -157,7 +157,7 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugarAcrossElementTypes(t *testing.T) 
         names.push(7u32)
         return ints.count + names.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_darray_builder_multi_type.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_builder_multi_type.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

@@ -3,7 +3,7 @@ package semantic
 import (
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 type scopedDecl struct {

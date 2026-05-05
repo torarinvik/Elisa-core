@@ -2,7 +2,7 @@ package backend_test
 
 import (
 	"bytes"
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"strings"
 	"testing"
 )
@@ -30,7 +30,7 @@ def read_array_slice_index() -> i32:
 def read_array_view_index() -> i32:
 	return make_array_view()[0]
 `
-	result := parseAndAnalyze(t, "backend_nested_collection_access_returns.llcontext", src)
+	result := parseAndAnalyze(t, "backend_nested_collection_access_returns.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -63,7 +63,7 @@ func TestGenerateLLVMIRLowersArrayLiteralAndInferredLocalViaFixedArrayLowering(t
 	part: view[int] = values[1:3]
 	return part[0]
 `
-	result := parseAndAnalyze(t, "backend_array_literal_inferred_local.llcontext", src)
+	result := parseAndAnalyze(t, "backend_array_literal_inferred_local.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -93,7 +93,7 @@ def head_codepoint(text: cstr[row]) -> char:
 	view: StringView = text[1:3]
     return view[0]
 `
-	result := parseAndAnalyze(t, "backend_string_slice_syntax.llcontext", src)
+	result := parseAndAnalyze(t, "backend_string_slice_syntax.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -131,7 +131,7 @@ def copy_full(text: cstr[row]) -> cstr:
 def copy_unknown(text: cstr[row], start: i64, end: i64) -> cstr:
 	return ctx_string_slice(text, start, end)
 `
-	result := parseAndAnalyze(t, "backend_exact_string_slice_materialize.llcontext", src)
+	result := parseAndAnalyze(t, "backend_exact_string_slice_materialize.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -191,7 +191,7 @@ def choose() -> i32:
 	static else:
         return 9
 `
-	result := parseAndAnalyze(t, "backend_static_if.llcontext", src)
+	result := parseAndAnalyze(t, "backend_static_if.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -224,7 +224,7 @@ func TestGenerateLLVMIRLowersForLoopRanges(t *testing.T) {
 		total <- total + k
 	return total
 `
-	result := parseAndAnalyze(t, "backend_for_loop_ranges.llcontext", src)
+	result := parseAndAnalyze(t, "backend_for_loop_ranges.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -264,7 +264,7 @@ def sum_pairs(items: array[Pair, 2]) -> int:
 		total <- total + left + right
 	return total
 `
-	result := parseAndAnalyze(t, "backend_iterable_for_destructure.llcontext", src)
+	result := parseAndAnalyze(t, "backend_iterable_for_destructure.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -295,7 +295,7 @@ def bump() -> int:
 		item.value <- item.value + 1
 	return items[0].value + items[1].value
 `
-	result := parseAndAnalyze(t, "backend_iterable_for_mutable_ref.llcontext", src)
+	result := parseAndAnalyze(t, "backend_iterable_for_mutable_ref.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -325,7 +325,7 @@ func TestGenerateLLVMIRLowersIterableForLoopOverDynamicString(t *testing.T) {
 		total <- total + ch
 	return total
 `
-	result := parseAndAnalyze(t, "backend_iterable_for_cstr.llcontext", src)
+	result := parseAndAnalyze(t, "backend_iterable_for_cstr.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -355,7 +355,7 @@ func TestGenerateLLVMIRLowersIterableForLoopOverChunksExactView(t *testing.T) {
 		total <- total + chunk[0] + chunk[1]
 	return total
 `
-	result := parseAndAnalyze(t, "backend_iterable_for_chunks_exact.llcontext", src)
+	result := parseAndAnalyze(t, "backend_iterable_for_chunks_exact.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -390,7 +390,7 @@ func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 	_ = left
 	_ = first
 `
-	result := parseAndAnalyze(t, "backend_proof_carrying_view_helpers.llcontext", src)
+	result := parseAndAnalyze(t, "backend_proof_carrying_view_helpers.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -419,7 +419,7 @@ def run(values: darray[i64, 4], bias: i64) -> i64:
 	base: dview[i64] = values[0:4]
 	return reduce_sum(readonly(base), add_bias, bias)
 `
-	result := parseAndAnalyze(t, "backend_reduce_sum_helper.llcontext", src)
+	result := parseAndAnalyze(t, "backend_reduce_sum_helper.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 const staticInterfaceSelfName = "Self"

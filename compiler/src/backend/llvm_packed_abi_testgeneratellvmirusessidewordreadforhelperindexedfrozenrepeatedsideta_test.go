@@ -31,7 +31,7 @@ def fold_side_common_frozen_helper_indexed_direct() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return wrapped.items[0u].node.span + wrapped.items[0u].node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_side_field_cache_direct_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_side_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -68,7 +68,7 @@ def fold_common_frozen_wrapped_reassign() -> int:
 	_ = frozen
 	return first + boxed.node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_field_cache_reassign_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_field_cache_reassign_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -109,7 +109,7 @@ def fold_common_frozen_helper_indexed_reassign() -> int:
 	_ = frozen
 	return first + wrapped.items[0u].node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_field_cache_reassign_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_field_cache_reassign_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -149,7 +149,7 @@ def fold_common_frozen_nested_helper_indexed_direct() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return wrapped.meta.items[0u].node.span + wrapped.meta.items[0u].node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_helper_indexed_field_cache_direct_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_helper_indexed_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -189,7 +189,7 @@ def fold_common_frozen_nested_wild_helper_indexed_direct() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return wrapped.meta.items[0u].node.span + wrapped.meta.items[0u].node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_helper_indexed_field_cache_direct_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_helper_indexed_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -233,7 +233,7 @@ def fold_common_frozen_nested_wild_helper_indexed_reassign() -> int:
 	_ = frozen
 	return first + wrapped.meta.items[0u].node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_helper_indexed_field_cache_reassign_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_helper_indexed_field_cache_reassign_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -277,7 +277,7 @@ def fold_common_frozen_nested_helper_indexed_reassign() -> int:
 	_ = frozen
 	return first + wrapped.meta.items[0u].node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_helper_indexed_field_cache_reassign_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_helper_indexed_field_cache_reassign_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -311,7 +311,7 @@ def read(owner: Arena) -> int:
 	again: Expr = frozen[key]
 	return again.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_dense_node_key_abi.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_dense_node_key_abi.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -353,7 +353,7 @@ def read(owner: Arena) -> int:
 	_ = again
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_dense_node_key_hidden_field_root_abi.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_dense_node_key_hidden_field_root_abi.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -384,7 +384,7 @@ def fold_common_frozen_mixed() -> int:
 	in frozen:
 		return node.span + node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_field_cache_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_field_cache_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -421,7 +421,7 @@ def fold_child_common_frozen_mixed() -> int:
 		Expr.Hold(value: _):
 			return 1
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_matched_payload_field_cache_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_matched_payload_field_cache_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -471,7 +471,7 @@ def fold_helper_indexed_child_common_frozen_mixed() -> int:
 		Expr.Hold(value: _):
 			return 1
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_matched_payload_field_cache_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_matched_payload_field_cache_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -524,7 +524,7 @@ def fold_nested_helper_indexed_child_common_frozen_mixed() -> int:
 		Expr.Hold(value: _):
 			return 1
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_rebased_helper_indexed_matched_payload_field_cache_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_rebased_helper_indexed_matched_payload_field_cache_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)

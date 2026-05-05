@@ -8,13 +8,13 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	prev, hadPrev := os.LookupEnv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
-	_ = os.Setenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS", "1")
+	prev, hadPrev := os.LookupEnv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
+	_ = os.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "1")
 	exitCode := m.Run()
 	if hadPrev {
-		_ = os.Setenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS", prev)
+		_ = os.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", prev)
 	} else {
-		_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+		_ = os.Unsetenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
 	}
 	os.Exit(exitCode)
 }

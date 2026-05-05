@@ -1,5 +1,0 @@
-include "../../Code/llcontext_std/contextlang_runtime.llcontext"
-
-def local_view(src: any u8&) -> i64:
-    text: sview = sview(src, 0, 1)
-    return text.len

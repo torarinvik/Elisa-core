@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {

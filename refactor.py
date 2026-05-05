@@ -2,7 +2,7 @@ import re
 
 import sys
 
-with open("Code/llcontext_atpl/src/atpl_frontend.llcontext", "r") as f:
+with open("Code/elisacore_atpl/src/atpl_frontend.elisa", "r") as f:
     text = f.read()
 
 def repl(pattern, replacement):

@@ -6,7 +6,7 @@ import (
 )
 
 func TestAnalyzeTreeExactRecordUpdateRequiresOwner(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_exact_update_owner_required.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_exact_update_owner_required.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -23,7 +23,7 @@ def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lu
 	}
 }
 func TestAnalyzeTreeRewriteDefaultExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_rewrite_default_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_rewrite_default_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -41,7 +41,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 `)
 }
 func TestAnalyzeTreeRewriteImplicitDefaultExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_rewrite_implicit_default_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_rewrite_implicit_default_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -57,7 +57,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 `)
 }
 func TestAnalyzeSequenceRewriteExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "sequence_rewrite_surface.llcontext", `def keep_non_zero(owner: mutable Arena&, items: dview[u32]) -> darray[u32]:
+	analyzeTreeTestSource(t, "sequence_rewrite_surface.elisa", `def keep_non_zero(owner: mutable Arena&, items: dview[u32]) -> darray[u32]:
 	can Abort.Panic, Memory.Allocate:
 		in owner:
 			return rewrite items as sequence[u32]:
@@ -66,7 +66,7 @@ func TestAnalyzeSequenceRewriteExpr(t *testing.T) {
 `)
 }
 func TestAnalyzeTreeTargetSequenceRewriteExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "sequence_rewrite_tree_target_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "sequence_rewrite_tree_target_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -83,7 +83,7 @@ def keep_positive_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> d
 `)
 }
 func TestAnalyzeSequenceRewriteEmitAllExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "sequence_rewrite_emit_all_surface.llcontext", `def concat(owner: mutable Arena&, left: dview[u32], right: dview[u32]) -> darray[u32]:
+	analyzeTreeTestSource(t, "sequence_rewrite_emit_all_surface.elisa", `def concat(owner: mutable Arena&, left: dview[u32], right: dview[u32]) -> darray[u32]:
 	can Abort.Panic, Memory.Allocate:
 		in owner:
 			segments: darray[dview[u32]] = [left, right]
@@ -93,7 +93,7 @@ func TestAnalyzeSequenceRewriteEmitAllExpr(t *testing.T) {
 `)
 }
 func TestAnalyzeTreeRewriteRemainsExhaustiveWithoutImplicitDefault(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_requires_exhaustive.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_requires_exhaustive.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -113,7 +113,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 	}
 }
 func TestAnalyzeTreeRewriteDefaultRequiresExactArm(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_default_requires_exact.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_default_requires_exact.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -133,7 +133,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 	}
 }
 func TestAnalyzeTreeVariantPayloadKindShadowsSyntheticKind(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_variant_payload_kind_shadow.llcontext", `tree Syntax:
+	analyzeTreeTestSource(t, "tree_variant_payload_kind_shadow.elisa", `tree Syntax:
 	node Form:
 		Atom(kind: bool)
 
@@ -144,7 +144,7 @@ def payload_kind(form: Syntax.Form) -> bool:
 `)
 }
 func TestAnalyzeRejectsChildrenOnMixedStructuralItemTypes(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_mixed.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_mixed.elisa", `tree Lua:
 	@role(stmt)
 	node Stmt:
 		IfStmt(condition: Lua.Expr, body: Lua.Block)
@@ -166,7 +166,7 @@ def visit(stmt: Lua.Stmt) -> i64:
 	}
 }
 func TestAnalyzeRejectsChildrenOverrideIncompatibleType(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_override_incompatible.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_override_incompatible.elisa", `tree Lua:
 	@role(stmt)
 	node Stmt:
 		IfStmt(condition: Lua.Expr, body: Lua.Block)
@@ -188,7 +188,7 @@ def visit(stmt: Lua.Stmt) -> i64:
 	}
 }
 func TestAnalyzeRejectsTreeIfPatternStoreClauses(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_if_pattern_store_reject.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_if_pattern_store_reject.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)

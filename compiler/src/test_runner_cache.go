@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 )
 
 type testRunnerCacheArtifact struct {
@@ -23,11 +23,11 @@ type testRunnerCacheArtifact struct {
 }
 
 func testRunnerCacheEnabled() bool {
-	return strings.TrimSpace(os.Getenv("LLCONTEXT_TEST_CACHE")) != "0"
+	return strings.TrimSpace(os.Getenv("ELISACORE_TEST_CACHE")) != "0"
 }
 
 func testRunnerCacheDebugEnabled() bool {
-	return strings.TrimSpace(os.Getenv("LLCONTEXT_TEST_CACHE_DEBUG")) != ""
+	return strings.TrimSpace(os.Getenv("ELISACORE_TEST_CACHE_DEBUG")) != ""
 }
 
 func debugTestRunnerCache(stderr io.Writer, status string, artifact testRunnerCacheArtifact) {
@@ -67,7 +67,7 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 	if _, err := os.Stat(artifact.executable); err == nil {
 		return nil
 	}
-	stagingDir, err := os.MkdirTemp(filepath.Dir(artifact.dir), ".llcontext-test-runner-stage-*")
+	stagingDir, err := os.MkdirTemp(filepath.Dir(artifact.dir), ".elisa-test-runner-stage-*")
 	if err != nil {
 		return err
 	}
@@ -117,12 +117,12 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 			return testRunnerCacheArtifact{}, err
 		}
 	}
-	if runtimePath, err := defaultLLContextRuntimeSupportPath(); err == nil {
+	if runtimePath, err := defaultElisaCoreRuntimeSupportPath(); err == nil {
 		runtimeSource, readErr := readSourceWithIncludes(runtimePath, map[string]bool{})
 		if readErr != nil {
 			return testRunnerCacheArtifact{}, readErr
 		}
-		testRunnerCacheWriteBytes(hash, "llcontext-runtime-support", runtimeSource)
+		testRunnerCacheWriteBytes(hash, "elisacore-runtime-support", runtimeSource)
 	} else {
 		return testRunnerCacheArtifact{}, err
 	}
@@ -152,9 +152,9 @@ func compilerSourceRootForCache() (string, error) {
 
 func testRunnerCacheRoot() (string, error) {
 	if base, err := os.UserCacheDir(); err == nil && base != "" {
-		return filepath.Join(base, "llcontext", "test_runners"), nil
+		return filepath.Join(base, "elisacore", "test_runners"), nil
 	}
-	return filepath.Join(os.TempDir(), "llcontext-test-runner-cache"), nil
+	return filepath.Join(os.TempDir(), "elisacore-test-runner-cache"), nil
 }
 
 func copyExecutableFile(src string, dst string) error {

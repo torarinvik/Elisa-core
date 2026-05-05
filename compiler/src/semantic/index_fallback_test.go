@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestAnalyzeIndexFallbackContextualizesFallback(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "index_fallback_contextual.llcontext", `def read(xs: darray[usize]) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "index_fallback_contextual.elisa", `def read(xs: darray[usize]) -> usize:
 	return xs[0] else 0
 `)
 	sym, ok := result.GlobalScope.Lookup("read")
@@ -36,7 +36,7 @@ func TestAnalyzeIndexFallbackContextualizesFallback(t *testing.T) {
 }
 
 func TestAnalyzeIndexFallbackRejectsTypeMismatch(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "index_fallback_type_mismatch.llcontext", `def read(xs: darray[int], i: usize) -> int:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "index_fallback_type_mismatch.elisa", `def read(xs: darray[int], i: usize) -> int:
 	return xs[i] else false
 `)
 	all := strings.Join(result.Errors(), "\n")

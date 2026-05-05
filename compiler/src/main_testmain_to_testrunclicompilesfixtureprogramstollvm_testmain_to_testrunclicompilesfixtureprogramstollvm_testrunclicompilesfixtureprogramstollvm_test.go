@@ -16,7 +16,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 	}{
 		{
 			name: "pointer_alloc",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.elisa"),
 			checks: []string{
 				"%ErrUnion__MemoryError__heap_Node = type { i32, ptr }",
 				"%ErrUnion__MemoryError__int = type { i32, i64 }",
@@ -31,7 +31,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "shape_ops",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "shape_ops.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "shape_ops.elisa"),
 			checks: []string{
 				"%ErrUnion__ShapeOpError__",
 				"%DynArray__i32 = type { ptr, i64, i64 }",
@@ -43,7 +43,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "variadic_stdio",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "variadic_stdio.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "variadic_stdio.elisa"),
 			checks: []string{
 				"%ErrUnion__FormatError__int = type { i32, i64 }",
 				"declare i64 @snprintf(ptr, i64, ptr, ...)",
@@ -56,7 +56,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "allocator_ownership",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "allocator_ownership.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "allocator_ownership.elisa"),
 			checks: []string{
 				"%HeapPairNode = type { %FuzzPair, ptr }",
 				"declare ptr @alloc_heap_pair_node()",
@@ -72,7 +72,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "pointer_casts",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "pointer_casts.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "pointer_casts.elisa"),
 			checks: []string{
 				"define i64 @ptr_bits(ptr",
 				"ptrtoint ptr",
@@ -84,7 +84,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "stack_pointers",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "stack_pointers.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "stack_pointers.elisa"),
 			checks: []string{
 				"%ErrUnion__StackError__int = type { i32, i64 }",
 				"%ScratchSlot = type { i64 }",
@@ -95,7 +95,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "nested_access",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "nested_access.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "nested_access.elisa"),
 			checks: []string{
 				"declare %DynArray__i32 @make_array()",
 				"declare %DynArrayView @make_array_view()",
@@ -110,7 +110,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "typed_list_views",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "typed_list_views.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "typed_list_views.elisa"),
 			checks: []string{
 				"define i32 @head_of_middle(%DynArray__i32",
 				"darrayslice.view.len.out = sub i64",
@@ -124,7 +124,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "string_view_ops",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "string_view_ops.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "string_view_ops.elisa"),
 			checks: []string{
 				"%StringView = type { ptr, i64 }",
 				"declare %StringView @ctx_string_view(ptr, i64, i64)",
@@ -137,7 +137,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "export_vec2i",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.elisa"),
 			checks: []string{
 				"define %Vec__i32 @vec_add_i32(%Vec__i32",
 				"define %Vec__i32 @keep_left__Vec_i32(%Vec__i32",
@@ -147,7 +147,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "dict_runtime",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "dict_runtime.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "dict_runtime.elisa"),
 			checks: []string{
 				"%DynDict__cstr_key_shape__i32 = type { ptr, i64, i64, i64, ptr }",
 				"%ErrUnion__RuntimeError__i32 = type { i32, ptr }",
@@ -165,7 +165,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "frontend_lexer",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa"),
 			checks: []string{
 				"%FrontendPos = type { i64, i64, i64 }",
 				"%FrontendToken = type { i32, %FrontendPos, %StringView, %StringView }",
@@ -181,7 +181,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "compiler_parallel_fixture",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.elisa"),
 			checks: []string{
 				"%Expr = type { i32, i64, [1 x i64] }",
 				"%FrozenExprGraph = type { %Expr__Store, i32 }",
@@ -200,7 +200,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "frontend_stress",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.elisa"),
 			checks: []string{
 				"%SourceSpan = type { i64, i64 }",
 				"%Token = type { i32, %SourceSpan, ptr }",
@@ -220,7 +220,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "recursive_enum",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "recursive_enum.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "recursive_enum.elisa"),
 			checks: []string{
 				"%Expr = type { i32, [2 x i64] }",
 				"define i64 @eval(ptr",
@@ -231,7 +231,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "regular_enum_values",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "regular_enum_values.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "regular_enum_values.elisa"),
 			checks: []string{
 				"%Small = type { i32, [2 x i64] }",
 				"define %Small @make_node(i64",
@@ -242,7 +242,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "region_checkpoints",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "region_checkpoints.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "region_checkpoints.elisa"),
 			checks: []string{
 				"%Arena = type { ptr, ptr, i64 }",
 				"%ArenaMark = type { ptr, i64 }",
@@ -256,7 +256,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "region_ref_types",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "region_ref_types.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "region_ref_types.elisa"),
 			checks: []string{
 				"%RegionNode = type { ptr, i32 }",
 				"define i32 @region_ref_sum(i32 ",
@@ -266,7 +266,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "packed_enum_common",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "packed_enum_common.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "packed_enum_common.elisa"),
 			checks: []string{
 				"%Expr = type { i32, i64, [1 x i64] }",
 				"%Token = type { i32, i64 }",
@@ -278,7 +278,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "ref_qualifier_generics",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "ref_qualifier_generics.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "ref_qualifier_generics.elisa"),
 			checks: []string{
 				"%Handle__heap__anon = type { ptr }",
 				"define %Handle__heap__anon @keep_handle__heap__anon(%Handle__heap__anon",
@@ -290,7 +290,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "json_parser",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa"),
 			checks: []string{
 				"%JsonCursor = type { ptr, i64, i64 }",
 				"%JsonLexemeResult = type { i64, i64, i64 }",
@@ -451,7 +451,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "grammar_surface_precedence",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_surface_precedence.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_surface_precedence.elisa"),
 			checks: []string{
 				"%Token = type { i32 }",
 				"define %Token @grammar_surface_parse_expr(ptr",
@@ -462,7 +462,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "fact_core_rules",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa"),
 			checks: []string{
 				"%FactPlayer__Alive = type { i64 }",
 				"define i64 @fact_core_rules(",
@@ -471,7 +471,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "fact_interface_rules",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa"),
 			checks: []string{
 				"define i64 @__impl__FactBuilder__semantic.StructType_FactBuilderTag__state()",
 				"define i64 @fact_interface_rules__FactBuilderTag(",
@@ -480,7 +480,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "grammar_uses_shared_helpers",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_uses_shared_helpers.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_uses_shared_helpers.elisa"),
 			checks: []string{
 				"%Token = type { i32 }",
 				"define %Token @grammar_uses_parse_statement(ptr",
@@ -492,7 +492,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "string_escapes",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "string_escapes.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "string_escapes.elisa"),
 			checks: []string{
 				"define ptr @newline_text()",
 				"define ptr @quoted_text()",
@@ -501,7 +501,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "char_literals",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "char_literals.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "char_literals.elisa"),
 			checks: []string{
 				"define i64 @char_code()",
 				"define i64 @escaped_char_code()",
@@ -511,7 +511,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "value_optionals",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "value_optionals.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "value_optionals.elisa"),
 			checks: []string{
 				"%Box = type { i64 }",
 				"%Optional__int = type { i1, i64 }",
@@ -527,7 +527,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 		},
 		{
 			name: "concurrency_explicit",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "concurrency_explicit.llcontext"),
+			path: filepath.Join(repoRoot, "Code", "test_programs", "concurrency_explicit.elisa"),
 			checks: []string{
 				"%Thread__i64__Joinable = type { i64, ptr }",
 				"%Task__i64__Pending = type { i64, ptr }",

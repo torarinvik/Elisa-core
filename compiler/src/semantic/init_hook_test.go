@@ -3,11 +3,11 @@ package semantic
 import (
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestAnalyzeInitHookOverloadsForParenStructConstructors(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "init_hook_overloads.llcontext", `struct Span:
+	result := analyzeFunctionAnalysisTestSource(t, "init_hook_overloads.elisa", `struct Span:
     start: i64
     finish: i64
 
@@ -75,7 +75,7 @@ def build(start: i64) -> i64:
 }
 
 func TestAnalyzeTypeNamedConstructorDeclSugar(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "init_hook_named_constructor.llcontext", `struct Span:
+	result := analyzeFunctionAnalysisTestSource(t, "init_hook_named_constructor.elisa", `struct Span:
     start: i64
     finish: i64
 

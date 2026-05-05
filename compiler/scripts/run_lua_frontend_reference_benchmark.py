@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Benchmark llcontext Lua parse throughput against the C reference parser.
+"""Benchmark elisacore Lua parse throughput against the C reference parser.
 
-This script only compares parse throughput because the llcontext-only modes
+This script only compares parse throughput because the elisacore-only modes
 `env`, `closure`, `label`, and `analysis` do not have direct C-reference
  equivalents.
 """
@@ -62,7 +62,7 @@ def load_corpus_manifest(repo_root: Path, manifest_path: Path | None) -> list[tu
     return inputs
 
 
-def build_llcontext_harness(compiler_dir: Path, frontend_path: Path, harness_path: Path, out_dir: Path, opt_level: str) -> Path:
+def build_elisacore_harness(compiler_dir: Path, frontend_path: Path, harness_path: Path, out_dir: Path, opt_level: str) -> Path:
     header_path = out_dir / "lua_frontend.h"
     object_path = out_dir / "lua_frontend.o"
     exe_path = out_dir / "lua_frontend_bench"
@@ -158,7 +158,7 @@ def write_json_report(
     parse_iterations: int,
     repeats: int,
     skip_real_corpus: bool,
-    llcontext_bench: Path,
+    elisacore_bench: Path,
     reference_bench: Path,
     synthetic_input: dict[str, object],
     inputs: list[tuple[str, Path]],
@@ -178,7 +178,7 @@ def write_json_report(
         "parse_iterations": parse_iterations,
         "repeats": repeats,
         "skip_real_corpus": skip_real_corpus,
-        "llcontext_bench": str(llcontext_bench),
+        "elisacore_bench": str(elisacore_bench),
         "reference_bench": str(reference_bench),
         "synthetic_input": synthetic_input,
         "inputs": [{"label": label, "path": str(path)} for label, path in inputs],
@@ -202,22 +202,22 @@ def main() -> int:
 
     repo_root = Path(__file__).resolve().parents[2]
     compiler_dir = repo_root / "compiler"
-    frontend_path = repo_root / "Code" / "llcontext_lua" / "src" / "lua_frontend.llcontext"
-    llcontext_harness = repo_root / "Code" / "benchmarks" / "lua_frontend_bench.c"
+    frontend_path = repo_root / "Code" / "elisacore_lua" / "src" / "lua_frontend.elisa"
+    elisacore_harness = repo_root / "Code" / "benchmarks" / "lua_frontend_bench.c"
     reference_harness = repo_root / "Code" / "benchmarks" / "lua_reference_bench.c"
     manifest_path = Path(args.corpus_manifest) if args.corpus_manifest else repo_root / "Code" / "benchmarks" / "lua_frontend_corpus_manifest.txt"
 
     temp_root_obj = tempfile.TemporaryDirectory(prefix="lua_frontend_reference_bench.")
     temp_root = Path(temp_root_obj.name)
     input_path = temp_root / "synthetic_bench.lua"
-    ll_out = temp_root / "llcontext"
+    ll_out = temp_root / "elisacore"
     ref_out = temp_root / "reference"
     ll_out.mkdir(parents=True, exist_ok=True)
     ref_out.mkdir(parents=True, exist_ok=True)
 
     try:
         synthetic_input = build_synthetic_lua_benchmark_input(input_path, args.stmt_count)
-        llcontext_bench = build_llcontext_harness(compiler_dir, frontend_path, llcontext_harness, ll_out, args.opt_level)
+        elisacore_bench = build_elisacore_harness(compiler_dir, frontend_path, elisacore_harness, ll_out, args.opt_level)
         reference_bench = build_reference_harness(reference_harness, ref_out, args.opt_level)
 
         inputs: list[tuple[str, Path]] = [("synthetic", input_path)]
@@ -246,17 +246,17 @@ def main() -> int:
         for input_label, bench_input in inputs:
             try:
                 ll_values = run_suite(
-                    llcontext_bench,
+                    elisacore_bench,
                     bench_input,
                     args.parse_iterations,
                     args.repeats,
-                    f"LLCONTEXT_{input_label}_parse".upper(),
+                    f"ELISACORE_{input_label}_parse".upper(),
                 )
             except RuntimeError as exc:
                 if input_label == "synthetic":
                     raise
-                print(f"SKIP label=llcontext_{input_label}_parse reason={exc}")
-                skipped.append({"variant": "llcontext", "input": input_label, "path": str(bench_input), "reason": str(exc)})
+                print(f"SKIP label=elisacore_{input_label}_parse reason={exc}")
+                skipped.append({"variant": "elisacore", "input": input_label, "path": str(bench_input), "reason": str(exc)})
                 continue
 
             try:
@@ -274,7 +274,7 @@ def main() -> int:
                 skipped.append({"variant": "reference", "input": input_label, "path": str(bench_input), "reason": str(exc)})
                 continue
 
-            ll_summary = summarize_variant(f"llcontext_{input_label}_parse", ll_values)
+            ll_summary = summarize_variant(f"elisacore_{input_label}_parse", ll_values)
             ref_summary = summarize_variant(f"reference_{input_label}_parse", ref_values)
             ratio = ratio_percent(ll_summary["avg_MiB_s"], ref_summary["avg_MiB_s"])
             print(f"SUMMARY label={input_label}_parse_ratio ll_over_reference={ratio:.3f}")
@@ -291,7 +291,7 @@ def main() -> int:
                     "mode": "parse",
                     "iterations": args.parse_iterations,
                     "repeats": args.repeats,
-                    "llcontext": {"values_MiB_s": ll_values, **ll_summary},
+                    "elisacore": {"values_MiB_s": ll_values, **ll_summary},
                     "reference": {"values_MiB_s": ref_values, **ref_summary},
                     "ll_over_reference": ratio,
                 }
@@ -305,16 +305,16 @@ def main() -> int:
             aggregate = {
                 "mode": "parse",
                 "common_input_count": len(ll_averages),
-                "llcontext_avg_MiB_s": ll_avg,
+                "elisacore_avg_MiB_s": ll_avg,
                 "reference_avg_MiB_s": ref_avg,
                 "ll_over_reference": ratio_percent(ll_avg, ref_avg),
-                "llcontext_min_MiB_s": min(ll_averages),
-                "llcontext_max_MiB_s": max(ll_averages),
+                "elisacore_min_MiB_s": min(ll_averages),
+                "elisacore_max_MiB_s": max(ll_averages),
                 "reference_min_MiB_s": min(ref_averages),
                 "reference_max_MiB_s": max(ref_averages),
             }
             print(f"SUMMARY common_inputs={aggregate['common_input_count']}")
-            print(f"SUMMARY aggregate_llcontext_parse_avg_MiB_s={ll_avg:.2f}")
+            print(f"SUMMARY aggregate_elisacore_parse_avg_MiB_s={ll_avg:.2f}")
             print(f"SUMMARY aggregate_reference_parse_avg_MiB_s={ref_avg:.2f}")
             print(f"SUMMARY aggregate_ll_over_reference={aggregate['ll_over_reference']:.3f}")
         else:
@@ -327,16 +327,16 @@ def main() -> int:
             real_corpus_aggregate = {
                 "mode": "parse",
                 "common_input_count": len(real_ll_averages),
-                "llcontext_avg_MiB_s": real_ll_avg,
+                "elisacore_avg_MiB_s": real_ll_avg,
                 "reference_avg_MiB_s": real_ref_avg,
                 "ll_over_reference": ratio_percent(real_ll_avg, real_ref_avg),
-                "llcontext_min_MiB_s": min(real_ll_averages),
-                "llcontext_max_MiB_s": max(real_ll_averages),
+                "elisacore_min_MiB_s": min(real_ll_averages),
+                "elisacore_max_MiB_s": max(real_ll_averages),
                 "reference_min_MiB_s": min(real_ref_averages),
                 "reference_max_MiB_s": max(real_ref_averages),
             }
             print(f"SUMMARY real_corpus_common_inputs={real_corpus_aggregate['common_input_count']}")
-            print(f"SUMMARY real_corpus_llcontext_parse_avg_MiB_s={real_ll_avg:.2f}")
+            print(f"SUMMARY real_corpus_elisacore_parse_avg_MiB_s={real_ll_avg:.2f}")
             print(f"SUMMARY real_corpus_reference_parse_avg_MiB_s={real_ref_avg:.2f}")
             print(f"SUMMARY real_corpus_ll_over_reference={real_corpus_aggregate['ll_over_reference']:.3f}")
         else:
@@ -355,7 +355,7 @@ def main() -> int:
                 parse_iterations=args.parse_iterations,
                 repeats=args.repeats,
                 skip_real_corpus=args.skip_real_corpus,
-                llcontext_bench=llcontext_bench,
+                elisacore_bench=elisacore_bench,
                 reference_bench=reference_bench,
                 synthetic_input=synthetic_input,
                 inputs=inputs,

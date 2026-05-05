@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func exactTypeKey(t Type) string {

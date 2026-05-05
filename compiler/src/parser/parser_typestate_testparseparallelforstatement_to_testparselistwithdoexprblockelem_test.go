@@ -1,9 +1,9 @@
 package parser
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/unparse"
 	"strings"
 	"testing"
 )

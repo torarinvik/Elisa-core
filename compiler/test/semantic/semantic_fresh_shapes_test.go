@@ -11,7 +11,7 @@ func TestAnalyzeShapeChangingResizeReturnsFreshShape(t *testing.T) {
 def bad(array: darray[i32, row]) -> darray[i32, row]:
 		return resize(array, 8)
 `
-	_, errs := parseAndAnalyze(t, "resize_returns_fresh_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "resize_returns_fresh_shape.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -26,7 +26,7 @@ func TestAnalyzeShapeChangingPushReturnsFreshShape(t *testing.T) {
 def bad(array: darray[i32, row]) -> darray[i32, row]:
 		return push(array, 1)
 `
-	_, errs := parseAndAnalyze(t, "push_returns_fresh_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "push_returns_fresh_shape.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -41,7 +41,7 @@ func TestAnalyzeShapeChangingConcatReturnsFreshShape(t *testing.T) {
 def bad(left: darray[i32, row], right: darray[i32, col]) -> darray[i32, row]:
 		return concat(left, right)
 `
-	_, errs := parseAndAnalyze(t, "concat_returns_fresh_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "concat_returns_fresh_shape.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -56,7 +56,7 @@ func TestAnalyzeFreshShapeMismatchAddsHelpfulNote(t *testing.T) {
 def bad(array: darray[i32, row]) -> darray[i32, row]:
 		return resize(array, 8)
 `
-	_, errs := parseAndAnalyze(t, "fresh_shape_note.llcontext", src)
+	_, errs := parseAndAnalyze(t, "fresh_shape_note.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -72,7 +72,7 @@ func TestAnalyzeShapeChangingCallCanBeDiscarded(t *testing.T) {
 def grow(array: darray[i32, row]) -> void:
 		_ = resize(array, 8)
 `
-	_, errs := parseAndAnalyze(t, "discard_shape_changing_call.llcontext", src)
+	_, errs := parseAndAnalyze(t, "discard_shape_changing_call.elisa", src)
 	requireNoErrors(t, errs)
 }
 
@@ -82,7 +82,7 @@ func TestAnalyzeShapeChangingStringConcatReturnsFreshShape(t *testing.T) {
 def bad(left: cstr[row], right: cstr[col]) -> cstr[row]:
 		return concat(left, right)
 `
-	_, errs := parseAndAnalyze(t, "concat_cstr_returns_fresh_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "concat_cstr_returns_fresh_shape.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -97,7 +97,7 @@ func TestAnalyzeWrapperCanReturnFreshResizeShape(t *testing.T) {
 def grow(array: darray[i32, row]) -> darray[i32, shape_after]:
 		return resize(array, 8)
 `
-	_, errs := parseAndAnalyze(t, "wrapper_returns_fresh_resize_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "wrapper_returns_fresh_resize_shape.elisa", src)
 	requireNoErrors(t, errs)
 }
 
@@ -107,7 +107,7 @@ func TestAnalyzeWrapperCanReturnFreshStringShape(t *testing.T) {
 def merge(left: cstr[row], right: cstr[col]) -> cstr[shape_after]:
 		return strcat(left, right)
 `
-	_, errs := parseAndAnalyze(t, "wrapper_returns_fresh_string_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "wrapper_returns_fresh_string_shape.elisa", src)
 	requireNoErrors(t, errs)
 }
 
@@ -123,7 +123,7 @@ def same(left: darray[i32, shape_pair], right: darray[i32, shape_pair]) -> void:
 def bad(array: darray[i32, row]) -> void:
 		same(grow(array), grow(array))
 `
-	_, errs := parseAndAnalyze(t, "wrapper_call_propagates_fresh_array_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "wrapper_call_propagates_fresh_array_shape.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -145,7 +145,7 @@ def same(left: cstr[shape_pair], right: cstr[shape_pair]) -> void:
 def bad(left: cstr[row], right: cstr[col]) -> void:
 		same(merge(left, right), merge(left, right))
 `
-	_, errs := parseAndAnalyze(t, "wrapper_call_propagates_fresh_string_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "wrapper_call_propagates_fresh_string_shape.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -167,7 +167,7 @@ def same(left: darray[i32, shape_pair], right: darray[i32, shape_pair]) -> void:
 def bad(array: darray[i32, row]) -> void:
 		same(grow(array), grow(array))
 `
-	_, errs := parseAndAnalyze(t, "fresh_wrapper_note.llcontext", src)
+	_, errs := parseAndAnalyze(t, "fresh_wrapper_note.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -191,7 +191,7 @@ def bad_truncate(array: darray[i32, row]) -> darray[i32, row]:
 def bad_clear(array: darray[i32, row]) -> darray[i32, row]:
 		return clear(array)
 `
-	_, errs := parseAndAnalyze(t, "additional_shape_builtins.llcontext", src)
+	_, errs := parseAndAnalyze(t, "additional_shape_builtins.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -225,7 +225,7 @@ def arena_da_append[T](a: Arena&, da: darray[T, shape_in]&, item: T) -> darray[T
 def bad(a: Arena&, da: darray[i32, row]&) -> darray[i32, row]&:
 	return arena_da_append(a, da, 1)
 `
-	_, errs := parseAndAnalyze(t, "arena_append_returns_fresh_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "arena_append_returns_fresh_shape.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -245,7 +245,7 @@ def rt_concat2(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_resu
 def bad(left: cstr[row], right: cstr[col]) -> cstr[row]:
 	return rt_concat2(left, right)
 `
-	_, errs := parseAndAnalyze(t, "stage1_string_concat_wrapper.llcontext", src)
+	_, errs := parseAndAnalyze(t, "stage1_string_concat_wrapper.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

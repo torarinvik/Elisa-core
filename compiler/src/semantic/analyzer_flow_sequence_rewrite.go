@@ -3,7 +3,7 @@ package semantic
 import (
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func sequenceRewriteTargetTypeExpr(rootExpr ast.TypeExpr) (ast.TypeExpr, bool) {

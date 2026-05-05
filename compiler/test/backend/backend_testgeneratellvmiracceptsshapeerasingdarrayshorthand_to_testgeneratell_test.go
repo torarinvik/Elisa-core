@@ -1,7 +1,7 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +15,7 @@ func TestGenerateLLVMIRAcceptsShapeErasingDArrayShorthand(t *testing.T) {
 def erase(values: darray[i32, row]) -> darray[i32]:
     return values
 `
-	result := parseAndAnalyze(t, "backend_darray_shorthand.llcontext", src)
+	result := parseAndAnalyze(t, "backend_darray_shorthand.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -36,7 +36,7 @@ func TestWriteLLVMBitcodeFile(t *testing.T) {
 	src := `def increment(value: i32) -> i32:
     return value + 1
 `
-	result := parseAndAnalyze(t, "backend_bitcode.llcontext", src)
+	result := parseAndAnalyze(t, "backend_bitcode.elisa", src)
 	outputPath := filepath.Join(t.TempDir(), "module.bc")
 
 	if err := backend.WriteLLVMBitcodeFile(result, outputPath); err != nil {
@@ -58,7 +58,7 @@ func TestWriteLLVMObjectFile(t *testing.T) {
 	src := `def increment(value: i32) -> i32:
     return value + 1
 `
-	result := parseAndAnalyze(t, "backend_object.llcontext", src)
+	result := parseAndAnalyze(t, "backend_object.elisa", src)
 	outputPath := filepath.Join(t.TempDir(), "module.o")
 
 	if err := backend.WriteLLVMObjectFile(result, outputPath); err != nil {
@@ -87,7 +87,7 @@ def padded_size() -> usize:
 def array_view_size() -> usize:
 	return sizeof(view[i32])
 `
-	result := parseAndAnalyze(t, "backend_sizeof.llcontext", src)
+	result := parseAndAnalyze(t, "backend_sizeof.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -118,7 +118,7 @@ def rem_unsigned() -> u32:
 	value %= 4
     return value
 `
-	result := parseAndAnalyze(t, "backend_modulo.llcontext", src)
+	result := parseAndAnalyze(t, "backend_modulo.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -150,7 +150,7 @@ def advance_commutative(offset: usize, ptr: u8&) -> u8&:
 def rewind(ptr: u8&, offset: usize) -> u8&:
     return ptr - offset
 `
-	result := parseAndAnalyze(t, "backend_pointer_arithmetic.llcontext", src)
+	result := parseAndAnalyze(t, "backend_pointer_arithmetic.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -178,7 +178,7 @@ func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 	value: i32& = new[scratch] seed + 1
 	return value[0]
 `
-	result := parseAndAnalyze(t, "backend_manual_regions.llcontext", src)
+	result := parseAndAnalyze(t, "backend_manual_regions.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -211,7 +211,7 @@ func TestGenerateLLVMIRLowersRegionCheckpoints(t *testing.T) {
 	final: i32& = new[scratch] seed + 3
 	return value + final[0]
 `
-	result := parseAndAnalyze(t, "backend_region_checkpoints.llcontext", src)
+	result := parseAndAnalyze(t, "backend_region_checkpoints.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -246,7 +246,7 @@ func TestGenerateLLVMIRLowersNestedRegionCheckpoints(t *testing.T) {
 	fresh: i32& = new[scratch] seed + 3
 	return kept + fresh[0]
 `
-	result := parseAndAnalyze(t, "backend_nested_region_checkpoints.llcontext", src)
+	result := parseAndAnalyze(t, "backend_nested_region_checkpoints.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -281,7 +281,7 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 			return left + right
 	return fallback
 `
-	result := parseAndAnalyze(t, "backend_enum_match.llcontext", src)
+	result := parseAndAnalyze(t, "backend_enum_match.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -317,7 +317,7 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 			return left + right
 	return fallback
 `
-	result := parseAndAnalyze(t, "backend_enum_match_stmt_payloads.llcontext", src)
+	result := parseAndAnalyze(t, "backend_enum_match_stmt_payloads.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -345,7 +345,7 @@ func TestGenerateLLVMIRLowersStringMatchStatementsWithTinyLiteralFastPath(t *tes
 			return 0
 	return 0
 `
-	result := parseAndAnalyze(t, "backend_string_match_stmt_fast_path.llcontext", src)
+	result := parseAndAnalyze(t, "backend_string_match_stmt_fast_path.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -402,7 +402,7 @@ def stmt_count(block: Lua.Block) -> usize:
 def cond_span(branch: Lua.ElseIf) -> i64:
 	return branch.condition.span
 `
-	result := parseAndAnalyze(t, "backend_tree_members.llcontext", src)
+	result := parseAndAnalyze(t, "backend_tree_members.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -445,7 +445,7 @@ def classify(node: Lua.Expr) -> i64:
 		_:
 			return 0
 `
-	result := parseAndAnalyze(t, "backend_nested_tree_categories.llcontext", src)
+	result := parseAndAnalyze(t, "backend_nested_tree_categories.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -474,7 +474,7 @@ func TestGenerateLLVMIRLowersStringMatchStatementsWithoutPhi(t *testing.T) {
 		_:
 			return 0
 `
-	result := parseAndAnalyze(t, "backend_string_match_stmt.llcontext", src)
+	result := parseAndAnalyze(t, "backend_string_match_stmt.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -523,7 +523,7 @@ def nested_value(value: Outer) -> int:
 			return -1
 	return 0
 `
-	result := parseAndAnalyze(t, "backend_nested_match_patterns.llcontext", src)
+	result := parseAndAnalyze(t, "backend_nested_match_patterns.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

@@ -22,7 +22,7 @@ def first_tag(owner: Arena) -> Expr.Tag:
 	tags: dview[Expr.Tag] = frozen.tags
 	return tags[0u]
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_tags_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_tags_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
@@ -59,7 +59,7 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 				_ = value + node.span
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_parallel_for_index_soa.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_parallel_for_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)

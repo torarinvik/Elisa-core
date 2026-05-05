@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestAnalyzeMembershipExprUsesBoolAndArrayLiteralType(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "membership_expr.llcontext", `def keep(value: i64) -> bool:
+	result := analyzeFunctionAnalysisTestSource(t, "membership_expr.elisa", `def keep(value: i64) -> bool:
     return value in [1, 2, 3]
 `)
 
@@ -38,7 +38,7 @@ func TestAnalyzeMembershipExprUsesBoolAndArrayLiteralType(t *testing.T) {
 }
 
 func TestAnalyzeMembershipAllowsEmptyListLiteral(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "membership_empty.llcontext", `def keep(value: i64) -> bool:
+	result := analyzeFunctionAnalysisTestSource(t, "membership_empty.elisa", `def keep(value: i64) -> bool:
     return value in []
 `)
 
@@ -56,7 +56,7 @@ func TestAnalyzeMembershipAllowsEmptyListLiteral(t *testing.T) {
 }
 
 func TestAnalyzeMembershipAllowsTokenSetDecl(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "membership_tokenset.llcontext", `const enum TokenKind of u32:
+	result := analyzeFunctionAnalysisTestSource(t, "membership_tokenset.elisa", `const enum TokenKind of u32:
     IF
     LET
     IDENT
@@ -84,7 +84,7 @@ def keep(kind: TokenKind) -> bool:
 }
 
 func TestAnalyzeTokenSetDeclQualifiesBareMembersFromElementType(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "membership_tokenset_bare.llcontext", `const enum TokenKind of u32:
+	result := analyzeFunctionAnalysisTestSource(t, "membership_tokenset_bare.elisa", `const enum TokenKind of u32:
     IF
     LET
     IDENT
@@ -115,7 +115,7 @@ def keep(kind: TokenKind) -> bool:
 }
 
 func TestAnalyzeMembershipRejectsNonLiteralRightHandSide(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "membership_non_literal.llcontext", `def keep(value: i64, xs: i64[2]) -> bool:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "membership_non_literal.elisa", `def keep(value: i64, xs: i64[2]) -> bool:
     return value in xs
 `)
 
@@ -126,7 +126,7 @@ func TestAnalyzeMembershipRejectsNonLiteralRightHandSide(t *testing.T) {
 }
 
 func TestAnalyzeExpectPatternSupportsAnonymousFieldShapeAndListRest(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "expect_field_shape_list_rest.llcontext", `struct Block:
+	result := analyzeFunctionAnalysisTestSource(t, "expect_field_shape_list_rest.elisa", `struct Block:
     stmts: int[3]
 
 enum Decl:

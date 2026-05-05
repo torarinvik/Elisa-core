@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func (a *Analyzer) cloneAffineValueStates() map[affineValueKey]affineValueState {

@@ -11,15 +11,15 @@ package backend
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 
-static LLVMBool llcontextInitializeNativeTarget(void) {
+static LLVMBool elisacoreInitializeNativeTarget(void) {
 	return LLVMInitializeNativeTarget();
 }
 
-static LLVMBool llcontextInitializeNativeAsmPrinter(void) {
+static LLVMBool elisacoreInitializeNativeAsmPrinter(void) {
 	return LLVMInitializeNativeAsmPrinter();
 }
 
-static LLVMTargetMachineRef llcontextCreateTargetMachineDefault(
+static LLVMTargetMachineRef elisacoreCreateTargetMachineDefault(
 	LLVMTargetRef Target,
 	char *Triple,
 	char *CPU,
@@ -34,7 +34,7 @@ static LLVMTargetMachineRef llcontextCreateTargetMachineDefault(
 		LLVMCodeModelDefault);
 }
 
-static char *llcontextRunOptimizationPipeline(
+static char *elisacoreRunOptimizationPipeline(
 	LLVMModuleRef Module,
 	LLVMTargetMachineRef TargetMachine,
 	char *PassPipeline) {
@@ -54,7 +54,7 @@ static char *llcontextRunOptimizationPipeline(
 	return LLVMGetErrorMessage(Err);
 }
 
-static void llcontextDisposeLLVMErrorMessage(char *ErrMsg) {
+static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
 	if (ErrMsg != NULL) {
 		LLVMDisposeErrorMessage(ErrMsg);
 	}
@@ -68,7 +68,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 )
 
 func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
@@ -160,7 +160,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 
 	passPipeline := cString(fmt.Sprintf("default<O%d>", int(optLevel)))
 	defer C.free(unsafe.Pointer(passPipeline))
-	errMessage := C.llcontextRunOptimizationPipeline(g.module, g.targetMachine, passPipeline)
+	errMessage := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, passPipeline)
 	if errMessage != nil {
 		return fmt.Errorf("failed to optimize LLVM module for code generation: %s", disposeLLVMErrorMessage(errMessage, "unknown LLVM pass pipeline error"))
 	}
@@ -175,10 +175,10 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	if g.targetMachine != nil && g.targetData != nil && g.targetTriple != nil {
 		return nil
 	}
-	if C.llcontextInitializeNativeTarget() != 0 {
+	if C.elisacoreInitializeNativeTarget() != 0 {
 		return fmt.Errorf("failed to initialize native LLVM target")
 	}
-	if C.llcontextInitializeNativeAsmPrinter() != 0 {
+	if C.elisacoreInitializeNativeAsmPrinter() != 0 {
 		return fmt.Errorf("failed to initialize native LLVM asm printer")
 	}
 
@@ -198,7 +198,7 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 
 	cpu := cString("")
 	features := cString("")
-	tm := C.llcontextCreateTargetMachineDefault(target, triple, cpu, features)
+	tm := C.elisacoreCreateTargetMachineDefault(target, triple, cpu, features)
 	C.free(unsafe.Pointer(cpu))
 	C.free(unsafe.Pointer(features))
 	if tm == nil {
@@ -273,7 +273,7 @@ func disposeLLVMErrorMessage(message *C.char, fallback string) string {
 		return fallback
 	}
 	text := strings.TrimSpace(C.GoString(message))
-	C.llcontextDisposeLLVMErrorMessage(message)
+	C.elisacoreDisposeLLVMErrorMessage(message)
 	if text == "" {
 		return fallback
 	}

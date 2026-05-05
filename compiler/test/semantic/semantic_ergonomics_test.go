@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func requireIdentExprName(t *testing.T, expr ast.Expr, expected string) {
@@ -35,7 +35,7 @@ def run(items: array[Row, 3], row: Row, flag: bool) -> int:
         Row{left, right: current, flag}:
             return total + current
 `
-	result, errs := parseAndAnalyze(t, "brace_struct_ergonomics_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "brace_struct_ergonomics_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "run", "int")
@@ -121,7 +121,7 @@ def run(row: Row) -> int:
     let {missing} = row
     return 0
 `
-	_, errs := parseAndAnalyze(t, "let_destructure_missing_field_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "let_destructure_missing_field_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -138,7 +138,7 @@ func TestAnalyzeRejectsUnknownRecordUpdateField(t *testing.T) {
 def run(row: Row) -> Row:
     return row{missing = 1}
 `
-	_, errs := parseAndAnalyze(t, "record_update_missing_field_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "record_update_missing_field_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

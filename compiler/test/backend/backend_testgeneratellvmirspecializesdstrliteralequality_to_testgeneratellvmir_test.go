@@ -1,7 +1,7 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"strings"
 	"testing"
 )
@@ -24,7 +24,7 @@ def direct_literal_left(text: cstr[row]) -> bool:
 def direct_empty_literal(text: cstr[row]) -> bool:
 	return ctx_streq(text, "") != 0
 `
-	result := parseAndAnalyze(t, "backend_runtime_cstr_literal_eq.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_cstr_literal_eq.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -68,7 +68,7 @@ def slice_literal(text: cstr[row]) -> bool:
 def direct_slice_literal(text: cstr[row]) -> bool:
 	return ctx_streq(ctx_string_slice(text, 1, 10), "lphabet s") != 0
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_slice_literal_eq.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_slice_literal_eq.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -103,7 +103,7 @@ def slice_eq_empty(text: cstr[row], other: cstr[col]) -> bool:
 def slice_eq_unknown(text: cstr[row], start: i64, end: i64, other: cstr[col]) -> bool:
 	return ctx_string_slice_eq(text, start, end, other) != 0
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_slice_eq.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_slice_eq.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -155,7 +155,7 @@ def slices_eq_empty(left: cstr[row], right: cstr[col]) -> bool:
 def slices_eq_unknown(left: cstr[row], left_start: i64, left_end: i64, right: cstr[col], right_start: i64, right_end: i64) -> bool:
 	return ctx_string_slices_eq(left, left_start, left_end, right, right_start, right_end) != 0
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_slices_eq.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_slices_eq.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -205,7 +205,7 @@ def same_short(view: StringView) -> bool:
 def differs_short(view: StringView) -> bool:
 	return view != "region"
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_tiny.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_tiny.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -237,7 +237,7 @@ func TestGenerateLLVMIRSpecializesLongStringViewLiteralHelperCalls(t *testing.T)
 def same_long(view: StringView) -> bool:
 	return string_view_eq(view, "destroy_region" as u8&) != 0
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_long.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_long.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -280,7 +280,7 @@ def split_copy(view: dview[i32]) -> void&?:
 	suffix: dview[i32] = arena_da_view_suffix(view, 2)
 	return arena_memcpy(prefix.data, suffix.data, prefix.len * prefix.elem_size)
 `
-	result := parseAndAnalyze(t, "backend_dview_split_memcpy.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_split_memcpy.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -344,7 +344,7 @@ def copy_overlap_unknown(values: darray[i32, shape_in]&) -> void:
 	right: dview[i32] = base[1:values.count]
 	arena_da_copy_exact(left, right)
 `
-	result := parseAndAnalyze(t, "backend_dview_copy_exact.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -418,7 +418,7 @@ def copy_helper(values: array[i32, 4]) -> void:
 	boxed: Views = wrap_views(values[0:2], values[2:4])
 	arena_da_copy_exact(boxed.left, boxed.right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -456,7 +456,7 @@ def copy_indexed(values: array[i32, 4]) -> void:
 	items: array[Views, 1] = [Views(values[0:2], values[2:4])]
 	arena_da_copy_exact(items[0].left, items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -495,7 +495,7 @@ def copy_helper_view_slice(values: array[i32, 8]) -> void:
 	window: view[Views] = arena_da_view_slice(items[1:2], 0, 1)
 	arena_da_copy_exact(window[0].left, window[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_standard_view_slice_helper_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_standard_view_slice_helper_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -529,7 +529,7 @@ def copy_helper_indexed(values: array[i32, 4]) -> void:
 	wrapped: ViewHolder = wrap_indexed_views(values[0:2], values[2:4])
 	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_copy_exact_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

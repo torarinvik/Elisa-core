@@ -32,7 +32,7 @@ def left_value(node: Lua.Expr) -> i64:
 		return value + rhs.span
 	return node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_open_view.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_open_view.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -63,7 +63,7 @@ def count_nodes(node: Lua.Expr) -> i64:
 		total <- total + count_nodes(child)
 	return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_children.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_children.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -81,7 +81,7 @@ func TestGenerateLLVMIRLowersEnumerateTupleLoops(t *testing.T) {
 		total <- total + index + value
 	return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_enumerate_tuple_loop.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_enumerate_tuple_loop.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -111,7 +111,7 @@ def count_children(stmt: Lua.Stmt) -> i64:
 		total <- total + child.kind.i64()
 	return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_children_root.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_children_root.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -149,7 +149,7 @@ def elseif_total(stmt: Lua.Stmt.IfStmt) -> i64:
 		total <- total + branch.kind.i64()
 	return total + stmt.elseifs[0].kind.i64()
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_sequence_fields.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_sequence_fields.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -201,7 +201,7 @@ def score(node: Lua.Stmt) -> i64:
 		Lua.Stmt.NumericFor(stmt, start, limit, step, body):
 			optional_i64_value(step) + start + limit + body + stmt.name_index.i64()
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_optional_child_fields.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_optional_child_fields.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -231,7 +231,7 @@ def score(node: Lua.Expr) -> i64:
 		Lua.Expr.Binary(expr):
 			expr.left.span + expr.right.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -273,7 +273,7 @@ def score_node(node: Lua.Node) -> i64:
 		_:
 			0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_guard.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_guard.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -322,7 +322,7 @@ def explicit_binary_kind() -> Lua.Expr.Kind:
 def explicit_root_binary_kind() -> Lua.Node.Kind:
 	return Lua.Node.Kind.Expr.Binary
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_kind.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_kind.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -352,7 +352,7 @@ def stmt_total(block: Lua.Block) -> i64:
 		Lua.Block(node):
 			node.stmts.len.i64()
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_exact_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_exact_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -385,7 +385,7 @@ def score(node: Lua.Expr) -> i64:
 		Lua.Expr.Binary(expr, left, right):
 			left + right + expr.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_fold_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_fold_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -412,7 +412,7 @@ attribute Lua.Expr.checksum -> i64:
 def checksum_of(node: Lua.Expr) -> i64:
 	return node.checksum
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_direct.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_direct.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -442,7 +442,7 @@ attribute Lua.Expr.node_count -> usize:
 def count_of(node: Lua.Expr) -> usize:
 	return node.node_count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_projected.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_projected.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -478,7 +478,7 @@ def has_control(node: Lua.Expr) -> bool:
 def all_children_leaf(node: Lua.Expr) -> bool:
 	return all(children(node).is_leaf)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_aggregate_helpers.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_aggregate_helpers.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -506,7 +506,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 			Lua.Expr.Binary(expr, left, right):
 				default
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -534,7 +534,7 @@ def rewrite_binary_explicit(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr,
 	alloc: mutable Arena& = (&owner).cast[mutable Arena&]
 	return new[alloc] node{left, right}
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_exact_update.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_exact_update.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

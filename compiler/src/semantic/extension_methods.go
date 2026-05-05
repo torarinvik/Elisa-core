@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 type ExtensionMethod struct {

@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func (a *Analyzer) analyzeMatchExprArmBodyWithAffineSnapshot(body []ast.Stmt, scope *Scope) (Type, affineFlowSnapshot) {
 	savedAffine := a.currentAffineValues

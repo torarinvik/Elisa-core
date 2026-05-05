@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 )
 
 func parseAndAnalyzeOptimizationFactsTest(t *testing.T, filename string, src string) (*ast.File, *Result) {
@@ -107,7 +107,7 @@ func mustAffineExprTerms(t *testing.T, value string, wantConst int64, wantTerms 
 }
 
 func TestOptimizationFactsMarkConstantChunksExactItemsDisjoint(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "chunks_exact_disjoint.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "chunks_exact_disjoint.elisa", `
 def kernel(buf: dview[i32]) -> void:
 	ro: dview[i32] = readonly(buf)
 	chunks: ChunksExactView[i32] = chunks_exact(ro, 4)
@@ -153,7 +153,7 @@ def kernel(buf: dview[i32]) -> void:
 }
 
 func TestAnalyzeZipMapAcceptsDisjointChunksExactItemsFromSharedBuffer(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_chunks_exact_disjoint.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_chunks_exact_disjoint.elisa", `
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
@@ -186,7 +186,7 @@ def kernel(buf: dview[i32]) -> void:
 }
 
 func TestOptimizationFactsComposeSplitAtAndChunksExactItemOffsets(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "split_chunks_exact_offsets.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "split_chunks_exact_offsets.elisa", `
 def kernel(buf: dview[i32]) -> void:
 	whole: dview[i32] = buf[0:16]
 	parts: SplitView[i32] = split_at(whole, 8)
@@ -234,7 +234,7 @@ def kernel(buf: dview[i32]) -> void:
 }
 
 func TestAnalyzeZipMapAcceptsSplitChunksExactComposition(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_split_chunks_exact_disjoint.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_split_chunks_exact_disjoint.elisa", `
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
@@ -266,7 +266,7 @@ def kernel(buf: dview[i32]) -> void:
 }
 
 func TestOptimizationFactsSupportAffineSplitChunkComposition(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "affine_split_chunks_exact_offsets.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "affine_split_chunks_exact_offsets.elisa", `
 def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 	limit: usize = start + (4 * chunk)
 	whole: dview[i32] = buf[start:limit]
@@ -326,7 +326,7 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 }
 
 func TestAnalyzeZipMapAcceptsAffineSplitChunkComposition(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_affine_split_chunks_exact.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_affine_split_chunks_exact.elisa", `
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
@@ -359,7 +359,7 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 }
 
 func TestAnalyzeZipMapAcceptsReadonlyDirectSliceComposition(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_affine_direct_slices.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_affine_direct_slices.elisa", `
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
@@ -412,7 +412,7 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 }
 
 func TestOptimizationFactsComposeHelperViewSlicesWithAffineBase(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "helper_view_slice_affine.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "helper_view_slice_affine.elisa", `
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
 	return view[start:end]
 
@@ -454,7 +454,7 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 }
 
 func TestAnalyzeZipMapAcceptsReadonlyHelperViewSlices(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_readonly_helper_slices.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_readonly_helper_slices.elisa", `
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
 	return view[start:end]
 
@@ -510,7 +510,7 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 }
 
 func TestAnalyzeReduceSumAcceptsReadonlyHelperSuffix(t *testing.T) {
-	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_helper_suffix.llcontext", `
+	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_helper_suffix.elisa", `
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
 	return view[start:end]
 
@@ -533,7 +533,7 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> i32:
 }
 
 func TestAnalyzeReduceSumAcceptsReadonlyEqualSizeTernarySlices(t *testing.T) {
-	file, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_slices.llcontext", `
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_slices.elisa", `
 def sum_one(value: i32) -> i32:
 	return value
 
@@ -561,7 +561,7 @@ def kernel(buf: dview[i32], cond: bool, chunk: usize) -> i32:
 }
 
 func TestAnalyzeReduceSumAcceptsReadonlyEqualSizeTernaryHelperSlices(t *testing.T) {
-	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_helper_slices.llcontext", `
+	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_helper_slices.elisa", `
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
 	return view[start:end]
 

@@ -6,15 +6,15 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/Core.h>
 
-void llctxSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
+void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
 */
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/semantic"
 	"sort"
 	"strings"
 )

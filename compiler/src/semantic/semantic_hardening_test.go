@@ -4,15 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func newSemanticHardeningTestAnalyzer() *Analyzer {
 	return &Analyzer{
-		file: &ast.File{Filename: "semantic_hardening.llcontext"},
+		file: &ast.File{Filename: "semantic_hardening.elisa"},
 		currentFuncDecl: &ast.FuncDecl{
-			Position: lexer.Pos{File: "semantic_hardening.llcontext", Line: 1, Col: 1},
+			Position: lexer.Pos{File: "semantic_hardening.elisa", Line: 1, Col: 1},
 			Name:     "hardening_target",
 		},
 	}

@@ -5,9 +5,9 @@ package main
 
 import (
 	"bytes"
+	"elisacore/src/semantic"
 	"fmt"
 	"io/fs"
-	"llcontext/src/semantic"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -231,7 +231,7 @@ func TestATPLCLIReportsDetailedSTDINErrors(t *testing.T) {
 func TestATPLExamplesMatchGoldenViaSelfHostedCLI(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	binPath := buildATPLCLI(t)
-	examplesRoot := filepath.Join(repoRoot, "Code", "llcontext_atpl", "examples")
+	examplesRoot := filepath.Join(repoRoot, "Code", "elisacore_atpl", "examples")
 	seen := 0
 
 	err := filepath.WalkDir(examplesRoot, func(path string, d fs.DirEntry, walkErr error) error {

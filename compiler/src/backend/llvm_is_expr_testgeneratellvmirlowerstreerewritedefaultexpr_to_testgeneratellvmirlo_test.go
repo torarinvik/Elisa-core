@@ -24,7 +24,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 			Lua.Expr.Binary(expr, left, right):
 				default
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_default.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -53,7 +53,7 @@ def simplify(block: Lua.Block) -> Lua.Block:
 			Lua.Block(block, items: items):
 				default
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_default_children.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_default_children.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -79,7 +79,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 			Lua.Expr.Binary(expr, left, right):
 				default{span = expr.span, left, right}
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_implicit_default_update.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_implicit_default_update.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -98,7 +98,7 @@ func TestGenerateLLVMIRLowersSequenceRewriteExpr(t *testing.T) {
 				item when item != 0u32:
 					emit item
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_sequence_rewrite_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_sequence_rewrite_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -125,7 +125,7 @@ def keep_positive_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> d
 				Lua.Expr.Int(expr) when expr.value > 0:
 					emit expr.value
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_target_sequence_rewrite_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_target_sequence_rewrite_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -145,7 +145,7 @@ func TestGenerateLLVMIRLowersSequenceRewriteEmitAllExpr(t *testing.T) {
 				segment:
 					emit all segment
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_sequence_rewrite_emit_all_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_sequence_rewrite_emit_all_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -177,7 +177,7 @@ def clone_expr(node: Lua.Expr) -> Lua.Expr:
 			Lua.Block(block, items: items):
 				default
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_heterogeneous_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_heterogeneous_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -206,7 +206,7 @@ def score(node: Lua.Expr) -> i64:
 		Lua.Expr.Binary(expr, left, right):
 			left + right + expr.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_fold_guard.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_fold_guard.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

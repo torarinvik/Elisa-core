@@ -6,7 +6,7 @@ import (
 )
 
 func TestAnalyzeTreeVariantConstructorsAndIsExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_variant_behaviors.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_variant_behaviors.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -48,7 +48,7 @@ def bind_right_named(node: Lua.Expr) -> i64:
 `)
 }
 func TestAnalyzeStructPatternIsConditionWithBindings(t *testing.T) {
-	analyzeTreeTestSource(t, "struct_is_condition_bindings.llcontext", `struct Span:
+	analyzeTreeTestSource(t, "struct_is_condition_bindings.elisa", `struct Span:
 	start: i64
 	finish: i64
 
@@ -64,7 +64,7 @@ def score(tok: Token) -> i64:
 `)
 }
 func TestAnalyzeStructPatternIsConditionTruthyOrBindings(t *testing.T) {
-	analyzeTreeTestSource(t, "struct_is_condition_truthy_or_bindings.llcontext", `struct Span:
+	analyzeTreeTestSource(t, "struct_is_condition_truthy_or_bindings.elisa", `struct Span:
 	start: i64
 	finish: i64
 
@@ -80,7 +80,7 @@ def score(tok: Token) -> i64:
 `)
 }
 func TestAnalyzeStructPatternIsConditionRejectsMissingNestedField(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "struct_is_condition_missing_nested_field.llcontext", `struct Span:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "struct_is_condition_missing_nested_field.elisa", `struct Span:
 	start: i64
 	finish: i64
 
@@ -100,7 +100,7 @@ def score(tok: Token) -> i64:
 	}
 }
 func TestAnalyzeTreeConstructorsSupportExplicitAndScopedOwners(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_owner_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_owner_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -120,7 +120,7 @@ def build_perm() -> Lua.Expr:
 `)
 }
 func TestAnalyzeNodeConstructionSugarInjectsAllocAndSpan(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_node_construction_sugar.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_node_construction_sugar.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -135,7 +135,7 @@ def build(alloc: mutable Arena&) -> Lua.Expr:
 `)
 }
 func TestAnalyzeRejectsBareTreeConstructorsOutsideOwnerScope(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_owner_required.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_owner_required.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -152,7 +152,7 @@ def make_nil() -> Lua.Expr:
 	}
 }
 func TestAnalyzeRejectsMissingCommonTreeConstructorFields(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_common_fields_required.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_common_fields_required.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -176,7 +176,7 @@ def make_binary(left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
 	}
 }
 func TestAnalyzeTreeViewSurfaceTypeAndRefinedCalls(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_view_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_view_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -198,7 +198,7 @@ def child_span(node: Lua.Expr) -> i64:
 `)
 }
 func TestAnalyzeTreeVariantBareTypeSugarAndRefinedCalls(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_variant_bare_type_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_variant_bare_type_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -220,7 +220,7 @@ def child_span(node: Lua.Expr) -> i64:
 `)
 }
 func TestAnalyzeTreeVariantViewTypeStringCanonicalizesToBareVariant(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_variant_view_string.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_variant_view_string.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -250,7 +250,7 @@ def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binar
 	}
 }
 func TestAnalyzeTreeMatchStatementsAndExpressions(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_match_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_match_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -277,7 +277,7 @@ def eval(node: Lua.Expr) -> i64:
 `)
 }
 func TestAnalyzeRejectsPartialNamedTreeMatchArm(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_match_partial_named_reject.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_match_partial_named_reject.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -298,7 +298,7 @@ def child_span(node: Lua.Expr) -> i64:
 	}
 }
 func TestAnalyzeTreeIfPatternViewAliasAndNestedPatterns(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_if_pattern_view_alias_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_if_pattern_view_alias_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -324,7 +324,7 @@ def left_value(node: Lua.Expr) -> i64:
 `)
 }
 func TestAnalyzeTreeChildrenLoops(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_children_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_children_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -348,7 +348,7 @@ def count_binary(binary: Lua.Expr.Binary) -> i64:
 `)
 }
 func TestAnalyzeTreeChildrenMixedToRootLoop(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_children_root_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_children_root_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(stmt)
@@ -368,7 +368,7 @@ def visit(stmt: Lua.Stmt) -> i64:
 `)
 }
 func TestAnalyzeTreeVisitExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_visit_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_visit_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -388,7 +388,7 @@ def score(node: Lua.Expr) -> i64:
 `)
 }
 func TestAnalyzeTreeVisitExactMemberExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_visit_exact_member_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_visit_exact_member_surface.elisa", `tree Lua:
 	@role(stmt)
 	node Stmt:
 		ExprStmt(expr: Expr)
@@ -405,7 +405,7 @@ def stmt_total(block: Lua.Block) -> i64:
 `)
 }
 func TestAnalyzeTreeSequenceFieldsSurfaceAsViews(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_sequence_field_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_sequence_field_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(stmt)
@@ -433,7 +433,7 @@ def elseif_total(stmt: Lua.Stmt.IfStmt) -> i64:
 `)
 }
 func TestAnalyzeTreeOptionalChildFields(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_optional_child_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_optional_child_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(stmt)
@@ -475,7 +475,7 @@ def score(node: Lua.Stmt) -> i64:
 `)
 }
 func TestAnalyzeTreeFoldExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_fold_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_fold_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -498,7 +498,7 @@ def score(node: Lua.Expr) -> i64:
 `)
 }
 func TestAnalyzeTreeRewriteExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_rewrite_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_rewrite_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -516,7 +516,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 `)
 }
 func TestAnalyzeTreeRewriteExprPreservesHeterogeneousChildTypes(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_rewrite_heterogeneous_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_rewrite_heterogeneous_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -548,7 +548,7 @@ def clone_block(block: Lua.Block) -> Lua.Block:
 `)
 }
 func TestAnalyzeTreeExactRecordUpdateExpr(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_exact_update_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_exact_update_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)

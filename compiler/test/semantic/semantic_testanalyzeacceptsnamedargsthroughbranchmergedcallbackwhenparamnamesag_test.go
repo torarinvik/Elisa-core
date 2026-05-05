@@ -1,7 +1,7 @@
 package semantic_test
 
 import (
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -24,7 +24,7 @@ def run(flag: bool) -> i64:
 		seed
 	)
 `
-	result, errs := parseAndAnalyze(t, "named_args_branch_merged_callback_same_names_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "named_args_branch_merged_callback_same_names_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "run", "i64")
@@ -44,7 +44,7 @@ def bad(flag: bool) -> i64:
 		local_fn <- mix
 	return local_fn(y: 7, x: 3)
 `
-	_, errs := parseAndAnalyze(t, "named_args_branch_merged_callback_different_names_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "named_args_branch_merged_callback_different_names_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -63,7 +63,7 @@ func TestAnalyzeAcceptsPackedCommonFieldStorageAnnotations(t *testing.T) {
 	Lit(value: int)
 	End
 `
-	result, errs := parseAndAnalyze(t, "packed_common_field_storage_annotations.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_common_field_storage_annotations.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	enumType, ok := result.NamedTypes["Expr"].(*semantic.EnumType)
@@ -90,7 +90,7 @@ func TestAnalyzeRejectsRemovedPackedABIAnnotation(t *testing.T) {
 packed enum Expr:
 	Lit(value: int)
 `
-	_, errs := parseAndAnalyze(t, "packed_abi_removed.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_abi_removed.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -106,7 +106,7 @@ packed enum Expr:
 		span: int
 	Lit(value: int)
 `
-	_, errs := parseAndAnalyze(t, "packed_prefix_removed.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_prefix_removed.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -120,7 +120,7 @@ func TestAnalyzeRejectsPackedFieldStorageAnnotationsOutsidePackedEnumCommonField
 	@storage(side_table)
 	value: int
 `
-	_, errs := parseAndAnalyze(t, "packed_common_field_storage_annotation_target_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_common_field_storage_annotation_target_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -136,7 +136,7 @@ func TestAnalyzeRejectsInvalidPackedCommonFieldStorageMode(t *testing.T) {
 		span: int
 	Lit(value: int)
 `
-	_, errs := parseAndAnalyze(t, "packed_common_field_storage_mode_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_common_field_storage_mode_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -166,7 +166,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_extern_return_alias_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_extern_return_alias_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -196,7 +196,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(alias_holder.pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_extern_return_aggregate_alias_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_extern_return_aggregate_alias_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -229,7 +229,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(wrapped.inner.pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_extern_return_nested_field_alias_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_extern_return_nested_field_alias_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -253,7 +253,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	task_group_add(alias_holder.group_ref, move task)
 	wait all holder.group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_returned_aggregate_alias_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_returned_aggregate_alias_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -273,7 +273,7 @@ def ok(items: view[GroupHolder], task: Task[i64, Pending]) -> void:
 	task_group_add(sub[0].group_ref, move task)
 	wait all items[1].group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_rebased_aggregate_alias_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_rebased_aggregate_alias_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -296,7 +296,7 @@ def ok(items: view[GroupHolder], task: Task[i64, Pending]) -> void:
 	task_group_add(window.items[0].group_ref, move task)
 	wait all items[1].group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_field_rebased_aggregate_alias_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_field_rebased_aggregate_alias_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -310,7 +310,7 @@ def bad() -> void:
 	pool_shutdown((&pool).cast[ThreadPool&])
 	pool_shutdown((&pool).cast[ThreadPool&])
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_double_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_double_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -329,7 +329,7 @@ def ok() -> void:
 	pool <- pool_new(1)
 	pool_shutdown((&pool).cast[ThreadPool&])
 `
-	result, errs := parseAndAnalyze(t, "thread_pool_reinitialize_after_shutdown_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "thread_pool_reinitialize_after_shutdown_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -338,7 +338,7 @@ func TestAnalyzeRejectsCopyingThreadPoolOwnerWithoutMove(t *testing.T) {
 	src := `def bad(pool: ThreadPool) -> void:
 	copy: ThreadPool = pool
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_owner_copy_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_owner_copy_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -352,7 +352,7 @@ func TestAnalyzeRejectsReusingMovedTaskGroupOwner(t *testing.T) {
 	moved: TaskGroup = move group
 	_ = move group
 `
-	_, errs := parseAndAnalyze(t, "task_group_owner_reuse_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "task_group_owner_reuse_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -367,7 +367,7 @@ func TestAnalyzeAcceptsWaitAllSyntax(t *testing.T) {
 def ok(group: mutable TaskGroup) -> void:
     wait all group
 `
-	result, errs := parseAndAnalyze(t, "wait_all_group_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_group_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -382,7 +382,7 @@ def ok(cv: mutable CondVar, broadcast: bool) -> void:
     else:
         notify one cv
 `
-	result, errs := parseAndAnalyze(t, "notify_syntax_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "notify_syntax_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -411,7 +411,7 @@ def ok(slot: mutable atomic[i64]) -> i64:
 		xor_bits: i64 = fetch_xor(slot_ref, 16, MemoryOrder.AcqRel)
 		return add + sub + or_bits + and_bits + xor_bits
 `
-	result, errs := parseAndAnalyze(t, "atomic_rmw_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "atomic_rmw_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "i64")
@@ -430,7 +430,7 @@ def bad(slot: mutable atomic[bool]) -> bool can[Atomics.Rmw]:
 	slot_ref: atomic[bool]& = (&slot).cast[atomic[bool]&]
 	return fetch_or(slot_ref, true, MemoryOrder.AcqRel)
 `
-	_, errs := parseAndAnalyze(t, "atomic_rmw_bool_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "atomic_rmw_bool_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -453,7 +453,7 @@ def bad(slot: mutable atomic[u8&], value: u8&) -> u8& can[Atomics.Rmw]:
 	slot_ref: atomic[u8&]& = (&slot).cast[atomic[u8&]&]
 	return fetch_xor(slot_ref, value, MemoryOrder.AcqRel)
 `
-	_, errs := parseAndAnalyze(t, "atomic_rmw_pointer_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "atomic_rmw_pointer_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -473,7 +473,7 @@ def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void:
 			while not ready:
 				g <- cond_wait((&cv).cast[CondVar&], move g)
 `
-	result, errs := parseAndAnalyze(t, "lock_scope_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "lock_scope_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -487,7 +487,7 @@ def ok() -> bool:
 		pool workers(2):
 			return workers.handle != null
 `
-	result, errs := parseAndAnalyze(t, "pool_scope_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "pool_scope_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "bool")
@@ -510,7 +510,7 @@ def ok() -> i64:
 			task: Task[i64, Pending] = submit work(7)
 			return await task
 `
-	result, errs := parseAndAnalyze(t, "submit_syntax_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "submit_syntax_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "i64")
@@ -529,7 +529,7 @@ def ok(pool: mutable ThreadPool&) -> i64 can[Pool.Submit, Pool.Await]:
 	task: Task[i64, Pending] = submit[pool] work(7)
 	return await task
 `
-	result, errs := parseAndAnalyze(t, "submit_explicit_pool_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "submit_explicit_pool_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "i64")
@@ -541,7 +541,7 @@ func TestParseRejectsSubmitOutsidePoolScope(t *testing.T) {
 def bad() -> void:
 	_ = submit work(7)
 `
-	_, errs := parseAndAnalyze(t, "submit_outside_pool_parse_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "submit_outside_pool_parse_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected parse error, got none")
 	}

@@ -21,7 +21,7 @@ def build(owner: Arena, items: darray[int]) -> usize:
             xs.push(4)
         return xs.count + total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_scope_checkpoint.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_scope_checkpoint.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -48,7 +48,7 @@ func TestGenerateLLVMIRLowersGroupedCheckpoint(t *testing.T) {
             ys.push(6)
         return xs.count + ys.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_grouped_scope_checkpoint.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_grouped_scope_checkpoint.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

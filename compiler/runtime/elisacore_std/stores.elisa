@@ -1,0 +1,6 @@
+include "./stores_core.elisa"
+include "./stores_types.elisa"
+include "./stores_packed_encoding.elisa"
+include "./stores_packed_dense.elisa"
+include "./stores_rows.elisa"
+include "./stores_packed_sparse.elisa"

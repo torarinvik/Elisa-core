@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/unparse"
 )
 
 func TestParseExplicitArgErgonomicsAndDestructuring(t *testing.T) {

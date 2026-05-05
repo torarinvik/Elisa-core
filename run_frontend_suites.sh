@@ -16,11 +16,11 @@ suite_names=(
 )
 
 suite_scripts=(
-	"$REPO_ROOT/Code/llcontext_lua/test/run_tests.sh"
-	"$REPO_ROOT/Code/llcontext_pascal/test/run_tests.sh"
-	"$REPO_ROOT/Code/llcontext_sml/test/run_tests.sh"
-	"$REPO_ROOT/Code/llcontext_perl/test/run_tests.sh"
-	"$REPO_ROOT/Code/llcontext_atpl/test/run_tests.sh"
+	"$REPO_ROOT/Code/elisacore_lua/test/run_tests.sh"
+	"$REPO_ROOT/Code/elisacore_pascal/test/run_tests.sh"
+	"$REPO_ROOT/Code/elisacore_sml/test/run_tests.sh"
+	"$REPO_ROOT/Code/elisacore_perl/test/run_tests.sh"
+	"$REPO_ROOT/Code/elisacore_atpl/test/run_tests.sh"
 )
 
 pids=()

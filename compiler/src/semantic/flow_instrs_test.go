@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestPopulateBasicFlowInstrsRecordsStatementLevelFacts(t *testing.T) {

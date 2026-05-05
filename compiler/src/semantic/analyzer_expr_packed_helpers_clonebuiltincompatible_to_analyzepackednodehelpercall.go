@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[string]bool) (bool, bool) {
 	if target == nil || source == nil {

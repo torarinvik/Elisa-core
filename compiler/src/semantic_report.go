@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
+	"elisacore/src/unparse"
 )
 
 func generateSemanticReport(result *semantic.Result) string {

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func (a *Analyzer) currentConservativeCallWideningTransforms() []FactTransform {

@@ -1,6 +1,6 @@
 # Unified Poststate `ensures` Clauses
 
-This document proposes the **next precision feature** for Contextlang typestate:
+This document proposes the **next precision feature** for Elisa core typestate:
 
 > explicit `ensures` summaries for how a call changes the caller-visible state of tracked argument paths.
 
@@ -33,7 +33,7 @@ Today the compiler is intentionally conservative at ref-call boundaries.
 
 Given:
 
-```context
+```elisa
 struct ParseJob[state Pending | Ready | Failed]:
     stage: mutable int
     checksum: mutable int
@@ -50,7 +50,7 @@ def finish_ok(job: ParseJob[Pending]&) -> void:
 
 the caller currently loses precision after:
 
-```context
+```elisa
 finish_ok((&job).cast[ParseJob[Pending]&])
 ```
 
@@ -58,7 +58,7 @@ because mutation crossed a ref-call boundary and the caller has no poststate sum
 
 So the caller sees a safe widened type like:
 
-```context
+```elisa
 ParseJob[Pending | Ready | Failed]
 ```
 
@@ -69,7 +69,7 @@ It is also the most obvious place to win precision back **next**.
 
 Today ownership-style helpers often need awkward “return the new pointer state so the caller can reassign” boilerplate:
 
-```context
+```elisa
 extern sfree_heap_pair_node(node: heap HeapPairNode&) -> heap HeapPairNode! can[Memory.Release]
 
 node as ! <- sfree_heap_pair_node(node)
@@ -79,7 +79,7 @@ That works, but it pushes the poststate update into the call site instead of the
 
 The more direct surface is:
 
-```context
+```elisa
 extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void
     can[Memory.Release]
     ensures node => !
@@ -87,7 +87,7 @@ extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void
 
 The caller then writes:
 
-```context
+```elisa
 sfree_heap_pair_node(node)
 ```
 
@@ -107,7 +107,7 @@ That means:
 
 So if a function says:
 
-```context
+```elisa
 def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     ...
 ```
@@ -116,7 +116,7 @@ the compiler should accept that only if every normal return path proves `job` is
 
 And if a function says:
 
-```context
+```elisa
 def require_non_null(node: heap HeapPairNode&?) -> void ensures node => &:
     ...
 ```
@@ -157,7 +157,7 @@ The preferred source-language surface should be a single **`ensures` clause**.
 
 For named typestate:
 
-```context
+```elisa
 def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.checksum <- 7
     job.stage <- 1
@@ -165,7 +165,7 @@ def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
 
 For pointer/refstate:
 
-```context
+```elisa
 extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void
     can[Memory.Release]
     ensures node => !
@@ -195,14 +195,14 @@ What is unified is the **user-facing poststate effect system**.
 
 ### 5.1 Exact named poststate
 
-```context
+```elisa
 def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     ...
 ```
 
 ### 5.2 Exact named union poststate
 
-```context
+```elisa
 def finish(job: ParseJob[Pending]&) -> void ensures job => Ready | Failed:
     ...
 ```
@@ -211,18 +211,18 @@ This means the caller should see exactly the union `Ready | Failed` after a norm
 
 ### 5.3 Refstate poststate
 
-```context
+```elisa
 extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void
     can[Memory.Release]
     ensures node => !
 ```
 
-```context
+```elisa
 def require_non_null(node: heap HeapPairNode&?) -> void ensures node => &:
     ...
 ```
 
-```context
+```elisa
 def maybe_invalidate(node: heap HeapPairNode&) -> void ensures node => &?:
     ...
 ```
@@ -245,7 +245,7 @@ So `ensures node => !` is shorthand for:
 
 ### 5.4 Preserve current caller-visible state
 
-```context
+```elisa
 def bump_score(player: Player[Alive]&) -> void ensures player => preserve:
     ...
 ```
@@ -254,12 +254,12 @@ This means the call does not invalidate the caller-visible state for that path.
 
 ### 5.5 Nested path
 
-```context
+```elisa
 def kill_team(team: Team&) -> void ensures team.player => Dead:
     ...
 ```
 
-```context
+```elisa
 def release_slot(holder: Owner&) -> void ensures holder.node => !:
     ...
 ```
@@ -268,14 +268,14 @@ def release_slot(holder: Owner&) -> void ensures holder.node => !:
 
 Single-line form:
 
-```context
+```elisa
 def kill_team(team: Team&) -> void ensures team.player => Dead, team.armor => Destroyed:
     ...
 ```
 
 Readable multiline form:
 
-```context
+```elisa
 def process(team: Team&, sock: Socket&) -> void
     ensures team.player => Dead,
             sock => preserve:
@@ -338,7 +338,7 @@ The simplest first implementation is the second option stated conservatively:
 
 ### 7.2 Exact named-state summary
 
-```context
+```elisa
 ensures job => Ready
 ```
 
@@ -348,7 +348,7 @@ means:
 
 And:
 
-```context
+```elisa
 ensures job => Ready | Failed
 ```
 
@@ -358,7 +358,7 @@ means:
 
 ### 7.3 Refstate summary
 
-```context
+```elisa
 ensures node => !
 ```
 
@@ -368,7 +368,7 @@ means:
 
 Likewise:
 
-```context
+```elisa
 ensures node => &
 ensures node => &?
 ```
@@ -381,7 +381,7 @@ This is intentionally concise because the right-hand side is expressing a **refs
 
 ### 7.4 Preserve summary
 
-```context
+```elisa
 ensures sock => preserve
 ```
 
@@ -403,7 +403,7 @@ This point is crucial.
 
 If a call says:
 
-```context
+```elisa
 ensures node => !
 ```
 
@@ -417,14 +417,14 @@ If the call may invalidate other overlapping aliases, the compiler must handle t
 
 If the callee only guarantees a union:
 
-```context
+```elisa
 def finish(job: ParseJob[Pending]&) -> void ensures job => Ready | Failed:
     ...
 ```
 
 then the caller only gets:
 
-```context
+```elisa
 job : ParseJob[Ready | Failed]
 ```
 
@@ -443,7 +443,7 @@ That is exactly the behavior we want:
 
 ### 8.1 Parser/job state
 
-```context
+```elisa
 struct ParseJob[state Pending | Ready | Failed]:
     stage: mutable int
     checksum: mutable int
@@ -460,7 +460,7 @@ def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
 
 ### 8.2 Resource close
 
-```context
+```elisa
 struct Socket[state Open | Closed]:
     fd: mutable int
 
@@ -474,7 +474,7 @@ def close_socket(sock: Socket[Open]&) -> void ensures sock => Closed:
 
 ### 8.3 Free helper with refstate postcondition
 
-```context
+```elisa
 extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void
     can[Memory.Release]
     ensures node => !
@@ -482,19 +482,19 @@ extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void
 
 Now the caller writes:
 
-```context
+```elisa
 sfree_heap_pair_node(node)
 ```
 
 instead of:
 
-```context
+```elisa
 node as ! <- sfree_heap_pair_node(node)
 ```
 
 ### 8.4 Require/prove non-null
 
-```context
+```elisa
 def require_non_null(node: heap HeapPairNode&?) -> void can[Abort.Panic] ensures node => &:
     assert node != null
 ```
@@ -503,7 +503,7 @@ This is a useful example of a call that does **not** change the pointer value, b
 
 ### 8.5 Preserve state across irrelevant mutation
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: mutable int
     score: mutable int
@@ -518,7 +518,7 @@ def bump_score(player: Player[Alive]&) -> void ensures player => preserve:
 
 ### 8.6 Nested path
 
-```context
+```elisa
 struct Team:
     player: mutable Player[Alive]
     slot: mutable heap HeapPairNode&?
@@ -536,7 +536,7 @@ def clear_slot(team: Team&) -> void ensures team.slot => !:
 
 For an `ensures` entry:
 
-```context
+```elisa
 ensures target => effect
 ```
 
@@ -569,7 +569,7 @@ Reject:
 
 These are valid:
 
-```context
+```elisa
 ensures job => Ready
 ensures sock => preserve
 ensures node => !
@@ -578,7 +578,7 @@ ensures maybe_node => &
 
 These are invalid:
 
-```context
+```elisa
 ensures job => !          # if job is not a ref type
 ensures node => Ready     # if node is just a ref, not a named-state-bearing pointee path
 ```
@@ -587,7 +587,7 @@ ensures node => Ready     # if node is just a ref, not a named-state-bearing poi
 
 These are valid:
 
-```context
+```elisa
 ensures sock => preserve
 ensures job => Ready
 ensures node => !
@@ -595,7 +595,7 @@ ensures node => !
 
 These are invalid:
 
-```context
+```elisa
 ensures job => preserve | Ready
 ensures node => preserve | !
 ```
@@ -604,13 +604,13 @@ ensures node => preserve | !
 
 If `job` is a `ParseJob[...]`, then:
 
-```context
+```elisa
 ensures job => Ready
 ```
 
 is fine, but:
 
-```context
+```elisa
 ensures job => Closed
 ```
 
@@ -743,7 +743,7 @@ For APIs where the caller **must inspect an outcome**, the right extension is a 
 
 For example:
 
-```context
+```elisa
 def try_finish(job: ParseJob[Pending]&) -> bool
     ensures return true  => job => Ready,
             return false => job => Failed:
@@ -752,7 +752,7 @@ def try_finish(job: ParseJob[Pending]&) -> bool
 
 And similarly for refstates:
 
-```context
+```elisa
 def maybe_release(node: heap HeapPairNode&) -> bool
     ensures return true  => node => !,
             return false => node => preserve:
@@ -930,7 +930,7 @@ In short:
 
 That is a very good next trade.
 
-This document proposes the **next precision feature** for Contextlang typestate:
+This document proposes the **next precision feature** for Elisa core typestate:
 
 > explicit summaries for how a call changes the typestate of ref arguments.
 
@@ -953,7 +953,7 @@ Today the compiler is intentionally conservative at ref-call boundaries.
 
 Given:
 
-```context
+```elisa
 struct ParseJob[state Pending | Ready | Failed]:
     stage: mutable int
     checksum: mutable int
@@ -970,7 +970,7 @@ def finish_ok(job: ParseJob[Pending]&) -> void:
 
 the caller currently loses precision after:
 
-```context
+```elisa
 finish_ok((&job).cast[ParseJob[Pending]&])
 ```
 
@@ -978,7 +978,7 @@ because mutation crossed a ref-call boundary and the caller has no poststate sum
 
 So the caller sees a safe widened type like:
 
-```context
+```elisa
 ParseJob[Pending | Ready | Failed]
 ```
 
@@ -1012,7 +1012,7 @@ The entire point is to stay **sound-first, explicit-second, inference-later**.
 
 The preferred source-language surface should be an **`ensures` clause**:
 
-```context
+```elisa
 def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.checksum <- 7
     job.stage <- 1
@@ -1040,13 +1040,13 @@ The compiler can still represent this internally as a normal poststate-effect su
 
 ### Exact poststate
 
-```context
+```elisa
 ensures job => Ready
 ```
 
 ### Exact union poststate
 
-```context
+```elisa
 ensures job => Ready | Failed
 ```
 
@@ -1054,7 +1054,7 @@ This means the caller should see exactly the union `Ready | Failed` after a norm
 
 ### Preserve current caller-visible state
 
-```context
+```elisa
 ensures sock => preserve
 ```
 
@@ -1062,7 +1062,7 @@ This means the call does not invalidate the caller-visible typestate for `sock`.
 
 ### Nested path
 
-```context
+```elisa
 ensures team.player => Dead
 ```
 
@@ -1072,14 +1072,14 @@ This means the summary applies to a field path rooted at a ref parameter, not ne
 
 Single-line form:
 
-```context
+```elisa
 def kill_team(team: Team&) -> void ensures team.player => Dead, team.armor => Destroyed:
     ...
 ```
 
 Readable multiline form:
 
-```context
+```elisa
 def kill_team(team: Team&) -> void
     ensures team.player => Dead,
             team.armor  => Destroyed:
@@ -1138,7 +1138,7 @@ The simplest first implementation is the first option.
 
 ### 6.2 Exact state summary
 
-```context
+```elisa
 ensures job => Ready
 ```
 
@@ -1148,7 +1148,7 @@ means:
 
 And:
 
-```context
+```elisa
 ensures job => Ready | Failed
 ```
 
@@ -1158,7 +1158,7 @@ means:
 
 ### 6.3 Preserve summary
 
-```context
+```elisa
 ensures sock => preserve
 ```
 
@@ -1180,7 +1180,7 @@ It expresses an **identity summary**, not just “no worse than the callee param
 
 ### 7.1 Parser/job state
 
-```context
+```elisa
 struct ParseJob[state Pending | Ready | Failed]:
     stage: mutable int
     checksum: mutable int
@@ -1200,7 +1200,7 @@ Now the caller can keep precision after the call without re-proving with `is`.
 
 ### 7.2 Resource close
 
-```context
+```elisa
 struct Socket[state Open | Closed]:
     fd: mutable int
 
@@ -1215,7 +1215,7 @@ def close_socket(sock: Socket[Open]&) -> void:
 
 ### 7.3 Preserve state across irrelevant mutation
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: mutable int
     score: mutable int
@@ -1231,7 +1231,7 @@ def bump_score(player: Player[Alive]&) -> void:
 
 ### 7.4 Nested path
 
-```context
+```elisa
 struct Team:
     player: mutable Player[Alive]
 
@@ -1248,7 +1248,7 @@ This is especially valuable because the current widening logic already understan
 
 For an `ensures` entry:
 
-```context
+```elisa
 ensures target => effect
 ```
 
@@ -1278,7 +1278,7 @@ Reject:
 
 These are valid:
 
-```context
+```elisa
 ensures sock => preserve
 ensures job => Ready
 ensures job => Ready | Failed
@@ -1286,7 +1286,7 @@ ensures job => Ready | Failed
 
 This is invalid:
 
-```context
+```elisa
 ensures job => preserve | Ready
 ```
 
@@ -1296,13 +1296,13 @@ or any equivalent mixed spelling.
 
 If `job` is a `ParseJob[...]`, then:
 
-```context
+```elisa
 ensures job => Ready
 ```
 
 is fine, but:
 
-```context
+```elisa
 ensures job => Closed
 ```
 
@@ -1314,7 +1314,7 @@ This is important.
 
 Unlike a whole-parameter inline transition syntax, `ensures` should naturally support **multiple target summaries**, because real functions may need more than one:
 
-```context
+```elisa
 def process(team: Team&, sock: Socket&) -> void
     ensures team.player => Dead,
             sock => preserve:
@@ -1413,7 +1413,7 @@ At each normal return, the analyzer must be able to prove that the target path i
 
 So for:
 
-```context
+```elisa
 def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.stage <- 1
 ```
@@ -1422,7 +1422,7 @@ the body is accepted only if every return path proves `job` is `Ready`.
 
 If one return path yields `Ready` and another yields `Failed`, then the annotation must be:
 
-```context
+```elisa
 ensures job => Ready | Failed
 ```
 

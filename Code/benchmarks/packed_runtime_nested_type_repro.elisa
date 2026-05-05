@@ -1,0 +1,50 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+const RETAINED_TYPE_ROUNDS = 24
+
+@packed_profile(retained_reads)
+packed enum TypeExpr:
+    common:
+        span: i64
+        weight: i64
+    Var(symbol: i64)
+    Tuple(left: TypeExpr, right: TypeExpr)
+    Record(label: i64, field_ty: TypeExpr, rest: TypeExpr)
+
+def score_type(node: TypeExpr, frozen: TypeExpr.Store[Frozen]) -> i64:
+    match node in frozen:
+        TypeExpr.Record(label: label, field_ty: TypeExpr.Tuple(left: left, right: right), rest: rest):
+            return node.span + node.weight + label + score_type(left, frozen) + score_type(right, frozen) + score_type(rest, frozen) + 17
+        TypeExpr.Var(symbol: symbol):
+            return node.span + node.weight + symbol + 3
+        TypeExpr.Tuple(left: left, right: right):
+            return node.span + node.weight + score_type(left, frozen) + score_type(right, frozen) + 5
+        TypeExpr.Record(label: label, field_ty: field_ty, rest: rest):
+            return node.span + node.weight + label + score_type(field_ty, frozen) + score_type(rest, frozen) + 13
+
+def build_type(seed: usize, current: TypeExpr, previous: TypeExpr, store: TypeExpr.Store[Local]) -> TypeExpr:
+    seed_i64: i64 = seed.i64()
+    if seed % 3 == 0:
+        pair: TypeExpr = new[store] TypeExpr.Tuple(span: 100 + seed_i64, weight: 7 + seed_i64, left: current, right: previous)
+        return new[store] TypeExpr.Record(span: 101 + seed_i64, weight: 11 + seed_i64, label: 400 + seed_i64, field_ty: pair, rest: current)
+    if seed % 3 == 1:
+        return new[store] TypeExpr.Tuple(span: 102 + seed_i64, weight: 13 + seed_i64, left: previous, right: current)
+    return new[store] TypeExpr.Record(span: 103 + seed_i64, weight: 17 + seed_i64, label: 500 + seed_i64, field_ty: previous, rest: current)
+
+def retained_nested_type_repro_impl() -> i64:
+    region scratch(32768)
+    store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
+    int_ty: TypeExpr = new[store] TypeExpr.Var(span: 1, weight: 1, symbol: 11)
+    bool_ty: TypeExpr = new[store] TypeExpr.Var(span: 2, weight: 1, symbol: 12)
+    current: mutable TypeExpr = new[store] TypeExpr.Tuple(span: 3, weight: 2, left: int_ty, right: bool_ty)
+    previous: mutable TypeExpr = bool_ty
+
+    for seed in 0..<RETAINED_TYPE_ROUNDS:
+        next: TypeExpr = build_type(seed, current, previous, store)
+        previous <- current
+        current <- next
+
+    frozen: TypeExpr.Store[Frozen] = freeze(move store)
+    return score_type(current, frozen)
+
+export func retained_nested_type_repro() -> i64 = retained_nested_type_repro_impl

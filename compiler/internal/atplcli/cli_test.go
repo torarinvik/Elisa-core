@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 )
 
 type fakeEvalOutcome struct {

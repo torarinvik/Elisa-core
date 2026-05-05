@@ -1,10 +1,10 @@
 package main
 
 import (
+	"elisacore/src/backend"
 	"encoding/json"
 	"fmt"
 	"io"
-	"llcontext/src/backend"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +13,7 @@ import (
 const (
 	projectFileName  = "project.json"
 	manifestFileName = "manifest.json"
-	libraryDirSuffix = ".llctxlib"
+	libraryDirSuffix = ".elisalib"
 )
 
 type trustLevel int
@@ -378,14 +378,14 @@ func parseTrustLevel(value string) (trustLevel, error) {
 }
 func printProjectUsage(w io.Writer) {
 	fmt.Fprintln(w, "Project commands:")
-	fmt.Fprintln(w, "  llcontext init <name> [--path <dir>]")
-	fmt.Fprintln(w, "  llcontext init-lib <name> [--path <dir>]")
-	fmt.Fprintln(w, "  llcontext build [target] [--project <dir|project.json>] [-emit <mode>] [-o <output>] [--trust <none|include|full>] [-O0|-O2|-O3]")
-	fmt.Fprintln(w, "  llcontext run [target] [--project <dir|project.json>] [--trust <none|include|full>]")
-	fmt.Fprintln(w, "  llcontext test [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>] [-O0|-O2|-O3]")
-	fmt.Fprintln(w, "  llcontext bench [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>]")
-	fmt.Fprintln(w, "  llcontext project view [target] [--project <dir|project.json>]")
-	fmt.Fprintln(w, "  llcontext project deps [target] [--project <dir|project.json>] [--json]")
+	fmt.Fprintln(w, "  elisacore init <name> [--path <dir>]")
+	fmt.Fprintln(w, "  elisacore init-lib <name> [--path <dir>]")
+	fmt.Fprintln(w, "  elisacore build [target] [--project <dir|project.json>] [-emit <mode>] [-o <output>] [--trust <none|include|full>] [-O0|-O2|-O3]")
+	fmt.Fprintln(w, "  elisacore run [target] [--project <dir|project.json>] [--trust <none|include|full>]")
+	fmt.Fprintln(w, "  elisacore test [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>] [-O0|-O2|-O3]")
+	fmt.Fprintln(w, "  elisacore bench [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>]")
+	fmt.Fprintln(w, "  elisacore project view [target] [--project <dir|project.json>]")
+	fmt.Fprintln(w, "  elisacore project deps [target] [--project <dir|project.json>] [--json]")
 }
 func scaffoldProject(options projectCLIOptions) error {
 	basePath := options.path
@@ -419,7 +419,7 @@ func scaffoldProject(options projectCLIOptions) error {
 		Exec:                  []string{},
 		Targets: map[string]projectTargetDefinition{
 			"app": {
-				Entry:        "src/main.llcontext",
+				Entry:        "src/main.elisa",
 				Emit:         emitLLVM,
 				RunEmit:      emitInterpret,
 				Output:       filepath.ToSlash(filepath.Join("build", "app.ll")),
@@ -439,7 +439,7 @@ func scaffoldProject(options projectCLIOptions) error {
 		return err
 	}
 	mainSource := "def main() -> int:\n    return 0\n"
-	if err := writeOutputFile(filepath.Join(root, "src", "main.llcontext"), []byte(mainSource)); err != nil {
+	if err := writeOutputFile(filepath.Join(root, "src", "main.elisa"), []byte(mainSource)); err != nil {
 		return err
 	}
 	for _, placeholder := range []string{filepath.Join(root, "lib", ".gitkeep"), filepath.Join(root, "test", ".gitkeep")} {
@@ -469,7 +469,7 @@ func scaffoldLibrary(options projectCLIOptions) error {
 	}
 	manifest := manifestDefinition{
 		Provides:     options.initName,
-		Entry:        filepath.ToSlash(filepath.Join("src", options.initName+".llcontext")),
+		Entry:        filepath.ToSlash(filepath.Join("src", options.initName+".elisa")),
 		Interface:    filepath.ToSlash(filepath.Join("src", options.initName+interfaceExtension)),
 		Dependencies: []string{},
 		IncludeDirs:  []string{"src"},
@@ -485,7 +485,7 @@ func scaffoldLibrary(options projectCLIOptions) error {
 	}
 	libFunc := sanitizeIdentifier(options.initName) + "_value"
 	libSource := fmt.Sprintf("def %s() -> int:\n    return 1\n", libFunc)
-	if err := writeOutputFile(filepath.Join(root, "src", options.initName+".llcontext"), []byte(libSource)); err != nil {
+	if err := writeOutputFile(filepath.Join(root, "src", options.initName+".elisa"), []byte(libSource)); err != nil {
 		return err
 	}
 	ifaceSource := fmt.Sprintf("extern %s() -> int\n", libFunc)

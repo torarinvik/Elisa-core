@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 	if expr == nil || expr.Operand == nil {

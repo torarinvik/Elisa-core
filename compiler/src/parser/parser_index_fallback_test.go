@@ -3,8 +3,8 @@ package parser
 import (
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/unparse"
 )
 
 func TestParseIndexFallbackExpr(t *testing.T) {

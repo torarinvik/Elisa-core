@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func (a *Analyzer) analyzeZipMapHelperCall(expr *ast.CallExpr) Type {
 	if len(expr.Args) != 4 {

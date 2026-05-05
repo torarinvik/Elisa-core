@@ -1,8 +1,8 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"strconv"
 	"strings"
 )

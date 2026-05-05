@@ -1,7 +1,7 @@
 package semantic_test
 
 import (
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,7 +33,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_rebased_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_rebased_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -66,7 +66,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return wrapped.meta.total + wrapped.tag
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_rebased_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_rebased_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsExternBorrowsReturnFieldOnUnknownNestedReturnPath(t *testing.T) {
@@ -85,7 +85,7 @@ struct Wrapper:
 @borrows_return_field(meta.missing, src)
 extern wrap_meta(src: view[Holder]) -> Wrapper
 `
-	_, errs := parseAndAnalyze(t, "extern_function_nested_field_path_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "extern_function_nested_field_path_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -106,7 +106,7 @@ def bad(owner: Arena) -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_packed_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_packed_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -127,7 +127,7 @@ def ok(owner: Arena) -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_packed_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_packed_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingIndexedStructFieldAliasInvalidatedByRestore(t *testing.T) {
@@ -143,7 +143,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_indexed_struct_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_indexed_struct_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -164,7 +164,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_indexed_struct_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_indexed_struct_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingSlicedViewAliasInvalidatedByRestore(t *testing.T) {
@@ -181,7 +181,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_sliced_view_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_sliced_view_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -203,7 +203,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_sliced_view_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_sliced_view_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingNestedStructViewAliasInvalidatedByRestore(t *testing.T) {
@@ -224,7 +224,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_nested_struct_view_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_nested_struct_view_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -250,7 +250,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_nested_struct_view_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_nested_struct_view_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingMoveAsEnumBoundIndexedAliasInvalidatedByRestore(t *testing.T) {
@@ -271,7 +271,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_indexed_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_indexed_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -297,7 +297,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_enum_indexed_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_enum_indexed_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsRestoringCheckpointFromWrongRegion(t *testing.T) {
@@ -307,7 +307,7 @@ func TestAnalyzeRejectsRestoringCheckpointFromWrongRegion(t *testing.T) {
 	mark left as cp
 	restore right from cp
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_wrong_region.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_wrong_region.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -322,7 +322,7 @@ func TestAnalyzeRejectsRestoringResetCheckpoint(t *testing.T) {
 	reset scratch
 	restore scratch from cp
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_reset_checkpoint.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_reset_checkpoint.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -337,7 +337,7 @@ func TestAnalyzeRejectsUsingReferenceInvalidatedByReset(t *testing.T) {
 	reset scratch
 	return value[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_reset_invalid_ref.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_reset_invalid_ref.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -353,7 +353,7 @@ func TestAnalyzeRejectsRestoringCheckpointInvalidatedByEarlierRestore(t *testing
 	restore scratch from outer
 	restore scratch from inner
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalidated_checkpoint.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalidated_checkpoint.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -363,8 +363,8 @@ func TestAnalyzeRejectsRestoringCheckpointInvalidatedByEarlierRestore(t *testing
 }
 func TestAnalyzeAcceptsFrontendStressFixture(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.llcontext"), map[string]bool{})
-	_, errs := parseAndAnalyze(t, "frontend_stress.llcontext", src)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.elisa"), map[string]bool{})
+	_, errs := parseAndAnalyze(t, "frontend_stress.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsErrorDeclarationsAndTryRecovery(t *testing.T) {
@@ -389,7 +389,7 @@ def load_with_fallback(path: u8&) -> u8&:
 	text: u8& = try read_file(path) else "" as u8&
 	return text
 `
-	_, errs := parseAndAnalyze(t, "error_handling_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_handling_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsErrorSetWideningAndTagRaise(t *testing.T) {
@@ -413,7 +413,7 @@ def bubble() -> int error[AppError.NotFound, ...]:
 def fail_now() -> int error[OneTagError.NotFound]:
 	raise FileError.NotFound
 `
-	_, errs := parseAndAnalyze(t, "error_set_widening_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_set_widening_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsWildcardErrorSetShorthand(t *testing.T) {
@@ -426,7 +426,7 @@ extern read_value() -> int error[FileError]
 def bubble() -> int error[FileError, ...]:
 	return try read_value()
 `
-	_, errs := parseAndAnalyze(t, "error_set_wildcard_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_set_wildcard_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsMultiFamilyErrorComposition(t *testing.T) {
@@ -446,7 +446,7 @@ def load_any(use_disk: bool) -> int error[FileError, NetworkError]:
 		return try read_disk()
 	return try read_network()
 `
-	_, errs := parseAndAnalyze(t, "error_multi_family_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_multi_family_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsMixedRowStyleFamilyExpansion(t *testing.T) {
@@ -469,7 +469,7 @@ def load_any(use_disk: bool) -> int error[FileError.NotFound, NetworkError.Timeo
 def fail_disk() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
 	raise FileError.PermissionDenied
 `
-	_, errs := parseAndAnalyze(t, "error_mixed_row_expansion_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_mixed_row_expansion_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeCanonicalizesEquivalentErrorSetSpellings(t *testing.T) {
@@ -487,7 +487,7 @@ def by_full_subset() -> int error[FileError.NotFound, FileError.PermissionDenied
 def by_reverse_family_order() -> int error[NetworkError, FileError]:
 	return 2
 `
-	result, errs := parseAndAnalyze(t, "error_canonicalization.llcontext", src)
+	result, errs := parseAndAnalyze(t, "error_canonicalization.elisa", src)
 	requireNoErrors(t, errs)
 
 	fullSubset, ok := result.GlobalScope.Lookup("by_full_subset")
@@ -527,7 +527,7 @@ error NetworkError:
 def fail() -> int error[FileError, NetworkError]:
 	raise LegacyError.NotFound
 `
-	_, errs := parseAndAnalyze(t, "error_multi_family_ambiguous_raise.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_multi_family_ambiguous_raise.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -548,7 +548,7 @@ error NetworkError:
 def fail() -> int error[NetworkError, FileError]:
 	raise LegacyError.Busy
 `
-	_, errs := parseAndAnalyze(t, "error_canonical_raise_diag.llcontext", src)
+	_, errs := parseAndAnalyze(t, "error_canonical_raise_diag.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

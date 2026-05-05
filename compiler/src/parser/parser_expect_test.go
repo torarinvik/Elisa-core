@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/unparse"
 )
 
 func TestParseExpectPatternStatementPreservesBlocklessBindingForm(t *testing.T) {

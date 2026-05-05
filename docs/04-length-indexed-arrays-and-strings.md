@@ -16,7 +16,7 @@ array[T, N]
 
 with the existing short fixed-array form still valid when you want it:
 
-```context
+```elisa
 array[u8, 16]
 array[Node, 4]
 array[T, N]
@@ -45,7 +45,7 @@ where `n` is a value-level natural number tracked in the type.
 
 If the operation may allocate, the practical surface should also admit failure explicitly:
 
-```context
+```elisa
 error ShapeOpError:
 	AllocationFailed
 ```
@@ -113,7 +113,7 @@ concat : str[A] × str[B] -> str[A + B]
 
 And if you want the numeric code unit explicitly, the cast stays direct:
 
-```context
+```elisa
 def first_code(text: str[4]) -> i64:
 	return text[0].i64()
 ```
@@ -229,7 +229,7 @@ That is:
 
 If I had to summarize your direction in one clean sentence, I’d say:
 
-> Contextlang should stay as low-level as C in representation and control, but use lightweight dependent typing for pointer validity and shape/length facts instead of borrow checking or lifetime analysis.
+> Elisa core should stay as low-level as C in representation and control, but use lightweight dependent typing for pointer validity and shape/length facts instead of borrow checking or lifetime analysis.
 
 I think that is a very strong language identity.
 

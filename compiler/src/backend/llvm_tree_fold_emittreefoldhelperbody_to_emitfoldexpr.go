@@ -9,9 +9,9 @@ package backend
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
 )
 
 func (s *functionState) emitTreeFoldHelperBody(expr *ast.FoldExpr, helper *treeFoldHelperInfo, nodeParam C.LLVMValueRef, envParam C.LLVMValueRef) error {

@@ -1,9 +1,9 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 	"strings"
 	"testing"
 )
@@ -68,7 +68,7 @@ func hasString(values []string, target string) bool {
 	return false
 }
 func TestAnalyzeInfersDirectSinkParamSummary(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "direct_sink_summary.llcontext", `extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
+	result := analyzeFunctionAnalysisTestSource(t, "direct_sink_summary.elisa", `extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
 
 def take(thread: Thread[i64, Joinable]) -> i64:
 	return join(move thread)
@@ -86,7 +86,7 @@ def take(thread: Thread[i64, Joinable]) -> i64:
 	}
 }
 func TestAnalyzeVariantAndLetConditionBindings(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "variant_let_bindings.llcontext", `enum Expr:
+	analyzeFunctionAnalysisTestSource(t, "variant_let_bindings.elisa", `enum Expr:
 	Int(value: i64)
 	Pair(left: i64, right: i64)
 
@@ -98,7 +98,7 @@ def score(node: Expr, maybe: i64?, enabled: bool) -> i64:
 `)
 }
 func TestAnalyzeIfLetConditionBindsNullableReferenceAsNonNull(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "if_let_nullable_ref_binding.llcontext", `struct Node:
+	analyzeFunctionAnalysisTestSource(t, "if_let_nullable_ref_binding.elisa", `struct Node:
 	value: i64
 
 def read(node: Node&?) -> i64:
@@ -108,14 +108,14 @@ def read(node: Node&?) -> i64:
 `)
 }
 func TestAnalyzeReturnQuestionEarlyReturnsOptionalPayload(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "return_question_optional_payload.llcontext", `def first(left: i64?, right: i64?) -> i64?:
+	analyzeFunctionAnalysisTestSource(t, "return_question_optional_payload.elisa", `def first(left: i64?, right: i64?) -> i64?:
 	return? left
 	return? right
 	return null
 `)
 }
 func TestAnalyzeLetConditionRejectsNonOptionalValue(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "let_bind_non_optional.llcontext", `def bad(value: i64) -> bool:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "let_bind_non_optional.elisa", `def bad(value: i64) -> bool:
 	return let item = value
 `)
 	if len(result.Errors()) == 0 {
@@ -223,7 +223,7 @@ func TestGuardFactsForConditionRecordsIsVariantProof(t *testing.T) {
 	}
 }
 func TestAnalyzeFunctionAnalysisCFGRecordsGuardNonnullCallFacts(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "guard_nonnull_cfg.llcontext", `struct Box:
+	result := analyzeFunctionAnalysisTestSource(t, "guard_nonnull_cfg.elisa", `struct Box:
 	value: i32
 
 @guard_nonnull(box)
@@ -253,7 +253,7 @@ def read_box(box: heap Box&?) -> i32:
 	}
 }
 func TestAnalyzeFunctionAnalysisCFGRecordsGuardVariantCallFacts(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "guard_variant_cfg.llcontext", `packed enum Expr:
+	result := analyzeFunctionAnalysisTestSource(t, "guard_variant_cfg.elisa", `packed enum Expr:
 	common:
 		span: i32
 	Int(value: i32)
@@ -287,7 +287,7 @@ def fold(node: Expr) -> i32:
 	}
 }
 func TestAnalyzeFunctionAnalysisCFGRecordsTreeGuardVariantCallFacts(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "tree_guard_variant_cfg.llcontext", `tree Lua:
+	result := analyzeFunctionAnalysisTestSource(t, "tree_guard_variant_cfg.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -323,7 +323,7 @@ def fold(node: Lua.Expr) -> i64:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsConservativeCallWidening(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "call_widening_fact_transform.llcontext", `struct Player[state Alive | Dead]:
+	result := analyzeFunctionAnalysisTestSource(t, "call_widening_fact_transform.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int
 
 	derive state:
@@ -363,7 +363,7 @@ def use(mutable player: Player[Alive]&) -> void:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsConsumeAndRecomputeTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "flow_fact_transforms.llcontext", `struct Player[state Alive | Dead]:
+	result := analyzeFunctionAnalysisTestSource(t, "flow_fact_transforms.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int
 
 	derive state:
@@ -397,7 +397,7 @@ def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsProduceAndRebaseTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "produce_rebase_fact_transforms.llcontext", `struct RegionNode:
+	result := analyzeFunctionAnalysisTestSource(t, "produce_rebase_fact_transforms.elisa", `struct RegionNode:
 	next: RegionNode&?
 	value: i32
 
@@ -458,7 +458,7 @@ func TestBuildFunctionFactSnapshotRecordsStoreDependencyLabels(t *testing.T) {
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsRegionInvalidateTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "region_invalidate_fact_transforms.llcontext", `def checkpoint_demo(seed: i32) -> i32:
+	result := analyzeFunctionAnalysisTestSource(t, "region_invalidate_fact_transforms.elisa", `def checkpoint_demo(seed: i32) -> i32:
 	region scratch(1024)
 	mark scratch as cp
 	temp: scratch i32& = new[scratch] seed + 1
@@ -508,7 +508,7 @@ def destroy_demo() -> void:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsAliasClassTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "alias_fact_transforms.llcontext", `struct RegionNode:
+	result := analyzeFunctionAnalysisTestSource(t, "alias_fact_transforms.elisa", `struct RegionNode:
 	next: RegionNode&?
 	value: i32
 
@@ -530,7 +530,7 @@ def alias_region_ref(seed: i32) -> i32:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsAliasClassMutationTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "alias_mutation_fact_transforms.llcontext", `struct RegionNode:
+	result := analyzeFunctionAnalysisTestSource(t, "alias_mutation_fact_transforms.elisa", `struct RegionNode:
 	next: RegionNode&?
 	value: mutable i32
 

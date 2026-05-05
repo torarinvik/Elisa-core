@@ -205,7 +205,7 @@ func packedMLASTMegaNativeSpec(repoRoot string, objectOpt string) nativeArtifact
 	return nativeArtifactSpec{
 		name:            "packed-ml-ast-mega",
 		objectOpt:       objectOpt,
-		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_mega_core.llcontext"),
+		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_mega_core.elisa"),
 		exeName:         "packed_lowering_ml_ast_bench",
 		harnessPath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
 		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")},
@@ -226,7 +226,7 @@ func packedMLASTUltraNativeSpec(repoRoot string, objectOpt string) nativeArtifac
 	return nativeArtifactSpec{
 		name:            "packed-ml-ast-ultra",
 		objectOpt:       objectOpt,
-		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_ultra_core.llcontext"),
+		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_ultra_core.elisa"),
 		exeName:         "packed_lowering_ml_ast_ultra_bench",
 		harnessPath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
 		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")},
@@ -247,7 +247,7 @@ func packedMLASTMediumNativeSpec(repoRoot string, objectOpt string) nativeArtifa
 	return nativeArtifactSpec{
 		name:            "packed-ml-ast-medium",
 		objectOpt:       objectOpt,
-		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_medium_core.llcontext"),
+		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_medium_core.elisa"),
 		exeName:         "packed_lowering_ml_ast_medium_bench",
 		harnessPath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
 		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")},
@@ -268,7 +268,7 @@ func packedMLExprReproNativeSpec(repoRoot string, objectOpt string) nativeArtifa
 	return nativeArtifactSpec{
 		name:            "packed-ml-expr-repro",
 		objectOpt:       objectOpt,
-		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_runtime_ml_expr_repro.llcontext"),
+		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_runtime_ml_expr_repro.elisa"),
 		exeName:         "packed_runtime_ml_expr_repro",
 		harnessSource:   "#include <stdio.h>\nlong long packed_ml_expr_repro(void);\nint main(void) { printf(\"%lld\\n\", packed_ml_expr_repro()); return 0; }\n",
 		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")},
@@ -333,9 +333,9 @@ func nativeArtifactCacheKey(repoRoot string, spec nativeArtifactSpec) (string, s
 
 func nativeArtifactCacheRoot() (string, error) {
 	if base, err := os.UserCacheDir(); err == nil && base != "" {
-		return filepath.Join(base, "llcontext", "native_artifacts"), nil
+		return filepath.Join(base, "elisacore", "native_artifacts"), nil
 	}
-	return filepath.Join(os.TempDir(), "llcontext-native-artifact-cache"), nil
+	return filepath.Join(os.TempDir(), "elisacore-native-artifact-cache"), nil
 }
 
 func (spec nativeArtifactSpec) artifactPaths(dir string, key string) nativeArtifacts {
@@ -378,10 +378,10 @@ func (artifacts nativeArtifacts) harnessPath(spec nativeArtifactSpec) string {
 }
 
 func debugNativeArtifactCache(status string, spec nativeArtifactSpec, artifacts nativeArtifacts) {
-	if os.Getenv("LLCONTEXT_CACHE_DEBUG") == "" {
+	if os.Getenv("ELISACORE_CACHE_DEBUG") == "" {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[llcontext-cache] %s name=%s key=%s exe=%s\n", status, spec.name, artifacts.cacheKey[:12], artifacts.executable)
+	fmt.Fprintf(os.Stderr, "[elisacore-cache] %s name=%s key=%s exe=%s\n", status, spec.name, artifacts.cacheKey[:12], artifacts.executable)
 }
 
 func hashGoFilesUnder(hash hashWriter, root string) error {
@@ -439,7 +439,7 @@ func requireSlowNativeMLAST(tb testing.TB) {
 	if testing.Short() {
 		tb.Skip("skipping slow native ML AST smoke in short mode")
 	}
-	if os.Getenv("LLCONTEXT_SLOW_NATIVE") == "" {
-		tb.Skip("skipping slow native ML AST smoke; set LLCONTEXT_SLOW_NATIVE=1 to run it")
+	if os.Getenv("ELISACORE_SLOW_NATIVE") == "" {
+		tb.Skip("skipping slow native ML AST smoke; set ELISACORE_SLOW_NATIVE=1 to run it")
 	}
 }

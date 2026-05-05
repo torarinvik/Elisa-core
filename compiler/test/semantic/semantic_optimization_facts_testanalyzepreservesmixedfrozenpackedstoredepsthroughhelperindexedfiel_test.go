@@ -40,7 +40,7 @@ def inspect(owner: Arena) -> int:
 		Expr.Hold(value: _):
 			return 1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_indexed_field_match_mixed_child.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_indexed_field_match_mixed_child.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -90,7 +90,7 @@ def inspect(buf: array[i32, 4]) -> int:
 	right_alloc: view[i32] = boxed.right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_allocated_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_allocated_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -135,7 +135,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_allocated_field_move_as.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_allocated_field_move_as.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -181,7 +181,7 @@ def inspect(buf: array[i32, 4]) -> int:
 	right_indexed: view[i32] = items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_indexed_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_indexed_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -212,7 +212,7 @@ func TestAnalyzePreservesOptimizationFactsThroughDirectIndexedExpressions(t *tes
 	right_indexed: view[i32] = items[1]
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_direct_indexed_values.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_direct_indexed_values.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -254,7 +254,7 @@ def inspect(owner: Arena) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_direct_indexed_frozen_packed_provenance.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_direct_indexed_frozen_packed_provenance.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -325,7 +325,7 @@ def inspect(buf: array[i32, 4]) -> int:
 	right_indexed: view[i32] = wrapped.items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_helper_indexed_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_helper_indexed_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -369,7 +369,7 @@ def inspect(buf: array[i32, 4]) -> int:
 	right_indexed: view[i32] = wrapped.holder.items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_nested_helper_indexed_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_nested_helper_indexed_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -411,7 +411,7 @@ def inspect(values: array[i32, 4]) -> int:
 	right_indexed: view[i32] = wrapped.items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_rebased_helper_indexed_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_rebased_helper_indexed_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -453,7 +453,7 @@ def inspect(values: array[i32, 8]) -> int:
 	right_indexed: view[i32] = wrapped.items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_wildcard_rebased_helper_indexed_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -495,7 +495,7 @@ def inspect(values: array[i32, 8]) -> int:
 	right_overlap: view[i32] = wrapped.items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_wildcard_rebased_helper_indexed_overlap_guardrails.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 

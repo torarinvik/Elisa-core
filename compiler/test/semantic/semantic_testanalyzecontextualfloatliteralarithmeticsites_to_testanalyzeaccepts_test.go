@@ -1,8 +1,8 @@
 package semantic_test
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -30,7 +30,7 @@ def contextual_struct() -> FloatPair:
 def contextual_array() -> f32[2]:
 	return [13.25 + 14.25, 15.25 + 16.25]
 `
-	result, errs := parseAndAnalyze(t, "contextual_float_literal_arithmetic_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "contextual_float_literal_arithmetic_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -149,7 +149,7 @@ global g_f64: f64 = 7.25 + 8.25
 global g_pair: FloatPair = FloatPair(9.25 + 10.25, 11.25 + 12.25)
 global g_values: f32[2] = [13.25 + 14.25, 15.25 + 16.25]
 `
-	result, errs := parseAndAnalyze(t, "contextual_float_literal_arithmetic_toplevel_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "contextual_float_literal_arithmetic_toplevel_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -252,7 +252,7 @@ def plain_range() -> int:
 		total <- total + idx
 	return total
 `
-	result, errs := parseAndAnalyze(t, "contextual_int_literals_usize_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "contextual_int_literals_usize_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -322,7 +322,7 @@ def contextual_array() -> i32[2]:
 def contextual_unary() -> i32:
 	return -7
 `
-	result, errs := parseAndAnalyze(t, "contextual_int_literals_i32_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "contextual_int_literals_i32_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -387,7 +387,7 @@ func TestAnalyzeExplicitIntLiteralSuffixOverridesUsizeContext(t *testing.T) {
 	which: usize = 1i32
 	return which
 `
-	result, errs := parseAndAnalyze(t, "contextual_int_literal_suffix_override_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "contextual_int_literal_suffix_override_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -405,7 +405,7 @@ func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
 def bad() -> void:
     box: Box& = null
 `
-	_, errs := parseAndAnalyze(t, "nonnull_ref_rejects_null.llcontext", src)
+	_, errs := parseAndAnalyze(t, "nonnull_ref_rejects_null.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -428,7 +428,7 @@ def release_box() -> void:
 def missing_box() -> Box!:
     return null
 `
-	_, errs := parseAndAnalyze(t, "pointer_typestate.llcontext", src)
+	_, errs := parseAndAnalyze(t, "pointer_typestate.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsNullableFieldAccessWithoutProof(t *testing.T) {
@@ -441,7 +441,7 @@ def bad() -> int:
 	box: Box&? = maybe_box()
     return box.value
 `
-	_, errs := parseAndAnalyze(t, "nullable_field_access.llcontext", src)
+	_, errs := parseAndAnalyze(t, "nullable_field_access.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -461,7 +461,7 @@ def read_box() -> int:
         return 0
     return box.value
 `
-	_, errs := parseAndAnalyze(t, "guard_clause_refinement.llcontext", src)
+	_, errs := parseAndAnalyze(t, "guard_clause_refinement.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAliasGuardClauseRefinesRootAfterReturn(t *testing.T) {
@@ -477,7 +477,7 @@ def read_box() -> int:
 		return 0
 	return box.value
 `
-	_, errs := parseAndAnalyze(t, "alias_guard_clause_refines_root_after_return.llcontext", src)
+	_, errs := parseAndAnalyze(t, "alias_guard_clause_refines_root_after_return.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAliasRefinementInvalidatesAfterRootAssignment(t *testing.T) {
@@ -494,7 +494,7 @@ def bad_box() -> int:
 	box <- null
 	return alias.value
 `
-	_, errs := parseAndAnalyze(t, "alias_refinement_invalidates_after_root_assignment.llcontext", src)
+	_, errs := parseAndAnalyze(t, "alias_refinement_invalidates_after_root_assignment.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -521,7 +521,7 @@ def use(values: array[i32, 4], dyn: darray[i32, row], text: str[5], dyn_text: cs
 	take_sview(dyn_sub)
 	return text[0]
 `
-	_, errs := parseAndAnalyze(t, "builtin_surface_types.llcontext", src)
+	_, errs := parseAndAnalyze(t, "builtin_surface_types.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsCharCastAndComparisonFromStringIndexing(t *testing.T) {
@@ -532,7 +532,7 @@ func TestAnalyzeAcceptsCharCastAndComparisonFromStringIndexing(t *testing.T) {
 def same_head(left: cstr[row], right: cstr[col]) -> bool:
 	return left[0] == right[0]
 `
-	_, errs := parseAndAnalyze(t, "char_cast_and_compare.llcontext", src)
+	_, errs := parseAndAnalyze(t, "char_cast_and_compare.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsStandaloneCharLocalsParamsAndCasts(t *testing.T) {
@@ -545,6 +545,6 @@ func TestAnalyzeAcceptsStandaloneCharLocalsParamsAndCasts(t *testing.T) {
 def bump(ch: char) -> i64:
 	return (ch + 1).i64()
 `
-	_, errs := parseAndAnalyze(t, "standalone_char_values.llcontext", src)
+	_, errs := parseAndAnalyze(t, "standalone_char_values.elisa", src)
 	requireNoErrors(t, errs)
 }

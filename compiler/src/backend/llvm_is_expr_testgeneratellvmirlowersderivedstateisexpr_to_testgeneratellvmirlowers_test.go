@@ -20,7 +20,7 @@ def score(player: Player) -> int:
         return player.health
     return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_derived_state_is_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_derived_state_is_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -39,7 +39,7 @@ func TestGenerateLLVMIRLowersEnumIsExprWithLiteralPayloadPattern(t *testing.T) {
 def is_pi(node: Expr) -> bool:
 	return node is Expr.Float(3.14)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_enum_is_expr_literal_payload.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_enum_is_expr_literal_payload.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -58,7 +58,7 @@ func TestGenerateLLVMIRLowersPatternTernaryBindings(t *testing.T) {
 def unwrap(node: Expr) -> i64:
     return value if node is Expr.Int(value) else 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_pattern_ternary_bindings.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_pattern_ternary_bindings.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -78,7 +78,7 @@ def unwrap(node: Expr) -> i64:
     return? value if node is Expr.Int(value)
     return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_return_question_pattern_guard.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_return_question_pattern_guard.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -99,7 +99,7 @@ func TestGenerateLLVMIRLowersIsExprWithAlternativeValueTargets(t *testing.T) {
 def is_rel(kind: Tok) -> bool:
 	return kind is .LT | .LTEQ | .GT | .GTEQ
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_is_expr_alternatives.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_is_expr_alternatives.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -118,7 +118,7 @@ def check(block: Block) -> void:
     can Abort.Panic:
         expect block as {stmts: [1, 2, ...]}
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_expect_field_shape_list_rest.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_expect_field_shape_list_rest.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -140,7 +140,7 @@ def check(stmt: Stmt) -> void:
     can Abort.Panic:
         expect stmt as Stmt.While(_, {stmts: [1, 2, ...]})
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_expect_variant_payload_field_shape_list_rest.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_expect_variant_payload_field_shape_list_rest.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -165,7 +165,7 @@ def check(stmt: Perl.Stmt) -> void:
     can Abort.Panic:
         expect stmt as Perl.Stmt.While(_, {stmts: [Perl.Stmt.Next, Perl.Stmt.Last]})
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_expect_tree_block_field_shape_list.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_expect_tree_block_field_shape_list.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -200,7 +200,7 @@ def score(tok: Token) -> i64:
 		_:
 			return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_struct_pattern_match_is.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_pattern_match_is.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -236,7 +236,7 @@ def apply_expr(op: Op) -> i64:
 			return 30
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_const_enum_match.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_const_enum_match.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -271,7 +271,7 @@ def loop_value(tok: Token) -> i64:
 		return value
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -301,7 +301,7 @@ def loop_value(tok: Token) -> i64:
 		return value
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings_and.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings_and.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -331,7 +331,7 @@ def loop_value(tok: Token) -> i64:
 		return value
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings_or.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings_or.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -358,7 +358,7 @@ def fallback(maybe: i64?) -> i64:
 		return value
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_variant_let_bindings.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_variant_let_bindings.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -387,7 +387,7 @@ def score(stmt: Tiny.Stmt) -> i64:
 				return value
 	return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_nested_let_optional.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_nested_let_optional.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -429,7 +429,7 @@ def child_span(node: Lua.Expr) -> i64:
 def starts_with_nil(node: Lua.Expr) -> bool:
 	return node is Lua.Expr.Binary(Lua.Expr.Nil, _)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_is_expr.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_is_expr.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -456,7 +456,7 @@ def build(owner: Arena) -> Lua.Expr:
 		right: Lua.Expr = new[alloc] Lua.Expr.Nil(span: 2)
 		return Lua.Expr.Binary(span: 3, left: left, right: right)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_owner_scope.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_owner_scope.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -485,7 +485,7 @@ def child_span(node: Lua.Expr) -> i64:
 		return score_binary(node)
 	return node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_treeview_surface.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_treeview_surface.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -516,7 +516,7 @@ def child_span(node: Lua.Expr) -> i64:
 		return score_binary(node)
 	return node.span
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_bare_variant_surface.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_bare_variant_surface.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -556,7 +556,7 @@ def eval(node: Lua.Expr) -> i64:
 		Lua.Expr.Binary(left: Lua.Expr.Int(value: lhs), right: right):
 			return lhs + eval(right)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_match.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_match.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

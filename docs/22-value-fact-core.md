@@ -1,6 +1,6 @@
 # Value + Fact Core
 
-This document is the cleanup spine for llcontext's safety, optimization, tree,
+This document is the cleanup spine for Elisa core's safety, optimization, tree,
 effect, and DSL features.
 
 The short model is:
@@ -93,8 +93,8 @@ The current implementation deliberately exposes these facts in one shared place:
 - `compiler/src/semantic_report.go` prints these fields in `-emit semantic` and
     provides a fact-only trace with `-emit facts` or `-emit fact-trace`.
 
-The executable fixtures `Code/test_programs/fact_core_rules.llcontext` and
-`Code/test_programs/fact_interface_rules.llcontext` are compile-checked smoke
+The executable fixtures `Code/test_programs/fact_core_rules.elisa` and
+`Code/test_programs/fact_interface_rules.elisa` are compile-checked smoke
 samples for the catalog.
 
 ## Reporting Surface
@@ -102,10 +102,10 @@ samples for the catalog.
 `-emit semantic` is still the broad report. Fact-specific work can use:
 
 ```sh
-go run ./src -emit facts ../Code/test_programs/fact_core_rules.llcontext
-go run ./src -emit fact-trace -filter 'function=contains:fact_core_rules' ../Code/test_programs/fact_core_rules.llcontext
-go run ./src -emit facts -filter 'kind=eq:widen,class=eq:typestate' ../Code/test_programs/fact_core_rules.llcontext
-go run ./src -emit facts -filter 'class=eq:interface' ../Code/test_programs/fact_interface_rules.llcontext
+go run ./src -emit facts ../Code/test_programs/fact_core_rules.elisa
+go run ./src -emit fact-trace -filter 'function=contains:fact_core_rules' ../Code/test_programs/fact_core_rules.elisa
+go run ./src -emit facts -filter 'kind=eq:widen,class=eq:typestate' ../Code/test_programs/fact_core_rules.elisa
+go run ./src -emit facts -filter 'class=eq:interface' ../Code/test_programs/fact_interface_rules.elisa
 ```
 
 The first non-heading line of a fact trace is a contract line such as
@@ -144,11 +144,11 @@ When a frontend or semantic rule behaves unexpectedly, prefer narrowing the
 trace before reading the full semantic report:
 
 ```sh
-go run ./src -emit facts -filter 'function=contains:parse_expr,mode=eq:summary' path/to/frontend.llcontext
-go run ./src -emit facts -filter 'kind=eq:recompute,class=eq:store-deps,target=contains:node' path/to/frontend.llcontext
-go run ./src -emit facts -filter 'region=eq:scratch' path/to/frontend.llcontext
-go run ./src -emit facts -filter 'alias=contains:alias-class#0' path/to/frontend.llcontext
-go run ./src -emit facts -filter 'function=contains:parse_expr,format=eq:json' path/to/frontend.llcontext
+go run ./src -emit facts -filter 'function=contains:parse_expr,mode=eq:summary' path/to/frontend.elisa
+go run ./src -emit facts -filter 'kind=eq:recompute,class=eq:store-deps,target=contains:node' path/to/frontend.elisa
+go run ./src -emit facts -filter 'region=eq:scratch' path/to/frontend.elisa
+go run ./src -emit facts -filter 'alias=contains:alias-class#0' path/to/frontend.elisa
+go run ./src -emit facts -filter 'function=contains:parse_expr,format=eq:json' path/to/frontend.elisa
 ```
 
 Use `mode=eq:summary` first to verify that the expected function has fact
@@ -178,7 +178,7 @@ Common recipes:
 
 ### Null check
 
-```llcontext
+```elisacore
 if p != null:
     use(p)
 ```
@@ -192,7 +192,7 @@ require use(p): RefState non-null
 
 ### Region checkpoint restore
 
-```llcontext
+```elisacore
 mark scratch as cp
 tmp: scratch Node& = new[scratch] Node(...)
 restore scratch from cp
@@ -214,7 +214,7 @@ implementation to become stringly typed internally.
 
 ### Packed tree construction
 
-```llcontext
+```elisacore
 return node[span = left.span + right.span] Pascal.Expr.Binary(left: left, right: right)
 ```
 
@@ -234,7 +234,7 @@ that this is a producing operation tied to a store/allocator.
 
 ### Freeze
 
-```llcontext
+```elisacore
 frozen: Expr.Store[Frozen] = freeze(move store)
 ```
 
@@ -252,7 +252,7 @@ store dependency detail (`store_deps=store`) for the produced frozen handle.
 
 ### Effects and local grants
 
-```llcontext
+```elisacore
 def log(text: u8&) -> void effects[Console.Write]:
     return puts(text) can Console.Write
 ```
@@ -270,7 +270,7 @@ protocol state of a value.
 
 ### Generic interface bounds
 
-```llcontext
+```elisacore
 static interface Builder:
     type State
     def state() -> State
@@ -291,7 +291,7 @@ failures as a separate diagnostic universe.
 
 ### Ensures
 
-```llcontext
+```elisacore
 def finish_ok(mutable job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.status <- ParseJobStatus.Ready
 ```
@@ -309,7 +309,7 @@ success postconditions.
 
 ### Ref-call widening
 
-```llcontext
+```elisacore
 extern unknown_update(mutable player: Player[Alive]&) -> void
 
 def use(mutable player: Player[Alive]&) -> void:
@@ -330,7 +330,7 @@ position.
 
 ### Error path exits
 
-```llcontext
+```elisacore
 def read() -> int error[FileError]:
     raise FileError.NotFound
 ```
@@ -347,7 +347,7 @@ alternate paths. These are not success-path `ensures` facts.
 
 ### Alias class mutation
 
-```llcontext
+```elisacore
 alias: mutable Node& = first
 alias.value <- alias.value + 1
 ```

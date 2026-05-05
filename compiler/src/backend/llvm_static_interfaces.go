@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 func (s *functionState) interfaceMethodRef(expr *ast.FieldExpr) (*semantic.InterfaceMethodRef, bool) {

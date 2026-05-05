@@ -1,11 +1,11 @@
-# Ideas From V That Look Orthogonal To `llcontext`
+# Ideas From V That Look Orthogonal To `elisacore`
 
 This note surveys the V compiler, runtime, and standard language surface for
 ideas that look **useful**, **portable in spirit**, and **orthogonal** to the
-current `llcontext` direction.
+current `elisacore` direction.
 
 The goal is **not** to copy V wholesale, and not to import features that would
-pull `llcontext` away from its existing center of gravity around:
+pull `elisacore` away from its existing center of gravity around:
 
 - explicit provenance / views / packed-layout work
 - region-aware storage and region checkpoints
@@ -20,7 +20,7 @@ look like **good complements** to that direction.
 
 An idea made the shortlist if most of the following were true:
 
-- it solves a problem `llcontext` is likely to face soon
+- it solves a problem `elisacore` is likely to face soon
 - it is mostly orthogonal to the current core language model
 - it can start as compiler infrastructure or library support before becoming a
   large surface feature
@@ -55,7 +55,7 @@ Relevant V sources:
   - `AtomicVal[T]` as a concrete example of type-directed compile-time
     specialization
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it is much smaller than a full macro system
 - it enables backend / target / type-specific specialization without runtime
@@ -102,7 +102,7 @@ Relevant V sources:
   - `SumType`
   - `Aggregate`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it is directly relevant to packed variants and sum-type work
 - it complements the new guard/fact reasoning rather than competing with it
@@ -148,7 +148,7 @@ Relevant V sources:
 - `Code/v-master/vlib/v/checker/comptime.v`
   - `evaluate_once_comptime_if_attribute`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - attributes are an orthogonal place to hang optimization, ABI, and tooling
   metadata
@@ -195,7 +195,7 @@ Relevant V sources:
   - `write_defer_stmts`
   - `write_defer_stmts_when_needed`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it gives a very simple cleanup story for foreign handles, locks, and transient
   setup/teardown code
@@ -205,7 +205,7 @@ Why this is attractive for `llcontext`:
 
 Why it is worth stealing:
 
-`llcontext` already has strong internal cleanup reasoning. A user-facing
+`elisacore` already has strong internal cleanup reasoning. A user-facing
 `defer` feature would not need to replace that. It could simply become another
 surface way to schedule compiler-lowered cleanup in a disciplined order.
 
@@ -231,7 +231,7 @@ Relevant V sources:
 - `Code/v-master/vlib/v/checker/checker.v`
   - the generic post-processing loop and cutoff limits
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it keeps generic checking and specialization from exploding too early
 - it handles cascaded generic instantiation more gracefully than purely eager
@@ -241,7 +241,7 @@ Why this is attractive for `llcontext`:
 Why it is worth stealing:
 
 This is a compiler-architecture lesson rather than a surface-language feature.
-If `llcontext` grows more generic library code—especially for shape-aware,
+If `elisacore` grows more generic library code—especially for shape-aware,
 packed, or concurrency utilities—a small specialization registry can keep the
 implementation tractable.
 
@@ -272,7 +272,7 @@ Relevant V sources:
   - `type_size`
   - size/alignment caching in the type table
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it separates type identity from lightweight qualifiers cleanly
 - it makes common type operations cheap to hash, compare, and memoize
@@ -281,7 +281,7 @@ Why this is attractive for `llcontext`:
 
 Why it is worth stealing:
 
-`llcontext` has richer type concerns than V in some areas, so this should not
+`elisacore` has richer type concerns than V in some areas, so this should not
 be copied naively. The important lesson is structural: keep the hot path small,
 and push bulkier metadata into side tables where possible.
 
@@ -315,7 +315,7 @@ Why it is interesting:
 
 Why it is lower priority:
 
-- `llcontext` already has explicit effect-oriented directions that may be a
+- `elisacore` already has explicit effect-oriented directions that may be a
   better fit for some failures
 - this is useful, but not obviously as urgent as compile-time reflection,
   exhaustive matching, or attribute discipline
@@ -332,7 +332,7 @@ Relevant V sources:
 Why it is interesting:
 
 - it is a concrete example of compile-time type-specialized library code
-- it fits well with `llcontext`’s concurrency note
+- it fits well with `elisacore`’s concurrency note
 
 Why it is lower priority:
 
@@ -353,7 +353,7 @@ Why it is interesting:
 
 Why it is lower priority:
 
-- `llcontext` already has ongoing string/view design work, so this is more of a
+- `elisacore` already has ongoing string/view design work, so this is more of a
   tradeoff reference than an obvious next feature
 
 ### 10. Explicit Non-Blocking Channel Outcome APIs
@@ -375,14 +375,14 @@ Why it is interesting:
 Why it is lower priority:
 
 - it only becomes important if channels become a first-class part of
-  `llcontext`’s concurrency surface
+  `elisacore`’s concurrency surface
 
 ## Things That Look Less Compelling To Copy Directly
 
 ### Autofree / V’s current memory-management strategy
 
 There are worthwhile implementation lessons in V’s runtime and lowering, but
-copying its memory-management model directly would pull against `llcontext`’s
+copying its memory-management model directly would pull against `elisacore`’s
 existing provenance / region / affine direction.
 
 ### The full web/template/ORM compile-time stack
@@ -394,10 +394,10 @@ application-specific surface features built on top of it.
 ### Full backend/transpilation strategy
 
 V’s C/native/JS backend plumbing is useful engineering, but it is less
-orthogonal and less immediately adoptable for `llcontext` than the smaller
+orthogonal and less immediately adoptable for `elisacore` than the smaller
 semantic and surface-language ideas above.
 
-## Recommended Order For `llcontext`
+## Recommended Order For `elisacore`
 
 If these ideas are adopted incrementally, the best order is probably:
 
@@ -416,7 +416,7 @@ If these ideas are adopted incrementally, the best order is probably:
 7. **Secondary library/runtime ideas**
    - `Result`/`Option`, atomics, channel polling, string/FFI layout references
 
-## How These Fit Existing `llcontext` Notes
+## How These Fit Existing `elisacore` Notes
 
 These V ideas line up well with the current note set:
 
@@ -433,7 +433,7 @@ The strongest V takeaway is therefore not a single flashy feature.
 
 It is this:
 
-> `llcontext` could gain a lot from a small set of **orthogonal surface and
+> `elisacore` could gain a lot from a small set of **orthogonal surface and
 > compiler-extension mechanisms**—especially attributes, exhaustive matching,
 > compile-time reflection, and disciplined specialization bookkeeping—without
 > abandoning its existing ownership/provenance direction.
@@ -449,5 +449,5 @@ The most promising orthogonal ideas to borrow from V are:
 - deferred generic specialization tracking
 - compact type-word / symbol-table structure as a compiler optimization pattern
 
-These are attractive because they strengthen `llcontext`’s language and
+These are attractive because they strengthen `elisacore`’s language and
 compiler ergonomics without forcing it to copy V’s full runtime or memory model.

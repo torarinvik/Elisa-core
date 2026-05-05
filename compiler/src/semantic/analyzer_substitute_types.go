@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string, permissionBindings map[string][]ast.PermissionRef) Type {

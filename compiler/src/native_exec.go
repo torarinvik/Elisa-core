@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"llcontext/src/ast"
-	"llcontext/src/backend"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/backend"
+	"elisacore/src/semantic"
 )
 
 type nativeBuildTiming struct {
@@ -46,7 +46,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		return "", func() {}, nativeBuildTiming{}, err
 	}
 	foreignFiles = resolvedForeignFiles
-	tempDir, err := os.MkdirTemp("", "llcontext-native-run-*")
+	tempDir, err := os.MkdirTemp("", "elisacore-native-run-*")
 	if err != nil {
 		return "", func() {}, nativeBuildTiming{}, err
 	}
@@ -57,13 +57,13 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 
 	exePath := strings.TrimSpace(outputPath)
 	if exePath == "" {
-		exePath = filepath.Join(tempDir, "llcontext_program")
+		exePath = filepath.Join(tempDir, "elisacore_program")
 	} else if err := ensureOutputParentExists(exePath); err != nil {
 		cleanup()
 		return "", func() {}, timing, err
 	}
 
-	objectPath := filepath.Join(tempDir, "llcontext_module.o")
+	objectPath := filepath.Join(tempDir, "elisacore_module.o")
 	objectStart := time.Now()
 	if err := backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, objectPath, optLevel, packedProfile); err != nil {
 		cleanup()
@@ -71,9 +71,9 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	timing.ObjectWrite = time.Since(objectStart)
 	runtimeObjectPath := ""
-	if !resultDefinesDefaultLLContextRuntime(result) {
-		runtimeObjectPath = filepath.Join(tempDir, "llcontext_runtime.o")
-		if err := writeDefaultLLContextRuntimeObject(runtimeObjectPath, packedProfile, stderr); err != nil {
+	if !resultDefinesDefaultElisaCoreRuntime(result) {
+		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
+		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, stderr); err != nil {
 			cleanup()
 			return "", func() {}, timing, err
 		}
@@ -149,20 +149,20 @@ func nativeExecutableNeedsPThread(foreignFiles []string) bool {
 	return true
 }
 
-func defaultLLContextRuntimeSupportPath() (string, error) {
+func defaultElisaCoreRuntimeSupportPath() (string, error) {
 	repoRoot, err := compilerRepoRootForNativeExec()
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "native_runtime_support.llcontext")
+	path := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "native_runtime_support.elisa")
 	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("failed to locate default llcontext runtime support %s: %w", path, err)
+		return "", fmt.Errorf("failed to locate default elisacore runtime support %s: %w", path, err)
 	}
 	return path, nil
 }
 
-func writeDefaultLLContextRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, stderr io.Writer) error {
-	runtimePath, err := defaultLLContextRuntimeSupportPath()
+func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, stderr io.Writer) error {
+	runtimePath, err := defaultElisaCoreRuntimeSupportPath()
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func writeDefaultLLContextRuntimeObject(outputPath string, packedProfile backend
 		if parseStderr.Len() != 0 && stderr != nil {
 			_, _ = io.Copy(stderr, &parseStderr)
 		}
-		return fmt.Errorf("failed to parse default llcontext runtime support")
+		return fmt.Errorf("failed to parse default elisacore runtime support")
 	}
 	runtimeResult := semantic.Analyze(file)
 	if errs := runtimeResult.Errors(); len(errs) != 0 {
@@ -185,7 +185,7 @@ func writeDefaultLLContextRuntimeObject(outputPath string, packedProfile backend
 				fmt.Fprintf(stderr, "%s\n", e)
 			}
 		}
-		return fmt.Errorf("failed to analyze default llcontext runtime support")
+		return fmt.Errorf("failed to analyze default elisacore runtime support")
 	}
 	if warns := runtimeResult.Notices(); len(warns) != 0 && stderr != nil {
 		for _, w := range warns {
@@ -198,7 +198,7 @@ func writeDefaultLLContextRuntimeObject(outputPath string, packedProfile backend
 	return backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile)
 }
 
-func resultDefinesDefaultLLContextRuntime(result *semantic.Result) bool {
+func resultDefinesDefaultElisaCoreRuntime(result *semantic.Result) bool {
 	if result == nil || result.GlobalScope == nil {
 		return false
 	}
@@ -267,7 +267,7 @@ func runNativeExecutable(exePath string, stdout io.Writer, stderr io.Writer) err
 }
 
 func nativeHeaderNames(result *semantic.Result, outputPath string) []string {
-	names := []string{"llcontext.h"}
+	names := []string{"elisacore.h"}
 	for _, candidate := range []string{nativeHeaderBaseName(outputPath), nativeHeaderBaseName(nativeResultFilename(result))} {
 		if candidate == "" {
 			continue

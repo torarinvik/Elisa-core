@@ -59,9 +59,9 @@ run_cmd() {
   "$@"
 }
 
-export LLCONTEXT_CACHE_DEBUG=""
+export ELISACORE_CACHE_DEBUG=""
 if [[ "${CACHE_DEBUG}" == "1" ]]; then
-  export LLCONTEXT_CACHE_DEBUG=1
+  export ELISACORE_CACHE_DEBUG=1
 fi
 
 cd "${COMPILER_DIR}"
@@ -73,7 +73,7 @@ run_cmd go test ./src -run '^$' -bench '^(BenchmarkRunCLICompilePackedMLAST(ToLL
 if [[ "${RUN_MEGA}" == "1" ]]; then
   echo
   echo "==> running explicit mega validation lane"
-  run_cmd env LLCONTEXT_SLOW_NATIVE=1 go test ./src -run '^TestRunCLIPackedMLASTMegaBenchSmoke$' -count="${COUNT}"
+  run_cmd env ELISACORE_SLOW_NATIVE=1 go test ./src -run '^TestRunCLIPackedMLASTMegaBenchSmoke$' -count="${COUNT}"
   run_cmd go test ./src/backend -run '^$' -bench '^(BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaRetainedReads|BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaParallelRetainedReads)$' -benchtime="${BENCHTIME}" -count="${COUNT}"
   run_cmd go test ./src -run '^$' -bench '^(BenchmarkRunCLICompilePackedMLASTMegaToObjectO3|BenchmarkRunNativePackedMLASTMegaRuntime)$' -benchtime="${BENCHTIME}" -count="${COUNT}"
 fi

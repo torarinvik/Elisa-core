@@ -22,7 +22,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_indexed_field_move_as.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_indexed_field_move_as.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -84,7 +84,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_indexed_field_move_as.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_indexed_field_move_as.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -136,7 +136,7 @@ def inspect(buf: array[i32, 4]) -> int:
 	right_wrapped: view[i32] = wrapped.right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_direct_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_direct_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -196,7 +196,7 @@ def inspect(buf: array[i32, 4]) -> int:
 	right_wrapped: view[i32] = wrapped.inner.right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_nested_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_nested_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 

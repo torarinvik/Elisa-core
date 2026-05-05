@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func resolveMatchableEnumType(actual Type) (*EnumType, *PackedVariantViewType, bool) {

@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 	"strings"
 	"testing"
 )
@@ -49,7 +49,7 @@ func TestCreateTypeBoundOpsSynthesizesRecursiveCleanupOps(t *testing.T) {
 	}
 }
 func TestAnalyzeDeferFunctionRecordsCaptureMetadata(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "defer_capture.llcontext", `def keep(seed: int) -> int:
+	result := analyzeFunctionAnalysisTestSource(t, "defer_capture.elisa", `def keep(seed: int) -> int:
 	value: int = seed
 	defer function:
 		_ = value
@@ -75,7 +75,7 @@ func TestAnalyzeDeferFunctionRecordsCaptureMetadata(t *testing.T) {
 	}
 }
 func TestAnalyzeDeferBodyRejectsReturn(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "defer_return_invalid.llcontext", `def keep() -> int:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "defer_return_invalid.elisa", `def keep() -> int:
 	defer block:
 		return 1
 	return 0
@@ -86,7 +86,7 @@ func TestAnalyzeDeferBodyRejectsReturn(t *testing.T) {
 	}
 }
 func TestAnalyzeDeferFunctionRejectsNestedScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "defer_function_nested_invalid.llcontext", `def keep(flag: bool) -> int:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "defer_function_nested_invalid.elisa", `def keep(flag: bool) -> int:
 	if flag:
 		defer function:
 			pass

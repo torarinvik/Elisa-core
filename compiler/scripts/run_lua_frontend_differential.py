@@ -2,11 +2,11 @@
 """Run a developer-facing Lua differential sweep against the C reference.
 
 This tool compares curated corpus cases against:
-- the llcontext Lua frontend (via the native benchmark harness in parse mode)
+- the elisacore Lua frontend (via the native benchmark harness in parse mode)
 - the C reference parser (via luaL_loadbufferx linked from onelua.c)
 
 It reports accept/reject mismatches clearly and, for accepted families with
-semantic-shape annotations, also prints llcontext-only fingerprints to make
+semantic-shape annotations, also prints elisacore-only fingerprints to make
 semantic shape easier to inspect during parity work.
 """
 
@@ -50,7 +50,7 @@ def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subproce
     return subprocess.run(cmd, cwd=cwd, check=check, text=True, capture_output=True)
 
 
-def build_llcontext_harness(compiler_dir: Path, frontend_path: Path, harness_path: Path, out_dir: Path, opt_level: str) -> Path:
+def build_elisacore_harness(compiler_dir: Path, frontend_path: Path, harness_path: Path, out_dir: Path, opt_level: str) -> Path:
     header_path = out_dir / "lua_frontend.h"
     object_path = out_dir / "lua_frontend.o"
     exe_path = out_dir / "lua_frontend_bench"
@@ -92,13 +92,13 @@ def parse_checksum(output: str) -> int:
     return int(match.group(1))
 
 
-def llcontext_accepts(bench_exe: Path, family: str, source_path: Path) -> bool:
+def elisacore_accepts(bench_exe: Path, family: str, source_path: Path) -> bool:
     mode = "checked" if family in ("control_flow", "functions_closures", "labels_gotos") else "parse"
     completed = run([str(bench_exe), str(source_path), "1", mode], check=False)
     return completed.returncode == 0
 
 
-def llcontext_fingerprint(bench_exe: Path, source_path: Path, mode: str) -> int:
+def elisacore_fingerprint(bench_exe: Path, source_path: Path, mode: str) -> int:
     completed = run([str(bench_exe), str(source_path), "1", mode], check=False)
     if completed.returncode != 0:
         return -1
@@ -145,7 +145,7 @@ def render_status(ok: bool) -> str:
 
 def parse_expected_fingerprints(source_path: Path) -> dict[str, int]:
     expected: dict[str, int] = {}
-    prefix = "-- llcontext-"
+    prefix = "-- elisacore-"
     for raw_line in source_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line:
@@ -156,11 +156,11 @@ def parse_expected_fingerprints(source_path: Path) -> dict[str, int]:
             continue
         payload = line[len(prefix):]
         if ":" not in payload:
-            raise RuntimeError(f"invalid llcontext fingerprint annotation in {source_path}: {raw_line}")
+            raise RuntimeError(f"invalid elisacore fingerprint annotation in {source_path}: {raw_line}")
         key, value_text = payload.split(":", 1)
         mode = key.strip().removesuffix("-fp")
         if mode not in {"env", "closure", "label", "analysis"}:
-            raise RuntimeError(f"unsupported llcontext fingerprint annotation mode {mode!r} in {source_path}")
+            raise RuntimeError(f"unsupported elisacore fingerprint annotation mode {mode!r} in {source_path}")
         expected[mode] = int(value_text.strip())
     return expected
 
@@ -187,15 +187,15 @@ def evaluate_case(result: CaseResult) -> dict[str, object]:
         "path": str(result.path),
         "expected_accept": result.expected_accept,
         "expected_status": render_status(result.expected_accept),
-        "llcontext_accept": result.ll_accept,
-        "llcontext_status": render_status(result.ll_accept),
+        "elisacore_accept": result.ll_accept,
+        "elisacore_status": render_status(result.ll_accept),
         "reference_accept": result.ref_accept,
         "reference_status": render_status(result.ref_accept),
         "ll_vs_ref_match": ll_vs_ref_match,
         "expectation_match": expectation_match,
         "fingerprint_match": fingerprint_match,
         "expected_fingerprints": result.expected_fingerprints,
-        "llcontext_fingerprints": result.ll_fingerprints,
+        "elisacore_fingerprints": result.ll_fingerprints,
         "fingerprint_mismatches": fingerprint_mismatches,
     }
 
@@ -224,7 +224,7 @@ def write_json_report(
         "strict": strict,
         "keep_temp": keep_temp,
         "temp_root": str(temp_root),
-        "llcontext_harness": str(ll_exe),
+        "elisacore_harness": str(ll_exe),
         "reference_harness": str(ref_exe),
         "summary": {
             "cases": len(evaluations),
@@ -243,10 +243,10 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[2]
     compiler_dir = repo_root / "compiler"
-    frontend_path = repo_root / "Code" / "llcontext_lua" / "src" / "lua_frontend.llcontext"
-    llcontext_harness = repo_root / "Code" / "benchmarks" / "lua_frontend_bench.c"
+    frontend_path = repo_root / "Code" / "elisacore_lua" / "src" / "lua_frontend.elisa"
+    elisacore_harness = repo_root / "Code" / "benchmarks" / "lua_frontend_bench.c"
     reference_harness = repo_root / "Code" / "benchmarks" / "lua_reference_parse_harness.c"
-    corpus_root = Path(args.corpus_root) if args.corpus_root else repo_root / "Code" / "llcontext_lua" / "test" / "differential_corpus"
+    corpus_root = Path(args.corpus_root) if args.corpus_root else repo_root / "Code" / "elisacore_lua" / "test" / "differential_corpus"
 
     temp_root_obj = tempfile.TemporaryDirectory(prefix="lua_frontend_differential.")
     temp_root = Path(temp_root_obj.name)
@@ -260,7 +260,7 @@ def main() -> int:
     fingerprint_mismatches = 0
 
     try:
-        ll_exe = build_llcontext_harness(compiler_dir, frontend_path, llcontext_harness, ll_out, args.opt_level)
+        ll_exe = build_elisacore_harness(compiler_dir, frontend_path, elisacore_harness, ll_out, args.opt_level)
         ref_exe = build_reference_harness(reference_harness, ref_out, args.opt_level)
 
         if args.keep_temp:
@@ -268,10 +268,10 @@ def main() -> int:
 
         results: list[CaseResult] = []
         for family, source_path, expected_accept, expected_fingerprints in iter_cases(corpus_root):
-            ll_accept = llcontext_accepts(ll_exe, family, source_path)
+            ll_accept = elisacore_accepts(ll_exe, family, source_path)
             ref_accept = reference_accepts(ref_exe, source_path)
             fingerprints = {
-                mode: llcontext_fingerprint(ll_exe, source_path, mode)
+                mode: elisacore_fingerprint(ll_exe, source_path, mode)
                 for mode in required_modes_for_case(family, expected_accept)
             }
             results.append(CaseResult(family, source_path, expected_accept, expected_fingerprints, ll_accept, ref_accept, fingerprints))
@@ -296,7 +296,7 @@ def main() -> int:
             print(
                 f"{ll_vs_ref} {fp_status} family={result.family} case={result.path.name} "
                 f"expected={render_status(result.expected_accept)} "
-                f"llcontext={render_status(result.ll_accept)} "
+                f"elisacore={render_status(result.ll_accept)} "
                 f"reference={render_status(result.ref_accept)}"
                 f"{extras}"
             )

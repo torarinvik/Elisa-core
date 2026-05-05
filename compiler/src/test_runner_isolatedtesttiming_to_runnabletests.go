@@ -2,12 +2,12 @@ package main
 
 import (
 	"bytes"
+	"elisacore/src/ast"
+	"elisacore/src/backend"
+	"elisacore/src/semantic"
 	"encoding/json"
 	"fmt"
 	"io"
-	"llcontext/src/ast"
-	"llcontext/src/backend"
-	"llcontext/src/semantic"
 	"os"
 	"os/exec"
 	"path"
@@ -33,7 +33,7 @@ type timingField struct {
 }
 
 func testTimingMode() string {
-	return strings.ToLower(strings.TrimSpace(os.Getenv("LLCONTEXT_TEST_TIMING")))
+	return strings.ToLower(strings.TrimSpace(os.Getenv("ELISACORE_TEST_TIMING")))
 }
 func testTimingEnabled() bool {
 	mode := testTimingMode()
@@ -44,7 +44,7 @@ func testTimingJSONEnabled() bool {
 	return mode == "json" || mode == "jsonl"
 }
 func testPhaseDebugEnabled() bool {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LLCONTEXT_TEST_PHASE_DEBUG")))
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("ELISACORE_TEST_PHASE_DEBUG")))
 	return mode != "" && mode != "0" && mode != "false" && mode != "off"
 }
 func writeTestPhaseLine(w io.Writer, phase string, detail string) {
@@ -249,7 +249,7 @@ func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter strin
 	}
 
 	if len(cases) == 0 {
-		message := llcontextStringLiteral(fmt.Sprintf("[ NO TESTS ] no @test functions matched filter %q", strings.TrimSpace(filter)))
+		message := elisacoreStringLiteral(fmt.Sprintf("[ NO TESTS ] no @test functions matched filter %q", strings.TrimSpace(filter)))
 		out.WriteString(bodyIndent)
 		out.WriteString("puts(")
 		out.WriteString(message)
@@ -265,14 +265,14 @@ func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter strin
 			continue
 		}
 		if testCase.skipped() {
-			skippedLine := llcontextStringLiteral(formatTestLine("SKIPPED", testCase.Func.Name, fmt.Sprintf(" (%s)", testCase.SkipReason)))
+			skippedLine := elisacoreStringLiteral(formatTestLine("SKIPPED", testCase.Func.Name, fmt.Sprintf(" (%s)", testCase.SkipReason)))
 			out.WriteString("\tputs(")
 			out.WriteString(skippedLine)
 			out.WriteString(" as u8&)\n")
 			continue
 		}
-		runLine := llcontextStringLiteral(formatTestLine("RUN", testCase.Func.Name, ""))
-		okLine := llcontextStringLiteral(formatTestLine("OK", testCase.Func.Name, ""))
+		runLine := elisacoreStringLiteral(formatTestLine("RUN", testCase.Func.Name, ""))
+		okLine := elisacoreStringLiteral(formatTestLine("OK", testCase.Func.Name, ""))
 		out.WriteString(bodyIndent)
 		out.WriteString("puts(")
 		out.WriteString(runLine)
@@ -286,7 +286,7 @@ func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter strin
 		out.WriteString(" as u8&)\n")
 	}
 
-	summaryLine := llcontextStringLiteral(fmt.Sprintf("[ SUMMARY  ] %d test(s) selected; runnable=%d skipped=%d failed=0", len(cases), len(runnable), skipped))
+	summaryLine := elisacoreStringLiteral(fmt.Sprintf("[ SUMMARY  ] %d test(s) selected; runnable=%d skipped=%d failed=0", len(cases), len(runnable), skipped))
 	out.WriteString(bodyIndent)
 	out.WriteString("puts(")
 	out.WriteString(summaryLine)

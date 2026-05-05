@@ -1,10 +1,10 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
+	"elisacore/src/backend"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -122,7 +122,7 @@ extern errno_value: i32
 def read_box(box: Box&) -> i32:
     return box.value
 `
-	result := parseAndAnalyze(t, "backend_box.llcontext", src)
+	result := parseAndAnalyze(t, "backend_box.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -157,7 +157,7 @@ struct ScratchHolder:
 def make_holder() -> ScratchHolder:
 		return ScratchHolder(ScratchPair(8, 9))
 `
-	result := parseAndAnalyze(t, "backend_nested_struct_literals.llcontext", src)
+	result := parseAndAnalyze(t, "backend_nested_struct_literals.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -182,7 +182,7 @@ func TestGenerateLLVMIRErasesAggregateStateStructTypes(t *testing.T) {
 def read(value: Holder[&]) -> i32:
     return value.value
 `
-	result := parseAndAnalyze(t, "backend_aggregate_state_struct.llcontext", src)
+	result := parseAndAnalyze(t, "backend_aggregate_state_struct.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -211,7 +211,7 @@ func TestGenerateLLVMIRErasesMultiAggregateStateStructTypes(t *testing.T) {
 def read(value: Holder[!, &]) -> i32:
     return value.value
 `
-	result := parseAndAnalyze(t, "backend_aggregate_state_struct_multi.llcontext", src)
+	result := parseAndAnalyze(t, "backend_aggregate_state_struct_multi.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -242,7 +242,7 @@ def sum(pair: Pair) -> i64:
     move pair as Pair(left, right)
     return left + right
 `
-	result := parseAndAnalyze(t, "backend_move_as_struct.llcontext", src)
+	result := parseAndAnalyze(t, "backend_move_as_struct.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -276,7 +276,7 @@ def countdown(start: i32) -> i32:
         value <- value - 1
     return total
 `
-	result := parseAndAnalyze(t, "backend_control_flow.llcontext", src)
+	result := parseAndAnalyze(t, "backend_control_flow.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -309,7 +309,7 @@ def lock_then_fallthrough(mu: mutable Mutex) -> void:
     lock mu as g:
         pass
 `
-	result := parseAndAnalyze(t, "backend_lock_scope.llcontext", src)
+	result := parseAndAnalyze(t, "backend_lock_scope.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -353,7 +353,7 @@ def pool_then_fallthrough(mu: mutable Mutex) -> void:
 		lock mu as g:
 			pass
 `
-	result := parseAndAnalyze(t, "backend_pool_scope.llcontext", src)
+	result := parseAndAnalyze(t, "backend_pool_scope.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -400,7 +400,7 @@ def wake(cv: mutable CondVar, broadcast: bool) -> void:
 	else:
 		notify one cv
 `
-	result := parseAndAnalyze(t, "backend_notify_syntax.llcontext", src)
+	result := parseAndAnalyze(t, "backend_notify_syntax.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -442,7 +442,7 @@ def bump(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
 	xor_bits: i64 = fetch_xor(slot_ref, 16, MemoryOrder.AcqRel)
 	return add + sub + or_bits + and_bits + xor_bits
 `
-	result := parseAndAnalyze(t, "backend_atomic_rmw.llcontext", src)
+	result := parseAndAnalyze(t, "backend_atomic_rmw.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -485,7 +485,7 @@ def submit_then_await() -> i64:
 		task: Task[i64, Pending] = submit work(7)
 		return await task
 `
-	result := parseAndAnalyze(t, "backend_submit_syntax.llcontext", src)
+	result := parseAndAnalyze(t, "backend_submit_syntax.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -523,7 +523,7 @@ def submit_then_await(pool: ThreadPool&) -> i64:
 	task: Task[i64, Pending] = submit[pool] work(7)
 	return await task
 `
-	result := parseAndAnalyze(t, "backend_submit_explicit_pool_syntax.llcontext", src)
+	result := parseAndAnalyze(t, "backend_submit_explicit_pool_syntax.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -551,7 +551,7 @@ def call_touch(value: i32) -> i32:
 	touch(value)
 	return value
 `
-	result := parseAndAnalyze(t, "backend_void_call.llcontext", src)
+	result := parseAndAnalyze(t, "backend_void_call.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

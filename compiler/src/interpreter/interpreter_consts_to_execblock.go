@@ -2,10 +2,10 @@ package interpreter
 
 import (
 	"bytes"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
 	"io"
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
 	"strconv"
 	"strings"
 )

@@ -30,7 +30,7 @@ def use_gate() -> i64:
     gate: SharedGate = SharedGate(1)
     return spawn1(work_gate, gate)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_generic_call_binding_specializations.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_generic_call_binding_specializations.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

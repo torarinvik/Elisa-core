@@ -3,8 +3,8 @@ package parser
 import (
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func TestParseEnumMapLowersToFunction(t *testing.T) {

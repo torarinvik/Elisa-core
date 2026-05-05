@@ -1,6 +1,6 @@
-# llcontext compiler
+# Elisa core compiler
 
-This directory contains the Go-based frontend for `.llcontext` source files.
+This directory contains the Go-based frontend for `.elisa` source files.
 
 ## Changelog and recent highlight
 
@@ -13,7 +13,7 @@ The current unreleased highlights include:
 - first-class `effect` declarations plus explicit `signal` statements for effect tracking
 - the earlier `refstorage` / `refstate` generic work across parsing, semantics, specialization, lowering, and generated C headers
 
-For a compile-checked end-to-end example, see `../Code/test_programs/ref_qualifier_generics.llcontext`.
+For a compile-checked end-to-end example, see `../Code/test_programs/ref_qualifier_generics.elisa`.
 
 ## Current syntax reference
 
@@ -25,7 +25,7 @@ For the canonical bundle/tree-capability cleanup direction, including implicit b
 
 For the parser implementation house style, see `../docs/useful_language_features/21-canonical-grammar-style.md`.
 
-For the concrete pain points that surfaced while implementing the SML frontend and the llcontext ergonomics improvements they suggest, see `../docs/useful_language_features/23-sml-frontend-pain-points-and-llcontext-ergonomics.md`.
+For the concrete pain points that surfaced while implementing the SML frontend and the Elisa core ergonomics improvements they suggest, see `../docs/useful_language_features/23-sml-frontend-pain-points-and-elisacore-ergonomics.md`.
 
 For scope/checkpoint rollback blocks, see `../docs/useful_language_features/08-region-checkpoints.md`.
 
@@ -162,19 +162,19 @@ Current rules:
 Current test-oriented emit modes:
 
 - `-emit tests`, `-emit benches`, and `-emit fixtures` list matching annotated functions
-- `-emit test-runner` emits generated `.llcontext` runner source rather than executing it directly
+- `-emit test-runner` emits generated `.elisa` runner source rather than executing it directly
 - `-emit test` compiles and runs the selected tests through the native harness path
 - `-filter` is only supported for `tests`, `benches`, `fixtures`, `test-runner`, and `test`
 - filters are case-insensitive and accept substring matches, glob patterns such as `*beta*`, and comma-separated OR combinations
 
 Canonical frontend wrapper commands from the repository root:
 
-- `bash Code/llcontext_lua/test/run_tests.sh` runs the Lua frontend suite
-- `bash Code/llcontext_pascal/test/run_tests.sh` runs the Pascal frontend suite
-- `bash Code/llcontext_pascal/test/run_lowered_tests.sh` runs the generated lowered Pascal frontend suite
-- `bash Code/llcontext_pascal/test/regenerate_lowered_tests.sh` refreshes the local lowered Pascal fixture
-- `bash Code/llcontext_pascal/test/run_compiler_smoke.sh` runs a narrow Pascal compiler/lowered-output smoke check
-- `bash Code/llcontext_atpl/test/run_tests.sh` runs the ATPL frontend, runtime, and CLI fixture suites
+- `bash Code/elisacore_lua/test/run_tests.sh` runs the Lua frontend suite
+- `bash Code/elisacore_pascal/test/run_tests.sh` runs the Pascal frontend suite
+- `bash Code/elisacore_pascal/test/run_lowered_tests.sh` runs the generated lowered Pascal frontend suite
+- `bash Code/elisacore_pascal/test/regenerate_lowered_tests.sh` refreshes the local lowered Pascal fixture
+- `bash Code/elisacore_pascal/test/run_compiler_smoke.sh` runs a narrow Pascal compiler/lowered-output smoke check
+- `bash Code/elisacore_atpl/test/run_tests.sh` runs the ATPL frontend, runtime, and CLI fixture suites
 - `bash run_frontend_suites.sh` runs the Lua, Pascal, and ATPL frontend suites together
 
 For the broader ATPL validation sweep, including compiler-side Go tests and example-golden coverage, run `bash compiler/scripts/run_atpl_suites.sh` from the repository root.
@@ -251,7 +251,7 @@ def total(seed: i64) -> i64:
   return total
 ```
 
-Use `new[region]` only when you need a reference to a regular enum value, such as a recursive structure whose payloads store `Expr&` handles. For compile-checked examples, see `../Code/test_programs/regular_enum_values.llcontext` for by-value usage and `../Code/test_programs/recursive_enum.llcontext` for recursive references.
+Use `new[region]` only when you need a reference to a regular enum value, such as a recursive structure whose payloads store `Expr&` handles. For compile-checked examples, see `../Code/test_programs/regular_enum_values.elisa` for by-value usage and `../Code/test_programs/recursive_enum.elisa` for recursive references.
 
 ## Packed enums
 
@@ -293,7 +293,7 @@ Current packed-enum rules:
 - structural test expectations can use `expect value as Pattern` or `expect value as Pattern: ...`, which are contextual sugar for a `match value` with the requested pattern and a wildcard `panic("expect pattern failed")`; this keeps reusable test DSLs project-neutral while still lowering to the ordinary match representation
 - match patterns can pin existing values with `^value`, for example `expect expr as Expr.Infix(^expected_op, _, _)`; bare identifiers still bind payloads
 
-For a compile-checked end-to-end example, see `../Code/test_programs/packed_enum_common.llcontext`.
+For a compile-checked end-to-end example, see `../Code/test_programs/packed_enum_common.elisa`.
 
 The frontend also now supports `in store:` block sugar over that explicit core:
 
@@ -364,9 +364,9 @@ go test ./test/benchmarks -run '^TestSyntheticJSONCorpusIsValid$'
 go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSyntheticCorpus$' -benchmem
 ```
 
-There is also now a self-hosted parser fixture at `../Code/test_programs/json_parser.llcontext` plus benchmark helpers:
+There is also now a self-hosted parser fixture at `../Code/test_programs/json_parser.elisa` plus benchmark helpers:
 
-- `../Code/test_programs/json_parser.llcontext` exports `json_parser_checksum(...)`, `json_parser_ast_checksum(...)`, `json_parser_ast_cached_checksum(...)`, `json_parser_parallel_checksum(...)`, `json_parser_parallel_ast_checksum(...)`, `json_parser_parallel_ast_cached_checksum(...)`, and `json_parser_parity_suite()`
+- `../Code/test_programs/json_parser.elisa` exports `json_parser_checksum(...)`, `json_parser_ast_checksum(...)`, `json_parser_ast_cached_checksum(...)`, `json_parser_parallel_checksum(...)`, `json_parser_parallel_ast_checksum(...)`, `json_parser_parallel_ast_cached_checksum(...)`, and `json_parser_parity_suite()`
 - `../Code/benchmarks/json_parser_bench.c` is a standalone checksum-parser benchmark executable for file-backed corpora
 - `../Code/benchmarks/json_parser_ast_bench.c` is the AST-building benchmark executable for the same corpora
 - `../Code/benchmarks/json_parser_parallel_bench.c` is a pool-driven parallel batch benchmark over the same parser exports
@@ -377,22 +377,22 @@ There is also now a self-hosted parser fixture at `../Code/test_programs/json_pa
 One way to compare both self-hosted paths against the Go baseline is:
 
 ```text
-bash ./scripts/ensure_json_parser_bench_input.sh /tmp/llcontext-large.json
-go run ./src -O3 -emit header -o /tmp/json_parser.h ../Code/test_programs/json_parser.llcontext
-go run ./src -O3 -emit obj -o /tmp/json_parser.o ../Code/test_programs/json_parser.llcontext
+bash ./scripts/ensure_json_parser_bench_input.sh /tmp/elisacore-large.json
+go run ./src -O3 -emit header -o /tmp/json_parser.h ../Code/test_programs/json_parser.elisa
+go run ./src -O3 -emit obj -o /tmp/json_parser.o ../Code/test_programs/json_parser.elisa
 clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_bench
 clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_ast_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_ast_bench
 clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_parallel_bench.c ../Code/benchmarks/json_parser_runtime_shims.c runtime/concurrency.c /tmp/json_parser.o -o /tmp/json_parser_parallel_bench
-/tmp/json_parser_bench /tmp/llcontext-large.json 20
-/tmp/json_parser_ast_bench /tmp/llcontext-large.json 20 full
-/tmp/json_parser_parallel_bench /tmp/llcontext-large.json 20 4 checksum
-/tmp/json_parser_parallel_bench /tmp/llcontext-large.json 20 4 ast-cached
+/tmp/json_parser_bench /tmp/elisacore-large.json 20
+/tmp/json_parser_ast_bench /tmp/elisacore-large.json 20 full
+/tmp/json_parser_parallel_bench /tmp/elisacore-large.json 20 4 checksum
+/tmp/json_parser_parallel_bench /tmp/elisacore-large.json 20 4 ast-cached
 go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSyntheticCorpus/large$' -benchmem -benchtime=20x
 ```
 
 There is also now a Lua frontend storage-layout benchmark lane for comparing the checked-in side-table packed-span layout against a temporary inline-control variant:
 
-- `../Code/llcontext_lua/src/lua_ast.llcontext` uses `@storage(side_table)` on `LuaNode.common.span`
+- `../Code/elisacore_lua/src/lua_ast.elisa` uses `@storage(side_table)` on `LuaNode.common.span`
 - `../Code/benchmarks/lua_frontend_bench.c` benchmarks exported parse/checksum/sample entry points plus the semantic analysis modes
 - `./scripts/run_lua_frontend_storage_benchmark.py` builds both layouts, generates valid Lua input, runs repeated parse/sample measurements, and summarizes throughput deltas
 
@@ -404,10 +404,10 @@ python3 ./scripts/run_lua_frontend_storage_benchmark.py --stmt-count 4000 --pars
 
 There is also now an ML-style packed AST benchmark ladder under `../Code/benchmarks/` for exercising packed/frozen tree matching and the produced native runtime:
 
-- `packed_lowering_ml_ast_medium_{core,bench,parallel_bench}.llcontext` is the default everyday perf tier
-- `packed_lowering_ml_ast_mega_{core,bench,parallel_bench}.llcontext` is the explicit slow validation tier
+- `packed_lowering_ml_ast_medium_{core,bench,parallel_bench}.elisa` is the default everyday perf tier
+- `packed_lowering_ml_ast_mega_{core,bench,parallel_bench}.elisa` is the explicit slow validation tier
 - generic ML AST benchmark names now target the medium fixture, while explicit `Mega` benchmark names keep the long-running workload available
-- `LLCONTEXT_SLOW_NATIVE=1` gates the full mega native smoke in `src/main_test.go`
+- `ELISACORE_SLOW_NATIVE=1` gates the full mega native smoke in `src/main_test.go`
 - `scripts/run_ml_ast_perf_loop.sh` runs the normal repro -> medium loop, and `--mega` adds the explicit slow-path validation lane
 
 Recommended workflow:
@@ -430,17 +430,17 @@ And one way to run the milestone validation pass is:
 
 ## Module interfaces and project manifests
 
-The compiler now has a small project and library workflow around `.llcontext`, `.llcontexti`, `project.json`, and `manifest.json`.
+The compiler now has a small project and library workflow around `.elisa`, `.elisai`, `project.json`, and `manifest.json`.
 
 Module interface emission:
 
 ```text
-llcontext -emit iface -o mathcore.llcontexti mathcore.llcontext
+elisacore -emit iface -o mathcore.elisai mathcore.elisa
 ```
 
 Current interface-emission behavior:
 
-- emitted `.llcontexti` files stay valid llcontext source
+- emitted `.elisai` files stay valid Elisa core source
 - type declarations are preserved
 - globals become `extern` declarations rather than exported initialized definitions
 - function bodies are stripped and replaced by `extern` signatures
@@ -449,14 +449,14 @@ Current interface-emission behavior:
 Current project scaffold commands:
 
 ```text
-llcontext init demo --path /tmp
-llcontext init-lib mathcore --path /tmp/demo/lib
-llcontext build app --project /tmp/demo
-llcontext run app --project /tmp/demo
-llcontext test tests --project /tmp/demo
-llcontext bench benches --project /tmp/demo
-llcontext project view app --project /tmp/demo
-llcontext project deps app --project /tmp/demo --json
+elisacore init demo --path /tmp
+elisacore init-lib mathcore --path /tmp/demo/lib
+elisacore build app --project /tmp/demo
+elisacore run app --project /tmp/demo
+elisacore test tests --project /tmp/demo
+elisacore bench benches --project /tmp/demo
+elisacore project view app --project /tmp/demo
+elisacore project deps app --project /tmp/demo --json
 ```
 
 Project file shape:
@@ -471,7 +471,7 @@ Project file shape:
   "exec": [],
   "targets": {
     "app": {
-      "entry": "src/main.llcontext",
+      "entry": "src/main.elisa",
       "emit": "llvm",
       "run-emit": "interpret",
       "output": "build/app.ll",
@@ -491,8 +491,8 @@ Library manifest shape:
 ```json
 {
   "provides": "mathcore",
-  "entry": "src/mathcore.llcontext",
-  "interface": "src/mathcore.llcontexti",
+  "entry": "src/mathcore.elisa",
+  "interface": "src/mathcore.elisai",
   "dependencies": [],
   "include-dirs": ["shared"],
   "foreign": ["native/mathcore_runtime.c"],
@@ -503,9 +503,9 @@ Library manifest shape:
 Current rules:
 
 - `project.json` is the top-level project file
-- `.llctxlib/manifest.json` is the dependency manifest format
+- `.elisalib/manifest.json` is the dependency manifest format
 - dependency search paths default to `lib` when the project does not override them
-- project targets currently require an `entry` that is a `.llcontext` or `.llcontexti` source file
+- project targets currently require an `entry` that is a `.elisa` or `.elisai` source file
 - manifests may provide an `entry`, an `interface`, or both; dependency loading prefers `entry` when present and falls back to `interface` otherwise
 - project-wide and target-specific `include-dirs`, `foreign`, and `dependencies` merge with dependency-provided include dirs and foreign files
 - `project view` reports resolved targets and the selected target configuration
@@ -529,7 +529,7 @@ Build the compiler binary from the `src` package tree:
 
 ```text
 mkdir -p bin
-go build -o bin/llcontext ./src
+go build -o bin/elisacore ./src
 ```
 
 ## Test
@@ -542,10 +542,10 @@ go test ./...
 
 ## Runtime source of truth
 
-The active runtime implementation lives in llcontext source files under `runtime/llcontext_std/`.
+The active runtime implementation lives in Elisa core source files under `runtime/elisacore_std/`.
 
-- `runtime/llcontext_std/contextlang_runtime.llcontext` — canonical runtime entrypoint
-- `runtime/llcontext_std/` — staged runtime helpers, wrappers, allocator, collections, stores, and test support
+- `runtime/elisacore_std/elisacore_runtime.elisa` — canonical runtime entrypoint
+- `runtime/elisacore_std/` — staged runtime helpers, wrappers, allocator, collections, stores, and test support
 
 Retained C sources under `../Code/benchmarks/` are benchmark scaffolding only and are not part of the active runtime implementation.
 
@@ -566,5 +566,5 @@ These commands were verified in this workspace:
 ```text
 go test ./...
 mkdir -p bin
-go build -o bin/llcontext ./src
+go build -o bin/elisacore ./src
 ```

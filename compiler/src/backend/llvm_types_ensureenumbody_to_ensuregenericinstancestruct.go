@@ -6,7 +6,7 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/Core.h>
 
-static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
+static void elisacoreAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
 	unsigned Kind = LLVMGetEnumAttributeKindForName(Name, NameLen);
 	if (Kind == 0) {
 		return;
@@ -15,24 +15,24 @@ static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, co
 	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
 }
 
-static LLVMTypeRef llcontextGlobalValueType(LLVMValueRef Value) {
+static LLVMTypeRef elisacoreGlobalValueType(LLVMValueRef Value) {
 	return LLVMGlobalGetValueType(Value);
 }
 
-static void llcontextSetAlignment(LLVMValueRef Value, unsigned Bytes) {
+static void elisacoreSetAlignment(LLVMValueRef Value, unsigned Bytes) {
 	LLVMSetAlignment(Value, Bytes);
 }
 
-static char* llcontextPrintType(LLVMTypeRef Type) {
+static char* elisacorePrintType(LLVMTypeRef Type) {
 	return LLVMPrintTypeToString(Type);
 }
 */
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
 )
 
 func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {

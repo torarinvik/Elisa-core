@@ -417,13 +417,13 @@ def compare_differential_reports(baseline: dict[str, Any], candidate: dict[str, 
         fields: dict[str, dict[str, Any]] = {}
         for field in (
             "expected_status",
-            "llcontext_status",
+            "elisacore_status",
             "reference_status",
             "ll_vs_ref_match",
             "expectation_match",
             "fingerprint_match",
             "expected_fingerprints",
-            "llcontext_fingerprints",
+            "elisacore_fingerprints",
             "fingerprint_mismatches",
         ):
             if before.get(field) != after.get(field):

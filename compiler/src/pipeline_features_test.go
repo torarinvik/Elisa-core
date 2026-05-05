@@ -12,8 +12,8 @@ import (
 
 func TestRunCLIEmitsFrontendIRAndLoadsLLVMFromBundle(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "sample.llcontext")
-	bundlePath := filepath.Join(fixtureDir, "sample.llctxir")
+	sourcePath := filepath.Join(fixtureDir, "sample.elisa")
+	bundlePath := filepath.Join(fixtureDir, "sample.elisair")
 	src := "def helper(x: i64) -> i64:\n    return x + 2\n\ndef main() -> i64:\n    return helper(40)\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write frontend IR fixture: %v", err)
@@ -45,7 +45,7 @@ func TestRunCLIEmitsFrontendIRAndLoadsLLVMFromBundle(t *testing.T) {
 
 func TestRunCLIInterpretsSimpleProgram(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "interpret_sample.llcontext")
+	sourcePath := filepath.Join(fixtureDir, "interpret_sample.elisa")
 	src := "def add_twice(x: i64) -> i64:\n    acc: mutable i64 = x\n    acc += x\n    return acc\n\ndef main() -> i64:\n    seed: i64 = 20\n    value: i64 = seed + 1\n    if value == 21:\n        return add_twice(value)\n    return 0\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write interpreter fixture: %v", err)
@@ -64,8 +64,8 @@ func TestRunCLIInterpretsSimpleProgram(t *testing.T) {
 
 func TestRunCLIActivatesLoweredGrammarProductionsForInterpretAndIR(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "grammar_active.llcontext")
-	bundlePath := filepath.Join(fixtureDir, "grammar_active.llctxir")
+	sourcePath := filepath.Join(fixtureDir, "grammar_active.elisa")
+	bundlePath := filepath.Join(fixtureDir, "grammar_active.elisair")
 	src := "grammar Demo:\n    produce() -> i64:\n        pass\n\ndef main() -> i64:\n    return produce()\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write grammar activation fixture: %v", err)
@@ -101,8 +101,8 @@ func TestRunCLIActivatesLoweredGrammarProductionsForInterpretAndIR(t *testing.T)
 
 func TestRunCLIEmittedLoweredGrammarSourceIsStandalone(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "grammar_standalone.llcontext")
-	loweredPath := filepath.Join(fixtureDir, "grammar_standalone.lowered.llcontext")
+	sourcePath := filepath.Join(fixtureDir, "grammar_standalone.elisa")
+	loweredPath := filepath.Join(fixtureDir, "grammar_standalone.lowered.elisa")
 	src := "grammar Demo:\n    produce() -> i64:\n        return 9\n\ndef main() -> i64:\n    return produce()\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write grammar standalone fixture: %v", err)
@@ -128,7 +128,7 @@ func TestRunCLIEmittedLoweredGrammarSourceIsStandalone(t *testing.T) {
 
 func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "contextual_ternary_darray.llcontext")
+	sourcePath := filepath.Join(fixtureDir, "contextual_ternary_darray.elisa")
 	src := "def main() -> i64:\n    region scratch(4096)\n    in scratch:\n        xs: darray[i64] = ([1] if true else [])\n        return xs.count.i64()\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write contextual ternary fixture: %v", err)
@@ -144,8 +144,8 @@ func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) 
 
 func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "grammar_return.llcontext")
-	bundlePath := filepath.Join(fixtureDir, "grammar_return.llctxir")
+	sourcePath := filepath.Join(fixtureDir, "grammar_return.elisa")
+	bundlePath := filepath.Join(fixtureDir, "grammar_return.elisair")
 	src := "grammar Demo:\n    produce() -> i64:\n        return 7\n\ndef main() -> i64:\n    return produce()\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write grammar return fixture: %v", err)
@@ -181,7 +181,7 @@ func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
 
 func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "interpret_named_runtime_call.llcontext")
+	sourcePath := filepath.Join(fixtureDir, "interpret_named_runtime_call.elisa")
 	src := "extern puts(text: u8&) -> int\nextern assert(cond: bool) -> void\n\ndef main() -> int:\n    printed: int = puts(text: do:\n        prefix: static u8& = \"hi\"\n        prefix as u8&\n    )\n    assert(cond: printed == 2)\n    return printed\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write named-runtime interpreter fixture: %v", err)
@@ -203,7 +203,7 @@ func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
 
 func TestRunCLIRejectsBadNamedRuntimeFunctionCall(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "interpret_bad_named_runtime_call.llcontext")
+	sourcePath := filepath.Join(fixtureDir, "interpret_bad_named_runtime_call.elisa")
 	src := "extern assert(cond: bool) -> void\n\ndef main() -> int:\n    assert(value: true)\n    return 0\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write bad named-runtime interpreter fixture: %v", err)
@@ -222,7 +222,7 @@ func TestRunCLIRejectsBadNamedRuntimeFunctionCall(t *testing.T) {
 
 func TestRunCLIInterpretsNamedLocalFunctionAliasCall(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "interpret_named_local_function_alias.llcontext")
+	sourcePath := filepath.Join(fixtureDir, "interpret_named_local_function_alias.elisa")
 	src := "def add(x: int, y: int) -> int:\n    return x + y\n\ndef main() -> int:\n    f = add\n    return f(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write named local alias interpreter fixture: %v", err)
@@ -241,7 +241,7 @@ func TestRunCLIInterpretsNamedLocalFunctionAliasCall(t *testing.T) {
 
 func TestRunCLIInterpretsNamedGlobalFunctionAliasCall(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_function_alias.llcontext")
+	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_function_alias.elisa")
 	src := "def add(x: int, y: int) -> int:\n    return x + y\n\nglobal runner: func(int, int) -> int = add\n\ndef main() -> int:\n    return runner(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write named global alias interpreter fixture: %v", err)
@@ -260,7 +260,7 @@ func TestRunCLIInterpretsNamedGlobalFunctionAliasCall(t *testing.T) {
 
 func TestRunCLIInterpretsNamedGlobalFieldFunctionAliasCall(t *testing.T) {
 	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_field_function_alias.llcontext")
+	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_field_function_alias.elisa")
 	src := "struct CallbackBox:\n    run: func(int, int) -> int\n\ndef add(x: int, y: int) -> int:\n    return x + y\n\nglobal BOX: CallbackBox = CallbackBox(add)\n\ndef main() -> int:\n    return BOX.run(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write named global-field alias interpreter fixture: %v", err)
@@ -281,7 +281,7 @@ func TestCompileServerRequestSupportsIRInterpretAndLLVM(t *testing.T) {
 	src := "def add_twice(x: i64) -> i64:\n    return x + x\n\ndef main() -> i64:\n    return add_twice(21)\n"
 	buildResp, status := executeCompileServerRequest(compileServerRequest{
 		Mode:     "ir",
-		Filename: "server_sample.llcontext",
+		Filename: "server_sample.elisa",
 		Source:   src,
 	})
 	if status != http.StatusOK || !buildResp.OK {
@@ -316,7 +316,7 @@ func TestCompileServerRequestSupportsIRInterpretAndLLVM(t *testing.T) {
 
 func TestCompileServerRequestSupportsFactTraceV2Filter(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 	source, err := os.ReadFile(fixturePath)
 	if err != nil {
 		t.Fatalf("failed to read fact interface fixture: %v", err)

@@ -1,7 +1,7 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +43,7 @@ def fill_runtime_wide(values: darray[i32, 4]&, value: i32) -> void:
 def fill_runtime_wide_unknown(view: dview[i32], value: i32) -> void:
 	arena_da_fill(view, value)
 `
-	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -117,7 +117,7 @@ def fill_runtime_int_to_bytes(values: darray[u8, 4]&, value: int) -> void:
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
-	result := parseAndAnalyze(t, "backend_dview_fill_coerced_byte.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_fill_coerced_byte.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -178,7 +178,7 @@ def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
-	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_optimized.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_optimized.elisa", src)
 	output, err := backend.GenerateLLVMIRWithOpt(result, backend.OptimizationLevel3)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
@@ -219,7 +219,7 @@ def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
-	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_object.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_object.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -260,7 +260,7 @@ def build() -> Node:
 	store: Node.Store[Local] = Node.Store(scratch)
 	return new[store] Node.Empty(zeroed)
 `
-	result := parseAndAnalyze(t, "backend_packed_zero_payload_object.llcontext", src)
+	result := parseAndAnalyze(t, "backend_packed_zero_payload_object.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -326,7 +326,7 @@ def eq_diff_extent(values: darray[i32, 4]&) -> bool:
 	right: dview[i32] = base[2:4]
 	return arena_da_eq_exact(left, right)
 `
-	result := parseAndAnalyze(t, "backend_dview_eq_exact.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -391,7 +391,7 @@ def eq_helper(values: array[i32, 4]) -> bool:
 	boxed: Views = wrap_views(values[0:2], values[2:4])
 	return arena_da_eq_exact(boxed.left, boxed.right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -430,7 +430,7 @@ def eq_indexed(values: array[i32, 4]) -> bool:
 	items: array[Views, 1] = [Views(values[0:2], values[2:4])]
 	return arena_da_eq_exact(items[0].left, items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -465,7 +465,7 @@ def eq_helper_indexed(values: array[i32, 4]) -> bool:
 	wrapped: ViewHolder = wrap_indexed_views(values[0:2], values[2:4])
 	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -503,7 +503,7 @@ def eq_nested_helper_indexed(values: array[i32, 4]) -> bool:
 	wrapped: NestedHolder = wrap_nested_indexed_views(values[0:2], values[2:4])
 	return arena_da_eq_exact(wrapped.holder.items[0].left, wrapped.holder.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -539,7 +539,7 @@ def eq_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 	wrapped: ViewWindow = wrap_sub(items[1:2], 0, 1)
 	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_rebased_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_rebased_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

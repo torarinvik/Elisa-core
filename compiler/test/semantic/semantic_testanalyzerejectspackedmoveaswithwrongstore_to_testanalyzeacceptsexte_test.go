@@ -16,7 +16,7 @@ def bad(node: Expr, store: Token.Store[Local]) -> int:
 	move node in store as Expr.Int(value)
 	return value
 `
-	_, errs := parseAndAnalyze(t, "move_as_packed_wrong_store_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "move_as_packed_wrong_store_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -37,7 +37,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_alias.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -57,7 +57,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_enum_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_enum_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingHelperReturnedReferenceInvalidatedByRestore(t *testing.T) {
@@ -76,7 +76,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_ref_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_ref_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -100,7 +100,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingHelperReturnedNestedViewAliasInvalidatedByRestore(t *testing.T) {
@@ -124,7 +124,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_nested_view_alias_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_nested_view_alias_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -148,7 +148,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return copy.count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_fresh_helper_return_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_fresh_helper_return_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingExternBorrowReturnedReferenceInvalidatedByRestore(t *testing.T) {
@@ -167,7 +167,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_ref_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_ref_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -196,7 +196,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_nested_view_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_nested_view_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -227,7 +227,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -258,7 +258,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedViewAliasInvalidatedByRestore(t *testing.T) {
@@ -284,7 +284,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_view_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_view_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -315,7 +315,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_elem_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_elem_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -345,7 +345,7 @@ def bad() -> i32:
 	restore left_r from left_cp
 	return pair.left[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_left_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_left_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -375,7 +375,7 @@ def ok() -> i32:
 	restore left_r from left_cp
 	return pair.right[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_right_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_right_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingExternRebasedBorrowReturnedSubviewAliasInvalidatedByRestore(t *testing.T) {
@@ -396,7 +396,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -422,7 +422,7 @@ def ok() -> i32:
 	restore scratch from cp
 	return count
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsUsingExternFieldRebasedBorrowReturnedStructFieldInvalidatedByRestore(t *testing.T) {
@@ -447,7 +447,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -476,14 +476,14 @@ def ok() -> i32:
 	restore scratch from cp
 	return pair.total
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsExternBorrowsReturnFieldRebasedOnNonStructReturn(t *testing.T) {
 	src := `@borrows_return_field_rebased(items, source)
 extern bad(source: i32&) -> i32&
 `
-	_, errs := parseAndAnalyze(t, "extern_function_field_rebased_non_struct_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "extern_function_field_rebased_non_struct_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -517,7 +517,7 @@ def bad() -> i32:
 	restore scratch from cp
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_invalid.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_invalid.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -550,6 +550,6 @@ def ok() -> i32:
 	restore scratch from cp
 	return wrapped.meta.total + wrapped.tag
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_scalar_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }

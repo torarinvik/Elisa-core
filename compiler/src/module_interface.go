@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/unparse"
 )
 
 func generateModuleInterface(file *ast.File) string {

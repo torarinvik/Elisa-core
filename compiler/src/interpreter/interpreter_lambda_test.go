@@ -3,10 +3,10 @@ package interpreter_test
 import (
 	"testing"
 
-	"llcontext/src/interpreter"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
+	"elisacore/src/interpreter"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 )
 
 func parseAndAnalyzeInterpreterTest(t *testing.T, filename string, src string) *semantic.Result {
@@ -37,7 +37,7 @@ def run() -> i64:
     return adder(40)
 `
 
-	result := parseAndAnalyzeInterpreterTest(t, "interpreter_lambda_capture.llcontext", src)
+	result := parseAndAnalyzeInterpreterTest(t, "interpreter_lambda_capture.elisa", src)
 	execResult, err := interpreter.Execute(result, interpreter.Options{Entry: "run"})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)

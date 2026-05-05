@@ -9,9 +9,9 @@ package backend
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
 	"unsafe"
 )
 
@@ -50,8 +50,8 @@ type treeFoldCapture struct {
 }
 
 const (
-	treeRewriteOwnerArenaCaptureName = "__llctx_rewrite_owner_arena"
-	treeRewriteOwnerStoreCaptureName = "__llctx_rewrite_owner_store"
+	treeRewriteOwnerArenaCaptureName = "__elisa_core_rewrite_owner_arena"
+	treeRewriteOwnerStoreCaptureName = "__elisa_core_rewrite_owner_store"
 )
 
 type treeFoldHelperInfo struct {

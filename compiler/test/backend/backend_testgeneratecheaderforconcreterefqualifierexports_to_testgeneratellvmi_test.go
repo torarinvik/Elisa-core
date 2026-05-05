@@ -1,7 +1,7 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"strings"
 	"testing"
 )
@@ -21,7 +21,7 @@ def keep_handle[refstorage Store, refstate State](value: Handle[Store, State]) -
 
 export func keep_heap_handle(value: HeapHandle) -> HeapHandle = keep_handle[heap, &]
 `
-	result := parseAndAnalyze(t, "backend_ref_qualifier_export_header.llcontext", src)
+	result := parseAndAnalyze(t, "backend_ref_qualifier_export_header.elisa", src)
 	header, err := backend.GenerateCHeader(result)
 	if err != nil {
 		t.Fatalf("GenerateCHeader returned error: %v", err)
@@ -62,7 +62,7 @@ def widen_bits(value: i32) -> f64:
 def narrow(value: f64) -> f32:
 	return value.f32()
 `
-	result := parseAndAnalyze(t, "backend_float_ops.llcontext", src)
+	result := parseAndAnalyze(t, "backend_float_ops.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -104,7 +104,7 @@ def scale_sum_impl(left: f32, right: f64) -> f64:
 
 export func scale_sum(left: f32, right: f64) -> f64 = scale_sum_impl
 `
-	result := parseAndAnalyze(t, "backend_float_header.llcontext", src)
+	result := parseAndAnalyze(t, "backend_float_header.elisa", src)
 	header, err := backend.GenerateCHeader(result)
 	if err != nil {
 		t.Fatalf("GenerateCHeader returned error: %v", err)
@@ -132,7 +132,7 @@ global g_small: i32 = SMALL
 global g_ratio32: f32 = RATIO32
 global g_wide64: f64 = WIDE64
 `
-	result := parseAndAnalyze(t, "backend_const_float_cast_globals.llcontext", src)
+	result := parseAndAnalyze(t, "backend_const_float_cast_globals.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -179,7 +179,7 @@ def u32_to_f32(value: u32) -> f32:
 def u64_to_f64(value: u64) -> f64:
 	return value.f64()
 `
-	result := parseAndAnalyze(t, "backend_float_cast_matrix.llcontext", src)
+	result := parseAndAnalyze(t, "backend_float_cast_matrix.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -222,7 +222,7 @@ global g_u64: u64 = U64_FROM_F64
 global g_f64: f64 = F64_FROM_U32
 global g_f32: f32 = F32_FROM_U64
 `
-	result := parseAndAnalyze(t, "backend_const_float_cast_matrix_globals.llcontext", src)
+	result := parseAndAnalyze(t, "backend_const_float_cast_matrix_globals.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -267,7 +267,7 @@ def local_and_call() -> f32:
 	local: f32 = 8.5
 	return passthrough(local) + passthrough(9.5)
 `
-	result := parseAndAnalyze(t, "backend_contextual_float_literals.llcontext", src)
+	result := parseAndAnalyze(t, "backend_contextual_float_literals.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -316,7 +316,7 @@ def local_and_call() -> f32:
 	local: f32 = 5.25 + 6.25
 	return passthrough(local) + passthrough(7.25 + 8.25)
 `
-	result := parseAndAnalyze(t, "backend_contextual_float_literal_arithmetic.llcontext", src)
+	result := parseAndAnalyze(t, "backend_contextual_float_literal_arithmetic.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -364,7 +364,7 @@ global g_values: f32[2] = [13.25 + 14.25, 15.25 + 16.25]
 def total() -> f64:
 	return F32_TOTAL.f64() + F64_TOTAL + g_f32.f64() + g_f64
 `
-	result := parseAndAnalyze(t, "backend_contextual_float_literal_arithmetic_toplevel.llcontext", src)
+	result := parseAndAnalyze(t, "backend_contextual_float_literal_arithmetic_toplevel.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -408,7 +408,7 @@ export type Node as CtxNode
 global root: Wrapper = zeroed
 export global root as ctx_root
 `
-	result := parseAndAnalyze(t, "backend_export_header_order.llcontext", src)
+	result := parseAndAnalyze(t, "backend_export_header_order.elisa", src)
 	header, err := backend.GenerateCHeader(result)
 	if err != nil {
 		t.Fatalf("GenerateCHeader returned error: %v", err)
@@ -434,7 +434,7 @@ func TestGenerateLLVMIRLowersVariadicExternCalls(t *testing.T) {
 def format_len(format: u8&) -> int:
 	return snprintf(null, 0, format, 7, 9)
 `
-	result := parseAndAnalyze(t, "backend_variadic_call.llcontext", src)
+	result := parseAndAnalyze(t, "backend_variadic_call.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -460,7 +460,7 @@ func TestGenerateLLVMIRLowersPointerIntegerCasts(t *testing.T) {
 def bits_ptr(bits: uintptr) -> u8&:
 	return bits.cast[u8&]
 `
-	result := parseAndAnalyze(t, "backend_pointer_integer_casts.llcontext", src)
+	result := parseAndAnalyze(t, "backend_pointer_integer_casts.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -490,7 +490,7 @@ extern make_outer() -> Outer
 def read_nested_return() -> i32:
 	return make_outer().inner.value
 `
-	result := parseAndAnalyze(t, "backend_nested_return_field_chain.llcontext", src)
+	result := parseAndAnalyze(t, "backend_nested_return_field_chain.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -524,7 +524,7 @@ extern take_array(values: darray[i32, row]) -> void
 extern take_array_view(view: dview[i32]) -> usize
 extern take_str(text: cstr[row]) -> void
 `
-	result := parseAndAnalyze(t, "backend_runtime_types.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_types.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

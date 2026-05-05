@@ -27,7 +27,7 @@ def inspect(owner: Arena) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_unwrap_else_frozen_packed_provenance.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_unwrap_else_frozen_packed_provenance.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -102,7 +102,7 @@ def inspect(owner: Arena, pick_left: bool) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_ternary_frozen_packed_provenance.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_ternary_frozen_packed_provenance.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -163,7 +163,7 @@ func TestAnalyzePreservesShapeExtentFactsThroughTernaryExpressions(t *testing.T)
 	choice: darray[i32, row] = left if pick_left else right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_ternary_shape_extent.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_ternary_shape_extent.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -204,7 +204,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_move_as.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_move_as.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -267,7 +267,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 		Expr.Int(value: _):
 			return 1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_match.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_match.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -328,7 +328,7 @@ def inspect(owner: Arena) -> int:
 		Expr.Hold(value: _):
 			return 1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_match_mixed_child.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_match_mixed_child.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -390,7 +390,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 		Expr.Int(value: _):
 			return 1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_field_match.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_field_match.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -454,7 +454,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 		Expr.Int(value: _):
 			return 1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_field_match.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_field_match.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -521,7 +521,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 		Expr.Int(value: _):
 			return 1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_indexed_field_match.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_indexed_field_match.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 

@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
+	"elisacore/src/backend"
 	"encoding/json"
-	"llcontext/src/backend"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,17 +12,17 @@ import (
 
 func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines(t *testing.T) {
 	dir := t.TempDir()
-	leafPath := filepath.Join(dir, "leaf.llcontext")
-	midPath := filepath.Join(dir, "mid.llcontext")
-	rootPath := filepath.Join(dir, "root.llcontext")
+	leafPath := filepath.Join(dir, "leaf.elisa")
+	midPath := filepath.Join(dir, "mid.elisa")
+	rootPath := filepath.Join(dir, "root.elisa")
 
 	if err := os.WriteFile(leafPath, []byte("leaf_line"), 0o644); err != nil {
 		t.Fatalf("write leaf fixture: %v", err)
 	}
-	if err := os.WriteFile(midPath, []byte("# include \"leaf.llcontext\"\nmid_line"), 0o644); err != nil {
+	if err := os.WriteFile(midPath, []byte("# include \"leaf.elisa\"\nmid_line"), 0o644); err != nil {
 		t.Fatalf("write mid fixture: %v", err)
 	}
-	if err := os.WriteFile(rootPath, []byte("root_start\n# include \"mid.llcontext\"\nroot_end"), 0o644); err != nil {
+	if err := os.WriteFile(rootPath, []byte("root_start\n# include \"mid.elisa\"\nroot_end"), 0o644); err != nil {
 		t.Fatalf("write root fixture: %v", err)
 	}
 
@@ -39,17 +39,17 @@ func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines
 }
 func TestReadSourceWithIncludesAcceptsBareIncludeDirective(t *testing.T) {
 	dir := t.TempDir()
-	leafPath := filepath.Join(dir, "leaf.llcontext")
-	midPath := filepath.Join(dir, "mid.llcontext")
-	rootPath := filepath.Join(dir, "root.llcontext")
+	leafPath := filepath.Join(dir, "leaf.elisa")
+	midPath := filepath.Join(dir, "mid.elisa")
+	rootPath := filepath.Join(dir, "root.elisa")
 
 	if err := os.WriteFile(leafPath, []byte("leaf_line"), 0o644); err != nil {
 		t.Fatalf("write leaf fixture: %v", err)
 	}
-	if err := os.WriteFile(midPath, []byte("include \"leaf.llcontext\"\nmid_line"), 0o644); err != nil {
+	if err := os.WriteFile(midPath, []byte("include \"leaf.elisa\"\nmid_line"), 0o644); err != nil {
 		t.Fatalf("write mid fixture: %v", err)
 	}
-	if err := os.WriteFile(rootPath, []byte("root_start\ninclude \"mid.llcontext\"\nroot_end"), 0o644); err != nil {
+	if err := os.WriteFile(rootPath, []byte("root_start\ninclude \"mid.elisa\"\nroot_end"), 0o644); err != nil {
 		t.Fatalf("write root fixture: %v", err)
 	}
 
@@ -66,17 +66,17 @@ func TestReadSourceWithIncludesAcceptsBareIncludeDirective(t *testing.T) {
 }
 func TestReadSourceWithIncludesAcceptsPascalIncludeDirectives(t *testing.T) {
 	dir := t.TempDir()
-	leafPath := filepath.Join(dir, "leaf.llcontext")
-	midPath := filepath.Join(dir, "mid.llcontext")
-	rootPath := filepath.Join(dir, "root.llcontext")
+	leafPath := filepath.Join(dir, "leaf.elisa")
+	midPath := filepath.Join(dir, "mid.elisa")
+	rootPath := filepath.Join(dir, "root.elisa")
 
 	if err := os.WriteFile(leafPath, []byte("leaf_line"), 0o644); err != nil {
 		t.Fatalf("write leaf fixture: %v", err)
 	}
-	if err := os.WriteFile(midPath, []byte("{$I leaf.llcontext}\nmid_line"), 0o644); err != nil {
+	if err := os.WriteFile(midPath, []byte("{$I leaf.elisa}\nmid_line"), 0o644); err != nil {
 		t.Fatalf("write mid fixture: %v", err)
 	}
-	if err := os.WriteFile(rootPath, []byte("root_start\n{$INCLUDE 'mid.llcontext'}\nroot_end"), 0o644); err != nil {
+	if err := os.WriteFile(rootPath, []byte("root_start\n{$INCLUDE 'mid.elisa'}\nroot_end"), 0o644); err != nil {
 		t.Fatalf("write root fixture: %v", err)
 	}
 
@@ -93,7 +93,7 @@ func TestReadSourceWithIncludesAcceptsPascalIncludeDirectives(t *testing.T) {
 }
 func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.elisa")
 	outputDir := t.TempDir()
 	bitcodePath := filepath.Join(outputDir, "pointer_alloc.bc")
 	objectPath := filepath.Join(outputDir, "pointer_alloc.o")
@@ -156,7 +156,7 @@ func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
 }
 func TestRunCLIEmitsHeaderForExportFixture(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.elisa")
 	outputPath := filepath.Join(t.TempDir(), "export_vec2i.h")
 
 	var stdout bytes.Buffer
@@ -192,8 +192,8 @@ func TestRunCLIEmitsHeaderForExportFixture(t *testing.T) {
 }
 func TestRunCLIEmitsModuleInterface(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "module_interface_fixture.llcontext")
-	interfacePath := filepath.Join(fixtureDir, "module_interface_fixture.llcontexti")
+	fixturePath := filepath.Join(fixtureDir, "module_interface_fixture.elisa")
+	interfacePath := filepath.Join(fixtureDir, "module_interface_fixture.elisai")
 	src := "struct Box[T]:\n    value: T\n\nglobal counter: int = 0\n\nstatic interface Builder:\n    type State\n    def state() -> State\n\ndef identity[T](value: T) -> T:\n    return value\n\ndef needs_builder[B: Builder]() -> B.State can[Console.Write]:\n    can Console.Write:\n        signal Console.Write\n    return B.state()\n\nnamespace util:\n    def inc(value: int) -> int:\n        return value + 1\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write interface fixture: %v", err)
@@ -252,13 +252,13 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 }
 func TestRunCLIEmitsSourceDependenciesJSON(t *testing.T) {
 	fixtureDir := t.TempDir()
-	leafPath := filepath.Join(fixtureDir, "leaf.llcontext")
-	midPath := filepath.Join(fixtureDir, "mid.llcontext")
-	rootPath := filepath.Join(fixtureDir, "root.llcontext")
+	leafPath := filepath.Join(fixtureDir, "leaf.elisa")
+	midPath := filepath.Join(fixtureDir, "mid.elisa")
+	rootPath := filepath.Join(fixtureDir, "root.elisa")
 	for path, content := range map[string]string{
 		leafPath: "def leaf() -> int:\n    return 1\n",
-		midPath:  "# include \"leaf.llcontext\"\n\ndef mid() -> int:\n    return leaf()\n",
-		rootPath: "# include \"mid.llcontext\"\n\ndef main() -> int:\n    return mid()\n",
+		midPath:  "# include \"leaf.elisa\"\n\ndef mid() -> int:\n    return leaf()\n",
+		rootPath: "# include \"mid.elisa\"\n\ndef main() -> int:\n    return mid()\n",
 	} {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write %s: %v", path, err)
@@ -296,13 +296,13 @@ func TestRunCLIEmitsSourceDependenciesJSON(t *testing.T) {
 }
 func TestRunCLIEmitsSourceDependenciesJSONForBareInclude(t *testing.T) {
 	fixtureDir := t.TempDir()
-	leafPath := filepath.Join(fixtureDir, "leaf.llcontext")
-	midPath := filepath.Join(fixtureDir, "mid.llcontext")
-	rootPath := filepath.Join(fixtureDir, "root.llcontext")
+	leafPath := filepath.Join(fixtureDir, "leaf.elisa")
+	midPath := filepath.Join(fixtureDir, "mid.elisa")
+	rootPath := filepath.Join(fixtureDir, "root.elisa")
 	for path, content := range map[string]string{
 		leafPath: "def leaf() -> int:\n    return 1\n",
-		midPath:  "include \"leaf.llcontext\"\n\ndef mid() -> int:\n    return leaf()\n",
-		rootPath: "include \"mid.llcontext\"\n\ndef main() -> int:\n    return mid()\n",
+		midPath:  "include \"leaf.elisa\"\n\ndef mid() -> int:\n    return leaf()\n",
+		rootPath: "include \"mid.elisa\"\n\ndef main() -> int:\n    return mid()\n",
 	} {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write %s: %v", path, err)
@@ -344,9 +344,9 @@ func TestParseArgsAcceptsOptimizationShorthands(t *testing.T) {
 		args  []string
 		level int
 	}{
-		{name: "shorthand", args: []string{"-O3", "fixture.llcontext"}, level: 3},
-		{name: "equals", args: []string{"-O=2", "fixture.llcontext"}, level: 2},
-		{name: "separate", args: []string{"-O", "0", "fixture.llcontext"}, level: 0},
+		{name: "shorthand", args: []string{"-O3", "fixture.elisa"}, level: 3},
+		{name: "equals", args: []string{"-O=2", "fixture.elisa"}, level: 2},
+		{name: "separate", args: []string{"-O", "0", "fixture.elisa"}, level: 0},
 	}
 	for _, test := range tests {
 		test := test
@@ -369,8 +369,8 @@ func TestParseArgsRejectsRemovedPackedABI(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "equals", args: []string{"-packed-abi=word-handle", "fixture.llcontext"}},
-		{name: "separate", args: []string{"-packed-abi", "row-handle", "fixture.llcontext"}},
+		{name: "equals", args: []string{"-packed-abi=word-handle", "fixture.elisa"}},
+		{name: "separate", args: []string{"-packed-abi", "row-handle", "fixture.elisa"}},
 	}
 	for _, test := range tests {
 		test := test
@@ -386,7 +386,7 @@ func TestParseArgsRejectsRemovedPackedABI(t *testing.T) {
 	}
 }
 func TestParseArgsDefaultsPackedLoweringToCanonicalProfile(t *testing.T) {
-	options, err := parseArgs([]string{"fixture.llcontext"})
+	options, err := parseArgs([]string{"fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestResolveProjectTargetRejectsRemovedPackedABI(t *testing.T) {
 		config: projectDefinition{
 			Targets: map[string]projectTargetDefinition{
 				"default": {
-					Entry:     "main.llcontext",
+					Entry:     "main.elisa",
 					PackedABI: "row-handle",
 				},
 			},
@@ -421,7 +421,7 @@ func TestResolveProjectTargetRejectsRemovedPackedABI(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsPackedInspectEmitAlias(t *testing.T) {
-	options, err := parseArgs([]string{"-emit", "packed-info", "fixture.llcontext"})
+	options, err := parseArgs([]string{"-emit", "packed-info", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestParseArgsAcceptsPackedInspectEmitAlias(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsLoweredEmitAlias(t *testing.T) {
-	options, err := parseArgs([]string{"-emit", "lower", "fixture.llcontext"})
+	options, err := parseArgs([]string{"-emit", "lower", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestParseArgsAcceptsLoweredEmitAlias(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsSemanticEmitAlias(t *testing.T) {
-	options, err := parseArgs([]string{"-emit", "sema", "fixture.llcontext"})
+	options, err := parseArgs([]string{"-emit", "sema", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestParseArgsAcceptsSemanticEmitAlias(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsFactTraceEmitAlias(t *testing.T) {
-	options, err := parseArgs([]string{"-emit", "fact-trace", "fixture.llcontext"})
+	options, err := parseArgs([]string{"-emit", "fact-trace", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestParseArgsAcceptsFactTraceEmitAlias(t *testing.T) {
 }
 func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "lowered_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "lowered_fixture.elisa")
 	src := "grammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write lowered fixture: %v", err)
@@ -497,7 +497,7 @@ func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
 }
 func TestRunCLIEmitsSemanticReport(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "semantic_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "semantic_fixture.elisa")
 	src := "const enum TokenKind of u32:\n    IDENT = 1\n\nstruct Token:\n    kind: TokenKind\n\nstruct ParserState:\n    cursor: mutable usize\n\nimpl mutable ParserState&:\n    def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:\n        _ = kind\n        return Token{kind: TokenKind.IDENT}\n\ngrammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write semantic fixture: %v", err)
@@ -533,7 +533,7 @@ func TestRunCLIEmitsSemanticReport(t *testing.T) {
 }
 func TestRunCLIEmitsFactTraceForGrammarLoweredPaths(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "grammar_fact_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "grammar_fact_fixture.elisa")
 	src := "const enum TokenKind of u32:\n    IDENT = 1\n\nstruct Token:\n    kind: TokenKind\n\nstruct ParserState:\n    cursor: mutable usize\n\nimpl mutable ParserState&:\n    def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:\n        _ = kind\n        return Token{kind: TokenKind.IDENT}\n\ngrammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write grammar fact fixture: %v", err)
@@ -554,7 +554,7 @@ func TestRunCLIEmitsFactTraceForGrammarLoweredPaths(t *testing.T) {
 }
 func TestRunCLIEmitsFactTraceReport(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

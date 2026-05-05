@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 )
 
 func TestGenerateLLVMIRLowersStaticInterfaceMethodDispatch(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "static_interface_dispatch.llcontext", `
+	result := parseAndAnalyzeBackendTest(t, "static_interface_dispatch.elisa", `
 struct AstNode:
     value: int
 
@@ -68,7 +68,7 @@ def entry() -> int:
 }
 
 func TestGenerateLLVMIRLowersDerivedParseBuilderImplMethods(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "static_interface_derived_parse_builder.llcontext", `
+	result := parseAndAnalyzeBackendTest(t, "static_interface_derived_parse_builder.elisa", `
 tree Lua:
 	common:
 		span: i64

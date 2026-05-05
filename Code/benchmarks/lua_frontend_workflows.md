@@ -1,13 +1,13 @@
 # Lua Frontend Benchmarking And Differential Workflows
 
-This document describes the developer-facing tools around the llcontext Lua
-frontend. Lua behavior checks live in the llcontext test runner, while these
+This document describes the developer-facing tools around the Elisa core Lua
+frontend. Lua behavior checks live in the Elisa core test runner, while these
 tools help with parity and performance work outside the regular test suite.
 
 ## Test Boundary
 
 - Lua semantic and analysis behavior:
-  - `bash Code/llcontext_lua/test/run_tests.sh`
+  - `bash Code/elisacore_lua/test/run_tests.sh`
 - Host compiler safety:
   - `cd compiler && go test ./src/parser ./src/semantic ./src/backend ./src/frontendir ./src`
 
@@ -45,7 +45,7 @@ For the exported pool-backed parallel surface specifically, run:
 bash ./compiler/scripts/smoke_lua_frontend_parallel.sh
 ```
 
-That script builds `Code/llcontext_lua/src/lua_frontend.llcontext`, links a tiny
+That script builds `Code/elisacore_lua/src/lua_frontend.elisa`, links a tiny
 C probe against the generated object, and verifies that the parallel parse,
 metrics, lexer, and analysis entrypoints match repeated serial results for the
 same input while also rejecting invalid worker/iteration requests.
@@ -54,7 +54,7 @@ same input while also rejecting invalid worker/iteration requests.
 
 The curated differential corpus lives under:
 
-- `Code/llcontext_lua/test/differential_corpus/`
+- `Code/elisacore_lua/test/differential_corpus/`
 
 Run the developer-facing comparison against the C reference parser with:
 
@@ -71,24 +71,24 @@ python3 ./compiler/scripts/run_lua_frontend_differential.py --json-out /tmp/lua-
 Notes:
 
 - The script compares accept/reject behavior between:
-  - the llcontext frontend
+  - the Elisa core frontend
   - the C reference harness built from `onelua.c`
-- It prints extra llcontext fingerprints for closure/env/label-heavy families.
+- It prints extra Elisa core fingerprints for closure/env/label-heavy families.
 - Accepted corpus annotation policy is intentionally family-specific:
-  - control-flow accepts require `llcontext-analysis-fp`, plus `llcontext-label-fp` when labels or gotos are involved
-  - closure/global accepts require `llcontext-env-fp`, `llcontext-closure-fp`, and `llcontext-analysis-fp`
-  - lexical/numeric/operator/table-call accepts require `llcontext-analysis-fp` only
+  - control-flow accepts require `elisacore-analysis-fp`, plus `elisacore-label-fp` when labels or gotos are involved
+  - closure/global accepts require `elisacore-env-fp`, `elisacore-closure-fp`, and `elisacore-analysis-fp`
+  - lexical/numeric/operator/table-call accepts require `elisacore-analysis-fp` only
   - reject cases remain accept/reject parity checks with no fingerprint requirement
 - With `--json-out`, it also writes a structured report with run metadata,
-  per-case statuses, llcontext/reference outcomes, expected fingerprints,
-  observed llcontext fingerprints, and mismatch summaries.
-- Differential cases can optionally pin expected llcontext semantic
+  per-case statuses, Elisa core/reference outcomes, expected fingerprints,
+  observed Elisa core fingerprints, and mismatch summaries.
+- Differential cases can optionally pin expected Elisa core semantic
   fingerprints with leading source comments like:
 
 ```lua
--- llcontext-env-fp: 1061
--- llcontext-closure-fp: 209
--- llcontext-analysis-fp: 6880
+-- elisacore-env-fp: 1061
+-- elisacore-closure-fp: 209
+-- elisacore-analysis-fp: 6880
 ```
 
   Supported annotation modes are:
@@ -184,7 +184,7 @@ and is listed by:
 
 - `Code/benchmarks/lua_frontend_execution_corpus_manifest.txt`
 
-Run the llcontext-vs-reference execution sweep with:
+Run the Elisa core-vs-reference execution sweep with:
 
 ```bash
 python3 ./compiler/scripts/run_lua_frontend_execution_benchmark.py
@@ -206,18 +206,18 @@ Useful options:
 Notes:
 
 - This sweep uses the execution-focused subset corpus rather than the broader parse benchmark corpus.
-- The llcontext side builds `Code/benchmarks/lua_frontend_execute_bench.c` against `Code/llcontext_lua/src/lua_frontend.llcontext`.
+- The Elisa core side builds `Code/benchmarks/lua_frontend_execute_bench.c` against `Code/elisacore_lua/src/lua_frontend.elisa`.
 - The reference side builds `Code/benchmarks/lua_reference_execute_bench.c`.
-- The current llcontext harness validates `lua_frontend_execute_status_with_len(...) == 0` before timing repeated execute checksum runs.
-- The JSON report records both per-input throughput and the aggregate llcontext-over-reference ratio.
+- The current Elisa core harness validates `lua_frontend_execute_status_with_len(...) == 0` before timing repeated execute checksum runs.
+- The JSON report records both per-input throughput and the aggregate Elisa core-over-reference ratio.
 
 ## Execution Profile Bundle
 
-To capture an execution-oriented profiling bundle with both the llcontext and
+To capture an execution-oriented profiling bundle with both the Elisa core and
 PUC Lua sweeps in one stable folder:
 
 ```bash
-bash ./compiler/scripts/profile_lua_frontend_execution.sh --out /tmp/llcontext-lua-execution-profile
+bash ./compiler/scripts/profile_lua_frontend_execution.sh --out /tmp/elisacore-lua-execution-profile
 ```
 
 Useful options:
@@ -240,7 +240,7 @@ This writes:
 Notes:
 
 - This bundle is the execution-side companion to the existing parse/analysis profile bundle produced by `profile_lua_frontend.sh`.
-- It reuses the deterministic execution corpus and keeps both the llcontext and reference runs together for manual investigation.
+- It reuses the deterministic execution corpus and keeps both the Elisa core and reference runs together for manual investigation.
 - The wrapper is aimed at execution-path performance work rather than parser parity or baseline-comparison automation.
 
 There is also a direct pool-backed benchmark harness for the exported parallel
@@ -254,7 +254,7 @@ One low-cost validation path is:
 bash ./compiler/scripts/smoke_lua_frontend_parallel.sh
 ```
 
-For manual timing runs, build `Code/llcontext_lua/src/lua_frontend.llcontext`
+For manual timing runs, build `Code/elisacore_lua/src/lua_frontend.elisa`
 to a header/object pair and link `Code/benchmarks/lua_frontend_parallel_bench.c`.
 The harness accepts:
 
@@ -269,7 +269,7 @@ overhead.
 
 ## Reference Parse Comparison
 
-To compare llcontext parse throughput against the checked-in C reference parser
+To compare Elisa core parse throughput against the checked-in C reference parser
 backed by `onelua.c`, run:
 
 ```bash
@@ -292,15 +292,15 @@ Useful options:
 
 Notes:
 
-- This comparison is intentionally parse-only. The llcontext-only semantic
+- This comparison is intentionally parse-only. The Elisa core-only semantic
   modes `env`, `closure`, `label`, and `analysis` do not have direct C
   equivalents.
 - The script benchmarks the same generated mixed-Lua synthetic input and
-  curated real-Lua corpus manifest used by the llcontext storage benchmark.
+  curated real-Lua corpus manifest used by the Elisa core storage benchmark.
 - `--stmt-count` controls the approximate statement budget of that generated
   synthetic workload rather than emitting one flat list of local assignments.
 - Aggregate output is reported over inputs that both implementations accept in
-  parse mode, so unsupported llcontext parse inputs are recorded as skips.
+  parse mode, so unsupported Elisa core parse inputs are recorded as skips.
 
 ## Profile Bundle
 
@@ -308,7 +308,7 @@ To generate a profiling bundle with benchmark logs and, optionally,
 differential logs:
 
 ```bash
-bash ./compiler/scripts/profile_lua_frontend.sh --out /tmp/llcontext-lua-profile
+bash ./compiler/scripts/profile_lua_frontend.sh --out /tmp/elisacore-lua-profile
 ```
 
 This writes:
@@ -341,7 +341,7 @@ To capture a lightweight bundle with structured differential and benchmark
 artifacts in one stable folder:
 
 ```bash
-bash ./compiler/scripts/capture_lua_frontend_baseline.sh --out /tmp/llcontext-lua-baseline
+bash ./compiler/scripts/capture_lua_frontend_baseline.sh --out /tmp/elisacore-lua-baseline
 ```
 
 Useful options:
@@ -401,7 +401,7 @@ baseline with the dedicated wrapper:
 ```bash
 bash ./compiler/scripts/ci_compare_lua_frontend_baseline.sh \
   --baseline-dir artifacts/lua-frontend-baseline \
-  --candidate-out /tmp/llcontext-lua-candidate \
+  --candidate-out /tmp/elisacore-lua-candidate \
   --opt-level -O3 \
   --parse-iterations 20 \
   --sample-iterations 5000 \
@@ -425,7 +425,7 @@ python3 ./compiler/scripts/compare_lua_frontend_reports.py baseline/differential
 To compare two full bundle directories (for example, profile or baseline bundles):
 
 ```bash
-python3 ./compiler/scripts/compare_lua_frontend_reports.py /tmp/llcontext-lua-baseline-a /tmp/llcontext-lua-baseline-b
+python3 ./compiler/scripts/compare_lua_frontend_reports.py /tmp/elisacore-lua-baseline-a /tmp/elisacore-lua-baseline-b
 ```
 
 To compare two structured benchmark reports:
@@ -528,7 +528,7 @@ counted.
 
 The public source-visible Lua frontend wrappers live in:
 
-- `Code/llcontext_lua/src/lua_frontend.llcontext`
+- `Code/elisacore_lua/src/lua_frontend.elisa`
 
 Key wrappers include:
 

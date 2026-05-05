@@ -9,8 +9,8 @@ TIMEOUT_SECONDS="${ATPL_TEST_TIMEOUT_SECONDS:-240}"
 
 COMPILER_MODE="${ATPL_TEST_COMPILER_MODE:-fresh}"
 
-if [[ "${COMPILER_MODE}" == "binary" && -x "${COMPILER_DIR}/llcontext-compiler" ]]; then
-  COMPILER_CMD=("${COMPILER_DIR}/llcontext-compiler")
+if [[ "${COMPILER_MODE}" == "binary" && -x "${COMPILER_DIR}/elisacore-compiler" ]]; then
+  COMPILER_CMD=("${COMPILER_DIR}/elisacore-compiler")
 else
   COMPILER_CMD=(go run ./src)
 fi
@@ -62,9 +62,9 @@ run_compiler_go_suite() {
   )
 }
 
-run_suite "../Code/llcontext_atpl/test/atpl_frontend_tests.llcontext"
-run_suite "../Code/llcontext_atpl/test/atpl_runtime_tests.llcontext"
-run_suite "../Code/llcontext_atpl/test/atpl_cli_tests.llcontext"
+run_suite "../Code/elisacore_atpl/test/atpl_frontend_tests.elisa"
+run_suite "../Code/elisacore_atpl/test/atpl_runtime_tests.elisa"
+run_suite "../Code/elisacore_atpl/test/atpl_cli_tests.elisa"
 run_compiler_go_suite "./internal/atplcli"
 run_go_suite "^TestATPL"
 

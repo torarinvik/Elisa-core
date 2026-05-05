@@ -1,9 +1,9 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 	"strings"
 	"testing"
 )
@@ -41,7 +41,7 @@ func analyzeTreeTestSourceWithSemanticErrors(t *testing.T, filename string, src 
 	return Analyze(file)
 }
 func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_registers.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_registers.elisa", `tree Lua:
     common:
         @storage(side_table)
         span: i64
@@ -143,7 +143,7 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 	}
 }
 func TestAnalyzeInfersTreePayloadRelations(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_inferred_payload_relations.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_inferred_payload_relations.elisa", `tree Lua:
     @role(expr)
     node Expr:
         Nil
@@ -173,7 +173,7 @@ func TestAnalyzeInfersTreePayloadRelations(t *testing.T) {
 	}
 }
 func TestAnalyzeRegistersNestedTreeCategories(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_nested_categories.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_nested_categories.elisa", `tree Lua:
     @role(expr)
     node Expr:
         Unary(expr: Expr)
@@ -220,7 +220,7 @@ func TestAnalyzeRegistersNestedTreeCategories(t *testing.T) {
 	}
 }
 func TestAnalyzeNestedTreeCategoryAssignableToParent(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_nested_category_assignability.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_nested_category_assignability.elisa", `tree Lua:
     @role(expr)
     node Expr:
         Unary(expr: Expr)
@@ -266,7 +266,7 @@ def classify(node: Lua.Expr) -> i64:
 	}
 }
 func TestAnalyzeSynthesizesTreeCategoryKindTypesAndShorthandComparisons(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_kind_types.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_kind_types.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -380,7 +380,7 @@ def shorthand_root_binary_kind() -> Lua.Node.Kind:
 	}
 }
 func TestAnalyzeRejectsDuplicateTreeMemberTypes(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_duplicate_member.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_duplicate_member.elisa", `tree Lua:
     node Expr:
         Nil
     struct Expr:
@@ -392,7 +392,7 @@ func TestAnalyzeRejectsDuplicateTreeMemberTypes(t *testing.T) {
 	}
 }
 func TestAnalyzeTreeCategoryRoleDirectives(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_role_directives.llcontext", `tree Lua:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_role_directives.elisa", `tree Lua:
     @role(expr)
     @role(stmt)
     node Expr:
@@ -411,7 +411,7 @@ func TestAnalyzeTreeCategoryRoleDirectives(t *testing.T) {
 	}
 }
 func TestAnalyzeTreeFieldAccess(t *testing.T) {
-	analyzeTreeTestSource(t, "tree_field_access.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "tree_field_access.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -434,7 +434,7 @@ def cond_span(branch: Lua.ElseIf) -> i64:
 `)
 }
 func TestAnalyzeTreeAttributeFieldAccess(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_attribute_field_access.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_attribute_field_access.elisa", `tree Lua:
 	@role(expr)
 	node Expr:
 		Int(value: i64)
@@ -462,7 +462,7 @@ def checksum_of(node: Lua.Expr) -> i64:
 	}
 }
 func TestAnalyzeProjectedTreeAttributeFieldAccess(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_attribute_projected_field_access.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_attribute_projected_field_access.elisa", `tree Lua:
 	@role(expr)
 	node Expr:
 		Int(value: i64)
@@ -502,7 +502,7 @@ def count_of(node: Lua.Expr) -> usize:
 	}
 }
 func TestAnalyzeTreeAttributeAggregateHelpers(t *testing.T) {
-	result := analyzeTreeTestSource(t, "tree_attribute_aggregate_helpers.llcontext", `tree Lua:
+	result := analyzeTreeTestSource(t, "tree_attribute_aggregate_helpers.elisa", `tree Lua:
 	@role(expr)
 	node Expr:
 		Nil

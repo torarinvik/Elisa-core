@@ -1,7 +1,7 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"strings"
 	"testing"
 )
@@ -22,7 +22,7 @@ def load(flag: bool) -> int:
 		Busy:
 			2
 `
-	result := parseAndAnalyze(t, "backend_catch_expr.llcontext", src)
+	result := parseAndAnalyze(t, "backend_catch_expr.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -59,7 +59,7 @@ def bubble_network() -> int error[FileError.NotFound, NetworkError.Timeout, ...]
 def fail_disk() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
 	raise FileError.PermissionDenied
 `
-	result := parseAndAnalyze(t, "backend_error_mixed_row_style.llcontext", src)
+	result := parseAndAnalyze(t, "backend_error_mixed_row_style.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -94,7 +94,7 @@ extern read_value() -> int error[NetworkError, FileError]
 def by_reverse_family_order() -> int error[NetworkError, FileError]:
 	return try read_value()
 `
-	result := parseAndAnalyze(t, "backend_error_canonicalization.llcontext", src)
+	result := parseAndAnalyze(t, "backend_error_canonicalization.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -114,7 +114,7 @@ def load_text(path: u8&) -> cstr[file_text] error[IoError, ...]:
 	text: cstr[file_text] = try read_file(path)
 	return text
 `
-	result := parseAndAnalyze(t, "backend_error_set_wildcard.llcontext", src)
+	result := parseAndAnalyze(t, "backend_error_set_wildcard.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -141,7 +141,7 @@ func TestGenerateLLVMIRLowersValueOptionalsAndTryElse(t *testing.T) {
 def fallback_value(flag: bool) -> int:
 	return try maybe_value(flag) else 11
 `
-	result := parseAndAnalyze(t, "backend_value_optionals.llcontext", src)
+	result := parseAndAnalyze(t, "backend_value_optionals.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -166,7 +166,7 @@ func TestGenerateLLVMIRLowersReturnQuestionWithOptionalBindings(t *testing.T) {
 		value_int >= lower_value and value_int <= upper_value
 	return null
 `
-	result := parseAndAnalyze(t, "backend_return_question_with_optional_bindings.llcontext", src)
+	result := parseAndAnalyze(t, "backend_return_question_with_optional_bindings.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -202,7 +202,7 @@ def unwrap_or(flag: bool) -> i32:
 		return 11
 	return value.value
 `
-	result := parseAndAnalyze(t, "backend_value_optionals_smart_cast.llcontext", src)
+	result := parseAndAnalyze(t, "backend_value_optionals_smart_cast.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -237,7 +237,7 @@ def read_array(values: darray[i32, row]) -> i32:
 def read_view(view: dview[i32]) -> i32:
     return view[2]
 `
-	result := parseAndAnalyze(t, "backend_runtime_index.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_index.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -262,7 +262,7 @@ func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
 	src := `def read_codepoint(text: cstr[row]) -> char:
     return text[1]
 `
-	result := parseAndAnalyze(t, "backend_runtime_cstr_index.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_cstr_index.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -286,7 +286,7 @@ func TestGenerateLLVMIRAcceptsShapeErasingDStrShorthand(t *testing.T) {
 def erase(text: cstr[row]) -> cstr:
     return text
 `
-	result := parseAndAnalyze(t, "backend_cstr_shorthand.llcontext", src)
+	result := parseAndAnalyze(t, "backend_cstr_shorthand.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -306,7 +306,7 @@ func TestGenerateLLVMIRIndexesStringViewViaRuntimeHelper(t *testing.T) {
 	src := `def read_view(view: StringView) -> char:
     return view[1]
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_view_index.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_view_index.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -337,7 +337,7 @@ def same_text_view(text: cstr[row], view: StringView) -> bool:
 def different_views(left: StringView, right: StringView) -> bool:
 	return left != right
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_equality.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_equality.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -399,7 +399,7 @@ def different_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 	right_view: StringView = ctx_string_view(right, 0, 3)
 	return left_view == right_view
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_same_extent.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_same_extent.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -495,7 +495,7 @@ def direct_different_bounds_view(left: cstr[row], right: cstr[row]) -> bool:
 	right_view: StringView = ctx_string_view(right, 0, 3)
 	return ctx_string_views_eq(left_view, right_view) != 0
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_direct_helper_eq.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_direct_helper_eq.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

@@ -1,7 +1,7 @@
 package semantic_test
 
 import (
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 	"strings"
 	"testing"
 )
@@ -15,7 +15,7 @@ def bad(owner: Arena) -> Expr:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return new[frozen] Expr.Int(value: 1)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_frozen_alloc_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_frozen_alloc_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -33,7 +33,7 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 		Expr.Int(value: value):
 			return value
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_match_frozen_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_match_frozen_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsBarePackedEnumConstructorCall(t *testing.T) {
@@ -43,7 +43,7 @@ func TestAnalyzeRejectsBarePackedEnumConstructorCall(t *testing.T) {
 def bad() -> Expr:
 	return Expr.Int(value: 1)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_ctor_without_store_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_ctor_without_store_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -60,7 +60,7 @@ def build(owner: Arena) -> Expr:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	return Expr.Int(value: 1)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_ctor_with_active_store_local_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_ctor_with_active_store_local_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsBarePackedAllocOutsideInStoreScope(t *testing.T) {
@@ -70,7 +70,7 @@ func TestAnalyzeRejectsBarePackedAllocOutsideInStoreScope(t *testing.T) {
 def bad() -> Expr:
 	return new Expr.Int(value: 1)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_alloc_without_scope_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_alloc_without_scope_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -87,7 +87,7 @@ def build(owner: Arena) -> Expr:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	return new Expr.Int(value: 1)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_alloc_with_active_store_local_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_alloc_with_active_store_local_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsPackedMatchWithoutStoreClause(t *testing.T) {
@@ -99,7 +99,7 @@ def bad(node: Expr) -> int:
 		Expr.Int(value: value):
 			return value
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_match_missing_store_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_match_missing_store_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -117,7 +117,7 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 		Expr.Int(value: value):
 			return value
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_match_with_active_store_param_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_match_with_active_store_param_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseFromFrozenIndexExpr(t *testing.T) {
@@ -129,7 +129,7 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 		Expr.Int(value: value):
 			return value
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_match_frozen_index_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_match_frozen_index_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseFromHiddenStoreFieldIndexExpr(t *testing.T) {
@@ -151,7 +151,7 @@ def read(owner: Arena) -> int:
 		Expr.Int(value: value):
 			return value
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_match_hidden_store_field_index_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_match_hidden_store_field_index_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseFromImmutableFieldProjection(t *testing.T) {
@@ -167,7 +167,7 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 		Expr.Int(value: value):
 			return value
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_match_field_projection_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_match_field_projection_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsOrdinaryEnumMatchWithStoreClause(t *testing.T) {
@@ -182,7 +182,7 @@ def bad(node: Expr, store: PackedExpr.Store[Local]) -> int:
 		Expr.Int(value: value):
 			return value
 `
-	_, errs := parseAndAnalyze(t, "ordinary_enum_match_store_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "ordinary_enum_match_store_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -200,7 +200,7 @@ func TestAnalyzeAcceptsPackedCommonFieldAccess(t *testing.T) {
 def read(node: Expr) -> int:
 	return node.span
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_common_field_access_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_common_field_access_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedCommonFieldInitializationWithNamedArgs(t *testing.T) {
@@ -213,7 +213,7 @@ def build(store_owner: Arena) -> Expr:
 	store: Expr.Store[Local] = Expr.Store(store_owner)
 	return new[store] Expr.Int(span: 7, value: 1)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_common_field_init_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_common_field_init_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedEnumIfPatternBinder(t *testing.T) {
@@ -229,7 +229,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	else:
 		return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeDeprecatesPackedEnumIfStorePatternBinder(t *testing.T) {
@@ -241,7 +241,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 		return value
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "packed_enum_if_store_pattern_binder_deprecated.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_enum_if_store_pattern_binder_deprecated.elisa", src)
 	requireNoErrors(t, errs)
 	deprecations := strings.Join(result.Deprecations(), "\n")
 	if !strings.Contains(deprecations, "`if value in store as Pattern` is deprecated") {
@@ -267,7 +267,7 @@ def classify(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
 	else:
 		return 9
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_elif_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_elif_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsEnumVariantIsCondition(t *testing.T) {
@@ -280,7 +280,7 @@ def is_int(node: Expr) -> bool:
 		return true
 	return false
 `
-	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	decl := requireFuncDecl(t, result, "is_int")
@@ -298,7 +298,7 @@ func TestAnalyzeAcceptsEnumVariantIsConditionWithPositionalLiteralPayloadPattern
 def is_pi(node: Expr) -> bool:
 	return node is Expr.Float(3.14)
 `
-	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_positional_literal_payload_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_positional_literal_payload_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -310,7 +310,7 @@ func TestAnalyzeAcceptsEnumVariantIsConditionWithNamedLiteralPayloadPattern(t *t
 def is_pi(node: Expr) -> bool:
 	return node is Expr.Float(PI: 314)
 `
-	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_named_literal_payload_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_named_literal_payload_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -324,7 +324,7 @@ def classify(node: Expr) -> int:
 		return 1
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "enum_if_pattern_positional_literal_payload_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_if_pattern_positional_literal_payload_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExpectPatternStatement(t *testing.T) {
@@ -336,7 +336,7 @@ def check(node: Expr) -> void:
 		expect node as Expr.Int(value)
 		assert value != 0
 `
-	_, errs := parseAndAnalyze(t, "expect_pattern_statement_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "expect_pattern_statement_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExpectLetPatternStatement(t *testing.T) {
@@ -348,7 +348,7 @@ def check(node: Expr) -> int:
 		expect let Expr.Int(value) = node
 		return value
 `
-	_, errs := parseAndAnalyze(t, "expect_let_pattern_statement_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "expect_let_pattern_statement_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsAssertPatternCondition(t *testing.T) {
@@ -358,7 +358,7 @@ func TestAnalyzeAcceptsAssertPatternCondition(t *testing.T) {
 def check(node: Expr) -> void:
 	assert node is Expr.Int(_)
 `
-	_, errs := parseAndAnalyze(t, "assert_pattern_condition_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "assert_pattern_condition_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExpectPatternBlockCaptures(t *testing.T) {
@@ -371,7 +371,7 @@ def check(node: Expr) -> int:
 			return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "expect_pattern_block_captures_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "expect_pattern_block_captures_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExpectPatternPinnedValue(t *testing.T) {
@@ -382,7 +382,7 @@ def check(node: Expr, expected_op: int) -> void:
 	can Abort.Panic:
 		expect node as Expr.Infix(^expected_op, _, _)
 `
-	_, errs := parseAndAnalyze(t, "expect_pattern_pinned_value_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "expect_pattern_pinned_value_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExpectListPatternWithPredicate(t *testing.T) {
@@ -399,7 +399,7 @@ def check(values: darray[Expr]) -> void:
 			_
 		]
 `
-	_, errs := parseAndAnalyze(t, "expect_list_pattern_predicate_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "expect_list_pattern_predicate_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExpectCountPatternForSequencePayloads(t *testing.T) {
@@ -413,7 +413,7 @@ def check(stmts: darray[Stmt]) -> void:
 			Stmt.Call(2, count(0))
 		]
 `
-	_, errs := parseAndAnalyze(t, "expect_count_pattern_sequence_payload_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "expect_count_pattern_sequence_payload_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsEnumVariantIsConditionPayloadBindPattern(t *testing.T) {
@@ -425,7 +425,7 @@ def unwrap(node: Expr) -> int:
 		return value
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_payload_bind_pattern_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_payload_bind_pattern_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -444,7 +444,7 @@ def fold(node: Expr) -> int:
 		return score(node)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "packed_enum_is_condition_refines_scrutinee_to_view_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_enum_is_condition_refines_scrutinee_to_view_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -467,7 +467,7 @@ def fold(node: Expr) -> int:
 		return score(node)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "packed_enum_bare_variant_type_surface_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_enum_bare_variant_type_surface_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -478,7 +478,7 @@ func TestAnalyzeRejectsOrdinaryEnumBareVariantTypeSugar(t *testing.T) {
 def bad(node: Expr.Int) -> int:
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "ordinary_enum_bare_variant_type_surface_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "ordinary_enum_bare_variant_type_surface_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -502,7 +502,7 @@ def fold(node: Expr) -> int:
 		return 0
 	return score(node)
 `
-	result, errs := parseAndAnalyze(t, "packed_enum_is_condition_fallthrough_refines_scrutinee_to_view_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_enum_is_condition_fallthrough_refines_scrutinee_to_view_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -519,7 +519,7 @@ def read(box: Box&?) -> int:
 		return 0
 	return box.value
 `
-	result, errs := parseAndAnalyze(t, "guard_nonnull_condition_refines_reference_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "guard_nonnull_condition_refines_reference_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -542,7 +542,7 @@ def fold(node: Expr) -> int:
 		return score(node)
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "guard_variant_condition_refines_packed_scrutinee_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "guard_variant_condition_refines_packed_scrutinee_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -561,6 +561,6 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 		return score(node) + value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_scrutinee_refined_to_view_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_scrutinee_refined_to_view_ok.elisa", src)
 	requireNoErrors(t, errs)
 }

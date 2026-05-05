@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"llcontext/src/backend"
-	"llcontext/src/frontendir"
-	"llcontext/src/grammar"
-	"llcontext/src/interpreter"
-	"llcontext/src/unparse"
+	"elisacore/src/backend"
+	"elisacore/src/frontendir"
+	"elisacore/src/grammar"
+	"elisacore/src/interpreter"
+	"elisacore/src/unparse"
 )
 
 func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, stdout io.Writer, stderr io.Writer) int {

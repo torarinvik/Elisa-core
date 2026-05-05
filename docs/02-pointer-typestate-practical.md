@@ -1,6 +1,6 @@
 # Pointer Typestate Mini-Spec
 
-This is a small formal-ish spec for pointer nullness in Contextlang.
+This is a small formal-ish spec for pointer nullness in Elisa core.
 
 The intent is:
 
@@ -11,13 +11,13 @@ The intent is:
 
 In short:
 
-> Contextlang does **not** have full dependent types, but pointers carry a lightweight proof state.
+> Elisa core does **not** have full dependent types, but pointers carry a lightweight proof state.
 
 ## Core pointer states
 
 There are three pointer/reference states for a pointee type `T`:
 
-```context
+```elisa
 T&   # proven non-null
 T&?  # may be null
 T!   # proven null
@@ -39,7 +39,7 @@ RefType ::= BaseType "&"
 
 Nested forms are allowed in the same way ordinary references are allowed:
 
-```context
+```elisa
 u8&&
 void&&?
 Node&?!   # if the parser allows nested suffix chaining, this means the outer ref is proven null
@@ -57,7 +57,7 @@ The literal `null` is only assignable where null is legal by type:
 
 Example:
 
-```context
+```elisa
 p0: Node&? = null   # ok
 p1: Node!  = null   # ok
 p2: Node&  = null   # error
@@ -110,14 +110,14 @@ Operations requiring `T&` proof include:
 
 So this is illegal:
 
-```context
+```elisa
 box: Box&? = maybe_box()
 return box.value    # error
 ```
 
 But this is legal:
 
-```context
+```elisa
 box: Box&? = maybe_box()
 if box == null:
     return 0
@@ -130,7 +130,7 @@ The compiler may refine a `T&?` value into `T&` or `T!` when proof is available.
 
 ### 1. Direct null checks
 
-```context
+```elisa
 if p != null:
     # here p : T&
 
@@ -144,7 +144,7 @@ If a branch exits unconditionally, the opposite fact is known after it.
 
 Examples:
 
-```context
+```elisa
 if p == null:
     return
 
@@ -152,7 +152,7 @@ if p == null:
 use(p)
 ```
 
-```context
+```elisa
 if p == null:
     panic("null")
 
@@ -164,7 +164,7 @@ use(p)
 
 Assertions act as runtime-checked proofs for later code:
 
-```context
+```elisa
 assert p != null
 
 # here p : T&
@@ -177,7 +177,7 @@ This is especially useful for container invariants or low-level runtime code.
 
 Proof flows through boolean conditions in the obvious safe direction.
 
-```context
+```elisa
 if p != null and p.len > 0:
     # right-hand side sees p : T&
     ...
@@ -185,7 +185,7 @@ if p != null and p.len > 0:
 
 Similarly:
 
-```context
+```elisa
 if p == null or p.len == 0:
     ...
 ```
@@ -196,15 +196,15 @@ The compiler may analyze the right-hand side using the proof learned from the le
 
 Proof also applies inside ternary branches:
 
-```context
+```elisa
 src: u8& = value if value != null else ""
 ```
 
 ### 6. Explicit typestate assignment
 
-Contextlang supports explicit typestate-changing assignment:
+Elisa core supports explicit typestate-changing assignment:
 
-```context
+```elisa
 ptr as & <- expr
 ptr as ! <- expr
 ```
@@ -216,7 +216,7 @@ Intended meaning:
 
 Example:
 
-```context
+```elisa
 node as ! <- sfree_node(node)
 ```
 
@@ -224,7 +224,7 @@ node as ! <- sfree_node(node)
 
 The canonical safe-free API shape should keep both **storage** and **permission** information visible at the FFI edge:
 
-```context
+```elisa
 permission Memory:
     Allocate
     Release
@@ -246,7 +246,7 @@ This keeps the low-level boundary honest:
 
 Example usage:
 
-```context
+```elisa
 if node != null:
     node as ! <- sfree_node(node) can Memory.Release
 ```
@@ -265,7 +265,7 @@ For the formal storage-qualifier rules behind `any`, `heap`, `stack`, and `stati
 
 Using the current explicit storage qualifiers, a practical wrapper looks like this:
 
-```context
+```elisa
 error MemoryError:
     OutOfMemory
 
@@ -299,7 +299,7 @@ Pointer state and pointer storage can now be abstracted explicitly in generic de
 
 Example:
 
-```context
+```elisa
 struct Cursor[refstorage store, refstate state]:
     ptr: store u8&[state]
     end: store u8&
@@ -317,14 +317,14 @@ Mixed generic arguments bind in declaration order.
 
 So:
 
-```context
+```elisa
 struct Cursor[T, refstorage store, refstate state]:
     ptr: store T&[state]
 ```
 
 is instantiated in exactly that order:
 
-```context
+```elisa
 Cursor[u8, heap, &]
 Cursor[u8, any, ?]
 ```
@@ -333,7 +333,7 @@ Cursor[u8, any, ?]
 
 `[state]` attaches to the nearest preceding `&`.
 
-```context
+```elisa
 u8&&[state]
 ```
 
@@ -343,7 +343,7 @@ means “pointer to pointer”, where the **outer** reference carries `state`.
 
 The older anonymous aggregate-state syntax still exists:
 
-```context
+```elisa
 struct Holder[?, ?]:
     ...
 
@@ -359,7 +359,7 @@ Keep the anonymous form when you only want positional aggregate-state placeholde
 
 For example, a fallible helper that reads one caller-owned scratch cell can say so directly:
 
-```context
+```elisa
 struct ScratchSlot:
     value: mutable int
 
@@ -380,7 +380,7 @@ Here `&scratch` is inferred as a `stack ScratchSlot&`, which documents that the 
 
 For more than one stack element, prefer the fixed-array value type itself:
 
-```context
+```elisa
 scratch: i32[4] = [7, 8, 9, 10]
 ```
 
@@ -392,17 +392,17 @@ The compiler must reject attempts to strengthen pointer proof without evidence.
 
 Rejected examples:
 
-```context
+```elisa
 box: Box&? = maybe_box()
 strong: Box& = box              # error
 ```
 
-```context
+```elisa
 box: Box&? = maybe_box()
 return box.Box&()               # error
 ```
 
-```context
+```elisa
 call_requires_nonnull(box)      # error if box : Box&?
 ```
 
@@ -430,7 +430,7 @@ Assignments update the current known pointer state.
 
 Examples:
 
-```context
+```elisa
 p: mutable Node&? = alloc_node()
 
 if p != null:
@@ -438,7 +438,7 @@ if p != null:
     # now p : Node!
 ```
 
-```context
+```elisa
 p: mutable Node&? = null
 p as & <- alloc_nonnull_node()
 # now p : Node&
@@ -448,7 +448,7 @@ If a pointer-typed lvalue receives a wider state through ordinary assignment, th
 
 Example:
 
-```context
+```elisa
 p: mutable Node& = alloc_nonnull_node()
 q: Node&? = maybe_node()
 
@@ -457,7 +457,7 @@ p <- q   # rejected, because that would weaken T& without proof
 
 But:
 
-```context
+```elisa
 p: mutable Node&? = alloc_nonnull_node()
 # current flow state for p may be treated as Node& after assignment
 ```
@@ -503,7 +503,7 @@ That gives you most of the practical value of dependent typing for pointers, whi
 
 ### Optional object use
 
-```context
+```elisa
 def read_box(box: Box&?) -> int:
     if box == null:
         return 0
@@ -512,7 +512,7 @@ def read_box(box: Box&?) -> int:
 
 ### Safe free
 
-```context
+```elisa
 def release(node: mutable Node&?):
     if node != null:
         node as ! <- sfree_node(node)
@@ -520,19 +520,19 @@ def release(node: mutable Node&?):
 
 ### Asserted invariant
 
-```context
+```elisa
 assert list.data != null
 memcpy(out.data.void&(), list.data.void&(), size)
 ```
 
 ### Illegal proof-skipping
 
-```context
+```elisa
 def bad(box: Box&?) -> int:
     return box.value   # error
 ```
 
-```context
+```elisa
 def also_bad(box: Box&?) -> Box&:
     return box.Box&()  # error
 ```
@@ -541,7 +541,7 @@ def also_bad(box: Box&?) -> Box&:
 
 If you want the whole feature in one sentence:
 
-> **Contextlang pointers are typestated:** `T&` means usable, `T&?` means maybe usable after proof, and `T!` means definitely null.
+> **Elisa core pointers are typestated:** `T&` means usable, `T&?` means maybe usable after proof, and `T!` means definitely null.
 
 If you want, I can also turn this section into a stricter EBNF-style compiler spec with explicit typing judgments like:
 

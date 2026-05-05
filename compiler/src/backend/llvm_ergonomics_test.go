@@ -24,7 +24,7 @@ def build(owner: Arena) -> usize:
             total <- total + name_key + depth
         return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_store_row_destructure.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_store_row_destructure.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -43,7 +43,7 @@ func TestGenerateLLVMIRLowersWithArenaScopedAllocatorShorthand(t *testing.T) {
             xs: darray[int] = [1, 2, 3]
             return xs.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_with_arena_scoped_allocator.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_with_arena_scoped_allocator.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

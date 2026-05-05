@@ -20,7 +20,7 @@
 
 - Manifest: `Code/benchmarks/lua_frontend_corpus_manifest.txt`
 - Mode compared: `parse`
-- llcontext harness: `Code/benchmarks/lua_frontend_bench.c`
+- Elisa core harness: `Code/benchmarks/lua_frontend_bench.c`
 - Reference harness: `Code/benchmarks/lua_reference_bench.c`
 - Shared inputs: 11
 - Real corpus inputs with results: 10
@@ -31,14 +31,14 @@
 
 All-common aggregate includes the generated mixed synthetic input. Real-corpus aggregate excludes that synthetic case and remains the better headline number for the curated checked-in corpus.
 
-| Aggregate | llcontext Avg MiB/s | Reference Avg MiB/s | ll/reference |
+| Aggregate | Elisa core Avg MiB/s | Reference Avg MiB/s | ll/reference |
 | --- | ---: | ---: | ---: |
 | All common inputs | 108.48 | 67.26 | 1.613x |
 | Real corpus only | 119.24 | 61.62 | 1.935x |
 
 ## Per-Input Summary
 
-| Input | llcontext Avg MiB/s | Reference Avg MiB/s | ll/reference |
+| Input | Elisa core Avg MiB/s | Reference Avg MiB/s | ll/reference |
 | --- | ---: | ---: | ---: |
 | synthetic | 0.94 | 123.65 | 0.008x |
 | strings_comments | 145.13 | 49.87 | 2.910x |
@@ -56,7 +56,7 @@ All-common aggregate includes the generated mixed synthetic input. Real-corpus a
 
 - The bundled C reference build emits the existing macOS `tmpnam` deprecation warning from `Code/lua/loslib.c` during compilation.
 - Parse-mode acceptance now uses an explicit parse-status helper rather than inferring success from checksum sign or statement count.
-- The llcontext parse benchmark path now uses the length-aware parse checksum helper, which removes repeated `strlen` work from the hot loop and matches the reference harness more closely.
+- The Elisa core parse benchmark path now uses the length-aware parse checksum helper, which removes repeated `strlen` work from the hot loop and matches the reference harness more closely.
 - Lexer-mode acceptance now also uses an explicit lexer-status helper, and env/closure/label/analysis benchmark modes now key acceptance off checked-status instead of fingerprint sign.
 - The old `closure_pipeline` skip was a harness bug, not a grammar bug. That case remains accepted and benchmarks at `1.345x` versus the C reference in this capture.
 - The new synthetic workload is intentionally more Lua-shaped than the old numeric-only stress file, but it is still a large generated stress case and remains unrepresentative of the tiny curated real-Lua corpus.

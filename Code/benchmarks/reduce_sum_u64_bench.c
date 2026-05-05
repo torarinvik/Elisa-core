@@ -106,16 +106,16 @@ int main(void) {
     }
     fill_input(data, len, seed);
 
-    uint64_t llctx_check = llctx_reduce_sum_u64(data, (uintptr_t)len, rounds, bias);
+    uint64_t elisa_core_check = elisa_core_reduce_sum_u64(data, (uintptr_t)len, rounds, bias);
     uint64_t c_check = c_reduce_sum_u64(data, (uintptr_t)len, rounds, bias);
-    if (llctx_check != c_check) {
-        fprintf(stderr, "llcontext and C kernels produced different results\n");
+    if (elisa_core_check != c_check) {
+        fprintf(stderr, "elisacore and C kernels produced different results\n");
         free(data);
         return 2;
     }
 
     bench_result results[] = {
-        run_bench("llcontext", llctx_reduce_sum_u64, data, len, rounds, bias, samples),
+        run_bench("elisacore", elisa_core_reduce_sum_u64, data, len, rounds, bias, samples),
         run_bench("native C", c_reduce_sum_u64, data, len, rounds, bias, samples),
     };
 
@@ -124,7 +124,7 @@ int main(void) {
     for (size_t i = 0; i < ARRAY_LEN(results); ++i) {
         print_result(&results[i]);
     }
-    printf("\nllcontext / C throughput ratio: %.3fx\n", results[0].gib_per_s / results[1].gib_per_s);
+    printf("\nelisacore / C throughput ratio: %.3fx\n", results[0].gib_per_s / results[1].gib_per_s);
     printf("bench sink=%" PRIu64 "\n", bench_sink);
 
     free(data);

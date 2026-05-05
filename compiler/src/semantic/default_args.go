@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 	switch n := expr.(type) {

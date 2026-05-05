@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"llcontext/src/lexer"
+	"elisacore/src/lexer"
 )
 
 func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (Field, bool) {

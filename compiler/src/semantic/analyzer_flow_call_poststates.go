@@ -1,8 +1,8 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func (a *Analyzer) rememberConditionalCallPoststates(call *ast.CallExpr, fnType *FuncType, originalByRoot map[*Symbol]Type) {

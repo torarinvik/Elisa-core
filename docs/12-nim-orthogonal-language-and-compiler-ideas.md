@@ -1,11 +1,11 @@
-# Ideas From Nim That Look Orthogonal To `llcontext`
+# Ideas From Nim That Look Orthogonal To `elisacore`
 
 This note surveys the Nim compiler and standard language implementation for
 ideas that look **useful**, **portable in spirit**, and **orthogonal** to the
-current `llcontext` direction.
+current `elisacore` direction.
 
 The goal is **not** to copy Nim wholesale, and not to import features that are
-already close to work `llcontext` has explicitly chosen to center, such as:
+already close to work `elisacore` has explicitly chosen to center, such as:
 
 - pointer provenance and typestate as first-class source concepts
 - region checkpoints and region-aware storage
@@ -20,7 +20,7 @@ would complement those systems.
 
 An idea made the shortlist if most of the following were true:
 
-- it solves a problem `llcontext` will plausibly face soon
+- it solves a problem `elisacore` will plausibly face soon
 - it is mostly orthogonal to the current language core
 - it can start as an internal compiler technique before becoming surface syntax
 - it composes with existing design notes rather than replacing them
@@ -40,7 +40,7 @@ Relevant Nim sources:
 - `proveLe*`
 - `checkFieldAccess*`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it is highly orthogonal to source syntax
 - it helps prove legality rather than adding new user obligations
@@ -57,7 +57,7 @@ Why it is worth stealing:
 Nim’s implementation is not just a generic “constant folder”. It keeps a small
 model of facts, canonicalizes arithmetic expressions, and answers implication
 queries conservatively. That is exactly the kind of internal engine that can
-help `llcontext` prove optimization and safety facts without exposing theorem
+help `elisacore` prove optimization and safety facts without exposing theorem
 proving syntax to users.
 
 Recommended adaptation:
@@ -82,7 +82,7 @@ Relevant Nim sources:
 - `computeGraphPartitions*`
 - `checkBorrowedLocations*`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it gives a cheap, practical middle-end approximation for alias classes
 - it tracks whether a graph is mutated, connected to a parameter, or borrowed
@@ -91,7 +91,7 @@ Why this is attractive for `llcontext`:
 
 Why it is worth stealing:
 
-`llcontext` already has stronger source-level concepts than Nim in some areas,
+`elisacore` already has stronger source-level concepts than Nim in some areas,
 but that does not automatically give the compiler a convenient internal graph of
 "what can still alias or get mutated together across this function body".
 Nim’s pass is a pragmatic answer to exactly that problem.
@@ -115,7 +115,7 @@ Relevant Nim sources:
 - `Code/Nim-devel/compiler/dfa.nim`
 - `constructCfg*`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it is smaller and easier to reason about than a fully general CFG framework
 - it is useful for move analysis, liveness, must-def/use checks, and simple
@@ -124,7 +124,7 @@ Why this is attractive for `llcontext`:
 
 Why it is worth stealing:
 
-`llcontext` is starting to accumulate analyses that care about control flow:
+`elisacore` is starting to accumulate analyses that care about control flow:
 
 - proof-carrying optimization legality
 - foreign/native interop correctness
@@ -152,7 +152,7 @@ Relevant Nim sources:
 - `Code/Nim-devel/compiler/sinkparameter_inference.nim`
 - `checkForSink*`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it reduces annotation burden without weakening the core model
 - it is orthogonal to regions, typestate, and permissions
@@ -160,7 +160,7 @@ Why this is attractive for `llcontext`:
 
 Why it is worth stealing:
 
-If `llcontext` keeps explicit move/affine concepts, users may still end up
+If `elisacore` keeps explicit move/affine concepts, users may still end up
 writing a lot of obvious consume annotations. Nim shows a small and practical
 way to infer “this parameter is effectively consumed” from usage patterns.
 
@@ -184,7 +184,7 @@ Relevant Nim sources:
 - `atomicRefOp`
 - `considerInferDupFromCopy`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it gives a disciplined place for cleanup synthesis
 - it scales better than hand-special-casing every aggregate lowering path
@@ -217,7 +217,7 @@ Relevant Nim sources:
 - `canAlias*`
 - `checkIsolate*`
 
-Why this is attractive for `llcontext`:
+Why this is attractive for `elisacore`:
 
 - it complements explicit provenance rather than replacing it
 - it is directly relevant for noalias/disjointness reasoning
@@ -241,11 +241,11 @@ Relevant Nim sources:
 - `Code/Nim-devel/compiler/reorder.nim`
 - `reorder*`
 
-Why it is attractive for `llcontext`:
+Why it is attractive for `elisacore`:
 
 - it could simplify ordering constraints inside a file or module bundle
 - it is a pragmatic companion to the new interface/dependency work already in
-  `llcontext`
+  `elisacore`
 - it helps split user ordering from compiler ordering concerns
 
 This is useful, but less urgent than the analysis ideas above.
@@ -260,7 +260,7 @@ Relevant Nim sources:
 - `Code/Nim-devel/compiler/patterns.nim`
 - `applyRule*`
 
-Why it is attractive for `llcontext`:
+Why it is attractive for `elisacore`:
 
 - it could become a compact internal lowering/optimization rule engine
 - it is especially interesting for repetitive packed/view rewrite rules
@@ -268,7 +268,7 @@ Why it is attractive for `llcontext`:
 Why it is risky:
 
 - exposed as a full user macro system, it is much larger than what
-  `llcontext` currently needs
+  `elisacore` currently needs
 - internal-only rewrite infrastructure is likely the right first use
 
 ### 9. Generator / Coroutine Lowering To Explicit State Machines
@@ -282,9 +282,9 @@ Relevant Nim sources:
 - `Code/Nim-devel/compiler/closureiters.nim`
 - `transformClosureIteratorBody`
 
-Why it is attractive for `llcontext`:
+Why it is attractive for `elisacore`:
 
-- if `llcontext` eventually wants generators, streaming parsers, or resumable
+- if `elisacore` eventually wants generators, streaming parsers, or resumable
   iterators, this is one of the best references in the repo
 - the treatment of exceptions/finally during suspension is especially valuable
 
@@ -298,22 +298,22 @@ Why it is lower priority:
 ### Lexer / parser architecture
 
 Nim’s lexer and parser are competent and worth reading, but they do not look as
-orthogonal or as high-leverage for `llcontext` right now as the semantic and
+orthogonal or as high-leverage for `elisacore` right now as the semantic and
 middle-end ideas above.
 
 ### Full macro / template system surface
 
 Nim’s macro power is impressive, but importing it would change the character of
-`llcontext` dramatically. The internal rewrite techniques are more reusable than
+`elisacore` dramatically. The internal rewrite techniques are more reusable than
 the exposed surface feature set.
 
 ### Copying ARC/ORC directly
 
-Nim’s ARC/ORC implementation details are interesting, but `llcontext` already
+Nim’s ARC/ORC implementation details are interesting, but `elisacore` already
 has its own ownership/provenance direction. The better lesson is the cleanup
 synthesis and analysis structure, not the exact memory-management model.
 
-## Recommended Order For `llcontext`
+## Recommended Order For `elisacore`
 
 If these ideas are adopted incrementally, the best order is probably:
 
@@ -332,7 +332,7 @@ If these ideas are adopted incrementally, the best order is probably:
 7. **Reordering / rewrite engine / generators**
    - valuable, but not first-wave work
 
-## How These Fit Existing `llcontext` Notes
+## How These Fit Existing `elisacore` Notes
 
 These Nim ideas align well with the current note set:
 
@@ -348,7 +348,7 @@ The strongest Nim takeaway is therefore not a flashy source-language feature.
 
 It is this:
 
-> a lot of the next leverage for `llcontext` is likely in **small, explicit,
+> a lot of the next leverage for `elisacore` is likely in **small, explicit,
 > compiler-internal reasoning engines** rather than large new surface syntax.
 
 ## Summary
@@ -362,5 +362,5 @@ The most promising orthogonal ideas to borrow from Nim are:
 - sink/consume inference
 - compiler-generated cleanup/move synthesis
 
-These are attractive because they strengthen `llcontext`’s implementation model
+These are attractive because they strengthen `elisacore`’s implementation model
 without forcing it to abandon its current language direction.

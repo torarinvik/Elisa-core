@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func (*InvalidType) isType()           {}

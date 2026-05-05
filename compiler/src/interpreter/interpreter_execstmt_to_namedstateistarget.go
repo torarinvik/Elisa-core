@@ -1,10 +1,10 @@
 package interpreter
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/semantic"
 	"strconv"
 	"unicode/utf8"
 )

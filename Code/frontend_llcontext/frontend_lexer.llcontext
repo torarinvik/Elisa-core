@@ -1,7 +1,0 @@
-include "./frontend_lexer_core.llcontext"
-include "./frontend_lexer_tokens.llcontext"
-include "./frontend_lexer_strings.llcontext"
-include "./frontend_lexer_cursor.llcontext"
-include "./frontend_lexer_comments.llcontext"
-include "./frontend_lexer_numbers.llcontext"
-include "./frontend_lexer_identifiers.llcontext"

@@ -5,7 +5,7 @@ package backend
 import (
 	"fmt"
 
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 )
 
 func GenerateLLVMIR(result *semantic.Result) (string, error) {

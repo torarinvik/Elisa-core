@@ -1,6 +1,6 @@
 # Typestate System Guide
 
-This document describes the **full typestate story** in Contextlang.
+This document describes the **full typestate story** in Elisa core.
 
 Typestate is now described as one fact class inside the broader
 `Value = Representation + Facts` model from
@@ -25,7 +25,7 @@ It is intentionally broader than the pointer-only typestate documents:
 
 In short:
 
-> Contextlang uses typestate as a lightweight proof system for low-level programming.
+> Elisa core uses typestate as a lightweight proof system for low-level programming.
 >
 > Some typestate is **explicit in types**.
 > Some typestate is **inferred from control flow**.
@@ -42,7 +42,7 @@ In fact-core terms:
 
 ## 1. Why typestate exists here
 
-Contextlang is trying to get useful safety and optimization facts **without** turning into a full theorem prover.
+Elisa core is trying to get useful safety and optimization facts **without** turning into a full theorem prover.
 
 The design goal is:
 
@@ -60,7 +60,7 @@ There are three main layers.
 
 References carry nullness/proof state:
 
-```context
+```elisa
 T&   # proven non-null
 T&?  # may be null
 T!   # proven null
@@ -72,7 +72,7 @@ This is the pointer typestate described in detail in the pointer docs.
 
 Structs can declare positional aggregate state placeholders:
 
-```context
+```elisa
 struct Holder[?]:
     value: i32
 
@@ -83,7 +83,7 @@ struct Pair[?, ?]:
 
 Those placeholders are filled with reference-state-style markers such as `&`, `?`, and `!` at instantiation time:
 
-```context
+```elisa
 Holder[&]
 Pair[&, !]
 ```
@@ -94,7 +94,7 @@ This is a compact way to thread state through low-level aggregate types.
 
 Structs can also declare a **named state parameter** and define the meaning of each state with a `derive state:` block:
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: mutable int
 
@@ -131,7 +131,7 @@ These axes are intentionally orthogonal where possible.
 
 Examples:
 
-```context
+```elisa
 heap Player[Alive]&
 ```
 
@@ -143,7 +143,7 @@ This means:
 
 And:
 
-```context
+```elisa
 Handle[&, !]
 ```
 
@@ -180,7 +180,7 @@ That layer is already documented in detail elsewhere, so this guide will only me
 
 Aggregate state parameters are positional.
 
-```context
+```elisa
 struct Holder[?]:
     value: i32
 
@@ -201,7 +201,7 @@ This is useful when the state itself is low-level and mechanical, for example:
 
 ### Instantiation
 
-```context
+```elisa
 Holder[&]
 Pair[&, !]
 Pair[?, ?]
@@ -222,7 +222,7 @@ The compiler supports both because they solve different problems.
 
 Named state is declared like this:
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: mutable int
 
@@ -239,7 +239,7 @@ This introduces a state family for `Player`:
 
 ### Meaning of the syntax
 
-```context
+```elisa
 [state Alive | Dead]
 ```
 
@@ -263,7 +263,7 @@ A struct with named states must satisfy these rules:
 
 So this is rejected:
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: int
 
@@ -275,7 +275,7 @@ because `Dead` is missing.
 
 And this is also rejected:
 
-```context
+```elisa
 Player[Ghost]
 ```
 
@@ -289,7 +289,7 @@ Named struct states are not limited to a single case.
 
 A value may also have a **state set**.
 
-```context
+```elisa
 Player[Alive | Dead]
 ```
 
@@ -316,7 +316,7 @@ The compiler canonicalizes state sets according to the declaration order.
 
 If the declared family is:
 
-```context
+```elisa
 [state Alive | Dead | Stunned]
 ```
 
@@ -332,7 +332,7 @@ Struct literals can participate in state inference.
 
 Example:
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: int
 
@@ -353,7 +353,7 @@ The literal `Player(5)` can be inferred as `Player[Alive]` because:
 
 If the expected type is already specific:
 
-```context
+```elisa
 player: Player[Alive] = Player(5)
 ```
 
@@ -363,7 +363,7 @@ the compiler checks that the literal satisfies `Alive`.
 
 This is rejected:
 
-```context
+```elisa
 player: Player[Alive] = Player(0)
 ```
 
@@ -386,7 +386,7 @@ If they are not, the compiler will widen or reject depending on what it can prov
 
 Named state is refined with the `is` operator.
 
-```context
+```elisa
 if player is Player[Alive]:
     return take_alive(player)
 return take_dead(player)
@@ -402,13 +402,13 @@ Inside the false branch, the tested state is subtracted from the current state s
 
 So if the current type is:
 
-```context
+```elisa
 Player[Alive | Dead]
 ```
 
 then after:
 
-```context
+```elisa
 if player is Player[Alive]:
     ...
 else:
@@ -417,7 +417,7 @@ else:
 
 the else branch sees:
 
-```context
+```elisa
 Player[Dead]
 ```
 
@@ -437,7 +437,7 @@ When control flow rejoins, the compiler merges the possible states from each sur
 
 Example:
 
-```context
+```elisa
 def update(player: Player[Alive | Dead], cond: bool) -> Player:
     if cond:
         return Player(5)
@@ -451,7 +451,7 @@ The two branches return different exact states:
 
 The join is:
 
-```context
+```elisa
 Player[Alive | Dead]
 ```
 
@@ -492,7 +492,7 @@ That rule is what makes the system useful without becoming unsound.
 
 Consider the canonical example:
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: mutable int
     score: mutable int
@@ -504,7 +504,7 @@ struct Player[state Alive | Dead]:
 
 ### Mutation that affects the derived state
 
-```context
+```elisa
 def bad(player: mutable Player[Alive]) -> int:
     player.health <- 0
     return take_alive(player)
@@ -512,7 +512,7 @@ def bad(player: mutable Player[Alive]) -> int:
 
 After `player.health <- 0`, the compiler can prove:
 
-```context
+```elisa
 player : Player[Dead]
 ```
 
@@ -520,7 +520,7 @@ So `take_alive(player)` is rejected.
 
 ### Mutation that does not affect the derived state
 
-```context
+```elisa
 def ok(player: mutable Player[Alive]) -> int:
     player.score <- 1
     return take_alive(player)
@@ -528,7 +528,7 @@ def ok(player: mutable Player[Alive]) -> int:
 
 Because `score` does not appear in the derive conditions, the current state remains:
 
-```context
+```elisa
 player : Player[Alive]
 ```
 
@@ -549,7 +549,7 @@ If a typestated value is nested inside another tracked value, mutation still upd
 
 Example:
 
-```context
+```elisa
 struct Team:
     player: mutable Player[Alive]
 
@@ -575,7 +575,7 @@ Direct local mutation is not the only hazard.
 
 This is also important:
 
-```context
+```elisa
 def bad(player: mutable Player[Alive]) -> int:
     alias: Player[Alive]& = (&player).cast[Player[Alive]&]
     alias.health <- 0
@@ -599,7 +599,7 @@ This is a crucial soundness rule.
 
 Consider:
 
-```context
+```elisa
 def kill(player: Player[Alive]&) -> void:
     player.health <- 0
 
@@ -614,7 +614,7 @@ So after the call, it conservatively widens the caller-visible state.
 
 In practice this means:
 
-```context
+```elisa
 player : Player[Alive | Dead]
 ```
 
@@ -635,7 +635,7 @@ For calls with reference arguments, the compiler conservatively widens named-sta
 
 That includes wrapper cases such as:
 
-```context
+```elisa
 struct Team:
     player: mutable Player[Alive]
 
@@ -666,7 +666,7 @@ The compiler currently treats a mutation as relevant to derived state when the m
 
 Examples:
 
-```context
+```elisa
 Alive when self.health > 0
 ```
 
@@ -679,7 +679,7 @@ are considered relevant.
 
 For nested predicates such as:
 
-```context
+```elisa
 Open when self.socket.fd >= 0
 ```
 
@@ -711,7 +711,7 @@ A nice way to understand the system is this timeline:
 
 Example:
 
-```context
+```elisa
 def route(player: mutable Player) -> int:
     if player is Player[Alive]:
         player.health <- 0
@@ -737,7 +737,7 @@ These layers stack.
 
 Example:
 
-```context
+```elisa
 player_ref: Player[Alive]&?
 ```
 
@@ -748,7 +748,7 @@ This carries two independent facts:
 
 Before field access, you still need the reference proof:
 
-```context
+```elisa
 if player_ref != null:
     return player_ref.health
 ```
@@ -937,7 +937,7 @@ Look there for examples covering:
 
 Use named states for semantic invariants:
 
-```context
+```elisa
 Socket[Open]
 Socket[Closed]
 Parser[Ready]
@@ -959,14 +959,14 @@ The best derive conditions are:
 
 Good:
 
-```context
+```elisa
 Alive when self.health > 0
 Dead when self.health <= 0
 ```
 
 Riskier:
 
-```context
+```elisa
 Ready when complicated_call(self.x, self.y, self.z)
 ```
 
@@ -1015,7 +1015,7 @@ But the current system deliberately stops short of that in order to stay simple 
 
 ### Simple construction and narrowing
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: mutable int
 
@@ -1034,7 +1034,7 @@ def route(player: Player) -> int:
 
 ### Exact post-mutation update
 
-```context
+```elisa
 def kill_local(player: mutable Player[Alive]) -> void:
     player.health <- 0
     # player is now Player[Dead]
@@ -1042,7 +1042,7 @@ def kill_local(player: mutable Player[Alive]) -> void:
 
 ### Unrelated-field preservation
 
-```context
+```elisa
 struct Player[state Alive | Dead]:
     health: mutable int
     score: mutable int
@@ -1058,7 +1058,7 @@ def bump_score(player: mutable Player[Alive]) -> int:
 
 ### Conservative widening after ref call
 
-```context
+```elisa
 def poke(player: Player[Alive]&) -> void:
     player.health <- 0
 
@@ -1077,7 +1077,7 @@ def use_after_call(player: mutable Player[Alive]) -> int:
 
 If you want the whole feature set in one sentence:
 
-> Contextlang typestate is a layered proof system: references track usability, structs can carry positional or named state, control flow narrows those states, and mutation either recomputes them exactly or widens them conservatively when proof is no longer justified.
+> Elisa core typestate is a layered proof system: references track usability, structs can carry positional or named state, control flow narrows those states, and mutation either recomputes them exactly or widens them conservatively when proof is no longer justified.
 
 And if you want the operational slogan:
 

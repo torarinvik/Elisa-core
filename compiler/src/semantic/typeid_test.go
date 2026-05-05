@@ -3,8 +3,8 @@ package semantic
 import (
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func requireCanonicalTypeID(t *testing.T, typ Type) TypeID {
@@ -51,13 +51,13 @@ func TestCanonicalTypeIDDistinguishesWritableRefs(t *testing.T) {
 
 func TestCanonicalTypeIDPreservesFuncGenericParamPositions(t *testing.T) {
 	left := &FuncType{
-		GenericParams: []ast.GenericParam{{Position: lexer.Pos{File: "left.llcontext", Line: 1, Col: 1, Offset: 0}, Kind: ast.GenericParamType, Name: "T"}},
+		GenericParams: []ast.GenericParam{{Position: lexer.Pos{File: "left.elisa", Line: 1, Col: 1, Offset: 0}, Kind: ast.GenericParamType, Name: "T"}},
 		TypeParams:    []string{"T"},
 		Params:        []Type{&TypeParamType{Name: "T"}},
 		Return:        &TypeParamType{Name: "T"},
 	}
 	right := &FuncType{
-		GenericParams: []ast.GenericParam{{Position: lexer.Pos{File: "right.llcontext", Line: 1, Col: 2, Offset: 1}, Kind: ast.GenericParamType, Name: "T"}},
+		GenericParams: []ast.GenericParam{{Position: lexer.Pos{File: "right.elisa", Line: 1, Col: 2, Offset: 1}, Kind: ast.GenericParamType, Name: "T"}},
 		TypeParams:    []string{"T"},
 		Params:        []Type{&TypeParamType{Name: "T"}},
 		Return:        &TypeParamType{Name: "T"},

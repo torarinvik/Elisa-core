@@ -6,15 +6,15 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/Core.h>
 
-void llctxSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
+void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
 */
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/semantic"
 )
 
 func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
@@ -552,7 +552,7 @@ func (s *functionState) attachBranchHintMetadata(branch C.LLVMValueRef, hint ast
 	if hint == ast.BranchHintUnlikely {
 		trueWeight, falseWeight = falseWeight, trueWeight
 	}
-	C.llctxSetBranchWeights(branch, s.g.context, C.uint(trueWeight), C.uint(falseWeight))
+	C.elisa_coreSetBranchWeights(branch, s.g.context, C.uint(trueWeight), C.uint(falseWeight))
 }
 func (s *functionState) buildCondBrWithHint(condValue C.LLVMValueRef, trueBB C.LLVMBasicBlockRef, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) {
 	branch := C.LLVMBuildCondBr(s.builder, condValue, trueBB, falseBB)

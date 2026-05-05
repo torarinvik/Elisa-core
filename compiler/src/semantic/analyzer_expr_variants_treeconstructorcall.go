@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func (a *Analyzer) treeConstructorCall(expr *ast.CallExpr) (*TreeCategoryType, *EnumVariant, bool) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)

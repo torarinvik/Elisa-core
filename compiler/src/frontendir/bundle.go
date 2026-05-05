@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 const BundleVersion = 1

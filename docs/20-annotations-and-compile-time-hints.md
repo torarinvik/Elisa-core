@@ -11,7 +11,7 @@ they have on semantic analysis or code generation.
 
 Struct declarations may carry explicit alignment hints.
 
-```context
+```elisa
 @align(32)
 struct Vec4:
     x: f32
@@ -37,7 +37,7 @@ Current rules:
 Packed enums accept layout-selection annotations in addition to the ordinary
 `packed enum` syntax.
 
-```context
+```elisa
 @packed_profile(build_heavy)
 packed enum Pair:
     common:
@@ -55,7 +55,7 @@ Current rules:
 
 Functions may carry explicit backend and optimizer hints.
 
-```context
+```elisa
 @inline(always)
 def helper(value: int) -> int:
     return value + 1
@@ -86,7 +86,7 @@ Current rules:
 
 Functions that act as proof-producing predicates may carry guard annotations.
 
-```context
+```elisa
 @guard_nonnull(box)
 def has_box(box: heap Box&?) -> bool:
     return box != null
@@ -108,7 +108,7 @@ Current rules:
 Branch-probability hints are statement syntax rather than `@` annotations, but
 they live in the same compile-time-hint family.
 
-```context
+```elisa
 if likely value:
     return 1
 

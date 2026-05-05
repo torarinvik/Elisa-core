@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"unsafe"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 func (g *llvmGenerator) defineGlobal(decl *ast.GlobalDecl, typ semantic.Type, global C.LLVMValueRef) error {

@@ -18,8 +18,8 @@ trap 'rm -rf "$TMP_RUN"' EXIT
 
 cd "$REPO_ROOT/compiler"
 
-go run ./src -O3 -emit header -o "$TMP_RUN/lua_frontend.h" ../Code/llcontext_lua/src/lua_frontend.llcontext
-go run ./src -O3 -emit obj -o "$TMP_RUN/lua_frontend.o" ../Code/llcontext_lua/src/lua_frontend.llcontext
+go run ./src -O3 -emit header -o "$TMP_RUN/lua_frontend.h" ../Code/elisacore_lua/src/lua_frontend.elisa
+go run ./src -O3 -emit obj -o "$TMP_RUN/lua_frontend.o" ../Code/elisacore_lua/src/lua_frontend.elisa
 
 cat > "$TMP_RUN/lua_frontend_parallel_smoke.c" <<'EOF'
 #include "lua_frontend.h"

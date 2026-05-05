@@ -20,7 +20,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 		return score(node) + value + node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_scrutinee_refined_to_unnamed_view_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_scrutinee_refined_to_unnamed_view_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedEnumMatchArmRefiningScrutineeToPackedView(t *testing.T) {
@@ -40,7 +40,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 		Expr.Add(left: left, right: right):
 			return score_add(node) + left.span + right.span
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_match_scrutinee_refined_to_view_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_match_scrutinee_refined_to_view_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsMatchOnRefinedPackedViewScrutinee(t *testing.T) {
@@ -59,7 +59,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 				return left.span + right.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_match_on_refined_view_scrutinee_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_match_on_refined_view_scrutinee_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternBindingPackedViewAliasWithInferredStore(t *testing.T) {
@@ -76,7 +76,7 @@ def read(node: Expr, store: Expr.Store[Local]) -> int:
 			return lit.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_view_alias_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_view_alias_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternBindingPackedViewAliasWithActiveStoreParam(t *testing.T) {
@@ -91,7 +91,7 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 		return lit.value + lit.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_view_alias_active_store_param_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_view_alias_active_store_param_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithNestedPackedVariantPattern(t *testing.T) {
@@ -105,7 +105,7 @@ def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_nested_pattern_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_nested_pattern_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithNamedPayloadDestructureAndRefinedScrutinee(t *testing.T) {
@@ -119,7 +119,7 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 		return value + node.value + node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_named_destructure_refined_scrutinee_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_named_destructure_refined_scrutinee_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithPackedViewParamWithoutStoreClause(t *testing.T) {
@@ -133,7 +133,7 @@ def read(view_node: packedview[Expr.Int]) -> int:
 		return value + view_node.value + view_node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_packedview_param_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_packedview_param_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithUnnamedPayloadDestructure(t *testing.T) {
@@ -147,7 +147,7 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 		return left + right + node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_unnamed_destructure_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_unnamed_destructure_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithDirectFieldProjectionWithoutStoreClause(t *testing.T) {
@@ -165,7 +165,7 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 		return value + box.root.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_direct_field_projection_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_direct_field_projection_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithActiveStoreParam(t *testing.T) {
@@ -179,7 +179,7 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 		return value + node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_active_store_param_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_active_store_param_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithNestedOpenStylePackedVariantPattern(t *testing.T) {
@@ -193,7 +193,7 @@ def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_nested_pattern_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_nested_pattern_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithPackedViewParamWithoutStoreClauseForOpenStyle(t *testing.T) {
@@ -207,7 +207,7 @@ def read(view_node: packedview[Expr.Int]) -> int:
 		return value + view_node.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_packedview_param_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_packedview_param_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithFrozenIndexAliasWithoutStoreClause(t *testing.T) {
@@ -223,7 +223,7 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 		return value + alias.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_frozen_index_alias_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_frozen_index_alias_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithHiddenStoreFieldIndexAliasWithoutStoreClause(t *testing.T) {
@@ -247,7 +247,7 @@ def read(owner: Arena) -> int:
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_hidden_store_field_index_alias_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_hidden_store_field_index_alias_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsIfPatternWithDirectFieldProjectionWithoutStoreClauseForOpenStyle(t *testing.T) {
@@ -265,7 +265,7 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 		return value + box.root.span
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_direct_field_projection_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_open_style_direct_field_projection_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsPackedEnumIfPatternBinderWithoutAs(t *testing.T) {
@@ -279,7 +279,7 @@ def bad(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
 		return 2
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_missing_as_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_missing_as_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatalf("expected missing `as` parse diagnostic")
 	}
@@ -297,7 +297,7 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_without_store_active_param_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_without_store_active_param_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedEnumIfPatternBinderWithoutStoreClauseFromFieldProjection(t *testing.T) {
@@ -313,7 +313,7 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_field_projection_inferred_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_field_projection_inferred_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedStoreCountAndIndexTraversal(t *testing.T) {
@@ -340,7 +340,7 @@ def walk(owner: Arena) -> int:
 		index <- index + 1
 	return total
 `
-	result, errs := parseAndAnalyze(t, "packed_store_count_and_index_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_store_count_and_index_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "walk", "int")
@@ -370,7 +370,7 @@ def inspect(owner: Arena) -> i32:
 		return again.span
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "packed_store_dense_node_key_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_store_dense_node_key_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "inspect", "i32")
@@ -451,7 +451,7 @@ def inspect(owner: Arena) -> i32:
 		return again.span
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "packed_store_dense_node_key_hidden_frozen_field_root_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_store_dense_node_key_hidden_frozen_field_root_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "inspect", "i32")
@@ -495,7 +495,7 @@ def bad(owner: Arena) -> Expr:
 	key: NodeKey[Expr] = dense_key(node, left_frozen)
 	return right_frozen[key]
 `
-	_, errs := parseAndAnalyze(t, "packed_store_dense_node_key_cross_root_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_store_dense_node_key_cross_root_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -530,7 +530,7 @@ def bad(owner: Arena) -> Expr:
 	key: NodeKey[Expr] = dense_key(node, pair.left)
 	return pair.right[key]
 `
-	_, errs := parseAndAnalyze(t, "packed_store_dense_node_key_cross_hidden_field_root_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_store_dense_node_key_cross_hidden_field_root_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -546,7 +546,7 @@ func TestAnalyzeRejectsAssigningPackedStoreIndexResult(t *testing.T) {
 def bad(store: Expr.Store[Frozen], node: Expr) -> void:
 	store[0] <- node
 `
-	_, errs := parseAndAnalyze(t, "packed_store_index_assign_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_store_index_assign_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

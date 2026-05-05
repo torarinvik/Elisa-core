@@ -3,8 +3,8 @@ package semantic_test
 import (
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/unparse"
 )
 
 func TestAnalyzeCascadeBlocksLowerToOrdinaryStatements(t *testing.T) {
@@ -24,7 +24,7 @@ def build(report: mutable Report&, delta: int) -> int:
     return report.inner.value
 `
 
-	result, errs := parseAndAnalyze(t, "cascade_blocks.llcontext", src)
+	result, errs := parseAndAnalyze(t, "cascade_blocks.elisa", src)
 	requireNoErrors(t, errs)
 	build := requireFuncDecl(t, result, "build")
 
@@ -74,7 +74,7 @@ def nonzero(row: Row) -> bool:
     return cascade row => .ref_count != 0
 `
 
-	result, errs := parseAndAnalyze(t, "cascade_expr.llcontext", src)
+	result, errs := parseAndAnalyze(t, "cascade_expr.elisa", src)
 	requireNoErrors(t, errs)
 	decl := requireFuncDecl(t, result, "nonzero")
 
@@ -106,7 +106,7 @@ def nonzero(report: Report) -> bool:
         return cascade .inner => .value != 0
 `
 
-	result, errs := parseAndAnalyze(t, "cascade_nested_expr.llcontext", src)
+	result, errs := parseAndAnalyze(t, "cascade_nested_expr.elisa", src)
 	requireNoErrors(t, errs)
 	decl := requireFuncDecl(t, result, "nonzero")
 

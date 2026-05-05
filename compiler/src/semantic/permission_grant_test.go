@@ -6,7 +6,7 @@ import (
 )
 
 func TestDeclaredCallPermissionRequiresTopLevelGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_local_grant.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_local_grant.elisa", `
 extern alloc_value() -> i64 can[Abort.Panic, Memory.Allocate]
 
 def build() -> i64:
@@ -19,7 +19,7 @@ def build() -> i64:
 }
 
 func TestDeclaredCallPermissionCanInheritOuterExplicitGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_inner_local_grant.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_inner_local_grant.elisa", `
 extern alloc_value() -> i64 can[Abort.Panic, Memory.Allocate]
 
 def build() -> i64:
@@ -58,7 +58,7 @@ def build() -> i64:
 }
 
 func TestDeclaredCallPermissionWithLocalGrantIsQuiet(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_with_local_grant.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_with_local_grant.elisa", `
 extern alloc_value() -> i64 can[Memory.Allocate]
 
 def build() -> i64:
@@ -82,7 +82,7 @@ def build() -> i64:
 }
 
 func TestDeclaredPanicPermissionRequiresTopLevelGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "declared_panic_permission_top_level_grant.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "declared_panic_permission_top_level_grant.elisa", `
 def build() -> void:
     panic("boom")
 `)
@@ -93,7 +93,7 @@ def build() -> void:
 }
 
 func TestDeclaredPanicPermissionCanInheritOuterExplicitGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "declared_panic_permission_local_grant.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "declared_panic_permission_local_grant.elisa", `
 def build() -> void:
     can Abort.Panic, Memory.Allocate:
         can Memory.Allocate:
@@ -120,7 +120,7 @@ def build() -> void:
 }
 
 func TestDeclaredPanicPermissionWithLocalGrantIsQuiet(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "declared_panic_permission_with_local_grant.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "declared_panic_permission_with_local_grant.elisa", `
 def build() -> void:
     can Abort.Panic:
         panic("boom")
@@ -142,7 +142,7 @@ def build() -> void:
 }
 
 func TestRedundantInlinePermissionGrantWarnsInsideGrantedScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "redundant_inline_permission_grant.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "redundant_inline_permission_grant.elisa", `
 extern alloc_value() -> i64 can[Memory.Allocate]
 
 def build() -> i64:
@@ -159,7 +159,7 @@ def build() -> i64:
 }
 
 func TestPartialNestedPermissionGrantDoesNotWarnAsRedundant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "partial_nested_permission_grant.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "partial_nested_permission_grant.elisa", `
 extern write_value() -> i64 can[Console.Write]
 
 def build() -> i64:

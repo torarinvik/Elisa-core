@@ -6,7 +6,7 @@ import (
 )
 
 func TestTokenizeCharLiterals(t *testing.T) {
-	l := New("chars.llcontext", []byte(`'a' '\n' '\x41' '\u0041' '\''`+"\n"))
+	l := New("chars.elisa", []byte(`'a' '\n' '\x41' '\u0041' '\''`+"\n"))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected lexer errors: %v", errs)
@@ -47,7 +47,7 @@ func TestRejectInvalidCharLiterals(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			l := New(tc.name+".llcontext", []byte(tc.src))
+			l := New(tc.name+".elisa", []byte(tc.src))
 			_ = l.Tokenize()
 			errs := l.Errors()
 			if len(errs) == 0 {
@@ -61,18 +61,18 @@ func TestRejectInvalidCharLiterals(t *testing.T) {
 }
 
 func TestTokenizeRecordsTokenSpans(t *testing.T) {
-	l := New("spans.llcontext", []byte("alpha += 1\n"))
+	l := New("spans.elisa", []byte("alpha += 1\n"))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected lexer errors: %v", errs)
 	}
-	if got := tokens[0].Pos.String(); got != "spans.llcontext:1:1-6" {
+	if got := tokens[0].Pos.String(); got != "spans.elisa:1:1-6" {
 		t.Fatalf("unexpected ident span: %s", got)
 	}
-	if got := tokens[1].Pos.String(); got != "spans.llcontext:1:7-9" {
+	if got := tokens[1].Pos.String(); got != "spans.elisa:1:7-9" {
 		t.Fatalf("unexpected += span: %s", got)
 	}
-	if got := tokens[2].Pos.String(); got != "spans.llcontext:1:10-11" {
+	if got := tokens[2].Pos.String(); got != "spans.elisa:1:10-11" {
 		t.Fatalf("unexpected int span: %s", got)
 	}
 	if !tokens[0].Pos.HasRange() {

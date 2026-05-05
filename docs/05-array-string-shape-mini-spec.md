@@ -1,6 +1,6 @@
 # Array and String Shape Mini-Spec
 
-This section proposes a shape/length-typed array and string model for Contextlang.
+This section proposes a shape/length-typed array and string model for Elisa core.
 
 The goal is the same as the pointer typestate goal:
 
@@ -51,7 +51,7 @@ I think the cleanest surface story is:
 
 ### Static arrays
 
-```context
+```elisa
 array[u8, 16]
 array[Node, 4]
 array[T, N]
@@ -66,14 +66,14 @@ This is already very good and should remain the canonical syntax for fixed-lengt
 
 I would suggest one of these explicit forms:
 
-```context
+```elisa
 darray[T, n]
 owned_array[T, n]
 ```
 
 I slightly prefer:
 
-```context
+```elisa
 darray[T, n]
 ```
 
@@ -83,7 +83,7 @@ because it makes the “this is dynamic storage” distinction very obvious.
 
 For strings I would distinguish between logical string length and raw byte arrays:
 
-```context
+```elisa
 u8[N]             # raw fixed byte array
 str[N]            # fixed string / byte-string with known logical length
 cstr[n]           # owned dynamic string with tracked logical length
@@ -236,7 +236,7 @@ If `i` is dynamic, you can choose one of two policies:
 1. unchecked indexing like C
 2. checked indexing in safe surface forms, unchecked in explicit low-level forms
 
-For Contextlang, I would keep the low-level spirit and make this a policy choice independent of the type system.
+For Elisa core, I would keep the low-level spirit and make this a policy choice independent of the type system.
 
 ### Array construction
 
@@ -468,7 +468,7 @@ If I had to propose the most practical version today, it would be:
 
 ### Keep
 
-```context
+```elisa
 T[N]
 ```
 
@@ -476,7 +476,7 @@ for static arrays.
 
 ### Add
 
-```context
+```elisa
 darray[T, n]
 cstr[n]
 view[T, begin, end]
@@ -498,7 +498,7 @@ concat      : cstr[shape_left] × cstr[shape_right] -> cstr[shape_result] error[
 
 String indexing now yields `char`. Cast explicitly when you want an integer code unit:
 
-```context
+```elisa
 def first_char(text: str[4]) -> char:
     return text[0]
 
@@ -523,6 +523,6 @@ That gives you the flavor you want:
 
 If pointers are typestated by validity, arrays and strings should be typestated by shape.
 
-That gives Contextlang a very crisp identity:
+That gives Elisa core a very crisp identity:
 
 > low-level, ABI-friendly memory model, with lightweight dependent typing for validity and shape.

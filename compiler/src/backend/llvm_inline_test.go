@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 )
 
 func analyzeInlineTestSource(t *testing.T, filename string, src string) *semantic.Result {
@@ -64,7 +64,7 @@ func functionBranchWeightsForTest(t *testing.T, output string, name string) (str
 }
 
 func TestAnalyzeInlineAnnotationSetsFunctionMetadata(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "inline_semantics.llcontext", `@inline(always)
+	result := parseAndAnalyzeBackendTest(t, "inline_semantics.elisa", `@inline(always)
 def helper[T](value: T) -> T:
 	return value
 `)
@@ -89,7 +89,7 @@ def helper[T](value: T) -> T:
 }
 
 func TestAnalyzeNoRecurseAnnotationSetsFunctionMetadata(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "norecurse_semantics.llcontext", `@norecurse
+	result := parseAndAnalyzeBackendTest(t, "norecurse_semantics.elisa", `@norecurse
 def helper[T](value: T) -> T:
 	return value
 `)
@@ -114,7 +114,7 @@ def helper[T](value: T) -> T:
 }
 
 func TestAnalyzeNoRecurseAnnotationRejectsArguments(t *testing.T) {
-	result := analyzeInlineTestSource(t, "norecurse_invalid_args.llcontext", `@norecurse(always)
+	result := analyzeInlineTestSource(t, "norecurse_invalid_args.elisa", `@norecurse(always)
 def helper() -> int:
 	return 1
 `)
@@ -125,7 +125,7 @@ def helper() -> int:
 }
 
 func TestAnalyzeInlineAnnotationRejectsUnsupportedMode(t *testing.T) {
-	result := analyzeInlineTestSource(t, "inline_invalid_mode.llcontext", `@inline(sometimes)
+	result := analyzeInlineTestSource(t, "inline_invalid_mode.elisa", `@inline(sometimes)
 def helper() -> int:
 	return 1
 `)
@@ -139,7 +139,7 @@ def helper() -> int:
 }
 
 func TestGenerateLLVMIRAppliesAlwaysInlineAttributeFromAnnotation(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_inline_always.llcontext", `@inline(always)
+	result := parseAndAnalyzeBackendTest(t, "backend_inline_always.elisa", `@inline(always)
 def helper(value: int) -> int:
 	return value + 1
 `)
@@ -159,7 +159,7 @@ def helper(value: int) -> int:
 }
 
 func TestGenerateLLVMIRAppliesNoRecurseAttributeFromAnnotation(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_norecurse.llcontext", `@norecurse
+	result := parseAndAnalyzeBackendTest(t, "backend_norecurse.elisa", `@norecurse
 def helper(value: int) -> int:
 	return value + 1
 `)
@@ -176,7 +176,7 @@ def helper(value: int) -> int:
 }
 
 func TestGenerateLLVMIRAppliesNoInlineAttributeFromAnnotation(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_inline_never.llcontext", `def entry() -> int:
+	result := parseAndAnalyzeBackendTest(t, "backend_inline_never.elisa", `def entry() -> int:
 	return helper()
 
 @inline(never)
@@ -199,7 +199,7 @@ def helper() -> int:
 }
 
 func TestAnalyzeHotAnnotationSetsFunctionMetadata(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "hot_semantics.llcontext", `@hot
+	result := parseAndAnalyzeBackendTest(t, "hot_semantics.elisa", `@hot
 def helper[T](value: T) -> T:
 	return value
 `)
@@ -224,7 +224,7 @@ def helper[T](value: T) -> T:
 }
 
 func TestSpecializeFuncTypePreservesExplicitParamNames(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "explicit_param_names_specialization.llcontext", `def helper[T](value: T, fallback: T) -> T:
+	result := parseAndAnalyzeBackendTest(t, "explicit_param_names_specialization.elisa", `def helper[T](value: T, fallback: T) -> T:
 	return fallback
 `)
 	sym, ok := result.GlobalScope.Lookup("helper")
@@ -289,7 +289,7 @@ func TestInferTypeBindingsFromFuncTypesPrefersSpecializedCalleeSignature(t *test
 }
 
 func TestAnalyzeFunctionTemperatureRejectsArguments(t *testing.T) {
-	result := analyzeInlineTestSource(t, "cold_invalid_args.llcontext", `@cold(always)
+	result := analyzeInlineTestSource(t, "cold_invalid_args.elisa", `@cold(always)
 def helper() -> int:
 	return 1
 `)
@@ -300,7 +300,7 @@ def helper() -> int:
 }
 
 func TestAnalyzeFunctionTemperatureRejectsConflictingModes(t *testing.T) {
-	result := analyzeInlineTestSource(t, "temperature_conflict.llcontext", `@hot
+	result := analyzeInlineTestSource(t, "temperature_conflict.elisa", `@hot
 @cold
 def helper() -> int:
 	return 1
@@ -312,7 +312,7 @@ def helper() -> int:
 }
 
 func TestGenerateLLVMIRAppliesHotAttributeFromAnnotation(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_hot.llcontext", `@hot
+	result := parseAndAnalyzeBackendTest(t, "backend_hot.elisa", `@hot
 def helper(value: int) -> int:
 	return value + 1
 `)
@@ -332,7 +332,7 @@ def helper(value: int) -> int:
 }
 
 func TestGenerateLLVMIRAppliesColdAttributeFromAnnotation(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_cold.llcontext", `@cold
+	result := parseAndAnalyzeBackendTest(t, "backend_cold.elisa", `@cold
 def helper(value: int) -> int:
 	return value + 1
 `)
@@ -352,7 +352,7 @@ def helper(value: int) -> int:
 }
 
 func TestGenerateLLVMIRPropagatesHotAttributeToExportWrapper(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_hot_export.llcontext", `@hot
+	result := parseAndAnalyzeBackendTest(t, "backend_hot_export.elisa", `@hot
 def helper(value: int) -> int:
 	return value + 1
 
@@ -371,7 +371,7 @@ export func public_helper(value: int) -> int = helper
 }
 
 func TestGenerateLLVMIRPropagatesNoRecurseAttributeToExportWrapper(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_norecurse_export.llcontext", `@norecurse
+	result := parseAndAnalyzeBackendTest(t, "backend_norecurse_export.elisa", `@norecurse
 def helper(value: int) -> int:
 	return value + 1
 
@@ -390,7 +390,7 @@ export func public_helper(value: int) -> int = helper
 }
 
 func TestGenerateLLVMIRAppliesLikelyBranchWeightsToIf(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_if_likely.llcontext", `def helper(value: bool) -> int:
+	result := parseAndAnalyzeBackendTest(t, "backend_if_likely.elisa", `def helper(value: bool) -> int:
 	if likely value:
 		return 1
 	return 0
@@ -408,7 +408,7 @@ func TestGenerateLLVMIRAppliesLikelyBranchWeightsToIf(t *testing.T) {
 }
 
 func TestGenerateLLVMIRAppliesUnlikelyBranchWeightsToWhile(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_while_unlikely.llcontext", `def helper(value: bool) -> int:
+	result := parseAndAnalyzeBackendTest(t, "backend_while_unlikely.elisa", `def helper(value: bool) -> int:
 	total: mutable int = 0
 	while unlikely value:
 		total <- total + 1

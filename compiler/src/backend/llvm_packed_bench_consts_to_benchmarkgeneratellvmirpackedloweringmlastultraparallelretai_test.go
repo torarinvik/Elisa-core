@@ -3,9 +3,9 @@
 package backend
 
 import (
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -522,52 +522,52 @@ func benchmarkPackedLoweringParallel(b *testing.B, filename string, src string, 
 	}
 }
 func BenchmarkGenerateLLVMIRPackedLoweringCanonical(b *testing.B) {
-	benchmarkPackedLowering(b, "packed_lowering_bench.llcontext", packedLoweringBenchmarkSource, DefaultPackedLoweringProfile())
+	benchmarkPackedLowering(b, "packed_lowering_bench.elisa", packedLoweringBenchmarkSource, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringRetainedReads(b *testing.B) {
-	benchmarkPackedLowering(b, "packed_lowering_retained_reads_bench.llcontext", packedLoweringRetainedReadsBenchmarkSource, DefaultPackedLoweringProfile())
+	benchmarkPackedLowering(b, "packed_lowering_retained_reads_bench.elisa", packedLoweringRetainedReadsBenchmarkSource, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringRetainedReadsSideTable(b *testing.B) {
-	benchmarkPackedLowering(b, "packed_lowering_retained_reads_side_table_bench.llcontext", packedLoweringRetainedReadsSideTableBenchmarkSource, DefaultPackedLoweringProfile())
+	benchmarkPackedLowering(b, "packed_lowering_retained_reads_side_table_bench.elisa", packedLoweringRetainedReadsSideTableBenchmarkSource, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringParserASTRetainedReads(b *testing.B) {
-	benchmarkPackedLowering(b, "packed_lowering_parser_ast_bench.llcontext", packedLoweringParserASTBenchmarkSource, DefaultPackedLoweringProfile())
+	benchmarkPackedLowering(b, "packed_lowering_parser_ast_bench.elisa", packedLoweringParserASTBenchmarkSource, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaRetainedReads(b *testing.B) {
-	benchmarkPackedLowering(b, "packed_lowering_parser_ast_mega_bench.llcontext", packedLoweringParserASTMegaBenchmarkSource, DefaultPackedLoweringProfile())
+	benchmarkPackedLowering(b, "packed_lowering_parser_ast_mega_bench.elisa", packedLoweringParserASTMegaBenchmarkSource, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaParallelRetainedReads(b *testing.B) {
-	benchmarkPackedLoweringParallel(b, "packed_lowering_parser_ast_mega_parallel_bench.llcontext", packedLoweringParserASTMegaBenchmarkSource, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
+	benchmarkPackedLoweringParallel(b, "packed_lowering_parser_ast_mega_parallel_bench.elisa", packedLoweringParserASTMegaBenchmarkSource, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
 }
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTRetainedReads(b *testing.B) {
-	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_medium_bench.llcontext"))
-	benchmarkPackedLowering(b, "packed_lowering_ml_ast_medium_bench.llcontext", src, DefaultPackedLoweringProfile())
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_medium_bench.elisa"))
+	benchmarkPackedLowering(b, "packed_lowering_ml_ast_medium_bench.elisa", src, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaRetainedReads(b *testing.B) {
-	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_bench.llcontext"))
-	benchmarkPackedLowering(b, "packed_lowering_ml_ast_mega_bench.llcontext", src, DefaultPackedLoweringProfile())
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_bench.elisa"))
+	benchmarkPackedLowering(b, "packed_lowering_ml_ast_mega_bench.elisa", src, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTUltraRetainedReads(b *testing.B) {
-	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_ultra_bench.llcontext"))
-	benchmarkPackedLowering(b, "packed_lowering_ml_ast_ultra_bench.llcontext", src, DefaultPackedLoweringProfile())
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_ultra_bench.elisa"))
+	benchmarkPackedLowering(b, "packed_lowering_ml_ast_ultra_bench.elisa", src, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMediumRetainedReads(b *testing.B) {
-	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_medium_bench.llcontext"))
-	benchmarkPackedLowering(b, "packed_lowering_ml_ast_medium_bench.llcontext", src, DefaultPackedLoweringProfile())
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_medium_bench.elisa"))
+	benchmarkPackedLowering(b, "packed_lowering_ml_ast_medium_bench.elisa", src, DefaultPackedLoweringProfile())
 }
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTParallelRetainedReads(b *testing.B) {
-	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_medium_parallel_bench.llcontext"))
-	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_medium_parallel_bench.llcontext", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_medium_parallel_bench.elisa"))
+	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_medium_parallel_bench.elisa", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
 }
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMediumParallelRetainedReads(b *testing.B) {
-	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_medium_parallel_bench.llcontext"))
-	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_medium_parallel_bench.llcontext", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_medium_parallel_bench.elisa"))
+	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_medium_parallel_bench.elisa", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
 }
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaParallelRetainedReads(b *testing.B) {
-	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_parallel_bench.llcontext"))
-	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_mega_parallel_bench.llcontext", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_parallel_bench.elisa"))
+	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_mega_parallel_bench.elisa", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
 }
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTUltraParallelRetainedReads(b *testing.B) {
-	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_ultra_parallel_bench.llcontext"))
-	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_ultra_parallel_bench.llcontext", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_ultra_parallel_bench.elisa"))
+	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_ultra_parallel_bench.elisa", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
 }

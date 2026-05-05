@@ -13,16 +13,16 @@ GENERATED_DIR="${ATPL_HOST_DIR}/generated"
 mkdir -p "${OUT_DIR}"
 mkdir -p "${GENERATED_DIR}"
 
-if [[ "${LLCONTEXT_USE_BOOTSTRAP:-0}" == "1" && -x "${COMPILER_DIR}/llcontext-compiler" ]]; then
-  COMPILER_CMD=("${COMPILER_DIR}/llcontext-compiler")
+if [[ "${ELISACORE_USE_BOOTSTRAP:-0}" == "1" && -x "${COMPILER_DIR}/elisacore-compiler" ]]; then
+  COMPILER_CMD=("${COMPILER_DIR}/elisacore-compiler")
 else
   COMPILER_CMD=(go run ./src)
 fi
 
 (
   cd "${COMPILER_DIR}"
-  "${COMPILER_CMD[@]}" -O3 -emit header -o "${GENERATED_DIR}/atpl_cli.h" ../Code/llcontext_atpl/src/atpl_cli.llcontext
-  "${COMPILER_CMD[@]}" -O3 -emit obj -o "${GENERATED_DIR}/atpl_cli.o" ../Code/llcontext_atpl/src/atpl_cli.llcontext
+  "${COMPILER_CMD[@]}" -O3 -emit header -o "${GENERATED_DIR}/atpl_cli.h" ../Code/elisacore_atpl/src/atpl_cli.elisa
+  "${COMPILER_CMD[@]}" -O3 -emit obj -o "${GENERATED_DIR}/atpl_cli.o" ../Code/elisacore_atpl/src/atpl_cli.elisa
 )
 
 (

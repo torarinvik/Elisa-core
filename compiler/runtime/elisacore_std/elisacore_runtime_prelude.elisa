@@ -1,0 +1,295 @@
+# ============================================================
+# Elisa core Runtime - Elisa core dialect
+# Split prelude: shared declarations, caches, builders
+# ============================================================
+
+include "./test.elisa"
+include "./stores.elisa"
+
+# ------------------------------------------------------------
+# External C function declarations
+# ------------------------------------------------------------
+
+extern strlen(s: u8&) -> usize
+extern strcmp(lhs: u8&, rhs: u8&) -> int
+extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
+extern memcmp(lhs: void&, rhs: void&, n: usize) -> int
+extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
+extern puts(s: u8&) -> int effects[Console.Write]
+extern fprintf(stream: void&, fmt: u8&, ...) -> int effects[Console]
+extern exit(code: int) effects[Abort.Exit]
+extern stderr: void&
+
+# ------------------------------------------------------------
+# Constants
+# ------------------------------------------------------------
+
+const CTX_SMALL_STRING_CACHE_BUCKETS: usize = 1024
+const CTX_STRING_LEN_CACHE_BUCKETS: usize = 4096
+
+# ------------------------------------------------------------
+# Global arena state
+# ------------------------------------------------------------
+
+global mutable perm_arena: Arena = Arena(null, null, 0)
+global mutable scratch_arena: Arena = Arena(null, null, 0)
+
+# ------------------------------------------------------------
+# Struct definitions
+# ------------------------------------------------------------
+
+struct SmallStringCacheEntry:
+	next: mutable heap SmallStringCacheEntry&?
+	len: mutable usize
+	text: mutable tail u8
+
+struct StringLenCacheEntry:
+	next: mutable heap StringLenCacheEntry&?
+	ptr: mutable u8&
+	len: mutable usize
+
+struct StringBuilder:
+	len: mutable i64
+	cap: mutable i64
+	data: mutable heap u8&?
+
+struct StringView:
+	data: mutable u8&
+	len: mutable i64
+
+# ------------------------------------------------------------
+# Global caches (zero-initialized)
+# ------------------------------------------------------------
+
+global mutable small_string_cache: heap SmallStringCacheEntry&?[CTX_SMALL_STRING_CACHE_BUCKETS] = zeroed
+global mutable string_len_cache: heap StringLenCacheEntry&?[CTX_STRING_LEN_CACHE_BUCKETS] = zeroed
+
+# ------------------------------------------------------------
+# Permanent / scratch arena allocation
+# ------------------------------------------------------------
+
+def alloc_perm(size: i64) -> mutable heap void&:
+	resolved: usize = size.usize() if size > 0 else 1
+	return arena_alloc(perm_arena.ref[Arena&], resolved) can Memory.Allocate, Abort.Panic
+
+def alloc_scratch(size: i64) -> mutable heap void&:
+	resolved: usize = size.usize() if size > 0 else 1
+	return arena_alloc(scratch_arena.ref[Arena&], resolved) can Memory.Allocate, Abort.Panic
+
+def reset_scratch():
+	arena_reset(scratch_arena.ref[Arena&])
+
+# ------------------------------------------------------------
+# String length cache (pointer-keyed hash table)
+# ------------------------------------------------------------
+
+def string_len_bucket(ptr: u8&) -> usize:
+	bits: mutable uintptr = ptr.uintptr()
+	bits ^= (bits >> 33)
+	bits *= 0xff51afd7ed558ccd.uintptr()
+	bits ^= (bits >> 33)
+	return (bits & (CTX_STRING_LEN_CACHE_BUCKETS - 1).uintptr()).usize()
+
+def register_perm_string_len(ptr: u8&?, len: usize):
+	can Memory.Allocate, Abort.Panic:
+		if ptr == null or len == 0:
+			return
+
+		bucket: usize = string_len_bucket(ptr.cast[u8&])
+
+		entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
+		while entry != null:
+			if entry.ptr == ptr.cast[u8&]:
+				entry.len <- len
+				return
+			entry <- entry.next
+
+		new_entry: heap StringLenCacheEntry& = alloc_perm(sizeof(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
+		new_entry.next <- string_len_cache[bucket]
+		new_entry.ptr <- ptr.cast[u8&]
+		new_entry.len <- len
+		string_len_cache[bucket] <- new_entry
+
+def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
+	if ptr == null:
+		return 0
+
+	bucket: usize = string_len_bucket(ptr.cast[u8&])
+
+	prev: mutable heap StringLenCacheEntry&? = null
+	entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
+
+	while entry != null:
+		if entry.ptr == ptr.cast[u8&]:
+			# Move-to-front heuristic
+			if prev != null:
+				prev.next <- entry.next
+				entry.next <- string_len_cache[bucket]
+				string_len_cache[bucket] <- entry
+			len_out <- entry.len
+			return 1
+		prev <- entry
+		entry <- entry.next
+
+	return 0
+
+# ------------------------------------------------------------
+# Runtime strlen (cache-aware)
+# ------------------------------------------------------------
+
+def runtime_strlen(value: u8&?) -> usize:
+	src: u8& = value if value != null else ""
+
+	if src[0] == 0:
+		return 0
+
+	len: mutable usize = 0
+	if lookup_cached_string_len(src, len.ref[mutable usize&]) != 0:
+		return len
+
+	return strlen(src)
+
+# ------------------------------------------------------------
+# Small string interning
+# ------------------------------------------------------------
+
+def intern_small_string(src: u8&, len: usize) -> heap u8&:
+	can Memory.Allocate, Abort.Panic:
+		if len == 0:
+			empty: heap u8& = alloc_perm(1).cast[heap u8&]
+			empty[0] <- 0
+			return empty
+
+		# FNV-1a hash
+		hash: mutable u64 = 1469598103934665603
+		for i in 0..<len:
+			hash ^= src[i].u64()
+			hash *= 1099511628211
+
+		bucket: usize = (hash & (CTX_SMALL_STRING_CACHE_BUCKETS - 1).u64()).usize()
+
+		entry: mutable heap SmallStringCacheEntry&? = small_string_cache[bucket]
+		while entry != null:
+			if entry.len == len and memcmp(entry.text[0].ref[void&], src.cast[void&], len) == 0:
+				return entry.text[0].ref[heap u8&]
+			entry <- entry.next
+
+		new_entry: mutable heap SmallStringCacheEntry& = alloc_perm(
+			(sizeof(SmallStringCacheEntry) + len + 1).i64()
+		).cast[heap SmallStringCacheEntry&]
+
+		new_entry.next <- small_string_cache[bucket]
+		new_entry.len <- len
+		memcpy(new_entry.text[0].ref[mutable void&], src.cast[void&], len)
+		new_entry.text[len] <- 0
+		small_string_cache[bucket] <- new_entry
+
+		register_perm_string_len(new_entry.text[0].ref[u8&], len)
+
+		return new_entry.text[0].ref[heap u8&]
+
+# ------------------------------------------------------------
+# Integer / bool / char to string conversion
+# ------------------------------------------------------------
+
+def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
+	can Memory.Allocate, Console.Format, Abort.Panic:
+		len: int = snprintf(null, 0, "%lld", value)
+
+		if len > 0 and len <= 8:
+			text: u8[9]
+			snprintf(text[0].ref[u8&], len.usize() + 1, "%lld", value)
+			return intern_small_string(text[0].ref[u8&], len.usize())
+
+		out: heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]
+		snprintf(out.cast[u8&?], len.usize() + 1, "%lld", value)
+
+		if arena == perm_arena.ref[Arena&]:
+			register_perm_string_len(out.cast[u8&], len.usize())
+
+		return out
+
+def bool_to_string_into(arena: Arena&, value: int) -> u8&:
+	_ = arena
+	return "True" if value != 0 else "False"
+
+def char_to_string_into(arena: Arena&, value: i64) -> heap u8&:
+	can Memory.Allocate, Abort.Panic:
+		_ = arena
+		text: u8[2]
+		text[0] <- value.u8()
+		text[1] <- 0
+		return intern_small_string(text[0].ref[u8&], 1)
+
+# ------------------------------------------------------------
+# String builder
+# ------------------------------------------------------------
+
+def string_builder_next_cap(min_cap: i64) -> i64:
+	cap: mutable i64 = 16
+	while cap < min_cap:
+		cap *= 2
+	return cap
+
+def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
+	can Memory.Allocate, Abort.Panic:
+		src: u8& = initial if initial != null else ""
+		len: usize = runtime_strlen(src)
+
+		builder: heap StringBuilder& = alloc_perm(sizeof(StringBuilder).i64()).cast[heap StringBuilder&]
+		builder.len <- len.i64()
+		builder.cap <- string_builder_next_cap(len.i64() + 1)
+		builder.data <- alloc_perm(builder.cap).cast[heap u8&]
+
+		if len > 0:
+			memcpy(builder.data.cast[mutable void&], src.cast[void&], len)
+
+		builder.data[len] <- 0
+		return builder
+
+def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
+	can Memory.Allocate, Abort.Panic:
+		src: u8& = suffix if suffix != null else ""
+		suffix_len: usize = runtime_strlen(src)
+
+		if builder == null:
+			return string_builder_new(src)
+
+		if suffix_len == 0:
+			return builder
+
+		b: heap StringBuilder& = builder
+		needed: i64 = b.len + suffix_len.i64() + 1
+
+		if needed > b.cap:
+			new_cap: i64 = string_builder_next_cap(needed)
+			new_data: heap u8& = alloc_perm(new_cap).cast[heap u8&]
+			if b.len > 0:
+				assert b.data != null
+				memcpy(new_data.cast[mutable void&], b.data.cast[void&], b.len.usize())
+			b.data <- new_data
+			b.cap <- new_cap
+
+		assert b.data != null
+		memcpy((b.data + b.len.usize()).cast[mutable void&], src.cast[void&], suffix_len)
+		b.len += suffix_len.i64()
+		b.data[b.len.usize()] <- 0
+		return b
+
+def string_builder_finish(builder: heap StringBuilder&?) -> heap u8&:
+	can Memory.Allocate, Abort.Panic:
+		if builder == null:
+			return intern_small_string("", 0)
+
+		b: heap StringBuilder& = builder
+		if b.len <= 0:
+			return intern_small_string("", 0)
+
+		assert b.data != null
+
+		if b.len <= 8:
+			return intern_small_string(b.data.cast[u8&], b.len.usize())
+
+		register_perm_string_len(b.data.cast[u8&], b.len.usize())
+		return b.data

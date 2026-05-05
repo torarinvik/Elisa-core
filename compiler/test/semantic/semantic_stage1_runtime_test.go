@@ -43,7 +43,7 @@ def use(values: darray[i32, row]&) -> i32:
 		return arena_da_view_get(sub, 0)
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "arena_array_view_helpers.llcontext", src)
+	_, errs := parseAndAnalyze(t, "arena_array_view_helpers.elisa", src)
 	requireNoErrors(t, errs)
 }
 
@@ -78,7 +78,7 @@ def bad(a: Arena&, values: darray[i32, row]&) -> darray[i32, row]:
 	view: dview[i32] = arena_da_view(values, 0, values.count)
 	return arena_da_from_view(a, view)
 `
-	_, errs := parseAndAnalyze(t, "arena_array_from_view_fresh_shape.llcontext", src)
+	_, errs := parseAndAnalyze(t, "arena_array_from_view_fresh_shape.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

@@ -1,9 +1,9 @@
 package interpreter
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
 	"strconv"
 	"unicode/utf8"
 )

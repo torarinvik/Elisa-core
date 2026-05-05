@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"llcontext/src/lexer"
-	"llcontext/src/semantic"
+	"elisacore/src/lexer"
+	"elisacore/src/semantic"
 )
 
 func generateFactTraceReport(result *semantic.Result, filter string) (string, error) {

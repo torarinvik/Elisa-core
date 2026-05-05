@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 )
 
 func TestGenerateLLVMIRLowersBraceStructErgonomics(t *testing.T) {
@@ -22,7 +22,7 @@ def run(items: array[Row, 2], row: Row, flag: bool) -> int:
     next: Row = built{flag, right = total}
     return next.left + next.right
 `
-	result := parseAndAnalyze(t, "backend_brace_struct_ergonomics.llcontext", src)
+	result := parseAndAnalyze(t, "backend_brace_struct_ergonomics.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -51,7 +51,7 @@ func TestGenerateLLVMIRDefinesBraceStructLiteralGlobal(t *testing.T) {
 
 global default_row: Row = Row{flag: true, right: 2, left: 1}
 `
-	result := parseAndAnalyze(t, "backend_brace_struct_global.llcontext", src)
+	result := parseAndAnalyze(t, "backend_brace_struct_global.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

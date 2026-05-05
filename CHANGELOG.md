@@ -14,7 +14,7 @@ All notable changes to this repository should be documented in this file.
 - The Lua frontend experiment now ships with a storage-layout benchmark harness that compares the checked-in side-table layout against a temporary inline-control variant.
 - First-class `refstorage` / `refstate` generics now work end to end across parsing, semantic analysis, specialization, exports, LLVM lowering, and C header generation.
 - Concrete export wrappers such as `keep_handle[heap, &]` now parse and lower correctly, including stable public header emission for concrete qualifier-specialized exports.
-- A compile-checked showcase for the feature now lives at `Code/test_programs/ref_qualifier_generics.llcontext`.
+- A compile-checked showcase for the feature now lives at `Code/test_programs/ref_qualifier_generics.elisa`.
 - Frozen-store projection APIs are now effectively complete across the current semantic and packed-ABI backend matrix, including wrapper continuity, decode-once reuse for projected frozen common-field reads, and correct decode-cache invalidation after projected mutation.
 - Frozen packed enums now support dense node-key side tables through `NodeKey[Enum]`, `NodeTable[Enum, T]`, `dense_key(...)`, `node_table_fill.specialize[...]()`, `frozen[key]`, `table[key]`, and `table.values`.
 
@@ -92,19 +92,19 @@ All notable changes to this repository should be documented in this file.
 - Added `docs/useful_language_features/20-annotations-and-compile-time-hints.md` as the implemented reference for current layout annotations, packed-layout annotations, function codegen hints, guard annotations, and branch hints.
 - Expanded `docs/useful_language_features/08-region-checkpoints.md` to cover the current `scope`, named checkpoint, grouped checkpoint, and rollback-block statement surface in addition to region-local checkpoints.
 - Updated `docs/useful_language_features/17-iterators-and-for-in-mini-spec.md` so it no longer reads as if the current explicit `parallel for` feature is still purely deferred.
-- Expanded `compiler/README.md` with a compact syntax cheat sheet plus current `.llcontexti`, `project.json`, and `.llctxlib/manifest.json` workflow documentation.
+- Expanded `compiler/README.md` with a compact syntax cheat sheet plus current `.elisai`, `project.json`, and `.elisalib/manifest.json` workflow documentation.
 - Expanded `compiler/README.md` with current test annotation, test-runner, filter, and helper emit-mode documentation, including `deps-json` and the distinction between listing, runner-generation, and direct test execution modes.
-- `Code/llcontext_lua/README.md` now reflects the current parser/export surface, side-table packed-span layout, and benchmark entry points.
+- `Code/elisacore_lua/README.md` now reflects the current parser/export surface, side-table packed-span layout, and benchmark entry points.
 - Expanded pointer typestate documentation in:
   - `docs/useful_language_features/02-pointer-typestate-practical.md`
   - `docs/useful_language_features/03-pointer-typestate-formal.md`
   - `docs/useful_language_features/07-export-and-c-abi.md`
 - Added a compile-checked end-to-end feature example at:
-  - `Code/test_programs/ref_qualifier_generics.llcontext`
+  - `Code/test_programs/ref_qualifier_generics.elisa`
 - Added a human-readable frozen packed-projection completeness note to `compiler/README.md`.
 - Documented the dense frozen packed node-table helper surface in `compiler/README.md`.
 
 ### Verification
 
 - Verified with a full compiler test sweep:
-  - `cd /Users/torarinbjarko/Documents/FSharpProjects/LowLevelContextlang/compiler && go test ./...`
+  - `cd /Users/torarinbjarko/Documents/FSharpProjects/Elisa core/compiler && go test ./...`

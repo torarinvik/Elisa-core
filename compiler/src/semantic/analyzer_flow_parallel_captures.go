@@ -3,7 +3,7 @@ package semantic
 import (
 	"fmt"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 type parallelForCaptureCollector struct {

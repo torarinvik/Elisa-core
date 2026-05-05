@@ -25,7 +25,7 @@ func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
 	projectRoot := filepath.Join(baseDir, "demo")
 	for _, path := range []string{
 		filepath.Join(projectRoot, projectFileName),
-		filepath.Join(projectRoot, "src", "main.llcontext"),
+		filepath.Join(projectRoot, "src", "main.elisa"),
 		filepath.Join(projectRoot, "build"),
 		filepath.Join(projectRoot, "lib"),
 		filepath.Join(projectRoot, "native"),
@@ -45,11 +45,11 @@ func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("expected no stderr output during init-lib, got:\n%s", stderr.String())
 	}
-	libRoot := filepath.Join(projectRoot, "lib", "mathcore.llctxlib")
+	libRoot := filepath.Join(projectRoot, "lib", "mathcore.elisalib")
 	for _, path := range []string{
 		filepath.Join(libRoot, manifestFileName),
-		filepath.Join(libRoot, "src", "mathcore.llcontext"),
-		filepath.Join(libRoot, "src", "mathcore.llcontexti"),
+		filepath.Join(libRoot, "src", "mathcore.elisa"),
+		filepath.Join(libRoot, "src", "mathcore.elisai"),
 		filepath.Join(libRoot, "native"),
 		filepath.Join(libRoot, "README.md"),
 	} {
@@ -61,7 +61,7 @@ func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected manifest to be readable: %v", err)
 	}
-	if !strings.Contains(string(manifestBytes), `"interface": "src/mathcore.llcontexti"`) {
+	if !strings.Contains(string(manifestBytes), `"interface": "src/mathcore.elisai"`) {
 		t.Fatalf("expected scaffolded manifest to record interface path, got:\n%s", string(manifestBytes))
 	}
 }
@@ -198,7 +198,7 @@ func TestRunCLIProjectDepsReportsInterfacesAndForeignSources(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("expected no stderr output during project deps, got:\n%s", stderr.String())
 	}
-	for _, check := range []string{"Sources:", "mathcore.llcontexti", "mathcore_runtime.c", "app_runtime.c"} {
+	for _, check := range []string{"Sources:", "mathcore.elisai", "mathcore_runtime.c", "app_runtime.c"} {
 		if !strings.Contains(stdout.String(), check) {
 			t.Fatalf("expected project deps output to contain %q, got:\n%s", check, stdout.String())
 		}
@@ -310,9 +310,9 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
 		filepath.Join(projectRoot, "native"),
 		filepath.Join(projectRoot, "shared"),
 		filepath.Join(projectRoot, "test"),
-		filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src"),
-		filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "native"),
-		filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "shared"),
+		filepath.Join(projectRoot, "lib", "mathcore.elisalib", "src"),
+		filepath.Join(projectRoot, "lib", "mathcore.elisalib", "native"),
+		filepath.Join(projectRoot, "lib", "mathcore.elisalib", "shared"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
@@ -326,7 +326,7 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
 		"foreign": ["native/app_runtime.c"],
   "targets": {
     "app": {
-      "entry": "src/main.llcontext",
+      "entry": "src/main.elisa",
       "emit": "llvm",
       "run-emit": "interpret",
       "output": "build/app.ll",
@@ -334,13 +334,13 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
       "exec": [` + hookJSON(options.targetHook) + `]
     },
     "tests": {
-      "entry": "test/project_tests.llcontext",
+      "entry": "test/project_tests.elisa",
       "emit": "llvm",
       "output": "build/tests.ll",
       "opt": "O0"
     },
     "benches": {
-      "entry": "test/project_benches.llcontext",
+      "entry": "test/project_benches.elisa",
       "emit": "llvm",
       "output": "build/benches.ll",
       "opt": "O0"
@@ -349,23 +349,23 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
 }
 `
 	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
-	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.llcontext"), "include \"project_extra.llcontext\"\n\ndef main() -> int:\n    return core_seed() + project_extra()\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), "include \"project_extra.elisa\"\n\ndef main() -> int:\n    return core_seed() + project_extra()\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "native", "app_runtime.c"), "/* app foreign stub */\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "shared", "project_extra.llcontext"), "def project_extra() -> int:\n    return 1\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.llcontext"), "@test\ndef alpha_case() -> void:\n    pass\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_benches.llcontext"), "@bench\ndef hot_loop() -> void:\n    pass\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", manifestFileName), `{
+	writeFixtureFile(t, filepath.Join(projectRoot, "shared", "project_extra.elisa"), "def project_extra() -> int:\n    return 1\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.elisa"), "@test\ndef alpha_case() -> void:\n    pass\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_benches.elisa"), "@bench\ndef hot_loop() -> void:\n    pass\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.elisalib", manifestFileName), `{
   "provides": "mathcore",
-  "entry": "src/mathcore.llcontext",
-		"interface": "src/mathcore.llcontexti",
+  "entry": "src/mathcore.elisa",
+		"interface": "src/mathcore.elisai",
 		"include-dirs": ["shared"],
 		"foreign": ["native/mathcore_runtime.c"]
 }
 `)
-	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src", "mathcore.llcontext"), "include \"math_helper.llcontext\"\n\ndef core_seed() -> int:\n    return math_helper()\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src", "mathcore.llcontexti"), "extern core_seed() -> int\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "native", "mathcore_runtime.c"), "/* mathcore foreign stub */\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "shared", "math_helper.llcontext"), "def math_helper() -> int:\n    return 41\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.elisalib", "src", "mathcore.elisa"), "include \"math_helper.elisa\"\n\ndef core_seed() -> int:\n    return math_helper()\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.elisalib", "src", "mathcore.elisai"), "extern core_seed() -> int\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.elisalib", "native", "mathcore_runtime.c"), "/* mathcore foreign stub */\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.elisalib", "shared", "math_helper.elisa"), "def math_helper() -> int:\n    return 41\n")
 	return projectRoot
 }
 
@@ -386,14 +386,14 @@ func writeNativeForeignProjectFixture(t *testing.T) string {
   "foreign": ["native/runtime.c"],
   "targets": {
     "app": {
-      "entry": "src/main.llcontext",
+      "entry": "src/main.elisa",
       "emit": "obj",
       "run-emit": "obj",
       "output": "build/app_native",
       "opt": "O0"
     },
     "tests": {
-      "entry": "test/project_tests.llcontext",
+      "entry": "test/project_tests.elisa",
       "emit": "llvm",
       "output": "build/tests.ll",
       "opt": "O0"
@@ -402,8 +402,8 @@ func writeNativeForeignProjectFixture(t *testing.T) string {
 }
 `
 	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
-	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.llcontext"), "extern foreign_message() -> u8&\nextern puts(text: u8&) -> int can[Console.Write]\n\ndef main() -> int can[Console.Write]:\n    can Console.Write:\n        puts(foreign_message())\n        return 0\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.llcontext"), "extern foreign_value() -> int\n\n@test\ndef foreign_case() -> void can[Abort.Panic]:\n    can Abort.Panic:\n        if foreign_value() != 42:\n            panic(\"expected foreign value\")\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), "extern foreign_message() -> u8&\nextern puts(text: u8&) -> int can[Console.Write]\n\ndef main() -> int can[Console.Write]:\n    can Console.Write:\n        puts(foreign_message())\n        return 0\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.elisa"), "extern foreign_value() -> int\n\n@test\ndef foreign_case() -> void can[Abort.Panic]:\n    can Abort.Panic:\n        if foreign_value() != 42:\n            panic(\"expected foreign value\")\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "native", "runtime.c"), "#include <stdint.h>\n\nint64_t foreign_value(void) { return 42; }\nchar *foreign_message(void) { return \"native hello\"; }\n")
 	return projectRoot
 }

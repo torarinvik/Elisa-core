@@ -1,7 +1,7 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"strings"
 	"testing"
 )
@@ -27,7 +27,7 @@ def eq_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
 	wrapped: ViewWindow = wrap_sub_wild(items[1:3], 0, 2)
 	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_wildcard_rebased_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -63,7 +63,7 @@ def eq_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
 	wrapped: ViewWindow = wrap_sub_wild(items[0:1], 0, 1)
 	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_wildcard_rebased_helper_indexed_overlap_guardrails.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -102,7 +102,7 @@ def eq_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
 	wrapped: Wrapper = wrap_submeta_wild(items[0:1], 0, 1)
 	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_wildcard_rebased_helper_indexed_overlap_guardrails.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -141,7 +141,7 @@ def eq_nested_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_rebased_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_rebased_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -180,7 +180,7 @@ def eq_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
 	wrapped: Wrapper = wrap_submeta_wild(items[1:3], 0, 2)
 	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_wildcard_rebased_helper_indexed_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -219,7 +219,7 @@ def eq_nested_helper(values: array[i32, 4]) -> bool:
 	boxed: NestedViews = wrap_nested_views(values[0:2], values[2:4])
 	return arena_da_eq_exact(boxed.inner.left, boxed.inner.right)
 	`
-	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_field_projection.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_field_projection.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -280,7 +280,7 @@ def materialize_split(a: Arena&, values: darray[i32, 4]&) -> darray[i32]:
 def materialize_unknown(a: Arena&, view: dview[i32]) -> darray[i32]:
 	return arena_da_from_view(a, view)
 `
-	result := parseAndAnalyze(t, "backend_dview_materialize.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dview_materialize.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -343,7 +343,7 @@ def copy_small_raw(text: cstr[row]) -> heap u8&:
 	view: StringView = ctx_string_view(text, 0, 2)
 	return string_view_copy(view)
 `
-	result := parseAndAnalyze(t, "backend_string_view_materialize.llcontext", src)
+	result := parseAndAnalyze(t, "backend_string_view_materialize.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -404,7 +404,7 @@ def same_short(view: StringView) -> bool:
 def same_long(view: StringView) -> bool:
 	return frontend_sv_eq_literal(view, "destroy_region")
 `
-	result := parseAndAnalyze(t, "backend_runtime_string_literal_wrapper_eq.llcontext", src)
+	result := parseAndAnalyze(t, "backend_runtime_string_literal_wrapper_eq.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -430,7 +430,7 @@ func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
 	src := `def text_len(text: cstr[row]) -> i64:
     return text.len
 `
-	result := parseAndAnalyze(t, "backend_cstr_len.llcontext", src)
+	result := parseAndAnalyze(t, "backend_cstr_len.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -454,7 +454,7 @@ func TestGenerateLLVMIRLowersDArrayViewRuntimeFields(t *testing.T) {
 def probe(view: dview[i64]) -> bool:
 	return non_empty(view)
 `
-	result := parseAndAnalyze(t, "backend_darray_view_runtime_fields.llcontext", src)
+	result := parseAndAnalyze(t, "backend_darray_view_runtime_fields.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -491,7 +491,7 @@ def head_view(view: dview[i32]) -> i32:
 	part: dview[i32] = view[0:1]
 	return part[0]
 `
-	result := parseAndAnalyze(t, "backend_array_slice_syntax.llcontext", src)
+	result := parseAndAnalyze(t, "backend_array_slice_syntax.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -528,7 +528,7 @@ def slice_owned(values: i32[4]) -> view[i32]:
 def head_ref(values: i32[4]&) -> i32:
 	return values[1:3][0]
 `
-	result := parseAndAnalyze(t, "backend_fixed_array_slice.llcontext", src)
+	result := parseAndAnalyze(t, "backend_fixed_array_slice.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

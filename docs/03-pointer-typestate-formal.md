@@ -347,7 +347,7 @@ If the true branch exits, the false refinement survives after the statement.
 
 This formalizes patterns like:
 
-```context
+```elisa
 if p == null:
     return
 
@@ -459,4 +459,4 @@ The design goal can be stated as:
 
 > If a program type-checks, every dereference-like pointer use is justified by either construction, control-flow proof, assertion, or explicit typestate transition.
 
-That is the exact sense in which Contextlang gets “dependent type safety for pointers” without needing borrow checking or lifetime analysis.
+That is the exact sense in which Elisa core gets “dependent type safety for pointers” without needing borrow checking or lifetime analysis.

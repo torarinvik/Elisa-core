@@ -3,7 +3,7 @@ package interpreter_test
 import (
 	"testing"
 
-	"llcontext/src/interpreter"
+	"elisacore/src/interpreter"
 )
 
 func TestExecuteMembershipExprShortCircuitsListCandidates(t *testing.T) {
@@ -11,7 +11,7 @@ func TestExecuteMembershipExprShortCircuitsListCandidates(t *testing.T) {
     return 1 in [1, 1 / 0]
 `
 
-	result := parseAndAnalyzeInterpreterTest(t, "interpreter_membership_short_circuit.llcontext", src)
+	result := parseAndAnalyzeInterpreterTest(t, "interpreter_membership_short_circuit.elisa", src)
 	execResult, err := interpreter.Execute(result, interpreter.Options{Entry: "run"})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
@@ -26,7 +26,7 @@ func TestExecuteMembershipExprHandlesEmptyList(t *testing.T) {
     return 1 in []
 `
 
-	result := parseAndAnalyzeInterpreterTest(t, "interpreter_membership_empty.llcontext", src)
+	result := parseAndAnalyzeInterpreterTest(t, "interpreter_membership_empty.elisa", src)
 	execResult, err := interpreter.Execute(result, interpreter.Options{Entry: "run"})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)

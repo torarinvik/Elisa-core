@@ -6,7 +6,7 @@ import (
 )
 
 func TestAnalyzeCloneBuiltinSupportsDArrayAndTreeTargets(t *testing.T) {
-	analyzeTreeTestSource(t, "clone_builtin_surface.llcontext", `tree Lua:
+	analyzeTreeTestSource(t, "clone_builtin_surface.elisa", `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -27,7 +27,7 @@ def clone_pair(owner: mutable Arena&, source_items: dview[u32], block: Lua.Block
 }
 
 func TestAnalyzeCloneBuiltinRejectsAllocatingCloneWithoutOwner(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_owner_required.llcontext", `def clone_items(items: dview[u32]) -> darray[u32]:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_owner_required.elisa", `def clone_items(items: dview[u32]) -> darray[u32]:
 	return clone[darray[u32]](items)
 `)
 	all := strings.Join(result.Errors(), "\n")
@@ -37,7 +37,7 @@ func TestAnalyzeCloneBuiltinRejectsAllocatingCloneWithoutOwner(t *testing.T) {
 }
 
 func TestAnalyzeCloneBuiltinSupportsStructsWithSViewFields(t *testing.T) {
-	analyzeTreeTestSource(t, "clone_builtin_sview_struct.llcontext", `struct NameBox:
+	analyzeTreeTestSource(t, "clone_builtin_sview_struct.elisa", `struct NameBox:
 	name: sview
 
 def clone_name_box(box: NameBox) -> NameBox:
@@ -46,7 +46,7 @@ def clone_name_box(box: NameBox) -> NameBox:
 }
 
 func TestAnalyzeCloneBuiltinRejectsReferences(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_rejects_refs.llcontext", `def clone_ref(value: i64&) -> i64&:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_rejects_refs.elisa", `def clone_ref(value: i64&) -> i64&:
 	return clone[i64&](value)
 `)
 	all := strings.Join(result.Errors(), "\n")

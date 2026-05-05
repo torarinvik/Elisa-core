@@ -1,10 +1,10 @@
 package main
 
 import (
+	"elisacore/src/backend"
 	"errors"
 	"fmt"
 	"io"
-	"llcontext/src/backend"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,7 +50,7 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 		}
 		debugTestRunnerCache(stderr, "miss", artifact)
 	}
-	tempDir, err := os.MkdirTemp("", "llcontext-test-run-*")
+	tempDir, err := os.MkdirTemp("", "elisacore-test-run-*")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		return "", func() {}, nativeBuildTiming{CacheLookup: time.Since(cacheLookupStart)}, 0, 0, err
@@ -59,7 +59,7 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 		_ = os.RemoveAll(tempDir)
 	}
 
-	runnerPath := filepath.Join(tempDir, "generated_runner.llcontext")
+	runnerPath := filepath.Join(tempDir, "generated_runner.elisa")
 	analyzeStart := time.Now()
 	_, runnerResult, ok := analyzeProgram(runnerPath, []byte(runnerSource), stderr)
 	analyzeElapsed := time.Since(analyzeStart)
@@ -135,7 +135,7 @@ func writeCapturedTestStream(w io.Writer, label string, testName string, output 
 		fmt.Fprintf(w, "    %s\n", line)
 	}
 }
-func llcontextStringLiteral(value string) string {
+func elisacoreStringLiteral(value string) string {
 	return strconv.Quote(value)
 }
 func testRunnerRuntimeShimSource() string {
@@ -143,13 +143,13 @@ func testRunnerRuntimeShimSource() string {
 
 void *stderr = NULL;
 
-void *llcontext_test_runner_stub_va_copy(void *args) __asm__("va_copy");
-void *llcontext_test_runner_stub_va_copy(void *args) {
+void *elisacore_test_runner_stub_va_copy(void *args) __asm__("va_copy");
+void *elisacore_test_runner_stub_va_copy(void *args) {
 	return args;
 }
 
-void llcontext_test_runner_stub_va_end(void *args) __asm__("va_end");
-void llcontext_test_runner_stub_va_end(void *args) {
+void elisacore_test_runner_stub_va_end(void *args) __asm__("va_end");
+void elisacore_test_runner_stub_va_end(void *args) {
 	(void)args;
 }
 `

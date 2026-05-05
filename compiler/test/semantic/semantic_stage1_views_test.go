@@ -45,7 +45,7 @@ def bad(text: cstr[row]) -> cstr[row]:
 	view: StringView = ctx_string_view(text, 0, 2)
 	return ctx_string_from_view(view)
 `
-	_, errs := parseAndAnalyze(t, "stage1_string_view_wrappers.llcontext", src)
+	_, errs := parseAndAnalyze(t, "stage1_string_view_wrappers.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -97,19 +97,19 @@ def probe(text: cstr[row], other: cstr[col]) -> int:
 		return ctx_string_views_eq(sub, view)
 	return ctx_string_view_len(sub)
 `
-	_, errs := parseAndAnalyze(t, "stage1_string_view_helpers.llcontext", src)
+	_, errs := parseAndAnalyze(t, "stage1_string_view_helpers.elisa", src)
 	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeStage1RuntimeFileAcceptsShapeTypedWrappers(t *testing.T) {
-	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 	src := loadSourceWithIncludes(t, fixture, map[string]bool{})
 	_, errs := parseAndAnalyze(t, fixture, src)
 	requireNoErrors(t, errs)
 }
 
 func TestAnalyzePointerFixture(t *testing.T) {
-	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "pointer_alloc.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "pointer_alloc.elisa")
 	src, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("failed to read fixture: %v", err)
@@ -119,7 +119,7 @@ func TestAnalyzePointerFixture(t *testing.T) {
 }
 
 func TestAnalyzeShapeOpsFixture(t *testing.T) {
-	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "shape_ops.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "shape_ops.elisa")
 	src, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("failed to read shape ops fixture: %v", err)
@@ -129,7 +129,7 @@ func TestAnalyzeShapeOpsFixture(t *testing.T) {
 }
 
 func TestAnalyzeArenaRuntimeFile(t *testing.T) {
-	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "llcontext_std", "arena.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "elisacore_std", "arena.elisa")
 	src, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("failed to read arena runtime fixture: %v", err)
@@ -139,7 +139,7 @@ func TestAnalyzeArenaRuntimeFile(t *testing.T) {
 }
 
 func TestAnalyzeContextRuntimeFile(t *testing.T) {
-	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 	src := loadSourceWithIncludes(t, fixture, map[string]bool{})
 	_, errs := parseAndAnalyze(t, fixture, src)
 	requireNoErrors(t, errs)

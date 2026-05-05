@@ -3,7 +3,7 @@ package semantic
 import (
 	"reflect"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func firstInvalidRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {

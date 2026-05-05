@@ -7,7 +7,7 @@ import (
 )
 
 func TestRunCLICompilesUFCSValueReceiverProbe(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "ufcs_value_receiver_probe.llcontext", `struct Counter:
+	sourcePath := writeImplicitContextFixture(t, "ufcs_value_receiver_probe.elisa", `struct Counter:
     value: i64
 
 def score(counter: Counter, delta: i64 = 1) -> i64:
@@ -30,7 +30,7 @@ def main() -> i64:
 }
 
 func TestRunCLICompilesExplicitRefHelperProbe(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "ufcs_explicit_ref_helper_probe.llcontext", `struct Counter:
+	sourcePath := writeImplicitContextFixture(t, "ufcs_explicit_ref_helper_probe.elisa", `struct Counter:
     value: i64
 
 def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
@@ -53,7 +53,7 @@ def main() -> i64:
 }
 
 func TestRunCLICompilesUFCSAutorefRefReceiverProbe(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "ufcs_autoref_ref_receiver_probe.llcontext", `struct Counter:
+	sourcePath := writeImplicitContextFixture(t, "ufcs_autoref_ref_receiver_probe.elisa", `struct Counter:
     value: i64
 
 def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
@@ -76,7 +76,7 @@ def main() -> i64:
 }
 
 func TestRunCLICompilesOptionalUFCSRefReceiverProbe(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "ufcs_optional_ref_receiver_probe.llcontext", `struct Counter:
+	sourcePath := writeImplicitContextFixture(t, "ufcs_optional_ref_receiver_probe.elisa", `struct Counter:
     value: i64
 
 def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
@@ -106,7 +106,7 @@ def main() -> i64:
 }
 
 func TestRunCLICompilesOptionalTransformCallProbe(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "optional_transform_call_probe.llcontext", `def bump(value: i64) -> i64:
+	sourcePath := writeImplicitContextFixture(t, "optional_transform_call_probe.elisa", `def bump(value: i64) -> i64:
     return value + 2
 
 def read(maybe_value: i64?) -> i64:
@@ -133,7 +133,7 @@ def main() -> i64:
 }
 
 func TestRunCLICompilesOptionalTransformMemberCallProbe(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "optional_transform_member_call_probe.llcontext", `struct Checker:
+	sourcePath := writeImplicitContextFixture(t, "optional_transform_member_call_probe.elisa", `struct Checker:
     delta: i64
 
 def adjust(self: Checker&, value: i64) -> i64:
@@ -162,7 +162,7 @@ def main() -> i64:
 }
 
 func TestRunCLICompilesOptionalFieldProbe(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "optional_field_probe.llcontext", `struct Counter:
+	sourcePath := writeImplicitContextFixture(t, "optional_field_probe.elisa", `struct Counter:
     value: i64
 
 def read(maybe_counter: Counter?) -> i64:
@@ -204,7 +204,7 @@ def main() -> i64:
 }
 
 func TestRunCLICompilesOptionalAssignProbe(t *testing.T) {
-	sourcePath := writeImplicitContextFixture(t, "optional_assign_probe.llcontext", `struct Counter:
+	sourcePath := writeImplicitContextFixture(t, "optional_assign_probe.elisa", `struct Counter:
     value: mutable i64
 
 def write(maybe_counter: mutable Counter&?) -> i64:

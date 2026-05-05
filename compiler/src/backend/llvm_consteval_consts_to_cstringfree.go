@@ -9,10 +9,10 @@ package backend
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/semantic"
 	"math"
 	"strconv"
 	"strings"

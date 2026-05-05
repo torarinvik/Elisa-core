@@ -6,7 +6,7 @@ import (
 )
 
 func TestEffectAliasExpandsReturnAndPermissions(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "effect_alias.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "effect_alias.elisa", `
 error ParseErr:
     Invalid
 
@@ -39,7 +39,7 @@ def parse() -> int effects[FrontendEffects]:
 }
 
 func TestEffectAliasResolvesThroughUsingAndFuncTypes(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "effect_alias_using.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "effect_alias_using.elisa", `
 namespace frontend:
     effectalias WorkerEffects = can[Abort.Panic]
 
@@ -63,7 +63,7 @@ def accept(callback: func() -> void effects[WorkerEffects]) -> void:
 }
 
 func TestEffectAliasUnknownNameErrors(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "effect_alias_unknown.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "effect_alias_unknown.elisa", `
 def parse() -> int effects[MissingEffects]:
     return 1
 `)
@@ -74,7 +74,7 @@ def parse() -> int effects[MissingEffects]:
 }
 
 func TestEffectsRowMixesAliasErrorsAndPermissions(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "effect_row.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "effect_row.elisa", `
 error ParseErr:
     Invalid
 
@@ -100,7 +100,7 @@ def parse() -> int effects[FrontendEffects, error IoErr, Memory.Allocate]:
 }
 
 func TestEffectDeclAndSignalInferPermissions(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "effect_signal.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "effect_signal.elisa", `
 effect FooEffect: pass
 effect ConsoleEffect:
     Write
@@ -124,7 +124,7 @@ def run() -> void:
 }
 
 func TestSignalUnknownEffectErrors(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "effect_signal_unknown.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "effect_signal_unknown.elisa", `
 def run() -> void:
     signal MissingEffect
 `)

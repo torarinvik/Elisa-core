@@ -6,7 +6,7 @@ import (
 )
 
 func TestAnalyzeRejectsDuplicateExportName(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_export_name.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_export_name.elisa", `
 def keep() -> i64:
     return 1
 
@@ -20,7 +20,7 @@ export func api() -> i64 = keep
 }
 
 func TestAnalyzeRejectsUndefinedExportTarget(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "undefined_export_target.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "undefined_export_target.elisa", `
 export func api() -> i64 = missing_target
 `)
 	all := strings.Join(result.Errors(), "\n")

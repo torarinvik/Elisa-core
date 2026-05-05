@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 func TestAnalyzeLambdaContextualTypingCapturesOuterValue(t *testing.T) {
@@ -17,7 +17,7 @@ def run() -> i64:
     return apply(lambda value: value + offset, 41)
 `
 
-	result, errs := parseAndAnalyze(t, "lambda_contextual_capture.llcontext", src)
+	result, errs := parseAndAnalyze(t, "lambda_contextual_capture.elisa", src)
 	requireNoErrors(t, errs)
 	decl := requireFuncDecl(t, result, "run")
 
@@ -58,7 +58,7 @@ func TestAnalyzeBlockLambdaRequiresReturnTypeOrContext(t *testing.T) {
         return value
 `
 
-	_, errs := parseAndAnalyze(t, "lambda_block_context_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "lambda_block_context_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatalf("expected block lambda error, got none")
 	}

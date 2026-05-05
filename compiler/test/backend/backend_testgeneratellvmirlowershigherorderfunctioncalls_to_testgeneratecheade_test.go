@@ -1,7 +1,7 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
+	"elisacore/src/backend"
 	"strings"
 	"testing"
 )
@@ -16,7 +16,7 @@ def inc(value: i64) -> i64:
 def run() -> i64:
     return apply_twice(inc, 40)
 `
-	result := parseAndAnalyze(t, "backend_higher_order_call.llcontext", src)
+	result := parseAndAnalyze(t, "backend_higher_order_call.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -53,7 +53,7 @@ def run() -> i64:
 	bits: uintptr = inc as uintptr
     return call_bits(bits, 41)
 `
-	result := parseAndAnalyze(t, "backend_function_value_erasure_casts.llcontext", src)
+	result := parseAndAnalyze(t, "backend_function_value_erasure_casts.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -83,7 +83,7 @@ def run() -> i64:
     fn: func(i64) -> i64 = id.specialize[i64]()
     return apply_i64(fn, 7)
 `
-	result := parseAndAnalyze(t, "backend_explicit_generic_function_specialization.llcontext", src)
+	result := parseAndAnalyze(t, "backend_explicit_generic_function_specialization.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -119,7 +119,7 @@ def run() -> i64:
     boxed: Box[i64] = wrap(builder, 7)
     return boxed.value
 `
-	result := parseAndAnalyze(t, "backend_generic_builder_struct_function_field.llcontext", src)
+	result := parseAndAnalyze(t, "backend_generic_builder_struct_function_field.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -141,7 +141,7 @@ func TestGenerateLLVMIRLowersPanicViaBacktraceAwareAbort(t *testing.T) {
 	src := `def fail() -> void:
 	panic("boom")
 `
-	result := parseAndAnalyze(t, "backend_panic_stmt.llcontext", src)
+	result := parseAndAnalyze(t, "backend_panic_stmt.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -178,7 +178,7 @@ def slice_text(text: str[4]) -> sview[1, 3]:
 def view_char(text: sview[0, 4]) -> char:
     return text[1]
 `
-	result := parseAndAnalyze(t, "backend_builtin_string_surface.llcontext", src)
+	result := parseAndAnalyze(t, "backend_builtin_string_surface.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -208,7 +208,7 @@ func TestGenerateLLVMIRCoercesStringLiteralToSView(t *testing.T) {
     view: sview = "hello"
     return view
 `
-	result := parseAndAnalyze(t, "backend_string_literal_sview_context.llcontext", src)
+	result := parseAndAnalyze(t, "backend_string_literal_sview_context.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -235,7 +235,7 @@ def quoted_text() -> u8&:
 def unicode_text() -> u8&:
 	return "\u263A" as u8&
 `
-	result := parseAndAnalyze(t, "backend_string_escapes.llcontext", src)
+	result := parseAndAnalyze(t, "backend_string_escapes.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -265,7 +265,7 @@ func TestGenerateLLVMIRLowersStandaloneCharValues(t *testing.T) {
 def bump(ch: char) -> i64:
 	return (ch + 1).i64()
 `
-	result := parseAndAnalyze(t, "backend_standalone_char_values.llcontext", src)
+	result := parseAndAnalyze(t, "backend_standalone_char_values.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -299,7 +299,7 @@ def is_present() -> bool:
 def same_box(left: Box&, right: Box&) -> bool:
     return left == right
 `
-	result := parseAndAnalyze(t, "backend_reference_comparisons.llcontext", src)
+	result := parseAndAnalyze(t, "backend_reference_comparisons.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -333,7 +333,7 @@ def has_type_expr(symbol: Symbol) -> bool:
 def lacks_type_expr(symbol: Symbol) -> bool:
 	return symbol.type_expr == null
 `
-	result := parseAndAnalyze(t, "backend_optional_struct_field_null_compare.llcontext", src)
+	result := parseAndAnalyze(t, "backend_optional_struct_field_null_compare.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -356,7 +356,7 @@ def both_present(left: PascalType.Type?, right: PascalType.Type?) -> bool:
 def both_missing(left: PascalType.Type?, right: PascalType.Type?) -> bool:
 	return true if left == null and right == null else false
 `
-	result := parseAndAnalyze(t, "backend_optional_ternary_condition_null_compare.llcontext", src)
+	result := parseAndAnalyze(t, "backend_optional_ternary_condition_null_compare.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -372,7 +372,7 @@ func TestGenerateLLVMIRTernaryUsesPhi(t *testing.T) {
 	src := `def choose(flag: bool, left: i32, right: i32) -> i32:
     return left if flag else right
 `
-	result := parseAndAnalyze(t, "backend_ternary.llcontext", src)
+	result := parseAndAnalyze(t, "backend_ternary.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -403,7 +403,7 @@ global negated: i32 = -(ANSWER / 21)
 global pair: Pair = Pair(ANSWER - 41, 1 + 1)
 global flags: i32[4] = zeroed
 `
-	result := parseAndAnalyze(t, "backend_globals.llcontext", src)
+	result := parseAndAnalyze(t, "backend_globals.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -438,7 +438,7 @@ global picked: Pair = table[1]
 global wrapped: Holder = Holder(table[0])
 global first_left: i32 = table[0].left
 `
-	result := parseAndAnalyze(t, "backend_global_aggregate_refs.llcontext", src)
+	result := parseAndAnalyze(t, "backend_global_aggregate_refs.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -468,7 +468,7 @@ func TestGenerateLLVMIRSpecializesGenericFunctions(t *testing.T) {
 def use_identity(value: i32) -> i32:
     return identity(value)
 `
-	result := parseAndAnalyze(t, "backend_generic_specialization.llcontext", src)
+	result := parseAndAnalyze(t, "backend_generic_specialization.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -499,7 +499,7 @@ def use_handle(value: Handle[heap, &]) -> heap Node&:
 	kept: Handle[heap, &] = id_handle(value)
 	return kept.ptr
 `
-	result := parseAndAnalyze(t, "backend_ref_qualifier_specialization.llcontext", src)
+	result := parseAndAnalyze(t, "backend_ref_qualifier_specialization.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -539,7 +539,7 @@ export global seed as ctx_seed
 export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
 export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
 `
-	result := parseAndAnalyze(t, "backend_export_wrappers.llcontext", src)
+	result := parseAndAnalyze(t, "backend_export_wrappers.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -584,7 +584,7 @@ export global seed as ctx_seed
 export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
 export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
 `
-	result := parseAndAnalyze(t, "backend_export_header.llcontext", src)
+	result := parseAndAnalyze(t, "backend_export_header.elisa", src)
 	header, err := backend.GenerateCHeader(result)
 	if err != nil {
 		t.Fatalf("GenerateCHeader returned error: %v", err)

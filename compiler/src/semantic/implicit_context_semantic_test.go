@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func findImplicitContextTestFuncDecl(t *testing.T, result *Result, name string) *ast.FuncDecl {
@@ -19,7 +19,7 @@ func findImplicitContextTestFuncDecl(t *testing.T, result *Result, name string) 
 }
 
 func TestAnalyzeGenericCallResolvesImplicitContextArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_generic.llcontext", `bundle ParseCtx implicit:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_generic.elisa", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -69,7 +69,7 @@ def outer[T]() with ParseCtx -> i64:
 }
 
 func TestAnalyzeGenericCallAutoForwardsFunctionImplicitContextArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_forward_function.llcontext", `bundle ParseCtx implicit:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_forward_function.elisa", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -116,7 +116,7 @@ def outer[T]() with ParseCtx -> i64:
 }
 
 func TestAnalyzeTryWrappedGenericCallResolvesImplicitContextArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_try_generic.llcontext", `error ParseErr:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_try_generic.elisa", `error ParseErr:
     Bad
 
 bundle ParseCtx implicit:
@@ -161,7 +161,7 @@ def outer[T]() with ParseCtx -> i64 error[ParseErr]:
 }
 
 func TestAnalyzeTryWrappedGenericCallAutoForwardsFunctionImplicitContextArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_try_forward_function.llcontext", `error ParseErr:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_try_forward_function.elisa", `error ParseErr:
     Bad
 
 bundle ParseCtx implicit:
@@ -206,7 +206,7 @@ def outer[T]() with ParseCtx -> i64 error[ParseErr]:
 }
 
 func TestAnalyzeWithStmtBundleSpreadUsesAmbientBindings(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_with_stmt_spread.llcontext", `bundle ParseCtx implicit:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_with_stmt_spread.elisa", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -248,7 +248,7 @@ def keep() -> i64:
 }
 
 func TestAnalyzeWithStmtBundleSpreadExplicitOverrideWins(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_with_stmt_override.llcontext", `bundle ParseCtx implicit:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_with_stmt_override.elisa", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -297,7 +297,7 @@ def keep() -> i64:
 }
 
 func TestAnalyzeTrailingWithBundleSpreadExplicitOverrideWins(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_call_override.llcontext", `bundle ParseCtx implicit:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_call_override.elisa", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -334,7 +334,7 @@ def keep() -> i64:
 }
 
 func TestAnalyzeWithBundleWithoutSpreadRequiresAllFieldsExplicit(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_context_bundle_no_spread.llcontext", `bundle ParseCtx implicit:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_context_bundle_no_spread.elisa", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -357,7 +357,7 @@ def keep() -> i64:
 }
 
 func TestAnalyzeWithBundleSpreadMissingAmbientFieldErrors(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_context_bundle_missing_ambient.llcontext", `bundle ParseCtx implicit:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_context_bundle_missing_ambient.elisa", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -379,7 +379,7 @@ def keep() -> i64:
 }
 
 func TestAnalyzeImplicitCallUsesSameNameAmbientFallback(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_same_name_fallback.llcontext", `bundle AllocCtx implicit:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_same_name_fallback.elisa", `bundle AllocCtx implicit:
     alloc: i64
 
 def read_alloc() with AllocCtx -> i64:

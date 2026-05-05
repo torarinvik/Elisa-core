@@ -23,7 +23,7 @@ def inspect(values: array[i32, 8]) -> int:
 	right_indexed: view[i32] = wrapped.meta.items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_nested_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_nested_wildcard_rebased_helper_indexed_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -68,7 +68,7 @@ def inspect(values: array[i32, 8]) -> int:
 	right_overlap: view[i32] = wrapped.meta.items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_nested_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_nested_wildcard_rebased_helper_indexed_overlap_guardrails.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -113,7 +113,7 @@ def inspect(values: array[i32, 4]) -> int:
 	right_indexed: view[i32] = wrapped.meta.items[0].right
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_nested_rebased_helper_indexed_field_projection.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_nested_rebased_helper_indexed_field_projection.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -167,7 +167,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_rebased_helper_indexed_field_move_as.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_rebased_helper_indexed_field_move_as.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -229,7 +229,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_wildcard_rebased_helper_indexed_field_move_as.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_wildcard_rebased_helper_indexed_field_move_as.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -294,7 +294,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	_ = frozen
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_wildcard_rebased_helper_indexed_field_move_as.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_wildcard_rebased_helper_indexed_field_move_as.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -340,7 +340,7 @@ func TestAnalyzeCollectsOptimizationFactsForProofCarryingViewHelpers(t *testing.
 	first_chunk: dview[i32] = chunks[0]
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_proof_carrying_view_helpers.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_proof_carrying_view_helpers.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -420,7 +420,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 		Expr.Int(value: _):
 			return 1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_rebased_helper_indexed_field_match.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_rebased_helper_indexed_field_match.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -490,7 +490,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 		Expr.Int(value: _):
 			return 1
 `
-	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_wildcard_rebased_helper_indexed_field_match.llcontext", src)
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_wildcard_rebased_helper_indexed_field_match.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 

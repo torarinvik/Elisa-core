@@ -1,9 +1,9 @@
 package semantic
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/grammar"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/grammar"
+	"elisacore/src/lexer"
 )
 
 type ConstValueKind int

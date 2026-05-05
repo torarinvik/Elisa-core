@@ -1,7 +1,7 @@
 package semantic_test
 
 import (
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -28,7 +28,7 @@ export global seed as ctx_seed
 export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
 export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
 `
-	result, errs := parseAndAnalyze(t, "export_wrappers.llcontext", src)
+	result, errs := parseAndAnalyze(t, "export_wrappers.elisa", src)
 	requireNoErrors(t, errs)
 	if len(result.ExportedTypes) != 1 {
 		t.Fatalf("expected 1 exported type, got %d", len(result.ExportedTypes))
@@ -70,7 +70,7 @@ def keep_handle[refstorage Store, refstate State](value: Handle[Store, State]) -
 
 export func keep_heap_handle(value: HeapHandle) -> HeapHandle = keep_handle[heap, &]
 `
-	result, errs := parseAndAnalyze(t, "export_ref_qualifier_wrappers.llcontext", src)
+	result, errs := parseAndAnalyze(t, "export_ref_qualifier_wrappers.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	if len(result.ExportedTypes) != 2 {
@@ -110,7 +110,7 @@ struct Handle[refstorage Store, refstate State]:
 
 export type Handle[i32, &] as BadHandle
 `
-	_, errs := parseAndAnalyze(t, "export_ref_qualifier_non_concrete_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "export_ref_qualifier_non_concrete_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -132,7 +132,7 @@ def shared_seed() -> int:
 def hot_loop() -> void:
 	pass
 `
-	result, errs := parseAndAnalyze(t, "function_annotations_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "function_annotations_ok.elisa", src)
 	requireNoErrors(t, errs)
 	if len(result.AnnotatedFuncs) != 3 {
 		t.Fatalf("expected 3 annotated funcs, got %d", len(result.AnnotatedFuncs))
@@ -170,7 +170,7 @@ func TestAnalyzeRejectsUnknownFunctionAnnotation(t *testing.T) {
 def sample_case() -> int:
 	return 7
 `
-	_, errs := parseAndAnalyze(t, "function_annotations_unknown.llcontext", src)
+	_, errs := parseAndAnalyze(t, "function_annotations_unknown.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -182,7 +182,7 @@ func TestAnalyzeRejectsUnknownExternFunctionAnnotation(t *testing.T) {
 	src := `@smoke
 extern borrow_value(holder: i32&) -> i32&
 `
-	_, errs := parseAndAnalyze(t, "extern_function_annotations_unknown.llcontext", src)
+	_, errs := parseAndAnalyze(t, "extern_function_annotations_unknown.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -194,7 +194,7 @@ func TestAnalyzeRejectsExternBorrowsReturnUnknownParam(t *testing.T) {
 	src := `@borrows_return(missing)
 extern borrow_value(holder: i32&) -> i32&
 `
-	_, errs := parseAndAnalyze(t, "extern_function_annotations_unknown_param.llcontext", src)
+	_, errs := parseAndAnalyze(t, "extern_function_annotations_unknown_param.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -206,7 +206,7 @@ func TestAnalyzeRejectsExternBorrowsReturnOnNonProvenanceParam(t *testing.T) {
 	src := `@borrows_return(count)
 extern borrow_value(count: i32) -> i32&
 `
-	_, errs := parseAndAnalyze(t, "extern_function_annotations_bad_param.llcontext", src)
+	_, errs := parseAndAnalyze(t, "extern_function_annotations_bad_param.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -220,7 +220,7 @@ func TestAnalyzeRejectsDuplicateFunctionAnnotation(t *testing.T) {
 def sample_case() -> int:
 	return 7
 `
-	_, errs := parseAndAnalyze(t, "function_annotations_duplicate.llcontext", src)
+	_, errs := parseAndAnalyze(t, "function_annotations_duplicate.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -233,7 +233,7 @@ func TestAnalyzeRejectsTestFunctionParameters(t *testing.T) {
 def sample_case(value: int) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "function_annotations_test_params.llcontext", src)
+	_, errs := parseAndAnalyze(t, "function_annotations_test_params.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -246,7 +246,7 @@ func TestAnalyzeAllowsTestFunctionAbortPermission(t *testing.T) {
 def sample_case() -> void can[Abort.Panic]:
 	assert(true)
 `
-	result, errs := parseAndAnalyze(t, "function_annotations_test_abort.llcontext", src)
+	result, errs := parseAndAnalyze(t, "function_annotations_test_abort.elisa", src)
 	if len(errs) != 0 {
 		t.Fatalf("expected no semantic errors, got:\n%s", strings.Join(errs, "\n"))
 	}
@@ -262,7 +262,7 @@ func TestAnalyzeAcceptsBareAssertCondition(t *testing.T) {
 	src := `def sample_case(left: int, right: int) -> void can[Abort.Panic]:
 	assert left != right
 `
-	_, errs := parseAndAnalyze(t, "bare_assert_condition.llcontext", src)
+	_, errs := parseAndAnalyze(t, "bare_assert_condition.elisa", src)
 	if len(errs) != 0 {
 		t.Fatalf("expected no semantic errors, got:\n%s", strings.Join(errs, "\n"))
 	}
@@ -272,7 +272,7 @@ func TestAnalyzeAllowsTestFunctionNonAbortPermission(t *testing.T) {
 def sample_case() -> void can[Console.Write]:
 	pass
 `
-	result, errs := parseAndAnalyze(t, "function_annotations_test_console_permission.llcontext", src)
+	result, errs := parseAndAnalyze(t, "function_annotations_test_console_permission.elisa", src)
 	if len(errs) != 0 {
 		t.Fatalf("expected no semantic errors, got:\n%s", strings.Join(errs, "\n"))
 	}
@@ -292,7 +292,7 @@ def sample_case() -> void:
 	can Memory.Allocate:
 		_ = alloc_i32()
 `
-	result, errs := parseAndAnalyze(t, "function_annotations_test_local_memory_grant_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "function_annotations_test_local_memory_grant_ok.elisa", src)
 	if len(errs) != 0 {
 		t.Fatalf("expected no semantic errors, got:\n%s", strings.Join(errs, "\n"))
 	}
@@ -303,7 +303,7 @@ func TestAnalyzeRejectsBenchFunctionNonVoidReturn(t *testing.T) {
 def hot_loop() -> int:
 	return 7
 `
-	_, errs := parseAndAnalyze(t, "function_annotations_bench_return.llcontext", src)
+	_, errs := parseAndAnalyze(t, "function_annotations_bench_return.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -316,7 +316,7 @@ func TestAnalyzeRejectsGenericFixtureFunction(t *testing.T) {
 def shared_seed[T]() -> int:
 	return 7
 `
-	_, errs := parseAndAnalyze(t, "function_annotations_fixture_generic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "function_annotations_fixture_generic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -329,7 +329,7 @@ func TestAnalyzeRejectsExportedNonGlobalSymbol(t *testing.T) {
 
 export global MAGIC as ctx_magic
 `
-	_, errs := parseAndAnalyze(t, "export_non_global_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "export_non_global_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -343,7 +343,7 @@ func TestAnalyzeRejectsExportedArrayBoundaryTypes(t *testing.T) {
 
 export func pass_array_c(value: i32[4]) -> i32[4] = pass_array
 `
-	_, errs := parseAndAnalyze(t, "export_array_boundary_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "export_array_boundary_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -355,7 +355,7 @@ func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
 	src := `def choose_text(value: u8&?) -> u8&:
 	return value if value != null else "" as u8&
 `
-	_, errs := parseAndAnalyze(t, "ternary_refinement.llcontext", src)
+	_, errs := parseAndAnalyze(t, "ternary_refinement.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsNullableToNonNullCastWithoutProof(t *testing.T) {
@@ -368,7 +368,7 @@ def bad() -> Box&:
     box: Box&? = maybe_box()
 	return box.cast[Box&]
 `
-	_, errs := parseAndAnalyze(t, "nonnull_cast_rejection.llcontext", src)
+	_, errs := parseAndAnalyze(t, "nonnull_cast_rejection.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -391,7 +391,7 @@ def is_present() -> bool:
 def same_box(left: Box&, right: Box&) -> bool:
 	return left == right
 `
-	_, errs := parseAndAnalyze(t, "reference_comparisons.llcontext", src)
+	_, errs := parseAndAnalyze(t, "reference_comparisons.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsBareReferenceTypeSyntax(t *testing.T) {
@@ -402,14 +402,14 @@ def read(box: Box&) -> int:
 	ptr: u8& = "hello" as u8&
 	return box.value + ptr[0].int()
 `
-	_, errs := parseAndAnalyze(t, "bare_reference_type_accept.llcontext", src)
+	_, errs := parseAndAnalyze(t, "bare_reference_type_accept.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestParseRejectsLegacyDotReferenceCastSyntax(t *testing.T) {
 	src := `def bits_ptr(bits: uintptr) -> u8&:
 	return bits.u8&()
 `
-	_, errs := parseAndAnalyze(t, "legacy_reference_cast_parse_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "legacy_reference_cast_parse_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected parse error, got none")
 	}
@@ -438,7 +438,7 @@ def use_source() -> Box&?:
 def explicit_any_still_works(box: heap Box&?) -> Box&?:
 	return box.cast[Box&?]
 `
-	result, errs := parseAndAnalyze(t, "storage_cast_syntax.llcontext", src)
+	result, errs := parseAndAnalyze(t, "storage_cast_syntax.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -458,7 +458,7 @@ def keep_explicit_stack() -> stack Box&:
 	box: Box = zeroed
 	return box.ref[stack Box&]
 `
-	result, errs := parseAndAnalyze(t, "ref_sugar_address_cast.llcontext", src)
+	result, errs := parseAndAnalyze(t, "ref_sugar_address_cast.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -469,7 +469,7 @@ func TestAnalyzeRejectsLegacyCastSyntax(t *testing.T) {
 def widen(box: heap Box&?) -> Box&?:
 	return box.cast[Box&?]()
 `
-	_, errs := parseAndAnalyze(t, "legacy_cast_error.llcontext", src)
+	_, errs := parseAndAnalyze(t, "legacy_cast_error.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected parser error, got none")
 	}
@@ -484,7 +484,7 @@ func TestAnalyzeAcceptsImplicitAnyStorageWithoutCast(t *testing.T) {
 def ok(box: heap Box&) -> Box&:
 	return box
 `
-	_, errs := parseAndAnalyze(t, "implicit_any_storage_without_cast.llcontext", src)
+	_, errs := parseAndAnalyze(t, "implicit_any_storage_without_cast.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsEquivalentConstArrayShapes(t *testing.T) {
@@ -493,14 +493,14 @@ func TestAnalyzeAcceptsEquivalentConstArrayShapes(t *testing.T) {
 def same_shape(buf: u8[N]) -> u8[2 + 2]:
     return buf
 `
-	_, errs := parseAndAnalyze(t, "equivalent_const_array_shapes.llcontext", src)
+	_, errs := parseAndAnalyze(t, "equivalent_const_array_shapes.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsMismatchedFixedArrayShapes(t *testing.T) {
 	src := `def bad(buf: u8[4]) -> u8[5]:
     return buf
 `
-	_, errs := parseAndAnalyze(t, "mismatched_fixed_array_shapes.llcontext", src)
+	_, errs := parseAndAnalyze(t, "mismatched_fixed_array_shapes.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -512,7 +512,7 @@ func TestAnalyzeRejectsRuntimeArraySizeExpression(t *testing.T) {
 	src := `def bad(n: usize) -> void:
     buf: u8[n] = zeroed
 `
-	_, errs := parseAndAnalyze(t, "runtime_array_size.llcontext", src)
+	_, errs := parseAndAnalyze(t, "runtime_array_size.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -527,7 +527,7 @@ def bad() -> u8:
     buf: u8[4] = zeroed
     return buf[IDX]
 `
-	_, errs := parseAndAnalyze(t, "constant_oob_array_index.llcontext", src)
+	_, errs := parseAndAnalyze(t, "constant_oob_array_index.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -542,7 +542,7 @@ def read_last() -> u8:
     buf: u8[4] = zeroed
     return buf[IDX]
 `
-	_, errs := parseAndAnalyze(t, "constant_in_bounds_array_index.llcontext", src)
+	_, errs := parseAndAnalyze(t, "constant_in_bounds_array_index.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsConstantOutOfBoundsArraySlice(t *testing.T) {
@@ -550,7 +550,7 @@ func TestAnalyzeRejectsConstantOutOfBoundsArraySlice(t *testing.T) {
     buf: u8[4] = zeroed
     return buf[2:5]
 `
-	_, errs := parseAndAnalyze(t, "constant_oob_array_slice.llcontext", src)
+	_, errs := parseAndAnalyze(t, "constant_oob_array_slice.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -563,7 +563,7 @@ func TestAnalyzeRejectsConstantReversedArraySlice(t *testing.T) {
     buf: u8[4] = zeroed
     return buf[3:1]
 `
-	_, errs := parseAndAnalyze(t, "constant_reversed_array_slice.llcontext", src)
+	_, errs := parseAndAnalyze(t, "constant_reversed_array_slice.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -581,6 +581,6 @@ def read_second() -> u8:
     buf: u8[4] = zeroed
     return buf[IDX]
 `
-	_, errs := parseAndAnalyze(t, "modulo_expr_and_const.llcontext", src)
+	_, errs := parseAndAnalyze(t, "modulo_expr_and_const.elisa", src)
 	requireNoErrors(t, errs)
 }

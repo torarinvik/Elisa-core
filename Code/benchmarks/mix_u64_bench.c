@@ -110,32 +110,32 @@ int main(void) {
     const uint64_t seed = UINT64_C(0x123456789abcdef0);
 
     uint64_t *base = (uint64_t *)malloc(len * sizeof(*base));
-    uint64_t *work_llctx = (uint64_t *)malloc(len * sizeof(*work_llctx));
+    uint64_t *work_elisa_core = (uint64_t *)malloc(len * sizeof(*work_elisa_core));
     uint64_t *work_c = (uint64_t *)malloc(len * sizeof(*work_c));
-    if (base == NULL || work_llctx == NULL || work_c == NULL) {
+    if (base == NULL || work_elisa_core == NULL || work_c == NULL) {
         fprintf(stderr, "allocation failed\n");
         free(base);
-        free(work_llctx);
+        free(work_elisa_core);
         free(work_c);
         return 1;
     }
 
     fill_input(base, len, seed);
 
-    memcpy(work_llctx, base, len * sizeof(*work_llctx));
+    memcpy(work_elisa_core, base, len * sizeof(*work_elisa_core));
     memcpy(work_c, base, len * sizeof(*work_c));
-    uint64_t llctx_check = llctx_mix_u64(work_llctx, (uintptr_t)len, inner_rounds, seed);
+    uint64_t elisa_core_check = elisa_core_mix_u64(work_elisa_core, (uintptr_t)len, inner_rounds, seed);
     uint64_t c_check = c_mix_u64(work_c, (uintptr_t)len, inner_rounds, seed);
-    if (llctx_check != c_check || memcmp(work_llctx, work_c, len * sizeof(*work_c)) != 0) {
-        fprintf(stderr, "llcontext and C kernels produced different results\n");
+    if (elisa_core_check != c_check || memcmp(work_elisa_core, work_c, len * sizeof(*work_c)) != 0) {
+        fprintf(stderr, "elisacore and C kernels produced different results\n");
         free(base);
-        free(work_llctx);
+        free(work_elisa_core);
         free(work_c);
         return 2;
     }
 
     bench_result results[] = {
-        run_bench("llcontext", llctx_mix_u64, base, work_llctx, len, inner_rounds, seed, samples),
+        run_bench("elisacore", elisa_core_mix_u64, base, work_elisa_core, len, inner_rounds, seed, samples),
         run_bench("native C", c_mix_u64, base, work_c, len, inner_rounds, seed, samples),
     };
 
@@ -144,11 +144,11 @@ int main(void) {
     for (size_t i = 0; i < ARRAY_LEN(results); ++i) {
         print_result(&results[i]);
     }
-    printf("\nllcontext / C ratio: %.3fx\n", results[0].ns_per_elem_round / results[1].ns_per_elem_round);
+    printf("\nelisacore / C ratio: %.3fx\n", results[0].ns_per_elem_round / results[1].ns_per_elem_round);
     printf("bench sink=%" PRIu64 "\n", bench_sink);
 
     free(base);
-    free(work_llctx);
+    free(work_elisa_core);
     free(work_c);
     return 0;
 }

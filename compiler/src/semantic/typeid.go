@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 type TypeID uint64

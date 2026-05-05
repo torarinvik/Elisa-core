@@ -1,4 +1,4 @@
-# Curated benchmark corpus for the llcontext Lua frontend.
+# Curated benchmark corpus for the elisacore Lua frontend.
 # These files are intentionally small, accepted by the checked frontend,
 # and exercise different parts of the lexer/parser/analysis pipeline.
 

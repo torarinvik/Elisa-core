@@ -1,6 +1,6 @@
 package semantic
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func callIdentName(expr *ast.CallExpr) string {
 	if expr == nil {

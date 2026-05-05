@@ -12,7 +12,7 @@ import (
 
 func TestRunCLIListsAnnotatedFunctionsByKind(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "annotated_lists.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "annotated_lists.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@fixture\ndef shared_seed() -> int:\n    return 7\n\n@bench\ndef bench_hot_loop() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write annotated list fixture: %v", err)
@@ -89,7 +89,7 @@ func TestRunCLIListsAnnotatedFunctionsByKind(t *testing.T) {
 }
 func TestRunCLIRejectsFilterOutsideAnnotationListModes(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "filter_reject.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "filter_reject.elisa")
 	if err := os.WriteFile(fixturePath, []byte("def sample_case() -> void:\n    pass\n"), 0o644); err != nil {
 		t.Fatalf("failed to write filter rejection fixture: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestRunCLIRejectsFilterOutsideAnnotationListModes(t *testing.T) {
 }
 func TestRunCLIFormatsSourceCanonically(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "format_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "format_fixture.elisa")
 	src := "@test\ndef sample_case(value: i64) -> i64:\n    values=[1,2,3]\n    if likely value > 0:\n        return (value)\n    return 0\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write format fixture: %v", err)
@@ -133,7 +133,7 @@ func TestRunCLIFormatsSourceCanonically(t *testing.T) {
 		}
 	}
 
-	formattedPath := filepath.Join(fixtureDir, "formatted_fixture.llcontext")
+	formattedPath := filepath.Join(fixtureDir, "formatted_fixture.elisa")
 	if err := os.WriteFile(formattedPath, stdout.Bytes(), 0o644); err != nil {
 		t.Fatalf("failed to write formatted fixture: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestRunCLIFormatsSourceCanonically(t *testing.T) {
 }
 func TestRunCLIEmitsReferenceDocs(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "reference_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "reference_fixture.elisa")
 	src := "struct Pair:\n    left: i64\n    right: i64\n\n@test\ndef build_pair(value: i64) -> Pair:\n    return Pair(value, value)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write reference fixture: %v", err)
@@ -166,7 +166,7 @@ func TestRunCLIEmitsReferenceDocs(t *testing.T) {
 	}
 	output := stdout.String()
 	for _, check := range []string{
-		"# Reference: reference_fixture.llcontext",
+		"# Reference: reference_fixture.elisa",
 		"## Struct `Pair`",
 		"- declaration: `struct Pair:`",
 		"- fields:",
@@ -183,7 +183,7 @@ func TestRunCLIEmitsReferenceDocs(t *testing.T) {
 }
 func TestRunCLIGeneratesSkippedTestRunnerSource(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "skipped_test_runner_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "skipped_test_runner_fixture.elisa")
 	src := "@skip(todo)\n@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write skipped runner fixture: %v", err)
@@ -211,7 +211,7 @@ func TestRunCLIGeneratesSkippedTestRunnerSource(t *testing.T) {
 }
 func TestRunCLIGeneratesTestRunnerSource(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "test_runner_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "test_runner_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n\ndef helper() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write runner fixture: %v", err)
@@ -245,7 +245,7 @@ func TestRunCLIGeneratesTestRunnerSource(t *testing.T) {
 }
 func TestRunCLIGeneratesFilteredTestRunnerSource(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "filtered_test_runner_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "filtered_test_runner_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write filtered runner fixture: %v", err)
@@ -277,7 +277,7 @@ func TestRunCLIRunsGeneratedTestRunner(t *testing.T) {
 		t.Skip("clang not available")
 	}
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "generated_runner_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "generated_runner_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write generated runner fixture: %v", err)
@@ -293,7 +293,7 @@ func TestRunCLIRunsGeneratedTestRunner(t *testing.T) {
 		t.Fatalf("expected no stderr while generating runner, got:\n%s", runnerStderr.String())
 	}
 
-	runnerPath := filepath.Join(fixtureDir, "generated_runner.llcontext")
+	runnerPath := filepath.Join(fixtureDir, "generated_runner.elisa")
 	if err := os.WriteFile(runnerPath, runnerStdout.Bytes(), 0o644); err != nil {
 		t.Fatalf("failed to write generated runner source: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestRunCLIExecutesSelectedTests(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "execute_tests_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "execute_tests_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write execute-tests fixture: %v", err)
@@ -377,7 +377,7 @@ func TestRunCLIExecutesEffectfulSelectedTests(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "execute_effectful_tests_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "execute_effectful_tests_fixture.elisa")
 	src := "@test\ndef memory_case() -> void:\n    can Memory.Allocate, Abort.Panic:\n        values: i64[4] = zeroed\n        values[0] <- 7\n        if values[0] != 7:\n            panic(\"expected initialized value\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write effectful execute-tests fixture: %v", err)
@@ -410,8 +410,8 @@ func TestRunCLIExecutesPoolBackedSelectedTests(t *testing.T) {
 
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "execute_pool_tests_fixture.llcontext")
-	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "execute_pool_tests_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
 	if err != nil {
 		t.Fatalf("failed to compute runtime include path: %v", err)
@@ -475,8 +475,8 @@ func TestRunCLIAcceptsBareSViewLocalAnnotationInObjectBuild(t *testing.T) {
 
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "sview_local_obj_fixture.llcontext")
-	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "sview_local_obj_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
 	if err != nil {
 		t.Fatalf("failed to compute runtime include path: %v", err)
@@ -510,8 +510,8 @@ func TestRunCLIAcceptsSurfaceRuntimeBackedLocalAnnotationsInObjectBuild(t *testi
 
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "surface_runtime_locals_obj_fixture.llcontext")
-	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "surface_runtime_locals_obj_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
 	if err != nil {
 		t.Fatalf("failed to compute runtime include path: %v", err)

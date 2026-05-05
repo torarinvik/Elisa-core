@@ -2,11 +2,11 @@ package main
 
 import (
 	"bytes"
+	"elisacore/src/ast"
+	"elisacore/src/backend"
+	"elisacore/src/semantic"
 	"encoding/json"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/backend"
-	"llcontext/src/semantic"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +16,7 @@ import (
 
 func TestRunCLIEmitsFilteredFactTraceReport(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -34,7 +34,7 @@ func TestRunCLIEmitsFilteredFactTraceReport(t *testing.T) {
 }
 func TestRunCLIEmitsInterfaceFactTraceReport(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -51,7 +51,7 @@ func TestRunCLIEmitsInterfaceFactTraceReport(t *testing.T) {
 }
 func TestRunCLIEmitsFactTraceContractSnapshot(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -76,8 +76,8 @@ func TestRunCLIEmitsFactTraceContractSnapshot(t *testing.T) {
 }
 func TestRunCLIEmitsFactTraceKeyedFilterSelectors(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	coreFixture := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
-	interfaceFixture := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+	coreFixture := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
+	interfaceFixture := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 	cases := []struct {
 		name     string
 		fixture  string
@@ -119,7 +119,7 @@ func TestRunCLIEmitsFactTraceKeyedFilterSelectors(t *testing.T) {
 }
 func TestRunCLIEmitsFactTraceFilterIntersections(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -137,7 +137,7 @@ func TestRunCLIEmitsFactTraceFilterIntersections(t *testing.T) {
 }
 func TestRunCLIEmitsFactTraceSnapshotOnlyFilter(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -154,7 +154,7 @@ func TestRunCLIEmitsFactTraceSnapshotOnlyFilter(t *testing.T) {
 }
 func TestRunCLIEmitsMixedRequireFactTrace(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -171,7 +171,7 @@ func TestRunCLIEmitsMixedRequireFactTrace(t *testing.T) {
 }
 func TestRunCLIEmitsPackedTreeStoreProvenanceFacts(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -188,7 +188,7 @@ func TestRunCLIEmitsPackedTreeStoreProvenanceFacts(t *testing.T) {
 }
 func TestRunCLIEmitsFactTraceJSONShape(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -249,7 +249,7 @@ func TestRunCLIEmitsFactTraceJSONShape(t *testing.T) {
 }
 func TestRunCLIEmitsFactTraceJSONStructuredSourcePos(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -280,7 +280,7 @@ func TestRunCLIEmitsFactTraceJSONStructuredSourcePos(t *testing.T) {
 }
 func TestRunCLIRejectsMalformedFactTraceFilters(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 	cases := []string{"kind=", "=eq:widen", "unknown=eq:widen", "kind=widen", "fact_core_rules"}
 	for _, filter := range cases {
 		t.Run(filter, func(t *testing.T) {
@@ -298,7 +298,7 @@ func TestRunCLIRejectsMalformedFactTraceFilters(t *testing.T) {
 }
 func BenchmarkGenerateFactTraceReportSummary(b *testing.B) {
 	repoRoot := repoRootFromMainTest(b)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 	var stderr bytes.Buffer
 	program, ok := loadProgramInput(fixturePath, &stderr)
 	if !ok {
@@ -364,7 +364,7 @@ func syntheticFactTraceResultForBenchmark(count int) *semantic.Result {
 }
 func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -410,7 +410,7 @@ func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.
 }
 func TestRunCLIPrintsPackedLoweringSummary(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "packed_info.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "packed_info.elisa")
 	src := "@packed_profile(build_heavy)\npacked enum Expr:\n    common:\n        @storage(side_table)\n        span: i64\n        kind: u32\n    Lit(value: i64)\n    End\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write packed info fixture: %v", err)
@@ -445,7 +445,7 @@ func TestRunCLIPrintsPackedLoweringSummary(t *testing.T) {
 }
 func TestRunCLIRejectsRemovedPackedABIFlag(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -493,7 +493,7 @@ func TestRunCLIGeneratedHeaderInteropHarness(t *testing.T) {
 		t.Skip("clang not available")
 	}
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.elisa")
 	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i_generated_harness.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "export_vec2i.h")

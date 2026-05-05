@@ -1,6 +1,6 @@
 // Benchmark-only reference arena header.
 // This file is retained for C microbenchmarks and is not part of the active
-// llcontext runtime implementation.
+// elisacore runtime implementation.
 
 // Copyright 2022 Alexey Kutepov <reximkut@gmail.com>
 

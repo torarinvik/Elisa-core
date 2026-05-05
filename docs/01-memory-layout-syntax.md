@@ -7,7 +7,7 @@ This ordering is based on compiler effort, not usefulness.
 
 ## 1. `aligned(N) struct`
 
-```context
+```elisa
 aligned(16) struct Vec4:
     x: f32
     y: f32
@@ -22,7 +22,7 @@ Requests that the struct itself be aligned to `N` bytes.
 
 ## 2. `packed struct`
 
-```context
+```elisa
 packed struct PacketHeader:
     kind: u8
     size: u16
@@ -36,7 +36,7 @@ Requests that the struct use packed layout with minimal padding.
 
 ## 3. `struct`
 
-```context
+```elisa
 struct Foo:
     a: u8
     b: i32
@@ -51,7 +51,7 @@ The old `repr(c) struct` spelling is no longer supported; use `struct` directly.
 
 ## 4. `reorderable struct`
 
-```context
+```elisa
 reorderable struct Foo:
     a: u8
     b: i32
@@ -65,7 +65,7 @@ Allows the compiler to reorder fields to reduce padding or improve layout.
 
 ## 5. `cacheline struct`
 
-```context
+```elisa
 cacheline struct Counter:
     value: i64
 ```
@@ -77,7 +77,7 @@ Requests that each instance begin on a cache-line boundary.
 
 ## 6. `isolate_cacheline` field modifier
 
-```context
+```elisa
 struct WorkerState:
     isolate_cacheline jobs_done: i64
     isolate_cacheline errors: i64
@@ -90,7 +90,7 @@ Requests that the marked field be placed on its own cache line.
 
 ## 7. `hotcold struct` with `hot:` and `cold:` sections
 
-```context
+```elisa
 hotcold struct Entity:
     hot:
         x: f32
@@ -112,7 +112,7 @@ Splits fields into hot and cold groups inside one logical type.
 
 ## 8. `layout aos struct`
 
-```context
+```elisa
 layout aos struct Particle:
     x: f32
     y: f32
@@ -129,7 +129,7 @@ Requests array-of-structs physical layout.
 
 ## 9. `layout soa struct`
 
-```context
+```elisa
 layout soa struct Particle:
     x: f32
     y: f32
@@ -146,7 +146,7 @@ Requests struct-of-arrays physical layout.
 
 ## 10. Combined layout modifiers
 
-```context
+```elisa
 layout soa hotcold struct Enemy:
     hot:
         x: f32
@@ -169,7 +169,7 @@ Combines SoA storage with hot/cold field grouping.
 
 ## 11. `layout tiled(N) struct`
 
-```context
+```elisa
 layout tiled(256) struct Particle:
     x: f32
     y: f32
@@ -186,7 +186,7 @@ Requests that instances be stored in fixed-size tiles of `N` elements.
 
 ## 12. `region Name`
 
-```context
+```elisa
 region ParseArena
 ```
 
@@ -197,7 +197,7 @@ Declares a named allocation region.
 
 ## 13. `struct T in Region`
 
-```context
+```elisa
 region ParseArena
 
 struct Expr in ParseArena:
@@ -213,7 +213,7 @@ Declares that instances of the type belong to the named region.
 
 ## 14. `layout ... in Region`
 
-```context
+```elisa
 region SimArena
 
 layout soa struct Particle in SimArena:
@@ -251,7 +251,7 @@ If you want the cleanest climb up the mountain:
 
 My blunt recommendation: the highest ROI starting subset is:
 
-```context
+```elisa
 struct ...
 packed struct ...
 aligned(N) struct ...

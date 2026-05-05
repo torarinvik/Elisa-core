@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 )
 
 type publicAggregate struct {
@@ -514,7 +514,7 @@ func headerGuardName(filename string) string {
 	}
 	value := strings.Trim(out.String(), "_")
 	if value == "" {
-		value = "LLCONTEXT_EXPORT"
+		value = "ELISACORE_EXPORT"
 	}
 	return value + "_H"
 }

@@ -3,7 +3,7 @@ package semantic
 import (
 	"strconv"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func (a *Analyzer) analyzeScopedPackedAllocExpr(expr *ast.AllocExpr) Type {

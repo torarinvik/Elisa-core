@@ -5,7 +5,7 @@ package backend
 /*
 #include <llvm-c/Core.h>
 
-static int llcontextConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
+static int elisacoreConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
 	if (LLVMIsAConstantInt(Value) == NULL) {
 		return 0;
 	}
@@ -16,9 +16,9 @@ static int llcontextConstIntGetZExtValue(LLVMValueRef Value, unsigned long long*
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
 )
 
 type packedStoreOps struct {
@@ -158,7 +158,7 @@ func (ops *packedStoreOps) constantUint64(value C.LLVMValueRef) (uint64, bool) {
 		return 0, false
 	}
 	var raw C.ulonglong
-	if C.llcontextConstIntGetZExtValue(value, &raw) == 0 {
+	if C.elisacoreConstIntGetZExtValue(value, &raw) == 0 {
 		return 0, false
 	}
 	return uint64(raw), true

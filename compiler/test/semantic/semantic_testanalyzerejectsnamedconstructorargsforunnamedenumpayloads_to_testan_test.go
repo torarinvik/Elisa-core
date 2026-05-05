@@ -1,7 +1,7 @@
 package semantic_test
 
 import (
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -13,7 +13,7 @@ func TestAnalyzeRejectsNamedConstructorArgsForUnnamedEnumPayloads(t *testing.T) 
 def make_some() -> MaybeInt:
 	return MaybeInt.Some(value: 1)
 `
-	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_unnamed_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_unnamed_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -29,7 +29,7 @@ func TestAnalyzeRejectsMixedNamedAndPositionalEnumConstructorArgs(t *testing.T) 
 def make_pair() -> PairOrInt:
 	return PairOrInt.Pair(left: 3, 4)
 `
-	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_mixed_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_mixed_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -44,7 +44,7 @@ func TestAnalyzeAcceptsNamedArgumentsForFunctionCalls(t *testing.T) {
 def bad() -> int:
 	return add(left: 1, right: 2)
 `
-	result, errs := parseAndAnalyze(t, "named_args_function_call.llcontext", src)
+	result, errs := parseAndAnalyze(t, "named_args_function_call.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "bad", "int")
@@ -64,7 +64,7 @@ def unwrap(value: MaybeInt) -> int:
 			return 0
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "enum_match_shadowed_stmt.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_match_shadowed_stmt.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -85,7 +85,7 @@ def unwrap(value: MaybeInt) -> int:
 			return inner
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "enum_match_non_exhaustive.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_match_non_exhaustive.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsConstEnumMatchStatements(t *testing.T) {
@@ -114,7 +114,7 @@ def score_full(op: Op) -> int:
 			return 30
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "const_enum_match_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "const_enum_match_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsNonExhaustiveConstEnumMatchStatementsWithFallthrough(t *testing.T) {
@@ -131,7 +131,7 @@ def score(op: Op) -> int:
 			return 20
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "const_enum_match_stmt_non_exhaustive.llcontext", src)
+	_, errs := parseAndAnalyze(t, "const_enum_match_stmt_non_exhaustive.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
@@ -141,7 +141,7 @@ func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
 			return 1
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "string_match_stmt_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_match_stmt_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsStringLiteralMatchStatementOverSlice(t *testing.T) {
@@ -153,7 +153,7 @@ func TestAnalyzeAcceptsStringLiteralMatchStatementOverSlice(t *testing.T) {
 			return 0
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "string_match_stmt_slice_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_match_stmt_slice_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsNonExhaustiveStringMatchStatementWithFallthrough(t *testing.T) {
@@ -163,7 +163,7 @@ func TestAnalyzeAcceptsNonExhaustiveStringMatchStatementWithFallthrough(t *testi
 			return 1
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "string_match_stmt_non_exhaustive.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_match_stmt_non_exhaustive.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsShadowedStringMatchArms(t *testing.T) {
@@ -177,7 +177,7 @@ func TestAnalyzeRejectsShadowedStringMatchArms(t *testing.T) {
 			return 0
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "string_match_shadowed_stmt.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_match_shadowed_stmt.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -199,7 +199,7 @@ def classify(value: Wrapper) -> int:
 			return 0
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "string_match_nested_pattern_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "string_match_nested_pattern_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -212,7 +212,7 @@ func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
 			return 0
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "string_match_non_string_value_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_match_non_string_value_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -232,7 +232,7 @@ def classify(text: StringView) -> int:
 		_:
 			return 0
 `
-	_, errs := parseAndAnalyze(t, "string_match_non_literal_arm_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_match_non_literal_arm_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -265,7 +265,7 @@ def loop_value(tok: Token) -> i64:
 		return value
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "struct_is_condition_bindings_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "struct_is_condition_bindings_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -288,7 +288,7 @@ def loop_value(tok: Token) -> i64:
 		return value
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "struct_is_condition_bindings_and_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "struct_is_condition_bindings_and_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -311,7 +311,7 @@ def loop_value(tok: Token) -> i64:
 		return value
 	return 0
 `
-	result, errs := parseAndAnalyze(t, "struct_is_condition_bindings_or_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "struct_is_condition_bindings_or_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -329,7 +329,7 @@ def score(tok: Token) -> i64:
 		return value
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "struct_is_condition_binding_or_missing_branch_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "struct_is_condition_binding_or_missing_branch_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatalf("expected composed-condition binding diagnostic")
 	}
@@ -357,7 +357,7 @@ def score(tok: Token) -> i64:
 		return value.start
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "struct_is_condition_binding_or_type_mismatch_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "struct_is_condition_binding_or_type_mismatch_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatalf("expected composed-condition binding diagnostic")
 	}
@@ -374,7 +374,7 @@ func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
 	Int(int)
 	Add(Expr, Expr)
 `
-	_, errs := parseAndAnalyze(t, "enum_recursive_by_value_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_recursive_by_value_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -395,7 +395,7 @@ def eval(node: Expr&) -> int:
 		Expr.Add(left: left, right: right):
 			return eval(left) + eval(right)
 `
-	_, errs := parseAndAnalyze(t, "enum_recursive_by_ref_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_recursive_by_ref_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedEnumsWithExplicitStoreCore(t *testing.T) {
@@ -418,7 +418,7 @@ def eval(node: Expr, store: Expr.Store[Local]) -> int:
 		Expr.Add(left: left, right: right):
 			return eval(left, store) + eval(right, store)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_explicit_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_explicit_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedEnumsWithinInStoreBlocks(t *testing.T) {
@@ -443,7 +443,7 @@ def eval(node: Expr, store: Expr.Store[Local]) -> int:
 			Expr.Add(left: left, right: right):
 				return node.span + eval(left, store) + eval(right, store)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_in_store_block_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_in_store_block_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPackedEnumTailPayloadsAsDynamicViews(t *testing.T) {
@@ -461,7 +461,7 @@ def build() -> int:
 				return items[0] + items[2]
 			return 0
 `
-	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_dview_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_dview_ok.elisa", src)
 	requireNoErrors(t, errs)
 
 	enumType, ok := result.NamedTypes["Expr"].(*semantic.EnumType)
@@ -491,7 +491,7 @@ func TestAnalyzeRejectsTailPayloadsOnOrdinaryEnums(t *testing.T) {
 	src := `enum Expr:
 	Block(items: tail int)
 `
-	_, errs := parseAndAnalyze(t, "enum_tail_payload_non_packed_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_tail_payload_non_packed_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -515,7 +515,7 @@ def build() -> int:
 				return items[1]
 			return 0
 `
-	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_not_final_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_not_final_ok.elisa", src)
 	requireNoErrors(t, errs)
 
 	enumType, ok := result.NamedTypes["Expr"].(*semantic.EnumType)
@@ -546,7 +546,7 @@ def freeze_store(owner: Arena) -> Expr.Store[Frozen]:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	return freeze(move store)
 `
-	result, errs := parseAndAnalyze(t, "packed_enum_store_freeze_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_enum_store_freeze_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "freeze_store", "Expr.Store[Frozen]")

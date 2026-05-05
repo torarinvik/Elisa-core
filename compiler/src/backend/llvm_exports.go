@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 )
 
 type exportABILowering struct {

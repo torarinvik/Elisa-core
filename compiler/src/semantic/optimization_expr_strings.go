@@ -1,9 +1,9 @@
 package semantic
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
 )
 
 func optimizationCallArg(call *ast.CallExpr, index int) (ast.Expr, bool) {

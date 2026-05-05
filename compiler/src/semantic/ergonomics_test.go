@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestAnalyzeParamPackCallExpansionAndAmbientArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_param_pack_ambient.llcontext", `bundle SharedArgs explicit:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_param_pack_ambient.elisa", `bundle SharedArgs explicit:
     value: i64
     width: i64 = 5
 
@@ -39,7 +39,7 @@ def build(value: i64, extra: i64) -> i64:
 }
 
 func TestAnalyzeArgForwardOverridesAmbientArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_forward_over_ambient.llcontext", `def consume(value: i64, width: i64, extra: i64 = 11) -> i64:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_forward_over_ambient.elisa", `def consume(value: i64, width: i64, extra: i64 = 11) -> i64:
     return value + width + extra
 
 def build(value: i64, width: i64, extra: i64) -> i64:
@@ -62,7 +62,7 @@ def build(value: i64, width: i64, extra: i64) -> i64:
 }
 
 func TestAnalyzeSignatureParamPackExpandsIntoFunctionBody(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_signature_pack.llcontext", `bundle Pair explicit:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_signature_pack.elisa", `bundle Pair explicit:
     left: i64
     right: i64 = 7
 
@@ -88,7 +88,7 @@ def build(left: i64) -> i64:
 }
 
 func TestAnalyzeLocalParamPackShadowsGlobalWithinSameBlock(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_local_pack_shadow.llcontext", `bundle Pair explicit:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_local_pack_shadow.elisa", `bundle Pair explicit:
     left: i64 = 1
     right: i64 = 2
 
@@ -120,7 +120,7 @@ def build(left: i64) -> i64:
 }
 
 func TestAnalyzeBareArgsScopeParamPackUse(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_bare_args_scope_pack.llcontext", `bundle Shared explicit:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_bare_args_scope_pack.elisa", `bundle Shared explicit:
 	value: i64 = 7
 	width: i64 = 9
 
@@ -151,7 +151,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeRejectsLocalParamPackUseBeforeDeclaration(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_local_pack_use_before_decl.llcontext", `def consume(left: i64, right: i64) -> i64:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_local_pack_use_before_decl.elisa", `def consume(left: i64, right: i64) -> i64:
     return left + right
 
 def build(left: i64) -> i64:
@@ -168,7 +168,7 @@ def build(left: i64) -> i64:
 }
 
 func TestAnalyzeRejectsLocalParamPackFromNestedBlock(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_local_pack_nested_block.llcontext", `def consume(left: i64, right: i64) -> i64:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_local_pack_nested_block.elisa", `def consume(left: i64, right: i64) -> i64:
     return left + right
 
 def build(left: i64) -> i64:
@@ -186,7 +186,7 @@ def build(left: i64) -> i64:
 }
 
 func TestAnalyzeRejectsMissingShorthandValue(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_missing_shorthand.llcontext", `def consume(missing: i64) -> i64:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_missing_shorthand.elisa", `def consume(missing: i64) -> i64:
     return missing
 
 def build() -> i64:
@@ -199,7 +199,7 @@ def build() -> i64:
 }
 
 func TestAnalyzeRejectsMissingDestructureField(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_missing_destructure_field.llcontext", `struct PairRow:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_missing_destructure_field.elisa", `struct PairRow:
     first: i64
     second: i64
 

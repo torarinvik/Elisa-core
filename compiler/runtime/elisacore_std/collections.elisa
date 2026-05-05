@@ -1,0 +1,386 @@
+# ============================================================
+# Collections helpers - Elisa core runtime dialect
+# ============================================================
+
+include "./deque.elisa"
+
+const ARENA_DA_INIT_CAP: usize = 256
+const DICT_INIT_CAP: usize = 8
+
+struct DynArray[T]:
+    items: mutable T&?
+    count: mutable usize
+    capacity: mutable usize
+
+struct DynArrayView:
+    data: mutable void&?
+    len: mutable usize
+    elem_size: mutable usize
+
+struct DictBucket[K, T]:
+    key: mutable K
+    value: mutable T
+
+struct DynDict[K, T]:
+    items: mutable DictBucket[K, T]&?
+    count: mutable usize
+    used: mutable usize
+    capacity: mutable usize
+    arena: mutable Arena&?
+
+struct DictProbeResult:
+    index: mutable usize
+    found: mutable bool
+
+# ------------------------------------------------------------
+# Dynamic array helpers (replacement for C macros)
+# ------------------------------------------------------------
+
+def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, needed: usize) -> mutable darray[T, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        da return if needed <= da.capacity
+
+        new_capacity: mutable usize = da.capacity
+        if new_capacity == 0:
+            new_capacity <- ARENA_DA_INIT_CAP
+
+        while needed > new_capacity:
+            new_capacity <- new_capacity * 2
+
+        old_size: usize = da.capacity * sizeof(T)
+        new_size: usize = new_capacity * sizeof(T)
+
+        if da.items == null:
+            da.items as & <- arena_alloc(a, new_size).cast[T&]
+        else:
+            da.items as & <- arena_realloc(
+                a,
+                da.items.cast[mutable void&],
+                old_size,
+                new_size
+            ).cast[T&]
+
+        da.capacity <- new_capacity
+        return da
+
+def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+    elem_size: usize = sizeof(T)
+    DynArrayView(null, 0, elem_size) return if da.items == null or da.count == 0
+
+    lo: mutable usize = start if start < da.count else da.count
+    hi: mutable usize = end if end < da.count else da.count
+    if hi < lo:
+        hi <- lo
+
+    DynArrayView(null, 0, elem_size) return if hi == lo
+
+    return DynArrayView((da.items + lo).cast[void&], hi - lo, elem_size)
+
+def arena_da_view_len[T](view: dview[T]) -> usize:
+    return view.len
+
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+    DynArrayView(null, 0, view.elem_size) return if view.data == null or view.len == 0
+
+    lo: mutable usize = start if start < view.len else view.len
+    hi: mutable usize = end if end < view.len else view.len
+    if hi < lo:
+        hi <- lo
+
+    DynArrayView(null, 0, view.elem_size) return if hi == lo
+
+    offset: usize = lo * view.elem_size
+    return DynArrayView((view.data.cast[u8&] + offset).cast[void&], hi - lo, view.elem_size)
+
+def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
+    return arena_da_view_slice(view, 0, end)
+
+def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+    return arena_da_view_slice(view, start, view.len)
+
+def arena_da_view_get[T](view: dview[T], index: usize) -> T:
+    assert index < view.len
+    assert view.data != null
+
+    offset: usize = index * view.elem_size
+    base: T& = (view.data.cast[u8&] + offset).cast[T&]
+    return base[0]
+
+def arena_da_fill[T](dst: dview[T], value: T):
+	if dst.len == 0:
+		return
+
+	assert dst.data != null
+
+    out: T& = dst.data.cast[T&]
+    for i in 0..<dst.len:
+		out[i] <- value
+
+def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
+    assert dst.len == src.len
+    if dst.len == 0:
+        return
+
+    assert dst.data != null
+    assert src.data != null
+
+    out: T& = dst.data.cast[T&]
+    src_items: T& = src.data.cast[T&]
+    for i in 0..<dst.len:
+        out[i] <- src_items[i]
+
+def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
+    assert left.len == right.len
+    assert left.elem_size == right.elem_size
+    true return if left.len == 0
+
+    assert left.data != null
+    assert right.data != null
+
+    byte_count: usize = left.len * left.elem_size
+    return arena_memeq(left.data.cast[void&], right.data.cast[void&], byte_count)
+
+def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_out]:
+    can Memory.Allocate, Abort.Panic:
+        zeroed return if view.len == 0
+
+        items: T& = arena_alloc(a, view.len * sizeof(T)).cast[T&]
+        assert view.data != null
+        arena_memcpy(items.cast[mutable void&], view.data.cast[void&], view.len * view.elem_size)
+
+        out: mutable darray[T, shape_out] = zeroed
+        out.items as & <- items
+        out.count <- view.len
+        out.capacity <- view.len
+        return out
+
+def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        in a:
+            _ = da.reserve(da.count + 1)
+
+        assert da.items != null
+
+        da.items[da.count] <- item
+        da.count <- da.count + 1
+        return da
+
+def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        needed: usize = da.count + new_items_count
+
+        if needed > da.capacity:
+            new_capacity: mutable usize = da.capacity
+            if new_capacity == 0:
+                new_capacity <- ARENA_DA_INIT_CAP
+
+            while needed > new_capacity:
+                new_capacity <- new_capacity * 2
+
+            old_size: usize = da.capacity * sizeof(T)
+            new_size: usize = new_capacity * sizeof(T)
+
+            if da.items == null:
+                da.items as & <- arena_alloc(a, new_size).cast[T&]
+            else:
+                da.items as & <- arena_realloc(
+                    a,
+                    da.items.cast[mutable void&],
+                    old_size,
+                    new_size
+                ).cast[T&]
+
+            da.capacity <- new_capacity
+
+        assert da.items != null
+
+        arena_memcpy(
+            (da.items + da.count).cast[mutable void&],
+            new_items.cast[void&],
+            new_items_count * sizeof(T)
+        )
+
+        da.count <- da.count + new_items_count
+        return da
+
+def arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&:
+    return arena_da_append_many(a, sb, buf, n) can Memory.Allocate, Abort.Panic
+
+def arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, cstr: u8&) -> mutable darray[u8, shape_out]&:
+    n: usize = arena_strlen(cstr)
+    return arena_da_append_many(a, sb, cstr, n) can Memory.Allocate, Abort.Panic
+
+def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        in a:
+            return sb.extend([0u8])
+
+# ------------------------------------------------------------
+# Dictionary helpers
+# ------------------------------------------------------------
+
+def arena_dict_next_capacity(min_capacity: usize) -> usize:
+    0 return if min_capacity == 0
+
+    cap: mutable usize = DICT_INIT_CAP
+    while cap < min_capacity:
+        cap <- cap * 2
+    return cap
+
+def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
+    DictProbeResult(0, false) return if m.count == 0 or m.items == null
+
+    assert m.items != null
+    items: DictBucket[K, T]& = m.items
+    for index in 0..<m.count:
+        DictProbeResult(index, true) return if items[index].key == key
+
+    return DictProbeResult(m.count, false)
+
+def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
+    view: dview[DictBucket[K, T]] = DynArrayView(items.cast[void&], capacity, sizeof(DictBucket[K, T]))
+    arena_da_fill(view, zeroed)
+
+def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable dict[K, T] = zeroed
+        out.arena as & <- a
+
+        capacity: usize = arena_dict_next_capacity(initial_capacity)
+        out return if capacity == 0
+
+        items: mutable DictBucket[K, T]& = arena_alloc(a, capacity * sizeof(DictBucket[K, T])).cast[DictBucket[K, T]&]
+        arena_dict_zero_buckets(items, capacity)
+
+        out.items as & <- items
+        out.capacity <- capacity
+        return out
+
+def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        target_capacity: usize = arena_dict_next_capacity(min_capacity)
+        if target_capacity == 0:
+            return
+
+        if target_capacity <= m.capacity:
+            return
+
+        owner: mutable Arena& = m.arena if m.arena != null else a
+        new_items: DictBucket[K, T]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[K, T])).cast[DictBucket[K, T]&]
+        arena_dict_zero_buckets(new_items, target_capacity)
+
+        if m.items != null and m.count > 0:
+            assert m.items != null
+            old_items: mutable DictBucket[K, T]& = m.items
+            for i in 0..<m.count:
+                new_items[i] <- old_items[i]
+
+        m.items as & <- new_items
+        m.used <- m.count
+        m.capacity <- target_capacity
+        m.arena as & <- owner
+        return
+
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
+    null return if m.count == 0 or m.items == null
+
+    probe: DictProbeResult = arena_dict_find_index(m, key)
+    null return if not probe.found
+
+    assert m.items != null
+    items: mutable DictBucket[K, T]& = m.items
+    return &items[probe.index].value
+
+def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        owner: mutable Arena& = m.arena if m.arena != null else a
+        if m.arena == null:
+            m.arena as & <- owner
+
+        probe: DictProbeResult = arena_dict_find_index(m, key)
+        if probe.found:
+            assert m.items != null
+            items: mutable DictBucket[K, T]& = m.items
+            items[probe.index].value <- value
+            return &items[probe.index].value
+
+        if m.capacity == 0 or m.count == m.capacity:
+            target_capacity: mutable usize = DICT_INIT_CAP if m.capacity == 0 else m.capacity * 2
+            if target_capacity < m.count + 1:
+                target_capacity <- m.count + 1
+            try arena_dict_reserve(owner, m, target_capacity)
+
+        assert m.items != null
+        assert m.capacity > 0
+
+        items: mutable DictBucket[K, T]& = m.items
+        insert_index: usize = m.count
+        items[insert_index].key <- key
+        items[insert_index].value <- value
+        m.count <- insert_index + 1
+        m.used <- m.count
+        return &items[insert_index].value
+
+def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        existing: mutable T&? = arena_dict_get(m, key)
+        existing return if existing != null
+        return try arena_dict_put(a, m, key, value)
+
+def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
+    return arena_dict_get(m, key) != null
+
+def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
+    false return if m.count == 0 or m.items == null
+
+    probe: DictProbeResult = arena_dict_find_index(m, key)
+    false return if not probe.found
+
+    assert m.items != null
+    items: mutable DictBucket[K, T]& = m.items
+    last_index: usize = m.count - 1
+    if probe.index != last_index:
+        items[probe.index] <- items[last_index]
+    items[last_index] <- zeroed
+    m.count <- last_index
+    m.used <- m.count
+    return true
+
+def arena_dict_clear[K, T](m: mutable dict[K, T]&):
+    if m.items == null or m.capacity == 0:
+        m.count <- 0
+        m.used <- 0
+        return
+
+    assert m.items != null
+    items: DictBucket[K, T]& = m.items
+    arena_dict_zero_buckets(items, m.capacity)
+    m.count <- 0
+    m.used <- 0
+
+def arena_dict_new__i64(a: mutable Arena&, initial_capacity: usize) -> dict[cstr[key_shape], i64]:
+    return arena_dict_new[cstr[key_shape], i64](a, initial_capacity) can Memory.Allocate, Abort.Panic
+
+def arena_dict_reserve__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        try arena_dict_reserve[cstr[key_shape], i64](a, m, min_capacity)
+
+def arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> mutable i64&?:
+    return arena_dict_get[cstr[key_shape], i64](m, key)
+
+def arena_dict_put__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        return try arena_dict_put[cstr[key_shape], i64](a, m, key, value)
+
+def arena_dict_get_or_insert__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        return try arena_dict_get_or_insert[cstr[key_shape], i64](a, m, key, value)
+
+def arena_dict_contains__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool:
+    return arena_dict_contains[cstr[key_shape], i64](m, key)
+
+def arena_dict_remove__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool:
+    return arena_dict_remove[cstr[key_shape], i64](m, key)
+
+def arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&):
+    arena_dict_clear[cstr[key_shape], i64](m)

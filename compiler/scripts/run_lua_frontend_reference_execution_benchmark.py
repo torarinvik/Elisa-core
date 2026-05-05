@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Benchmark PUC Lua load-plus-execute throughput on deterministic execution corpus inputs.
 
-This script establishes the C-reference side of the future llcontext compile-plus-
+This script establishes the C-reference side of the future elisacore compile-plus-
 execute comparison. It intentionally targets a small execution-only corpus whose
 programs return deterministic scalar values under repeated execution in a shared
 Lua state.

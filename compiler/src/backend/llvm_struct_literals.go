@@ -5,8 +5,8 @@ package backend
 import (
 	"fmt"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 type structLiteralField struct {

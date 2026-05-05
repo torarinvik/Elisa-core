@@ -11,8 +11,8 @@ import "C"
 import (
 	"fmt"
 
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 type lambdaCaptureBinding struct {
@@ -21,7 +21,7 @@ type lambdaCaptureBinding struct {
 }
 
 func (g *llvmGenerator) ensureLambdaClosureType() (C.LLVMTypeRef, error) {
-	const name = "LLContextLambdaClosure"
+	const name = "ElisaCoreLambdaClosure"
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err

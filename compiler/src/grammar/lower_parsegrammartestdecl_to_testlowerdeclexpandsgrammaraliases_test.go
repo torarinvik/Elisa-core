@@ -1,23 +1,23 @@
 package grammar
 
 import (
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/unparse"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/unparse"
 	"strings"
 	"testing"
 )
 
 func parseGrammarTestDecl(t *testing.T, src string) *ast.GrammarDecl {
 	t.Helper()
-	l := lexer.New("grammar_lower_test.llcontext", []byte(src))
+	l := lexer.New("grammar_lower_test.elisa", []byte(src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected lex errors: %v", errs)
 	}
 	p := parser.New(tokens)
-	file := p.ParseFile("grammar_lower_test.llcontext")
+	file := p.ParseFile("grammar_lower_test.elisa")
 	if errs := p.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected parse errors: %v", errs)
 	}
@@ -29,13 +29,13 @@ func parseGrammarTestDecl(t *testing.T, src string) *ast.GrammarDecl {
 }
 func parseGrammarTestFile(t *testing.T, src string) *ast.File {
 	t.Helper()
-	l := lexer.New("grammar_lower_test.llcontext", []byte(src))
+	l := lexer.New("grammar_lower_test.elisa", []byte(src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected lex errors: %v", errs)
 	}
 	p := parser.New(tokens)
-	file := p.ParseFile("grammar_lower_test.llcontext")
+	file := p.ParseFile("grammar_lower_test.elisa")
 	if errs := p.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected parse errors: %v", errs)
 	}
@@ -297,7 +297,7 @@ func TestLowerDeclExpandsFirstTermLookahead(t *testing.T) {
 	}
 }
 func TestGrammarFirstFactsWalkNullablePrefixes(t *testing.T) {
-	pos := lexer.Pos{File: "grammar_facts_test.llcontext", Line: 1, Col: 1}
+	pos := lexer.Pos{File: "grammar_facts_test.elisa", Line: 1, Col: 1}
 	productions := map[string]resolvedGrammarProduction{
 		"maybe_prefix": {
 			Production: ast.GrammarProductionDecl{

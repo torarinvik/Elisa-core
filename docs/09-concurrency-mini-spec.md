@@ -1,6 +1,6 @@
 # Concurrency Mini-Spec
 
-This document proposes a concurrency design for Contextlang / `llcontext` where
+This document proposes a concurrency design for Elisa core / `elisacore` where
 protocol safety is tracked in the **type system**, not by ad hoc lifetime-flow
 analysis.
 
@@ -165,7 +165,7 @@ This is the important shift:
 
 Suggested surface spelling:
 
-```context
+```elisa
 affine struct Thread[T, S]
 affine struct Task[T, S]
 affine struct MutexGuard[S]
@@ -178,7 +178,7 @@ kind marker.
 
 Affine values are consumed with an explicit `move`.
 
-```context
+```elisa
 result: i64 = join(move thread)
 task_group_add(&jobs, move task)
 ```
@@ -191,22 +191,22 @@ To extract affine fields, the whole aggregate must be consumed explicitly.
 
 Implemented spellings:
 
-```context
+```elisa
 move holder as Holder(thread, count)
 return join(move thread)
 ```
 
-```context
+```elisa
 move job as Job.Run(thread, priority)
 ```
 
-```context
+```elisa
 move node in store as Expr.Add(left, right)
 ```
 
 Nested payload destructuring is also supported:
 
-```context
+```elisa
 move node in store as Expr.Add(Expr.Int(value), rhs)
 ```
 
@@ -234,7 +234,7 @@ And the following become `affine` structurally:
 
 So if:
 
-```context
+```elisa
 struct Holder:
     thread: Thread[i64, Joinable]
     count: i64
@@ -257,7 +257,7 @@ If `T` contains affine values structurally, reject:
 
 Examples:
 
-```context
+```elisa
 def bad(arg: Holder&) -> void:   # reject
     pass
 
@@ -277,13 +277,13 @@ until there is a stronger whole-program ownership model.
 
 Reject direct by-value field extraction from an affine-containing aggregate:
 
-```context
+```elisa
 join(holder.thread)   # reject in phase 1
 ```
 
 Instead:
 
-```context
+```elisa
 move holder as Holder(thread, count)
 join(move thread)
 ```
@@ -308,7 +308,7 @@ Packed enums currently reject:
 
 Implemented marker types:
 
-```context
+```elisa
 type Joinable
 type Pending
 type Held
@@ -319,7 +319,7 @@ first slice because the consuming operations simply destroy the capability.
 
 ## Runtime Carriers
 
-```context
+```elisa
 affine struct Thread[T, S]
 affine struct Task[T, S]
 struct ThreadPool
@@ -334,7 +334,7 @@ struct atomic[T]
 
 User-defined affine structs are also supported:
 
-```context
+```elisa
 affine struct WorkerLease:
     raw: mutable uintptr
 ```
@@ -343,7 +343,7 @@ affine struct WorkerLease:
 
 ### Threads
 
-```context
+```elisa
 extern spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joinable] can[Thread.Spawn]
 extern join[R](t: move Thread[R, Joinable]) -> R can[Thread.Join]
 extern detach[R](t: move Thread[R, Joinable]) -> void can[Thread.Detach]
@@ -351,7 +351,7 @@ extern detach[R](t: move Thread[R, Joinable]) -> void can[Thread.Detach]
 
 ### Pools and Tasks
 
-```context
+```elisa
 extern pool_new(threads: usize) -> ThreadPool can[Pool.Create]
 extern pool_shutdown(pool: ThreadPool&) -> void can[Pool.Shutdown]
 
@@ -365,7 +365,7 @@ extern task_group_wait_all(group: TaskGroup&) -> void can[Pool.WaitAll]
 
 ### Locks and Condvars
 
-```context
+```elisa
 extern mutex_lock(mu: Mutex&) -> MutexGuard[Held] can[Sync.Lock]
 extern mutex_unlock(g: move MutexGuard[Held]) -> void can[Sync.Unlock]
 extern cond_wait(cv: CondVar&, g: move MutexGuard[Held]) -> MutexGuard[Held] can[Sync.Wait]
@@ -528,14 +528,14 @@ which data may cross thread boundaries at all.
 
 Packed stores are stateful capabilities:
 
-```context
+```elisa
 Expr.Store[Local]
 Expr.Store[Frozen]
 ```
 
 Constructor and publication surface:
 
-```context
+```elisa
 store: Expr.Store[Local] = Expr.Store(owner)
 frozen: Expr.Store[Frozen] = freeze(move store)
 ```
@@ -558,7 +558,7 @@ Rules:
 
 Extern helpers can carry provenance through explicit contracts:
 
-```context
+```elisa
 @borrows_return(path)
 @borrows_return_field(field, path, ...)
 @borrows_return_rebased(path)
@@ -581,7 +581,7 @@ The rebased forms are provenance contracts, not slice-offset or length proofs.
 
 Atomics stay explicit and low-level.
 
-```context
+```elisa
 enum MemoryOrder:
     Relaxed
     Acquire
@@ -590,7 +590,7 @@ enum MemoryOrder:
     SeqCst
 ```
 
-```context
+```elisa
 extern load[T](slot: atomic[T]&, order: MemoryOrder) -> T can[Atomics.Load]
 extern store[T](slot: atomic[T]&, value: T, order: MemoryOrder) -> void can[Atomics.Store]
 extern exchange[T](slot: atomic[T]&, value: T, order: MemoryOrder) -> T can[Atomics.Exchange]
@@ -611,7 +611,7 @@ extern fence(order: MemoryOrder) -> void can[Atomics.Fence]
 
 ### Pool Scope
 
-```context
+```elisa
 pool workers(8u):
     ...
 ```
@@ -626,43 +626,43 @@ desugars to:
 
 Inside an active pool:
 
-```context
+```elisa
 t: Task[i64, Pending] = submit work(arg)
 ```
 
 desugars to:
 
-```context
+```elisa
 t: Task[i64, Pending] = pool_submit1(&workers, work, arg)
 ```
 
 ### Await
 
-```context
+```elisa
 result: i64 = await task
 ```
 
 desugars to:
 
-```context
+```elisa
 result: i64 = pool_await(move task)
 ```
 
 ### Wait-All
 
-```context
+```elisa
 wait all jobs
 ```
 
 desugars to:
 
-```context
+```elisa
 task_group_wait_all(&jobs)
 ```
 
 ### Lock Scope
 
-```context
+```elisa
 lock mu as g:
     body
 ```
@@ -675,7 +675,7 @@ desugars conceptually to:
 
 `cond_wait` rebinding remains explicit:
 
-```context
+```elisa
 lock box.mu as g:
     while not box.has_value:
         g <- cond_wait(&box.cv, move g)
@@ -685,7 +685,7 @@ lock box.mu as g:
 
 ### 1. Join Exactly Once
 
-```context
+```elisa
 def run_one() -> i64 can[Thread.Spawn, Thread.Join]:
     t: Thread[i64, Joinable] = spawn1(work, 7)
     return join(move t)
@@ -693,7 +693,7 @@ def run_one() -> i64 can[Thread.Spawn, Thread.Join]:
 
 ### 2. Whole-Value Destructuring of an Affine Aggregate
 
-```context
+```elisa
 struct Holder:
     thread: Thread[i64, Joinable]
     count: i64
@@ -708,7 +708,7 @@ This is preferred over field-by-field partial moves.
 
 ### 2.5 Nested Packed Pattern Destructuring
 
-```context
+```elisa
 packed enum Expr:
     Int(value: int)
     Add(left: Expr, right: Expr)
@@ -725,7 +725,7 @@ statement-oriented packed destructuring forms.
 
 ### 3. Pool-Scoped Tasks
 
-```context
+```elisa
 def parallel_sum(data: static i32&, mid: usize, len: usize) -> i64 can[Pool.Submit, Pool.Await, Atomics.Rmw, Atomics.Load]:
     total: atomic[i64] = atomic[i64](0)
 
@@ -741,7 +741,7 @@ def parallel_sum(data: static i32&, mid: usize, len: usize) -> i64 can[Pool.Subm
 
 ### 4. Task Groups
 
-```context
+```elisa
 def build_index(paths: static PathJob&, count: usize) -> void can[Pool.Submit, Pool.WaitAll]:
     pool workers(8u):
         jobs: TaskGroup = task_group_new()
@@ -757,7 +757,7 @@ def build_index(paths: static PathJob&, count: usize) -> void can[Pool.Submit, P
 
 ### 5. Rejected Affine-Containing Ref
 
-```context
+```elisa
 struct Holder:
     thread: Thread[i64, Joinable]
 
@@ -769,7 +769,7 @@ Rejected because refs to affine-containing values are not supported in phase 1.
 
 ### 6. Rejected Stack Submission
 
-```context
+```elisa
 struct BadJob:
     ptr: stack i64&
 

@@ -10,7 +10,7 @@ func TestAnalyzeRejectsMismatchedFixedArrayLiteralLength(t *testing.T) {
 	src := `def bad() -> void:
 	values: i32[2] = [1, 2, 3]
 `
-	_, errs := parseAndAnalyze(t, "fixed_array_literal_length_mismatch.llcontext", src)
+	_, errs := parseAndAnalyze(t, "fixed_array_literal_length_mismatch.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -22,14 +22,14 @@ func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
 	src := `def middle(text: cstr[row]) -> sview:
 	return text[1:3]
 `
-	_, errs := parseAndAnalyze(t, "string_slice_syntax.llcontext", src)
+	_, errs := parseAndAnalyze(t, "string_slice_syntax.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsAssigningToDStrLenField(t *testing.T) {
 	src := `def bad(text: cstr[row]) -> void:
 	text.len <- 1
 `
-	_, errs := parseAndAnalyze(t, "cstr_len_assign.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_len_assign.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -41,7 +41,7 @@ func TestAnalyzeRejectsAssigningToSViewIndex(t *testing.T) {
 	src := `def bad(view: sview) -> void:
 	view[0] <- 1
 `
-	_, errs := parseAndAnalyze(t, "ctx_string_view_index_assignment.llcontext", src)
+	_, errs := parseAndAnalyze(t, "ctx_string_view_index_assignment.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -56,7 +56,7 @@ func TestAnalyzeAcceptsImplicitDArrayShapeParams(t *testing.T) {
 def keep(array: darray[i32, row]) -> darray[i32, row]:
 	return identity(array)
 `
-	_, errs := parseAndAnalyze(t, "implicit_darray_shape_params.llcontext", src)
+	_, errs := parseAndAnalyze(t, "implicit_darray_shape_params.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsShapeErasingDArrayShorthand(t *testing.T) {
@@ -66,14 +66,14 @@ func TestAnalyzeAcceptsShapeErasingDArrayShorthand(t *testing.T) {
 def erase_explicit(values: darray[i32, row]) -> darray[i32]:
 	return values
 `
-	_, errs := parseAndAnalyze(t, "darray_shorthand_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "darray_shorthand_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsRecoveringExplicitShapeFromShorthand(t *testing.T) {
 	src := `def bad(values: darray[i32]) -> darray[i32, row]:
 	return values
 `
-	_, errs := parseAndAnalyze(t, "darray_shorthand_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "darray_shorthand_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -85,11 +85,11 @@ func TestAnalyzeDArrayUsesDynArrayRuntimeFields(t *testing.T) {
 	src := `def needs_grow[T](array: darray[T, row]&) -> bool:
 	return array.count >= array.capacity
 `
-	_, errs := parseAndAnalyze(t, "darray_runtime_field_access.llcontext", src)
+	_, errs := parseAndAnalyze(t, "darray_runtime_field_access.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeDynArrayRuntimeBridgeWorksBothDirections(t *testing.T) {
-	fixturePath := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "llcontext_std", "dynarray_runtime_bridge_roundtrip.llcontext")
+	fixturePath := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "elisacore_std", "dynarray_runtime_bridge_roundtrip.elisa")
 	src := `def take_raw[T](values: DynArray[T]) -> void:
 	pass
 
@@ -109,7 +109,7 @@ func TestAnalyzeRejectsMismatchedDArrayShapes(t *testing.T) {
 	src := `def bad(array: darray[i32, row]) -> darray[i32, col]:
 	return array
 `
-	_, errs := parseAndAnalyze(t, "mismatched_darray_shapes.llcontext", src)
+	_, errs := parseAndAnalyze(t, "mismatched_darray_shapes.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -124,7 +124,7 @@ func TestAnalyzeAcceptsImplicitDStrShapeParams(t *testing.T) {
 def keep(text: cstr[row]) -> cstr[row]:
 	return echo(text)
 `
-	_, errs := parseAndAnalyze(t, "implicit_cstr_shape_params.llcontext", src)
+	_, errs := parseAndAnalyze(t, "implicit_cstr_shape_params.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsShapeErasingDStrShorthand(t *testing.T) {
@@ -134,7 +134,7 @@ func TestAnalyzeAcceptsShapeErasingDStrShorthand(t *testing.T) {
 def erase_explicit(text: cstr[row]) -> cstr:
 	return text
 `
-	_, errs := parseAndAnalyze(t, "cstr_shorthand_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_shorthand_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsShapeErasingSViewShorthand(t *testing.T) {
@@ -145,14 +145,14 @@ def slice_prefix(text: cstr[row]) -> sview:
 	prefix: sview = text[0:1]
 	return prefix
 `
-	_, errs := parseAndAnalyze(t, "sview_shorthand_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "sview_shorthand_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsRecoveringExplicitShapeFromDStrShorthand(t *testing.T) {
 	src := `def bad(text: cstr) -> cstr[row]:
 	return text
 `
-	_, errs := parseAndAnalyze(t, "cstr_shorthand_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_shorthand_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -164,7 +164,7 @@ func TestAnalyzeFormatsBareSViewShorthandInDiagnostics(t *testing.T) {
 	src := `def bad() -> void:
 	text: sview = 1
 `
-	_, errs := parseAndAnalyze(t, "sview_shorthand_mismatch.llcontext", src)
+	_, errs := parseAndAnalyze(t, "sview_shorthand_mismatch.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -181,7 +181,7 @@ func TestAnalyzeFormatsWhileConditionSViewUsingSurfaceNames(t *testing.T) {
 	while text[0:1]:
 		pass
 `
-	_, errs := parseAndAnalyze(t, "while_sview_surface_diagnostic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "while_sview_surface_diagnostic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -200,7 +200,7 @@ func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 			return 0
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "match_dview_surface_diagnostic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "match_dview_surface_diagnostic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -216,7 +216,7 @@ func TestAnalyzeFormatsCompareSViewUsingSurfaceNames(t *testing.T) {
 	src := `def bad(text: cstr[row]) -> bool:
 	return text[0:1] == 1
 `
-	_, errs := parseAndAnalyze(t, "compare_sview_surface_diagnostic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "compare_sview_surface_diagnostic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -235,7 +235,7 @@ func TestAnalyzeFormatsIsVariantSViewUsingSurfaceNames(t *testing.T) {
 def bad(text: cstr[row]) -> bool:
 	return text[0:1] is Flag.On
 `
-	_, errs := parseAndAnalyze(t, "is_variant_sview_surface_diagnostic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "is_variant_sview_surface_diagnostic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -251,7 +251,7 @@ func TestAnalyzeFormatsSafeChainDViewUsingSurfaceNames(t *testing.T) {
 	src := `def bad(values: darray[i32, 4]) -> void:
 	_ = values[0:4]?.count
 `
-	_, errs := parseAndAnalyze(t, "safe_chain_dview_surface_diagnostic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "safe_chain_dview_surface_diagnostic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -267,7 +267,7 @@ func TestAnalyzeFormatsConstEnumStorageSViewUsingSurfaceNames(t *testing.T) {
 	src := `const enum Tok of sview:
 	Value = 1
 `
-	_, errs := parseAndAnalyze(t, "const_enum_sview_storage_surface_diagnostic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "const_enum_sview_storage_surface_diagnostic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -284,7 +284,7 @@ func TestAnalyzeFormatsGuardNonnullSViewUsingSurfaceNames(t *testing.T) {
 def has_text(text: sview) -> bool:
 	return true
 `
-	_, errs := parseAndAnalyze(t, "guard_nonnull_sview_surface_diagnostic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "guard_nonnull_sview_surface_diagnostic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -316,7 +316,7 @@ def build[B: Builder]() -> B.State:
 def bad() -> int:
 	return build[sview]()
 `
-	_, errs := parseAndAnalyze(t, "interface_bound_sview_type_arg_surface_diagnostic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "interface_bound_sview_type_arg_surface_diagnostic.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -342,7 +342,7 @@ def roundtrip(text: cstr[row], raw: u8&) -> cstr[row]:
 	raw_value: u8& = text
 	return raw_value
 `
-	_, errs := parseAndAnalyze(t, "cstr_runtime_bridge_roundtrip.llcontext", src)
+	_, errs := parseAndAnalyze(t, "cstr_runtime_bridge_roundtrip.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsLegacyUppercaseBuiltinTypes(t *testing.T) {
@@ -358,7 +358,7 @@ def bad_str(text: DStr[row]) -> void:
 def bad_dict(values: Dict[cstr, i32]) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "dynamic_shape_arity.llcontext", src)
+	_, errs := parseAndAnalyze(t, "dynamic_shape_arity.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -381,7 +381,7 @@ func TestAnalyzeRejectsLegacyStringBuiltinAliases(t *testing.T) {
 def bad_dynamic(text: cstring[row]) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "legacy_string_aliases.llcontext", src)
+	_, errs := parseAndAnalyze(t, "legacy_string_aliases.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -397,7 +397,7 @@ func TestAnalyzeRejectsRemovedDListTypes(t *testing.T) {
 def bad_list_view(view: DListView[i32]) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "removed_dlist_surface.llcontext", src)
+	_, errs := parseAndAnalyze(t, "removed_dlist_surface.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
@@ -410,6 +410,6 @@ func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
 	src := `def non_empty[T](view: dview[T]) -> bool:
 	return view.len > 0 and view.elem_size > 0
 `
-	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.llcontext", src)
+	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.elisa", src)
 	requireNoErrors(t, errs)
 }

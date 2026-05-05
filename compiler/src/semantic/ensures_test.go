@@ -6,7 +6,7 @@ import (
 )
 
 func TestSemanticEnsuresNamedStateCallRecovery(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ensures_named_state.llcontext", `struct ParseJob[state Pending | Ready | Failed]:
+	result := analyzeFunctionAnalysisTestSource(t, "ensures_named_state.elisa", `struct ParseJob[state Pending | Ready | Failed]:
 	stage: mutable int
 	checksum: mutable int
 
@@ -50,7 +50,7 @@ def use(job: ParseJob[Pending]&) -> void can[Abort]:
 }
 
 func TestSemanticEnsuresRejectsWrongNamedStateProof(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ensures_bad_named_state.llcontext", `struct ParseJob[state Pending | Ready | Failed]:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ensures_bad_named_state.elisa", `struct ParseJob[state Pending | Ready | Failed]:
 	stage: mutable int
 	checksum: mutable int
 
@@ -72,7 +72,7 @@ def bad_finish(mutable job: ParseJob[Pending]&) -> void can[Abort] ensures job =
 }
 
 func TestSemanticEnsuresRefStateCallRecovery(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ensures_refstate.llcontext", `struct HeapPairNode:
+	result := analyzeFunctionAnalysisTestSource(t, "ensures_refstate.elisa", `struct HeapPairNode:
 	value: i32
 
 def expect_null(node: heap HeapPairNode!) -> void:
@@ -98,7 +98,7 @@ def use(node: heap HeapPairNode&) -> void can[Abort]:
 }
 
 func TestSemanticEnsuresDefRefStateProofAndCallRecovery(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ensures_require_non_null.llcontext", `struct HeapPairNode:
+	result := analyzeFunctionAnalysisTestSource(t, "ensures_require_non_null.elisa", `struct HeapPairNode:
 	value: i32
 
 def expect_non_null(node: heap HeapPairNode&) -> void:
@@ -121,7 +121,7 @@ def use(node: heap HeapPairNode&?) -> void can[Abort]:
 }
 
 func TestSemanticEnsuresPreserveCallRecovery(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ensures_preserve.llcontext", `struct Player[state Alive | Dead]:
+	result := analyzeFunctionAnalysisTestSource(t, "ensures_preserve.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int
 	score: mutable int
 
@@ -149,7 +149,7 @@ def use(player: Player[Alive]&) -> void can[Abort]:
 }
 
 func TestSemanticEnsuresRejectsInvalidPreserveAfterRelevantMutation(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ensures_bad_preserve.llcontext", `struct Player[state Alive | Dead]:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ensures_bad_preserve.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int
 	score: mutable int
 
@@ -170,7 +170,7 @@ def bad_preserve(mutable player: Player[Alive]&) -> void can[Abort] ensures play
 }
 
 func TestSemanticEnsuresNestedFieldCallRecovery(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "ensures_nested_fields.llcontext", `struct HeapPairNode:
+	analyzeFunctionAnalysisTestSource(t, "ensures_nested_fields.elisa", `struct HeapPairNode:
 	value: i32
 
 struct Player[state Alive | Dead]:
@@ -206,7 +206,7 @@ def use(team: Team&) -> void can[Abort]:
 }
 
 func TestSemanticEnsuresRejectsInvalidTargets(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ensures_invalid_targets.llcontext", `struct Player[state Alive | Dead]:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ensures_invalid_targets.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int
 	score: mutable int
 
@@ -230,7 +230,7 @@ def bad_state(player: Player[Alive]&) -> void can[Abort] ensures player => Close
 }
 
 func TestSemanticConditionalEnsuresBranchRecovery(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_branch.llcontext", `struct ParseJob[state Pending | Ready | Failed]:
+	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_branch.elisa", `struct ParseJob[state Pending | Ready | Failed]:
 	stage: mutable int
 	checksum: mutable int
 
@@ -262,7 +262,7 @@ def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort]:
 }
 
 func TestSemanticConditionalEnsuresJoinOnPlainCall(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_join.llcontext", `struct ParseJob[state Pending | Ready | Failed]:
+	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_join.elisa", `struct ParseJob[state Pending | Ready | Failed]:
 	stage: mutable int
 
 	derive state:
@@ -287,7 +287,7 @@ def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort]:
 }
 
 func TestSemanticConditionalEnsuresPreserveBranchRecovery(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_preserve.llcontext", `struct Player[state Alive | Dead]:
+	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_preserve.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int
 	score: mutable int
 
@@ -317,7 +317,7 @@ def use(mutable player: Player[Alive]&, ok: bool) -> void can[Abort]:
 }
 
 func TestSemanticConditionalEnsuresRejectWrongReturnBranchProof(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "conditional_ensures_wrong_branch.llcontext", `struct ParseJob[state Pending | Ready | Failed]:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "conditional_ensures_wrong_branch.elisa", `struct ParseJob[state Pending | Ready | Failed]:
 	stage: mutable int
 
 	derive state:
@@ -342,7 +342,7 @@ def bad_finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ens
 }
 
 func TestSemanticConditionalEnsuresRejectNonBoolReturn(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "conditional_ensures_non_bool.llcontext", `struct Player[state Alive | Dead]:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "conditional_ensures_non_bool.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int
 
 	derive state:

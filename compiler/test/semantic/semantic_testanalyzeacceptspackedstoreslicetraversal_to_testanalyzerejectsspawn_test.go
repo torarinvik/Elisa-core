@@ -30,7 +30,7 @@ def walk(owner: Arena) -> int:
 		index <- index + 1
 	return total
 `
-	result, errs := parseAndAnalyze(t, "packed_store_slice_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "packed_store_slice_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "walk", "int")
@@ -48,7 +48,7 @@ func TestAnalyzeAcceptsForLoopRangeForms(t *testing.T) {
 		total <- total + m
 	return total
 `
-	result, errs := parseAndAnalyze(t, "for_loop_ranges_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "for_loop_ranges_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "walk", "int")
@@ -64,7 +64,7 @@ def walk(items: array[Pair, 2]) -> int:
 		total <- total + left + right
 	return total
 `
-	result, errs := parseAndAnalyze(t, "iterable_for_value_destructure_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "iterable_for_value_destructure_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "walk", "int")
@@ -79,7 +79,7 @@ def bump() -> int:
 		item.value <- item.value + 1
 	return items[0].value + items[1].value
 `
-	result, errs := parseAndAnalyze(t, "iterable_for_mutable_ref_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "iterable_for_mutable_ref_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "bump", "int")
@@ -91,7 +91,7 @@ func TestAnalyzeAcceptsIterableForLoopOverDynamicString(t *testing.T) {
 		total <- total + ch
 	return total
 `
-	result, errs := parseAndAnalyze(t, "iterable_for_cstr_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "iterable_for_cstr_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "checksum", "int")
@@ -108,7 +108,7 @@ def run(values: darray[i64, 4], bias: i64) -> i64:
 		total <- total + reduce_sum(chunk, add_bias, bias)
 	return total
 `
-	result, errs := parseAndAnalyze(t, "iterable_for_chunks_exact_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "iterable_for_chunks_exact_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "run", "i64")
@@ -120,7 +120,7 @@ func TestAnalyzeRejectsIterableForLoopRefOverChunksExactView(t *testing.T) {
 	for ref chunk in chunks:
 		_ = chunk
 `
-	_, errs := parseAndAnalyze(t, "iterable_for_chunks_exact_ref_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "iterable_for_chunks_exact_ref_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -134,7 +134,7 @@ func TestAnalyzeRejectsForLoopZeroStep(t *testing.T) {
 	for i in 0..10..0:
 		pass
 `
-	_, errs := parseAndAnalyze(t, "for_loop_zero_step_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "for_loop_zero_step_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -148,7 +148,7 @@ func TestAnalyzeRejectsForLoopNonIntegralBounds(t *testing.T) {
 	for value in 0.0..1.0:
 		pass
 `
-	_, errs := parseAndAnalyze(t, "for_loop_non_integral_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "for_loop_non_integral_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -178,7 +178,7 @@ def visit(owner: Arena) -> int:
 					_ = value + node.span
 		return 0
 `
-	result, errs := parseAndAnalyze(t, "parallel_for_frozen_store_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "parallel_for_frozen_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "visit", "int")
@@ -205,7 +205,7 @@ def visit(owner: Arena) -> int:
 					_ = i
 		return 0
 `
-	result, errs := parseAndAnalyze(t, "parallel_for_packed_tags_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "parallel_for_packed_tags_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "visit", "int")
@@ -219,7 +219,7 @@ def bad(store: Expr.Store[Frozen]) -> void:
 	parallel for node in store:
 		pass
 `
-	_, errs := parseAndAnalyze(t, "parallel_for_outside_pool_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "parallel_for_outside_pool_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -239,7 +239,7 @@ def bad(store: Expr.Store[Frozen]) -> void can[Pool.Create, Pool.Shutdown, Pool.
 		parallel for node in store:
 			total <- total + 1
 `
-	_, errs := parseAndAnalyze(t, "parallel_for_outer_mutation_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "parallel_for_outer_mutation_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -259,7 +259,7 @@ def visit(values: darray[i32, 4]) -> int:
 				_ = chunk[0] + chunk[1]
 		return 0
 `
-	result, errs := parseAndAnalyze(t, "parallel_for_chunks_exact_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "parallel_for_chunks_exact_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "visit", "int")
@@ -270,7 +270,7 @@ func TestAnalyzeRejectsAssigningReadonlyViewIndexResult(t *testing.T) {
 	ro: view[i32, 0, 2] = readonly(buf[0:2])
 	ro[0] <- 7
 `
-	_, errs := parseAndAnalyze(t, "readonly_index_assign_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "readonly_index_assign_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -290,7 +290,7 @@ def bad() -> void:
 	src2: view[i32, 4, 6] = buf[4:6]
 	zip_map(dst, src1, src2, add_pair)
 `
-	_, errs := parseAndAnalyze(t, "zip_map_requires_readonly_sources_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "zip_map_requires_readonly_sources_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -307,7 +307,7 @@ def run(values: darray[i64, 4], bias: i64) -> i64:
 	base: dview[i64] = values[0:4]
 	return reduce_sum(readonly(base), add_bias, bias)
 `
-	result, errs := parseAndAnalyze(t, "reduce_sum_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "reduce_sum_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "run", "i64")
@@ -320,7 +320,7 @@ def bad(values: darray[i64, 4]) -> i64:
 	base: dview[i64] = values[0:4]
 	return reduce_sum(readonly(base), is_positive)
 `
-	_, errs := parseAndAnalyze(t, "reduce_sum_bool_callback_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "reduce_sum_bool_callback_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -337,7 +337,7 @@ def bad(store: Expr.Store[Frozen], node: Expr) -> void:
 	chunk: dview[Expr] = store[0:store.count]
 	chunk[0] <- node
 `
-	_, errs := parseAndAnalyze(t, "packed_store_slice_index_assign_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_store_slice_index_assign_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -354,7 +354,7 @@ def bad(store: Expr.Store[Frozen]) -> void:
 	tags: dview[Expr.Tag] = store.tags
 	tags[0] <- Expr.Tag.Int
 `
-	_, errs := parseAndAnalyze(t, "packed_store_tag_view_index_assign_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_store_tag_view_index_assign_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -373,7 +373,7 @@ def build(store_owner: Arena) -> Token:
 	store: Token.Store[Local] = Token.Store(store_owner)
 	return new[store] Token.Region(span: 4)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_common_field_init_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_common_field_init_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsPayloadlessPackedConstructorInAlloc(t *testing.T) {
@@ -385,7 +385,7 @@ def build(store_owner: Arena) -> Token:
 	store: Token.Store[Local] = Token.Store(store_owner)
 	return new[store] Token.Region
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_alloc_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_alloc_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsBarePayloadlessPackedConstructorWithoutActiveStore(t *testing.T) {
@@ -396,7 +396,7 @@ func TestAnalyzeRejectsBarePayloadlessPackedConstructorWithoutActiveStore(t *tes
 def build() -> Token:
 	return Token.Region
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_ctor_without_store_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_ctor_without_store_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -414,7 +414,7 @@ def build(store_owner: Arena) -> Token:
 	store: Token.Store[Local] = Token.Store(store_owner)
 	return Token.Region
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_ctor_active_store_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_ctor_active_store_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsAffinePayloadsInPackedEnums(t *testing.T) {
@@ -438,7 +438,7 @@ def consume(owner: Arena, handle: Handle, thread: Thread[i64, Joinable]) -> i64:
 			return join(move taken)
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_affine_payload_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_affine_payload_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeConsumesAffinePackedEnumAfterMatch(t *testing.T) {
@@ -458,7 +458,7 @@ def consume_twice(owner: Arena, thread: Thread[i64, Joinable]) -> i64:
 			return join(move taken)
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_affine_payload_match_consumes_root.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_affine_payload_match_consumes_root.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -473,7 +473,7 @@ func TestAnalyzeWarnsOnAvoidableStructPadding(t *testing.T) {
 	value: i64
 	small: i16
 `
-	result, errs := parseAndAnalyze(t, "struct_padding_warn.llcontext", src)
+	result, errs := parseAndAnalyze(t, "struct_padding_warn.elisa", src)
 	requireNoErrors(t, errs)
 	warns := result.Warnings()
 	if len(warns) == 0 {
@@ -493,7 +493,7 @@ func TestAnalyzeDoesNotWarnOnDenseStructFieldOrder(t *testing.T) {
 	small: i16
 	flag: bool
 `
-	result, errs := parseAndAnalyze(t, "struct_padding_dense_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "struct_padding_dense_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -503,7 +503,7 @@ func TestAnalyzeWarnsOnReprCStructPadding(t *testing.T) {
 	value: i64
 	small: i16
 `
-	result, errs := parseAndAnalyze(t, "struct_padding_reprc_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "struct_padding_reprc_ok.elisa", src)
 	requireNoErrors(t, errs)
 	warns := result.Warnings()
 	if len(warns) == 0 {
@@ -529,7 +529,7 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 	node: Expr = new[store] Expr.Int(value: 1)
 	return spawn1(worker, node)
 `
-	_, errs := parseAndAnalyze(t, "spawn1_unpublished_store_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "spawn1_unpublished_store_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

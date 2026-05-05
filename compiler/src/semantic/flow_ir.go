@@ -3,8 +3,8 @@ package semantic
 import (
 	"strconv"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 type FlowInstrKind string

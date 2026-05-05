@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func RequestedAlignment(t Type) (int, bool) {

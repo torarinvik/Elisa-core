@@ -35,7 +35,7 @@ def bad(holder: PoolHolder) -> void:
 			pool_shutdown(pool_ref)
 			_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_enum_match_bound_aggregate_projected_callback_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_enum_match_bound_aggregate_projected_callback_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -68,7 +68,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 			task_group_add(alias_holder.group_ref, move task)
 			wait all holder.group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_enum_match_bound_aggregate_projected_callback_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_enum_match_bound_aggregate_projected_callback_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -105,7 +105,7 @@ def bad(holder: PoolHolder) -> void:
 			pool_shutdown(pool_ref)
 			_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_packed_enum_match_bound_aggregate_projected_callback_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_packed_enum_match_bound_aggregate_projected_callback_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -140,7 +140,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 			task_group_add(alias_holder.group_ref, move task)
 			wait all holder.group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_packed_enum_match_bound_aggregate_projected_callback_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_packed_enum_match_bound_aggregate_projected_callback_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -172,7 +172,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_aggregate_callback_param_projection_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_aggregate_callback_param_projection_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -202,7 +202,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	task_group_add(alias_holder.group_ref, move task)
 	wait all holder.group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_callback_param_projection_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_callback_param_projection_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -236,7 +236,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_aggregate_callback_param_local_alias_projection_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_aggregate_callback_param_local_alias_projection_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -268,7 +268,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	task_group_add(alias_holder.group_ref, move task)
 	wait all holder.group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_callback_param_local_alias_projection_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_callback_param_local_alias_projection_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -305,7 +305,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_mutable_aggregate_callback_wrapper_rebinding_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_mutable_aggregate_callback_wrapper_rebinding_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -340,7 +340,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	task_group_add(alias_holder.group_ref, move task)
 	wait all holder.group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_mutable_aggregate_callback_wrapper_rebinding_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_mutable_aggregate_callback_wrapper_rebinding_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -374,7 +374,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_mutable_callback_rebinding_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_mutable_callback_rebinding_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -406,7 +406,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	task_group_add(alias_holder.group_ref, move task)
 	wait all holder.group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_higher_order_helper_mutable_callback_rebinding_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_higher_order_helper_mutable_callback_rebinding_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -444,7 +444,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.left_pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_branch_merged_callback_rebinding_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_branch_merged_callback_rebinding_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -480,7 +480,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	task_group_add(group_ref, move task)
 	wait all holder.primary_group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_higher_order_helper_branch_merged_callback_rebinding_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_higher_order_helper_branch_merged_callback_rebinding_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
@@ -517,7 +517,7 @@ def bad(holder: PoolHolder) -> void:
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
-	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_branch_merged_callback_different_param_names_shutdown_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_branch_merged_callback_different_param_names_shutdown_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -552,7 +552,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	task_group_add(group_ref, move task)
 	wait all holder.group_ref
 `
-	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_branch_merged_callback_different_param_names_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_branch_merged_callback_different_param_names_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")

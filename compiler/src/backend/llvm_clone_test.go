@@ -25,7 +25,7 @@ def clone_items(owner: mutable Arena&, items: dview[u32], block: Lua.Block) -> L
 			_ = copied.count
 			return clone[Lua.Block](block)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_clone_builtin.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_clone_builtin.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -53,7 +53,7 @@ def clone_form(owner: mutable Arena&, form: Syntax.Form) -> Syntax.Form:
 		in owner:
 			return clone[Syntax.Form](form)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_clone_category_children.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_clone_category_children.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

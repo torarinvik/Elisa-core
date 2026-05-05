@@ -1,10 +1,10 @@
 package backend_test
 
 import (
-	"llcontext/src/backend"
-	"llcontext/src/lexer"
-	"llcontext/src/parser"
-	"llcontext/src/semantic"
+	"elisacore/src/backend"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -22,7 +22,7 @@ def score(value: PairOrInt) -> int:
 			return l + r
 	return 0
 `
-	result := parseAndAnalyze(t, "backend_enum_named_payload_patterns.llcontext", src)
+	result := parseAndAnalyze(t, "backend_enum_named_payload_patterns.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -49,7 +49,7 @@ func TestGenerateLLVMIRLowersNamedEnumConstructorArgs(t *testing.T) {
 def make_pair() -> PairOrInt:
 	return PairOrInt.Pair(right: 4, left: 3)
 `
-	result := parseAndAnalyze(t, "backend_enum_named_ctor_args.llcontext", src)
+	result := parseAndAnalyze(t, "backend_enum_named_ctor_args.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -81,7 +81,7 @@ def differs(left: MaybeInt, right: MaybeInt) -> bool:
 def compare_payload() -> bool:
 	return MaybeInt.Pair(3, 4) == MaybeInt.Pair(3, 4)
 `
-	result := parseAndAnalyze(t, "backend_enum_equality.llcontext", src)
+	result := parseAndAnalyze(t, "backend_enum_equality.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -121,7 +121,7 @@ def is_region(kind: TokenKind) -> bool:
 def next_kind() -> TokenKind:
 	return TokenKind.Destroy
 `
-	result := parseAndAnalyze(t, "backend_payloadless_enum_tags.llcontext", src)
+	result := parseAndAnalyze(t, "backend_payloadless_enum_tags.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -168,7 +168,7 @@ def inspect(owner: Arena) -> i32:
 		return frozen[key].span
 	return 0
 `
-	result := parseAndAnalyze(t, "backend_dense_node_table.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dense_node_table.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -226,7 +226,7 @@ def inspect(owner: Arena) -> i32:
 	table[key] <- 7
 	return table[key]
 `
-	result := parseAndAnalyze(t, "backend_dense_node_table_hidden_frozen_field_root.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dense_node_table_hidden_frozen_field_root.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -262,7 +262,7 @@ def pass_runtime(values: dict[cstr, i32]) -> void:
 def from_runtime() -> dict[cstr, i32]:
 	return make_runtime()
 `
-	result := parseAndAnalyze(t, "backend_dict_runtime_bridge.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dict_runtime_bridge.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -294,13 +294,13 @@ def use(values: dict[u32, i32]) -> dict[u32, i32]:
 	take_runtime(values)
 	return make_runtime()
 `
-	l := lexer.New("backend_dict_runtime_bridge_reject.llcontext", []byte(src))
+	l := lexer.New("backend_dict_runtime_bridge_reject.elisa", []byte(src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) > 0 {
 		t.Fatalf("lexer errors:\n%s", strings.Join(errs, "\n"))
 	}
 	p := parser.New(tokens)
-	file := p.ParseFile("backend_dict_runtime_bridge_reject.llcontext")
+	file := p.ParseFile("backend_dict_runtime_bridge_reject.elisa")
 	if errs := p.Errors(); len(errs) > 0 {
 		t.Fatalf("parse errors:\n%s", strings.Join(errs, "\n"))
 	}
@@ -327,7 +327,7 @@ def touch(a: Arena&, m: dict[cstr, i32]&, key: cstr) -> bool:
 	maybe_slot: i32&? = arena_dict_get(m, key)
 	return maybe_slot != null
 `
-	result := parseAndAnalyze(t, "backend_dict_helper_calls.llcontext", src)
+	result := parseAndAnalyze(t, "backend_dict_helper_calls.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -348,8 +348,8 @@ def touch(a: Arena&, m: dict[cstr, i32]&, key: cstr) -> bool:
 	}
 }
 func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
-	src := loadFixtureSource(t, "Code", "test_programs", "frontend_stress.llcontext")
-	result := parseAndAnalyze(t, "backend_frontend_stress.llcontext", src)
+	src := loadFixtureSource(t, "Code", "test_programs", "frontend_stress.elisa")
+	result := parseAndAnalyze(t, "backend_frontend_stress.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -378,8 +378,8 @@ func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
 	}
 }
 func TestGenerateLLVMIRLowersAllocatorOwnershipFixture(t *testing.T) {
-	src := loadFixtureSource(t, "Code", "test_programs", "allocator_ownership.llcontext")
-	result := parseAndAnalyze(t, "backend_allocator_ownership.llcontext", src)
+	src := loadFixtureSource(t, "Code", "test_programs", "allocator_ownership.elisa")
+	result := parseAndAnalyze(t, "backend_allocator_ownership.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -442,7 +442,7 @@ def load_with_default(path: u8&) -> u8&:
 	text: u8& = try? read_file(path) default "" as u8&
 	return text
 `
-	result := parseAndAnalyze(t, "backend_error_handling.llcontext", src)
+	result := parseAndAnalyze(t, "backend_error_handling.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -487,7 +487,7 @@ def bubble() -> int error[BroadError.NotFound, ...]:
 def fail_now() -> int error[BroadError.NotFound, ...]:
 	raise SourceError.NotFound
 `
-	result := parseAndAnalyze(t, "backend_error_set_widening.llcontext", src)
+	result := parseAndAnalyze(t, "backend_error_set_widening.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
@@ -527,7 +527,7 @@ def bubble_disk() -> int error[FileError, NetworkError]:
 def bubble_network() -> int error[FileError, NetworkError]:
 	return try read_network()
 `
-	result := parseAndAnalyze(t, "backend_error_multi_family.llcontext", src)
+	result := parseAndAnalyze(t, "backend_error_multi_family.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark llcontext Lua execution throughput against the PUC Lua reference harness."""
+"""Benchmark elisacore Lua execution throughput against the PUC Lua reference harness."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def load_corpus_manifest(repo_root: Path, manifest_path: Path) -> list[tuple[str
     return inputs
 
 
-def build_llcontext_harness(compiler_dir: Path, frontend_path: Path, harness_path: Path, out_dir: Path, opt_level: str) -> Path:
+def build_elisacore_harness(compiler_dir: Path, frontend_path: Path, harness_path: Path, out_dir: Path, opt_level: str) -> Path:
     header_path = out_dir / "lua_frontend.h"
     object_path = out_dir / "lua_frontend.o"
     exe_path = out_dir / "lua_frontend_execute_bench"
@@ -144,7 +144,7 @@ def write_json_report(
     opt_level: str,
     iterations: int,
     repeats: int,
-    llcontext_bench: Path,
+    elisacore_bench: Path,
     reference_bench: Path,
     inputs: list[tuple[str, Path]],
     runs: list[dict[str, object]],
@@ -159,7 +159,7 @@ def write_json_report(
         "opt_level": opt_level,
         "iterations": iterations,
         "repeats": repeats,
-        "llcontext_bench": str(llcontext_bench),
+        "elisacore_bench": str(elisacore_bench),
         "reference_bench": str(reference_bench),
         "inputs": [{"label": label, "path": str(path)} for label, path in inputs],
         "runs": runs,
@@ -179,8 +179,8 @@ def main() -> int:
 
     repo_root = Path(__file__).resolve().parents[2]
     compiler_dir = repo_root / "compiler"
-    frontend_path = repo_root / "Code" / "llcontext_lua" / "src" / "lua_frontend.llcontext"
-    llcontext_harness = repo_root / "Code" / "benchmarks" / "lua_frontend_execute_bench.c"
+    frontend_path = repo_root / "Code" / "elisacore_lua" / "src" / "lua_frontend.elisa"
+    elisacore_harness = repo_root / "Code" / "benchmarks" / "lua_frontend_execute_bench.c"
     reference_harness = repo_root / "Code" / "benchmarks" / "lua_reference_execute_bench.c"
     manifest_path = Path(args.corpus_manifest) if args.corpus_manifest else repo_root / "Code" / "benchmarks" / "lua_frontend_execution_corpus_manifest.txt"
     if not manifest_path.exists():
@@ -188,13 +188,13 @@ def main() -> int:
 
     temp_root_obj = tempfile.TemporaryDirectory(prefix="lua_frontend_execute_bench.")
     temp_root = Path(temp_root_obj.name)
-    ll_out = temp_root / "llcontext"
+    ll_out = temp_root / "elisacore"
     ref_out = temp_root / "reference"
     ll_out.mkdir(parents=True, exist_ok=True)
     ref_out.mkdir(parents=True, exist_ok=True)
 
     try:
-        llcontext_bench = build_llcontext_harness(compiler_dir, frontend_path, llcontext_harness, ll_out, args.opt_level)
+        elisacore_bench = build_elisacore_harness(compiler_dir, frontend_path, elisacore_harness, ll_out, args.opt_level)
         reference_bench = build_reference_harness(reference_harness, ref_out, args.opt_level)
         inputs = load_corpus_manifest(repo_root, manifest_path)
         if not inputs:
@@ -211,11 +211,11 @@ def main() -> int:
 
         for input_label, bench_input in inputs:
             ll_values = run_suite(
-                llcontext_bench,
+                elisacore_bench,
                 bench_input,
                 args.iterations,
                 args.repeats,
-                f"LLCONTEXT_{input_label}_EXECUTE".upper(),
+                f"ELISACORE_{input_label}_EXECUTE".upper(),
             )
             ref_values = run_suite(
                 reference_bench,
@@ -224,7 +224,7 @@ def main() -> int:
                 args.repeats,
                 f"REFERENCE_{input_label}_EXECUTE".upper(),
             )
-            ll_summary = summarize_variant(f"llcontext_{input_label}_execute", ll_values)
+            ll_summary = summarize_variant(f"elisacore_{input_label}_execute", ll_values)
             ref_summary = summarize_variant(f"reference_{input_label}_execute", ref_values)
             ratio = ratio_percent(ll_summary["avg_MiB_s"], ref_summary["avg_MiB_s"])
             print(f"SUMMARY label={input_label}_execute_ratio ll_over_reference={ratio:.3f}")
@@ -238,7 +238,7 @@ def main() -> int:
                     "mode": "execute",
                     "iterations": args.iterations,
                     "repeats": args.repeats,
-                    "llcontext": {"values_MiB_s": ll_values, **ll_summary},
+                    "elisacore": {"values_MiB_s": ll_values, **ll_summary},
                     "reference": {"values_MiB_s": ref_values, **ref_summary},
                     "ll_over_reference": ratio,
                 }
@@ -247,16 +247,16 @@ def main() -> int:
         aggregate = {
             "mode": "execute",
             "common_input_count": len(ll_averages),
-            "llcontext_avg_MiB_s": statistics.mean(ll_averages),
+            "elisacore_avg_MiB_s": statistics.mean(ll_averages),
             "reference_avg_MiB_s": statistics.mean(ref_averages),
             "ll_over_reference": ratio_percent(statistics.mean(ll_averages), statistics.mean(ref_averages)),
-            "llcontext_min_MiB_s": min(ll_averages),
-            "llcontext_max_MiB_s": max(ll_averages),
+            "elisacore_min_MiB_s": min(ll_averages),
+            "elisacore_max_MiB_s": max(ll_averages),
             "reference_min_MiB_s": min(ref_averages),
             "reference_max_MiB_s": max(ref_averages),
         }
         print(f"SUMMARY common_inputs={aggregate['common_input_count']}")
-        print(f"SUMMARY aggregate_llcontext_execute_avg_MiB_s={aggregate['llcontext_avg_MiB_s']:.2f}")
+        print(f"SUMMARY aggregate_elisacore_execute_avg_MiB_s={aggregate['elisacore_avg_MiB_s']:.2f}")
         print(f"SUMMARY aggregate_reference_execute_avg_MiB_s={aggregate['reference_avg_MiB_s']:.2f}")
         print(f"SUMMARY aggregate_ll_over_reference={aggregate['ll_over_reference']:.3f}")
 
@@ -270,7 +270,7 @@ def main() -> int:
                 opt_level=args.opt_level,
                 iterations=args.iterations,
                 repeats=args.repeats,
-                llcontext_bench=llcontext_bench,
+                elisacore_bench=elisacore_bench,
                 reference_bench=reference_bench,
                 inputs=inputs,
                 runs=runs,

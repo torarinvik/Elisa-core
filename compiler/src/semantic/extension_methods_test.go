@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestAnalyzeExtensionMethodCallRewritesToInternalFunctionCall(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "extension_method_rewrite.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "extension_method_rewrite.elisa", `
 const enum Tok of i8:
     PLUS = 0
 
@@ -81,7 +81,7 @@ def read(tok: Tok, box: Box) -> i64:
 }
 
 func TestAnalyzeExtensionMethodPrefersRealFieldFunctionValues(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "extension_method_field_precedence.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "extension_method_field_precedence.elisa", `
 struct CallbackBox:
     run: func() -> i64
 
@@ -123,7 +123,7 @@ def read(box: CallbackBox) -> i64:
 }
 
 func TestAnalyzeExtensionMethodNamedArgsAndDoBlock(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "extension_method_named_args.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "extension_method_named_args.elisa", `
 struct Box:
     value: i64
 
@@ -176,7 +176,7 @@ def read(box: Box) -> i64:
 }
 
 func TestAnalyzeUFCSFreeFunctionRewrite(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ufcs_free_function.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_free_function.elisa", `
 struct Box:
     value: i64
 
@@ -210,7 +210,7 @@ def read(box: Box) -> i64:
 }
 
 func TestAnalyzeUFCSFreeFunctionAutorefRewrite(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ufcs_free_function_autoref.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_free_function_autoref.elisa", `
 struct Box:
     value: i64
 
@@ -251,7 +251,7 @@ def read(box: Box) -> i64:
 }
 
 func TestAnalyzeUFCSAmbiguityReportsCandidates(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ufcs_ambiguous.llcontext", `
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ufcs_ambiguous.elisa", `
 namespace left:
     struct Box:
         value: i64
@@ -279,7 +279,7 @@ def read(box: Box) -> i64:
 }
 
 func TestAnalyzeOptionalChainingOnOptionalAndNullableReceivers(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "optional_chaining.llcontext", `
+	result := analyzeFunctionAnalysisTestSource(t, "optional_chaining.elisa", `
 struct Box:
     value: i64
 

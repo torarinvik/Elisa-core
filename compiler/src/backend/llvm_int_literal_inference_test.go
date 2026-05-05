@@ -27,7 +27,7 @@ def build(owner: Arena, items: darray[usize]) -> usize:
 		total <- total + chunk[0]
 		return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_int_literal_unsigned_contexts.llcontext", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_int_literal_unsigned_contexts.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

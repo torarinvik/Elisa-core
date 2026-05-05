@@ -3,7 +3,7 @@ package semantic
 import (
 	"fmt"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func appendVisitArmLocals(locals map[string]bool, arm ast.VisitArm) {

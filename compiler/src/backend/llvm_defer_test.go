@@ -28,7 +28,7 @@ func previousNonEmptyLine(lines []string, index int) string {
 }
 
 func TestGenerateLLVMIRFunctionDeferUsesCapturedBindingAcrossShadowing(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_defer_function_capture.llcontext", `extern sink(value: int) -> void
+	result := parseAndAnalyzeBackendTest(t, "backend_defer_function_capture.elisa", `extern sink(value: int) -> void
 
 def keep(flag: bool) -> int:
     value: int = 10
@@ -69,7 +69,7 @@ def keep(flag: bool) -> int:
 }
 
 func TestGenerateLLVMIRBlockDeferRunsBeforePoolShutdown(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_defer_block_pool_order.llcontext", parallelForConcurrencyPrelude+`
+	result := parseAndAnalyzeBackendTest(t, "backend_defer_block_pool_order.elisa", parallelForConcurrencyPrelude+`
 extern observe(pool: stack ThreadPool&) -> void
 
 def keep() -> void:

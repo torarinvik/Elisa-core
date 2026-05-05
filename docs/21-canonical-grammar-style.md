@@ -1,6 +1,6 @@
 # Canonical grammar style
 
-This note is the house style for llcontext grammar/parser implementations.
+This note is the house style for Elisa core grammar/parser implementations.
 
 The goal is not to hide the low-level language. The goal is to make the common parser/tree/compiler cases read like a compact grammar DSL, while keeping every escape hatch available when allocation, recovery, or control flow needs to be explicit.
 
@@ -8,7 +8,7 @@ The goal is not to hide the low-level language. The goal is to make the common p
 
 Prefer splitting grammars by reusable concern:
 
-```context
+```elisa
 grammar PascalListGrammar with PascalParserEnv:
     grammar type separated_by[T](item: grammar -> T, stop: tokenset, sep: grammar = .COMMA) -> grammar -> darray[T]:
         separated item by sep until(stop)
@@ -25,14 +25,14 @@ Use `grammar type` for reusable parser constructors. Keep `grammarfn` for compat
 
 Prefer direct named calls for grammar constructors:
 
-```context
+```elisa
 args = separated_by(item: expression(), stop: RParenSync)
 condition = recovered(item: condition(), message: expr(ExpectedCondition), stop: ConditionSync, fallback: expr(invalid_expr()))
 ```
 
 When the first argument is the grammar fragment being transformed, prefer the pipeline form:
 
-```context
+```elisa
 args = expression() |> separated_by(stop: RParenSync)
 condition = condition() |> recovered(message: expr(ExpectedCondition), stop: ConditionSync, fallback: expr(invalid_expr()))
 ```
@@ -41,13 +41,13 @@ Pipelines are compile-time grammar application sugar. They pass the left-hand te
 
 Avoid the older explicit spelling unless you intentionally want to emphasize expansion or positional experiments:
 
-```context
+```elisa
 args = apply separated_by(item: expression(), stop: RParenSync)
 ```
 
 Use `grammar alias` when a grammar fragment has a domain name that should appear at the use site:
 
-```context
+```elisa
 grammar PascalStmtGrammar with PascalTreeGrammarEnv uses PascalListGrammar:
     tokenset BlockEndSync:
         END
@@ -64,7 +64,7 @@ grammar PascalStmtGrammar with PascalTreeGrammarEnv uses PascalListGrammar:
 
 Use a parameterized alias when the named parser concept needs local stop sets, separators, or recovery expressions, but should still read as a domain construct at the call site:
 
-```context
+```elisa
 grammar PascalExprGrammar with PascalTreeGrammarEnv uses PascalListGrammar:
     grammar alias expr_items(stop: tokenset, sep: grammar = .COMMA):
         expression() |> separated_by(stop: stop, sep: sep)
@@ -78,7 +78,7 @@ Prefer `grammar type` when the abstraction is a reusable constructor such as `se
 
 Use the block form when the alias names a larger fragment:
 
-```context
+```elisa
 grammar ATPLPostfix:
     grammar alias member_postfix_step:
         attempt(try self.try_parse_postfix_member(owner, base))
@@ -90,7 +90,7 @@ grammar ATPLPostfix:
 
 When a block alias contains several terms, the body itself is the sequence:
 
-```context
+```elisa
 grammar PascalParenGrammar:
     grammar alias parenthesized_atom:
         .LPAREN
@@ -102,7 +102,7 @@ Aliases are compile-time grammar terms. They are imported through `uses`, may co
 
 Aliases also compose inside `infix table` declarations, which keeps expression tables from turning into dense one-line nests:
 
-```context
+```elisa
 grammar PascalExprGrammar:
     grammar alias atom_choice:
         choice:
@@ -121,7 +121,7 @@ grammar PascalExprGrammar:
 
 Use grouped token aliases:
 
-```context
+```elisa
 token:
     IDENT
     INTEGER
@@ -132,7 +132,7 @@ token:
 
 Use `tokenset` for sync boundaries and repeated list stops:
 
-```context
+```elisa
 tokenset RParenSync:
     RPAREN
     token(TokenKind.EOF)
@@ -148,7 +148,7 @@ Prefer semantic names such as `StatementSync`, `BlockEndSync`, `RParenSync`, and
 
 Use `token family` when the same token union names a domain atom rather than a sync boundary:
 
-```context
+```elisa
 token family OperatorName:
     IDENT
     CONSTR_IDENT
@@ -168,7 +168,7 @@ Prefer names that describe the parser concept. `StatementSync` and `BlockEndSync
 
 Use grammar-wide channels for fields that are genuinely shared by most productions in the grammar:
 
-```context
+```elisa
 grammar PascalExprGrammar with PascalTreeGrammarEnv:
     channel span: Span
     channel node
@@ -176,7 +176,7 @@ grammar PascalExprGrammar with PascalTreeGrammarEnv:
 
 Use production-local channels for tuple/struct helper results:
 
-```context
+```elisa
 assignment_spec() -> (name_id: NameId, value: Pascal.Expr, span: Span):
     channel name_id
     channel value
@@ -195,7 +195,7 @@ Let channel synthesis build the final tuple/struct when the result shape is just
 
 Use comprehension syntax and list composition instead of hand-written allocation helpers:
 
-```context
+```elisa
 decls = const_decls + type_decls + var_decls
 empty_decls = empty[Pascal.Decl]
 one_decl = singleton[Pascal.Decl](decl)
@@ -207,7 +207,7 @@ Use `empty[T]` for no items, `singleton[T](value)` for one item, `[value for ite
 
 Prefer grammar composition over helper functions whose only job is list plumbing:
 
-```context
+```elisa
 declarations() -> darray[Pascal.Decl]:
     kind = expr(state.current_token().kind)
     const_decls = when(kind == TokenKind.CONST, const_prefixed_decl_sections(), empty[Pascal.Decl])
@@ -221,19 +221,19 @@ declarations() -> darray[Pascal.Decl]:
 
 Use tree constructor sugar for ordinary AST construction:
 
-```context
+```elisa
 node <- expr(node[span = left.span + right.span] Pascal.Expr.Binary(left: left, op: op, right: right))
 ```
 
 Use span algebra:
 
-```context
+```elisa
 span <- expr(start_token.span + end_token.span)
 ```
 
 Avoid new parser code that writes:
 
-```context
+```elisa
 span <- expr(combine_span(start_token.span, end_token.span))
 node <- expr(node[span = combine_span(left.span, right.span)] Pascal.Expr.Binary(left: left, right: right))
 ```
@@ -244,7 +244,7 @@ Keep low-level constructors available for places where allocation, storage, or f
 
 Use block `seq:` when a sequence owns multiple meaningful steps:
 
-```context
+```elisa
 choice:
     seq:
         .IDENT(token)
@@ -256,7 +256,7 @@ choice:
 
 For reusable transformed atoms, prefer a small helper production over nesting compact `seq(...)` inside a large expression:
 
-```context
+```elisa
 name_atom() -> Pascal.Expr:
     .IDENT(token)
     return make_name_expr(token)
@@ -271,14 +271,14 @@ Inline `seq(...)` is still valid for compact nested positions, but it should not
 
 Use postfix `?` for optional grammar terms:
 
-```context
+```elisa
 else_stmt = else_clause()?
 args = delimited(.LPAREN, expression() |> separated_by(stop: RParenSync), .RPAREN, ExpectedRightParen)?
 ```
 
-When ordinary llcontext support code needs to return an optional value only after several optional inputs are present, prefer `return? with` over a nested `if let` ladder:
+When ordinary Elisa core support code needs to return an optional value only after several optional inputs are present, prefer `return? with` over a nested `if let` ladder:
 
-```context
+```elisa
 def integer_range_contains(lower: Expr, upper: Expr, value: Expr) -> bool?:
     return? with lower_value = integer_literal(lower),
                  upper_value = integer_literal(upper),
@@ -291,7 +291,7 @@ This is only for optional-return control flow. Use plain `if let` when the prese
 
 For those side-effecting branches, prefer the multi-binding form over a nested ladder:
 
-```context
+```elisa
 if let lower_value = integer_literal(lower), upper_value = integer_literal(upper):
     lower_value > upper_value then:
         record_diagnostic()
@@ -302,7 +302,7 @@ The `then:` block is just a compact statement-form `if` for short guards. Use th
 
 Use direct recovery constructors for repeated recovery shapes:
 
-```context
+```elisa
 grammar type recovered_expr(stop: tokenset) -> grammar -> SML.Expr:
     expression() |> recovered(message: expr(SMLParseMessageKey.ExpectedExpression), stop: stop, fallback: expr(invalid_sml_expr_at(state.current_token().span)))
 
@@ -320,7 +320,7 @@ if_expr() -> SML.Expr:
 
 Use `protocol` for compile-time capability contracts:
 
-```context
+```elisa
 protocol SpanLike:
     type Range
     def combine(left: Range, right: Range) -> Range
@@ -330,7 +330,7 @@ Use `static interface` only when deliberately showing the low-level spelling or 
 
 ## When To Drop Down
 
-Drop to ordinary llcontext code when:
+Drop to ordinary Elisa core code when:
 
 - Allocation strategy matters more than grammar readability.
 - A parser helper needs loops, mutation, or several non-grammar checks.

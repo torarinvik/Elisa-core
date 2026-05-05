@@ -73,7 +73,7 @@ That gives you the practical rule of thumb:
 
 The biggest current precision loss is this pattern:
 
-```context
+```elisa
 def finish_ok(job: ParseJob[Pending]&) -> void:
     job.checksum <- 7
     job.stage <- 1
@@ -87,7 +87,7 @@ Even if `finish_ok` obviously makes the job ready, the caller currently widens a
 
 So the caller sees something like:
 
-```context
+```elisa
 ParseJob[Pending | Ready | Failed]
 ```
 
@@ -97,7 +97,7 @@ That is conservative, but sound.
 
 ## 4. Pattern: Open / Closed resource
 
-```context
+```elisa
 struct Socket[state Open | Closed]:
     fd: mutable int
     bytes_sent: mutable int
@@ -109,14 +109,14 @@ struct Socket[state Open | Closed]:
 
 ### Direct mutation stays precise
 
-```context
+```elisa
 sock.fd <- -1
 # sock is now Socket[Closed]
 ```
 
 ### Ref helper call widens today
 
-```context
+```elisa
 def close_socket(sock: Socket[Open]&) -> void:
     sock.fd <- -1
 
@@ -130,7 +130,7 @@ Use this pattern when the state is a real resource protocol, not just a tag you 
 
 ## 5. Pattern: Uninitialized / Initialized buffer wrapper
 
-```context
+```elisa
 struct ScratchBuffer[state Uninitialized | Initialized]:
     capacity: mutable int
     used: mutable int
@@ -148,7 +148,7 @@ struct ScratchBuffer[state Uninitialized | Initialized]:
 
 ### Current caveat
 
-```context
+```elisa
 def init_buffer(buf: ScratchBuffer[Uninitialized]&) -> void:
     buf.capacity <- 64
     buf.used <- 0
@@ -163,7 +163,7 @@ So today you should expect a re-check if you cross a helper call.
 
 ## 6. Pattern: Pending / Ready / Failed parser or async state
 
-```context
+```elisa
 struct ParseJob[state Pending | Ready | Failed]:
     stage: mutable int
     checksum: mutable int
@@ -178,7 +178,7 @@ This is a strong dogfooding pattern because it is exactly the sort of API where 
 
 ### Direct local transition can be exact
 
-```context
+```elisa
 job.checksum <- 7
 job.stage <- 1
 return take_ready(job)
@@ -186,7 +186,7 @@ return take_ready(job)
 
 ### Helper call currently forces the “re-prove” style
 
-```context
+```elisa
 finish_ok((&job).cast[ParseJob[Pending]&])
 
 if job is ParseJob[Ready]:
@@ -223,7 +223,7 @@ Use `is` when:
 
 Typical pattern:
 
-```context
+```elisa
 helper((&value).cast[SomeStatefulType[OldState]&])
 
 if value is SomeStatefulType[NewState]:

@@ -1,7 +1,7 @@
 package semantic_test
 
 import (
-	"llcontext/src/semantic"
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -16,7 +16,7 @@ def advance_commutative(offset: usize, ptr: u8&) -> u8&:
 def rewind(ptr: u8&, offset: usize) -> u8&:
 	return ptr - offset
 `
-	_, errs := parseAndAnalyze(t, "pointer_arithmetic.llcontext", src)
+	_, errs := parseAndAnalyze(t, "pointer_arithmetic.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsManualRegions(t *testing.T) {
@@ -25,7 +25,7 @@ func TestAnalyzeAcceptsManualRegions(t *testing.T) {
 	value: i32& = new[scratch] seed + 1
 	return value[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExplicitRegionQualifiedRefs(t *testing.T) {
@@ -35,7 +35,7 @@ func TestAnalyzeAcceptsExplicitRegionQualifiedRefs(t *testing.T) {
 	alias: scratch i32& = value
 	return value[0] + alias[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_explicit_ref_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_explicit_ref_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExplicitRegionParamsOnFunctions(t *testing.T) {
@@ -49,7 +49,7 @@ def use(seed: i32) -> i32:
 	alias: scratch i32& = id(value)
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "function_region_params_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "function_region_params_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExplicitRegionParamsOnExternFunctions(t *testing.T) {
@@ -61,7 +61,7 @@ def use(seed: i32) -> i32:
 	alias: scratch i32& = borrow(value)
 	return alias[0]
 `
-	_, errs := parseAndAnalyze(t, "extern_function_region_params_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "extern_function_region_params_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExplicitAndInferredPermissions(t *testing.T) {
@@ -77,7 +77,7 @@ def scoped() -> void:
 	can Console.Write:
 		emit(3)
 `
-	result, errs := parseAndAnalyze(t, "permissions_explicit_and_inferred_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "permissions_explicit_and_inferred_ok.elisa", src)
 	requireNoErrors(t, errs)
 
 	for _, name := range []string{"explicit", "inferred", "scoped"} {
@@ -104,7 +104,7 @@ func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
 	src := `def use() -> void can[Thread.Spawn, Thread.Join, Thread.Detach, Pool.Create, Pool.Submit, Pool.Await, Pool.WaitAll, Pool.Shutdown, Sync.Lock, Sync.Unlock, Sync.Wait, Sync.Notify, Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence]:
 	pass
 `
-	result, errs := parseAndAnalyze(t, "builtin_concurrency_permissions_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "builtin_concurrency_permissions_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireDeclaredFunctionPermissionRefs(t, result, "use",
@@ -147,7 +147,7 @@ def touch(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadP
 	mutex_unlock(move guard)
 	_ = pool_await(move task)
 `
-	result, errs := parseAndAnalyze(t, "builtin_concurrency_carriers_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "builtin_concurrency_carriers_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -157,7 +157,7 @@ func TestAnalyzeAcceptsAtomicSafePayloadTypes(t *testing.T) {
 	_ = ready.value
 	_ = ptrs.value
 `
-	result, errs := parseAndAnalyze(t, "atomic_safe_payloads_ok.llcontext", src)
+	result, errs := parseAndAnalyze(t, "atomic_safe_payloads_ok.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -169,7 +169,7 @@ func TestAnalyzeRejectsAtomicPayloadOfAggregateStruct(t *testing.T) {
 def bad(slot: atomic[Pair]) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "atomic_aggregate_payload_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "atomic_aggregate_payload_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -182,7 +182,7 @@ func TestAnalyzeRejectsAtomicPayloadOfAffineHandle(t *testing.T) {
 	src := `def bad(slot: atomic[Thread[i64, Joinable]]) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "atomic_affine_payload_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "atomic_affine_payload_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -195,7 +195,7 @@ func TestAnalyzeRejectsMissingProtocolStateTypeArguments(t *testing.T) {
 	src := `def bad(thread: Thread[i64]) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "concurrency_protocol_arity_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "concurrency_protocol_arity_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -210,7 +210,7 @@ func TestAnalyzeRejectsProtocolStateMismatchAtCallSite(t *testing.T) {
 def bad(thread: Thread[i64, Pending]) -> i64:
 	return join(move thread)
 `
-	_, errs := parseAndAnalyze(t, "concurrency_protocol_state_mismatch_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "concurrency_protocol_state_mismatch_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -227,7 +227,7 @@ def bad(handle: Handle) -> void:
 	borrow: Handle& = &handle
 	_ = borrow
 `
-	_, errs := parseAndAnalyze(t, "user_affine_ref_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "user_affine_ref_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -242,7 +242,7 @@ func TestAnalyzeRejectsGlobalUserDeclaredAffineStruct(t *testing.T) {
 
 global current: Handle = zeroed
 `
-	_, errs := parseAndAnalyze(t, "user_affine_global_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "user_affine_global_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -257,7 +257,7 @@ func TestAnalyzeWarnsOnMissingPermissionGrant(t *testing.T) {
 def bad() -> void:
 	emit(1)
 `
-	result, errs := parseAndAnalyze(t, "permissions_missing_grant_warn.llcontext", src)
+	result, errs := parseAndAnalyze(t, "permissions_missing_grant_warn.elisa", src)
 	requireNoErrors(t, errs)
 	warns := strings.Join(result.Warnings(), "\n")
 	if warns == "" {
@@ -282,7 +282,7 @@ def bad(flag: bool) -> void:
 		local_fn <- do_wait
 	local_fn()
 `
-	result, errs := parseAndAnalyze(t, "permissions_branch_merged_callback_union_warn.llcontext", src)
+	result, errs := parseAndAnalyze(t, "permissions_branch_merged_callback_union_warn.elisa", src)
 	requireNoErrors(t, errs)
 	warns := strings.Join(result.Warnings(), "\n")
 	if warns == "" {
@@ -304,7 +304,7 @@ def caller() -> void:
 def callee() -> void:
 	emit(1) can Console.Write
 `
-	result, errs := parseAndAnalyze(t, "permissions_forward_reference_propagates.llcontext", src)
+	result, errs := parseAndAnalyze(t, "permissions_forward_reference_propagates.elisa", src)
 	requireNoErrors(t, errs)
 	sym, ok := result.GlobalScope.Lookup("caller")
 	if !ok {
@@ -327,7 +327,7 @@ func TestAnalyzeRejectsUnknownPermissionMember(t *testing.T) {
 def bad() -> void:
 	emit(1) can Console.Read
 `
-	_, errs := parseAndAnalyze(t, "permissions_unknown_member_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "permissions_unknown_member_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -339,7 +339,7 @@ func TestAnalyzeInfersBuiltinAbortPermissionFromPanic(t *testing.T) {
 	src := `def fail_fast() -> void:
 	panic("boom")
 `
-	result, errs := parseAndAnalyze(t, "builtin_abort_from_panic.llcontext", src)
+	result, errs := parseAndAnalyze(t, "builtin_abort_from_panic.elisa", src)
 	requireNoErrors(t, errs)
 	sym, ok := result.GlobalScope.Lookup("fail_fast")
 	if !ok {
@@ -367,7 +367,7 @@ func TestAnalyzeRejectsCallsWhenRegionParamCannotBeInferred(t *testing.T) {
 def use(value: i32&) -> i32&:
 	return id(value)
 `
-	_, errs := parseAndAnalyze(t, "function_region_params_inference_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "function_region_params_inference_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -383,7 +383,7 @@ func TestAnalyzeRejectsMismatchedRegionQualifiedRefs(t *testing.T) {
 	other: right i32& = value
 	return other[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_mismatched_ref_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_mismatched_ref_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -395,7 +395,7 @@ func TestAnalyzeRejectsUnknownRegionQualifiedRef(t *testing.T) {
 	src := `def bad() -> void:
 	value: scratch i32&? = null
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_unknown_ref_qualifier_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_unknown_ref_qualifier_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -409,7 +409,7 @@ func TestAnalyzeRejectsReturningReferenceAllocatedFromLocalRegion(t *testing.T) 
 	value: i32& = new[scratch] 1
 	return value
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_return_ref_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_return_ref_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -423,7 +423,7 @@ func TestAnalyzeRejectsReturningCastedReferenceAllocatedFromLocalRegion(t *testi
 	value: i32& = new[scratch] 1
 	return value.cast[i32&]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_return_cast_ref_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_return_cast_ref_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
@@ -443,7 +443,7 @@ func TestAnalyzeAcceptsRegionCheckpoints(t *testing.T) {
 	final: i32& = new[scratch] seed + 3
 	return value + final[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_checkpoints_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_checkpoints_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsNestedRegionCheckpoints(t *testing.T) {
@@ -461,7 +461,7 @@ func TestAnalyzeAcceptsNestedRegionCheckpoints(t *testing.T) {
 	final: i32& = new[scratch] seed + 3
 	return baseline + kept + final[0]
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_nested_checkpoints_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "manual_regions_nested_checkpoints_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsEnumConstructorsAndMatch(t *testing.T) {
@@ -485,7 +485,7 @@ def make_pair() -> MaybeInt:
 def make_none() -> MaybeInt:
 	return MaybeInt.None
 `
-	_, errs := parseAndAnalyze(t, "enum_match_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_match_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsStatementMatchesAndNestedPatterns(t *testing.T) {
@@ -507,7 +507,7 @@ def score(value: Outer) -> int:
 			return -1
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "enum_match_stmt_nested_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_match_stmt_nested_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsNamedEnumPayloadFieldsAndPatterns(t *testing.T) {
@@ -526,7 +526,7 @@ def score(value: PairOrInt) -> int:
 			return l + r
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "enum_named_payloads_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_named_payloads_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsNamedEnumConstructorArgs(t *testing.T) {
@@ -537,7 +537,7 @@ func TestAnalyzeAcceptsNamedEnumConstructorArgs(t *testing.T) {
 def make_pair() -> PairOrInt:
 	return PairOrInt.Pair(right: 4, left: 3)
 `
-	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_ok.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsNamedPatternsForUnnamedEnumPayloads(t *testing.T) {
@@ -550,7 +550,7 @@ def unwrap(value: MaybeInt) -> int:
 			return inner
 	return 0
 `
-	_, errs := parseAndAnalyze(t, "enum_named_payloads_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "enum_named_payloads_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}

@@ -69,7 +69,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$OUT_DIR" ]; then
-    OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/llcontext-lua-profile.XXXXXX")"
+    OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/elisacore-lua-profile.XXXXXX")"
 else
     mkdir -p "$OUT_DIR"
 fi

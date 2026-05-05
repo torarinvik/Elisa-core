@@ -18,9 +18,9 @@ package backend
 import "C"
 
 import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
-	"llcontext/src/ast"
-	"llcontext/src/semantic"
 	"unsafe"
 )
 

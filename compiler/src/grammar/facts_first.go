@@ -1,6 +1,6 @@
 package grammar
 
-import "llcontext/src/ast"
+import "elisacore/src/ast"
 
 func resolveGrammarProductionFirstSets(production ast.GrammarProductionDecl, productions map[string]resolvedGrammarProduction) ast.GrammarProductionDecl {
 	production.RecoverUntil = resolveGrammarFirstRefsInStopList(production.RecoverUntil, productions)

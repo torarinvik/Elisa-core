@@ -3,8 +3,8 @@ package semantic
 import (
 	"strings"
 
-	"llcontext/src/ast"
-	"llcontext/src/lexer"
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func (a *Analyzer) registerTreeMemberTypes(treeQualifiedName string, treeType *TreeType, members []ast.TreeMemberDecl) {

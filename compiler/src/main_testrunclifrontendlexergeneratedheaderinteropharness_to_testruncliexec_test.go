@@ -17,7 +17,7 @@ func TestRunCLIFrontendLexerGeneratedHeaderInteropHarness(t *testing.T) {
 		t.Skip("clang not available")
 	}
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa")
 	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer_generated_harness.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "frontend_lexer_runtime_shims.c")
 	outputDir := t.TempDir()
@@ -65,7 +65,7 @@ func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 		t.Skip("clang not available")
 	}
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser_generated_harness.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
 	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
@@ -110,7 +110,7 @@ func TestRunCLIJSONParserParallelBenchBuildSmoke(t *testing.T) {
 	}
 
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 	benchPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_parallel_bench.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
 	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
@@ -217,7 +217,7 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 	}
 
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 	benchPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_dom_bench.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
 	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
@@ -293,7 +293,7 @@ func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 	}
 
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser_tests.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser_tests.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -324,7 +324,7 @@ func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 }
 func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
+	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -380,7 +380,7 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 }
 func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "invalid_escape.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "invalid_escape.elisa")
 	if err := os.WriteFile(fixturePath, []byte("def bad() -> u8&:\n    return \"oops\\q\".cast[u8&]\n"), 0o644); err != nil {
 		t.Fatalf("failed to write invalid fixture: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
 }
 func TestRunCLIRejectsInvalidCharLiteral(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "invalid_char.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "invalid_char.elisa")
 	if err := os.WriteFile(fixturePath, []byte("def bad() -> i64:\n    return '\\u0080'.i64()\n"), 0o644); err != nil {
 		t.Fatalf("failed to write invalid char fixture: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestRunCLIRejectsInvalidCharLiteral(t *testing.T) {
 }
 func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "generic_key_dict_runtime_reject.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "generic_key_dict_runtime_reject.elisa")
 	src := "def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:\n    return null\n\ndef bad(values: dict[u32, i64], key: u32) -> mutable i64&?:\n    return values.get(key)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write generic-key dict runtime rejection fixture: %v", err)
@@ -437,7 +437,7 @@ func TestRunCLIExecutesCharLiteralSmokeProgram(t *testing.T) {
 	}
 
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "char_literals.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "char_literals.elisa")
 	outputDir := t.TempDir()
 	objectPath := filepath.Join(outputDir, "char_literals.o")
 	exePath := filepath.Join(outputDir, "char_literals")
@@ -481,7 +481,7 @@ func TestRunCLIExecutesAllocatorPortSmokeProgram(t *testing.T) {
 	}
 
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "allocator_ports.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "allocator_ports.elisa")
 	outputDir := t.TempDir()
 	objectPath := filepath.Join(outputDir, "allocator_ports.o")
 	exePath := filepath.Join(outputDir, "allocator_ports")
@@ -525,7 +525,7 @@ func TestRunCLIExecutesDequePortSmokeProgram(t *testing.T) {
 	}
 
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "deque_ports.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "deque_ports.elisa")
 	outputDir := t.TempDir()
 	objectPath := filepath.Join(outputDir, "deque_ports.o")
 	exePath := filepath.Join(outputDir, "deque_ports")

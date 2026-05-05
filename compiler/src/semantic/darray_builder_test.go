@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TestAnalyzeDArrayBuilderLiteralAndPushSugar(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_builder_push.llcontext", `def build(owner: Arena) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_builder_push.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
@@ -69,7 +69,7 @@ func TestAnalyzeDArrayBuilderLiteralAndPushSugar(t *testing.T) {
 }
 
 func TestAnalyzeDArrayBuilderWithArenaScopedAllocatorShorthand(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_with_arena_scoped_allocator.llcontext", `def consume(owner: mutable Arena&) -> void:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_with_arena_scoped_allocator.elisa", `def consume(owner: mutable Arena&) -> void:
     pass
 
 def build() -> usize:
@@ -101,7 +101,7 @@ def build() -> usize:
 }
 
 func TestAnalyzeRejectsDArrayPushOutsideArenaScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_push_requires_scope.llcontext", `def build() -> void:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_push_requires_scope.elisa", `def build() -> void:
     xs: mutable darray[i64] = []
     xs.push(1)
 `)
@@ -113,7 +113,7 @@ func TestAnalyzeRejectsDArrayPushOutsideArenaScope(t *testing.T) {
 }
 
 func TestAnalyzeListComprehensionExpr(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_list_comprehension.llcontext", `def build(owner: Arena, items: darray[i64]) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_list_comprehension.elisa", `def build(owner: Arena, items: darray[i64]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs = [item + 1 for item in items if item > 0]
@@ -158,7 +158,7 @@ func TestAnalyzeListComprehensionExpr(t *testing.T) {
 }
 
 func TestAnalyzeQueryExprFamily(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "query_expr_family.llcontext", `def has_positive(items: darray[i64]) -> bool:
+	result := analyzeFunctionAnalysisTestSource(t, "query_expr_family.elisa", `def has_positive(items: darray[i64]) -> bool:
     return any item in items where item > 0
 
 def all_positive(items: darray[i64]) -> bool:
@@ -213,7 +213,7 @@ def positive_count(items: darray[i64]) -> usize:
 }
 
 func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.llcontext", `def build(items: darray[i64]) -> darray[i64]:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.elisa", `def build(items: darray[i64]) -> darray[i64]:
     return [item + 1 for item in items]
 `)
 
@@ -224,7 +224,7 @@ func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 }
 
 func TestAnalyzeDArrayPushSupportsMutableRefReceivers(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_push_ref_receiver.llcontext", `def build(owner: Arena) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_push_ref_receiver.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
@@ -265,7 +265,7 @@ func TestAnalyzeDArrayPushSupportsMutableRefReceivers(t *testing.T) {
 }
 
 func TestAnalyzeDArrayExtendSupportsRefReceiversAndArraySources(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_extend_ref_receiver.llcontext", `def build(owner: Arena) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_extend_ref_receiver.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = []
@@ -310,7 +310,7 @@ func TestAnalyzeDArrayExtendSupportsRefReceiversAndArraySources(t *testing.T) {
 }
 
 func TestAnalyzeDArrayReserveSupportsRefReceivers(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_reserve_ref_receiver.llcontext", `def build(owner: Arena) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_reserve_ref_receiver.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
@@ -348,7 +348,7 @@ func TestAnalyzeDArrayReserveSupportsRefReceivers(t *testing.T) {
 }
 
 func TestAnalyzeDArrayClearAndTruncate(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_clear_truncate.llcontext", `def build(owner: Arena) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_clear_truncate.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = [1, 2, 3]

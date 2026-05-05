@@ -24,7 +24,7 @@ func requireInstructionLineContainsAll(t *testing.T, output string, needle strin
 }
 
 func TestGenerateLLVMIRReduceSumUsesDirectDenseViewData(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_reduce_sum_direct_dense_view.llcontext", `
+	result := parseAndAnalyzeBackendTest(t, "backend_reduce_sum_direct_dense_view.elisa", `
 def sum_one(value: i32) -> i32:
 	return value
 
@@ -64,7 +64,7 @@ def kernel(buf: dview[i32]) -> i32:
 }
 
 func TestGenerateLLVMIRZipMapUsesDirectDenseViewData(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_zip_map_direct_dense_view.llcontext", `
+	result := parseAndAnalyzeBackendTest(t, "backend_zip_map_direct_dense_view.elisa", `
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
@@ -102,7 +102,7 @@ def kernel(buf: dview[i32]) -> void:
 	if !strings.Contains(output, "zip_map.index = phi") {
 		t.Fatalf("expected zip_map lowering to keep its induction variable in SSA, got:\n%s", output)
 	}
-	if !strings.Contains(output, "llctx.zip_map.") {
+	if !strings.Contains(output, "elisa_core.zip_map.") {
 		t.Fatalf("expected zip_map lowering to emit named alias scopes, got:\n%s", output)
 	}
 	requireInstructionLineContainsAll(t, output, "zip_map.src1.elem = load", "!alias.scope", "!noalias")
@@ -111,7 +111,7 @@ def kernel(buf: dview[i32]) -> void:
 }
 
 func TestGenerateLLVMIRArenaViewCopyUsesUnrolledDisjointExactFastPath(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_dview_copy_unrolled_disjoint_exact.llcontext", `
+	result := parseAndAnalyzeBackendTest(t, "backend_dview_copy_unrolled_disjoint_exact.elisa", `
 def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 	return
 
@@ -127,7 +127,7 @@ def kernel(buf: dview[i32]) -> void:
 	if strings.Contains(output, "call ptr @arena_memcpy(") {
 		t.Fatalf("expected tiny disjoint exact view copy to avoid arena_memcpy, got:\n%s", output)
 	}
-	if !strings.Contains(output, "llctx.dview.copy.") {
+	if !strings.Contains(output, "elisa_core.dview.copy.") {
 		t.Fatalf("expected disjoint exact view copy to emit named alias scopes, got:\n%s", output)
 	}
 	requireInstructionLineContainsAll(t, output, "load i32, ptr %dview.copy.src.elem.ptr", "!alias.scope", "!noalias")
@@ -135,7 +135,7 @@ def kernel(buf: dview[i32]) -> void:
 }
 
 func TestGenerateLLVMIRArenaViewEqUsesUnrolledDisjointExactFastPath(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_dview_eq_unrolled_disjoint_exact.llcontext", `
+	result := parseAndAnalyzeBackendTest(t, "backend_dview_eq_unrolled_disjoint_exact.elisa", `
 def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
 	return false
 
@@ -151,7 +151,7 @@ def kernel(buf: dview[i32]) -> bool:
 	if strings.Contains(output, "call i64 @memcmp(") || strings.Contains(output, "call i32 @memcmp(") {
 		t.Fatalf("expected tiny disjoint exact view equality to avoid memcmp, got:\n%s", output)
 	}
-	if !strings.Contains(output, "llctx.dview.eq.") {
+	if !strings.Contains(output, "elisa_core.dview.eq.") {
 		t.Fatalf("expected disjoint exact view equality to emit named alias scopes, got:\n%s", output)
 	}
 	requireInstructionLineContainsAll(t, output, "dview.eq.left.byte = load i8", "!alias.scope", "!noalias")
@@ -162,7 +162,7 @@ def kernel(buf: dview[i32]) -> bool:
 }
 
 func TestGenerateLLVMIRArenaFromViewUsesUnrolledTinyExactFastPath(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_dview_materialize_unrolled_exact.llcontext", `
+	result := parseAndAnalyzeBackendTest(t, "backend_dview_materialize_unrolled_exact.elisa", `
 def arena_da_from_view[T](a: Arena&, view: dview[T]) -> darray[T]:
 	return zeroed
 
@@ -179,7 +179,7 @@ def kernel(buf: dview[i32]) -> darray[i32]:
 	if strings.Contains(output, "call ptr @arena_memcpy(") {
 		t.Fatalf("expected tiny exact arena_da_from_view to avoid arena_memcpy, got:\n%s", output)
 	}
-	if !strings.Contains(output, "llctx.dview.materialize.") {
+	if !strings.Contains(output, "elisa_core.dview.materialize.") {
 		t.Fatalf("expected tiny exact arena_da_from_view to emit named alias scopes, got:\n%s", output)
 	}
 	requireInstructionLineContainsAll(t, output, "load i32, ptr %dview.materialize.src.elem.ptr", "!alias.scope", "!noalias")
@@ -190,7 +190,7 @@ def kernel(buf: dview[i32]) -> darray[i32]:
 }
 
 func TestGenerateLLVMIRArenaViewFillUsesUnrolledTinyExactByteFastPath(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_dview_fill_unrolled_exact_byte.llcontext", `
+	result := parseAndAnalyzeBackendTest(t, "backend_dview_fill_unrolled_exact_byte.elisa", `
 def arena_da_fill[T](dst: dview[T], value: T):
 	return
 

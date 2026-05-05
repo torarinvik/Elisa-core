@@ -3,7 +3,7 @@ package semantic
 import (
 	"fmt"
 
-	"llcontext/src/ast"
+	"elisacore/src/ast"
 )
 
 func TreeStructuralSequenceElemType(t Type) (Type, bool) {

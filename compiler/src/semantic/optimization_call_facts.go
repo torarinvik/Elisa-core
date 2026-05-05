@@ -1,8 +1,8 @@
 package semantic
 
 import (
+	"elisacore/src/ast"
 	"fmt"
-	"llcontext/src/ast"
 )
 
 func (a *Analyzer) recordImmutableSymbolOptimizationFacts(sym *Symbol, expr ast.Expr) {

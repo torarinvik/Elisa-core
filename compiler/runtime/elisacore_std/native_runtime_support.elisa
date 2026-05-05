@@ -1,0 +1,10 @@
+# ============================================================
+# Native fallback runtime exports
+# ============================================================
+#
+# This entrypoint is compiled as a separate native object for programs that do
+# not include elisacore_runtime.elisa themselves. It keeps ordinary test
+# helpers private under optimized codegen, while exporting the concrete runtime
+# helper symbols that the backend may declare directly.
+
+include "./elisacore_runtime.elisa"

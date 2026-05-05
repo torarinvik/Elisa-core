@@ -13,10 +13,10 @@ func TestRunCLIEmitsSelectedTestPhaseDebug(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	t.Setenv("LLCONTEXT_TEST_PHASE_DEBUG", "1")
+	t.Setenv("ELISACORE_TEST_PHASE_DEBUG", "1")
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "execute_tests_phase_debug_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "execute_tests_phase_debug_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write phase-debug execute-tests fixture: %v", err)
@@ -49,7 +49,7 @@ func TestRunCLIExecutesFilteredSelectedTests(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "execute_filtered_tests_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "execute_filtered_tests_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write filtered execute-tests fixture: %v", err)
@@ -84,7 +84,7 @@ func TestRunCLIExecutesSelectedTestsWithGlobFilter(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "execute_glob_tests_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "execute_glob_tests_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write glob execute-tests fixture: %v", err)
@@ -119,7 +119,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "execute_fail_skip_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "execute_fail_skip_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    can Abort.Panic:\n        panic(\"boom\")\n\n@skip(todo)\n@test\ndef beta_case() -> void:\n    pass\n\n@test\ndef gamma_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write fail/skip execute-tests fixture: %v", err)
@@ -158,7 +158,7 @@ func TestRunCLIExecutesTupleMatchStatement(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "tuple_match_execute_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "tuple_match_execute_fixture.elisa")
 	src := "@test\ndef tuple_match_selects_literal_arm() -> void:\n    match 5, 'w', 'h', 'i', 'l', 'e':\n        5, 'w', 'h', 'i', 'l', 'e':\n            return\n        _:\n            can Abort.Panic:\n                panic(\"tuple match fallback\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write tuple match execute fixture: %v", err)
@@ -186,7 +186,7 @@ func TestRunCLIExecutesTupleMatchStatement(t *testing.T) {
 }
 func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "panic_backtrace_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "panic_backtrace_fixture.elisa")
 	src := "def main() -> int:\n    can Abort.Panic:\n        panic(\"boom\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write panic backtrace fixture: %v", err)
@@ -223,7 +223,7 @@ func TestRunCLIReturnsNonZeroWhenNoTestsMatchExecutionFilter(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "execute_no_tests_fixture.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "execute_no_tests_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write no-match execute-tests fixture: %v", err)
