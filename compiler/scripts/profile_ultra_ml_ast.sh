@@ -125,7 +125,7 @@ build_native_ultra() {
     clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I "$build_dir" \
       ../Code/benchmarks/packed_lowering_ml_ast_bench.c \
       ../Code/benchmarks/json_parser_runtime_shims.c \
-      ../Code/benchmarks/json_parser_concurrency_runtime.c \
+      runtime/concurrency.c \
       "$object_path" \
       -o "$exe_path"
   } 2>&1 | tee "$log_path" >&2

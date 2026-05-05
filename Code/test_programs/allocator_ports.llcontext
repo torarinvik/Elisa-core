@@ -1,5 +1,5 @@
-include "../llcontext_std/test.llcontext"
-include "../llcontext_std/heap.llcontext"
+include "../../compiler/runtime/llcontext_std/test.llcontext"
+include "../../compiler/runtime/llcontext_std/heap.llcontext"
 
 struct PoolPair:
     left: mutable i64

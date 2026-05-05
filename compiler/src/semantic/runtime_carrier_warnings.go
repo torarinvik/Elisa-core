@@ -61,7 +61,7 @@ func runtimeCarrierCarrierPathIsInternal(path string) bool {
 		return true
 	}
 	internalRoots := []string{
-		"Code/llcontext_std/",
+		"compiler/runtime/llcontext_std/",
 		"Code/frontend_llcontext/",
 		"Code/llcontext_lua/",
 		"Code/test_programs/",

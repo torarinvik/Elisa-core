@@ -102,7 +102,7 @@ def probe(text: cstr[row], other: cstr[col]) -> int:
 }
 
 func TestAnalyzeStage1RuntimeFileAcceptsShapeTypedWrappers(t *testing.T) {
-	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
 	src := loadSourceWithIncludes(t, fixture, map[string]bool{})
 	_, errs := parseAndAnalyze(t, fixture, src)
 	requireNoErrors(t, errs)
@@ -129,7 +129,7 @@ func TestAnalyzeShapeOpsFixture(t *testing.T) {
 }
 
 func TestAnalyzeArenaRuntimeFile(t *testing.T) {
-	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "llcontext_std", "arena.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "llcontext_std", "arena.llcontext")
 	src, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("failed to read arena runtime fixture: %v", err)
@@ -139,7 +139,7 @@ func TestAnalyzeArenaRuntimeFile(t *testing.T) {
 }
 
 func TestAnalyzeContextRuntimeFile(t *testing.T) {
-	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
 	src := loadSourceWithIncludes(t, fixture, map[string]bool{})
 	_, errs := parseAndAnalyze(t, fixture, src)
 	requireNoErrors(t, errs)

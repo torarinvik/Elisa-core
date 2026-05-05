@@ -89,7 +89,7 @@ func TestAnalyzeDArrayUsesDynArrayRuntimeFields(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeDynArrayRuntimeBridgeWorksBothDirections(t *testing.T) {
-	fixturePath := filepath.Join(repoRootFromTestFile(t), "Code", "llcontext_std", "dynarray_runtime_bridge_roundtrip.llcontext")
+	fixturePath := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "llcontext_std", "dynarray_runtime_bridge_roundtrip.llcontext")
 	src := `def take_raw[T](values: DynArray[T]) -> void:
 	pass
 

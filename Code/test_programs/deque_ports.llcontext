@@ -1,5 +1,5 @@
-include "../llcontext_std/test.llcontext"
-include "../llcontext_std/heap.llcontext"
+include "../../compiler/runtime/llcontext_std/test.llcontext"
+include "../../compiler/runtime/llcontext_std/heap.llcontext"
 
 def deque_i64_make_with_capacity(a: mutable Arena&, capacity: usize) -> Deque[i64]:
     ctor: func(mutable Arena&, usize) -> Deque[i64] effects[Memory.Allocate, Abort.Panic] = arena_deque_with_capacity.specialize[i64]()

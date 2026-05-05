@@ -18,7 +18,7 @@ func TestRunCLIProvidesDefaultNativeRuntimeHelpersForSelectedTests(t *testing.T)
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "native_runtime_helpers_fixture.llcontext")
-	testPath := filepath.Join(repoRoot, "Code", "llcontext_std", "test.llcontext")
+	testPath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "test.llcontext")
 	testInclude, err := filepath.Rel(fixtureDir, testPath)
 	if err != nil {
 		t.Fatalf("failed to compute test include path: %v", err)

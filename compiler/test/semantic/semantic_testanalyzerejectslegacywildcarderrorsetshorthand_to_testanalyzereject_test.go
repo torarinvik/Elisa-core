@@ -331,7 +331,7 @@ func TestAnalyzeAcceptsAllocatorOwnershipFixturePatterns(t *testing.T) {
 }
 func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "arena.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "arena.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -350,7 +350,7 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 }
 func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "arena.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "arena.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -366,7 +366,7 @@ func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 }
 func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "collections.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "collections.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "collections.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -375,7 +375,7 @@ func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 }
 func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "stores.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "stores.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "stores.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -383,7 +383,7 @@ func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {
 }
 func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -394,7 +394,7 @@ func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T)
 }
 func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -409,7 +409,7 @@ func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 }
 func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "contextlang_runtime.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)

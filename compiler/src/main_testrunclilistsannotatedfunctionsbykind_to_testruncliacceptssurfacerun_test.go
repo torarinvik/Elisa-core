@@ -411,7 +411,7 @@ func TestRunCLIExecutesPoolBackedSelectedTests(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "execute_pool_tests_fixture.llcontext")
-	runtimePath := filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
 	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
 	if err != nil {
 		t.Fatalf("failed to compute runtime include path: %v", err)
@@ -476,7 +476,7 @@ func TestRunCLIAcceptsBareSViewLocalAnnotationInObjectBuild(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "sview_local_obj_fixture.llcontext")
-	runtimePath := filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
 	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
 	if err != nil {
 		t.Fatalf("failed to compute runtime include path: %v", err)
@@ -511,7 +511,7 @@ func TestRunCLIAcceptsSurfaceRuntimeBackedLocalAnnotationsInObjectBuild(t *testi
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "surface_runtime_locals_obj_fixture.llcontext")
-	runtimePath := filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
 	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
 	if err != nil {
 		t.Fatalf("failed to compute runtime include path: %v", err)

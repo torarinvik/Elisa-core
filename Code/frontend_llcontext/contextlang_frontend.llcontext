@@ -2,6 +2,6 @@
 # Self-hosted Contextlang frontend
 # ============================================================
 
-include "../llcontext_std/contextlang_runtime.llcontext"
+include "../../compiler/runtime/llcontext_std/contextlang_runtime.llcontext"
 include "frontend_tokens.llcontext"
 include "frontend_lexer.llcontext"

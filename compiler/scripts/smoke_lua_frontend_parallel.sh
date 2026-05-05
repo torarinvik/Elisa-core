@@ -155,7 +155,7 @@ EOF
 clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I "$TMP_RUN" \
     "$TMP_RUN/lua_frontend_parallel_smoke.c" \
     ../Code/benchmarks/json_parser_runtime_shims.c \
-    ../Code/benchmarks/json_parser_concurrency_runtime.c \
+    runtime/concurrency.c \
     "$TMP_RUN/lua_frontend.o" \
     -o "$TMP_RUN/lua_frontend_parallel_smoke"
 

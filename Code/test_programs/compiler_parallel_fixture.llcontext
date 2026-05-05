@@ -1,4 +1,4 @@
-include "../llcontext_std/contextlang_runtime.llcontext"
+include "../../compiler/runtime/llcontext_std/contextlang_runtime.llcontext"
 
 packed enum Expr:
 	common:

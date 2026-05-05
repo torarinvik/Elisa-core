@@ -1,4 +1,4 @@
-include "../llcontext_std/test.llcontext"
+include "../../compiler/runtime/llcontext_std/test.llcontext"
 
 const CHAR_A: char = 'A'
 const CHAR_NL: char = '\n'

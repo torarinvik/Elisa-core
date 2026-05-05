@@ -68,7 +68,7 @@ def build_llcontext_harness(compiler_dir: Path, frontend_path: Path, harness_pat
     exe_path = out_dir / "lua_frontend_bench"
     benchmarks_dir = harness_path.parent
     runtime_shims_path = benchmarks_dir / "json_parser_runtime_shims.c"
-    concurrency_runtime_path = benchmarks_dir / "json_parser_concurrency_runtime.c"
+    concurrency_runtime_path = compiler_dir / "runtime" / "concurrency.c"
     run(["go", "run", "./src", opt_level, "-emit", "header", "-o", str(header_path), str(frontend_path)], cwd=compiler_dir)
     run(["go", "run", "./src", opt_level, "-emit", "obj", "-o", str(object_path), str(frontend_path)], cwd=compiler_dir)
     run(

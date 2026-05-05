@@ -1,5 +1,5 @@
 #define ARENA_IMPLEMENTATION
-#include "arena_reference.h"
+#include "../../compiler/runtime/arena_reference.h"
 
 #include <stdint.h>
 #include <stdio.h>

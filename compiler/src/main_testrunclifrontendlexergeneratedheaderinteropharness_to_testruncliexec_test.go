@@ -68,7 +68,7 @@ func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
 	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser_generated_harness.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
-	runtimePath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "json_parser.h")
 	objectPath := filepath.Join(outputDir, "json_parser.o")
@@ -113,7 +113,7 @@ func TestRunCLIJSONParserParallelBenchBuildSmoke(t *testing.T) {
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
 	benchPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_parallel_bench.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
-	runtimePath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "json_parser.h")
 	objectPath := filepath.Join(outputDir, "json_parser.o")
@@ -220,7 +220,7 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
 	benchPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_dom_bench.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
-	runtimePath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "json_parser.h")
 	objectPath := filepath.Join(outputDir, "json_parser.o")
@@ -324,7 +324,7 @@ func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 }
 func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "contextlang_runtime.llcontext")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

@@ -123,7 +123,7 @@ func withDefaultNativeRuntimeForeignFiles(foreignFiles []string) ([]string, erro
 	if hasConcurrencyRuntimeForeignFile(resolved) {
 		return dedupeStrings(resolved), nil
 	}
-	defaultConcurrencyRuntime := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
+	defaultConcurrencyRuntime := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
 	if _, err := os.Stat(defaultConcurrencyRuntime); err != nil {
 		return nil, fmt.Errorf("failed to locate default concurrency runtime shim %s: %w", defaultConcurrencyRuntime, err)
 	}
@@ -142,7 +142,7 @@ func compilerRepoRootForNativeExec() (string, error) {
 func hasConcurrencyRuntimeForeignFile(foreignFiles []string) bool {
 	for _, foreignFile := range foreignFiles {
 		base := filepath.Base(strings.TrimSpace(foreignFile))
-		if strings.HasSuffix(base, "_concurrency_runtime.c") {
+		if base == "concurrency.c" || strings.HasSuffix(base, "_concurrency_runtime.c") {
 			return true
 		}
 	}

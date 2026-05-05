@@ -370,7 +370,7 @@ There is also now a self-hosted parser fixture at `../Code/test_programs/json_pa
 - `../Code/benchmarks/json_parser_bench.c` is a standalone checksum-parser benchmark executable for file-backed corpora
 - `../Code/benchmarks/json_parser_ast_bench.c` is the AST-building benchmark executable for the same corpora
 - `../Code/benchmarks/json_parser_parallel_bench.c` is a pool-driven parallel batch benchmark over the same parser exports
-- `../Code/benchmarks/json_parser_concurrency_runtime.c` provides a small pthread-backed implementation of the raw pool/task-group runtime seam used by the parallel benchmark path
+- `runtime/concurrency.c` provides a small pthread-backed implementation of the raw pool/task-group runtime seam used by the parallel benchmark path
 - `test/benchmarks/cmd/gen_synthetic_json` writes the same deterministic corpus family to disk for external benchmarking
 - `scripts/ensure_json_parser_bench_input.sh` creates the default large synthetic corpus on demand and prints the path, which keeps ignored local task runners usable without hand-creating `/tmp/zimdjson-dom-large.json`
 
@@ -382,7 +382,7 @@ go run ./src -O3 -emit header -o /tmp/json_parser.h ../Code/test_programs/json_p
 go run ./src -O3 -emit obj -o /tmp/json_parser.o ../Code/test_programs/json_parser.llcontext
 clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_bench
 clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_ast_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_ast_bench
-clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_parallel_bench.c ../Code/benchmarks/json_parser_runtime_shims.c ../Code/benchmarks/json_parser_concurrency_runtime.c /tmp/json_parser.o -o /tmp/json_parser_parallel_bench
+clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_parallel_bench.c ../Code/benchmarks/json_parser_runtime_shims.c runtime/concurrency.c /tmp/json_parser.o -o /tmp/json_parser_parallel_bench
 /tmp/json_parser_bench /tmp/llcontext-large.json 20
 /tmp/json_parser_ast_bench /tmp/llcontext-large.json 20 full
 /tmp/json_parser_parallel_bench /tmp/llcontext-large.json 20 4 checksum
@@ -542,10 +542,10 @@ go test ./...
 
 ## Runtime source of truth
 
-The active runtime implementation lives in llcontext source files under `../Code/llcontext_std/`.
+The active runtime implementation lives in llcontext source files under `runtime/llcontext_std/`.
 
-- `../Code/llcontext_std/contextlang_runtime.llcontext` — canonical runtime entrypoint
-- `../Code/llcontext_std/` — staged runtime helpers, wrappers, allocator, collections, stores, and test support
+- `runtime/llcontext_std/contextlang_runtime.llcontext` — canonical runtime entrypoint
+- `runtime/llcontext_std/` — staged runtime helpers, wrappers, allocator, collections, stores, and test support
 
 Retained C sources under `../Code/benchmarks/` are benchmark scaffolding only and are not part of the active runtime implementation.
 

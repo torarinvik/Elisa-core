@@ -6,7 +6,7 @@
 
 #define ARENA_API CTX_RUNTIME_WEAK
 #define ARENA_IMPLEMENTATION
-#include "../../Code/benchmarks/arena_reference.h"
+#include "arena_reference.h"
 
 #include <stdint.h>
 #include <stdlib.h>

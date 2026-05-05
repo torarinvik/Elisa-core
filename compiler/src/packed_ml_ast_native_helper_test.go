@@ -208,7 +208,7 @@ func packedMLASTMegaNativeSpec(repoRoot string, objectOpt string) nativeArtifact
 		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_mega_core.llcontext"),
 		exeName:         "packed_lowering_ml_ast_bench",
 		harnessPath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
-		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")},
+		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")},
 		generateHeader:  true,
 		headerName:      "packed_lowering_ml_ast_mega_core.h",
 		objectName:      "packed_lowering_ml_ast_mega_core.o",
@@ -217,7 +217,7 @@ func packedMLASTMegaNativeSpec(repoRoot string, objectOpt string) nativeArtifact
 		hashFiles: []string{
 			filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
 			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"),
-			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c"),
+			filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c"),
 		},
 	}
 }
@@ -229,7 +229,7 @@ func packedMLASTUltraNativeSpec(repoRoot string, objectOpt string) nativeArtifac
 		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_ultra_core.llcontext"),
 		exeName:         "packed_lowering_ml_ast_ultra_bench",
 		harnessPath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
-		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")},
+		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")},
 		generateHeader:  true,
 		headerName:      "packed_lowering_ml_ast_mega_core.h",
 		objectName:      "packed_lowering_ml_ast_ultra_core.o",
@@ -238,7 +238,7 @@ func packedMLASTUltraNativeSpec(repoRoot string, objectOpt string) nativeArtifac
 		hashFiles: []string{
 			filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
 			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"),
-			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c"),
+			filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c"),
 		},
 	}
 }
@@ -250,7 +250,7 @@ func packedMLASTMediumNativeSpec(repoRoot string, objectOpt string) nativeArtifa
 		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_medium_core.llcontext"),
 		exeName:         "packed_lowering_ml_ast_medium_bench",
 		harnessPath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
-		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")},
+		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")},
 		generateHeader:  true,
 		headerName:      "packed_lowering_ml_ast_mega_core.h",
 		objectName:      "packed_lowering_ml_ast_medium_core.o",
@@ -259,7 +259,7 @@ func packedMLASTMediumNativeSpec(repoRoot string, objectOpt string) nativeArtifa
 		hashFiles: []string{
 			filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
 			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"),
-			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c"),
+			filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c"),
 		},
 	}
 }
@@ -271,14 +271,14 @@ func packedMLExprReproNativeSpec(repoRoot string, objectOpt string) nativeArtifa
 		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_runtime_ml_expr_repro.llcontext"),
 		exeName:         "packed_runtime_ml_expr_repro",
 		harnessSource:   "#include <stdio.h>\nlong long packed_ml_expr_repro(void);\nint main(void) { printf(\"%lld\\n\", packed_ml_expr_repro()); return 0; }\n",
-		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")},
+		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")},
 		generateHeader:  false,
 		objectName:      "packed_runtime_ml_expr_repro.o",
 		clangArgs:       []string{objectOpt},
 		hashExpandedSrc: true,
 		hashFiles: []string{
 			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"),
-			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c"),
+			filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c"),
 		},
 	}
 }
