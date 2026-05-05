@@ -117,6 +117,15 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 			return testRunnerCacheArtifact{}, err
 		}
 	}
+	if runtimePath, err := defaultLLContextRuntimeSupportPath(); err == nil {
+		runtimeSource, readErr := readSourceWithIncludes(runtimePath, map[string]bool{})
+		if readErr != nil {
+			return testRunnerCacheArtifact{}, readErr
+		}
+		testRunnerCacheWriteBytes(hash, "llcontext-runtime-support", runtimeSource)
+	} else {
+		return testRunnerCacheArtifact{}, err
+	}
 	compilerRoot, err := compilerSourceRootForCache()
 	if err != nil {
 		return testRunnerCacheArtifact{}, err

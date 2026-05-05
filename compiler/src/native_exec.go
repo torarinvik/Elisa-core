@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"llcontext/src/ast"
 	"llcontext/src/backend"
 	"llcontext/src/semantic"
 )
@@ -69,6 +70,14 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		return "", func() {}, timing, err
 	}
 	timing.ObjectWrite = time.Since(objectStart)
+	runtimeObjectPath := ""
+	if !resultDefinesDefaultLLContextRuntime(result) {
+		runtimeObjectPath = filepath.Join(tempDir, "llcontext_runtime.o")
+		if err := writeDefaultLLContextRuntimeObject(runtimeObjectPath, packedProfile, stderr); err != nil {
+			cleanup()
+			return "", func() {}, timing, err
+		}
+	}
 	headerGenStart := time.Now()
 	headerSource, err := backend.GenerateCHeader(result)
 	if err != nil {
@@ -94,6 +103,9 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		linkArgs = append(linkArgs, "-Wl,-undefined,dynamic_lookup")
 	}
 	linkArgs = append(linkArgs, objectPath)
+	if runtimeObjectPath != "" {
+		linkArgs = append(linkArgs, runtimeObjectPath)
+	}
 	linkArgs = append(linkArgs, foreignFiles...)
 	linkArgs = append(linkArgs, "-o", exePath)
 
@@ -111,15 +123,6 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 
 func withDefaultNativeRuntimeForeignFiles(foreignFiles []string) ([]string, error) {
 	resolved := dedupeStrings(append([]string(nil), foreignFiles...))
-	repoRoot, err := compilerRepoRootForNativeExec()
-	if err != nil {
-		return nil, err
-	}
-	defaultRuntimeSupport := filepath.Join(repoRoot, "compiler", "runtime", "native_runtime_support.c")
-	if _, err := os.Stat(defaultRuntimeSupport); err != nil {
-		return nil, fmt.Errorf("failed to locate default native runtime support %s: %w", defaultRuntimeSupport, err)
-	}
-	resolved = append(resolved, defaultRuntimeSupport)
 	return dedupeStrings(resolved), nil
 }
 
@@ -143,6 +146,71 @@ func hasConcurrencyRuntimeForeignFile(foreignFiles []string) bool {
 
 func nativeExecutableNeedsPThread(foreignFiles []string) bool {
 	_ = foreignFiles
+	return true
+}
+
+func defaultLLContextRuntimeSupportPath() (string, error) {
+	repoRoot, err := compilerRepoRootForNativeExec()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(repoRoot, "compiler", "runtime", "llcontext_std", "native_runtime_support.llcontext")
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("failed to locate default llcontext runtime support %s: %w", path, err)
+	}
+	return path, nil
+}
+
+func writeDefaultLLContextRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, stderr io.Writer) error {
+	runtimePath, err := defaultLLContextRuntimeSupportPath()
+	if err != nil {
+		return err
+	}
+	src, err := readSourceWithIncludes(runtimePath, map[string]bool{})
+	if err != nil {
+		return err
+	}
+	var parseStderr bytes.Buffer
+	file, ok := parseProgram(runtimePath, src, &parseStderr)
+	if !ok {
+		if parseStderr.Len() != 0 && stderr != nil {
+			_, _ = io.Copy(stderr, &parseStderr)
+		}
+		return fmt.Errorf("failed to parse default llcontext runtime support")
+	}
+	runtimeResult := semantic.Analyze(file)
+	if errs := runtimeResult.Errors(); len(errs) != 0 {
+		if stderr != nil {
+			for _, e := range errs {
+				fmt.Fprintf(stderr, "%s\n", e)
+			}
+		}
+		return fmt.Errorf("failed to analyze default llcontext runtime support")
+	}
+	if warns := runtimeResult.Notices(); len(warns) != 0 && stderr != nil {
+		for _, w := range warns {
+			if shouldSuppressDeprecatedWarningsForTests(w) {
+				continue
+			}
+			fmt.Fprintf(stderr, "%s\n", w)
+		}
+	}
+	return backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile)
+}
+
+func resultDefinesDefaultLLContextRuntime(result *semantic.Result) bool {
+	if result == nil || result.GlobalScope == nil {
+		return false
+	}
+	for _, name := range []string{"arena_alloc", "ctx_strlen", "ctx_string_view_slice"} {
+		sym, ok := result.GlobalScope.Lookup(name)
+		if !ok || sym == nil {
+			return false
+		}
+		if _, ok := sym.Node.(*ast.FuncDecl); !ok {
+			return false
+		}
+	}
 	return true
 }
 

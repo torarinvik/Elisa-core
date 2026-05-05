@@ -455,7 +455,7 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 	if g.preferPrivateLinkage && !g.isDirectlyExportedFunction(name) {
 		linkage = C.LLVMLinkage(C.LLVMPrivateLinkage)
 	}
-	if g.isDirectlyExportedFunction(name) {
+	if g.isDirectlyExportedFunction(name) || g.isDefaultNativeRuntimeSupportExport(name) {
 		linkage = C.LLVMLinkage(C.LLVMExternalLinkage)
 	}
 	C.LLVMSetLinkage(value, linkage)
@@ -480,6 +480,52 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 		if g.shouldNeverInlineDefinedFunction(name) {
 			g.addNoInlineAttribute(value)
 		}
+	}
+}
+
+func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
+	if g == nil || g.result == nil || g.result.File == nil {
+		return false
+	}
+	if !strings.HasSuffix(g.result.File.Filename, "native_runtime_support.llcontext") {
+		return false
+	}
+	switch name {
+	case "new_region",
+		"free_region",
+		"arena_alloc",
+		"arena_realloc",
+		"arena_memcpy",
+		"arena_memeq",
+		"arena_strdup",
+		"arena_memdup",
+		"arena_snapshot",
+		"arena_reset",
+		"arena_rewind",
+		"arena_free",
+		"arena_trim",
+		"alloc_perm",
+		"alloc_scratch",
+		"reset_scratch",
+		"ctx_strlen",
+		"ctx_streq",
+		"ctx_string_slice_eq",
+		"ctx_string_slices_eq",
+		"ctx_string_index",
+		"ctx_string_slice",
+		"ctx_string_view",
+		"ctx_string_view_len",
+		"ctx_string_view_slice",
+		"ctx_string_view_prefix",
+		"ctx_string_view_suffix",
+		"ctx_string_view_index",
+		"ctx_string_view_eq",
+		"ctx_string_views_eq",
+		"ctx_string_from_view",
+		"ctx_llvm_codegen_fatal":
+		return true
+	default:
+		return false
 	}
 }
 func (g *llvmGenerator) applyFunctionNoRecurseAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
