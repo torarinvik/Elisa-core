@@ -145,7 +145,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				for _, arg := range expr.Args {
 					argTypes = append(argTypes, s.exprType(arg))
 				}
-				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes)
+				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes, s.exprType(expr))
 				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
 				return value, specialized, err
 			}

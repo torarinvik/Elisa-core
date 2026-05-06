@@ -104,6 +104,11 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 		a.recordAnalyzedExprType(lambda, result)
 		return result
 	}
+	if call, ok := expr.(*ast.CallExpr); ok {
+		result := a.analyzeCallExprWithExpected(call, expected)
+		a.recordAnalyzedExprType(call, result)
+		return result
+	}
 	if ternary, ok := expr.(*ast.TernaryExpr); ok && expected != nil {
 		return a.analyzeContextualTernaryExpr(ternary, expected)
 	}

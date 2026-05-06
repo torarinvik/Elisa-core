@@ -32,6 +32,35 @@ struct DictProbeResult:
     index: mutable usize
     found: mutable bool
 
+extern SymbolTableSlot
+
+type SymbolTableId = id[SymbolTableSlot]
+
+
+def __cast__(value: u32) -> SymbolTableId:
+    return value.cast[SymbolTableId]
+
+
+global SYMBOL_TABLE_INVALID_ID: SymbolTableId = 0u32.SymbolTableId()
+
+
+struct SymbolEntry[K, T]:
+    key: mutable K
+    value: mutable T
+
+
+struct SymbolTable[K, T]:
+    owner: mutable Arena&?
+    entries: mutable darray[SymbolEntry[K, T]]
+    by_key: mutable dict[K, SymbolTableId]
+
+
+struct SymbolTableNamespace:
+    _unused: u8
+
+
+global symtab: SymbolTableNamespace = SymbolTableNamespace(0u8)
+
 # ------------------------------------------------------------
 # Dynamic array helpers (replacement for C macros)
 # ------------------------------------------------------------
@@ -384,3 +413,118 @@ def arena_dict_remove__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[key
 
 def arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&):
     arena_dict_clear[cstr[key_shape], i64](m)
+
+
+# ------------------------------------------------------------
+# Symbol tables
+# ------------------------------------------------------------
+
+def symbol_table_index(symbol_id: SymbolTableId) -> usize:
+    assert symbol_id != SYMBOL_TABLE_INVALID_ID
+    return (!symbol_id).usize() - 1
+
+
+def symbol_table_id_from_index(index: usize) -> SymbolTableId:
+    return (index + 1).u32().SymbolTableId()
+
+
+def symbol_table[K, T](owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        table: mutable SymbolTable[K, T] = zeroed
+        table.owner as & <- owner
+        table.by_key <- arena_dict_new[K, SymbolTableId](owner, initial_capacity)
+        in owner:
+            _ = table.entries.reserve(initial_capacity)
+        return table
+
+
+def new[K, T](api: SymbolTableNamespace, owner: mutable Arena&) -> SymbolTable[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        _ = api
+        return symbol_table[K, T](owner, 32usize)
+
+
+def with_capacity[K, T](api: SymbolTableNamespace, owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        _ = api
+        return symbol_table[K, T](owner, initial_capacity)
+
+
+def symbol_table_count[K, T](table: SymbolTable[K, T]&) -> usize:
+    return table.entries.count
+
+
+def symbol_table_valid_id[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> bool:
+    false return if symbol_id == SYMBOL_TABLE_INVALID_ID
+    return symbol_table_index(symbol_id) < table.entries.count
+
+
+def symbol_table_find_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
+    found: mutable SymbolTableId&? = arena_dict_get[K, SymbolTableId](table.by_key, key)
+    SYMBOL_TABLE_INVALID_ID return if found == null
+    return found[0]
+
+
+def symbol_table_contains[K, T](table: SymbolTable[K, T]&, key: K) -> bool:
+    return symbol_table_find_id[K, T](table, key) != SYMBOL_TABLE_INVALID_ID
+
+
+def symbol_table_entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
+    assert symbol_table_valid_id[K, T](table, symbol_id)
+    return table.entries[symbol_table_index(symbol_id)]
+
+
+def symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+    return symbol_table_entry[K, T](table, symbol_id).value
+
+
+def symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
+    can Memory.Allocate, Abort.Panic:
+        existing_id: SymbolTableId = symbol_table_find_id[K, T](table, key)
+        if existing_id != SYMBOL_TABLE_INVALID_ID:
+            table.entries[symbol_table_index(existing_id)].value <- value
+            return existing_id
+
+        assert table.owner != null
+        owner: mutable Arena& = table.owner
+
+        symbol_id: SymbolTableId = symbol_table_id_from_index(table.entries.count)
+        in owner:
+            table.entries.push(SymbolEntry[K, T]{key: key, value: value})
+        _ = try arena_dict_put[K, SymbolTableId](owner, table.by_key, key, symbol_id) else null
+        return symbol_id
+
+
+def declare[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
+    can Memory.Allocate, Abort.Panic:
+        return symbol_table_put[K, T](table, key, value)
+
+
+def lookup_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
+    return symbol_table_find_id[K, T](table, key)
+
+
+def get[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+    return symbol_table_value[K, T](table, symbol_id)
+
+
+def lookup[K, T](table: SymbolTable[K, T]&, key: K) -> T?:
+    symbol_id: SymbolTableId = symbol_table_find_id[K, T](table, key)
+    null return if symbol_id == SYMBOL_TABLE_INVALID_ID
+    value: T = symbol_table_value[K, T](table, symbol_id)
+    return value
+
+
+def symbol_table_replace[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
+    false return if not symbol_table_valid_id[K, T](table, symbol_id)
+    table.entries[symbol_table_index(symbol_id)].value <- value
+    return true
+
+
+def update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
+    return symbol_table_replace[K, T](table, symbol_id, value)
+
+
+def symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&):
+    table.entries.count <- 0
+    arena_dict_clear[K, SymbolTableId](table.by_key)

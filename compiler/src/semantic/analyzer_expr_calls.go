@@ -7,6 +7,10 @@ import (
 )
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
+	return a.analyzeCallExprWithExpected(expr, nil)
+}
+
+func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type) Type {
 	if expr != nil && expr.Safe {
 		return a.analyzeSafeCallExpr(expr)
 	}
@@ -150,10 +154,14 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if !orderedOK {
 		return invalidType
 	}
-	return a.analyzeResolvedCallExpr(expr, ft, orderedArgs)
+	return a.analyzeResolvedCallExprWithExpected(expr, ft, orderedArgs, expected)
 }
 
 func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, orderedArgs []ast.Expr) Type {
+	return a.analyzeResolvedCallExprWithExpected(expr, ft, orderedArgs, nil)
+}
+
+func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *FuncType, orderedArgs []ast.Expr, expectedReturn Type) Type {
 	if expr == nil || ft == nil {
 		return invalidType
 	}
@@ -170,6 +178,10 @@ func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, ord
 	permissionBindings := map[string][]ast.PermissionRef{}
 	specializedParamTypes := map[int]Type{}
 	regionParams := regionParamSet(ft.RegionParams)
+	if expectedReturn != nil && ft.Return != nil && !IsInvalidType(expectedReturn) {
+		a.collectTypeBindings(ft.Return, expectedReturn, bindings, map[string]Shape{}, map[string]string{}, map[string][]ast.PermissionRef{}, regionParams)
+		a.collectTypeBindings(StripAggregateStateType(ft.Return), StripAggregateStateType(expectedReturn), bindings, map[string]Shape{}, map[string]string{}, map[string][]ast.PermissionRef{}, regionParams)
+	}
 	limit := explicitParamCount
 	if len(orderedArgs) < limit {
 		limit = len(orderedArgs)

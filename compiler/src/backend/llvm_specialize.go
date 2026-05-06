@@ -85,10 +85,14 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 	}
 }
 
-func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes []semantic.Type) map[string]semantic.Type {
+func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes []semantic.Type, resultType semantic.Type) map[string]semantic.Type {
 	bindings := map[string]semantic.Type{}
 	if fn == nil {
 		return bindings
+	}
+	if resultType != nil && fn.Return != nil {
+		collectSpecializationBindings(fn.Return, resultType, bindings)
+		collectSpecializationBindings(semantic.StripAggregateStateType(fn.Return), semantic.StripAggregateStateType(resultType), bindings)
 	}
 	limit := len(fn.Params)
 	if len(argTypes) < limit {

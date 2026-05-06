@@ -65,6 +65,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		return t
 	case *semantic.ErrorUnionType:
 		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst, impls), Errors: tt.Errors}
+	case *semantic.OptionalType:
+		return &semantic.OptionalType{Value: substituteType(tt.Value, subst, impls)}
 	case *semantic.RefType:
 		state := tt.State
 		stateParam := tt.StateParam

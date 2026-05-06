@@ -164,6 +164,26 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "stable_symbol_table",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "stable_symbol_table.elisa"),
+			checks: []string{
+				"%SymbolTable__cstr_key_shape__FixtureSymbol = type",
+				"%SymbolEntry__cstr_key_shape__FixtureSymbol = type",
+				"%Optional__FixtureSymbol = type",
+				"@symtab = global %SymbolTableNamespace",
+				"define i32 @stable_symbol_table_smoke(ptr",
+				"define i32 @stable_symbol_table_default_capacity(ptr",
+				"define %SymbolTable__cstr_key_shape__FixtureSymbol @with_capacity__cstr_key_shape__FixtureSymbol(",
+				"define %SymbolTable__cstr_key_shape__FixtureSymbol @new__cstr_key_shape__FixtureSymbol(",
+				"define i32 @declare__cstr_key_shape__FixtureSymbol(",
+				"define i1 @update__cstr_key_shape__FixtureSymbol(",
+				"define %Optional__FixtureSymbol @lookup__cstr_key_shape__FixtureSymbol(",
+				"define i32 @lookup_id__cstr_key_shape__FixtureSymbol(",
+				"define %FixtureSymbol @get__cstr_key_shape__FixtureSymbol(",
+				"call i32 @declare__cstr_key_shape__FixtureSymbol(",
+			},
+		},
+		{
 			name: "frontend_lexer",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa"),
 			checks: []string{

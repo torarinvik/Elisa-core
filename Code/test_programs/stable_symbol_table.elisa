@@ -1,0 +1,41 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+struct FixtureSymbol:
+    value: mutable i32
+
+
+def stable_symbol_table_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.with_capacity(a, 4usize)
+
+        alpha_id: SymbolTableId = table.declare("alpha", FixtureSymbol{value: 7})
+        beta_id: SymbolTableId = table.declare("beta", FixtureSymbol{value: 3})
+        _ = table.update(alpha_id, FixtureSymbol{value: 11})
+
+        -1 return if alpha_id == SYMBOL_TABLE_INVALID_ID
+        -2 return if beta_id == SYMBOL_TABLE_INVALID_ID
+        -3 return if alpha_id == beta_id
+
+        found_alpha_id: SymbolTableId = table.lookup_id("alpha")
+        -4 return if found_alpha_id != alpha_id
+        -5 return if not symbol_table_contains[cstr[key_shape], FixtureSymbol](table, "beta")
+        -6 return if symbol_table_count[cstr[key_shape], FixtureSymbol](table) != 2usize
+
+        alpha: mutable FixtureSymbol = zeroed
+        if let found_alpha = table.lookup("alpha"):
+            alpha <- found_alpha
+        else:
+            return -7
+        beta: FixtureSymbol = table.get(beta_id)
+        return alpha.value + beta.value
+
+
+def stable_symbol_table_default_capacity(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.new(a)
+        symbol_id: SymbolTableId = table.declare("gamma", FixtureSymbol{value: 19})
+        symbol: FixtureSymbol? = table.lookup("gamma")
+        -1 return if symbol_id == SYMBOL_TABLE_INVALID_ID
+        if let found = symbol:
+            return found.value
+        return -2
