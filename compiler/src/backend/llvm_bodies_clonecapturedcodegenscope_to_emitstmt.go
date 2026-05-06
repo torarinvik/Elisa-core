@@ -388,6 +388,15 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		if n.Optional {
 			return s.emitOptionalAssignStmt(n)
 		}
+		if fieldTarget, ok := n.Target.(*ast.FieldExpr); ok {
+			if handled, err := s.emitBitGroupMemberAssign(fieldTarget, n.Value); handled {
+				if err != nil {
+					return err
+				}
+				s.invalidatePackedReadCaches()
+				return nil
+			}
+		}
 		ptr, targetType, err := s.emitAddress(n.Target)
 		if err != nil {
 			return err

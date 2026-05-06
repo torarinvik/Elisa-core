@@ -91,8 +91,24 @@ func SameType(a, b Type) bool {
 		_, ok := b.(*NullType)
 		return ok
 	case *BuiltinType:
-		tb, ok := b.(*BuiltinType)
-		return ok && ta.Name == tb.Name
+		if tb, ok := b.(*BuiltinType); ok {
+			return ta.Name == tb.Name
+		}
+		if bit, ok := b.(*BitIntType); ok {
+			signed, width, ok := ParseBitIntName(ta.Name)
+			return ok && signed == bit.Signed && width == bit.Width
+		}
+		return false
+	case *BitIntType:
+		tb, ok := b.(*BitIntType)
+		if ok {
+			return ta.Signed == tb.Signed && ta.Width == tb.Width
+		}
+		if bb, ok := b.(*BuiltinType); ok {
+			signed, width, ok := ParseBitIntName(bb.Name)
+			return ok && ta.Signed == signed && ta.Width == width
+		}
+		return false
 	case *IDType:
 		tb, ok := b.(*IDType)
 		return ok && SameType(ta.Tag, tb.Tag) && SameType(ta.Storage, tb.Storage)
@@ -138,6 +154,8 @@ func SameType(a, b Type) bool {
 			}
 		}
 		return true
+	case *BitGroupType:
+		return ta == b
 	case *ConstEnumType:
 		tb, ok := b.(*ConstEnumType)
 		return ok && ta.Name == tb.Name

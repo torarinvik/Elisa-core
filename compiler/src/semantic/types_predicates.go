@@ -115,6 +115,9 @@ func ConstEnumStorageType(t Type) (Type, bool) {
 }
 
 func IsNumericType(t Type) bool {
+	if _, _, ok := BitIntInfo(t); ok {
+		return true
+	}
 	b, ok := t.(*BuiltinType)
 	if !ok {
 		return false
@@ -141,13 +144,17 @@ func IsFloatType(t Type) bool {
 }
 
 func IsIntegralType(t Type) bool {
-	b, ok := t.(*BuiltinType)
-	if !ok {
-		return false
-	}
-	switch b.Name {
-	case "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr":
+	if _, _, ok := BitIntInfo(t); ok {
 		return true
+	}
+	switch b := t.(type) {
+	case *BuiltinType:
+		switch b.Name {
+		case "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr":
+			return true
+		default:
+			return false
+		}
 	default:
 		return false
 	}

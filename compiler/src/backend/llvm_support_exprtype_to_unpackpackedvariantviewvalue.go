@@ -151,6 +151,17 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 		objType = runtimeBacked
 	}
 	switch t := objType.(type) {
+	case *semantic.BitGroupType:
+		member, ok := t.MemberMap[fieldName]
+		if !ok {
+			return nil, 0, nil, false, fmt.Errorf("%s has no packed member %s", t, fieldName)
+		}
+		for i, candidate := range t.Members {
+			if candidate.Name == member.Name {
+				return member.Type, i, t, true, nil
+			}
+		}
+		return nil, 0, nil, false, fmt.Errorf("%s has no packed member %s", t, fieldName)
 	case *semantic.TupleType:
 		for i, field := range t.Fields {
 			if field.Name == fieldName {

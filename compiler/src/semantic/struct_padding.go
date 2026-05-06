@@ -160,6 +160,9 @@ func (a *Analyzer) hostABILayoutForStructType(st *StructType, bindings map[strin
 	if st == nil || st.Decl == nil {
 		return hostABILayout{}, false
 	}
+	if st.HasPackedGroups {
+		return hostABILayout{}, false
+	}
 	key := st.Name
 	if key == "" {
 		key = fmt.Sprintf("%p", st)

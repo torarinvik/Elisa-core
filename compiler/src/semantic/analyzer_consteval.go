@@ -472,14 +472,19 @@ func castConstNumericToInt64(value ConstValue, dst Type) (int64, bool) {
 }
 
 func builtinNumericTypeName(t Type) (string, bool) {
-	builtin, ok := t.(*BuiltinType)
-	if !ok {
-		return "", false
+	if bit, ok := t.(*BitIntType); ok {
+		return BitIntName(bit.Signed, bit.Width), true
 	}
-	return builtin.Name, true
+	if builtin, ok := t.(*BuiltinType); ok {
+		return builtin.Name, true
+	}
+	return "", false
 }
 
 func isSignedConstCastBuiltin(name string) bool {
+	if signed, _, ok := ParseBitIntName(name); ok {
+		return signed
+	}
 	switch name {
 	case "char", "int", "isize", "i8", "i16", "i32", "i64":
 		return true
@@ -489,6 +494,9 @@ func isSignedConstCastBuiltin(name string) bool {
 }
 
 func usesInt64ConstRange(name string) bool {
+	if signed, width, ok := ParseBitIntName(name); ok {
+		return signed && width == 64
+	}
 	switch name {
 	case "char", "int", "isize", "i64":
 		return true
@@ -498,6 +506,12 @@ func usesInt64ConstRange(name string) bool {
 }
 
 func signedConstCastRange(name string) (int64, int64, bool) {
+	if signed, width, ok := ParseBitIntName(name); ok && signed {
+		if width >= 64 {
+			return math.MinInt64, math.MaxInt64, true
+		}
+		return -(int64(1) << (width - 1)), (int64(1) << (width - 1)) - 1, true
+	}
 	switch name {
 	case "i8":
 		return math.MinInt8, math.MaxInt8, true
@@ -513,6 +527,12 @@ func signedConstCastRange(name string) (int64, int64, bool) {
 }
 
 func unsignedConstCastMax(name string) (uint64, bool) {
+	if signed, width, ok := ParseBitIntName(name); ok && !signed {
+		if width >= 64 {
+			return math.MaxInt64, true
+		}
+		return (uint64(1) << width) - 1, true
+	}
 	switch name {
 	case "u8":
 		return math.MaxUint8, true
@@ -528,6 +548,9 @@ func unsignedConstCastMax(name string) (uint64, bool) {
 }
 
 func usesInt64BackedUnsignedConstRange(name string) bool {
+	if signed, width, ok := ParseBitIntName(name); ok {
+		return !signed && width >= 64
+	}
 	switch name {
 	case "u64", "usize", "uintptr":
 		return true

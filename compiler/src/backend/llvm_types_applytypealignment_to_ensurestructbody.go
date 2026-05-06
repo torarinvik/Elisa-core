@@ -103,6 +103,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.BuiltinType:
 		return g.lowerBuiltin(tt.Name)
+	case *semantic.BitIntType:
+		return g.lowerBitInt(tt.Width), nil
 	case *semantic.IDType:
 		return g.lowerType(tt.Storage)
 	case *semantic.ConstEnumType:
@@ -139,6 +141,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 			fields = append(fields, fieldType)
 		}
 		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+	case *semantic.BitGroupType:
+		return g.lowerBitInt(tt.BackingWidth), nil
 	case *semantic.TypeParamType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.RefType:
@@ -251,6 +255,16 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	default:
 		return nil, fmt.Errorf("unsupported semantic type %T", t)
 	}
+}
+
+func (g *llvmGenerator) lowerBitInt(width int) C.LLVMTypeRef {
+	if width < 1 {
+		width = 1
+	}
+	if width > 64 {
+		width = 64
+	}
+	return C.LLVMIntTypeInContext(g.context, C.unsigned(width))
 }
 func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
 	if enumType == nil || !enumType.Packed {

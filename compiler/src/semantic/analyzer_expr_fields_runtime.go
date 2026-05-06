@@ -91,6 +91,15 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		objType = runtimeBacked
 	}
 	switch t := objType.(type) {
+	case *BitGroupType:
+		member, ok := t.MemberMap[fieldName]
+		if !ok {
+			if emitDiagnostics {
+				a.errorf(pos, "%s has no packed member %q", t, fieldName)
+			}
+			return Field{}, false
+		}
+		return Field{Name: member.Name, Type: member.Type, Mutable: true}, true
 	case *TupleType:
 		for _, field := range t.Fields {
 			if field.Name == fieldName {

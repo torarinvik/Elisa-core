@@ -12,6 +12,7 @@ func (*InvalidType) isType()           {}
 func (*NeverType) isType()             {}
 func (*NullType) isType()              {}
 func (*BuiltinType) isType()           {}
+func (*BitIntType) isType()            {}
 func (*IDType) isType()                {}
 func (*TypeParamType) isType()         {}
 func (*StructStateCaseType) isType()   {}
@@ -24,6 +25,7 @@ func (*ErrorSetType) isType()          {}
 func (*ErrorUnionType) isType()        {}
 func (*OptionalType) isType()          {}
 func (*TupleType) isType()             {}
+func (*BitGroupType) isType()          {}
 func (*ConstEnumType) isType()         {}
 func (*RefType) isType()               {}
 func (*ArrayType) isType()             {}
@@ -62,6 +64,12 @@ func (*NeverType) String() string   { return "<never>" }
 func (*NullType) String() string    { return "null" }
 func (t *BuiltinType) String() string {
 	return t.Name
+}
+func (t *BitIntType) String() string {
+	if t == nil {
+		return "<invalid-bitint>"
+	}
+	return BitIntName(t.Signed, t.Width)
 }
 func (t *IDType) String() string {
 	if t == nil || t.Tag == nil {
@@ -134,6 +142,18 @@ func (t *TupleType) String() string {
 		parts = append(parts, field.Type.String())
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+func (t *BitGroupType) String() string {
+	if t == nil {
+		return "<invalid-bitgroup>"
+	}
+	if t.Name != "" {
+		return t.Name
+	}
+	if t.Kind == BitGroupBitset {
+		return "bitset"
+	}
+	return "bitfield"
 }
 func (t *ConstEnumType) String() string {
 	if t == nil {

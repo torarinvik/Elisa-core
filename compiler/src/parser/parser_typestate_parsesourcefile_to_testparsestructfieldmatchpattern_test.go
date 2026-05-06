@@ -38,6 +38,66 @@ func TestParseCharLiteralInConstDecl(t *testing.T) {
 		t.Fatalf("expected const type char, got %T %#v", decl.Type, decl.Type)
 	}
 }
+
+func TestParseBitIntConstEnumAndPackedGroups(t *testing.T) {
+	file, errs := parseSourceFile(t, `const enum Flags of u4:
+	None = 0
+	Read = 1
+
+struct Header:
+	flags: bitset:
+		has_read
+		has_write
+	layout: bitfield:
+		tag: u4
+		arity: u3
+		active: u1
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	enumDecl, ok := file.Decls[0].(*ast.ConstEnumDecl)
+	if !ok {
+		t.Fatalf("expected const enum decl, got %T", file.Decls[0])
+	}
+	if named, ok := enumDecl.Storage.(*ast.NamedType); !ok || named.Name != "u4" {
+		t.Fatalf("expected const enum storage u4, got %T %#v", enumDecl.Storage, enumDecl.Storage)
+	}
+	structDecl, ok := file.Decls[1].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[1])
+	}
+	if structDecl.Fields[0].BitGroup == nil || structDecl.Fields[0].BitGroup.Kind != ast.BitGroupBitset {
+		t.Fatalf("expected first field to be a bitset group, got %#v", structDecl.Fields[0].BitGroup)
+	}
+	if structDecl.Fields[1].BitGroup == nil || structDecl.Fields[1].BitGroup.Kind != ast.BitGroupBitfield {
+		t.Fatalf("expected second field to be a bitfield group, got %#v", structDecl.Fields[1].BitGroup)
+	}
+	if got := len(structDecl.Fields[1].BitGroup.Members); got != 3 {
+		t.Fatalf("expected three bitfield members, got %d", got)
+	}
+}
+
+func TestParseConstEnumAllowsInferredStorage(t *testing.T) {
+	file, errs := parseSourceFile(t, `const enum Mode:
+	None
+	Fast
+	Slow = 7
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	enumDecl, ok := file.Decls[0].(*ast.ConstEnumDecl)
+	if !ok {
+		t.Fatalf("expected const enum decl, got %T", file.Decls[0])
+	}
+	if enumDecl.Storage != nil {
+		t.Fatalf("expected omitted const enum storage to parse as nil, got %#v", enumDecl.Storage)
+	}
+	if enumDecl.Members[0].Value != nil || enumDecl.Members[1].Value != nil {
+		t.Fatalf("expected omitted member values to stay nil for semantic auto-numbering")
+	}
+}
 func TestParseReturnQuestionPatternGuard(t *testing.T) {
 	file, errs := parseSourceFile(t, `enum Expr:
     Int(value: i64)

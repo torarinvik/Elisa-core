@@ -9,6 +9,15 @@ func (a *Analyzer) registerBuiltins() {
 	for _, name := range []string{"void", "bool", "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr", "f32", "f64", "Local", "Frozen", "Joinable", "Pending", "Held"} {
 		a.namedTypes[name] = &BuiltinType{Name: name}
 	}
+	for width := 1; width <= 64; width++ {
+		for _, signed := range []bool{false, true} {
+			name := BitIntName(signed, width)
+			if _, exists := a.namedTypes[name]; exists {
+				continue
+			}
+			a.namedTypes[name] = &BitIntType{Signed: signed, Width: width}
+		}
+	}
 	a.registerBuiltinPermissions()
 	a.registerBuiltinRuntimeStructs()
 }

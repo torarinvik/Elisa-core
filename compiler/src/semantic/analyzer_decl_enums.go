@@ -16,12 +16,8 @@ func (a *Analyzer) populateConstEnumMembers(decls []scopedDecl) {
 		if constEnumType == nil {
 			continue
 		}
-		storageType := a.resolveType(constEnumDecl.Storage)
-		constEnumType.Storage = storageType
-		if !IsIntegralStorageType(storageType) {
-			a.errorf(constEnumDecl.Storage.Pos(), "const enum %q storage type must be an explicit integer type, got %s", constEnumDecl.Name, storageType)
-		}
 		members := make([]*ConstEnumMember, 0, len(constEnumDecl.Members))
+		values := make([]int64, 0, len(constEnumDecl.Members))
 		nextValue := int64(0)
 		for i := range constEnumDecl.Members {
 			memberDecl := &constEnumDecl.Members[i]
@@ -41,7 +37,23 @@ func (a *Analyzer) populateConstEnumMembers(decls []scopedDecl) {
 			member := &ConstEnumMember{Name: memberDecl.Name, Value: value, Decl: memberDecl}
 			constEnumType.MemberMap[member.Name] = member
 			members = append(members, member)
+			values = append(values, value)
 			nextValue = value + 1
+		}
+		var storageType Type
+		if constEnumDecl.Storage != nil {
+			storageType = a.resolveType(constEnumDecl.Storage)
+			if !IsIntegralStorageType(storageType) {
+				a.errorf(constEnumDecl.Storage.Pos(), "const enum %q storage type must be an explicit integer type, got %s", constEnumDecl.Name, storageType)
+			}
+		} else {
+			storageType = InferBitIntTypeForValues(values)
+		}
+		constEnumType.Storage = storageType
+		for _, member := range members {
+			if !IntegerTypeFitsValue(storageType, member.Value) {
+				a.errorf(member.Decl.Pos(), "const enum member %q.%q value %d does not fit storage type %s", constEnumDecl.Name, member.Name, member.Value, storageType)
+			}
 		}
 		constEnumType.Members = members
 	}

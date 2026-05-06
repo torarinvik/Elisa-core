@@ -61,6 +61,11 @@ type BuiltinType struct {
 	Name string
 }
 
+type BitIntType struct {
+	Signed bool
+	Width  int
+}
+
 type IDType struct {
 	Tag     Type
 	Storage Type
@@ -117,6 +122,31 @@ type TupleField struct {
 
 type TupleType struct {
 	Fields []TupleField
+}
+
+type BitGroupKind int
+
+const (
+	BitGroupBitset BitGroupKind = iota + 1
+	BitGroupBitfield
+)
+
+type BitGroupMember struct {
+	Name   string
+	Type   Type
+	Offset int
+	Width  int
+	Signed bool
+	Decl   *ast.BitGroupMemberDecl
+}
+
+type BitGroupType struct {
+	Name         string
+	Kind         BitGroupKind
+	Members      []BitGroupMember
+	MemberMap    map[string]BitGroupMember
+	BackingWidth int
+	Decl         *ast.BitGroupDecl
 }
 
 type ConstEnumMember struct {
@@ -359,6 +389,7 @@ type StructType struct {
 	Fields           map[string]Field
 	Affine           bool
 	ReprC            bool
+	HasPackedGroups  bool
 	Alignment        int
 	HasAlignment     bool
 	Decl             *ast.StructDecl

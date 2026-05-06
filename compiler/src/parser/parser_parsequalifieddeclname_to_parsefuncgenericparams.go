@@ -352,8 +352,10 @@ func (p *Parser) parseConstEnumDecl() *ast.ConstEnumDecl {
 	p.expect(lexer.TOKEN_CONST)
 	p.expect(lexer.TOKEN_ENUM)
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expectIdentText("of")
-	storage := p.parseTypeExpr()
+	var storage ast.TypeExpr
+	if p.matchIdentText("of") {
+		storage = p.parseTypeExpr()
+	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -545,10 +547,52 @@ func (p *Parser) parseFieldDecl() ast.FieldDecl {
 		isTail = true
 	}
 
+	if p.peekIdentText("bitset") || p.peekIdentText("bitfield") {
+		if mutable {
+			p.errorAt(pos, "packed struct groups cannot be marked mutable; mutate their members instead")
+		}
+		if isTail {
+			p.errorAt(pos, "packed struct groups cannot be tail fields")
+		}
+		group := p.parseBitGroupDecl()
+		return ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, BitGroup: group}
+	}
+
 	typ := p.parseTypeExpr()
 	p.expectNewline()
 
 	return ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Mutable: mutable, IsTail: isTail, Type: typ}
+}
+
+func (p *Parser) parseBitGroupDecl() *ast.BitGroupDecl {
+	pos := p.cur().Pos
+	kind := ast.BitGroupBitset
+	if p.matchIdentText("bitfield") {
+		kind = ast.BitGroupBitfield
+	} else {
+		p.expectIdentText("bitset")
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	members := make([]ast.BitGroupMemberDecl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		memberPos := p.cur().Pos
+		memberName := p.expect(lexer.TOKEN_IDENT).Text
+		var memberType ast.TypeExpr
+		if kind == ast.BitGroupBitfield {
+			p.expect(lexer.TOKEN_COLON)
+			memberType = p.parseTypeExpr()
+		}
+		p.expectNewline()
+		members = append(members, ast.BitGroupMemberDecl{Position: memberPos, Name: memberName, Type: memberType})
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return &ast.BitGroupDecl{Position: pos, Kind: kind, Members: members}
 }
 func (p *Parser) parseFuncDecl() *ast.FuncDecl {
 	return p.parseFuncDeclWithAnnotations(nil)

@@ -59,6 +59,15 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 						a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
 						continue
 					}
+					if field.BitGroup != nil {
+						groupType := a.resolveBitGroupType(stDecl.Name+"."+field.Name, field.BitGroup)
+						st.HasPackedGroups = true
+						st.Fields[field.Name] = Field{
+							Name: field.Name,
+							Type: groupType,
+						}
+						continue
+					}
 					fieldType := a.resolveType(field.Type)
 					if field.IsTail {
 						fieldType = &RefType{Elem: fieldType, State: RefStateNonNull, Storage: RefStorageAny}
@@ -74,6 +83,65 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 			})
 		})
 	}
+}
+
+func (a *Analyzer) resolveBitGroupType(name string, groupDecl *ast.BitGroupDecl) *BitGroupType {
+	group := &BitGroupType{
+		Name:      name,
+		MemberMap: map[string]BitGroupMember{},
+		Decl:      groupDecl,
+	}
+	if groupDecl == nil {
+		return group
+	}
+	switch groupDecl.Kind {
+	case ast.BitGroupBitset:
+		group.Kind = BitGroupBitset
+	case ast.BitGroupBitfield:
+		group.Kind = BitGroupBitfield
+	default:
+		a.errorf(groupDecl.Position, "unknown packed group kind")
+		group.Kind = BitGroupBitfield
+	}
+	offset := 0
+	for i := range groupDecl.Members {
+		memberDecl := &groupDecl.Members[i]
+		if _, exists := group.MemberMap[memberDecl.Name]; exists {
+			a.errorf(memberDecl.Position, "duplicate packed group member %q in %s", memberDecl.Name, name)
+			continue
+		}
+		memberType := Type(&BuiltinType{Name: "bool"})
+		width := 1
+		signed := false
+		if group.Kind == BitGroupBitfield {
+			if memberDecl.Type == nil {
+				a.errorf(memberDecl.Position, "bitfield member %q requires an explicit bit integer type", memberDecl.Name)
+				continue
+			}
+			memberType = a.resolveType(memberDecl.Type)
+			var ok bool
+			signed, width, ok = BitIntInfo(memberType)
+			if !ok {
+				if storage, storageOK := ConstEnumStorageType(memberType); storageOK {
+					signed, width, ok = BitIntInfo(storage)
+				}
+			}
+			if !ok {
+				a.errorf(memberDecl.Type.Pos(), "bitfield member %q requires a bit integer or const enum storage type, got %s", memberDecl.Name, memberType)
+				continue
+			}
+		}
+		if offset+width > 64 {
+			a.errorf(memberDecl.Position, "packed group %s exceeds 64 bits", name)
+			continue
+		}
+		member := BitGroupMember{Name: memberDecl.Name, Type: memberType, Offset: offset, Width: width, Signed: signed, Decl: memberDecl}
+		group.Members = append(group.Members, member)
+		group.MemberMap[member.Name] = member
+		offset += width
+	}
+	group.BackingWidth = BitGroupBackingWidth(offset)
+	return group
 }
 
 func (a *Analyzer) validateStructDerivedStates(stDecl *ast.StructDecl, st *StructType) {

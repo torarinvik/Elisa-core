@@ -106,6 +106,9 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if fieldType, ok := cstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
 		return s.emitRuntimeStringLenExpr(expr.Object, fieldType)
 	}
+	if value, fieldType, handled, err := s.emitBitGroupMemberExpr(expr); handled {
+		return value, fieldType, err
+	}
 	if value, fieldType, handled, err := s.emitPackedStoreCountExpr(expr); handled {
 		return value, fieldType, err
 	}

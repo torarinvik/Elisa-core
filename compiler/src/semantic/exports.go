@@ -272,10 +272,10 @@ func sameExportSignature(left *FuncType, right *FuncType) bool {
 func exportedNamedTypeAllowed(t Type) bool {
 	switch tt := t.(type) {
 	case *StructType:
-		return tt.ReprC && len(genericParamsForStructType(tt)) == 0
+		return tt.ReprC && !tt.HasPackedGroups && len(genericParamsForStructType(tt)) == 0
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
-		return ok && base.ReprC && len(genericParamsForStructType(base)) == len(tt.Args)
+		return ok && base.ReprC && !base.HasPackedGroups && len(genericParamsForStructType(base)) == len(tt.Args)
 	default:
 		return false
 	}
@@ -317,8 +317,12 @@ func isCABICompatibleType(t Type) bool {
 		return true
 	case *ArrayType:
 		return tt.HasConstSize && isCABICompatibleType(tt.Elem)
+	case *BitIntType:
+		return false
+	case *BitGroupType:
+		return false
 	case *StructType:
-		if !tt.ReprC || len(genericParamsForStructType(tt)) > 0 || tt.Decl == nil {
+		if !tt.ReprC || tt.HasPackedGroups || len(genericParamsForStructType(tt)) > 0 || tt.Decl == nil {
 			return false
 		}
 		for _, fieldDecl := range tt.Decl.Fields {
@@ -331,7 +335,7 @@ func isCABICompatibleType(t Type) bool {
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
 		params := genericParamsForStructType(base)
-		if !ok || !base.ReprC || base.Decl == nil || len(params) != len(tt.Args) {
+		if !ok || !base.ReprC || base.HasPackedGroups || base.Decl == nil || len(params) != len(tt.Args) {
 			return false
 		}
 		bindings := genericBindingsForParams(params, tt.Args)

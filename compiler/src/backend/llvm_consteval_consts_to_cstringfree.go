@@ -475,6 +475,9 @@ func isPointerLikeType(t semantic.Type) bool {
 }
 func isSignedIntegerType(t semantic.Type) bool {
 	t = numericCastType(t)
+	if signed, _, ok := semantic.BitIntInfo(t); ok {
+		return signed
+	}
 	b, ok := t.(*semantic.BuiltinType)
 	if !ok {
 		if _, ok := t.(*semantic.NullType); ok {
@@ -495,6 +498,9 @@ func isFloatType(t semantic.Type) bool {
 }
 func integerBitWidth(t semantic.Type, wordBits int) int {
 	t = numericCastType(t)
+	if _, width, ok := semantic.BitIntInfo(t); ok {
+		return width
+	}
 	b, ok := t.(*semantic.BuiltinType)
 	if !ok {
 		if isPointerLikeType(t) {

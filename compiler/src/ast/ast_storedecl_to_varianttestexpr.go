@@ -39,6 +39,24 @@ type FieldDecl struct {
 	Mutable     bool
 	IsTail      bool
 	Type        TypeExpr
+	BitGroup    *BitGroupDecl
+}
+type BitGroupKind int
+
+const (
+	BitGroupBitset BitGroupKind = iota + 1
+	BitGroupBitfield
+)
+
+type BitGroupDecl struct {
+	Position lexer.Pos
+	Kind     BitGroupKind
+	Members  []BitGroupMemberDecl
+}
+type BitGroupMemberDecl struct {
+	Position lexer.Pos
+	Name     string
+	Type     TypeExpr
 }
 type Annotation struct {
 	Position lexer.Pos
