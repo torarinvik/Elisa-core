@@ -73,6 +73,7 @@ type Analyzer struct {
 	staticInterfaces                  map[string]*StaticInterface
 	staticImpls                       map[string]*StaticImpl
 	extensionMethodsByName            map[string][]*ExtensionMethod
+	ufcsFunctionsByName               map[string][]*Symbol
 	permissions                       map[string]*PermissionSet
 	effectAliases                     map[string]*EffectAlias
 	contextBundles                    map[string]*ContextBundle
@@ -322,6 +323,7 @@ func Analyze(file *ast.File) *Result {
 		staticInterfaces:                  map[string]*StaticInterface{},
 		staticImpls:                       map[string]*StaticImpl{},
 		extensionMethodsByName:            map[string][]*ExtensionMethod{},
+		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
 		effectAliases:                     map[string]*EffectAlias{},
 		contextBundles:                    map[string]*ContextBundle{},

@@ -49,16 +49,30 @@ struct SymbolEntry[K, T]:
     value: mutable T
 
 
-struct SymbolTable[K, T]:
+struct IndexMapEntry[K, T]:
+    key: mutable K
+    value: mutable T
+
+
+struct IndexMap[K, T]:
     owner: mutable Arena&?
-    entries: mutable darray[SymbolEntry[K, T]]
-    by_key: mutable dict[K, SymbolTableId]
+    entries: mutable darray[IndexMapEntry[K, T]]
+    by_key: mutable dict[K, usize]
+
+
+struct SymbolTable[K, T]:
+    items: mutable IndexMap[K, T]
+
+
+struct IndexMapNamespace:
+    _unused: u8
 
 
 struct SymbolTableNamespace:
     _unused: u8
 
 
+global indexmap: IndexMapNamespace = IndexMapNamespace(0u8)
 global symtab: SymbolTableNamespace = SymbolTableNamespace(0u8)
 
 # ------------------------------------------------------------
@@ -416,6 +430,143 @@ def arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&):
 
 
 # ------------------------------------------------------------
+# Ordered index maps
+# ------------------------------------------------------------
+
+def index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        map: mutable IndexMap[K, T] = zeroed
+        map.owner as & <- owner
+        map.by_key <- arena_dict_new[K, usize](owner, initial_capacity)
+        in owner:
+            _ = map.entries.reserve(initial_capacity)
+        return map
+
+
+def index_map_new[K, T](owner: mutable Arena&) -> IndexMap[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        return index_map[K, T](owner, 32usize)
+
+
+def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        _ = api
+        return index_map_new[K, T](owner)
+
+
+def index_map_with_capacity[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        return index_map[K, T](owner, initial_capacity)
+
+
+def with_capacity[K, T](api: IndexMapNamespace, owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        _ = api
+        return index_map_with_capacity[K, T](owner, initial_capacity)
+
+
+def index_map_count[K, T](map: IndexMap[K, T]&) -> usize:
+    return map.entries.count
+
+
+def count[K, T](map: IndexMap[K, T]&) -> usize:
+    return index_map_count[K, T](map)
+
+
+def index_map_valid_index[K, T](map: IndexMap[K, T]&, index: usize) -> bool:
+    return index < map.entries.count
+
+
+def index_map_find_index[K, T](map: IndexMap[K, T]&, key: K) -> usize?:
+    found: mutable usize&? = arena_dict_get[K, usize](map.by_key, key)
+    null return if found == null
+    return found[0]
+
+
+def index_map_contains[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return index_map_find_index[K, T](map, key) != null
+
+
+def index_map_entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
+    assert index_map_valid_index[K, T](map, index)
+    return map.entries[index]
+
+
+def index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    return index_map_entry[K, T](map, index).value
+
+
+@ufcs_only
+def entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
+    return index_map_entry[K, T](map, index)
+
+
+@ufcs_only
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    return index_map_value[K, T](map, index)
+
+
+def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        if let existing_index = index_map_find_index[K, T](map, key):
+            map.entries[existing_index].value <- value
+            return existing_index
+
+        assert map.owner != null
+        owner: mutable Arena& = map.owner
+        index: usize = map.entries.count
+        in owner:
+            map.entries.push(IndexMapEntry[K, T]{key: key, value: value})
+        _ = try arena_dict_put[K, usize](owner, map.by_key, key, index) else null
+        return index
+
+
+def put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        return index_map_put[K, T](map, key, value)
+
+
+def index_map_set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        return index_map_put[K, T](map, key, value)
+
+
+def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        return index_map_set[K, T](map, key, value)
+
+
+def index_map_get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
+    if let index = index_map_find_index[K, T](map, key):
+        value: T = index_map_value[K, T](map, index)
+        return value
+    return null
+
+
+def get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
+    return index_map_get[K, T](map, key)
+
+
+def index_map_has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return index_map_contains[K, T](map, key)
+
+
+def has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return index_map_has[K, T](map, key)
+
+
+def update_at[K, T](map: mutable IndexMap[K, T]&, index: usize, value: T) -> bool:
+    false return if not index_map_valid_index[K, T](map, index)
+    map.entries[index].value <- value
+    return true
+
+
+def clear[K, T](map: mutable IndexMap[K, T]&):
+    map.entries.count <- 0
+    arena_dict_clear[K, usize](map.by_key)
+
+
+# ------------------------------------------------------------
 # Symbol tables
 # ------------------------------------------------------------
 
@@ -431,10 +582,7 @@ def symbol_table_id_from_index(index: usize) -> SymbolTableId:
 def symbol_table[K, T](owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]:
     can Memory.Allocate, Abort.Panic:
         table: mutable SymbolTable[K, T] = zeroed
-        table.owner as & <- owner
-        table.by_key <- arena_dict_new[K, SymbolTableId](owner, initial_capacity)
-        in owner:
-            _ = table.entries.reserve(initial_capacity)
+        table.items <- index_map[K, T](owner, initial_capacity)
         return table
 
 
@@ -451,48 +599,56 @@ def with_capacity[K, T](api: SymbolTableNamespace, owner: mutable Arena&, initia
 
 
 def symbol_table_count[K, T](table: SymbolTable[K, T]&) -> usize:
-    return table.entries.count
+    return index_map_count[K, T](table.items)
+
+
+def count[K, T](table: SymbolTable[K, T]&) -> usize:
+    return symbol_table_count[K, T](table)
 
 
 def symbol_table_valid_id[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> bool:
     false return if symbol_id == SYMBOL_TABLE_INVALID_ID
-    return symbol_table_index(symbol_id) < table.entries.count
+    return index_map_valid_index[K, T](table.items, symbol_table_index(symbol_id))
 
 
 def symbol_table_find_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
-    found: mutable SymbolTableId&? = arena_dict_get[K, SymbolTableId](table.by_key, key)
-    SYMBOL_TABLE_INVALID_ID return if found == null
-    return found[0]
+    if let index = index_map_find_index[K, T](table.items, key):
+        return symbol_table_id_from_index(index)
+    return SYMBOL_TABLE_INVALID_ID
 
 
 def symbol_table_contains[K, T](table: SymbolTable[K, T]&, key: K) -> bool:
     return symbol_table_find_id[K, T](table, key) != SYMBOL_TABLE_INVALID_ID
 
 
+def has[K, T](table: SymbolTable[K, T]&, key: K) -> bool:
+    return symbol_table_contains[K, T](table, key)
+
+
 def symbol_table_entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
     assert symbol_table_valid_id[K, T](table, symbol_id)
-    return table.entries[symbol_table_index(symbol_id)]
+    entry: IndexMapEntry[K, T] = index_map_entry[K, T](table.items, symbol_table_index(symbol_id))
+    return SymbolEntry[K, T]{key: entry.key, value: entry.value}
 
 
 def symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
     return symbol_table_entry[K, T](table, symbol_id).value
 
 
+@ufcs_only
+def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
+    return symbol_table_entry[K, T](table, symbol_id)
+
+
+@ufcs_only
+def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+    return symbol_table_value[K, T](table, symbol_id)
+
+
 def symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
     can Memory.Allocate, Abort.Panic:
-        existing_id: SymbolTableId = symbol_table_find_id[K, T](table, key)
-        if existing_id != SYMBOL_TABLE_INVALID_ID:
-            table.entries[symbol_table_index(existing_id)].value <- value
-            return existing_id
-
-        assert table.owner != null
-        owner: mutable Arena& = table.owner
-
-        symbol_id: SymbolTableId = symbol_table_id_from_index(table.entries.count)
-        in owner:
-            table.entries.push(SymbolEntry[K, T]{key: key, value: value})
-        _ = try arena_dict_put[K, SymbolTableId](owner, table.by_key, key, symbol_id) else null
-        return symbol_id
+        index: usize = index_map_put[K, T](table.items, key, value)
+        return symbol_table_id_from_index(index)
 
 
 def declare[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
@@ -517,8 +673,7 @@ def lookup[K, T](table: SymbolTable[K, T]&, key: K) -> T?:
 
 def symbol_table_replace[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
     false return if not symbol_table_valid_id[K, T](table, symbol_id)
-    table.entries[symbol_table_index(symbol_id)].value <- value
-    return true
+    return update_at[K, T](table.items, symbol_table_index(symbol_id), value)
 
 
 def update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
@@ -526,5 +681,4 @@ def update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, va
 
 
 def symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&):
-    table.entries.count <- 0
-    arena_dict_clear[K, SymbolTableId](table.by_key)
+    clear[K, T](table.items)

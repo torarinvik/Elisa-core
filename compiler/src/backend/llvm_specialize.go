@@ -28,7 +28,11 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 		}
 		orderedArgs = append(orderedArgs, bound)
 	}
-	specializedName := mangleGenericType(decl.Name, orderedArgs)
+	specializationBase := decl.Name
+	if base.Name != "" {
+		specializationBase = base.Name
+	}
+	specializedName := mangleGenericType(specializationBase, orderedArgs)
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
 		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)

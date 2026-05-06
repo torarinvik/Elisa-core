@@ -250,6 +250,501 @@ def read(box: Box) -> i64:
 	}
 }
 
+func TestAnalyzeUFCSRuntimeReceiverMethodsOnGenericStructs(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_runtime_receiver_methods.elisa", `
+struct FixtureSymbol:
+    value: mutable i32
+
+struct SymbolTableNamespace:
+    marker: u8
+
+struct SymbolTable[K, T]:
+    marker: u8
+
+extern SymbolTableSlot
+type SymbolTableId = id[SymbolTableSlot]
+
+global symtab: SymbolTableNamespace = SymbolTableNamespace(0u8)
+
+def new[K, T](api: SymbolTableNamespace, owner: mutable Arena&) -> SymbolTable[K, T]:
+    _ = api
+    _ = owner
+    return zeroed
+
+def declare[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
+    _ = table
+    _ = key
+    _ = value
+    return 1u32.cast[SymbolTableId]
+
+def lookup[K, T](table: SymbolTable[K, T]&, key: K) -> T?:
+    _ = table
+    _ = key
+    return null
+
+def update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
+    _ = table
+    _ = symbol_id
+    _ = value
+    return true
+
+def get[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+    _ = table
+    _ = symbol_id
+    return zeroed
+
+def read(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.new(a)
+        symbol_id: SymbolTableId = table.declare("alpha", FixtureSymbol{value: 7})
+        if let found = table.lookup("alpha"):
+            _ = table.update(symbol_id, found)
+        return table.get(symbol_id).value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+
+	funcSym, ok := result.GlobalScope.Lookup("read")
+	if !ok {
+		t.Fatal("expected read symbol")
+	}
+	decl := funcSym.Node.(*ast.FuncDecl)
+	if len(decl.Body) == 0 {
+		t.Fatal("expected function body")
+	}
+	body := decl.Body
+	if canStmt, ok := decl.Body[0].(*ast.CanStmt); ok {
+		body = canStmt.Body
+	}
+	var ifStmt *ast.IfStmt
+	var ret *ast.ReturnStmt
+	for _, stmt := range body {
+		if ifStmt == nil {
+			if candidate, ok := stmt.(*ast.IfStmt); ok {
+				ifStmt = candidate
+			}
+		}
+		if ret == nil {
+			if candidate, ok := stmt.(*ast.ReturnStmt); ok {
+				ret = candidate
+			}
+		}
+	}
+	if ifStmt == nil {
+		t.Fatalf("expected if stmt in body, got %#v", body)
+	}
+	if ret == nil {
+		t.Fatalf("expected return stmt in body, got %#v", body)
+	}
+	ifLet, ok := ifStmt.Cond.(*ast.OptionalBindExpr)
+	if !ok {
+		t.Fatalf("expected optional bind cond, got %T", ifStmt.Cond)
+	}
+	lookupCall, ok := ifLet.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected lookup call, got %T", ifLet.Value)
+	}
+	lookupCallee, ok := lookupCall.Func.(*ast.Ident)
+	if !ok || lookupCallee.Name != "lookup" {
+		t.Fatalf("expected UFCS lookup callee, got %T %#v", lookupCall.Func, lookupCall.Func)
+	}
+	if len(lookupCall.LoweredArgs()) != 2 {
+		t.Fatalf("expected receiver plus key arg, got %d", len(lookupCall.LoweredArgs()))
+	}
+	var updateCall *ast.CallExpr
+	switch stmt := ifStmt.Then[0].(type) {
+	case *ast.ExprStmt:
+		updateCall = stmt.Expr.(*ast.CallExpr)
+	case *ast.DiscardStmt:
+		updateCall = stmt.Value.(*ast.CallExpr)
+	default:
+		t.Fatalf("expected update call statement, got %T", ifStmt.Then[0])
+	}
+	updateCallee, ok := updateCall.Func.(*ast.Ident)
+	if !ok || updateCallee.Name != "update" {
+		t.Fatalf("expected UFCS update callee, got %T %#v", updateCall.Func, updateCall.Func)
+	}
+	if len(updateCall.LoweredArgs()) != 3 {
+		t.Fatalf("expected receiver plus two args, got %d", len(updateCall.LoweredArgs()))
+	}
+	field, ok := ret.Value.(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected field expr return, got %T", ret.Value)
+	}
+	getCall, ok := field.Object.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected get call in return, got %T", field.Object)
+	}
+	getCallee, ok := getCall.Func.(*ast.Ident)
+	if !ok || getCallee.Name != "get" {
+		t.Fatalf("expected UFCS get callee, got %T %#v", getCall.Func, getCall.Func)
+	}
+	if len(getCall.LoweredArgs()) != 2 {
+		t.Fatalf("expected receiver plus symbol id arg, got %d", len(getCall.LoweredArgs()))
+	}
+}
+
+func TestAnalyzeUFCSRuntimeReceiverMethodsOnIndexMaps(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_runtime_indexmap_methods.elisa", `
+struct FixtureSymbol:
+    value: mutable i32
+
+struct IndexMapNamespace:
+    marker: u8
+
+struct IndexMap[K, T]:
+    marker: u8
+
+global indexmap: IndexMapNamespace = IndexMapNamespace(0u8)
+
+def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
+    _ = api
+    _ = owner
+    return zeroed
+
+def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    _ = map
+    _ = key
+    _ = value
+    return 0usize
+
+def get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
+    _ = map
+    _ = key
+    return null
+
+def has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    _ = map
+    _ = key
+    return false
+
+def count[K, T](map: IndexMap[K, T]&) -> usize:
+    _ = map
+    return 0usize
+
+def read(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        map: mutable IndexMap[cstr[key_shape], FixtureSymbol] = indexmap.new(a)
+        _ = map.set("alpha", FixtureSymbol{value: 7})
+        if map.has("alpha"):
+            if let found = map.get("alpha"):
+                return found.value + map.count().i32()
+        return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+
+	funcSym, ok := result.GlobalScope.Lookup("read")
+	if !ok {
+		t.Fatal("expected read symbol")
+	}
+	decl := funcSym.Node.(*ast.FuncDecl)
+	body := decl.Body
+	if canStmt, ok := decl.Body[0].(*ast.CanStmt); ok {
+		body = canStmt.Body
+	}
+	discard := body[1].(*ast.DiscardStmt)
+	setCall := discard.Value.(*ast.CallExpr)
+	setCallee, ok := setCall.Func.(*ast.Ident)
+	if !ok || setCallee.Name != "set" {
+		t.Fatalf("expected UFCS set callee, got %T %#v", setCall.Func, setCall.Func)
+	}
+	if len(setCall.LoweredArgs()) != 3 {
+		t.Fatalf("expected receiver plus key/value args, got %d", len(setCall.LoweredArgs()))
+	}
+	outerIf := body[2].(*ast.IfStmt)
+	hasCall := outerIf.Cond.(*ast.CallExpr)
+	hasCallee, ok := hasCall.Func.(*ast.Ident)
+	if !ok || hasCallee.Name != "has" {
+		t.Fatalf("expected UFCS has callee, got %T %#v", hasCall.Func, hasCall.Func)
+	}
+	innerIf := outerIf.Then[0].(*ast.IfStmt)
+	ifLet := innerIf.Cond.(*ast.OptionalBindExpr)
+	getCall := ifLet.Value.(*ast.CallExpr)
+	getCallee, ok := getCall.Func.(*ast.Ident)
+	if !ok || getCallee.Name != "get" {
+		t.Fatalf("expected UFCS get callee, got %T %#v", getCall.Func, getCall.Func)
+	}
+	ret := innerIf.Then[0].(*ast.ReturnStmt)
+	binary := ret.Value.(*ast.BinaryExpr)
+	countCall := binary.Right.(*ast.CastExpr).Operand.(*ast.CallExpr)
+	countCallee, ok := countCall.Func.(*ast.Ident)
+	if !ok || countCallee.Name != "count" {
+		t.Fatalf("expected UFCS count callee, got %T %#v", countCall.Func, countCall.Func)
+	}
+}
+
+func TestAnalyzeUFCSPrefersGenericStructFieldOverSameNamedUFCSFunction(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_generic_field_precedence.elisa", `
+struct Cell[T]:
+    value: T
+
+struct IndexMap[K, T]:
+    marker: u8
+
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    _ = map
+    _ = index
+    return zeroed
+
+def read(cell: Cell[i64]) -> i64:
+    return cell.value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+
+	funcSym, ok := result.GlobalScope.Lookup("read")
+	if !ok {
+		t.Fatal("expected read symbol")
+	}
+	decl := funcSym.Node.(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	field, ok := ret.Value.(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected field expr return, got %T", ret.Value)
+	}
+	if field.Field != "value" {
+		t.Fatalf("expected value field access, got %#v", field)
+	}
+	if got := result.ExprTypes[field]; got == nil || got.String() != "i64" {
+		t.Fatalf("expected field type i64, got %v", got)
+	}
+}
+
+func TestAnalyzeUFCSPrefersPlainCountFieldOverSameNamedUFCSFunction(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_count_field_precedence.elisa", `
+struct Counter:
+    count: usize
+
+struct IndexMap[K, T]:
+    marker: u8
+
+def count[K, T](map: IndexMap[K, T]&) -> usize:
+    _ = map
+    return 0usize
+
+def read(counter: Counter) -> usize:
+    return counter.count
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+
+	funcSym, ok := result.GlobalScope.Lookup("read")
+	if !ok {
+		t.Fatal("expected read symbol")
+	}
+	decl := funcSym.Node.(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	field, ok := ret.Value.(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected field expr return, got %T", ret.Value)
+	}
+	if field.Field != "count" {
+		t.Fatalf("expected count field access, got %#v", field)
+	}
+	if got := result.ExprTypes[field]; got == nil || got.String() != "usize" {
+		t.Fatalf("expected field type usize, got %v", got)
+	}
+}
+
+func TestAnalyzeUFCSDoesNotHijackGenericEntryValueField(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_generic_entry_value.elisa", `
+struct Entry[T]:
+    value: T
+
+struct IndexMap[K, T]:
+    marker: u8
+
+def entry[K, T](map: IndexMap[K, T]&, index: usize) -> Entry[T]:
+    _ = map
+    _ = index
+    return zeroed
+
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    _ = map
+    _ = index
+    return zeroed
+
+def read_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    return entry[K, T](map, index).value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+
+	funcSym, ok := result.GlobalScope.Lookup("read_value")
+	if !ok {
+		t.Fatal("expected read_value symbol")
+	}
+	decl := funcSym.Node.(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	field, ok := ret.Value.(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected field expr return, got %T", ret.Value)
+	}
+	if field.Field != "value" {
+		t.Fatalf("expected value field access, got %#v", field)
+	}
+}
+
+func TestAnalyzeUFCSDoesNotHijackGenericEntryValueInStructLiteral(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_generic_entry_value_structlit.elisa", `
+struct Entry[T]:
+    value: T
+
+struct Wrap[T]:
+    value: T
+
+struct IndexMap[K, T]:
+    marker: u8
+
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    _ = map
+    _ = index
+    return zeroed
+
+def wrap_entry[T](entry: Entry[T]) -> Wrap[T]:
+    return Wrap[T]{value: entry.value}
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeUFCSGlobalNameDoesNotShadowLocalValueBinding(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_local_value_shadow.elisa", `
+struct IndexMap[K, T]:
+    marker: u8
+
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    _ = map
+    _ = index
+    return zeroed
+
+def read() -> i64:
+    value: i64 = 7
+    return value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeUFCSGlobalNameDoesNotShadowInferredValueBinding(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_local_inferred_value_shadow.elisa", `
+struct IndexMap[K, T]:
+    marker: u8
+
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    _ = map
+    _ = index
+    return zeroed
+
+def read() -> i64:
+    value = 7
+    return value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeUFCSGlobalNameDoesNotShadowTupleReturnLocalValue(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_tuple_return_local_value.elisa", `
+struct IndexMap[K, T]:
+    marker: u8
+
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    _ = map
+    _ = index
+    return zeroed
+
+def read(flag: bool) -> (value: bool, after: usize):
+    value: mutable bool = flag
+    after: mutable usize = 7usize
+    return (value, after)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeUFCSOnlyFunctionSupportsReceiverCallWithoutGlobalCollision(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_only_value_method.elisa", `
+struct IndexMap[K, T]:
+    marker: u8
+
+@ufcs_only
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    _ = map
+    _ = index
+    return zeroed
+
+def read[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    return map.value(index)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeUFCSOnlyFunctionDoesNotShadowTupleValueBindings(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_only_tuple_value_binding.elisa", `
+struct IndexMap[K, T]:
+    marker: u8
+
+@ufcs_only
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    _ = map
+    _ = index
+    return zeroed
+
+def read(flag: bool) -> (value: bool, after: usize):
+    value: mutable bool = flag
+    after: mutable usize = 7usize
+    return (value, after)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeUFCSOnlyFunctionSupportsSymbolTableStyleReceiverCalls(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_only_symbol_table_methods.elisa", `
+extern SymbolTableSlot
+type SymbolTableId = id[SymbolTableSlot]
+
+struct SymbolEntry[T]:
+    value: T
+
+struct SymbolTable[K, T]:
+    marker: u8
+
+@ufcs_only
+def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+    _ = table
+    _ = symbol_id
+    return zeroed
+
+@ufcs_only
+def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[T]:
+    _ = table
+    _ = symbol_id
+    return zeroed
+
+def read[T](table: SymbolTable[cstr, T]&, symbol_id: SymbolTableId) -> T:
+    _ = table.entry(symbol_id)
+    return table.value(symbol_id)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
 func TestAnalyzeUFCSAmbiguityReportsCandidates(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ufcs_ambiguous.elisa", `
 namespace left:

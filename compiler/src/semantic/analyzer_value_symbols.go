@@ -71,10 +71,11 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						symbolName = initHookSymbolName(qualifiedName, fnType, n.Pos())
 					}
 				}
-				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}
+				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, UFCSOnly: funcHasAnnotation(n, "ufcs_only")}
 				a.functionTypes[symbolName] = fnType
 				a.funcDeclSymbols[n] = sym
-				a.defineGlobal(sym, n.Pos())
+				a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
+				a.functionTypes[sym.Name] = fnType
 				switch n.Name {
 				case "__cast__":
 					a.registerCastHook(scoped.Namespace, n, fnType, sym)
@@ -153,7 +154,9 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 				a.functionTypes[qualifiedName] = fnType
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false}, n.Pos())
+				sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false}
+				a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
+				a.functionTypes[sym.Name] = fnType
 			case *ast.ExternVarDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				declType := a.resolveType(n.Type)

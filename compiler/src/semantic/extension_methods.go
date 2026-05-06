@@ -18,6 +18,10 @@ func ExtensionMethodSymbolName(visibleName string, receiver Type, methodName str
 	return "__ext__" + sanitizeStaticInterfaceSymbolFragment(visibleName) + "__" + sanitizeStaticInterfaceSymbolFragment(TypeIdentityKey(receiver)) + "__" + sanitizeStaticInterfaceSymbolFragment(methodName)
 }
 
+func ReceiverOverloadSymbolName(visibleName string, receiver Type, methodName string) string {
+	return "__ovl__" + sanitizeStaticInterfaceSymbolFragment(visibleName) + "__" + sanitizeStaticInterfaceSymbolFragment(TypeIdentityKey(receiver)) + "__" + sanitizeStaticInterfaceSymbolFragment(methodName)
+}
+
 func (a *Analyzer) validateExtensionMethodSignature(visibleName string, receiver Type, fnType *FuncType, decl ast.Node) bool {
 	if a == nil || receiver == nil || fnType == nil || decl == nil {
 		return false
@@ -93,29 +97,36 @@ func (a *Analyzer) lookupVisibleUFCSFunction(name string, actualReceiver Type) (
 		ambiguousNames []string
 	)
 	for _, candidate := range a.visibleNameCandidates(name) {
-		sym, ok := a.globalScope.Lookup(candidate)
-		if !ok || sym == nil {
-			continue
-		}
-		if sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc {
-			continue
-		}
-		fnType, ok := sym.Type.(*FuncType)
-		if !ok || fnType == nil || len(fnType.Params) == 0 {
-			continue
-		}
-		if !a.ufcsReceiverAssignableTo(fnType.Params[0], actualReceiver) {
-			continue
-		}
-		if matched != nil {
-			if len(ambiguousNames) == 0 {
-				ambiguousNames = append(ambiguousNames, matchedName)
+		candidates := a.ufcsFunctionsByName[candidate]
+		if len(candidates) == 0 {
+			if sym, ok := a.globalScope.Lookup(candidate); ok && sym != nil {
+				candidates = append(candidates, sym)
 			}
-			ambiguousNames = append(ambiguousNames, candidate)
-			continue
 		}
-		matched = sym
-		matchedName = candidate
+		for _, sym := range candidates {
+			if sym == nil {
+				continue
+			}
+			if sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc {
+				continue
+			}
+			fnType, ok := sym.Type.(*FuncType)
+			if !ok || fnType == nil || len(fnType.Params) == 0 {
+				continue
+			}
+			if !a.ufcsReceiverAssignableTo(fnType.Params[0], actualReceiver) {
+				continue
+			}
+			if matched != nil {
+				if len(ambiguousNames) == 0 {
+					ambiguousNames = append(ambiguousNames, matchedName)
+				}
+				ambiguousNames = append(ambiguousNames, candidate)
+				continue
+			}
+			matched = sym
+			matchedName = candidate
+		}
 	}
 	if len(ambiguousNames) != 0 {
 		return nil, false, fmt.Errorf("UFCS call %q on %s is ambiguous: %s", name, diagnosticTypeString(actualReceiver), strings.Join(ambiguousNames, ", "))
@@ -130,18 +141,91 @@ func (a *Analyzer) ufcsReceiverAssignableTo(expected Type, actual Type) bool {
 	if a == nil || expected == nil || actual == nil {
 		return false
 	}
-	if AssignableTo(expected, actual) {
+	expectedBase := expected
+	if expectedRef, ok := expected.(*RefType); ok && expectedRef != nil {
+		expectedBase = expectedRef.Elem
+	}
+	actualBase := actual
+	if actualRef, ok := actual.(*RefType); ok && actualRef != nil {
+		actualBase = actualRef.Elem
+	}
+	if !ufcsReceiverBaseCompatible(expectedBase, actualBase) {
+		return false
+	}
+	if SameType(expected, actual) {
 		return true
 	}
 	expectedRef, ok := expected.(*RefType)
 	if !ok || expectedRef == nil {
 		return false
 	}
-	if _, ok := implicitCallLikeRefUpcastType(expectedRef, actual); ok {
+	if actualRef, ok := actual.(*RefType); ok && actualRef != nil {
+		if ufcsReceiverBaseCompatible(expectedRef.Elem, actualRef.Elem) {
+			return expectedRef.State == RefStateNonNull || expectedRef.State == RefStateNullable
+		}
+	}
+	if upcastType, ok := implicitCallLikeRefUpcastType(expectedRef, actual); ok && SameType(upcastType, expected) {
 		return true
 	}
-	if !AssignableTo(expectedRef.Elem, actual) {
+	if !ufcsReceiverBaseCompatible(expectedRef.Elem, actual) {
 		return false
 	}
 	return expectedRef.State == RefStateNonNull || expectedRef.State == RefStateNullable
+}
+
+func ufcsReceiverBaseCompatible(expected Type, actual Type) bool {
+	if expected == nil || actual == nil {
+		return false
+	}
+	expected = StripAggregateStateType(expected)
+	actual = StripAggregateStateType(actual)
+	if SameType(expected, actual) {
+		return true
+	}
+	switch exp := expected.(type) {
+	case *GenericInstanceType:
+		act, ok := actual.(*GenericInstanceType)
+		if !ok || act == nil {
+			return false
+		}
+		return exp.Name == act.Name && SameType(exp.Base, act.Base)
+	case *StructType:
+		switch act := actual.(type) {
+		case *StructType:
+			return SameType(exp, act)
+		case *GenericInstanceType:
+			return SameType(exp, act.Base)
+		}
+	}
+	return TypeIdentityKey(expected) == TypeIdentityKey(actual)
+}
+
+func receiverOverloadType(sym *Symbol) (Type, bool) {
+	if sym == nil {
+		return nil, false
+	}
+	if sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc {
+		return nil, false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || len(fnType.Params) == 0 {
+		return nil, false
+	}
+	return fnType.Params[0], true
+}
+
+func (a *Analyzer) registerUFCSFunction(visibleName string, sym *Symbol) {
+	if a == nil || visibleName == "" || sym == nil {
+		return
+	}
+	if _, ok := receiverOverloadType(sym); !ok {
+		return
+	}
+	methods := a.ufcsFunctionsByName[visibleName]
+	for _, existing := range methods {
+		if existing == sym {
+			return
+		}
+	}
+	a.ufcsFunctionsByName[visibleName] = append(methods, sym)
 }

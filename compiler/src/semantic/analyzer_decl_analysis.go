@@ -212,6 +212,17 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	if annotation.Name == "skip" || annotation.Name == "ignore" {
 		return true
 	}
+	if annotation.Name == "ufcs_only" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@ufcs_only on function %q does not take arguments", fn.Name)
+			return false
+		}
+		if len(signature.Params) == 0 {
+			a.errorf(annotation.Position, "@ufcs_only function %q must take at least one receiver parameter", fn.Name)
+			return false
+		}
+		return true
+	}
 	if annotation.Name == "inline" {
 		if len(annotation.Args) != 1 {
 			a.errorf(annotation.Position, "@inline on function %q expects exactly one mode argument", fn.Name)
@@ -424,7 +435,7 @@ func funcHasAnnotation(fn *ast.FuncDecl, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant", "ufcs_only":
 		return true
 	default:
 		return false

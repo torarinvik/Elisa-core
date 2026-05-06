@@ -256,6 +256,7 @@ type Symbol struct {
 	AliasOf    *Symbol
 	ParamIndex int
 	Mutable    bool
+	UFCSOnly   bool
 }
 
 func symbolAliasRoot(sym *Symbol) *Symbol {
