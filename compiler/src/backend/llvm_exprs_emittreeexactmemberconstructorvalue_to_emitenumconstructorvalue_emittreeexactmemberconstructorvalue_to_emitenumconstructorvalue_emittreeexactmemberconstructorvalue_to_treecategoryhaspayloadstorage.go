@@ -118,10 +118,6 @@ func (s *functionState) emitTreeExactMemberConstructorValue(callExpr *ast.CallEx
 	}
 	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.exact.store.arena")
 	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.exact.store.state")
-	slot, err := s.emitTreeExactAppendSlot(arenaValue, stateValue, family, memberType, "tree.exact")
-	if err != nil {
-		return nil, nil, err
-	}
 	fieldValues := make([]C.LLVMValueRef, 0, len(fieldDecls))
 	for i, fieldDecl := range fieldDecls {
 		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
@@ -133,6 +129,44 @@ func (s *functionState) emitTreeExactMemberConstructorValue(callExpr *ast.CallEx
 			return nil, nil, err
 		}
 		fieldValues = append(fieldValues, fieldValue)
+	}
+	if treeFamilyLayoutPlan(family).isCategoryUnion() {
+		slot, err := s.emitTreeRootUnionAppendSlot(arenaValue, stateValue, family, "tree.exact")
+		if err != nil {
+			return nil, nil, err
+		}
+		tagType, err := s.g.lowerBuiltin("u32")
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := s.emitTreeRootUnionKindAtIndex(slot.tablePtr, family, slot.rowIndex, C.LLVMConstInt(tagType, C.ulonglong(tag), 0), "tree.exact"); err != nil {
+			return nil, nil, err
+		}
+		payloadType, err := s.g.lowerTreeRootUnionExactPayloadType(memberType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if C.LLVMGetTypeKind(payloadType) != C.LLVMVoidTypeKind {
+			payloadValue := C.LLVMGetUndef(payloadType)
+			for i, fieldValue := range fieldValues {
+				payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, fieldValue, C.unsigned(i), cStringFree("tree.exact.payload.field"))
+			}
+			if err := s.emitTreeRootUnionPayloadAtIndex(slot.tablePtr, family, slot.rowIndex, payloadType, payloadValue, "tree.exact"); err != nil {
+				return nil, nil, err
+			}
+		}
+		if err := s.emitTreeRootUnionTableSetCount(slot.tablePtr, family, slot.neededCount, "tree.exact"); err != nil {
+			return nil, nil, err
+		}
+		handleValue, err := s.buildTreeHandleValue(family, stateValue, slot.rowIndex, "tree.exact")
+		if err != nil {
+			return nil, nil, err
+		}
+		return handleValue, memberType, nil
+	}
+	slot, err := s.emitTreeExactAppendSlot(arenaValue, stateValue, family, memberType, "tree.exact")
+	if err != nil {
+		return nil, nil, err
 	}
 	if err := s.emitTreeStoreExactRowValueAtIndex(slot.tablePtr, memberType, slot.rowIndex, fieldValues, "tree.exact"); err != nil {
 		return nil, nil, err

@@ -226,6 +226,28 @@ func treeFamilyCategoryIndex(treeType *semantic.TreeType, category *semantic.Tre
 	return -1, false
 }
 
+func treeFamilyDirectRootMembersInDeclOrder(treeType *semantic.TreeType) []semantic.Type {
+	if treeType == nil || treeType.Decl == nil {
+		return nil
+	}
+	out := make([]semantic.Type, 0)
+	for _, memberDecl := range flattenLLVMTreeMemberDecls(treeType.Decl.Members) {
+		switch decl := memberDecl.(type) {
+		case *ast.TreeBlockDecl:
+			member, ok := treeType.Member(decl.Name)
+			if ok && member != nil {
+				out = append(out, member)
+			}
+		case *ast.TreeStructDecl:
+			member, ok := treeType.Member(decl.Name)
+			if ok && member != nil {
+				out = append(out, member)
+			}
+		}
+	}
+	return out
+}
+
 func treeExactMemberTag(memberType semantic.Type) (uint32, bool) {
 	switch tt := semantic.StripAggregateStateType(memberType).(type) {
 	case *semantic.TreeVariantViewType:
@@ -386,11 +408,28 @@ func (g *llvmGenerator) ensureTreeRootUnionPayloadType(treeType *semantic.TreeTy
 	if g.structBodies[name] {
 		return ty, nil
 	}
-	u32Type, err := g.lowerBuiltin("u32")
+	maxSlots := uint64(0)
+	categoryRefSlots, err := g.treeRootUnionCategoryRefPayloadSlots()
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{u32Type, u32Type}
+	if categoryRefSlots > maxSlots {
+		maxSlots = categoryRefSlots
+	}
+	for _, member := range treeFamilyDirectRootMembersInDeclOrder(treeType) {
+		slots, err := g.treeRootUnionExactPayloadSlots(member)
+		if err != nil {
+			return nil, err
+		}
+		if slots > maxSlots {
+			maxSlots = slots
+		}
+	}
+	wordType, err := g.lowerBuiltin("uintptr")
+	if err != nil {
+		return nil, err
+	}
+	fields := []C.LLVMTypeRef{C.LLVMArrayType2(wordType, C.ulonglong(maxSlots))}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
@@ -989,7 +1028,14 @@ func (s *functionState) emitTreeCategoryUnionRootHandle(categoryValue C.LLVMValu
 			return nil, err
 		}
 	}
-	if err := s.emitTreeRootUnionPayloadAtIndex(slot.tablePtr, family, slot.rowIndex, uint32(categoryIndex), handleValue, name); err != nil {
+	payloadType, err := s.g.lowerTreeRootUnionCategoryRefPayloadType()
+	if err != nil {
+		return nil, err
+	}
+	payloadValue := C.LLVMGetUndef(payloadType)
+	payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, C.LLVMConstInt(u32Type, C.ulonglong(categoryIndex), 0), 0, cStringFree(name+".payload.category"))
+	payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, handleValue, 1, cStringFree(name+".payload.handle"))
+	if err := s.emitTreeRootUnionPayloadAtIndex(slot.tablePtr, family, slot.rowIndex, payloadType, payloadValue, name); err != nil {
 		return nil, err
 	}
 	if err := s.emitTreeRootUnionTableSetCount(slot.tablePtr, family, slot.neededCount, name); err != nil {

@@ -290,10 +290,12 @@ tree Lua:
 		span: i64
 	@role(stmt)
 	node Stmt:
-		IfStmt(condition: Lua.Expr, fallback: Lua.Expr)
+		IfStmt(condition: Lua.Expr, body: Lua.Block)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)
+	block Block:
+		stmts: darray[Lua.Stmt]
 
 def count_children(stmt: Lua.Stmt) -> i64:
 	total: mutable i64 = 0

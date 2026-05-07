@@ -835,6 +835,24 @@ func (s *functionState) emitTreeMemberFieldValueAtHandle(nodeValue C.LLVMValueRe
 		}
 		return s.emitTreeCategoryUnionFieldValueAtIndex(access.tablePtr, viewType.Category, viewType.Variant, fieldName, access.rowIndex, name)
 	}
+	switch semantic.StripAggregateStateType(memberType).(type) {
+	case *semantic.TreeBlockType, *semantic.TreeStructType:
+		if family != nil && treeFamilyLayoutPlan(family).isCategoryUnion() {
+			stateValue, err := s.emitTreeCategoryUnionContextStateValue(family, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name+".index")
+			if err != nil {
+				return nil, nil, err
+			}
+			return s.emitTreeRootUnionExactFieldValueAtIndex(tablePtr, family, memberType, fieldName, rowIndex, name)
+		}
+	}
 	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
 	if err != nil {
 		return nil, nil, err
@@ -848,6 +866,20 @@ func (s *functionState) emitTreeMemberSurfaceFieldValueAtHandle(nodeValue C.LLVM
 			return nil, nil, err
 		}
 		return s.emitTreeCategoryUnionSurfaceFieldValue(access.tablePtr, viewType.Category, viewType.Variant, fieldName, access.rowIndex, name)
+	}
+	switch semantic.StripAggregateStateType(memberType).(type) {
+	case *semantic.TreeBlockType, *semantic.TreeStructType:
+		if family != nil && treeFamilyLayoutPlan(family).isCategoryUnion() {
+			value, rawType, err := s.emitTreeMemberFieldValueAtHandle(nodeValue, family, memberType, fieldName, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			field, ok := semantic.TreeExactSurfaceFieldInfo(memberType, fieldName)
+			if !ok {
+				return nil, nil, fmt.Errorf("%s has no field %s", treeExactMemberSurfaceName(memberType), fieldName)
+			}
+			return s.treeFieldSurfaceValue(value, rawType, field.Type, name)
+		}
 	}
 	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
 	if err != nil {
@@ -1033,36 +1065,74 @@ func (s *functionState) emitTreeCategoryUnionPayloadAtIndex(tablePtr C.LLVMValue
 	return nil
 }
 
-func (s *functionState) emitTreeRootUnionPayloadAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, rowIndex C.LLVMValueRef, categoryIndex uint32, categoryHandle C.LLVMValueRef, name string) error {
+func (s *functionState) emitTreeRootUnionPayloadAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, rowIndex C.LLVMValueRef, payloadType C.LLVMTypeRef, payloadValue C.LLVMValueRef, name string) error {
 	payloadsPtr, err := s.emitTreeRootUnionPayloadsPointerValue(tablePtr, family, name)
 	if err != nil {
 		return err
 	}
-	payloadType, err := s.g.ensureTreeRootUnionPayloadType(family)
+	payloadRowType, err := s.g.ensureTreeRootUnionPayloadType(family)
 	if err != nil {
 		return err
 	}
-	u32Type, err := s.g.lowerBuiltin("u32")
+	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadRowType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.ptr"))
+	payloadValuePtr := C.LLVMBuildAlloca(s.builder, payloadType, cStringFree(name+".payload.tmp"))
+	C.LLVMBuildStore(s.builder, payloadValue, payloadValuePtr)
+	sizeBytes, err := s.g.abiSizeOfLLVMType(payloadType)
 	if err != nil {
 		return err
 	}
-	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.ptr"))
-	payloadValue := C.LLVMGetUndef(payloadType)
-	payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, C.LLVMConstInt(u32Type, C.ulonglong(categoryIndex), 0), 0, cStringFree(name+".payload.category"))
-	payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, categoryHandle, 1, cStringFree(name+".payload.handle"))
-	C.LLVMBuildStore(s.builder, payloadValue, payloadRowPtr)
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	})
+	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{payloadRowPtr, payloadValuePtr, C.LLVMConstInt(usizeLLVMType, C.ulonglong(sizeBytes), 0)}, name+".payload.memcpy")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
 	return nil
 }
 
-func (s *functionState) emitTreeRootUnionPayloadValueAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, C.LLVMTypeRef, error) {
+func (s *functionState) emitTreeRootUnionPayloadValueAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, rowIndex C.LLVMValueRef, payloadType C.LLVMTypeRef, name string) (C.LLVMValueRef, C.LLVMTypeRef, error) {
 	payloadsPtr, err := s.emitTreeRootUnionPayloadsPointerValue(tablePtr, family, name)
 	if err != nil {
 		return nil, nil, err
 	}
-	payloadType, err := s.g.ensureTreeRootUnionPayloadType(family)
+	payloadRowType, err := s.g.ensureTreeRootUnionPayloadType(family)
 	if err != nil {
 		return nil, nil, err
 	}
-	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.ptr"))
+	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadRowType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.ptr"))
 	return C.LLVMBuildLoad2(s.builder, payloadType, payloadRowPtr, cStringFree(name+".payload")), payloadType, nil
+}
+
+func (s *functionState) emitTreeRootUnionExactFieldValueAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, fieldName string, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	fieldIndex, field, err := treeExactFieldIndex(memberType, fieldName)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadType, err := s.g.lowerTreeRootUnionExactPayloadType(memberType)
+	if err != nil {
+		return nil, nil, err
+	}
+	if C.LLVMGetTypeKind(payloadType) == C.LLVMVoidTypeKind {
+		return nil, nil, fmt.Errorf("%s has no lowered root payload field %s", treeExactMemberSurfaceName(memberType), fieldName)
+	}
+	payloadValue, _, err := s.emitTreeRootUnionPayloadValueAtIndex(tablePtr, family, rowIndex, payloadType, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	value := C.LLVMBuildExtractValue(s.builder, payloadValue, C.unsigned(fieldIndex), cStringFree(name+".elem"))
+	return value, field.Type, nil
 }

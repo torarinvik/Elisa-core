@@ -178,10 +178,16 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		if tt == nil || tt.Family == nil {
 			return nil, fmt.Errorf("missing tree block metadata")
 		}
+		if treeFamilyLayoutPlan(tt.Family).isCategoryUnion() {
+			return g.ensureTreeDenseHandleCarrierType()
+		}
 		return g.ensureTreeHandleCarrierType(tt.Family)
 	case *semantic.TreeStructType:
 		if tt == nil || tt.Family == nil {
 			return nil, fmt.Errorf("missing tree struct metadata")
+		}
+		if treeFamilyLayoutPlan(tt.Family).isCategoryUnion() {
+			return g.ensureTreeDenseHandleCarrierType()
 		}
 		return g.ensureTreeHandleCarrierType(tt.Family)
 	case *semantic.ArrayType:

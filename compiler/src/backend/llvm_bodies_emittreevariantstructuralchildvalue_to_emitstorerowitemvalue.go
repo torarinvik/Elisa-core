@@ -265,16 +265,30 @@ func (s *functionState) emitTreeRootUnionPayloadForHandle(nodeValue C.LLVMValueR
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.emitTreeRootUnionPayloadValueAtIndex(tablePtr, family, rowIndex, name)
+	payloadType, err := s.g.lowerTreeRootUnionCategoryRefPayloadType()
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.emitTreeRootUnionPayloadValueAtIndex(tablePtr, family, rowIndex, payloadType, name)
 }
 
 func (s *functionState) emitTreeRootUnionStructuralChildCount(nodeValue C.LLVMValueRef, family *semantic.TreeType, name string) (C.LLVMValueRef, error) {
-	payloadValue, _, err := s.emitTreeRootUnionPayloadForHandle(nodeValue, family, name+".root")
+	stateValue, err := s.emitTreeCategoryUnionContextStateValue(family, name+".root")
 	if err != nil {
 		return nil, err
 	}
-	categoryIndexValue := C.LLVMBuildExtractValue(s.builder, payloadValue, 0, cStringFree(name+".root.category"))
-	categoryHandleValue := C.LLVMBuildExtractValue(s.builder, payloadValue, 1, cStringFree(name+".root.handle"))
+	tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, name+".root")
+	if err != nil {
+		return nil, err
+	}
+	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name+".root.index")
+	if err != nil {
+		return nil, err
+	}
+	kindValue, err := s.emitTreeRootUnionKindValueAtIndex(tablePtr, family, rowIndex, name+".root")
+	if err != nil {
+		return nil, err
+	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -282,15 +296,29 @@ func (s *functionState) emitTreeRootUnionStructuralChildCount(nodeValue C.LLVMVa
 	}
 	resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".root.count.result"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".root.count.fail"))
-	categories := treeFamilyCategoryMembersInDeclOrder(family)
-	switchInst := C.LLVMBuildSwitch(s.builder, categoryIndexValue, failBB, C.unsigned(len(categories)))
-	incomingValues := make([]C.LLVMValueRef, 0, len(categories))
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(categories))
-	for i, category := range categories {
+	members := semantic.TreeFamilyExactMembersInTagOrder(family)
+	switchInst := C.LLVMBuildSwitch(s.builder, kindValue, failBB, C.unsigned(len(members)))
+	incomingValues := make([]C.LLVMValueRef, 0, len(members))
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(members))
+	for _, member := range members {
+		tag, ok := treeExactMemberTag(member)
+		if !ok {
+			return nil, fmt.Errorf("missing exact tree tag for %s", treeExactMemberSurfaceName(member))
+		}
 		caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".root.count.case"))
-		C.LLVMAddCase(switchInst, C.LLVMConstInt(C.LLVMTypeOf(categoryIndexValue), C.ulonglong(i), 0), caseBB)
+		C.LLVMAddCase(switchInst, C.LLVMConstInt(C.LLVMTypeOf(kindValue), C.ulonglong(tag), 0), caseBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
-		countValue, err := s.emitTreeChildrenCount(category, categoryHandleValue, name+".root.category")
+		dispatchValue := nodeValue
+		dispatchType := member
+		if viewType, ok := semantic.StripAggregateStateType(member).(*semantic.TreeVariantViewType); ok && viewType != nil {
+			payloadValue, _, err := s.emitTreeRootUnionPayloadForHandle(nodeValue, family, name+".root")
+			if err != nil {
+				return nil, err
+			}
+			dispatchValue = C.LLVMBuildExtractValue(s.builder, payloadValue, 1, cStringFree(name+".root.handle"))
+			dispatchType = viewType.Category
+		}
+		countValue, err := s.emitTreeChildrenCount(dispatchType, dispatchValue, name+".root.member")
 		if err != nil {
 			return nil, err
 		}
@@ -308,27 +336,51 @@ func (s *functionState) emitTreeRootUnionStructuralChildCount(nodeValue C.LLVMVa
 }
 
 func (s *functionState) emitTreeRootUnionStructuralChildValue(nodeValue C.LLVMValueRef, family *semantic.TreeType, itemType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	payloadValue, _, err := s.emitTreeRootUnionPayloadForHandle(nodeValue, family, name+".root")
+	stateValue, err := s.emitTreeCategoryUnionContextStateValue(family, name+".root")
 	if err != nil {
 		return nil, err
 	}
-	categoryIndexValue := C.LLVMBuildExtractValue(s.builder, payloadValue, 0, cStringFree(name+".root.category"))
-	categoryHandleValue := C.LLVMBuildExtractValue(s.builder, payloadValue, 1, cStringFree(name+".root.handle"))
+	tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, name+".root")
+	if err != nil {
+		return nil, err
+	}
+	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name+".root.index")
+	if err != nil {
+		return nil, err
+	}
+	kindValue, err := s.emitTreeRootUnionKindValueAtIndex(tablePtr, family, rowIndex, name+".root")
+	if err != nil {
+		return nil, err
+	}
 	itemLLVMType, err := s.g.lowerType(itemType)
 	if err != nil {
 		return nil, err
 	}
 	resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".root.value.result"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".root.value.fail"))
-	categories := treeFamilyCategoryMembersInDeclOrder(family)
-	switchInst := C.LLVMBuildSwitch(s.builder, categoryIndexValue, failBB, C.unsigned(len(categories)))
-	incomingValues := make([]C.LLVMValueRef, 0, len(categories))
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(categories))
-	for i, category := range categories {
+	members := semantic.TreeFamilyExactMembersInTagOrder(family)
+	switchInst := C.LLVMBuildSwitch(s.builder, kindValue, failBB, C.unsigned(len(members)))
+	incomingValues := make([]C.LLVMValueRef, 0, len(members))
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(members))
+	for _, member := range members {
+		tag, ok := treeExactMemberTag(member)
+		if !ok {
+			return nil, fmt.Errorf("missing exact tree tag for %s", treeExactMemberSurfaceName(member))
+		}
 		caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".root.value.case"))
-		C.LLVMAddCase(switchInst, C.LLVMConstInt(C.LLVMTypeOf(categoryIndexValue), C.ulonglong(i), 0), caseBB)
+		C.LLVMAddCase(switchInst, C.LLVMConstInt(C.LLVMTypeOf(kindValue), C.ulonglong(tag), 0), caseBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
-		value, err := s.emitTreeChildrenValue(category, categoryHandleValue, itemType, indexValue, name+".root.category")
+		dispatchValue := nodeValue
+		dispatchType := member
+		if viewType, ok := semantic.StripAggregateStateType(member).(*semantic.TreeVariantViewType); ok && viewType != nil {
+			payloadValue, _, err := s.emitTreeRootUnionPayloadForHandle(nodeValue, family, name+".root")
+			if err != nil {
+				return nil, err
+			}
+			dispatchValue = C.LLVMBuildExtractValue(s.builder, payloadValue, 1, cStringFree(name+".root.handle"))
+			dispatchType = viewType.Category
+		}
+		value, err := s.emitTreeChildrenValue(dispatchType, dispatchValue, itemType, indexValue, name+".root.member")
 		if err != nil {
 			return nil, err
 		}

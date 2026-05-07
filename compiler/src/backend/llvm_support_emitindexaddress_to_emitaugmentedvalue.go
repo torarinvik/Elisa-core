@@ -289,6 +289,14 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 				}
 				return s.emitTreeCategoryUnionRootHandle(value, actualTree, tagValue, "tree.root.coerce")
 			}
+		case *semantic.TreeBlockType:
+			if actualTree != nil && actualTree.Family == expectedNode.Family {
+				return value, nil
+			}
+		case *semantic.TreeStructType:
+			if actualTree != nil && actualTree.Family == expectedNode.Family {
+				return value, nil
+			}
 		}
 	}
 	actualLLVM, err := s.g.lowerType(actual)
