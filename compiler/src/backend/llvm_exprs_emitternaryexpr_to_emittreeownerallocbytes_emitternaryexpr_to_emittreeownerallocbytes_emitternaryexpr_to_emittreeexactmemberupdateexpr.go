@@ -344,9 +344,6 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 		if err := s.emitTreeCategoryUnionTableSetCount(slot.tablePtr, viewType.Category, slot.neededCount, "tree.update"); err != nil {
 			return nil, nil, err
 		}
-		if err := s.emitTreeCategoryUnionSetActiveStore(family, storeValue); err != nil {
-			return nil, nil, err
-		}
 		keyValue, err := s.buildTreeHandleKey(tag, slot.rowIndex, "tree.update")
 		if err != nil {
 			return nil, nil, err

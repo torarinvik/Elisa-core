@@ -166,6 +166,9 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		if tt == nil || tt.Family == nil {
 			return nil, fmt.Errorf("missing tree node metadata")
 		}
+		if treeFamilyLayoutPlan(tt.Family).isCategoryUnion() {
+			return g.ensureTreeDenseHandleCarrierType()
+		}
 		return g.ensureTreeHandleCarrierType(tt.Family)
 	case *semantic.TreeType:
 		return nil, fmt.Errorf("tree family %s is not a runtime value type", tt.Name)

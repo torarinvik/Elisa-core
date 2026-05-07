@@ -83,6 +83,9 @@ def make_int(value: i64) -> Lua.Expr:
 	if strings.Contains(output, "%Lua__TreeHandle = type") {
 		t.Fatalf("expected category_union constructor to lower handles as dense i32 rows, got legacy handle carrier:\n%s", output)
 	}
+	if strings.Contains(output, "active_tree_store") {
+		t.Fatalf("expected category_union constructor to avoid hidden active store globals, got:\n%s", output)
+	}
 }
 
 func TestGenerateLLVMIRLowersCategoryUnionTreeFieldReads(t *testing.T) {
@@ -96,17 +99,20 @@ tree Lua:
 		Int(value: i64)
 
 def score_int(view_node: Lua.Expr.Int) -> i64:
-	return view_node.value + view_node.span
+	in perm:
+		return view_node.value + view_node.span
 
 def score(node: Lua.Expr) -> i64:
-	if node is Lua.Expr.Int:
-		return node.value + node.span
-	return node.span
+	in perm:
+		if node is Lua.Expr.Int:
+			return node.value + node.span
+		return node.span
 
 def payload_score(node: Lua.Expr) -> i64:
-	if node is Lua.Expr.Int(value):
-		return value
-	return 0
+	in perm:
+		if node is Lua.Expr.Int(value):
+			return value
+		return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_field_read.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -162,10 +168,11 @@ def build_store() -> void:
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 	for _, check := range []string{
+		"%Lua__RootUnionTable = type { i64, i64, ptr, ptr }",
 		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
 		"%Lua_Expr_Atom__TreeUnionTable = type { i64, i64, ptr, ptr }",
 		"%Lua_Stmt__TreeUnionTable = type { i64, i64, ptr, ptr }",
-		"%Lua__TreeStoreState = type { %Lua_Expr__TreeUnionTable, %Lua_Expr_Atom__TreeUnionTable, %Lua_Stmt__TreeUnionTable }",
+		"%Lua__TreeStoreState = type { %Lua__RootUnionTable, %Lua_Expr__TreeUnionTable, %Lua_Expr_Atom__TreeUnionTable, %Lua_Stmt__TreeUnionTable }",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected category_union type shell to contain %q, got:\n%s", check, output)
@@ -184,10 +191,11 @@ func TestGenerateLLVMIRLowersTreeChildrenLoops(t *testing.T) {
 		Call(callee: Expr, args: darray[Expr], link source_expr: Expr)
 
 def count_nodes(node: Lua.Expr) -> i64:
-	total: mutable i64 = 1
-	for child in children(node):
-		total <- total + count_nodes(child)
-	return total
+	in perm:
+		total: mutable i64 = 1
+		for child in children(node):
+			total <- total + child.kind.i64()
+		return total
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_children.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -213,10 +221,11 @@ tree Lua:
 		Binary(left: Expr, right: Expr)
 
 def count_nodes(node: Lua.Expr) -> i64:
-	total: mutable i64 = 1
-	for child in children(node):
-		total <- total + count_nodes(child)
-	return total
+	in perm:
+		total: mutable i64 = 1
+		for child in children(node):
+			total <- total + child.kind.i64()
+		return total
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_children.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -281,23 +290,27 @@ tree Lua:
 		span: i64
 	@role(stmt)
 	node Stmt:
-		IfStmt(condition: Lua.Expr, body: Lua.Block)
+		IfStmt(condition: Lua.Expr, fallback: Lua.Expr)
 	@role(expr)
 	node Expr:
 		Name(name_index: u32)
-	block Block:
-		stmts: darray[Lua.Stmt]
 
 def count_children(stmt: Lua.Stmt) -> i64:
 	total: mutable i64 = 0
-	for child in children(stmt as Lua.Node):
-		total <- total + child.kind.i64()
+	in perm:
+		for child in children(stmt as Lua.Node):
+			total <- total + child.kind.i64()
 	return total
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_children_root.elisa", src)
-	_, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
-	if err == nil || !strings.Contains(err.Error(), "cannot be widened to root Lua.Node without root handle storage") {
-		t.Fatalf("expected category_union root children lowering to diagnose missing root handle storage, got: %v", err)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"%Lua__RootUnionTable", "tree.root.coerce.root.table", "tree.children.value.phi"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union root children lowering to contain %q, got:\n%s", check, output)
+		}
 	}
 }
 
@@ -314,12 +327,14 @@ tree Lua:
 		Binary(left: Expr, right: Expr)
 
 def atom_id(atom: Lua.Expr.Atom) -> i64:
-	if atom is Lua.Expr.Atom.Name:
-		return atom.id + atom.span
-	return atom.span
+	in perm:
+		if atom is Lua.Expr.Atom.Name:
+			return atom.id + atom.span
+		return atom.span
 
 def name_id(name: Lua.Expr.Atom.Name) -> i64:
-	return name.id + name.span
+	in perm:
+		return name.id + name.span
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_nested_category_union_fields.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)

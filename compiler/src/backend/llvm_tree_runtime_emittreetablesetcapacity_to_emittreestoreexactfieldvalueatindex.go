@@ -48,6 +48,12 @@ type treeCategoryUnionAppendSlot struct {
 	neededCount C.LLVMValueRef
 }
 
+type treeRootUnionAppendSlot struct {
+	tablePtr    C.LLVMValueRef
+	rowIndex    C.LLVMValueRef
+	neededCount C.LLVMValueRef
+}
+
 func (s *functionState) emitTreeExactAppendSlot(arenaValue C.LLVMValueRef, stateValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, name string) (treeExactAppendSlot, error) {
 	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
 	if err != nil {
@@ -86,6 +92,26 @@ func (s *functionState) emitTreeCategoryUnionAppendSlot(arenaValue C.LLVMValueRe
 		return treeCategoryUnionAppendSlot{}, err
 	}
 	return treeCategoryUnionAppendSlot{tablePtr: tablePtr, rowIndex: rowIndex, neededCount: neededCount}, nil
+}
+
+func (s *functionState) emitTreeRootUnionAppendSlot(arenaValue C.LLVMValueRef, stateValue C.LLVMValueRef, family *semantic.TreeType, name string) (treeRootUnionAppendSlot, error) {
+	tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, name)
+	if err != nil {
+		return treeRootUnionAppendSlot{}, err
+	}
+	rowIndex, err := s.emitTreeRootUnionTableCountValue(tablePtr, family, name)
+	if err != nil {
+		return treeRootUnionAppendSlot{}, err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return treeRootUnionAppendSlot{}, err
+	}
+	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree(name+".needed"))
+	if err := s.emitTreeEnsureRootUnionTableCapacity(arenaValue, tablePtr, family, neededCount, name); err != nil {
+		return treeRootUnionAppendSlot{}, err
+	}
+	return treeRootUnionAppendSlot{tablePtr: tablePtr, rowIndex: rowIndex, neededCount: neededCount}, nil
 }
 
 func (s *functionState) emitTreeCategoryUnionTableSetCapacity(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, capacityValue C.LLVMValueRef, name string) error {
@@ -164,6 +190,90 @@ func (s *functionState) emitTreeCategoryUnionTableSetKindsPointer(tablePtr C.LLV
 
 func (s *functionState) emitTreeCategoryUnionTableSetPayloadsPointer(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, value C.LLVMValueRef, name string) error {
 	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return err
+	}
+	ptr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 3, cStringFree(name+".payloads.ptr"))
+	C.LLVMBuildStore(s.builder, value, ptr)
+	return nil
+}
+
+func (s *functionState) emitTreeRootUnionTableSetCapacity(tablePtr C.LLVMValueRef, family *semantic.TreeType, capacityValue C.LLVMValueRef, name string) error {
+	tableType, err := s.g.ensureTreeRootUnionTableType(family)
+	if err != nil {
+		return err
+	}
+	capacityPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 1, cStringFree(name+".capacity.ptr"))
+	C.LLVMBuildStore(s.builder, capacityValue, capacityPtr)
+	return nil
+}
+
+func (s *functionState) emitTreeRootUnionTableSetCount(tablePtr C.LLVMValueRef, family *semantic.TreeType, countValue C.LLVMValueRef, name string) error {
+	tableType, err := s.g.ensureTreeRootUnionTableType(family)
+	if err != nil {
+		return err
+	}
+	countPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 0, cStringFree(name+".count.ptr"))
+	C.LLVMBuildStore(s.builder, countValue, countPtr)
+	return nil
+}
+
+func (s *functionState) emitTreeRootUnionTableCountValue(tablePtr C.LLVMValueRef, family *semantic.TreeType, name string) (C.LLVMValueRef, error) {
+	tableType, err := s.g.ensureTreeRootUnionTableType(family)
+	if err != nil {
+		return nil, err
+	}
+	countPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 0, cStringFree(name+".count.ptr"))
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildLoad2(s.builder, usizeType, countPtr, cStringFree(name+".count")), nil
+}
+
+func (s *functionState) emitTreeRootUnionTableCapacityValue(tablePtr C.LLVMValueRef, family *semantic.TreeType, name string) (C.LLVMValueRef, error) {
+	tableType, err := s.g.ensureTreeRootUnionTableType(family)
+	if err != nil {
+		return nil, err
+	}
+	capacityPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 1, cStringFree(name+".capacity.ptr"))
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildLoad2(s.builder, usizeType, capacityPtr, cStringFree(name+".capacity")), nil
+}
+
+func (s *functionState) emitTreeRootUnionKindsPointerValue(tablePtr C.LLVMValueRef, family *semantic.TreeType, name string) (C.LLVMValueRef, error) {
+	tableType, err := s.g.ensureTreeRootUnionTableType(family)
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 2, cStringFree(name+".kinds.ptr"))
+	return C.LLVMBuildLoad2(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), ptr, cStringFree(name+".kinds")), nil
+}
+
+func (s *functionState) emitTreeRootUnionPayloadsPointerValue(tablePtr C.LLVMValueRef, family *semantic.TreeType, name string) (C.LLVMValueRef, error) {
+	tableType, err := s.g.ensureTreeRootUnionTableType(family)
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 3, cStringFree(name+".payloads.ptr"))
+	return C.LLVMBuildLoad2(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), ptr, cStringFree(name+".payloads")), nil
+}
+
+func (s *functionState) emitTreeRootUnionTableSetKindsPointer(tablePtr C.LLVMValueRef, family *semantic.TreeType, value C.LLVMValueRef, name string) error {
+	tableType, err := s.g.ensureTreeRootUnionTableType(family)
+	if err != nil {
+		return err
+	}
+	ptr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 2, cStringFree(name+".kinds.ptr"))
+	C.LLVMBuildStore(s.builder, value, ptr)
+	return nil
+}
+
+func (s *functionState) emitTreeRootUnionTableSetPayloadsPointer(tablePtr C.LLVMValueRef, family *semantic.TreeType, value C.LLVMValueRef, name string) error {
+	tableType, err := s.g.ensureTreeRootUnionTableType(family)
 	if err != nil {
 		return err
 	}
@@ -343,6 +453,66 @@ func (s *functionState) emitTreeEnsureCategoryUnionTableCapacity(arenaRef C.LLVM
 	return nil
 }
 
+func (s *functionState) emitTreeEnsureRootUnionTableCapacity(arenaRef C.LLVMValueRef, tablePtr C.LLVMValueRef, family *semantic.TreeType, neededCount C.LLVMValueRef, name string) error {
+	currentCapacity, err := s.emitTreeRootUnionTableCapacityValue(tablePtr, family, name)
+	if err != nil {
+		return err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return err
+	}
+	kindType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return err
+	}
+	payloadType, err := s.g.ensureTreeRootUnionPayloadType(family)
+	if err != nil {
+		return err
+	}
+	kindSizeBytes, err := s.g.abiSizeOfLLVMType(kindType)
+	if err != nil {
+		return err
+	}
+	payloadSizeBytes, err := s.g.abiSizeOfLLVMType(payloadType)
+	if err != nil {
+		return err
+	}
+	needsGrow := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), currentCapacity, neededCount, cStringFree(name+".grow"))
+	growBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".grow.bb"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".grow.cont"))
+	C.LLVMBuildCondBr(s.builder, needsGrow, growBB, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, growBB)
+	zero := C.LLVMConstInt(usizeType, 0, 0)
+	initCap := C.LLVMConstInt(usizeType, C.ulonglong(treeInitialRowCapacity(kindSizeBytes+payloadSizeBytes)), 0)
+	doubled := C.LLVMBuildMul(s.builder, currentCapacity, C.LLVMConstInt(usizeType, 2, 0), cStringFree(name+".capacity.double"))
+	nonZeroCap := C.LLVMBuildSelect(s.builder,
+		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentCapacity, zero, cStringFree(name+".capacity.zero")),
+		initCap,
+		doubled,
+		cStringFree(name+".capacity.base"),
+	)
+	newCapacity := C.LLVMBuildSelect(s.builder,
+		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), nonZeroCap, neededCount, cStringFree(name+".capacity.lt")),
+		neededCount,
+		nonZeroCap,
+		cStringFree(name+".capacity.new"),
+	)
+	if err := s.emitTreeGrowRootUnionPointer(arenaRef, tablePtr, family, currentCapacity, newCapacity, kindSizeBytes, true, name+".kinds"); err != nil {
+		return err
+	}
+	if err := s.emitTreeGrowRootUnionPointer(arenaRef, tablePtr, family, currentCapacity, newCapacity, payloadSizeBytes, false, name+".payloads"); err != nil {
+		return err
+	}
+	if err := s.emitTreeRootUnionTableSetCapacity(tablePtr, family, newCapacity, name); err != nil {
+		return err
+	}
+	C.LLVMBuildBr(s.builder, contBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	return nil
+}
+
 func (s *functionState) emitTreeGrowCategoryUnionPointer(arenaRef C.LLVMValueRef, tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, currentCapacity C.LLVMValueRef, newCapacity C.LLVMValueRef, rowSizeBytes uint64, kinds bool, name string) error {
 	if rowSizeBytes == 0 {
 		return nil
@@ -411,6 +581,76 @@ func (s *functionState) emitTreeGrowCategoryUnionPointer(arenaRef C.LLVMValueRef
 		return s.emitTreeCategoryUnionTableSetKindsPointer(tablePtr, category, newPtr, name)
 	}
 	return s.emitTreeCategoryUnionTableSetPayloadsPointer(tablePtr, category, newPtr, name)
+}
+
+func (s *functionState) emitTreeGrowRootUnionPointer(arenaRef C.LLVMValueRef, tablePtr C.LLVMValueRef, family *semantic.TreeType, currentCapacity C.LLVMValueRef, newCapacity C.LLVMValueRef, rowSizeBytes uint64, kinds bool, name string) error {
+	if rowSizeBytes == 0 {
+		return nil
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return err
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	})
+	reallocType := s.g.cachedRuntimeHelperType("arena_realloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_realloc", Params: []semantic.Type{arenaRefType, voidRefType, s.g.result.NamedTypes["usize"], s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	})
+	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
+	if err != nil {
+		return err
+	}
+	reallocCallee, err := s.g.ensureFunctionDeclared("arena_realloc", reallocType)
+	if err != nil {
+		return err
+	}
+	allocLLVMType, err := s.g.lowerFunctionType(allocType)
+	if err != nil {
+		return err
+	}
+	reallocLLVMType, err := s.g.lowerFunctionType(reallocType)
+	if err != nil {
+		return err
+	}
+	rowSizeValue := C.LLVMConstInt(usizeType, C.ulonglong(rowSizeBytes), 0)
+	oldBytes := C.LLVMBuildMul(s.builder, currentCapacity, rowSizeValue, cStringFree(name+".old.bytes"))
+	newBytes := C.LLVMBuildMul(s.builder, newCapacity, rowSizeValue, cStringFree(name+".new.bytes"))
+	var oldPtr C.LLVMValueRef
+	if kinds {
+		oldPtr, err = s.emitTreeRootUnionKindsPointerValue(tablePtr, family, name)
+	} else {
+		oldPtr, err = s.emitTreeRootUnionPayloadsPointerValue(tablePtr, family, name)
+	}
+	if err != nil {
+		return err
+	}
+	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), oldPtr, C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0)), cStringFree(name+".null"))
+	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".alloc"))
+	reallocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".realloc"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".cont"))
+	C.LLVMBuildCondBr(s.builder, isNull, allocBB, reallocBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
+	allocated := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaRef, newBytes}, name+".alloc.call")
+	allocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, reallocBB)
+	reallocated := s.buildCall(reallocLLVMType, reallocCallee, []C.LLVMValueRef{arenaRef, oldPtr, oldBytes, newBytes}, name+".realloc.call")
+	reallocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	newPtr := C.LLVMBuildPhi(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), cStringFree(name+".phi"))
+	C.LLVMAddIncoming(newPtr, llvmValueSlicePtr([]C.LLVMValueRef{allocated, reallocated}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{allocEnd, reallocEnd}), 2)
+	if kinds {
+		return s.emitTreeRootUnionTableSetKindsPointer(tablePtr, family, newPtr, name)
+	}
+	return s.emitTreeRootUnionTableSetPayloadsPointer(tablePtr, family, newPtr, name)
 }
 func (s *functionState) currentBlock() C.LLVMBasicBlockRef {
 	if s == nil || s.builder == nil {
@@ -726,6 +966,33 @@ func (s *functionState) emitTreeCategoryUnionKindValueAtIndex(tablePtr C.LLVMVal
 	return C.LLVMBuildLoad2(s.builder, kindType, kindPtr, cStringFree(name+".kind")), nil
 }
 
+func (s *functionState) emitTreeRootUnionKindAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, rowIndex C.LLVMValueRef, tagValue C.LLVMValueRef, name string) error {
+	kindsPtr, err := s.emitTreeRootUnionKindsPointerValue(tablePtr, family, name)
+	if err != nil {
+		return err
+	}
+	kindType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return err
+	}
+	kindPtr := C.LLVMBuildGEP2(s.builder, kindType, kindsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".kind.ptr"))
+	C.LLVMBuildStore(s.builder, tagValue, kindPtr)
+	return nil
+}
+
+func (s *functionState) emitTreeRootUnionKindValueAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	kindsPtr, err := s.emitTreeRootUnionKindsPointerValue(tablePtr, family, name)
+	if err != nil {
+		return nil, err
+	}
+	kindType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	kindPtr := C.LLVMBuildGEP2(s.builder, kindType, kindsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".kind.ptr"))
+	return C.LLVMBuildLoad2(s.builder, kindType, kindPtr, cStringFree(name+".kind")), nil
+}
+
 func (s *functionState) emitTreeCategoryUnionPayloadAtIndex(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, variant *semantic.EnumVariant, rowIndex C.LLVMValueRef, payloadType C.LLVMTypeRef, payloadValue C.LLVMValueRef, name string) error {
 	payloadsPtr, err := s.emitTreeCategoryUnionPayloadsPointerValue(tablePtr, category, name)
 	if err != nil {
@@ -764,4 +1031,38 @@ func (s *functionState) emitTreeCategoryUnionPayloadAtIndex(tablePtr C.LLVMValue
 	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
 	_ = variant
 	return nil
+}
+
+func (s *functionState) emitTreeRootUnionPayloadAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, rowIndex C.LLVMValueRef, categoryIndex uint32, categoryHandle C.LLVMValueRef, name string) error {
+	payloadsPtr, err := s.emitTreeRootUnionPayloadsPointerValue(tablePtr, family, name)
+	if err != nil {
+		return err
+	}
+	payloadType, err := s.g.ensureTreeRootUnionPayloadType(family)
+	if err != nil {
+		return err
+	}
+	u32Type, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return err
+	}
+	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.ptr"))
+	payloadValue := C.LLVMGetUndef(payloadType)
+	payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, C.LLVMConstInt(u32Type, C.ulonglong(categoryIndex), 0), 0, cStringFree(name+".payload.category"))
+	payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, categoryHandle, 1, cStringFree(name+".payload.handle"))
+	C.LLVMBuildStore(s.builder, payloadValue, payloadRowPtr)
+	return nil
+}
+
+func (s *functionState) emitTreeRootUnionPayloadValueAtIndex(tablePtr C.LLVMValueRef, family *semantic.TreeType, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, C.LLVMTypeRef, error) {
+	payloadsPtr, err := s.emitTreeRootUnionPayloadsPointerValue(tablePtr, family, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadType, err := s.g.ensureTreeRootUnionPayloadType(family)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.ptr"))
+	return C.LLVMBuildLoad2(s.builder, payloadType, payloadRowPtr, cStringFree(name+".payload")), payloadType, nil
 }

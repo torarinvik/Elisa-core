@@ -499,11 +499,6 @@ func (s *functionState) coerceTreeChildrenItemValue(value C.LLVMValueRef, actual
 	if actualType == nil || itemType == nil {
 		return value, nil
 	}
-	if actualCategory, _, ok := resolveMatchableTreeCategoryTypeBackend(actualType); ok && actualCategory != nil && treeCategoryLayoutPlan(actualCategory).isCategoryUnion() {
-		if itemNode, ok := semantic.StripAggregateStateType(itemType).(*semantic.TreeNodeType); ok && itemNode != nil && itemNode.Family == actualCategory.Family {
-			return nil, fmt.Errorf("category_union child %s cannot be widened to root %s without root handle storage", actualType.String(), itemType.String())
-		}
-	}
 	if !semantic.AssignableTo(itemType, actualType) {
 		return nil, fmt.Errorf("tree structural child item type mismatch: expected %s, got %s", itemType.String(), actualType.String())
 	}

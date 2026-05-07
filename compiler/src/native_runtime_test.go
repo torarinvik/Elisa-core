@@ -111,27 +111,33 @@ tree Lua:
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)
 
-def eval(node: Lua.Expr) -> i64:
-	if node is Lua.Expr.Int:
-		return node.value + node.span
-	if node is Lua.Expr.Binary:
-		return eval(node.left) + eval(node.right) + node.span
-	return 0
+def eval(store: Lua.Store[Local], node: Lua.Expr) -> i64:
+	in store:
+		if node is Lua.Expr.Int:
+			return node.value + node.span
+		if node is Lua.Expr.Binary:
+			return eval(store, node.left) + eval(store, node.right) + node.span
+		return 0
 
-def flip(owner: mutable Arena&, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
-	in owner:
+def flip(store: Lua.Store[Local], node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+	in store:
 		return node{left = right, right = left}
 
 @test
 def category_union_tree_roundtrip_test() -> void:
 	can Abort.Panic, Memory.Allocate:
 		region scratch(8192)
-		owner: mutable Arena& = scratch.ref[mutable Arena&]
-		in owner:
+		store = Lua.Store(scratch)
+		in store:
 			left: Lua.Expr = Lua.Expr.Int(span: 1, value: 10)
 			right: Lua.Expr = Lua.Expr.Int(span: 2, value: 20)
 			root: Lua.Expr = Lua.Expr.Binary(span: 3, left: left, right: right)
-			assert_eq(eval(root), 36)
+			assert_eq(eval(store, root), 36)
+			if root is Lua.Expr.Binary:
+				flipped: Lua.Expr = flip(store, root, left, right)
+				assert_eq(eval(store, flipped), 36)
+				copied: Lua.Expr = clone[Lua.Expr](flipped)
+				assert_eq(eval(store, copied), 36)
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write category_union native fixture: %v", err)
@@ -263,7 +269,6 @@ attribute Sparse.Expr.checksum -> i64:
 	Sparse.Expr.Binary(expr, left, right):
 		return left.checksum + right.checksum + 1
 
-@layout(category_union)
 tree Dense:
 	@role(expr)
 	node Expr:

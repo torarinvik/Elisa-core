@@ -256,6 +256,25 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			if !ok || kindType == nil {
 				return nil, nil, true, fmt.Errorf("%s has no kind", tt.String())
 			}
+			if tt.Family != nil && treeFamilyLayoutPlan(tt.Family).isCategoryUnion() {
+				stateValue, err := s.emitTreeCategoryUnionContextStateValue(tt.Family, "tree.field.kind")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, tt.Family, "tree.field.kind")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field.kind")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				value, err := s.emitTreeRootUnionKindValueAtIndex(tablePtr, tt.Family, rowIndex, "tree.field.kind")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				return value, kindType, true, nil
+			}
 			value, err := s.emitTreeHandleTagValue(handleValue, "tree.field.kind")
 			if err != nil {
 				return nil, nil, true, err

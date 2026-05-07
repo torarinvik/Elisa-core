@@ -557,16 +557,6 @@ func (s *functionState) emitTreeCategoryUnionConstructorValue(treeType *semantic
 	if treeType == nil || treeType.Family == nil || variant == nil {
 		return nil, nil, fmt.Errorf("missing category-union tree constructor metadata")
 	}
-	storeLLVMType, err := s.g.lowerTreeStoreType(treeType.Family.StoreType)
-	if err != nil {
-		return nil, nil, err
-	}
-	activeStore := C.LLVMGetUndef(storeLLVMType)
-	activeStore = C.LLVMBuildInsertValue(s.builder, activeStore, arenaValue, 0, cStringFree("tree.category.active.arena"))
-	activeStore = C.LLVMBuildInsertValue(s.builder, activeStore, stateValue, 1, cStringFree("tree.category.active.state"))
-	if err := s.emitTreeCategoryUnionSetActiveStore(treeType.Family, activeStore); err != nil {
-		return nil, nil, err
-	}
 	slot, err := s.emitTreeCategoryUnionAppendSlot(arenaValue, stateValue, treeType.Family, treeType, "tree.category")
 	if err != nil {
 		return nil, nil, err

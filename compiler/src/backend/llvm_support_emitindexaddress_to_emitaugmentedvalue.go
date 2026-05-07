@@ -270,6 +270,27 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 			return s.buildPackedVariantViewValue(expectedView, value, &store)
 		}
 	}
+	if expectedNode, ok := semantic.StripAggregateStateType(expected).(*semantic.TreeNodeType); ok && expectedNode != nil && expectedNode.Family != nil && treeFamilyLayoutPlan(expectedNode.Family).isCategoryUnion() {
+		switch actualTree := semantic.StripAggregateStateType(actual).(type) {
+		case *semantic.TreeVariantViewType:
+			if actualTree != nil && actualTree.Category != nil && actualTree.Category.Family == expectedNode.Family {
+				tagType, err := s.g.lowerBuiltin("u32")
+				if err != nil {
+					return nil, err
+				}
+				tagValue := C.LLVMConstInt(tagType, C.ulonglong(actualTree.Variant.Tag), 0)
+				return s.emitTreeCategoryUnionRootHandle(value, actualTree.Category, tagValue, "tree.root.coerce")
+			}
+		case *semantic.TreeCategoryType:
+			if actualTree != nil && actualTree.Family == expectedNode.Family {
+				tagValue, err := s.extractTreeCategoryTagValue(value, actualTree)
+				if err != nil {
+					return nil, err
+				}
+				return s.emitTreeCategoryUnionRootHandle(value, actualTree, tagValue, "tree.root.coerce")
+			}
+		}
+	}
 	actualLLVM, err := s.g.lowerType(actual)
 	if err != nil {
 		return nil, err
