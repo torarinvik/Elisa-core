@@ -133,13 +133,9 @@ func treeExactMemberLayout(memberType semantic.Type) semantic.TreeLayout {
 			return tt.Category.Layout
 		}
 	case *semantic.TreeBlockType:
-		if tt != nil && tt.Family != nil {
-			return tt.Family.Layout
-		}
+		return semantic.TreeLayoutPerVariantRows
 	case *semantic.TreeStructType:
-		if tt != nil && tt.Family != nil {
-			return tt.Family.Layout
-		}
+		return semantic.TreeLayoutPerVariantRows
 	}
 	return semantic.DefaultTreeLayout()
 }

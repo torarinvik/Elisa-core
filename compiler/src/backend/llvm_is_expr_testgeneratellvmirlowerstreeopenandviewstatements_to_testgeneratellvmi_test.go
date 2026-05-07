@@ -271,6 +271,89 @@ def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lu
 	}
 }
 
+func TestGenerateLLVMIRLowersCategoryUnionMixedTreeChildrenToRootLoops(t *testing.T) {
+	src := `@layout(category_union)
+tree Lua:
+	common:
+		span: i64
+	@role(stmt)
+	node Stmt:
+		IfStmt(condition: Lua.Expr, body: Lua.Block)
+	@role(expr)
+	node Expr:
+		Name(name_index: u32)
+	block Block:
+		stmts: darray[Lua.Stmt]
+
+def count_children(stmt: Lua.Stmt) -> i64:
+	total: mutable i64 = 0
+	for child in children(stmt as Lua.Node):
+		total <- total + child.kind.i64()
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_children_root.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"define i64 @count_children(%Lua__TreeHandle ",
+		"TreeChildren",
+		"tree.children.value.phi",
+		"%Lua_Stmt__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union mixed tree children lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "%Lua_Stmt_IfStmt__TreeTable") || strings.Contains(output, "%Lua_Expr_Name__TreeTable") {
+		t.Fatalf("expected category_union mixed tree children lowering to avoid exact per-variant rows, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersNestedCategoryUnionTreeFields(t *testing.T) {
+	src := `@layout(category_union)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		node Atom:
+			Name(id: i64)
+			String(id: i64)
+		Binary(left: Expr, right: Expr)
+
+def atom_id(atom: Lua.Expr.Atom) -> i64:
+	if atom is Lua.Expr.Atom.Name:
+		return atom.id + atom.span
+	return atom.span
+
+def name_id(name: Lua.Expr.Atom.Name) -> i64:
+	return name.id + name.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_nested_category_union_fields.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"%Lua_Expr_Atom__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"define i64 @atom_id(%Lua__TreeHandle ",
+		"define i64 @name_id(%Lua__TreeHandle ",
+		"tree.field.payload.row.ptr",
+		"tree.field.payload.elem.ptr",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected nested category_union field lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "%Lua_Expr_Atom_Name__TreeTable") {
+		t.Fatalf("expected nested category_union fields to avoid exact per-variant rows, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersEnumerateTupleLoops(t *testing.T) {
 	src := `def sum_pairs(items: darray[usize]) -> usize:
 	total: mutable usize = 0
