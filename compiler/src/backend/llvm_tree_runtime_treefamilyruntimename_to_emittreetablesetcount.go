@@ -744,6 +744,11 @@ type treeExactTableAccess struct {
 	tablePtr C.LLVMValueRef
 }
 
+type treeCategoryUnionTableAccess struct {
+	rowIndex C.LLVMValueRef
+	tablePtr C.LLVMValueRef
+}
+
 type treeHandleAccess struct {
 	stateValue C.LLVMValueRef
 	rowIndex   C.LLVMValueRef
@@ -768,6 +773,17 @@ func (s *functionState) emitTreeExactTableAccessFromHandle(handleValue C.LLVMVal
 		return treeExactTableAccess{}, err
 	}
 	return treeExactTableAccess{rowIndex: handleAccess.rowIndex, tablePtr: tablePtr}, nil
+}
+func (s *functionState) emitTreeCategoryUnionTableAccessFromHandle(handleValue C.LLVMValueRef, family *semantic.TreeType, category *semantic.TreeCategoryType, name string) (treeCategoryUnionTableAccess, error) {
+	handleAccess, err := s.emitTreeHandleAccess(handleValue, name)
+	if err != nil {
+		return treeCategoryUnionTableAccess{}, err
+	}
+	tablePtr, err := s.emitTreeCategoryUnionTablePtr(handleAccess.stateValue, family, category, name)
+	if err != nil {
+		return treeCategoryUnionTableAccess{}, err
+	}
+	return treeCategoryUnionTableAccess{rowIndex: handleAccess.rowIndex, tablePtr: tablePtr}, nil
 }
 func (s *functionState) emitTreeTableCountValue(tablePtr C.LLVMValueRef, memberType semantic.Type, name string) (C.LLVMValueRef, error) {
 	tableType, err := s.g.ensureTreeExactTableType(memberType)

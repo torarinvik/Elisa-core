@@ -308,11 +308,7 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 		return nil, nil, err
 	}
 	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
-		sourceAccess, err := s.emitTreeHandleAccess(handleValue, "tree.update.src")
-		if err != nil {
-			return nil, nil, err
-		}
-		sourceTablePtr, err := s.emitTreeCategoryUnionTablePtr(sourceAccess.stateValue, family, viewType.Category, "tree.update.src")
+		sourceAccess, err := s.emitTreeCategoryUnionTableAccessFromHandle(handleValue, family, viewType.Category, "tree.update.src")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -342,7 +338,7 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 			patchNames = append(patchNames, fieldDecl.Name)
 			patchValues = append(patchValues, fieldValue)
 		}
-		if err := s.emitTreeCopyCategoryUnionPayloadAndPatch(sourceTablePtr, slot.tablePtr, viewType.Category, viewType.Variant, sourceAccess.rowIndex, slot.rowIndex, patchNames, patchValues, "tree.update"); err != nil {
+		if err := s.emitTreeCopyCategoryUnionPayloadAndPatch(sourceAccess.tablePtr, slot.tablePtr, viewType.Category, viewType.Variant, sourceAccess.rowIndex, slot.rowIndex, patchNames, patchValues, "tree.update"); err != nil {
 			return nil, nil, err
 		}
 		if err := s.emitTreeCategoryUnionTableSetCount(slot.tablePtr, viewType.Category, slot.neededCount, "tree.update"); err != nil {

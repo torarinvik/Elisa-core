@@ -105,11 +105,7 @@ func (s *functionState) extractTreeVariantPayloadValues(nodeValue C.LLVMValueRef
 	}
 	memberType := categoryType.VariantViewType(variant)
 	if categoryType.Layout == semantic.TreeLayoutCategoryUnion {
-		access, err := s.emitTreeHandleAccess(nodeValue, "tree.payload")
-		if err != nil {
-			return nil, err
-		}
-		tablePtr, err := s.emitTreeCategoryUnionTablePtr(access.stateValue, categoryType.Family, categoryType, "tree.payload")
+		access, err := s.emitTreeCategoryUnionTableAccessFromHandle(nodeValue, categoryType.Family, categoryType, "tree.payload")
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +115,7 @@ func (s *functionState) extractTreeVariantPayloadValues(nodeValue C.LLVMValueRef
 			if fieldName == "" {
 				fieldName = fmt.Sprintf("payload%d", i)
 			}
-			value, _, err := s.emitTreeCategoryUnionFieldValueAtIndex(tablePtr, categoryType, variant, fieldName, access.rowIndex, "tree.payload.field")
+			value, _, err := s.emitTreeCategoryUnionFieldValueAtIndex(access.tablePtr, categoryType, variant, fieldName, access.rowIndex, "tree.payload.field")
 			if err != nil {
 				return nil, err
 			}

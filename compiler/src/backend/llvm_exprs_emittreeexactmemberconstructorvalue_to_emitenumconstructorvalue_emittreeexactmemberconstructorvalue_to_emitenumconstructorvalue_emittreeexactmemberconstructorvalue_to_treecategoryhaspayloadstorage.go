@@ -235,15 +235,11 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				}
 			}
 			if tt.Category != nil && tt.Category.Layout == semantic.TreeLayoutCategoryUnion {
-				access, err := s.emitTreeHandleAccess(handleValue, "tree.field")
+				access, err := s.emitTreeCategoryUnionTableAccessFromHandle(handleValue, tt.Category.Family, tt.Category, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}
-				tablePtr, err := s.emitTreeCategoryUnionTablePtr(access.stateValue, tt.Category.Family, tt.Category, "tree.field")
-				if err != nil {
-					return nil, nil, true, err
-				}
-				surfaceValue, surfaceType, err := s.emitTreeCategoryUnionSurfaceFieldValue(tablePtr, tt.Category, tt.Variant, expr.Field, access.rowIndex, "tree.field")
+				surfaceValue, surfaceType, err := s.emitTreeCategoryUnionSurfaceFieldValue(access.tablePtr, tt.Category, tt.Variant, expr.Field, access.rowIndex, "tree.field")
 				return surfaceValue, surfaceType, true, err
 			}
 			access, err := s.emitTreeExactTableAccessFromHandle(handleValue, tt.Category.Family, tt, "tree.field")
@@ -284,18 +280,13 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			if err != nil {
 				return nil, nil, true, err
 			}
-			var categoryUnionTablePtr C.LLVMValueRef
-			var categoryUnionRowIndex C.LLVMValueRef
+			var categoryUnionAccess treeCategoryUnionTableAccess
 			if tt.Layout == semantic.TreeLayoutCategoryUnion {
-				access, err := s.emitTreeHandleAccess(handleValue, "tree.field")
+				access, err := s.emitTreeCategoryUnionTableAccessFromHandle(handleValue, tt.Family, tt, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}
-				categoryUnionRowIndex = access.rowIndex
-				categoryUnionTablePtr, err = s.emitTreeCategoryUnionTablePtr(access.stateValue, tt.Family, tt, "tree.field")
-				if err != nil {
-					return nil, nil, true, err
-				}
+				categoryUnionAccess = access
 			}
 			resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.result"))
 			failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.fail"))
@@ -313,7 +304,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
 				var surfaceValue C.LLVMValueRef
 				if tt.Layout == semantic.TreeLayoutCategoryUnion {
-					surfaceValue, _, err = s.emitTreeCategoryUnionSurfaceFieldValue(categoryUnionTablePtr, tt, variant, expr.Field, categoryUnionRowIndex, "tree.field")
+					surfaceValue, _, err = s.emitTreeCategoryUnionSurfaceFieldValue(categoryUnionAccess.tablePtr, tt, variant, expr.Field, categoryUnionAccess.rowIndex, "tree.field")
 					if err != nil {
 						return nil, nil, true, err
 					}
