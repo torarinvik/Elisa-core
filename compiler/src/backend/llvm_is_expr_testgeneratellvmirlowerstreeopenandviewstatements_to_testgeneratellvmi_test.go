@@ -82,6 +82,59 @@ def make_int(value: i64) -> Lua.Expr:
 	}
 }
 
+func TestGenerateLLVMIRLowersCategoryUnionTreeFieldReads(t *testing.T) {
+	src := `@layout(category_union)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Int(value: i64)
+
+def score_int(view_node: Lua.Expr.Int) -> i64:
+	return view_node.value + view_node.span
+
+def score(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Int:
+		return node.value + node.span
+	return node.span
+
+def payload_score(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Int(value):
+		return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_field_read.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"define i64 @score_int(%Lua__TreeHandle ",
+		"define i64 @score(%Lua__TreeHandle ",
+		"define i64 @payload_score(%Lua__TreeHandle ",
+		"tree.field.payload.row.ptr",
+		"tree.field.payload.elem.ptr",
+		"tree.payload.field.payload.elem.ptr",
+		"match.tree.tag",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union field read lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, oldShape := range []string{
+		"%Lua_Expr_Int__TreeTable",
+		"tree.field.rows.ptr",
+		"tree.field.row.ptr",
+	} {
+		if strings.Contains(output, oldShape) {
+			t.Fatalf("expected category_union field reads to avoid exact per-variant row lowering %q, got:\n%s", oldShape, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRPredeclaresCategoryUnionTreeTables(t *testing.T) {
 	src := `@layout(category_union)
 tree Lua:

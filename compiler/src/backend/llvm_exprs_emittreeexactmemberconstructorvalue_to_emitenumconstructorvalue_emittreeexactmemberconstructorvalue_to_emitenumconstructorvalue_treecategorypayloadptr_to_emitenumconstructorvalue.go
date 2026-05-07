@@ -104,6 +104,30 @@ func (s *functionState) extractTreeVariantPayloadValues(nodeValue C.LLVMValueRef
 		return nil, fmt.Errorf("missing tree category metadata")
 	}
 	memberType := categoryType.VariantViewType(variant)
+	if categoryType.Layout == semantic.TreeLayoutCategoryUnion {
+		stateValue := s.emitTreeHandleStateValue(nodeValue, "tree.payload")
+		rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, "tree.payload")
+		if err != nil {
+			return nil, err
+		}
+		tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, categoryType.Family, categoryType, "tree.payload")
+		if err != nil {
+			return nil, err
+		}
+		values := make([]C.LLVMValueRef, 0, len(variant.Payload))
+		for i := range variant.Payload {
+			fieldName := variant.PayloadLabel(i)
+			if fieldName == "" {
+				fieldName = fmt.Sprintf("payload%d", i)
+			}
+			value, _, err := s.emitTreeCategoryUnionFieldValueAtIndex(tablePtr, categoryType, variant, fieldName, rowIndex, "tree.payload.field")
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	}
 	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, categoryType.Family, memberType, "tree.payload")
 	if err != nil {
 		return nil, err

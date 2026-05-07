@@ -519,6 +519,51 @@ func (s *functionState) emitTreeExactFieldValueFromRow(memberType semantic.Type,
 	value := C.LLVMBuildExtractValue(s.builder, rowValue, C.unsigned(fieldIndex), cStringFree(name+".elem"))
 	return value, field.Type, nil
 }
+func (s *functionState) emitTreeCategoryUnionFieldValueAtIndex(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, variant *semantic.EnumVariant, fieldName string, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if category == nil || variant == nil {
+		return nil, nil, fmt.Errorf("missing category-union tree field metadata")
+	}
+	memberType := category.VariantViewType(variant)
+	fieldIndex, field, err := treeExactFieldIndex(memberType, fieldName)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadType, err := s.g.lowerTreeCategoryUnionVariantPayloadType(category, variant)
+	if err != nil {
+		return nil, nil, err
+	}
+	if C.LLVMGetTypeKind(payloadType) == C.LLVMVoidTypeKind {
+		return nil, nil, fmt.Errorf("%s has no lowered payload field %s", treeExactMemberSurfaceName(memberType), fieldName)
+	}
+	payloadsPtr, err := s.emitTreeCategoryUnionPayloadsPointerValue(tablePtr, category, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadRowType, err := s.g.ensureTreeCategoryUnionPayloadType(category)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadRowType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.row.ptr"))
+	elemLLVMType, err := s.g.lowerType(field.Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	elemPtr := C.LLVMBuildStructGEP2(s.builder, payloadType, payloadRowPtr, C.unsigned(fieldIndex), cStringFree(name+".payload.elem.ptr"))
+	value := C.LLVMBuildLoad2(s.builder, elemLLVMType, elemPtr, cStringFree(name+".payload.elem"))
+	return value, field.Type, nil
+}
+func (s *functionState) emitTreeCategoryUnionSurfaceFieldValue(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, variant *semantic.EnumVariant, fieldName string, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	memberType := category.VariantViewType(variant)
+	field, ok := semantic.TreeVariantSurfaceFieldInfo(memberType, fieldName)
+	if !ok {
+		return nil, nil, fmt.Errorf("%s has no field %s", treeExactMemberSurfaceName(memberType), fieldName)
+	}
+	value, rawType, err := s.emitTreeCategoryUnionFieldValueAtIndex(tablePtr, category, variant, fieldName, rowIndex, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.treeFieldSurfaceValue(value, rawType, field.Type, name)
+}
 func (s *functionState) emitTreePatchExactRowFieldValue(memberType semantic.Type, rowValue C.LLVMValueRef, fieldName string, fieldValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	fieldIndex, _, err := treeExactFieldIndex(memberType, fieldName)
 	if err != nil {
