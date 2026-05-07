@@ -4,7 +4,12 @@ package backend
 
 import "testing"
 
-const treeAoSBenchmarkSource = `tree Lua:
+func treeBenchmarkSource(layout string) string {
+	prefix := ""
+	if layout != "" {
+		prefix = "@layout(" + layout + ")\n"
+	}
+	return prefix + `tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -13,8 +18,6 @@ const treeAoSBenchmarkSource = `tree Lua:
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)
 		Call(callee: Expr, args: darray[Expr])
-	block Block:
-		items: darray[Expr]
 
 def make_binary(owner: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
 	in owner:
@@ -47,9 +50,18 @@ def score(node: Lua.Expr) -> i64:
 		Lua.Expr.Call(expr):
 			expr.callee.span + expr.args.len.cast[i64]
 `
+}
 
 func BenchmarkGenerateLLVMIRTreeAoSRows(b *testing.B) {
-	result := parseAndAnalyzeBackendBenchmarkSource(b, "tree_aos_rows_bench.elisa", treeAoSBenchmarkSource)
+	benchmarkGenerateLLVMIRTreeLayout(b, "tree_aos_rows_bench.elisa", treeBenchmarkSource(""))
+}
+
+func BenchmarkGenerateLLVMIRTreeCategoryUnion(b *testing.B) {
+	benchmarkGenerateLLVMIRTreeLayout(b, "tree_category_union_bench.elisa", treeBenchmarkSource("category_union"))
+}
+
+func benchmarkGenerateLLVMIRTreeLayout(b *testing.B, filename string, src string) {
+	result := parseAndAnalyzeBackendBenchmarkSource(b, filename, src)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
