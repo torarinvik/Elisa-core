@@ -387,14 +387,10 @@ func (s *functionState) emitSequenceRewriteExpr(expr *ast.FoldExpr) (C.LLVMValue
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, endBB)
-	resultValue := C.LLVMBuildLoad2(s.builder, s.mustLowerType(resultType), outPtr, cStringFree("sequence.rewrite.result"))
-	return resultValue, resultType, nil
-}
-
-func (s *functionState) mustLowerType(t semantic.Type) C.LLVMTypeRef {
-	llvmType, err := s.g.lowerType(t)
+	resultLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
-	return llvmType
+	resultValue := C.LLVMBuildLoad2(s.builder, resultLLVMType, outPtr, cStringFree("sequence.rewrite.result"))
+	return resultValue, resultType, nil
 }
