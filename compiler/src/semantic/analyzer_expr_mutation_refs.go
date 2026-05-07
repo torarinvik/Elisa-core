@@ -132,6 +132,10 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		if !ok {
 			return invalidType
 		}
+		if _, ok := a.treeSurfaceFieldExprInfo(n); ok {
+			a.errorf(n.Pos(), "cannot assign directly to tree field %q; tree values are handle-lowered and must be changed with tree update syntax", n.Field)
+			return field.Type
+		}
 		if !field.Mutable {
 			a.errorf(n.Pos(), "field %q is immutable", n.Field)
 		}
@@ -418,6 +422,10 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
 		if !ok {
 			return invalidType
+		}
+		if _, ok := a.treeSurfaceFieldExprInfo(n); ok {
+			a.errorf(n.Pos(), "cannot bind tree field %q as a reference; tree values are handle-lowered and fields are value-only", n.Field)
+			return a.refTypeWithAsKind(field.Type, asKind)
 		}
 		if !field.Mutable {
 			a.errorf(n.Pos(), "field %q is immutable", n.Field)

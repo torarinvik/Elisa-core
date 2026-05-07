@@ -494,7 +494,7 @@ func (s *functionState) emitTreeHandleValue(expr ast.Expr, objType semantic.Type
 	return value, baseType, nil
 }
 func (s *functionState) emitTreeCommonFieldAddress(objExpr ast.Expr, objType semantic.Type, fieldName string) (C.LLVMValueRef, semantic.Type, error) {
-	return nil, nil, fmt.Errorf("tree field addresses are not supported for handle-lowered tree values")
+	return nil, nil, fmt.Errorf("tree field address .%s is not supported for handle-lowered tree values", fieldName)
 }
 func treeCategoryCommonFieldInfo(categoryType *semantic.TreeCategoryType, fieldName string) (semantic.Field, int, error) {
 	for i, fieldDecl := range treeCommonFieldDecls(categoryType) {

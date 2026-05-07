@@ -103,7 +103,7 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 	case "packedview":
 		return nil, true, fmt.Errorf("packedview must be written with builtin syntax like packedview[Expr.Lit]")
 	case "treeview":
-		return nil, true, fmt.Errorf("treeview is a builtin alias for refined tree variants; use a bare variant type like Lua.Expr.Binary")
+		return nil, true, fmt.Errorf("treeview is a builtin alias for refined tree variants; use a bare concrete variant type such as Tree.Expr.Binary")
 	case "DArray":
 		return nil, true, legacyBuiltinReplacementError("DArray", "darray")
 	case "DArrayView":
@@ -292,11 +292,11 @@ func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExp
 func (s *functionState) resolveTreeVariantViewSurfaceTypeExpr(expr ast.TypeExpr) (semantic.Type, error) {
 	named, ok := expr.(*ast.NamedType)
 	if !ok {
-		return nil, fmt.Errorf("treeview expects a tree variant like Lua.Expr.Binary")
+		return nil, fmt.Errorf("treeview expects a concrete tree variant type such as Tree.Expr.Binary")
 	}
 	lastDot := strings.LastIndex(named.Name, ".")
 	if lastDot <= 0 || lastDot >= len(named.Name)-1 {
-		return nil, fmt.Errorf("treeview expects a tree variant like Lua.Expr.Binary")
+		return nil, fmt.Errorf("treeview expects a concrete tree variant type such as Tree.Expr.Binary")
 	}
 	categoryName := named.Name[:lastDot]
 	variantName := named.Name[lastDot+1:]
@@ -306,7 +306,7 @@ func (s *functionState) resolveTreeVariantViewSurfaceTypeExpr(expr ast.TypeExpr)
 	}
 	categoryType, ok := base.(*semantic.TreeCategoryType)
 	if !ok || categoryType == nil {
-		return nil, fmt.Errorf("treeview expects a tree variant like Lua.Expr.Binary")
+		return nil, fmt.Errorf("treeview expects a concrete tree variant type such as Tree.Expr.Binary")
 	}
 	variant, ok := categoryType.Variant(variantName)
 	if !ok {

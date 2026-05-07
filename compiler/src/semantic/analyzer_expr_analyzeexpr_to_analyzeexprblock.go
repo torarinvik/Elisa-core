@@ -481,6 +481,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.AddrOfExpr:
 		inner := a.analyzeExpr(n.Operand)
+		if fieldExpr, ok := stripMutationTargetExpr(n.Operand).(*ast.FieldExpr); ok {
+			if _, isTreeField := a.treeSurfaceFieldExprInfo(fieldExpr); isTreeField {
+				a.errorf(n.Pos(), "cannot take address of tree field %q; tree values are handle-lowered and fields are value-only", fieldExpr.Field)
+			}
+		}
 		if a.containsAffineHandleValues(inner, map[string]bool{}) && !isBorrowableAffineOwnerType(inner) {
 			if _, ok := a.lookupAffineValueKey(n.Operand); ok {
 				if isAffineHandleType(inner) {

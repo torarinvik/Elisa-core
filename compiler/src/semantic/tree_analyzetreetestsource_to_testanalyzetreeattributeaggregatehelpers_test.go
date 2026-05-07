@@ -521,6 +521,36 @@ def cond_span(branch: Lua.ElseIf) -> i64:
 	return branch.condition.span
 `)
 }
+
+func TestAnalyzeRejectsTreeFieldMutationAndAddressTaking(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_field_value_only.elisa", `tree Syntax:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+
+def set_span(node: Syntax.Expr):
+	node.span <- 2
+
+def borrow_span(node: Syntax.Expr) -> i64&:
+	return &node.span
+
+def bind_span_ref(node: Syntax.Expr):
+	node.span as & <- 3
+`)
+	all := strings.Join(result.Errors(), "\n")
+	for _, want := range []string{
+		`cannot assign directly to tree field "span"`,
+		`cannot take address of tree field "span"`,
+		`cannot bind tree field "span" as a reference`,
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("expected tree value-only field diagnostic %q, got:\n%s", want, all)
+		}
+	}
+}
+
 func TestAnalyzeTreeAttributeFieldAccess(t *testing.T) {
 	result := analyzeTreeTestSource(t, "tree_attribute_field_access.elisa", `tree Lua:
 	@role(expr)
