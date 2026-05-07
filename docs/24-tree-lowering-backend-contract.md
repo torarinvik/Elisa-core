@@ -20,13 +20,28 @@ This note documents the current LLVM backend contract for Elisa `tree` values. I
 ## Store And Field Semantics
 
 - Tree allocation requires an active tree owner: `perm`, a tree store, an `Arena` value, or an `Arena` reference.
+- Dense `category_union` code should prefer explicit stores:
+  `store = Tree.Store(owner)` followed by `in store:` around constructors, reads, visits, folds, rewrites, clones, and attributes.
+- `in owner:` remains valid for short-lived local construction/read scopes, but values that escape the scope should also carry an explicit store somewhere in the surrounding data model.
 - Tree fields are value reads over handle-lowered storage.
 - Tree fields are not stable lvalues in v1.
 - Assignment, address-taking, mutable reference binding, and by-reference mutation of tree fields must be rejected.
 - Tree field reads must not expose physical row storage pointers as user-visible values.
+
+## Migration Rules
+
+- Default to dense `category_union` for new trees.
+- Use explicit `@layout(per_variant_rows)` only for compatibility code that passes tree handles through APIs without carrying a store value yet.
+- Avoid accidental root materialization: keep category handles such as `Lua.Expr` category-local in locals, parameters, fields, and helper returns. Convert to the root family type only when the source type or expected type is the root tree value itself.
+- A dense root row is useful for mixed root dispatch and `children(root)`, but category-local algorithms should stay on category-local handles so they only touch the category `{tags, payloads}` table pair.
+- Migrating a legacy tree means updating the public container type that owns root handles to also own the matching generated tree store. For example, a parser AST result should store both the root handle and the tree store that owns that row.
+- The Pascal AST is still explicitly pinned to `per_variant_rows` because `Ast` currently contains only `{root, names}`. Removing that annotation requires changing `Ast`, parser entrypoints, semantic entrypoints, and backends to thread `Pascal.Store[...]` and `PascalType.Store[...]` explicitly.
 
 ## Runtime Coverage Expectations
 
 - Both supported layouts should be covered by IR-shape regression tests.
 - Native `-emit test` smoke coverage should exercise constructors, field reads, `kind`, `is`, children traversal, fold, rewrite default, record update, clone, and attributes.
 - Benchmarks should continue comparing `per_variant_rows` and `category_union` on similar AST workloads before changing capacity policy.
+- Compile-time IR generation is benchmarked with `BenchmarkGenerateLLVMIRTree`.
+- Native runtime traversal is benchmarked with `BenchmarkNativeTreeRuntime`; the generated executable accepts an iteration count and loops internally so measurements are not dominated by process startup.
+- On Apple M5 during this pass, IR generation measured about `673 us/op` for `per_variant_rows` and `881 us/op` for dense `category_union`; native traversal measured about `5.7 ns/op` for `per_variant_rows` and `8.4 ns/op` for dense `category_union`. Treat these as directional until the dense path has more root-materialization and caching work.

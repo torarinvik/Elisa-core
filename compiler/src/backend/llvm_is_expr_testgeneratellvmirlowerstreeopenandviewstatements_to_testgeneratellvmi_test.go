@@ -115,6 +115,39 @@ def make_int(value: i64) -> Lua.Expr:
 			t.Fatalf("expected default tree layout to lower as category_union and contain %q, got:\n%s", check, output)
 		}
 	}
+	for _, oldShape := range []string{"%Lua__TreeHandle = type", "active_tree_store", "tree.root.coerce"} {
+		if strings.Contains(output, oldShape) {
+			t.Fatalf("expected default category-local tree lowering to avoid %q, got:\n%s", oldShape, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRMaterializesCategoryUnionRootOnlyForRootType(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+
+def make_node(value: i64) -> Lua.Node:
+	in perm:
+		return Lua.Expr.Int(span: 1, value: value)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_root_materialization.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"define i32 @make_node",
+		"tree.root.coerce.root.table",
+		"tree.root.coerce.payload.handle",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected root-typed tree lowering to materialize root row containing %q, got:\n%s", check, output)
+		}
+	}
 	if strings.Contains(output, "%Lua__TreeHandle = type") || strings.Contains(output, "active_tree_store") {
 		t.Fatalf("expected default tree layout to use dense handles without active store, got:\n%s", output)
 	}
@@ -157,8 +190,8 @@ def payload_score(node: Lua.Expr) -> i64:
 		"define i64 @score(i32 ",
 		"define i64 @payload_score(i32 ",
 		"tree.field.payload.row.ptr",
-		"tree.field.payload.elem.ptr",
-		"tree.payload.field.payload.elem.ptr",
+		"tree.field.payload.value",
+		"tree.payload.field.payload.value",
 		"match.tree.tag",
 	} {
 		if !strings.Contains(output, check) {
@@ -270,7 +303,7 @@ def count_nodes(node: Lua.Expr) -> i64:
 		"tree.children.count.phi",
 		"tree.children.value.phi",
 		"tree.payload.field.payload.row.ptr",
-		"tree.payload.field.payload.elem.ptr",
+		"tree.payload.field.payload.value",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected category_union children lowering to include %q, got:\n%s", check, output)
@@ -382,7 +415,7 @@ def name_id(name: Lua.Expr.Atom.Name) -> i64:
 		"define i64 @atom_id(i32 ",
 		"define i64 @name_id(i32 ",
 		"tree.field.payload.row.ptr",
-		"tree.field.payload.elem.ptr",
+		"tree.field.payload.value",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected nested category_union field lowering to include %q, got:\n%s", check, output)

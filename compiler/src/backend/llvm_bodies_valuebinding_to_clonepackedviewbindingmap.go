@@ -76,6 +76,8 @@ type functionState struct {
 	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
 	treeExactRowPointers         map[treeExactRowCacheKey]C.LLVMValueRef
 	treeExactRowValues           map[treeExactRowCacheKey]C.LLVMValueRef
+	treeDenseKindValues          map[treeDenseValueCacheKey]C.LLVMValueRef
+	treeDensePayloadValues       map[treeDenseValueCacheKey]C.LLVMValueRef
 	scopedCleanups               []scopedCleanupBinding
 	checkpoints                  map[string]checkpointBinding
 	poolScopes                   []activePoolBinding
@@ -156,6 +158,12 @@ type treeResolvedStoreCacheKey struct {
 type treeResolvedStoreSlot struct {
 	value     C.LLVMValueRef
 	storeType *semantic.TreeStoreType
+}
+type treeDenseValueCacheKey struct {
+	block C.LLVMBasicBlockRef
+	kind  string
+	table C.LLVMValueRef
+	row   C.LLVMValueRef
 }
 type packedStoreExtractCacheKey struct {
 	block C.LLVMBasicBlockRef

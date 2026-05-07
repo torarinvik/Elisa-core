@@ -271,7 +271,6 @@ attribute Sparse.Expr.checksum -> i64:
 	Sparse.Expr.Binary(expr, left, right):
 		return left.checksum + right.checksum + 1
 
-@layout(per_variant_rows)
 tree Dense:
 	@role(expr)
 	node Expr:
@@ -294,6 +293,8 @@ def tree_attribute_native_test() -> void:
 			sright: Sparse.Expr = Sparse.Expr.Int(value: 20)
 			sroot: Sparse.Expr = Sparse.Expr.Binary(left: sleft, right: sright)
 			assert_eq(sroot.checksum, 31)
+		store = Dense.Store(scratch)
+		in store:
 			dleft: Dense.Expr = Dense.Expr.Int(value: 3)
 			dright: Dense.Expr = Dense.Expr.Int(value: 4)
 			droot: Dense.Expr = Dense.Expr.Binary(left: dleft, right: dright)
@@ -340,7 +341,6 @@ func TestRunCLIExecutesMixedTreeChildrenCloneRewriteNativeSmoke(t *testing.T) {
 	testInclude = filepath.ToSlash(testInclude)
 	src := fmt.Sprintf(`# include %q
 
-@layout(per_variant_rows)
 tree Flow:
 	@role(stmt)
 	node Stmt:
@@ -351,29 +351,30 @@ tree Flow:
 	block Block:
 		stmts: darray[Flow.Stmt]
 
-def count_stmt_children(stmt: Flow.Stmt) -> i64:
-	total: mutable i64 = 0
-	for child in children(stmt as Flow.Node):
-		_ = child.kind
-		total <- total + 1
-	return total
+def count_stmt_children(store: Flow.Store[Local], stmt: Flow.Stmt) -> i64:
+	in store:
+		total: mutable i64 = 0
+		for child in children(stmt as Flow.Node):
+			_ = child.kind
+			total <- total + 1
+		return total
 
-@layout(per_variant_rows)
 tree Lua:
 	@role(expr)
 	node Expr:
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)
 
-def eval_lua(node: Lua.Expr) -> i64:
-	if node is Lua.Expr.Int:
-		return node.value
-	if node is Lua.Expr.Binary:
-		return eval_lua(node.left) + eval_lua(node.right) + 1
-	return 0
+def eval_lua(store: Lua.Store[Local], node: Lua.Expr) -> i64:
+	in store:
+		if node is Lua.Expr.Int:
+			return node.value
+		if node is Lua.Expr.Binary:
+			return eval_lua(store, node.left) + eval_lua(store, node.right) + 1
+		return 0
 
-def rewrite_same(node: Lua.Expr) -> Lua.Expr:
-	in perm:
+def rewrite_same(store: Lua.Store[Local], node: Lua.Expr) -> Lua.Expr:
+	in store:
 		return rewrite node as Lua.Expr:
 			Lua.Expr.Int(expr):
 				default
@@ -384,21 +385,23 @@ def rewrite_same(node: Lua.Expr) -> Lua.Expr:
 def mixed_tree_children_clone_rewrite_test() -> void:
 	can Abort.Panic, Memory.Allocate:
 		region scratch(12288)
-		owner: mutable Arena& = scratch.ref[mutable Arena&]
-		in owner:
+		flow_store = Flow.Store(scratch)
+		in flow_store:
 			condition: Flow.Expr = Flow.Expr.Name(name_index: 7u32)
 			stmts: darray[Flow.Stmt] = []
 			body: Flow.Block = Flow.Block(stmts: stmts)
 			stmt: Flow.Stmt = Flow.Stmt.IfStmt(condition: condition, body: body)
-			assert_eq(count_stmt_children(stmt), 2)
+			assert_eq(count_stmt_children(flow_store, stmt), 2)
+		lua_store = Lua.Store(scratch)
+		in lua_store:
 			left: Lua.Expr = Lua.Expr.Int(value: 10)
 			right: Lua.Expr = Lua.Expr.Int(value: 20)
 			root: Lua.Expr = Lua.Expr.Binary(left: left, right: right)
-			assert_eq(eval_lua(root), 31)
+			assert_eq(eval_lua(lua_store, root), 31)
 			copied: Lua.Expr = clone[Lua.Expr](root)
-			assert_eq(eval_lua(copied), 31)
-			rewritten: Lua.Expr = rewrite_same(copied)
-			assert_eq(eval_lua(rewritten), 31)
+			assert_eq(eval_lua(lua_store, copied), 31)
+			rewritten: Lua.Expr = rewrite_same(lua_store, copied)
+			assert_eq(eval_lua(lua_store, rewritten), 31)
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write mixed tree native fixture: %v", err)

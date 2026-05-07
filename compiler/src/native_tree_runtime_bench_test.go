@@ -3,23 +3,25 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"elisacore/src/backend"
 )
 
-const nativeTreeRuntimeBenchRepeats = 2048
-
-func nativeTreeRuntimeBenchSource(layout string, repeats int) string {
+func nativeTreeRuntimeBenchSource(layout string) string {
 	annotation := ""
 	if strings.TrimSpace(layout) != "" {
 		annotation = "@layout(" + layout + ")\n"
 	}
 	if layout == "per_variant_rows" {
-		return fmt.Sprintf(`%stree Lua:
+		return fmt.Sprintf(`extern tree_runtime_escape(value: i64) -> i64
+
+%stree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -37,9 +39,8 @@ def eval(node: Lua.Expr) -> i64:
 		Lua.Expr.Call(expr):
 			eval(expr.callee) + expr.args.len.cast[i64] + expr.span
 
-@test
-def tree_runtime_bench_test() -> void:
-	can Abort.Panic, Memory.Allocate:
+def tree_runtime_bench_impl(repeats: i64) -> i64:
+	can Memory.Allocate:
 		region scratch(32768)
 		owner: mutable Arena& = scratch.ref[mutable Arena&]
 		in owner:
@@ -51,12 +52,16 @@ def tree_runtime_bench_test() -> void:
 			right: Lua.Expr = Lua.Expr.Binary(span: 6, left: c, right: d)
 			root: Lua.Expr = Lua.Expr.Binary(span: 7, left: left, right: right)
 			total: mutable i64 = 0
-			for _ in 0..<%d:
-				total <- total + eval(root)
-			assert_eq(total, 128i64 * %di64)
-`, annotation, repeats, repeats)
+			for _ in 0..<repeats:
+				total <- total + tree_runtime_escape(eval(root))
+			return total
+
+export func tree_runtime_bench(repeats: i64) -> i64 = tree_runtime_bench_impl
+`, annotation)
 	}
-	return fmt.Sprintf(`%stree Lua:
+	return fmt.Sprintf(`extern tree_runtime_escape(value: i64) -> i64
+
+%stree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -75,9 +80,8 @@ def eval(store: Lua.Store[Local], node: Lua.Expr) -> i64:
 			return eval(store, node.callee) + node.args.len.cast[i64] + node.span
 		return 0
 
-@test
-def tree_runtime_bench_test() -> void:
-	can Abort.Panic, Memory.Allocate:
+def tree_runtime_bench_impl(repeats: i64) -> i64:
+	can Memory.Allocate:
 		region scratch(32768)
 		store = Lua.Store(scratch)
 		in store:
@@ -89,10 +93,12 @@ def tree_runtime_bench_test() -> void:
 			right: Lua.Expr = Lua.Expr.Binary(span: 6, left: c, right: d)
 			root: Lua.Expr = Lua.Expr.Binary(span: 7, left: left, right: right)
 			total: mutable i64 = 0
-			for _ in 0..<%d:
-				total <- total + eval(store, root)
-			assert_eq(total, 128i64 * %di64)
-`, annotation, repeats, repeats)
+			for _ in 0..<repeats:
+				total <- total + tree_runtime_escape(eval(store, root))
+			return total
+
+export func tree_runtime_bench(repeats: i64) -> i64 = tree_runtime_bench_impl
+`, annotation)
 }
 
 func buildNativeTreeRuntimeBenchExecutable(b *testing.B, layout string) string {
@@ -104,29 +110,55 @@ func buildNativeTreeRuntimeBenchExecutable(b *testing.B, layout string) string {
 
 	repoRoot := repoRootFromMainBench(b)
 	fixturePath := filepath.Join(repoRoot, "Code", "benchmarks", "tree_runtime_"+benchmarkTreeLayoutFilenameSuffix(layout)+".elisa")
-	testPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "test.elisa")
-	testPrelude, err := readSourceWithIncludes(testPath, map[string]bool{})
-	if err != nil {
-		b.Fatalf("failed to read native test prelude: %v", err)
-	}
-	source := append(append([]byte{}, testPrelude...), '\n')
-	source = append(source, []byte(nativeTreeRuntimeBenchSource(layout, nativeTreeRuntimeBenchRepeats))...)
+	source := []byte(nativeTreeRuntimeBenchSource(layout))
 	var stderr bytes.Buffer
 	_, result, ok := analyzeProgram(fixturePath, source, &stderr)
 	if !ok {
 		b.Fatalf("failed to analyze native tree runtime benchmark source:\n%s", stderr.String())
 	}
-	cases := runnableTestCases(selectTestCases(result, "tree_runtime_bench_test"))
-	if len(cases) != 1 {
-		b.Fatalf("expected one runnable tree runtime benchmark test, got %d", len(cases))
-	}
-	runnerSource := buildDispatchTestRunnerSource(source, cases)
-	exePath, cleanup, _, _, _, err := compileTestRunnerExecutableWithShim(clangPath, runnerSource, testRunnerDispatchShimSource(cases), nil, nil, backend.OptimizationLevel3, backend.DefaultPackedLoweringProfile(), &stderr)
+	tempDir, err := os.MkdirTemp("", "elisacore-tree-runtime-bench-*")
 	if err != nil {
+		b.Fatalf("failed to create native tree runtime benchmark temp dir: %v", err)
+	}
+	shimPath := filepath.Join(tempDir, "tree_runtime_bench_main.c")
+	if err := os.WriteFile(shimPath, []byte(nativeTreeRuntimeBenchShimSource()), 0o644); err != nil {
+		_ = os.RemoveAll(tempDir)
+		b.Fatalf("failed to write native tree runtime benchmark shim: %v", err)
+	}
+	exePath, nativeCleanup, _, err := buildNativeExecutableWithClang(clangPath, result, []string{shimPath}, nil, filepath.Join(tempDir, "tree_runtime_bench"), backend.OptimizationLevel3, backend.DefaultPackedLoweringProfile(), &stderr)
+	if err != nil {
+		_ = os.RemoveAll(tempDir)
 		b.Fatalf("failed to build native tree runtime benchmark executable:\n%s%s", err.Error(), stderr.String())
 	}
-	b.Cleanup(cleanup)
+	b.Cleanup(func() {
+		nativeCleanup()
+		_ = os.RemoveAll(tempDir)
+	})
 	return exePath
+}
+
+func nativeTreeRuntimeBenchShimSource() string {
+	return `#include <stdlib.h>
+
+extern long long tree_runtime_bench(long long repeats);
+
+__attribute__((noinline)) long long tree_runtime_escape(long long value) {
+#if defined(__GNUC__) || defined(__clang__)
+	__asm__ __volatile__("" : "+r"(value));
+#endif
+	return value;
+}
+
+int main(int argc, char **argv) {
+	if (argc < 2) {
+		return 2;
+	}
+	long long repeats = atoll(argv[1]);
+	long long got = tree_runtime_bench(repeats);
+	long long want = 128LL * repeats;
+	return got == want ? 0 : 3;
+}
+`
 }
 
 func benchmarkTreeLayoutFilenameSuffix(layout string) string {
@@ -140,16 +172,14 @@ func benchmarkTreeLayoutFilenameSuffix(layout string) string {
 func benchmarkNativeTreeRuntimeLayout(b *testing.B, layout string) {
 	b.Helper()
 	exePath := buildNativeTreeRuntimeBenchExecutable(b, layout)
-	args := []string{"tree_runtime_bench_test"}
-	b.SetBytes(int64(nativeTreeRuntimeBenchRepeats))
+	args := []string{strconv.Itoa(b.N)}
+	b.SetBytes(1)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cmd := exec.Command(exePath, args...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			b.Fatalf("native tree runtime benchmark failed for layout %q: %v\n%s", layout, err, string(output))
-		}
+	cmd := exec.Command(exePath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		b.Fatalf("native tree runtime benchmark failed for layout %q: %v\n%s", layout, err, string(output))
 	}
 }
 
