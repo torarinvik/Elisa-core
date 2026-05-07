@@ -320,3 +320,102 @@ def tree_attribute_native_test() -> void:
 		}
 	}
 }
+
+func TestRunCLIExecutesMixedTreeChildrenCloneRewriteNativeSmoke(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "mixed_tree_children_clone_rewrite_native_fixture.elisa")
+	testPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "test.elisa")
+	testInclude, err := filepath.Rel(fixtureDir, testPath)
+	if err != nil {
+		t.Fatalf("failed to compute test include path: %v", err)
+	}
+	testInclude = filepath.ToSlash(testInclude)
+	src := fmt.Sprintf(`# include %q
+
+tree Flow:
+	@role(stmt)
+	node Stmt:
+		IfStmt(condition: Flow.Expr, body: Flow.Block)
+	@role(expr)
+	node Expr:
+		Name(name_index: u32)
+	block Block:
+		stmts: darray[Flow.Stmt]
+
+def count_stmt_children(stmt: Flow.Stmt) -> i64:
+	total: mutable i64 = 0
+	for child in children(stmt as Flow.Node):
+		_ = child.kind
+		total <- total + 1
+	return total
+
+tree Lua:
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+def eval_lua(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Int:
+		return node.value
+	if node is Lua.Expr.Binary:
+		return eval_lua(node.left) + eval_lua(node.right) + 1
+	return 0
+
+def rewrite_same(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Expr:
+			Lua.Expr.Int(expr):
+				default
+			Lua.Expr.Binary(expr, left, right):
+				default
+
+@test
+def mixed_tree_children_clone_rewrite_test() -> void:
+	can Abort.Panic, Memory.Allocate:
+		region scratch(12288)
+		owner: mutable Arena& = scratch.ref[mutable Arena&]
+		in owner:
+			condition: Flow.Expr = Flow.Expr.Name(name_index: 7u32)
+			stmts: darray[Flow.Stmt] = []
+			body: Flow.Block = Flow.Block(stmts: stmts)
+			stmt: Flow.Stmt = Flow.Stmt.IfStmt(condition: condition, body: body)
+			assert_eq(count_stmt_children(stmt), 2)
+			left: Lua.Expr = Lua.Expr.Int(value: 10)
+			right: Lua.Expr = Lua.Expr.Int(value: 20)
+			root: Lua.Expr = Lua.Expr.Binary(left: left, right: right)
+			assert_eq(eval_lua(root), 31)
+			copied: Lua.Expr = clone[Lua.Expr](root)
+			assert_eq(eval_lua(copied), 31)
+			rewritten: Lua.Expr = rewrite_same(copied)
+			assert_eq(eval_lua(rewritten), 31)
+`, testInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write mixed tree native fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected mixed tree native test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] mixed_tree_children_clone_rewrite_test",
+		"[       OK ] mixed_tree_children_clone_rewrite_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected mixed tree native test output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
