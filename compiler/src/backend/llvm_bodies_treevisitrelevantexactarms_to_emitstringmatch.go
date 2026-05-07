@@ -303,20 +303,11 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 			C.LLVMBuildBr(s.builder, mergeBB)
 		}
 		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-		if len(incomingValues) == 0 {
-			C.LLVMBuildUnreachable(s.builder)
-			return nil, resultType, nil
-		}
-		if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
-			return incomingValues[0], resultType, nil
-		}
-		llvmType, err := s.g.lowerType(resultType)
+		value, _, err := s.emitTreeSwitchMergedValue(resultType, incomingValues, incomingBlocks, "visit.node.phi")
 		if err != nil {
 			return nil, nil, err
 		}
-		phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("visit.node.phi"))
-		C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-		return phi, resultType, nil
+		return value, resultType, nil
 	}
 	relevantArms, exhaustive, err := s.treeVisitRelevantExactArms(rootType.Family, expr.Arms)
 	if err != nil {
@@ -378,20 +369,11 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
-		return nil, resultType, nil
-	}
-	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
-		return incomingValues[0], resultType, nil
-	}
-	llvmType, err := s.g.lowerType(resultType)
+	value, _, err := s.emitTreeSwitchMergedValue(resultType, incomingValues, incomingBlocks, "visit.node.phi")
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("visit.node.phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-	return phi, resultType, nil
+	return value, resultType, nil
 }
 func (s *functionState) emitExactTreeVisitExpr(expr *ast.VisitExpr, memberName string, bindType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	value, _, err := s.emitExpr(expr.Value, bindType)

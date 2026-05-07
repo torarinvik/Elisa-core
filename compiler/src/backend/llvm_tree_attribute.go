@@ -306,20 +306,7 @@ func (s *functionState) emitTreeAttributeSwitchDispatch(helper *treeAttributeHel
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
-		return nil, true, nil
-	}
-	if len(incomingValues) == 1 || semantic.IsNeverType(helper.resultType) {
-		return incomingValues[0], false, nil
-	}
-	llvmType, err := s.g.lowerType(helper.resultType)
-	if err != nil {
-		return nil, false, err
-	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree(name+".phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-	return phi, false, nil
+	return s.emitTreeSwitchMergedValue(helper.resultType, incomingValues, incomingBlocks, name+".phi")
 }
 
 func (s *functionState) emitTreeAttributeArmSequence(helper *treeAttributeHelperInfo, nodeValue C.LLVMValueRef, memberType semantic.Type, arms []ast.VisitArm, exhaustive bool, name string) (C.LLVMValueRef, bool, error) {
@@ -403,20 +390,7 @@ func (s *functionState) emitTreeAttributeArmSequence(helper *treeAttributeHelper
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
-		return nil, true, nil
-	}
-	if len(incomingValues) == 1 || semantic.IsNeverType(helper.resultType) {
-		return incomingValues[0], false, nil
-	}
-	llvmType, err := s.g.lowerType(helper.resultType)
-	if err != nil {
-		return nil, false, err
-	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree(name+".phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-	return phi, false, nil
+	return s.emitTreeSwitchMergedValue(helper.resultType, incomingValues, incomingBlocks, name+".phi")
 }
 
 func (s *functionState) emitTreeAttributeNamedChildBindingLocals(nodeValue C.LLVMValueRef, memberType semantic.Type, arm ast.VisitArm, name string) error {

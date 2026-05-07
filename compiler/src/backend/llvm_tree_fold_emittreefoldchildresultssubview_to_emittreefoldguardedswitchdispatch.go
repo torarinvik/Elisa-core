@@ -337,20 +337,7 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
-		return nil, true, nil
-	}
-	if len(incomingValues) == 1 || semantic.IsNeverType(helper.resultType) {
-		return incomingValues[0], false, nil
-	}
-	llvmType, err := s.g.lowerType(helper.resultType)
-	if err != nil {
-		return nil, false, err
-	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree(name+".phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-	return phi, false, nil
+	return s.emitTreeSwitchMergedValue(helper.resultType, incomingValues, incomingBlocks, name+".phi")
 }
 func (s *functionState) emitTreeFoldExactDispatch(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, arms []ast.VisitArm) (C.LLVMValueRef, bool, error) {
 	if visitArmsHaveGuard(arms) {
@@ -429,20 +416,7 @@ func (s *functionState) emitTreeFoldSwitchDispatch(helper *treeFoldHelperInfo, e
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
-		return nil, true, nil
-	}
-	if len(incomingValues) == 1 || semantic.IsNeverType(helper.resultType) {
-		return incomingValues[0], false, nil
-	}
-	llvmType, err := s.g.lowerType(helper.resultType)
-	if err != nil {
-		return nil, false, err
-	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree(name+".phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-	return phi, false, nil
+	return s.emitTreeSwitchMergedValue(helper.resultType, incomingValues, incomingBlocks, name+".phi")
 }
 func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, members []semantic.Type, arms []ast.VisitArm, exhaustive bool, name string) (C.LLVMValueRef, bool, error) {
 	if len(members) == 0 {
@@ -499,18 +473,5 @@ func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelper
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
-		return nil, true, nil
-	}
-	if len(incomingValues) == 1 || semantic.IsNeverType(helper.resultType) {
-		return incomingValues[0], false, nil
-	}
-	llvmType, err := s.g.lowerType(helper.resultType)
-	if err != nil {
-		return nil, false, err
-	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree(name+".phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-	return phi, false, nil
+	return s.emitTreeSwitchMergedValue(helper.resultType, incomingValues, incomingBlocks, name+".phi")
 }
