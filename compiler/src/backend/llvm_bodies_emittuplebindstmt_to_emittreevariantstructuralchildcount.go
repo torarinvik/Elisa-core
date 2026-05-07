@@ -201,16 +201,9 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 			C.LLVMBuildBr(s.builder, contBB)
 		}
 		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-		trapFn, err := s.ensureTrapFunction()
-		if err != nil {
+		if err := s.emitTrapUnreachable("move.as.variant.fail"); err != nil {
 			return err
 		}
-		trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
-		if err != nil {
-			return err
-		}
-		s.buildCall(trapType, trapFn, nil, "")
-		C.LLVMBuildUnreachable(s.builder)
 		C.LLVMPositionBuilderAtEnd(s.builder, contBB)
 		return nil
 	default:
@@ -459,17 +452,7 @@ func treeChildrenExactSourceInfo(sourceType semantic.Type) (semantic.Type, *sema
 }
 func (s *functionState) emitTreeChildrenTrapBlock(block C.LLVMBasicBlockRef) error {
 	C.LLVMPositionBuilderAtEnd(s.builder, block)
-	trapFn, err := s.ensureTrapFunction()
-	if err != nil {
-		return err
-	}
-	trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
-	if err != nil {
-		return err
-	}
-	s.buildCall(trapType, trapFn, nil, "")
-	C.LLVMBuildUnreachable(s.builder)
-	return nil
+	return s.emitTrapUnreachable("tree.children.trap")
 }
 func (s *functionState) emitTreeStructuralSequenceCount(payloadValue C.LLVMValueRef, payloadType semantic.Type, name string) (C.LLVMValueRef, error) {
 	if optionalType, ok := payloadType.(*semantic.OptionalType); ok {

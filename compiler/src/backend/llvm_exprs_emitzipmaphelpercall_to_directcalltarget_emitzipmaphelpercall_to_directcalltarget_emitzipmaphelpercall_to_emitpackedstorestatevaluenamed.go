@@ -319,16 +319,9 @@ func (s *functionState) emitChunksExactValidation(chunkSizeValue C.LLVMValueRef,
 	C.LLVMBuildCondBr(s.builder, isNonZero, nonZeroBB, failBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-	trapFn, err := s.ensureTrapFunction()
-	if err != nil {
+	if err := s.emitTrapUnreachable(prefix + ".fail"); err != nil {
 		return err
 	}
-	trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
-	if err != nil {
-		return err
-	}
-	s.buildCall(trapType, trapFn, nil, "")
-	C.LLVMBuildUnreachable(s.builder)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, nonZeroBB)
 	remainder := C.LLVMBuildURem(s.builder, totalValue, chunkSizeValue, cStringFree(prefix+".remainder"))
