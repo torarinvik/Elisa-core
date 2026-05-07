@@ -415,7 +415,9 @@ def cond_span(branch: Lua.ElseIf) -> i64:
 		"define i64 @span_of(%Lua__TreeHandle",
 		"define i64 @stmt_count(",
 		"define i64 @cond_span(",
-		"tree.field.column.ptr",
+		"%Lua_Expr_Binary__TreeRow = type",
+		"tree.field.rows.ptr",
+		"tree.field.row.ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

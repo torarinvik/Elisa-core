@@ -76,44 +76,42 @@ func (s *functionState) emitTreeEnsureTableCapacity(arenaRef C.LLVMValueRef, tab
 	if err != nil {
 		return err
 	}
-	for i, fieldDecl := range treeExactFieldDecls(memberType) {
-		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
-		if !ok {
-			return fmt.Errorf("missing exact tree field %s.%s", treeExactMemberSurfaceName(memberType), fieldDecl.Name)
-		}
-		elemSizeBytes, err := s.sizeOfType(field.Type)
-		if err != nil {
-			return err
-		}
-		elemSizeValue := C.LLVMConstInt(usizeType, C.ulonglong(elemSizeBytes), 0)
-		oldBytes := C.LLVMBuildMul(s.builder, currentCapacity, elemSizeValue, cStringFree(name+".old.bytes"))
-		newBytes := C.LLVMBuildMul(s.builder, newCapacity, elemSizeValue, cStringFree(name+".new.bytes"))
-		columnPtr, err := s.emitTreeTableColumnPointerValue(tablePtr, memberType, i, name)
-		if err != nil {
-			return err
-		}
-		isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), columnPtr, C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0)), cStringFree(name+".column.null"))
-		fieldAllocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".column.alloc"))
-		fieldReallocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".column.realloc"))
-		fieldContBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".column.cont"))
-		C.LLVMBuildCondBr(s.builder, isNull, fieldAllocBB, fieldReallocBB)
+	rowType, err := s.g.ensureTreeExactRowType(memberType)
+	if err != nil {
+		return err
+	}
+	rowSizeBytes, err := s.g.abiSizeOfLLVMType(rowType)
+	if err != nil {
+		return err
+	}
+	rowSizeValue := C.LLVMConstInt(usizeType, C.ulonglong(rowSizeBytes), 0)
+	oldBytes := C.LLVMBuildMul(s.builder, currentCapacity, rowSizeValue, cStringFree(name+".old.bytes"))
+	newBytes := C.LLVMBuildMul(s.builder, newCapacity, rowSizeValue, cStringFree(name+".new.bytes"))
+	rowsPtr, err := s.emitTreeTableRowsPointerValue(tablePtr, memberType, name)
+	if err != nil {
+		return err
+	}
+	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), rowsPtr, C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0)), cStringFree(name+".rows.null"))
+	rowsAllocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".rows.alloc"))
+	rowsReallocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".rows.realloc"))
+	rowsContBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".rows.cont"))
+	C.LLVMBuildCondBr(s.builder, isNull, rowsAllocBB, rowsReallocBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, fieldAllocBB)
-		allocated := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaRef, newBytes}, name+".column.alloc")
-		allocEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, fieldContBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, rowsAllocBB)
+	allocated := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaRef, newBytes}, name+".rows.alloc")
+	allocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, rowsContBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, fieldReallocBB)
-		reallocated := s.buildCall(reallocLLVMType, reallocCallee, []C.LLVMValueRef{arenaRef, columnPtr, oldBytes, newBytes}, name+".column.realloc")
-		reallocEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, fieldContBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, rowsReallocBB)
+	reallocated := s.buildCall(reallocLLVMType, reallocCallee, []C.LLVMValueRef{arenaRef, rowsPtr, oldBytes, newBytes}, name+".rows.realloc")
+	reallocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, rowsContBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, fieldContBB)
-		columnValue := C.LLVMBuildPhi(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), cStringFree(name+".column.phi"))
-		C.LLVMAddIncoming(columnValue, llvmValueSlicePtr([]C.LLVMValueRef{allocated, reallocated}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{allocEnd, reallocEnd}), 2)
-		if err := s.emitTreeTableSetColumnPointer(tablePtr, memberType, i, columnValue, name); err != nil {
-			return err
-		}
+	C.LLVMPositionBuilderAtEnd(s.builder, rowsContBB)
+	rowsValue := C.LLVMBuildPhi(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), cStringFree(name+".rows.phi"))
+	C.LLVMAddIncoming(rowsValue, llvmValueSlicePtr([]C.LLVMValueRef{allocated, reallocated}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{allocEnd, reallocEnd}), 2)
+	if err := s.emitTreeTableSetRowsPointer(tablePtr, memberType, rowsValue, name); err != nil {
+		return err
 	}
 	if err := s.emitTreeTableSetCapacity(tablePtr, memberType, newCapacity, name); err != nil {
 		return err
@@ -138,7 +136,11 @@ func (s *functionState) emitTreeExactFieldValueAtIndex(tablePtr C.LLVMValueRef, 
 	if !ok {
 		return nil, nil, fmt.Errorf("missing exact tree field %s.%s", treeExactMemberSurfaceName(memberType), fieldName)
 	}
-	columnPtr, err := s.emitTreeTableColumnPointerValue(tablePtr, memberType, fieldIndex, name)
+	rowsPtr, err := s.emitTreeTableRowsPointerValue(tablePtr, memberType, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	rowType, err := s.g.ensureTreeExactRowType(memberType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -146,7 +148,8 @@ func (s *functionState) emitTreeExactFieldValueAtIndex(tablePtr C.LLVMValueRef, 
 	if err != nil {
 		return nil, nil, err
 	}
-	elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, columnPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".elem.ptr"))
+	rowPtr := C.LLVMBuildGEP2(s.builder, rowType, rowsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".row.ptr"))
+	elemPtr := C.LLVMBuildStructGEP2(s.builder, rowType, rowPtr, C.unsigned(fieldIndex), cStringFree(name+".elem.ptr"))
 	value := C.LLVMBuildLoad2(s.builder, elemLLVMType, elemPtr, cStringFree(name+".elem"))
 	return value, field.Type, nil
 }
@@ -168,15 +171,16 @@ func (s *functionState) emitTreeStoreExactFieldValueAtIndex(tablePtr C.LLVMValue
 	if fieldIndex < 0 || fieldType == nil {
 		return fmt.Errorf("%s has no field %s", treeExactMemberSurfaceName(memberType), fieldName)
 	}
-	columnPtr, err := s.emitTreeTableColumnPointerValue(tablePtr, memberType, fieldIndex, name)
+	rowsPtr, err := s.emitTreeTableRowsPointerValue(tablePtr, memberType, name)
 	if err != nil {
 		return err
 	}
-	elemLLVMType, err := s.g.lowerType(fieldType)
+	rowType, err := s.g.ensureTreeExactRowType(memberType)
 	if err != nil {
 		return err
 	}
-	elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, columnPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".elem.ptr"))
+	rowPtr := C.LLVMBuildGEP2(s.builder, rowType, rowsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".row.ptr"))
+	elemPtr := C.LLVMBuildStructGEP2(s.builder, rowType, rowPtr, C.unsigned(fieldIndex), cStringFree(name+".elem.ptr"))
 	C.LLVMBuildStore(s.builder, fieldValue, elemPtr)
 	return nil
 }

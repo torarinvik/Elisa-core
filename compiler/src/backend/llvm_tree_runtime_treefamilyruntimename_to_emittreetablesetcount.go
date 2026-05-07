@@ -28,6 +28,9 @@ func treeStoreStateName(treeType *semantic.TreeType) string {
 func treeExactTableName(memberType semantic.Type) string {
 	return sanitizeIdentifier(treeExactMemberSurfaceName(memberType)) + "__TreeTable"
 }
+func treeExactRowName(memberType semantic.Type) string {
+	return sanitizeIdentifier(treeExactMemberSurfaceName(memberType)) + "__TreeRow"
+}
 func treeExactMemberSurfaceName(memberType semantic.Type) string {
 	switch tt := semantic.StripAggregateStateType(memberType).(type) {
 	case *semantic.TreeVariantViewType:
@@ -172,6 +175,9 @@ func (g *llvmGenerator) ensureTreeExactTableType(memberType semantic.Type) (C.LL
 	if family == nil {
 		return nil, fmt.Errorf("missing tree exact member family")
 	}
+	if _, err := g.ensureTreeExactRowType(memberType); err != nil {
+		return nil, err
+	}
 	name := treeExactTableName(memberType)
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
@@ -184,7 +190,21 @@ func (g *llvmGenerator) ensureTreeExactTableType(memberType semantic.Type) (C.LL
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{usizeType, usizeType}
+	fields := []C.LLVMTypeRef{usizeType, usizeType, C.LLVMPointerTypeInContext(g.context, 0)}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+func (g *llvmGenerator) ensureTreeExactRowType(memberType semantic.Type) (C.LLVMTypeRef, error) {
+	name := treeExactRowName(memberType)
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	fields := make([]C.LLVMTypeRef, 0, len(treeExactFieldDecls(memberType)))
 	for _, fieldDecl := range treeExactFieldDecls(memberType) {
 		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 		if !ok {
@@ -193,7 +213,11 @@ func (g *llvmGenerator) ensureTreeExactTableType(memberType semantic.Type) (C.LL
 		if err := g.noteType(field.Type); err != nil {
 			return nil, err
 		}
-		fields = append(fields, C.LLVMPointerTypeInContext(g.context, 0))
+		fieldType, err := g.lowerType(field.Type)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, fieldType)
 	}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
@@ -545,22 +569,22 @@ func (s *functionState) emitTreeTableCapacityValue(tablePtr C.LLVMValueRef, memb
 	}
 	return C.LLVMBuildLoad2(s.builder, usizeType, capPtr, cStringFree(name+".capacity")), nil
 }
-func (s *functionState) emitTreeTableColumnPointerValue(tablePtr C.LLVMValueRef, memberType semantic.Type, fieldIndex int, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitTreeTableRowsPointerValue(tablePtr C.LLVMValueRef, memberType semantic.Type, name string) (C.LLVMValueRef, error) {
 	tableType, err := s.g.ensureTreeExactTableType(memberType)
 	if err != nil {
 		return nil, err
 	}
-	columnPtrPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, C.unsigned(2+fieldIndex), cStringFree(name+".column.ptrptr"))
+	rowsPtrPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 2, cStringFree(name+".rows.ptrptr"))
 	opaquePtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	return C.LLVMBuildLoad2(s.builder, opaquePtrType, columnPtrPtr, cStringFree(name+".column.ptr")), nil
+	return C.LLVMBuildLoad2(s.builder, opaquePtrType, rowsPtrPtr, cStringFree(name+".rows.ptr")), nil
 }
-func (s *functionState) emitTreeTableSetColumnPointer(tablePtr C.LLVMValueRef, memberType semantic.Type, fieldIndex int, columnPtr C.LLVMValueRef, name string) error {
+func (s *functionState) emitTreeTableSetRowsPointer(tablePtr C.LLVMValueRef, memberType semantic.Type, rowsPtr C.LLVMValueRef, name string) error {
 	tableType, err := s.g.ensureTreeExactTableType(memberType)
 	if err != nil {
 		return err
 	}
-	columnPtrPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, C.unsigned(2+fieldIndex), cStringFree(name+".column.ptrptr"))
-	C.LLVMBuildStore(s.builder, columnPtr, columnPtrPtr)
+	rowsPtrPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 2, cStringFree(name+".rows.ptrptr"))
+	C.LLVMBuildStore(s.builder, rowsPtr, rowsPtrPtr)
 	return nil
 }
 func (s *functionState) emitTreeTableSetCount(tablePtr C.LLVMValueRef, memberType semantic.Type, countValue C.LLVMValueRef, name string) error {
