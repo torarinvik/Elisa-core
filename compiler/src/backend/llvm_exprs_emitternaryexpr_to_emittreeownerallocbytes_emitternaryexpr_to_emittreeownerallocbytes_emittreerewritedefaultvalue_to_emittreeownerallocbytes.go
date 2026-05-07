@@ -114,12 +114,11 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 	zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	oneValue := C.LLVMConstInt(usizeLLVMType, 1, 0)
 	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
-		sourceStateValue := s.emitTreeHandleStateValue(ctx.nodeValue, "tree.default.src")
-		sourceRowIndex, err := s.emitTreeHandleIndexValue(ctx.nodeValue, "tree.default.src")
+		sourceAccess, err := s.emitTreeHandleAccess(ctx.nodeValue, "tree.default.src")
 		if err != nil {
 			return nil, nil, err
 		}
-		sourceTablePtr, err := s.emitTreeCategoryUnionTablePtr(sourceStateValue, family, viewType.Category, "tree.default.src")
+		sourceTablePtr, err := s.emitTreeCategoryUnionTablePtr(sourceAccess.stateValue, family, viewType.Category, "tree.default.src")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -233,7 +232,7 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 				patchValues = append(patchValues, fieldValue)
 			}
 		}
-		if err := s.emitTreeCopyCategoryUnionPayloadAndPatch(sourceTablePtr, slot.tablePtr, viewType.Category, viewType.Variant, sourceRowIndex, slot.rowIndex, patchNames, patchValues, "tree.default"); err != nil {
+		if err := s.emitTreeCopyCategoryUnionPayloadAndPatch(sourceTablePtr, slot.tablePtr, viewType.Category, viewType.Variant, sourceAccess.rowIndex, slot.rowIndex, patchNames, patchValues, "tree.default"); err != nil {
 			return nil, nil, err
 		}
 		if err := s.emitTreeCategoryUnionTableSetCount(slot.tablePtr, viewType.Category, slot.neededCount, "tree.default"); err != nil {

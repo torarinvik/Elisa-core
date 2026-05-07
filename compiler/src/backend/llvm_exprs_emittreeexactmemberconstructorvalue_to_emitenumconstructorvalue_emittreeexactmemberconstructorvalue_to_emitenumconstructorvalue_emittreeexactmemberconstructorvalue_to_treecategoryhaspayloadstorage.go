@@ -235,16 +235,15 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				}
 			}
 			if tt.Category != nil && tt.Category.Layout == semantic.TreeLayoutCategoryUnion {
-				stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
-				rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
+				access, err := s.emitTreeHandleAccess(handleValue, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}
-				tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, tt.Category.Family, tt.Category, "tree.field")
+				tablePtr, err := s.emitTreeCategoryUnionTablePtr(access.stateValue, tt.Category.Family, tt.Category, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}
-				surfaceValue, surfaceType, err := s.emitTreeCategoryUnionSurfaceFieldValue(tablePtr, tt.Category, tt.Variant, expr.Field, rowIndex, "tree.field")
+				surfaceValue, surfaceType, err := s.emitTreeCategoryUnionSurfaceFieldValue(tablePtr, tt.Category, tt.Variant, expr.Field, access.rowIndex, "tree.field")
 				return surfaceValue, surfaceType, true, err
 			}
 			access, err := s.emitTreeExactTableAccessFromHandle(handleValue, tt.Category.Family, tt, "tree.field")
@@ -288,12 +287,12 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			var categoryUnionTablePtr C.LLVMValueRef
 			var categoryUnionRowIndex C.LLVMValueRef
 			if tt.Layout == semantic.TreeLayoutCategoryUnion {
-				stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
-				categoryUnionRowIndex, err = s.emitTreeHandleIndexValue(handleValue, "tree.field")
+				access, err := s.emitTreeHandleAccess(handleValue, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}
-				categoryUnionTablePtr, err = s.emitTreeCategoryUnionTablePtr(stateValue, tt.Family, tt, "tree.field")
+				categoryUnionRowIndex = access.rowIndex
+				categoryUnionTablePtr, err = s.emitTreeCategoryUnionTablePtr(access.stateValue, tt.Family, tt, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}

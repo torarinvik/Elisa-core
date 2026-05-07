@@ -744,17 +744,30 @@ type treeExactTableAccess struct {
 	tablePtr C.LLVMValueRef
 }
 
-func (s *functionState) emitTreeExactTableAccessFromHandle(handleValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, name string) (treeExactTableAccess, error) {
+type treeHandleAccess struct {
+	stateValue C.LLVMValueRef
+	rowIndex   C.LLVMValueRef
+}
+
+func (s *functionState) emitTreeHandleAccess(handleValue C.LLVMValueRef, name string) (treeHandleAccess, error) {
 	stateValue := s.emitTreeHandleStateValue(handleValue, name+".state")
 	rowIndex, err := s.emitTreeHandleIndexValue(handleValue, name+".index")
 	if err != nil {
-		return treeExactTableAccess{}, err
+		return treeHandleAccess{}, err
 	}
-	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
+	return treeHandleAccess{stateValue: stateValue, rowIndex: rowIndex}, nil
+}
+
+func (s *functionState) emitTreeExactTableAccessFromHandle(handleValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, name string) (treeExactTableAccess, error) {
+	handleAccess, err := s.emitTreeHandleAccess(handleValue, name)
 	if err != nil {
 		return treeExactTableAccess{}, err
 	}
-	return treeExactTableAccess{rowIndex: rowIndex, tablePtr: tablePtr}, nil
+	tablePtr, err := s.emitTreeStateTablePtr(handleAccess.stateValue, family, memberType, name)
+	if err != nil {
+		return treeExactTableAccess{}, err
+	}
+	return treeExactTableAccess{rowIndex: handleAccess.rowIndex, tablePtr: tablePtr}, nil
 }
 func (s *functionState) emitTreeTableCountValue(tablePtr C.LLVMValueRef, memberType semantic.Type, name string) (C.LLVMValueRef, error) {
 	tableType, err := s.g.ensureTreeExactTableType(memberType)
