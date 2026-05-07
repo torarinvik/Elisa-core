@@ -531,6 +531,17 @@ func (s *functionState) buildTreeHandleKey(tag uint32, rowIndexValue C.LLVMValue
 		return nil, err
 	}
 	rowIndex64 := C.LLVMBuildZExt(s.builder, rowIndexValue, u64Type, cStringFree(name+".row.zext"))
+	maxRowIndex := C.LLVMConstInt(u64Type, treeHandleIndexMask, 0)
+	rowOverflow := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), rowIndex64, maxRowIndex, cStringFree(name+".row.overflow"))
+	overflowBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".row.overflow.bb"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".row.key.cont"))
+	C.LLVMBuildCondBr(s.builder, rowOverflow, overflowBB, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, overflowBB)
+	if err := s.emitTrapUnreachable(name + ".row.overflow"); err != nil {
+		return nil, err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
 	rowIndexKey := C.LLVMBuildAnd(s.builder, rowIndex64, C.LLVMConstInt(u64Type, treeHandleIndexMask, 0), cStringFree(name+".row.mask"))
 	tagValue := C.LLVMConstInt(u64Type, C.ulonglong(tag), 0)
 	tagShifted := C.LLVMBuildShl(s.builder, tagValue, C.LLVMConstInt(u64Type, treeHandleTagShift, 0), cStringFree(name+".tag.shl"))

@@ -236,6 +236,19 @@ func (s *functionState) ensureTrapFunction() (C.LLVMValueRef, error) {
 	trapType := &semantic.FuncType{Name: "llvm.trap", Return: voidType}
 	return s.g.ensureFunctionDeclared("llvm.trap", trapType)
 }
+func (s *functionState) emitTrapUnreachable(name string) error {
+	trapFn, err := s.ensureTrapFunction()
+	if err != nil {
+		return err
+	}
+	trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
+	if err != nil {
+		return err
+	}
+	s.buildCall(trapType, trapFn, nil, "")
+	C.LLVMBuildUnreachable(s.builder)
+	return nil
+}
 func (s *functionState) ensureAbortFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
 	voidType := s.g.result.NamedTypes["void"]
 	fnType := &semantic.FuncType{Name: "abort", Return: voidType}
