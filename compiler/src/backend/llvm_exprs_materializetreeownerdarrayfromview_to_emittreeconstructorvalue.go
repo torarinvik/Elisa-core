@@ -509,7 +509,7 @@ func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeTyp
 	}
 	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.store.arena")
 	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.store.state")
-	if treeType.Layout == semantic.TreeLayoutCategoryUnion {
+	if treeCategoryLayoutPlan(treeType).isCategoryUnion() {
 		return s.emitTreeCategoryUnionConstructorValue(treeType, variant, orderedArgs, commonArgs, arenaValue, stateValue)
 	}
 	memberType := treeType.VariantViewType(variant)

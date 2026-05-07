@@ -113,7 +113,7 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 	}
 	zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	oneValue := C.LLVMConstInt(usizeLLVMType, 1, 0)
-	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
+	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && treeCategoryLayoutPlan(viewType.Category).isCategoryUnion() {
 		sourceAccess, err := s.emitTreeCategoryUnionTableAccessFromHandle(ctx.nodeValue, family, viewType.Category, "tree.default.src")
 		if err != nil {
 			return nil, nil, err

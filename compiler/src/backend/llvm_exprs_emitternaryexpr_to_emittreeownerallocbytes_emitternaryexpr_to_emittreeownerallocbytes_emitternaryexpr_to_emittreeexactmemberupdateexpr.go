@@ -307,7 +307,7 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 	if err != nil {
 		return nil, nil, err
 	}
-	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
+	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && treeCategoryLayoutPlan(viewType.Category).isCategoryUnion() {
 		sourceAccess, err := s.emitTreeCategoryUnionTableAccessFromHandle(handleValue, family, viewType.Category, "tree.update.src")
 		if err != nil {
 			return nil, nil, err

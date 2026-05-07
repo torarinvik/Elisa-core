@@ -104,7 +104,7 @@ func (s *functionState) extractTreeVariantPayloadValues(nodeValue C.LLVMValueRef
 		return nil, fmt.Errorf("missing tree category metadata")
 	}
 	memberType := categoryType.VariantViewType(variant)
-	if categoryType.Layout == semantic.TreeLayoutCategoryUnion {
+	if treeCategoryLayoutPlan(categoryType).isCategoryUnion() {
 		access, err := s.emitTreeCategoryUnionTableAccessFromHandle(nodeValue, categoryType.Family, categoryType, "tree.payload")
 		if err != nil {
 			return nil, err

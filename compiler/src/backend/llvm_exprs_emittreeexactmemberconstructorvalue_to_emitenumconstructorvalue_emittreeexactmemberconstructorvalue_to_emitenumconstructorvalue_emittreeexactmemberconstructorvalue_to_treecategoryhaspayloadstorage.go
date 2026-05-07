@@ -234,7 +234,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 					return value, kindType, true, nil
 				}
 			}
-			if tt.Category != nil && tt.Category.Layout == semantic.TreeLayoutCategoryUnion {
+			if tt.Category != nil && treeCategoryLayoutPlan(tt.Category).isCategoryUnion() {
 				access, err := s.emitTreeCategoryUnionTableAccessFromHandle(handleValue, tt.Category.Family, tt.Category, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
@@ -281,7 +281,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				return nil, nil, true, err
 			}
 			var categoryUnionAccess treeCategoryUnionTableAccess
-			if tt.Layout == semantic.TreeLayoutCategoryUnion {
+			if treeCategoryLayoutPlan(tt).isCategoryUnion() {
 				access, err := s.emitTreeCategoryUnionTableAccessFromHandle(handleValue, tt.Family, tt, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
@@ -303,7 +303,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				C.LLVMAddCase(switchInst, tagConst, caseBB)
 				C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
 				var surfaceValue C.LLVMValueRef
-				if tt.Layout == semantic.TreeLayoutCategoryUnion {
+				if treeCategoryLayoutPlan(tt).isCategoryUnion() {
 					surfaceValue, _, err = s.emitTreeCategoryUnionSurfaceFieldValue(categoryUnionAccess.tablePtr, tt, variant, expr.Field, categoryUnionAccess.rowIndex, "tree.field")
 					if err != nil {
 						return nil, nil, true, err

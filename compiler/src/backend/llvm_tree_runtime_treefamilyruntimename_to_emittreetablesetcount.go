@@ -140,6 +140,51 @@ func treeExactMemberLayout(memberType semantic.Type) semantic.TreeLayout {
 	return semantic.DefaultTreeLayout()
 }
 
+type treeLayoutPlan struct {
+	name   string
+	layout semantic.TreeLayout
+}
+
+func treeFamilyLayoutPlan(treeType *semantic.TreeType) treeLayoutPlan {
+	if treeType == nil {
+		return treeLayoutPlan{name: "<missing tree>", layout: semantic.DefaultTreeLayout()}
+	}
+	return treeLayoutPlan{name: treeType.Name, layout: treeType.Layout}
+}
+
+func treeCategoryLayoutPlan(category *semantic.TreeCategoryType) treeLayoutPlan {
+	if category == nil {
+		return treeLayoutPlan{name: "<missing category>", layout: semantic.DefaultTreeLayout()}
+	}
+	return treeLayoutPlan{name: category.Name, layout: category.Layout}
+}
+
+func treeExactMemberLayoutPlan(memberType semantic.Type) treeLayoutPlan {
+	return treeLayoutPlan{name: treeExactMemberSurfaceName(memberType), layout: treeExactMemberLayout(memberType)}
+}
+
+func (plan treeLayoutPlan) isPerVariantRows() bool {
+	return plan.layout == semantic.TreeLayoutPerVariantRows
+}
+
+func (plan treeLayoutPlan) isCategoryUnion() bool {
+	return plan.layout == semantic.TreeLayoutCategoryUnion
+}
+
+func (plan treeLayoutPlan) requirePerVariantRows() error {
+	if !plan.isPerVariantRows() {
+		return unsupportedTreeLayoutError(plan.name, plan.layout)
+	}
+	return nil
+}
+
+func (plan treeLayoutPlan) requireCategoryUnion() error {
+	if !plan.isCategoryUnion() {
+		return unsupportedTreeLayoutError(plan.name, plan.layout)
+	}
+	return nil
+}
+
 func unsupportedTreeLayoutError(name string, layout semantic.TreeLayout) error {
 	return fmt.Errorf("tree layout %q for %s is not implemented by the LLVM backend yet", layout.String(), name)
 }
@@ -247,6 +292,9 @@ func (g *llvmGenerator) ensureTreeCategoryUnionPayloadType(category *semantic.Tr
 	if category == nil {
 		return nil, fmt.Errorf("missing category-union tree category metadata")
 	}
+	if err := treeCategoryLayoutPlan(category).requireCategoryUnion(); err != nil {
+		return nil, err
+	}
 	name := treeCategoryUnionPayloadName(category)
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
@@ -278,8 +326,8 @@ func (g *llvmGenerator) ensureTreeCategoryUnionTableType(category *semantic.Tree
 	if category == nil {
 		return nil, fmt.Errorf("missing category-union tree category metadata")
 	}
-	if category.Layout != semantic.TreeLayoutCategoryUnion {
-		return nil, fmt.Errorf("tree category %s does not use category_union layout", category.Name)
+	if err := treeCategoryLayoutPlan(category).requireCategoryUnion(); err != nil {
+		return nil, err
 	}
 	if _, err := g.ensureTreeCategoryUnionPayloadType(category); err != nil {
 		return nil, err
@@ -311,8 +359,8 @@ func (g *llvmGenerator) ensureTreeExactTableType(memberType semantic.Type) (C.LL
 	if family == nil {
 		return nil, fmt.Errorf("missing tree exact member family")
 	}
-	if layout := treeExactMemberLayout(memberType); layout != semantic.TreeLayoutPerVariantRows {
-		return nil, unsupportedTreeLayoutError(treeExactMemberSurfaceName(memberType), layout)
+	if err := treeExactMemberLayoutPlan(memberType).requirePerVariantRows(); err != nil {
+		return nil, err
 	}
 	if _, err := g.ensureTreeExactRowType(memberType); err != nil {
 		return nil, err
@@ -335,8 +383,8 @@ func (g *llvmGenerator) ensureTreeExactTableType(memberType semantic.Type) (C.LL
 	return ty, nil
 }
 func (g *llvmGenerator) ensureTreeExactRowType(memberType semantic.Type) (C.LLVMTypeRef, error) {
-	if layout := treeExactMemberLayout(memberType); layout != semantic.TreeLayoutPerVariantRows {
-		return nil, unsupportedTreeLayoutError(treeExactMemberSurfaceName(memberType), layout)
+	if err := treeExactMemberLayoutPlan(memberType).requirePerVariantRows(); err != nil {
+		return nil, err
 	}
 	name := treeExactRowName(memberType)
 	ty, err := g.ensureNamedStructType(name)
@@ -378,8 +426,9 @@ func (g *llvmGenerator) ensureTreeStoreStateType(treeType *semantic.TreeType) (C
 		return ty, nil
 	}
 	fields := make([]C.LLVMTypeRef, 0)
-	switch treeType.Layout {
-	case semantic.TreeLayoutPerVariantRows:
+	plan := treeFamilyLayoutPlan(treeType)
+	switch {
+	case plan.isPerVariantRows():
 		members := semantic.TreeFamilyExactMembersInTagOrder(treeType)
 		fields = make([]C.LLVMTypeRef, 0, len(members))
 		for _, member := range members {
@@ -389,7 +438,7 @@ func (g *llvmGenerator) ensureTreeStoreStateType(treeType *semantic.TreeType) (C
 			}
 			fields = append(fields, tableType)
 		}
-	case semantic.TreeLayoutCategoryUnion:
+	case plan.isCategoryUnion():
 		categories := treeFamilyCategoryMembersInDeclOrder(treeType)
 		fields = make([]C.LLVMTypeRef, 0, len(categories))
 		for _, category := range categories {
@@ -400,7 +449,7 @@ func (g *llvmGenerator) ensureTreeStoreStateType(treeType *semantic.TreeType) (C
 			fields = append(fields, tableType)
 		}
 	default:
-		return nil, unsupportedTreeLayoutError(treeType.Name, treeType.Layout)
+		return nil, unsupportedTreeLayoutError(plan.name, plan.layout)
 	}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true

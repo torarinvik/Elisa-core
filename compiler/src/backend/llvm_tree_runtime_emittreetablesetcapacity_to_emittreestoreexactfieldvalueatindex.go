@@ -588,7 +588,7 @@ func (s *functionState) emitTreeCategoryUnionSurfaceFieldValue(tablePtr C.LLVMVa
 	return s.treeFieldSurfaceValue(value, rawType, field.Type, name)
 }
 func (s *functionState) emitTreeMemberFieldValueAtHandle(nodeValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
-	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
+	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && treeCategoryLayoutPlan(viewType.Category).isCategoryUnion() {
 		access, err := s.emitTreeCategoryUnionTableAccessFromHandle(nodeValue, family, viewType.Category, name)
 		if err != nil {
 			return nil, nil, err
@@ -602,7 +602,7 @@ func (s *functionState) emitTreeMemberFieldValueAtHandle(nodeValue C.LLVMValueRe
 	return s.emitTreeExactFieldValueAtIndex(access.tablePtr, memberType, fieldName, access.rowIndex, name)
 }
 func (s *functionState) emitTreeMemberSurfaceFieldValueAtHandle(nodeValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
-	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
+	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && treeCategoryLayoutPlan(viewType.Category).isCategoryUnion() {
 		access, err := s.emitTreeCategoryUnionTableAccessFromHandle(nodeValue, family, viewType.Category, name)
 		if err != nil {
 			return nil, nil, err

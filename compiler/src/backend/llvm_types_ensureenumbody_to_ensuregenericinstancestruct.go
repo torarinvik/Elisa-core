@@ -95,8 +95,8 @@ func (g *llvmGenerator) ensureTreeCategoryStorageNamedType(category *semantic.Tr
 	return g.ensureNamedStructType(treeCategoryStorageName(category))
 }
 func (g *llvmGenerator) ensureTreeCategoryBody(category *semantic.TreeCategoryType) (C.LLVMTypeRef, error) {
-	if category != nil && category.Layout != semantic.TreeLayoutPerVariantRows {
-		return nil, unsupportedTreeLayoutError(category.Name, category.Layout)
+	if err := treeCategoryLayoutPlan(category).requirePerVariantRows(); err != nil {
+		return nil, err
 	}
 	ty, err := g.ensureTreeCategoryStorageNamedType(category)
 	if err != nil {
