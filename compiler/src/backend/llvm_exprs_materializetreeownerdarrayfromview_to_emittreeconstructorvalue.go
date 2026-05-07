@@ -510,53 +510,36 @@ func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeTyp
 	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.store.arena")
 	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.store.state")
 	memberType := treeType.VariantViewType(variant)
-	tablePtr, err := s.emitTreeStateTablePtr(stateValue, treeType.Family, memberType, "tree.ctor")
+	slot, err := s.emitTreeExactAppendSlot(arenaValue, stateValue, treeType.Family, memberType, "tree.ctor")
 	if err != nil {
 		return nil, nil, err
 	}
-	rowIndex, err := s.emitTreeTableCountValue(tablePtr, memberType, "tree.ctor")
-	if err != nil {
-		return nil, nil, err
-	}
-	usizeType, err := s.g.lowerBuiltin("usize")
-	if err != nil {
-		return nil, nil, err
-	}
-	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree("tree.ctor.needed"))
-	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, "tree.ctor"); err != nil {
-		return nil, nil, err
-	}
+	fieldValues := make([]C.LLVMValueRef, 0, len(treeExactFieldDecls(memberType)))
 	for _, fieldDecl := range treeCommonFieldDecls(treeType) {
-		arg := commonArgs[fieldDecl.Name]
 		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 		if !ok {
 			return nil, nil, fmt.Errorf("missing tree common field %s.%s", treeType.Name, fieldDecl.Name)
 		}
-		fieldValue, _, err := s.emitExpr(arg, field.Type)
+		fieldValue, _, err := s.emitExpr(commonArgs[fieldDecl.Name], field.Type)
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, fieldValue, "tree.ctor"); err != nil {
-			return nil, nil, err
-		}
+		fieldValues = append(fieldValues, fieldValue)
 	}
 	for i, payloadType := range variant.Payload {
-		fieldName := variant.PayloadLabel(i)
-		if fieldName == "" {
-			fieldName = fmt.Sprintf("payload%d", i)
-		}
 		fieldValue, _, err := s.emitExpr(orderedArgs[i], payloadType)
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldName, rowIndex, fieldValue, "tree.ctor"); err != nil {
-			return nil, nil, err
-		}
+		fieldValues = append(fieldValues, fieldValue)
 	}
-	if err := s.emitTreeTableSetCount(tablePtr, memberType, neededCount, "tree.ctor"); err != nil {
+	if err := s.emitTreeStoreExactRowValueAtIndex(slot.tablePtr, memberType, slot.rowIndex, fieldValues, "tree.ctor"); err != nil {
 		return nil, nil, err
 	}
-	keyValue, err := s.buildTreeHandleKey(variant.Tag, rowIndex, "tree.ctor")
+	if err := s.emitTreeTableSetCount(slot.tablePtr, memberType, slot.neededCount, "tree.ctor"); err != nil {
+		return nil, nil, err
+	}
+	keyValue, err := s.buildTreeHandleKey(variant.Tag, slot.rowIndex, "tree.ctor")
 	if err != nil {
 		return nil, nil, err
 	}

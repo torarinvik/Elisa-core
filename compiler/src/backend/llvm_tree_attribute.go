@@ -441,12 +441,11 @@ func (s *functionState) emitTreeAttributeNamedChildBindingLocals(nodeValue C.LLV
 	if family == nil {
 		return fmt.Errorf("attribute child binding source %s is missing tree family metadata", treeExactMemberSurfaceName(memberType))
 	}
-	stateValue := s.emitTreeHandleStateValue(nodeValue, name+".state")
-	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name+".index")
+	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
 	if err != nil {
 		return err
 	}
-	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
+	rowValue, _, err := s.emitTreeExactRowValueAtIndex(access.tablePtr, memberType, access.rowIndex, name)
 	if err != nil {
 		return err
 	}
@@ -456,15 +455,7 @@ func (s *functionState) emitTreeAttributeNamedChildBindingLocals(nodeValue C.LLV
 		if !wanted {
 			continue
 		}
-		field, ok := semantic.TreeExactSurfaceFieldInfo(memberType, childBinding.Name)
-		if !ok {
-			return fmt.Errorf("missing exact tree field %s.%s", treeExactMemberSurfaceName(memberType), childBinding.Name)
-		}
-		rawValue, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, childBinding.Name, rowIndex, name+"."+childBinding.Name)
-		if err != nil {
-			return err
-		}
-		surfaceValue, surfaceType, err := s.treeFieldSurfaceValue(rawValue, rawType, field.Type, name+"."+childBinding.Name+".surface")
+		surfaceValue, surfaceType, err := s.emitTreeExactSurfaceFieldValueFromRow(memberType, rowValue, childBinding.Name, name+"."+childBinding.Name+".surface")
 		if err != nil {
 			return err
 		}

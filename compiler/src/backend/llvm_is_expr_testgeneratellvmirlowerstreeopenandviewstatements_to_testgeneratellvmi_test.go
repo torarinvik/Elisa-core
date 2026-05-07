@@ -37,13 +37,16 @@ def left_value(node: Lua.Expr) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @child_span(%Lua__TreeHandle ", "define i64 @left_value(%Lua__TreeHandle ", "call %Lua__TreeHandle @keep_binary(%Lua__TreeHandle ", "match.tree.tag", "%Lua_Expr_Binary__TreeRow = type", "tree.field.rows.ptr", "tree.field.row.ptr"} {
+	for _, check := range []string{"define i64 @child_span(%Lua__TreeHandle ", "define i64 @left_value(%Lua__TreeHandle ", "call %Lua__TreeHandle @keep_binary(%Lua__TreeHandle ", "match.tree.tag", "%Lua_Expr_Binary__TreeTable = type { i64, i64, ptr }", "%Lua_Expr_Binary__TreeRow = type", "tree.field.rows.ptr", "tree.field.row.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree open/view lowering to include %q, got:\n%s", check, output)
 		}
 	}
 	if strings.Contains(output, "TreeView__") || strings.Contains(output, "treeview.handle") {
 		t.Fatalf("expected tree if-pattern lowering to keep treeview as the existing tree handle carrier, got:\n%s", output)
+	}
+	if strings.Contains(output, "tree.field.column.ptr") {
+		t.Fatalf("expected tree open/view lowering to use row arrays, got old column pointer IR:\n%s", output)
 	}
 }
 func TestGenerateLLVMIRLowersTreeChildrenLoops(t *testing.T) {
@@ -539,7 +542,7 @@ def rewrite_binary_explicit(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr,
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define %Lua__TreeHandle @rewrite_binary(%Lua__TreeHandle ", "define %Lua__TreeHandle @rewrite_binary_explicit(%Arena ", "tree.update.src", "tree.update.store.state"} {
+	for _, check := range []string{"define %Lua__TreeHandle @rewrite_binary(%Lua__TreeHandle ", "define %Lua__TreeHandle @rewrite_binary_explicit(%Arena ", "tree.update.src.row", "tree.update.store.state", "load %Lua_Expr_Binary__TreeRow", "insertvalue %Lua_Expr_Binary__TreeRow", "store %Lua_Expr_Binary__TreeRow"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected exact tree update lowering to include %q, got:\n%s", check, output)
 		}

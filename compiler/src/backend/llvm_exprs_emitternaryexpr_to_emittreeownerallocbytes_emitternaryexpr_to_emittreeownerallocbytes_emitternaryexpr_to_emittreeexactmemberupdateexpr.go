@@ -307,55 +307,46 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 	if err != nil {
 		return nil, nil, err
 	}
-	sourceStateValue := s.emitTreeHandleStateValue(handleValue, "tree.update.src.state")
-	sourceRowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.update.src.index")
-	if err != nil {
-		return nil, nil, err
-	}
-	sourceTablePtr, err := s.emitTreeStateTablePtr(sourceStateValue, family, memberType, "tree.update.src")
+	sourceAccess, err := s.emitTreeExactTableAccessFromHandle(handleValue, family, memberType, "tree.update.src")
 	if err != nil {
 		return nil, nil, err
 	}
 	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.update.store.arena")
 	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.update.store.state")
-	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, "tree.update")
+	slot, err := s.emitTreeExactAppendSlot(arenaValue, stateValue, family, memberType, "tree.update")
 	if err != nil {
 		return nil, nil, err
 	}
-	rowIndex, err := s.emitTreeTableCountValue(tablePtr, memberType, "tree.update")
-	if err != nil {
-		return nil, nil, err
-	}
-	usizeType, err := s.g.lowerBuiltin("usize")
-	if err != nil {
-		return nil, nil, err
-	}
-	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree("tree.update.needed"))
-	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, "tree.update"); err != nil {
-		return nil, nil, err
-	}
-	for i, fieldDecl := range fieldDecls {
-		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
-		if !ok {
-			return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
-		}
-		var fieldValue C.LLVMValueRef
-		if i < len(orderedArgs) && orderedArgs[i] != nil {
-			fieldValue, _, err = s.emitExpr(orderedArgs[i], field.Type)
-		} else {
-			fieldValue, _, err = s.emitTreeExactFieldValueAtIndex(sourceTablePtr, memberType, fieldDecl.Name, sourceRowIndex, "tree.update.src")
-		}
+	if len(fieldDecls) > 0 {
+		rowValue, _, err := s.emitTreeExactRowValueAtIndex(sourceAccess.tablePtr, memberType, sourceAccess.rowIndex, "tree.update.src")
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, fieldValue, "tree.update"); err != nil {
+		for i, fieldDecl := range fieldDecls {
+			field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
+			if !ok {
+				return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
+			}
+			if i >= len(orderedArgs) || orderedArgs[i] == nil {
+				continue
+			}
+			fieldValue, _, err := s.emitExpr(orderedArgs[i], field.Type)
+			if err != nil {
+				return nil, nil, err
+			}
+			rowValue, err = s.emitTreePatchExactRowFieldValue(memberType, rowValue, fieldDecl.Name, fieldValue, "tree.update")
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		if err := s.emitTreeStoreExactRowValue(slot.tablePtr, memberType, slot.rowIndex, rowValue, "tree.update"); err != nil {
 			return nil, nil, err
 		}
 	}
-	if err := s.emitTreeTableSetCount(tablePtr, memberType, neededCount, "tree.update"); err != nil {
+	if err := s.emitTreeTableSetCount(slot.tablePtr, memberType, slot.neededCount, "tree.update"); err != nil {
 		return nil, nil, err
 	}
-	keyValue, err := s.buildTreeHandleKey(tag, rowIndex, "tree.update")
+	keyValue, err := s.buildTreeHandleKey(tag, slot.rowIndex, "tree.update")
 	if err != nil {
 		return nil, nil, err
 	}

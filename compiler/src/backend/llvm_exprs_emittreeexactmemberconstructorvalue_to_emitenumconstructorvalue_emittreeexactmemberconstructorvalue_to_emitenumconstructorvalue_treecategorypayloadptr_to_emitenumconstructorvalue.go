@@ -103,13 +103,12 @@ func (s *functionState) extractTreeVariantPayloadValues(nodeValue C.LLVMValueRef
 	if categoryType == nil || categoryType.Family == nil {
 		return nil, fmt.Errorf("missing tree category metadata")
 	}
-	stateValue := s.emitTreeHandleStateValue(nodeValue, "tree.payload")
-	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, "tree.payload")
+	memberType := categoryType.VariantViewType(variant)
+	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, categoryType.Family, memberType, "tree.payload")
 	if err != nil {
 		return nil, err
 	}
-	memberType := categoryType.VariantViewType(variant)
-	tablePtr, err := s.emitTreeStateTablePtr(stateValue, categoryType.Family, memberType, "tree.payload")
+	rowValue, _, err := s.emitTreeExactRowValueAtIndex(access.tablePtr, memberType, access.rowIndex, "tree.payload")
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +118,7 @@ func (s *functionState) extractTreeVariantPayloadValues(nodeValue C.LLVMValueRef
 		if fieldName == "" {
 			fieldName = fmt.Sprintf("payload%d", i)
 		}
-		value, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, fieldName, rowIndex, "tree.payload.field")
+		value, _, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, fieldName, "tree.payload.field")
 		if err != nil {
 			return nil, err
 		}

@@ -369,24 +369,11 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 func (s *functionState) emitStructMatchFieldValue(actualValue C.LLVMValueRef, actualType semantic.Type, field structLiteralField, name string) (C.LLVMValueRef, error) {
 	switch tt := semantic.StripAggregateStateType(actualType).(type) {
 	case *semantic.TreeBlockType, *semantic.TreeStructType:
-		surfaceField, ok := semantic.TreeExactSurfaceFieldInfo(tt, field.Decl.Name)
-		if !ok {
-			return nil, fmt.Errorf("%s has no field %s", actualType.String(), field.Decl.Name)
-		}
-		stateValue := s.emitTreeHandleStateValue(actualValue, name)
-		rowIndex, err := s.emitTreeHandleIndexValue(actualValue, name)
+		access, err := s.emitTreeExactTableAccessFromHandle(actualValue, treeExactMemberFamily(tt), tt, name)
 		if err != nil {
 			return nil, err
 		}
-		tablePtr, err := s.emitTreeStateTablePtr(stateValue, treeExactMemberFamily(tt), tt, name)
-		if err != nil {
-			return nil, err
-		}
-		value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, field.Decl.Name, rowIndex, name)
-		if err != nil {
-			return nil, err
-		}
-		surfaceValue, _, err := s.treeFieldSurfaceValue(value, rawType, surfaceField.Type, name)
+		surfaceValue, _, err := s.emitTreeExactSurfaceFieldValue(access.tablePtr, tt, field.Decl.Name, access.rowIndex, name)
 		return surfaceValue, err
 	default:
 		return C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(field.Index), cStringFree(name)), nil

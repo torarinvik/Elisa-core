@@ -29,7 +29,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define %Lua__TreeHandle @simplify(%Lua__TreeHandle ", "tree.default.src", "tree.default.store.state"} {
+	for _, check := range []string{"define %Lua__TreeHandle @simplify(%Lua__TreeHandle ", "tree.default.src.row", "tree.default.store.state", "load %Lua_Expr_Binary__TreeRow", "insertvalue %Lua_Expr_Binary__TreeRow", "store %Lua_Expr_Binary__TreeRow"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree rewrite default lowering to include %q, got:\n%s", check, output)
 		}

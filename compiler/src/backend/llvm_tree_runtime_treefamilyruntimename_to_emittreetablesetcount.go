@@ -22,6 +22,10 @@ func treeFamilyRuntimeName(treeType *semantic.TreeType) string {
 func treeHandleCarrierName(treeType *semantic.TreeType) string {
 	return treeFamilyRuntimeName(treeType) + "__TreeHandle"
 }
+
+const treeHandleTagShift = 32
+const treeHandleIndexMask = 0xffffffff
+
 func treeStoreStateName(treeType *semantic.TreeType) string {
 	return treeFamilyRuntimeName(treeType) + "__TreeStoreState"
 }
@@ -347,7 +351,7 @@ func (s *functionState) emitTreeTagValueFromKey(keyValue C.LLVMValueRef, name st
 	if err != nil {
 		return nil, err
 	}
-	shifted := C.LLVMBuildLShr(s.builder, keyValue, C.LLVMConstInt(u64Type, 32, 0), cStringFree(name+".tag.shift"))
+	shifted := C.LLVMBuildLShr(s.builder, keyValue, C.LLVMConstInt(u64Type, treeHandleTagShift, 0), cStringFree(name+".tag.shift"))
 	return C.LLVMBuildTrunc(s.builder, shifted, u32Type, cStringFree(name+".tag.trunc")), nil
 }
 func (s *functionState) emitTreeIndexValueFromKey(keyValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
@@ -362,7 +366,7 @@ func (s *functionState) emitTreeIndexValueFromKey(keyValue C.LLVMValueRef, name 
 	if err != nil {
 		return nil, err
 	}
-	masked := C.LLVMBuildAnd(s.builder, keyValue, C.LLVMConstInt(u64Type, 0xffffffff, 0), cStringFree(name+".index.mask"))
+	masked := C.LLVMBuildAnd(s.builder, keyValue, C.LLVMConstInt(u64Type, treeHandleIndexMask, 0), cStringFree(name+".index.mask"))
 	return C.LLVMBuildTrunc(s.builder, masked, usizeType, cStringFree(name+".index.trunc")), nil
 }
 func (s *functionState) emitTreeHandleTagValue(handleValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
@@ -380,9 +384,10 @@ func (s *functionState) buildTreeHandleKey(tag uint32, rowIndexValue C.LLVMValue
 		return nil, err
 	}
 	rowIndex64 := C.LLVMBuildZExt(s.builder, rowIndexValue, u64Type, cStringFree(name+".row.zext"))
+	rowIndexKey := C.LLVMBuildAnd(s.builder, rowIndex64, C.LLVMConstInt(u64Type, treeHandleIndexMask, 0), cStringFree(name+".row.mask"))
 	tagValue := C.LLVMConstInt(u64Type, C.ulonglong(tag), 0)
-	tagShifted := C.LLVMBuildShl(s.builder, tagValue, C.LLVMConstInt(u64Type, 32, 0), cStringFree(name+".tag.shl"))
-	return C.LLVMBuildOr(s.builder, tagShifted, rowIndex64, cStringFree(name+".key")), nil
+	tagShifted := C.LLVMBuildShl(s.builder, tagValue, C.LLVMConstInt(u64Type, treeHandleTagShift, 0), cStringFree(name+".tag.shl"))
+	return C.LLVMBuildOr(s.builder, tagShifted, rowIndexKey, cStringFree(name+".key")), nil
 }
 func (s *functionState) emitTreeStoreFieldValueNamed(storeValue C.LLVMValueRef, index C.unsigned, name string) C.LLVMValueRef {
 	return C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name))
@@ -544,6 +549,24 @@ func (s *functionState) emitTreeStateTablePtr(stateValue C.LLVMValueRef, family 
 		return nil, err
 	}
 	return C.LLVMBuildStructGEP2(s.builder, stateType, stateValue, C.unsigned(tag), cStringFree(name+".table")), nil
+}
+
+type treeExactTableAccess struct {
+	rowIndex C.LLVMValueRef
+	tablePtr C.LLVMValueRef
+}
+
+func (s *functionState) emitTreeExactTableAccessFromHandle(handleValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, name string) (treeExactTableAccess, error) {
+	stateValue := s.emitTreeHandleStateValue(handleValue, name+".state")
+	rowIndex, err := s.emitTreeHandleIndexValue(handleValue, name+".index")
+	if err != nil {
+		return treeExactTableAccess{}, err
+	}
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
+	if err != nil {
+		return treeExactTableAccess{}, err
+	}
+	return treeExactTableAccess{rowIndex: rowIndex, tablePtr: tablePtr}, nil
 }
 func (s *functionState) emitTreeTableCountValue(tablePtr C.LLVMValueRef, memberType semantic.Type, name string) (C.LLVMValueRef, error) {
 	tableType, err := s.g.ensureTreeExactTableType(memberType)

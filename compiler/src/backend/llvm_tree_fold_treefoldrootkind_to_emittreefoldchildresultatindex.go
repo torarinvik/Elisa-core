@@ -402,12 +402,7 @@ func (s *functionState) emitTreeFoldExactStructuralChildNodeValue(nodeValue C.LL
 	if family == nil {
 		return nil, fmt.Errorf("fold child source %s is missing tree family metadata", treeExactMemberSurfaceName(memberType))
 	}
-	stateValue := s.emitTreeHandleStateValue(nodeValue, name+".state")
-	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name+".index")
-	if err != nil {
-		return nil, err
-	}
-	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
+	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
 	if err != nil {
 		return nil, err
 	}
@@ -427,6 +422,10 @@ func (s *functionState) emitTreeFoldExactStructuralChildNodeValue(nodeValue C.LL
 	remaining := indexValue
 	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	rowValue, _, err := s.emitTreeExactRowValueAtIndex(access.tablePtr, memberType, access.rowIndex, name)
+	if err != nil {
+		return nil, err
+	}
 	for _, fieldDecl := range treeExactFieldDecls(memberType) {
 		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 		if !ok {
@@ -436,7 +435,7 @@ func (s *functionState) emitTreeFoldExactStructuralChildNodeValue(nodeValue C.LL
 		if relation != ast.EnumPayloadRelationChild && relation != ast.EnumPayloadRelationChildren {
 			continue
 		}
-		fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, name)
+		fieldValue, _, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, fieldDecl.Name, name)
 		if err != nil {
 			return nil, err
 		}

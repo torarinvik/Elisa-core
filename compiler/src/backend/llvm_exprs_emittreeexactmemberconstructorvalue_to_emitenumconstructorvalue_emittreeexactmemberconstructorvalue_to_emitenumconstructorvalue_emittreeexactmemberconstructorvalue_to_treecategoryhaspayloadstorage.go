@@ -118,22 +118,11 @@ func (s *functionState) emitTreeExactMemberConstructorValue(callExpr *ast.CallEx
 	}
 	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.exact.store.arena")
 	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.exact.store.state")
-	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, "tree.exact")
+	slot, err := s.emitTreeExactAppendSlot(arenaValue, stateValue, family, memberType, "tree.exact")
 	if err != nil {
 		return nil, nil, err
 	}
-	rowIndex, err := s.emitTreeTableCountValue(tablePtr, memberType, "tree.exact")
-	if err != nil {
-		return nil, nil, err
-	}
-	usizeType, err := s.g.lowerBuiltin("usize")
-	if err != nil {
-		return nil, nil, err
-	}
-	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree("tree.exact.needed"))
-	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, "tree.exact"); err != nil {
-		return nil, nil, err
-	}
+	fieldValues := make([]C.LLVMValueRef, 0, len(fieldDecls))
 	for i, fieldDecl := range fieldDecls {
 		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 		if !ok {
@@ -143,14 +132,15 @@ func (s *functionState) emitTreeExactMemberConstructorValue(callExpr *ast.CallEx
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, fieldValue, "tree.exact"); err != nil {
-			return nil, nil, err
-		}
+		fieldValues = append(fieldValues, fieldValue)
 	}
-	if err := s.emitTreeTableSetCount(tablePtr, memberType, neededCount, "tree.exact"); err != nil {
+	if err := s.emitTreeStoreExactRowValueAtIndex(slot.tablePtr, memberType, slot.rowIndex, fieldValues, "tree.exact"); err != nil {
 		return nil, nil, err
 	}
-	keyValue, err := s.buildTreeHandleKey(tag, rowIndex, "tree.exact")
+	if err := s.emitTreeTableSetCount(slot.tablePtr, memberType, slot.neededCount, "tree.exact"); err != nil {
+		return nil, nil, err
+	}
+	keyValue, err := s.buildTreeHandleKey(tag, slot.rowIndex, "tree.exact")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -244,20 +234,11 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 					return value, kindType, true, nil
 				}
 			}
-			stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
-			rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
+			access, err := s.emitTreeExactTableAccessFromHandle(handleValue, tt.Category.Family, tt, "tree.field")
 			if err != nil {
 				return nil, nil, true, err
 			}
-			tablePtr, err := s.emitTreeStateTablePtr(stateValue, tt.Category.Family, tt, "tree.field")
-			if err != nil {
-				return nil, nil, true, err
-			}
-			value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, expr.Field, rowIndex, "tree.field")
-			if err != nil {
-				return nil, nil, true, err
-			}
-			surfaceValue, surfaceType, err := s.treeFieldSurfaceValue(value, rawType, field.Type, "tree.field")
+			surfaceValue, surfaceType, err := s.emitTreeExactSurfaceFieldValue(access.tablePtr, tt, expr.Field, access.rowIndex, "tree.field")
 			return surfaceValue, surfaceType, true, err
 		}
 		return nil, nil, true, fmt.Errorf("%s has no field %s", tt.String(), expr.Field)
@@ -291,10 +272,6 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			if err != nil {
 				return nil, nil, true, err
 			}
-			rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
-			if err != nil {
-				return nil, nil, true, err
-			}
 			resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.result"))
 			failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.fail"))
 			switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(tt.Variants)))
@@ -309,16 +286,11 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				}
 				C.LLVMAddCase(switchInst, tagConst, caseBB)
 				C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
-				stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
-				tablePtr, err := s.emitTreeStateTablePtr(stateValue, tt.Family, memberType, "tree.field")
+				access, err := s.emitTreeExactTableAccessFromHandle(handleValue, tt.Family, memberType, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}
-				value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, expr.Field, rowIndex, "tree.field")
-				if err != nil {
-					return nil, nil, true, err
-				}
-				surfaceValue, _, err := s.treeFieldSurfaceValue(value, rawType, field.Type, "tree.field")
+				surfaceValue, _, err := s.emitTreeExactSurfaceFieldValue(access.tablePtr, memberType, expr.Field, access.rowIndex, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}
@@ -356,24 +328,15 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			value := C.LLVMConstInt(llvmType, C.ulonglong(tag), 0)
 			return value, kindType, true, nil
 		}
-		field, ok := semantic.TreeExactSurfaceFieldInfo(tt, expr.Field)
+		_, ok := semantic.TreeExactSurfaceFieldInfo(tt, expr.Field)
 		if !ok {
 			return nil, nil, true, fmt.Errorf("%s has no field %s", baseType.String(), expr.Field)
 		}
-		stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
-		rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
+		access, err := s.emitTreeExactTableAccessFromHandle(handleValue, treeExactMemberFamily(tt), tt, "tree.field")
 		if err != nil {
 			return nil, nil, true, err
 		}
-		tablePtr, err := s.emitTreeStateTablePtr(stateValue, treeExactMemberFamily(tt), tt, "tree.field")
-		if err != nil {
-			return nil, nil, true, err
-		}
-		value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, expr.Field, rowIndex, "tree.field")
-		if err != nil {
-			return nil, nil, true, err
-		}
-		surfaceValue, surfaceType, err := s.treeFieldSurfaceValue(value, rawType, field.Type, "tree.field")
+		surfaceValue, surfaceType, err := s.emitTreeExactSurfaceFieldValue(access.tablePtr, tt, expr.Field, access.rowIndex, "tree.field")
 		return surfaceValue, surfaceType, true, err
 	default:
 		return nil, nil, false, nil
@@ -448,6 +411,28 @@ func (s *functionState) treeFieldSurfaceValue(value C.LLVMValueRef, rawType sema
 		return nil, nil, err
 	}
 	return viewValue, viewType, nil
+}
+func (s *functionState) emitTreeExactSurfaceFieldValue(tablePtr C.LLVMValueRef, memberType semantic.Type, fieldName string, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	field, ok := semantic.TreeExactSurfaceFieldInfo(memberType, fieldName)
+	if !ok {
+		return nil, nil, fmt.Errorf("%s has no field %s", treeExactMemberSurfaceName(memberType), fieldName)
+	}
+	value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, fieldName, rowIndex, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.treeFieldSurfaceValue(value, rawType, field.Type, name)
+}
+func (s *functionState) emitTreeExactSurfaceFieldValueFromRow(memberType semantic.Type, rowValue C.LLVMValueRef, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
+	field, ok := semantic.TreeExactSurfaceFieldInfo(memberType, fieldName)
+	if !ok {
+		return nil, nil, fmt.Errorf("%s has no field %s", treeExactMemberSurfaceName(memberType), fieldName)
+	}
+	value, rawType, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, fieldName, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.treeFieldSurfaceValue(value, rawType, field.Type, name)
 }
 func (s *functionState) emitTreeHandleValue(expr ast.Expr, objType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	baseType := semantic.StripAggregateStateType(objType)

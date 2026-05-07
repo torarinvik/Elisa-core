@@ -434,10 +434,13 @@ def starts_with_nil(node: Lua.Expr) -> bool:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"%Lua__TreeHandle = type { ptr, i64 }", "%Lua__TreeStoreState = type {", "%Lua_Expr_Binary__TreeRow = type", "@Lua__perm_tree_store", "define %Lua__TreeHandle @make_binary(i64 ", "is.tree.variant.result", "match.tree.tag", "tree.field.rows.ptr", "tree.field.row.ptr"} {
+	for _, check := range []string{"%Lua__TreeHandle = type { ptr, i64 }", "%Lua__TreeStoreState = type {", "%Lua_Expr_Binary__TreeTable = type { i64, i64, ptr }", "%Lua_Expr_Binary__TreeRow = type { i64, %Lua__TreeHandle, %Lua__TreeHandle }", "insertvalue %Lua_Expr_Binary__TreeRow", "store %Lua_Expr_Binary__TreeRow", ".row.mask", "@Lua__perm_tree_store", "define %Lua__TreeHandle @make_binary(i64 ", "is.tree.variant.result", "match.tree.tag", "tree.field.rows.ptr", "tree.field.row.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree is lowering to include %q, got:\n%s", check, output)
 		}
+	}
+	if strings.Contains(output, "tree.field.column.ptr") || strings.Contains(output, "tree.ctor.column.ptr") {
+		t.Fatalf("expected exact tree lowering to use row arrays, got old column pointer IR:\n%s", output)
 	}
 }
 func TestGenerateLLVMIRLowersTreeConstructorsWithArenaOwners(t *testing.T) {

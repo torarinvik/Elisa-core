@@ -100,12 +100,7 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 	if !ok {
 		return nil, nil, fmt.Errorf("default requires an active in <owner>: scope")
 	}
-	sourceStateValue := s.emitTreeHandleStateValue(ctx.nodeValue, "tree.default.src.state")
-	sourceRowIndex, err := s.emitTreeHandleIndexValue(ctx.nodeValue, "tree.default.src.index")
-	if err != nil {
-		return nil, nil, err
-	}
-	sourceTablePtr, err := s.emitTreeStateTablePtr(sourceStateValue, family, memberType, "tree.default.src")
+	sourceAccess, err := s.emitTreeExactTableAccessFromHandle(ctx.nodeValue, family, memberType, "tree.default.src")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -115,14 +110,6 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 	}
 	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.default.store.arena")
 	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.default.store.state")
-	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, "tree.default")
-	if err != nil {
-		return nil, nil, err
-	}
-	rowIndex, err := s.emitTreeTableCountValue(tablePtr, memberType, "tree.default")
-	if err != nil {
-		return nil, nil, err
-	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -130,113 +117,126 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 	}
 	zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	oneValue := C.LLVMConstInt(usizeLLVMType, 1, 0)
-	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, oneValue, cStringFree("tree.default.needed"))
-	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, "tree.default"); err != nil {
+	slot, err := s.emitTreeExactAppendSlot(arenaValue, stateValue, family, memberType, "tree.default")
+	if err != nil {
 		return nil, nil, err
 	}
 	offsetValue := zeroValue
-	for _, fieldDecl := range treeExactFieldDecls(memberType) {
-		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
-		if !ok {
-			return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
-		}
-		sourceFieldValue, _, err := s.emitTreeExactFieldValueAtIndex(sourceTablePtr, memberType, fieldDecl.Name, sourceRowIndex, "tree.default.src")
+	fieldDecls := treeExactFieldDecls(memberType)
+	if len(fieldDecls) > 0 {
+		rowValue, _, err := s.emitTreeExactRowValueAtIndex(sourceAccess.tablePtr, memberType, sourceAccess.rowIndex, "tree.default.src")
 		if err != nil {
 			return nil, nil, err
 		}
-		fieldValue := sourceFieldValue
-		relation := semantic.TreeFieldStructuralRelation(family, field.Type)
-		switch relation {
-		case ast.EnumPayloadRelationChild:
-			bindingType, ok := semantic.TreeRewriteChildBindingType(field.Type, relation)
+		for _, fieldDecl := range fieldDecls {
+			field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 			if !ok {
-				return nil, nil, fmt.Errorf("rewrite default could not determine child result type for %s.%s", memberType.String(), fieldDecl.Name)
+				return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
 			}
-			childResultType := bindingType
-			if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
-				childResultType = optionalBinding.Value
+			sourceFieldValue, _, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, fieldDecl.Name, "tree.default.src")
+			if err != nil {
+				return nil, nil, err
 			}
-			if optionalFieldType, ok := field.Type.(*semantic.OptionalType); ok {
-				presentValue, err := s.extractOptionalPresent(sourceFieldValue, optionalFieldType)
-				if err != nil {
-					return nil, nil, err
+			fieldValue := sourceFieldValue
+			relation := semantic.TreeFieldStructuralRelation(family, field.Type)
+			switch relation {
+			case ast.EnumPayloadRelationChild:
+				bindingType, ok := semantic.TreeRewriteChildBindingType(field.Type, relation)
+				if !ok {
+					return nil, nil, fmt.Errorf("rewrite default could not determine child result type for %s.%s", memberType.String(), fieldDecl.Name)
 				}
-				childCount := C.LLVMBuildSelect(s.builder, presentValue, oneValue, zeroValue, cStringFree("tree.default.child.count"))
-				payloadLLVMType, err := s.g.lowerType(optionalFieldType.Value)
-				if err != nil {
-					return nil, nil, err
+				childResultType := bindingType
+				if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
+					childResultType = optionalBinding.Value
 				}
-				presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.some"))
-				absentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.none"))
-				contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.cont"))
-				C.LLVMBuildCondBr(s.builder, presentValue, presentBB, absentBB)
+				if optionalFieldType, ok := field.Type.(*semantic.OptionalType); ok {
+					presentValue, err := s.extractOptionalPresent(sourceFieldValue, optionalFieldType)
+					if err != nil {
+						return nil, nil, err
+					}
+					childCount := C.LLVMBuildSelect(s.builder, presentValue, oneValue, zeroValue, cStringFree("tree.default.child.count"))
+					payloadLLVMType, err := s.g.lowerType(optionalFieldType.Value)
+					if err != nil {
+						return nil, nil, err
+					}
+					presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.some"))
+					absentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.none"))
+					contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.cont"))
+					C.LLVMBuildCondBr(s.builder, presentValue, presentBB, absentBB)
 
-				C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
-				presentPayload, err := s.emitTreeFoldChildResultAtIndex(ctx.childViewValue, childResultType, offsetValue, "tree.default.child")
-				if err != nil {
-					return nil, nil, err
-				}
-				presentEnd := C.LLVMGetInsertBlock(s.builder)
-				C.LLVMBuildBr(s.builder, contBB)
+					C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
+					presentPayload, err := s.emitTreeFoldChildResultAtIndex(ctx.childViewValue, childResultType, offsetValue, "tree.default.child")
+					if err != nil {
+						return nil, nil, err
+					}
+					presentEnd := C.LLVMGetInsertBlock(s.builder)
+					C.LLVMBuildBr(s.builder, contBB)
 
-				C.LLVMPositionBuilderAtEnd(s.builder, absentBB)
-				absentPayload, err := s.zeroValue(optionalFieldType.Value)
-				if err != nil {
-					return nil, nil, err
-				}
-				absentEnd := C.LLVMGetInsertBlock(s.builder)
-				C.LLVMBuildBr(s.builder, contBB)
+					C.LLVMPositionBuilderAtEnd(s.builder, absentBB)
+					absentPayload, err := s.zeroValue(optionalFieldType.Value)
+					if err != nil {
+						return nil, nil, err
+					}
+					absentEnd := C.LLVMGetInsertBlock(s.builder)
+					C.LLVMBuildBr(s.builder, contBB)
 
-				C.LLVMPositionBuilderAtEnd(s.builder, contBB)
-				payloadPhi := C.LLVMBuildPhi(s.builder, payloadLLVMType, cStringFree("tree.default.child.payload"))
-				C.LLVMAddIncoming(payloadPhi, llvmValueSlicePtr([]C.LLVMValueRef{presentPayload, absentPayload}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{presentEnd, absentEnd}), 2)
-				fieldValue, err = s.buildOptionalValue(optionalFieldType, presentValue, payloadPhi)
-				if err != nil {
-					return nil, nil, err
+					C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+					payloadPhi := C.LLVMBuildPhi(s.builder, payloadLLVMType, cStringFree("tree.default.child.payload"))
+					C.LLVMAddIncoming(payloadPhi, llvmValueSlicePtr([]C.LLVMValueRef{presentPayload, absentPayload}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{presentEnd, absentEnd}), 2)
+					fieldValue, err = s.buildOptionalValue(optionalFieldType, presentValue, payloadPhi)
+					if err != nil {
+						return nil, nil, err
+					}
+					offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, childCount, cStringFree("tree.default.child.offset.next"))
+				} else {
+					fieldValue, err = s.emitTreeFoldChildResultAtIndex(ctx.childViewValue, childResultType, offsetValue, "tree.default.child")
+					if err != nil {
+						return nil, nil, err
+					}
+					offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, oneValue, cStringFree("tree.default.child.offset.next"))
 				}
-				offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, childCount, cStringFree("tree.default.child.offset.next"))
-			} else {
-				fieldValue, err = s.emitTreeFoldChildResultAtIndex(ctx.childViewValue, childResultType, offsetValue, "tree.default.child")
-				if err != nil {
-					return nil, nil, err
+			case ast.EnumPayloadRelationChildren:
+				bindingType, ok := semantic.TreeRewriteChildBindingType(field.Type, relation)
+				if !ok {
+					return nil, nil, fmt.Errorf("rewrite default could not determine children result type for %s.%s", memberType.String(), fieldDecl.Name)
 				}
-				offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, oneValue, cStringFree("tree.default.child.offset.next"))
-			}
-		case ast.EnumPayloadRelationChildren:
-			bindingType, ok := semantic.TreeRewriteChildBindingType(field.Type, relation)
-			if !ok {
-				return nil, nil, fmt.Errorf("rewrite default could not determine children result type for %s.%s", memberType.String(), fieldDecl.Name)
-			}
-			childElemType := field.Type
-			if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
-				if viewType, ok := optionalBinding.Value.(*semantic.DArrayViewType); ok {
+				childElemType := field.Type
+				if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
+					if viewType, ok := optionalBinding.Value.(*semantic.DArrayViewType); ok {
+						childElemType = viewType.Elem
+					}
+				} else if viewType, ok := bindingType.(*semantic.DArrayViewType); ok {
 					childElemType = viewType.Elem
 				}
-			} else if viewType, ok := bindingType.(*semantic.DArrayViewType); ok {
-				childElemType = viewType.Elem
+				countValue, err := s.emitTreeStructuralSequenceCount(sourceFieldValue, field.Type, "tree.default.children.count")
+				if err != nil {
+					return nil, nil, err
+				}
+				subViewValue, subViewType, err := s.emitTreeFoldChildResultsSubview(ctx.childViewValue, childElemType, offsetValue, countValue, "tree.default.children")
+				if err != nil {
+					return nil, nil, err
+				}
+				fieldValue, err = s.coerceTreeRewriteSequenceFieldValue(subViewValue, subViewType, field.Type, owner, "tree.default.children")
+				if err != nil {
+					return nil, nil, err
+				}
+				offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, countValue, cStringFree("tree.default.children.offset.next"))
 			}
-			countValue, err := s.emitTreeStructuralSequenceCount(sourceFieldValue, field.Type, "tree.default.children.count")
-			if err != nil {
-				return nil, nil, err
+			if fieldValue != sourceFieldValue {
+				rowValue, err = s.emitTreePatchExactRowFieldValue(memberType, rowValue, fieldDecl.Name, fieldValue, "tree.default")
+				if err != nil {
+					return nil, nil, err
+				}
 			}
-			subViewValue, subViewType, err := s.emitTreeFoldChildResultsSubview(ctx.childViewValue, childElemType, offsetValue, countValue, "tree.default.children")
-			if err != nil {
-				return nil, nil, err
-			}
-			fieldValue, err = s.coerceTreeRewriteSequenceFieldValue(subViewValue, subViewType, field.Type, owner, "tree.default.children")
-			if err != nil {
-				return nil, nil, err
-			}
-			offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, countValue, cStringFree("tree.default.children.offset.next"))
 		}
-		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, fieldValue, "tree.default"); err != nil {
+		if err := s.emitTreeStoreExactRowValue(slot.tablePtr, memberType, slot.rowIndex, rowValue, "tree.default"); err != nil {
 			return nil, nil, err
 		}
 	}
-	if err := s.emitTreeTableSetCount(tablePtr, memberType, neededCount, "tree.default"); err != nil {
+	if err := s.emitTreeTableSetCount(slot.tablePtr, memberType, slot.neededCount, "tree.default"); err != nil {
 		return nil, nil, err
 	}
-	keyValue, err := s.buildTreeHandleKey(tag, rowIndex, "tree.default")
+	keyValue, err := s.buildTreeHandleKey(tag, slot.rowIndex, "tree.default")
 	if err != nil {
 		return nil, nil, err
 	}

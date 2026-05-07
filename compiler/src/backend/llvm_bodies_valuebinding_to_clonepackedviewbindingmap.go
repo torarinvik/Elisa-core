@@ -73,6 +73,8 @@ type functionState struct {
 	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
 	packedDirectFieldReads       map[packedDirectFieldReadCacheKey]C.LLVMValueRef
 	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
+	treeExactRowPointers         map[treeExactRowCacheKey]C.LLVMValueRef
+	treeExactRowValues           map[treeExactRowCacheKey]C.LLVMValueRef
 	scopedCleanups               []scopedCleanupBinding
 	checkpoints                  map[string]checkpointBinding
 	poolScopes                   []activePoolBinding
@@ -212,6 +214,12 @@ type packedVariantPayloadReadCacheKey struct {
 	variant  *semantic.EnumVariant
 	origin   packedReadOriginKey
 	handle   C.LLVMValueRef
+}
+type treeExactRowCacheKey struct {
+	block      C.LLVMBasicBlockRef
+	memberName string
+	table      C.LLVMValueRef
+	row        C.LLVMValueRef
 }
 type packedEnumStorageBinding struct {
 	ptr C.LLVMValueRef
