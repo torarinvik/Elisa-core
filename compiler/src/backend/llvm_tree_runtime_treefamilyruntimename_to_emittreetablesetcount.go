@@ -486,35 +486,53 @@ func (s *functionState) emitTreeHandleStateValue(handleValue C.LLVMValueRef, nam
 func (s *functionState) emitTreeHandleKeyValue(handleValue C.LLVMValueRef, name string) C.LLVMValueRef {
 	return C.LLVMBuildExtractValue(s.builder, handleValue, 1, cStringFree(name+".key"))
 }
-func (s *functionState) emitTreeTagValueFromKey(keyValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (s *functionState) treeHandleKeyType() (C.LLVMTypeRef, error) {
 	if s == nil || s.g == nil {
 		return nil, fmt.Errorf("missing tree handle lowering state")
 	}
-	u64Type, err := s.g.lowerBuiltin("u64")
+	return s.g.lowerBuiltin("u64")
+}
+func (s *functionState) treeHandleTagType() (C.LLVMTypeRef, error) {
+	if s == nil || s.g == nil {
+		return nil, fmt.Errorf("missing tree handle lowering state")
+	}
+	return s.g.lowerBuiltin("u32")
+}
+func (s *functionState) treeHandleIndexType() (C.LLVMTypeRef, error) {
+	if s == nil || s.g == nil {
+		return nil, fmt.Errorf("missing tree handle lowering state")
+	}
+	return s.g.lowerBuiltin("usize")
+}
+func treeHandleIndexMaskValue(keyType C.LLVMTypeRef) C.LLVMValueRef {
+	return C.LLVMConstInt(keyType, treeHandleIndexMask, 0)
+}
+func treeHandleTagShiftValue(keyType C.LLVMTypeRef) C.LLVMValueRef {
+	return C.LLVMConstInt(keyType, treeHandleTagShift, 0)
+}
+func (s *functionState) emitTreeTagValueFromKey(keyValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	keyType, err := s.treeHandleKeyType()
 	if err != nil {
 		return nil, err
 	}
-	u32Type, err := s.g.lowerBuiltin("u32")
+	tagType, err := s.treeHandleTagType()
 	if err != nil {
 		return nil, err
 	}
-	shifted := C.LLVMBuildLShr(s.builder, keyValue, C.LLVMConstInt(u64Type, treeHandleTagShift, 0), cStringFree(name+".tag.shift"))
-	return C.LLVMBuildTrunc(s.builder, shifted, u32Type, cStringFree(name+".tag.trunc")), nil
+	shifted := C.LLVMBuildLShr(s.builder, keyValue, treeHandleTagShiftValue(keyType), cStringFree(name+".tag.shift"))
+	return C.LLVMBuildTrunc(s.builder, shifted, tagType, cStringFree(name+".tag.trunc")), nil
 }
 func (s *functionState) emitTreeIndexValueFromKey(keyValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	if s == nil || s.g == nil {
-		return nil, fmt.Errorf("missing tree handle lowering state")
-	}
-	u64Type, err := s.g.lowerBuiltin("u64")
+	keyType, err := s.treeHandleKeyType()
 	if err != nil {
 		return nil, err
 	}
-	usizeType, err := s.g.lowerBuiltin("usize")
+	indexType, err := s.treeHandleIndexType()
 	if err != nil {
 		return nil, err
 	}
-	masked := C.LLVMBuildAnd(s.builder, keyValue, C.LLVMConstInt(u64Type, treeHandleIndexMask, 0), cStringFree(name+".index.mask"))
-	return C.LLVMBuildTrunc(s.builder, masked, usizeType, cStringFree(name+".index.trunc")), nil
+	masked := C.LLVMBuildAnd(s.builder, keyValue, treeHandleIndexMaskValue(keyType), cStringFree(name+".index.mask"))
+	return C.LLVMBuildTrunc(s.builder, masked, indexType, cStringFree(name+".index.trunc")), nil
 }
 func (s *functionState) emitTreeHandleTagValue(handleValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	return s.emitTreeTagValueFromKey(s.emitTreeHandleKeyValue(handleValue, name), name)
@@ -523,15 +541,12 @@ func (s *functionState) emitTreeHandleIndexValue(handleValue C.LLVMValueRef, nam
 	return s.emitTreeIndexValueFromKey(s.emitTreeHandleKeyValue(handleValue, name), name)
 }
 func (s *functionState) buildTreeHandleKey(tag uint32, rowIndexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	if s == nil || s.g == nil {
-		return nil, fmt.Errorf("missing tree handle lowering state")
-	}
-	u64Type, err := s.g.lowerBuiltin("u64")
+	keyType, err := s.treeHandleKeyType()
 	if err != nil {
 		return nil, err
 	}
-	rowIndex64 := C.LLVMBuildZExt(s.builder, rowIndexValue, u64Type, cStringFree(name+".row.zext"))
-	maxRowIndex := C.LLVMConstInt(u64Type, treeHandleIndexMask, 0)
+	rowIndex64 := C.LLVMBuildZExt(s.builder, rowIndexValue, keyType, cStringFree(name+".row.zext"))
+	maxRowIndex := treeHandleIndexMaskValue(keyType)
 	rowOverflow := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), rowIndex64, maxRowIndex, cStringFree(name+".row.overflow"))
 	overflowBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".row.overflow.bb"))
 	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".row.key.cont"))
@@ -542,9 +557,9 @@ func (s *functionState) buildTreeHandleKey(tag uint32, rowIndexValue C.LLVMValue
 		return nil, err
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
-	rowIndexKey := C.LLVMBuildAnd(s.builder, rowIndex64, C.LLVMConstInt(u64Type, treeHandleIndexMask, 0), cStringFree(name+".row.mask"))
-	tagValue := C.LLVMConstInt(u64Type, C.ulonglong(tag), 0)
-	tagShifted := C.LLVMBuildShl(s.builder, tagValue, C.LLVMConstInt(u64Type, treeHandleTagShift, 0), cStringFree(name+".tag.shl"))
+	rowIndexKey := C.LLVMBuildAnd(s.builder, rowIndex64, treeHandleIndexMaskValue(keyType), cStringFree(name+".row.mask"))
+	tagValue := C.LLVMConstInt(keyType, C.ulonglong(tag), 0)
+	tagShifted := C.LLVMBuildShl(s.builder, tagValue, treeHandleTagShiftValue(keyType), cStringFree(name+".tag.shl"))
 	return C.LLVMBuildOr(s.builder, tagShifted, rowIndexKey, cStringFree(name+".key")), nil
 }
 func (s *functionState) emitTreeStoreFieldValueNamed(storeValue C.LLVMValueRef, index C.unsigned, name string) C.LLVMValueRef {
