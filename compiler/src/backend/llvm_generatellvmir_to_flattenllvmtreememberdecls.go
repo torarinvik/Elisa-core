@@ -491,8 +491,20 @@ func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl) error {
 		}
 		switch tt := memberType.(type) {
 		case *semantic.TreeCategoryType:
-			if _, err := g.ensureTreeCategoryStorageNamedType(tt); err != nil {
-				return err
+			switch tt.Layout {
+			case semantic.TreeLayoutPerVariantRows:
+				if _, err := g.ensureTreeCategoryStorageNamedType(tt); err != nil {
+					return err
+				}
+			case semantic.TreeLayoutCategoryUnion:
+				if _, err := g.ensureTreeCategoryUnionPayloadType(tt); err != nil {
+					return err
+				}
+				if _, err := g.ensureTreeCategoryUnionTableType(tt); err != nil {
+					return err
+				}
+			default:
+				return unsupportedTreeLayoutError(tt.Name, tt.Layout)
 			}
 		case *semantic.TreeBlockType:
 			if _, err := g.ensureNamedStructType(tt.Name); err != nil {
@@ -536,8 +548,20 @@ func (g *llvmGenerator) emitTreeDecl(decl *ast.TreeDecl) error {
 		}
 		switch tt := memberType.(type) {
 		case *semantic.TreeCategoryType:
-			if _, err := g.ensureTreeCategoryBody(tt); err != nil {
-				return err
+			switch tt.Layout {
+			case semantic.TreeLayoutPerVariantRows:
+				if _, err := g.ensureTreeCategoryBody(tt); err != nil {
+					return err
+				}
+			case semantic.TreeLayoutCategoryUnion:
+				if _, err := g.ensureTreeCategoryUnionPayloadType(tt); err != nil {
+					return err
+				}
+				if _, err := g.ensureTreeCategoryUnionTableType(tt); err != nil {
+					return err
+				}
+			default:
+				return unsupportedTreeLayoutError(tt.Name, tt.Layout)
 			}
 		case *semantic.TreeBlockType:
 			if _, err := g.ensureTreeBlockBody(tt); err != nil {

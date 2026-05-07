@@ -509,6 +509,9 @@ func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeTyp
 	}
 	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.store.arena")
 	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.store.state")
+	if treeType.Layout == semantic.TreeLayoutCategoryUnion {
+		return s.emitTreeCategoryUnionConstructorValue(treeType, variant, orderedArgs, commonArgs, arenaValue, stateValue)
+	}
 	memberType := treeType.VariantViewType(variant)
 	slot, err := s.emitTreeExactAppendSlot(arenaValue, stateValue, treeType.Family, memberType, "tree.ctor")
 	if err != nil {
@@ -544,6 +547,62 @@ func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeTyp
 		return nil, nil, err
 	}
 	handleValue, err := s.buildTreeHandleValue(treeType.Family, stateValue, keyValue, "tree.ctor")
+	if err != nil {
+		return nil, nil, err
+	}
+	return handleValue, treeType, nil
+}
+
+func (s *functionState) emitTreeCategoryUnionConstructorValue(treeType *semantic.TreeCategoryType, variant *semantic.EnumVariant, orderedArgs []ast.Expr, commonArgs map[string]ast.Expr, arenaValue C.LLVMValueRef, stateValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+	if treeType == nil || treeType.Family == nil || variant == nil {
+		return nil, nil, fmt.Errorf("missing category-union tree constructor metadata")
+	}
+	slot, err := s.emitTreeCategoryUnionAppendSlot(arenaValue, stateValue, treeType.Family, treeType, "tree.category")
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.emitTreeCategoryUnionKindAtIndex(slot.tablePtr, treeType, slot.rowIndex, variant.Tag, "tree.category"); err != nil {
+		return nil, nil, err
+	}
+	payloadType, err := s.g.lowerTreeCategoryUnionVariantPayloadType(treeType, variant)
+	if err != nil {
+		return nil, nil, err
+	}
+	if C.LLVMGetTypeKind(payloadType) != C.LLVMVoidTypeKind {
+		payloadValue := C.LLVMGetUndef(payloadType)
+		fieldIndex := 0
+		for _, fieldDecl := range treeCommonFieldDecls(treeType) {
+			field, ok := treeExactFieldInfo(treeType.VariantViewType(variant), fieldDecl.Name)
+			if !ok {
+				return nil, nil, fmt.Errorf("missing tree common field %s.%s", treeType.Name, fieldDecl.Name)
+			}
+			fieldValue, _, err := s.emitExpr(commonArgs[fieldDecl.Name], field.Type)
+			if err != nil {
+				return nil, nil, err
+			}
+			payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, fieldValue, C.unsigned(fieldIndex), cStringFree("tree.category.payload.field"))
+			fieldIndex++
+		}
+		for i, payloadType := range variant.Payload {
+			fieldValue, _, err := s.emitExpr(orderedArgs[i], payloadType)
+			if err != nil {
+				return nil, nil, err
+			}
+			payloadValue = C.LLVMBuildInsertValue(s.builder, payloadValue, fieldValue, C.unsigned(fieldIndex), cStringFree("tree.category.payload.field"))
+			fieldIndex++
+		}
+		if err := s.emitTreeCategoryUnionPayloadAtIndex(slot.tablePtr, treeType, variant, slot.rowIndex, payloadType, payloadValue, "tree.category"); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := s.emitTreeCategoryUnionTableSetCount(slot.tablePtr, treeType, slot.neededCount, "tree.category"); err != nil {
+		return nil, nil, err
+	}
+	keyValue, err := s.buildTreeHandleKey(variant.Tag, slot.rowIndex, "tree.category")
+	if err != nil {
+		return nil, nil, err
+	}
+	handleValue, err := s.buildTreeHandleValue(treeType.Family, stateValue, keyValue, "tree.category")
 	if err != nil {
 		return nil, nil, err
 	}

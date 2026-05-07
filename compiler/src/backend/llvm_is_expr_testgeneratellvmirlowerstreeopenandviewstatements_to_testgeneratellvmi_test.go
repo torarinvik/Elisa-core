@@ -50,7 +50,7 @@ def left_value(node: Lua.Expr) -> i64:
 	}
 }
 
-func TestGenerateLLVMIRRejectsCategoryUnionTreeLayoutUntilLoweringExists(t *testing.T) {
+func TestGenerateLLVMIRLowersCategoryUnionTreeConstructor(t *testing.T) {
 	src := `@layout(category_union)
 tree Lua:
 	common:
@@ -58,18 +58,62 @@ tree Lua:
 	@role(expr)
 	node Expr:
 		Nil
+		Int(value: i64)
 
-def make_nil() -> Lua.Expr:
+def make_int(value: i64) -> Lua.Expr:
 	in perm:
-		return Lua.Expr.Nil(span: 1)
+		return Lua.Expr.Int(span: 1, value: value)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_layout_rejected.elisa", src)
-	_, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
-	if err == nil {
-		t.Fatalf("expected category_union tree layout lowering to fail")
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_ctor.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), `tree layout "category_union" for Lua is not implemented by the LLVM backend yet`) {
-		t.Fatalf("expected category_union backend diagnostic, got: %v", err)
+	for _, check := range []string{
+		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"tree.category.kind.ptr",
+		"tree.category.payload.memcpy",
+		"tree.category.count.ptr",
+		"define %Lua__TreeHandle @make_int",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union constructor lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRPredeclaresCategoryUnionTreeTables(t *testing.T) {
+	src := `@layout(category_union)
+tree Lua:
+	@role(expr)
+	node Expr:
+		Nil
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+		node Atom:
+			Name(id: i64)
+	@role(stmt)
+	node Stmt:
+		Return(value: Expr)
+
+def build_store() -> void:
+	region scratch(256u)
+	store = Lua.Store(scratch)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_table_shell.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"%Lua_Expr_Atom__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"%Lua_Stmt__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"%Lua__TreeStoreState = type { %Lua_Expr__TreeUnionTable, %Lua_Expr_Atom__TreeUnionTable, %Lua_Stmt__TreeUnionTable }",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union type shell to contain %q, got:\n%s", check, output)
+		}
 	}
 }
 func TestGenerateLLVMIRLowersTreeChildrenLoops(t *testing.T) {

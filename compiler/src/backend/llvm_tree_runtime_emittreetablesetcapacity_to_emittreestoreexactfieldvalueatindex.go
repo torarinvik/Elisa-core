@@ -42,6 +42,12 @@ type treeExactAppendSlot struct {
 	neededCount C.LLVMValueRef
 }
 
+type treeCategoryUnionAppendSlot struct {
+	tablePtr    C.LLVMValueRef
+	rowIndex    C.LLVMValueRef
+	neededCount C.LLVMValueRef
+}
+
 func (s *functionState) emitTreeExactAppendSlot(arenaValue C.LLVMValueRef, stateValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, name string) (treeExactAppendSlot, error) {
 	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
 	if err != nil {
@@ -61,6 +67,111 @@ func (s *functionState) emitTreeExactAppendSlot(arenaValue C.LLVMValueRef, state
 	}
 	return treeExactAppendSlot{tablePtr: tablePtr, rowIndex: rowIndex, neededCount: neededCount}, nil
 }
+
+func (s *functionState) emitTreeCategoryUnionAppendSlot(arenaValue C.LLVMValueRef, stateValue C.LLVMValueRef, family *semantic.TreeType, category *semantic.TreeCategoryType, name string) (treeCategoryUnionAppendSlot, error) {
+	tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, family, category, name)
+	if err != nil {
+		return treeCategoryUnionAppendSlot{}, err
+	}
+	rowIndex, err := s.emitTreeCategoryUnionTableCountValue(tablePtr, category, name)
+	if err != nil {
+		return treeCategoryUnionAppendSlot{}, err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return treeCategoryUnionAppendSlot{}, err
+	}
+	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree(name+".needed"))
+	if err := s.emitTreeEnsureCategoryUnionTableCapacity(arenaValue, tablePtr, category, neededCount, name); err != nil {
+		return treeCategoryUnionAppendSlot{}, err
+	}
+	return treeCategoryUnionAppendSlot{tablePtr: tablePtr, rowIndex: rowIndex, neededCount: neededCount}, nil
+}
+
+func (s *functionState) emitTreeCategoryUnionTableSetCapacity(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, capacityValue C.LLVMValueRef, name string) error {
+	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return err
+	}
+	capacityPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 1, cStringFree(name+".capacity.ptr"))
+	C.LLVMBuildStore(s.builder, capacityValue, capacityPtr)
+	return nil
+}
+
+func (s *functionState) emitTreeCategoryUnionTableSetCount(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, countValue C.LLVMValueRef, name string) error {
+	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return err
+	}
+	countPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 0, cStringFree(name+".count.ptr"))
+	C.LLVMBuildStore(s.builder, countValue, countPtr)
+	return nil
+}
+
+func (s *functionState) emitTreeCategoryUnionTableCountValue(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, name string) (C.LLVMValueRef, error) {
+	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return nil, err
+	}
+	countPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 0, cStringFree(name+".count.ptr"))
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildLoad2(s.builder, usizeType, countPtr, cStringFree(name+".count")), nil
+}
+
+func (s *functionState) emitTreeCategoryUnionTableCapacityValue(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, name string) (C.LLVMValueRef, error) {
+	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return nil, err
+	}
+	capacityPtr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 1, cStringFree(name+".capacity.ptr"))
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildLoad2(s.builder, usizeType, capacityPtr, cStringFree(name+".capacity")), nil
+}
+
+func (s *functionState) emitTreeCategoryUnionKindsPointerValue(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, name string) (C.LLVMValueRef, error) {
+	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 2, cStringFree(name+".kinds.ptr"))
+	return C.LLVMBuildLoad2(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), ptr, cStringFree(name+".kinds")), nil
+}
+
+func (s *functionState) emitTreeCategoryUnionPayloadsPointerValue(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, name string) (C.LLVMValueRef, error) {
+	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 3, cStringFree(name+".payloads.ptr"))
+	return C.LLVMBuildLoad2(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), ptr, cStringFree(name+".payloads")), nil
+}
+
+func (s *functionState) emitTreeCategoryUnionTableSetKindsPointer(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, value C.LLVMValueRef, name string) error {
+	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return err
+	}
+	ptr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 2, cStringFree(name+".kinds.ptr"))
+	C.LLVMBuildStore(s.builder, value, ptr)
+	return nil
+}
+
+func (s *functionState) emitTreeCategoryUnionTableSetPayloadsPointer(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, value C.LLVMValueRef, name string) error {
+	tableType, err := s.g.ensureTreeCategoryUnionTableType(category)
+	if err != nil {
+		return err
+	}
+	ptr := C.LLVMBuildStructGEP2(s.builder, tableType, tablePtr, 3, cStringFree(name+".payloads.ptr"))
+	C.LLVMBuildStore(s.builder, value, ptr)
+	return nil
+}
+
 func (s *functionState) emitTreeEnsureTableCapacity(arenaRef C.LLVMValueRef, tablePtr C.LLVMValueRef, memberType semantic.Type, neededCount C.LLVMValueRef, name string) error {
 	currentCapacity, err := s.emitTreeTableCapacityValue(tablePtr, memberType, name)
 	if err != nil {
@@ -168,6 +279,138 @@ func (s *functionState) emitTreeEnsureTableCapacity(arenaRef C.LLVMValueRef, tab
 	C.LLVMBuildBr(s.builder, contBB)
 	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
 	return nil
+}
+
+func (s *functionState) emitTreeEnsureCategoryUnionTableCapacity(arenaRef C.LLVMValueRef, tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, neededCount C.LLVMValueRef, name string) error {
+	currentCapacity, err := s.emitTreeCategoryUnionTableCapacityValue(tablePtr, category, name)
+	if err != nil {
+		return err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return err
+	}
+	kindType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return err
+	}
+	payloadType, err := s.g.ensureTreeCategoryUnionPayloadType(category)
+	if err != nil {
+		return err
+	}
+	kindSizeBytes, err := s.g.abiSizeOfLLVMType(kindType)
+	if err != nil {
+		return err
+	}
+	payloadSizeBytes, err := s.g.abiSizeOfLLVMType(payloadType)
+	if err != nil {
+		return err
+	}
+	needsGrow := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), currentCapacity, neededCount, cStringFree(name+".grow"))
+	growBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".grow.bb"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".grow.cont"))
+	C.LLVMBuildCondBr(s.builder, needsGrow, growBB, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, growBB)
+	zero := C.LLVMConstInt(usizeType, 0, 0)
+	initCap := C.LLVMConstInt(usizeType, C.ulonglong(treeInitialRowCapacity(kindSizeBytes+payloadSizeBytes)), 0)
+	doubled := C.LLVMBuildMul(s.builder, currentCapacity, C.LLVMConstInt(usizeType, 2, 0), cStringFree(name+".capacity.double"))
+	nonZeroCap := C.LLVMBuildSelect(s.builder,
+		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentCapacity, zero, cStringFree(name+".capacity.zero")),
+		initCap,
+		doubled,
+		cStringFree(name+".capacity.base"),
+	)
+	newCapacity := C.LLVMBuildSelect(s.builder,
+		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), nonZeroCap, neededCount, cStringFree(name+".capacity.lt")),
+		neededCount,
+		nonZeroCap,
+		cStringFree(name+".capacity.new"),
+	)
+	if err := s.emitTreeGrowCategoryUnionPointer(arenaRef, tablePtr, category, currentCapacity, newCapacity, kindSizeBytes, true, name+".kinds"); err != nil {
+		return err
+	}
+	if payloadSizeBytes > 0 {
+		if err := s.emitTreeGrowCategoryUnionPointer(arenaRef, tablePtr, category, currentCapacity, newCapacity, payloadSizeBytes, false, name+".payloads"); err != nil {
+			return err
+		}
+	}
+	if err := s.emitTreeCategoryUnionTableSetCapacity(tablePtr, category, newCapacity, name); err != nil {
+		return err
+	}
+	C.LLVMBuildBr(s.builder, contBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	return nil
+}
+
+func (s *functionState) emitTreeGrowCategoryUnionPointer(arenaRef C.LLVMValueRef, tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, currentCapacity C.LLVMValueRef, newCapacity C.LLVMValueRef, rowSizeBytes uint64, kinds bool, name string) error {
+	if rowSizeBytes == 0 {
+		return nil
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return err
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	})
+	reallocType := s.g.cachedRuntimeHelperType("arena_realloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_realloc", Params: []semantic.Type{arenaRefType, voidRefType, s.g.result.NamedTypes["usize"], s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	})
+	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
+	if err != nil {
+		return err
+	}
+	reallocCallee, err := s.g.ensureFunctionDeclared("arena_realloc", reallocType)
+	if err != nil {
+		return err
+	}
+	allocLLVMType, err := s.g.lowerFunctionType(allocType)
+	if err != nil {
+		return err
+	}
+	reallocLLVMType, err := s.g.lowerFunctionType(reallocType)
+	if err != nil {
+		return err
+	}
+	rowSizeValue := C.LLVMConstInt(usizeType, C.ulonglong(rowSizeBytes), 0)
+	oldBytes := C.LLVMBuildMul(s.builder, currentCapacity, rowSizeValue, cStringFree(name+".old.bytes"))
+	newBytes := C.LLVMBuildMul(s.builder, newCapacity, rowSizeValue, cStringFree(name+".new.bytes"))
+	var oldPtr C.LLVMValueRef
+	if kinds {
+		oldPtr, err = s.emitTreeCategoryUnionKindsPointerValue(tablePtr, category, name)
+	} else {
+		oldPtr, err = s.emitTreeCategoryUnionPayloadsPointerValue(tablePtr, category, name)
+	}
+	if err != nil {
+		return err
+	}
+	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), oldPtr, C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0)), cStringFree(name+".null"))
+	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".alloc"))
+	reallocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".realloc"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".cont"))
+	C.LLVMBuildCondBr(s.builder, isNull, allocBB, reallocBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
+	allocated := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaRef, newBytes}, name+".alloc.call")
+	allocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, reallocBB)
+	reallocated := s.buildCall(reallocLLVMType, reallocCallee, []C.LLVMValueRef{arenaRef, oldPtr, oldBytes, newBytes}, name+".realloc.call")
+	reallocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	newPtr := C.LLVMBuildPhi(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), cStringFree(name+".phi"))
+	C.LLVMAddIncoming(newPtr, llvmValueSlicePtr([]C.LLVMValueRef{allocated, reallocated}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{allocEnd, reallocEnd}), 2)
+	if kinds {
+		return s.emitTreeCategoryUnionTableSetKindsPointer(tablePtr, category, newPtr, name)
+	}
+	return s.emitTreeCategoryUnionTableSetPayloadsPointer(tablePtr, category, newPtr, name)
 }
 func (s *functionState) currentBlock() C.LLVMBasicBlockRef {
 	if s == nil || s.builder == nil {
@@ -335,5 +578,59 @@ func (s *functionState) emitTreeStoreExactRowValue(tablePtr C.LLVMValueRef, memb
 		s.treeExactRowValues = map[treeExactRowCacheKey]C.LLVMValueRef{}
 	}
 	s.treeExactRowValues[makeTreeExactRowCacheKey(s, memberType, tablePtr, rowIndex)] = rowValue
+	return nil
+}
+
+func (s *functionState) emitTreeCategoryUnionKindAtIndex(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, rowIndex C.LLVMValueRef, tag uint32, name string) error {
+	kindsPtr, err := s.emitTreeCategoryUnionKindsPointerValue(tablePtr, category, name)
+	if err != nil {
+		return err
+	}
+	kindType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return err
+	}
+	kindPtr := C.LLVMBuildGEP2(s.builder, kindType, kindsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".kind.ptr"))
+	C.LLVMBuildStore(s.builder, C.LLVMConstInt(kindType, C.ulonglong(tag), 0), kindPtr)
+	return nil
+}
+
+func (s *functionState) emitTreeCategoryUnionPayloadAtIndex(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, variant *semantic.EnumVariant, rowIndex C.LLVMValueRef, payloadType C.LLVMTypeRef, payloadValue C.LLVMValueRef, name string) error {
+	payloadsPtr, err := s.emitTreeCategoryUnionPayloadsPointerValue(tablePtr, category, name)
+	if err != nil {
+		return err
+	}
+	payloadRowType, err := s.g.ensureTreeCategoryUnionPayloadType(category)
+	if err != nil {
+		return err
+	}
+	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadRowType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.ptr"))
+	payloadValuePtr := C.LLVMBuildAlloca(s.builder, payloadType, cStringFree(name+".payload.tmp"))
+	C.LLVMBuildStore(s.builder, payloadValue, payloadValuePtr)
+	sizeBytes, err := s.g.abiSizeOfLLVMType(payloadType)
+	if err != nil {
+		return err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	})
+	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{payloadRowPtr, payloadValuePtr, C.LLVMConstInt(usizeLLVMType, C.ulonglong(sizeBytes), 0)}, name+".payload.memcpy")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+	_ = variant
 	return nil
 }

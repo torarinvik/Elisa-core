@@ -77,9 +77,6 @@ func (g *llvmGenerator) lowerTreeCategoryType(category *semantic.TreeCategoryTyp
 	if category.Family == nil {
 		return nil, fmt.Errorf("tree category %s is missing family metadata", category.Name)
 	}
-	if category.Layout != semantic.TreeLayoutPerVariantRows {
-		return nil, unsupportedTreeLayoutError(category.Name, category.Layout)
-	}
 	if _, err := g.ensureTreeHandleCarrierType(category.Family); err != nil {
 		return nil, err
 	}
@@ -147,6 +144,55 @@ func (g *llvmGenerator) ensureTreeCategoryBody(category *semantic.TreeCategoryTy
 	g.structBodies[name] = true
 	return ty, nil
 }
+
+func (g *llvmGenerator) lowerTreeCategoryUnionVariantPayloadType(category *semantic.TreeCategoryType, variant *semantic.EnumVariant) (C.LLVMTypeRef, error) {
+	if category == nil || variant == nil {
+		return C.LLVMVoidTypeInContext(g.context), nil
+	}
+	fields := make([]C.LLVMTypeRef, 0, len(treeCommonFieldDecls(category))+len(variant.Payload))
+	for _, fieldDecl := range treeCommonFieldDecls(category) {
+		field, ok := category.Common[fieldDecl.Name]
+		if !ok {
+			return nil, fmt.Errorf("missing tree common field %s.%s", category.Name, fieldDecl.Name)
+		}
+		fieldType, err := g.lowerType(field.Type)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, fieldType)
+	}
+	for _, payloadType := range variant.Payload {
+		fieldType, err := g.lowerType(payloadType)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, fieldType)
+	}
+	if len(fields) == 0 {
+		return C.LLVMVoidTypeInContext(g.context), nil
+	}
+	return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+}
+
+func (g *llvmGenerator) treeCategoryUnionVariantPayloadSlots(category *semantic.TreeCategoryType, variant *semantic.EnumVariant) (uint64, error) {
+	payloadType, err := g.lowerTreeCategoryUnionVariantPayloadType(category, variant)
+	if err != nil {
+		return 0, err
+	}
+	if C.LLVMGetTypeKind(payloadType) == C.LLVMVoidTypeKind {
+		return 0, nil
+	}
+	sizeBytes, err := g.abiSizeOfLLVMType(payloadType)
+	if err != nil {
+		return 0, err
+	}
+	wordBytes := uint64(g.wordBits / 8)
+	if wordBytes == 0 {
+		wordBytes = 8
+	}
+	return (sizeBytes + wordBytes - 1) / wordBytes, nil
+}
+
 func (g *llvmGenerator) ensureTreeBlockBody(blockType *semantic.TreeBlockType) (C.LLVMTypeRef, error) {
 	if blockType == nil {
 		return nil, fmt.Errorf("missing tree block metadata")
