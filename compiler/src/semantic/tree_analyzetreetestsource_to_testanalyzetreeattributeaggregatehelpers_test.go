@@ -142,6 +142,94 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 		t.Fatalf("expected synthesized Lua.Node tree root, got %#v", result.NamedTypes["Lua.Node"])
 	}
 }
+
+func TestAnalyzeTreeLayoutAnnotations(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_layout_annotations.elisa", `@layout(category_union)
+tree Lua:
+    @role(expr)
+    node Expr:
+        Nil
+        Binary(left: Expr, right: Expr)
+        node Atom:
+            Int(value: i64)
+    @layout(per_variant_rows)
+    node Stmt:
+        Return(value: Expr)
+`)
+
+	family, ok := result.NamedTypes["Lua"].(*TreeType)
+	if !ok {
+		t.Fatalf("expected Lua tree type, got %T", result.NamedTypes["Lua"])
+	}
+	if family.Layout != TreeLayoutCategoryUnion || !family.LayoutExplicit {
+		t.Fatalf("expected explicit category_union tree layout, got %s explicit=%v", family.Layout, family.LayoutExplicit)
+	}
+	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
+	}
+	if exprType.Layout != TreeLayoutCategoryUnion || exprType.LayoutExplicit {
+		t.Fatalf("expected Expr to inherit category_union layout, got %s explicit=%v", exprType.Layout, exprType.LayoutExplicit)
+	}
+	atomType, ok := result.NamedTypes["Lua.Expr.Atom"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Expr.Atom tree category type, got %T", result.NamedTypes["Lua.Expr.Atom"])
+	}
+	if atomType.Layout != TreeLayoutCategoryUnion || atomType.LayoutExplicit {
+		t.Fatalf("expected nested Atom to inherit Expr category_union layout, got %s explicit=%v", atomType.Layout, atomType.LayoutExplicit)
+	}
+	stmtType, ok := result.NamedTypes["Lua.Stmt"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Stmt tree category type, got %T", result.NamedTypes["Lua.Stmt"])
+	}
+	if stmtType.Layout != TreeLayoutPerVariantRows || !stmtType.LayoutExplicit {
+		t.Fatalf("expected Stmt explicit per_variant_rows layout, got %s explicit=%v", stmtType.Layout, stmtType.LayoutExplicit)
+	}
+}
+
+func TestAnalyzeTreeLayoutAnnotationsDefaultAndDiagnostics(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_layout_default.elisa", `tree Lua:
+    @role(expr)
+    node Expr:
+        Nil
+`)
+	family, ok := result.NamedTypes["Lua"].(*TreeType)
+	if !ok {
+		t.Fatalf("expected Lua tree type, got %T", result.NamedTypes["Lua"])
+	}
+	if family.Layout != TreeLayoutPerVariantRows || family.LayoutExplicit {
+		t.Fatalf("expected default per_variant_rows tree layout, got %s explicit=%v", family.Layout, family.LayoutExplicit)
+	}
+	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
+	if !ok {
+		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
+	}
+	if exprType.Layout != TreeLayoutPerVariantRows || exprType.LayoutExplicit {
+		t.Fatalf("expected Expr to inherit default per_variant_rows layout, got %s explicit=%v", exprType.Layout, exprType.LayoutExplicit)
+	}
+
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "tree_layout_bad.elisa", `@layout(banana)
+@layout(category_union)
+tree Bad:
+    @layout
+    @layout(per_variant_rows)
+    node Broken:
+        Nil
+`)
+	all := strings.Join(bad.Errors(), "\n")
+	if !strings.Contains(all, `@layout on tree "Bad" uses unsupported layout "banana"`) {
+		t.Fatalf("expected unsupported tree @layout diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, `duplicate @layout annotation on tree "Bad"`) {
+		t.Fatalf("expected duplicate tree @layout diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, `@layout on tree node "Broken" expects exactly one layout argument`) {
+		t.Fatalf("expected malformed node @layout diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, `duplicate @layout annotation on tree node "Broken"`) {
+		t.Fatalf("expected duplicate node @layout diagnostic, got:\n%s", all)
+	}
+}
 func TestAnalyzeInfersTreePayloadRelations(t *testing.T) {
 	result := analyzeTreeTestSource(t, "tree_inferred_payload_relations.elisa", `tree Lua:
     @role(expr)

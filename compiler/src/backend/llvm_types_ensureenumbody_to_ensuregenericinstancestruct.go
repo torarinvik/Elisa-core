@@ -77,6 +77,9 @@ func (g *llvmGenerator) lowerTreeCategoryType(category *semantic.TreeCategoryTyp
 	if category.Family == nil {
 		return nil, fmt.Errorf("tree category %s is missing family metadata", category.Name)
 	}
+	if category.Layout != semantic.TreeLayoutPerVariantRows {
+		return nil, unsupportedTreeLayoutError(category.Name, category.Layout)
+	}
 	if _, err := g.ensureTreeHandleCarrierType(category.Family); err != nil {
 		return nil, err
 	}
@@ -95,6 +98,9 @@ func (g *llvmGenerator) ensureTreeCategoryStorageNamedType(category *semantic.Tr
 	return g.ensureNamedStructType(treeCategoryStorageName(category))
 }
 func (g *llvmGenerator) ensureTreeCategoryBody(category *semantic.TreeCategoryType) (C.LLVMTypeRef, error) {
+	if category != nil && category.Layout != semantic.TreeLayoutPerVariantRows {
+		return nil, unsupportedTreeLayoutError(category.Name, category.Layout)
+	}
 	ty, err := g.ensureTreeCategoryStorageNamedType(category)
 	if err != nil {
 		return nil, err

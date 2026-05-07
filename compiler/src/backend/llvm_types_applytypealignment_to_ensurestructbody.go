@@ -292,6 +292,9 @@ func (g *llvmGenerator) lowerTreeStoreType(storeType *semantic.TreeStoreType) (C
 	if storeType == nil {
 		return nil, fmt.Errorf("missing tree store type")
 	}
+	if storeType.Family != nil && storeType.Family.Layout != semantic.TreeLayoutPerVariantRows {
+		return nil, unsupportedTreeLayoutError(storeType.Family.Name, storeType.Family.Layout)
+	}
 	name := treeStoreCarrierName(storeType)
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {

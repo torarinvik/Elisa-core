@@ -7,7 +7,7 @@ import (
 	"elisacore/src/lexer"
 )
 
-func (a *Analyzer) registerTreeMemberTypes(treeQualifiedName string, treeType *TreeType, members []ast.TreeMemberDecl) {
+func (a *Analyzer) registerTreeMemberTypes(treeQualifiedName string, treeType *TreeType, members []ast.TreeMemberDecl, inheritedLayout TreeLayout) {
 	if treeType == nil {
 		return
 	}
@@ -24,7 +24,8 @@ func (a *Analyzer) registerTreeMemberTypes(treeQualifiedName string, treeType *T
 		var memberType Type
 		switch m := member.(type) {
 		case *ast.TreeCategoryDecl:
-			categoryType := &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
+			layout, layoutExplicit := a.treeCategoryLayout(m, inheritedLayout)
+			categoryType := &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Layout: layout, LayoutExplicit: layoutExplicit, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
 			if parentName := treeCategoryParentMemberName(m.Name); parentName != "" {
 				parent, _ := treeType.Member(parentName)
 				categoryType.Parent, _ = parent.(*TreeCategoryType)
@@ -52,7 +53,11 @@ func (a *Analyzer) registerTreeMemberTypes(treeQualifiedName string, treeType *T
 			for i := range category.Nested {
 				nested = append(nested, &category.Nested[i])
 			}
-			a.registerTreeMemberTypes(treeQualifiedName, treeType, nested)
+			nestedLayout := inheritedLayout
+			if categoryType, ok := memberType.(*TreeCategoryType); ok && categoryType != nil {
+				nestedLayout = categoryType.Layout
+			}
+			a.registerTreeMemberTypes(treeQualifiedName, treeType, nested, nestedLayout)
 		}
 	}
 }
@@ -378,6 +383,48 @@ func (a *Analyzer) treeCategoryRole(categoryDecl *ast.TreeCategoryDecl) string {
 		role = annotation.Args[0]
 	}
 	return role
+}
+
+func (a *Analyzer) treeDeclLayout(treeDecl *ast.TreeDecl) (TreeLayout, bool) {
+	if treeDecl == nil || len(treeDecl.Annotations) == 0 {
+		return DefaultTreeLayout(), false
+	}
+	return a.resolveTreeLayoutAnnotations("tree", treeDecl.Name, treeDecl.Annotations, DefaultTreeLayout())
+}
+
+func (a *Analyzer) treeCategoryLayout(categoryDecl *ast.TreeCategoryDecl, inherited TreeLayout) (TreeLayout, bool) {
+	if categoryDecl == nil || len(categoryDecl.Annotations) == 0 {
+		return inherited, false
+	}
+	return a.resolveTreeLayoutAnnotations("tree node", categoryDecl.Name, categoryDecl.Annotations, inherited)
+}
+
+func (a *Analyzer) resolveTreeLayoutAnnotations(ownerKind string, ownerName string, annotations []ast.Annotation, inherited TreeLayout) (TreeLayout, bool) {
+	layout := inherited
+	var layoutPos lexer.Pos
+	seenLayout := false
+	for _, annotation := range annotations {
+		if annotation.Name != "layout" {
+			continue
+		}
+		if seenLayout {
+			a.errorf(annotation.Position, "duplicate @layout annotation on %s %q (first seen at %s:%d:%d)", ownerKind, ownerName, layoutPos.File, layoutPos.Line, layoutPos.Col)
+			continue
+		}
+		seenLayout = true
+		layoutPos = annotation.Position
+		if len(annotation.Args) != 1 {
+			a.errorf(annotation.Position, "@layout on %s %q expects exactly one layout argument", ownerKind, ownerName)
+			continue
+		}
+		normalized, ok := normalizeTreeLayoutAnnotationArg(annotation.Args[0])
+		if !ok {
+			a.errorf(annotation.Position, "@layout on %s %q uses unsupported layout %q (expected per_variant_rows or category_union)", ownerKind, ownerName, annotation.Args[0])
+			continue
+		}
+		layout = normalized
+	}
+	return layout, seenLayout
 }
 
 func (a *Analyzer) populateTreeBlockDecl(treeType *TreeType, blockDecl *ast.TreeBlockDecl) {

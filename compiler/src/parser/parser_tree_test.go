@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
-	file, errs := parseSourceFile(t, "@packed_profile(retained_reads)\ntree Lua:\n    common:\n        @storage(side_table)\n        span: LuaSpan\n    @role(expr)\n    @packed_profile(retained_reads)\n    node Expr:\n        Nil\n        Binary(op: LuaBinaryOp, left: Expr, right: Expr)\n    @role(stmt)\n    node Stmt:\n        Return(value: Expr)\n    block Block:\n        stmts: List[Stmt]\n    struct ElseIf:\n        condition: Expr\n        body: Block\n")
+	file, errs := parseSourceFile(t, "@packed_profile(retained_reads)\n@layout(per_variant_rows)\ntree Lua:\n    common:\n        @storage(side_table)\n        span: LuaSpan\n    @role(expr)\n    @packed_profile(retained_reads)\n    @layout(category_union)\n    node Expr:\n        Nil\n        Binary(op: LuaBinaryOp, left: Expr, right: Expr)\n    @role(stmt)\n    node Stmt:\n        Return(value: Expr)\n    block Block:\n        stmts: List[Stmt]\n    struct ElseIf:\n        condition: Expr\n        body: Block\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -20,7 +20,7 @@ func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
 	if decl.Name != "Lua" {
 		t.Fatalf("expected tree name Lua, got %q", decl.Name)
 	}
-	if len(decl.Annotations) != 1 || decl.Annotations[0].Name != "packed_profile" {
+	if len(decl.Annotations) != 2 || decl.Annotations[0].Name != "packed_profile" || decl.Annotations[1].Name != "layout" || len(decl.Annotations[1].Args) != 1 || decl.Annotations[1].Args[0] != "per_variant_rows" {
 		t.Fatalf("expected tree-level packed_profile annotation, got %#v", decl.Annotations)
 	}
 	if len(decl.Common) != 1 {
@@ -43,7 +43,7 @@ func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
 	if exprMember.Name != "Expr" || len(exprMember.Variants) != 2 {
 		t.Fatalf("unexpected Expr node member: %#v", exprMember)
 	}
-	if len(exprMember.Annotations) != 2 || exprMember.Annotations[0].Name != "role" || len(exprMember.Annotations[0].Args) != 1 || exprMember.Annotations[0].Args[0] != "expr" || exprMember.Annotations[1].Name != "packed_profile" {
+	if len(exprMember.Annotations) != 3 || exprMember.Annotations[0].Name != "role" || len(exprMember.Annotations[0].Args) != 1 || exprMember.Annotations[0].Args[0] != "expr" || exprMember.Annotations[1].Name != "packed_profile" || exprMember.Annotations[2].Name != "layout" || len(exprMember.Annotations[2].Args) != 1 || exprMember.Annotations[2].Args[0] != "category_union" {
 		t.Fatalf("expected stacked Expr node annotations, got %#v", exprMember.Annotations)
 	}
 
@@ -78,7 +78,7 @@ func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
 	}
 
 	formatted := unparse.FormatDecl(decl)
-	for _, want := range []string{"tree Lua:", "@role(expr)", "node Expr:", "@role(stmt)", "node Stmt:", "block Block:", "struct ElseIf:"} {
+	for _, want := range []string{"@layout(per_variant_rows)", "tree Lua:", "@role(expr)", "@layout(category_union)", "node Expr:", "@role(stmt)", "node Stmt:", "block Block:", "struct ElseIf:"} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted tree decl to contain %q, got:\n%s", want, formatted)
 		}

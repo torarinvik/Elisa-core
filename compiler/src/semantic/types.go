@@ -288,6 +288,13 @@ type TreeStoreType struct {
 	State  Type
 }
 
+type TreeLayout int
+
+const (
+	TreeLayoutPerVariantRows TreeLayout = iota
+	TreeLayoutCategoryUnion
+)
+
 type PackedVariantViewType struct {
 	Enum    *EnumType
 	Variant *EnumVariant
@@ -305,24 +312,28 @@ type TreeNodeType struct {
 }
 
 type TreeType struct {
-	Name        string
-	Common      map[string]Field
-	MemberTypes map[string]Type
-	NodeType    *TreeNodeType
-	StoreType   *TreeStoreType
-	Decl        *ast.TreeDecl
+	Name           string
+	Layout         TreeLayout
+	LayoutExplicit bool
+	Common         map[string]Field
+	MemberTypes    map[string]Type
+	NodeType       *TreeNodeType
+	StoreType      *TreeStoreType
+	Decl           *ast.TreeDecl
 }
 
 type TreeCategoryType struct {
-	Name       string
-	Family     *TreeType
-	Parent     *TreeCategoryType
-	Role       string
-	KindType   *ConstEnumType
-	Common     map[string]Field
-	Variants   []*EnumVariant
-	VariantMap map[string]*EnumVariant
-	Decl       *ast.TreeCategoryDecl
+	Name           string
+	Family         *TreeType
+	Parent         *TreeCategoryType
+	Role           string
+	Layout         TreeLayout
+	LayoutExplicit bool
+	KindType       *ConstEnumType
+	Common         map[string]Field
+	Variants       []*EnumVariant
+	VariantMap     map[string]*EnumVariant
+	Decl           *ast.TreeCategoryDecl
 }
 
 type TreeBlockType struct {

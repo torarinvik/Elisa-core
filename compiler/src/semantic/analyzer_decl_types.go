@@ -189,7 +189,8 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
-				treeType := &TreeType{Name: qualifiedName, Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
+				layout, layoutExplicit := a.treeDeclLayout(n)
+				treeType := &TreeType{Name: qualifiedName, Layout: layout, LayoutExplicit: layoutExplicit, Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
 				a.namedTypes[qualifiedName] = treeType
 				nodeQualifiedName := treeMemberTypeName(qualifiedName, "Node")
 				if _, exists := a.namedTypes[nodeQualifiedName]; exists {
@@ -217,7 +218,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				treeType.StoreType = storeType
 				a.namedTypes[storeName] = storeType
 				treeType.MemberTypes["Store"] = storeType
-				a.registerTreeMemberTypes(qualifiedName, treeType, n.Members)
+				a.registerTreeMemberTypes(qualifiedName, treeType, n.Members, treeType.Layout)
 			case *ast.ExternTypeDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {

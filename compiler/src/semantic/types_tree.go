@@ -1,5 +1,20 @@
 package semantic
 
+func DefaultTreeLayout() TreeLayout {
+	return TreeLayoutPerVariantRows
+}
+
+func (layout TreeLayout) String() string {
+	switch layout {
+	case TreeLayoutPerVariantRows:
+		return "per_variant_rows"
+	case TreeLayoutCategoryUnion:
+		return "category_union"
+	default:
+		return "unknown"
+	}
+}
+
 func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {
 	if t == nil || t.MemberMap == nil {
 		return nil, false

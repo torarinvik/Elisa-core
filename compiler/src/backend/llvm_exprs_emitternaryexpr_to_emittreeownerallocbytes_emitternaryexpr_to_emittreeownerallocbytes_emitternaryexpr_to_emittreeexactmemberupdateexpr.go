@@ -322,24 +322,24 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 		if err != nil {
 			return nil, nil, err
 		}
+		patchNames := make([]string, 0, len(orderedArgs))
+		patchValues := make([]C.LLVMValueRef, 0, len(orderedArgs))
 		for i, fieldDecl := range fieldDecls {
+			if i >= len(orderedArgs) || orderedArgs[i] == nil {
+				continue
+			}
 			field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 			if !ok {
 				return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
-			}
-			if i >= len(orderedArgs) || orderedArgs[i] == nil {
-				continue
 			}
 			fieldValue, _, err := s.emitExpr(orderedArgs[i], field.Type)
 			if err != nil {
 				return nil, nil, err
 			}
-			rowValue, err = s.emitTreePatchExactRowFieldValue(memberType, rowValue, fieldDecl.Name, fieldValue, "tree.update")
-			if err != nil {
-				return nil, nil, err
-			}
+			patchNames = append(patchNames, fieldDecl.Name)
+			patchValues = append(patchValues, fieldValue)
 		}
-		if err := s.emitTreeStoreExactRowValue(slot.tablePtr, memberType, slot.rowIndex, rowValue, "tree.update"); err != nil {
+		if err := s.emitTreeCopyRowAndPatch(slot.tablePtr, memberType, slot.rowIndex, rowValue, patchNames, patchValues, "tree.update"); err != nil {
 			return nil, nil, err
 		}
 	}

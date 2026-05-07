@@ -301,6 +301,27 @@ func (s *functionState) emitTreeStoreExactRowValueAtIndex(tablePtr C.LLVMValueRe
 	}
 	return s.emitTreeStoreExactRowValue(tablePtr, memberType, rowIndex, rowValue, name)
 }
+func (s *functionState) emitTreeCopyRowAndPatch(tablePtr C.LLVMValueRef, memberType semantic.Type, rowIndex C.LLVMValueRef, rowValue C.LLVMValueRef, fieldNames []string, fieldValues []C.LLVMValueRef, name string) error {
+	patched, err := s.emitTreePatchExactRowFields(memberType, rowValue, fieldNames, fieldValues, name)
+	if err != nil {
+		return err
+	}
+	return s.emitTreeStoreExactRowValue(tablePtr, memberType, rowIndex, patched, name)
+}
+func (s *functionState) emitTreePatchExactRowFields(memberType semantic.Type, rowValue C.LLVMValueRef, fieldNames []string, fieldValues []C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if len(fieldNames) != len(fieldValues) {
+		return nil, fmt.Errorf("tree row patch for %s expects %d field names and %d values", treeExactMemberSurfaceName(memberType), len(fieldNames), len(fieldValues))
+	}
+	patched := rowValue
+	for i, fieldName := range fieldNames {
+		var err error
+		patched, err = s.emitTreePatchExactRowFieldValue(memberType, patched, fieldName, fieldValues[i], name)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return patched, nil
+}
 func (s *functionState) emitTreeStoreExactRowValue(tablePtr C.LLVMValueRef, memberType semantic.Type, rowIndex C.LLVMValueRef, rowValue C.LLVMValueRef, name string) error {
 	if len(treeExactFieldDecls(memberType)) == 0 {
 		return nil

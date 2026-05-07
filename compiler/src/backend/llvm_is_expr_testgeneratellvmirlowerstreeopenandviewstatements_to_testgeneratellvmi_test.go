@@ -49,6 +49,29 @@ def left_value(node: Lua.Expr) -> i64:
 		t.Fatalf("expected tree open/view lowering to use row arrays, got old column pointer IR:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRRejectsCategoryUnionTreeLayoutUntilLoweringExists(t *testing.T) {
+	src := `@layout(category_union)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+
+def make_nil() -> Lua.Expr:
+	in perm:
+		return Lua.Expr.Nil(span: 1)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_layout_rejected.elisa", src)
+	_, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err == nil {
+		t.Fatalf("expected category_union tree layout lowering to fail")
+	}
+	if !strings.Contains(err.Error(), `tree layout "category_union" for Lua is not implemented by the LLVM backend yet`) {
+		t.Fatalf("expected category_union backend diagnostic, got: %v", err)
+	}
+}
 func TestGenerateLLVMIRLowersTreeChildrenLoops(t *testing.T) {
 	src := `tree Lua:
 	common:
@@ -545,6 +568,53 @@ def rewrite_binary_explicit(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr,
 	for _, check := range []string{"define %Lua__TreeHandle @rewrite_binary(%Lua__TreeHandle ", "define %Lua__TreeHandle @rewrite_binary_explicit(%Arena ", "tree.update.src.row", "tree.update.store.state", "load %Lua_Expr_Binary__TreeRow", "insertvalue %Lua_Expr_Binary__TreeRow", "store %Lua_Expr_Binary__TreeRow"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected exact tree update lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIREnsuresTreeRowLayoutMatchesSourceFieldOrder(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Binary(left: Expr, right: Expr)
+		Call(callee: Expr, args: darray[Expr])
+	block Block:
+		stmts: darray[Expr]
+
+def make_binary(span: i64, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return Lua.Expr.Binary(span: span, left: left, right: right)
+
+def make_call(span: i64, callee: Lua.Expr, args: darray[Lua.Expr]) -> Lua.Expr:
+	in perm:
+		return Lua.Expr.Call(span: span, callee: callee, args: args)
+
+def make_block(span: i64, stmts: darray[Lua.Expr]) -> Lua.Block:
+	in perm:
+		return Lua.Block(span: span, stmts: stmts)
+
+def left_span(node: Lua.Expr.Binary) -> i64:
+	return node.left.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_row_layout.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "%Lua_Expr_Binary__TreeRow = type { i64, %Lua__TreeHandle, %Lua__TreeHandle }") {
+		t.Fatalf("expected Lua.Expr.Binary row layout to be { i64, TreeHandle, TreeHandle } matching field order span, left, right, got:\n%s", output)
+	}
+	if !strings.Contains(output, "%Lua_Expr_Call__TreeRow = type { i64, %Lua__TreeHandle, %DynArray__Lua_Expr }") {
+		t.Fatalf("expected Lua.Expr.Call row layout to be { i64, TreeHandle, DynArray_Lua_Expr } matching field order span, callee, args, got:\n%s", output)
+	}
+	if !strings.Contains(output, "%Lua_Block__TreeRow = type { i64, %DynArray__Lua_Expr }") {
+		t.Fatalf("expected Lua.Block row layout to be { i64, DynArray_Lua_Expr } matching field order span, stmts, got:\n%s", output)
+	}
+	for _, check := range []string{"insertvalue %Lua_Expr_Binary__TreeRow", "store %Lua_Expr_Binary__TreeRow", "insertvalue %Lua_Expr_Call__TreeRow", "store %Lua_Expr_Call__TreeRow", "insertvalue %Lua_Block__TreeRow", "store %Lua_Block__TreeRow"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected whole-row store lowering to include %q, got:\n%s", check, output)
 		}
 	}
 }

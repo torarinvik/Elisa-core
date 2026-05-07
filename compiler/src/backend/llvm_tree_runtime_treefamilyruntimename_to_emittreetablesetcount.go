@@ -113,6 +113,29 @@ func treeExactMemberFamily(memberType semantic.Type) *semantic.TreeType {
 		return nil
 	}
 }
+
+func treeExactMemberLayout(memberType semantic.Type) semantic.TreeLayout {
+	switch tt := semantic.StripAggregateStateType(memberType).(type) {
+	case *semantic.TreeVariantViewType:
+		if tt != nil && tt.Category != nil {
+			return tt.Category.Layout
+		}
+	case *semantic.TreeBlockType:
+		if tt != nil && tt.Family != nil {
+			return tt.Family.Layout
+		}
+	case *semantic.TreeStructType:
+		if tt != nil && tt.Family != nil {
+			return tt.Family.Layout
+		}
+	}
+	return semantic.DefaultTreeLayout()
+}
+
+func unsupportedTreeLayoutError(name string, layout semantic.TreeLayout) error {
+	return fmt.Errorf("tree layout %q for %s is not implemented by the LLVM backend yet", layout.String(), name)
+}
+
 func treeExactMemberTag(memberType semantic.Type) (uint32, bool) {
 	switch tt := semantic.StripAggregateStateType(memberType).(type) {
 	case *semantic.TreeVariantViewType:
@@ -157,6 +180,9 @@ func (g *llvmGenerator) ensureTreeHandleCarrierType(treeType *semantic.TreeType)
 	if treeType == nil {
 		return nil, fmt.Errorf("missing tree family for handle lowering")
 	}
+	if treeType.Layout != semantic.TreeLayoutPerVariantRows {
+		return nil, unsupportedTreeLayoutError(treeType.Name, treeType.Layout)
+	}
 	name := treeHandleCarrierName(treeType)
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
@@ -179,6 +205,9 @@ func (g *llvmGenerator) ensureTreeExactTableType(memberType semantic.Type) (C.LL
 	if family == nil {
 		return nil, fmt.Errorf("missing tree exact member family")
 	}
+	if layout := treeExactMemberLayout(memberType); layout != semantic.TreeLayoutPerVariantRows {
+		return nil, unsupportedTreeLayoutError(treeExactMemberSurfaceName(memberType), layout)
+	}
 	if _, err := g.ensureTreeExactRowType(memberType); err != nil {
 		return nil, err
 	}
@@ -200,6 +229,9 @@ func (g *llvmGenerator) ensureTreeExactTableType(memberType semantic.Type) (C.LL
 	return ty, nil
 }
 func (g *llvmGenerator) ensureTreeExactRowType(memberType semantic.Type) (C.LLVMTypeRef, error) {
+	if layout := treeExactMemberLayout(memberType); layout != semantic.TreeLayoutPerVariantRows {
+		return nil, unsupportedTreeLayoutError(treeExactMemberSurfaceName(memberType), layout)
+	}
 	name := treeExactRowName(memberType)
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
@@ -230,6 +262,9 @@ func (g *llvmGenerator) ensureTreeExactRowType(memberType semantic.Type) (C.LLVM
 func (g *llvmGenerator) ensureTreeStoreStateType(treeType *semantic.TreeType) (C.LLVMTypeRef, error) {
 	if treeType == nil {
 		return nil, fmt.Errorf("missing tree family for store state lowering")
+	}
+	if treeType.Layout != semantic.TreeLayoutPerVariantRows {
+		return nil, unsupportedTreeLayoutError(treeType.Name, treeType.Layout)
 	}
 	name := treeStoreStateName(treeType)
 	ty, err := g.ensureNamedStructType(name)
