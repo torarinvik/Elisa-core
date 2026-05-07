@@ -85,3 +85,80 @@ def string_view_empty_slice_test() -> void:
 		}
 	}
 }
+
+func TestRunCLIExecutesCategoryUnionTreeNativeSmoke(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "category_union_tree_native_fixture.elisa")
+	testPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "test.elisa")
+	testInclude, err := filepath.Rel(fixtureDir, testPath)
+	if err != nil {
+		t.Fatalf("failed to compute test include path: %v", err)
+	}
+	testInclude = filepath.ToSlash(testInclude)
+	src := fmt.Sprintf(`# include %q
+
+@layout(category_union)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+def eval(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Int:
+		return node.value + node.span
+	if node is Lua.Expr.Binary:
+		return eval(node.left) + eval(node.right) + node.span
+	return 0
+
+def flip(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+	in perm:
+		return node{left = right, right = left}
+
+@test
+def category_union_tree_roundtrip_test() -> void:
+	can Abort.Panic, Memory.Allocate:
+		region scratch(8192)
+		owner: mutable Arena& = scratch.ref[mutable Arena&]
+		in owner:
+			left: Lua.Expr = Lua.Expr.Int(span: 1, value: 10)
+			right: Lua.Expr = Lua.Expr.Int(span: 2, value: 20)
+			root: Lua.Expr = Lua.Expr.Binary(span: 3, left: left, right: right)
+			assert_eq(eval(root), 36)
+			if root is Lua.Expr.Binary:
+				flipped: Lua.Expr = flip(root, left, right)
+				assert_eq(eval(flipped), 36)
+				copied: Lua.Expr = clone[Lua.Expr](flipped)
+				assert_eq(eval(copied), 36)
+`, testInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write category_union native fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected category_union native tree test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] category_union_tree_roundtrip_test",
+		"[       OK ] category_union_tree_roundtrip_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union native test output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
