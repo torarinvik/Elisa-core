@@ -90,6 +90,18 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 	case *TypeParamType:
 		appendKeyTag(b, "typeparam")
 		appendKeyString(b, tt.Name)
+	case *ConstParamType:
+		appendKeyTag(b, "constparam")
+		appendKeyString(b, tt.Name)
+		if !appendTypeIDKey(b, tt.ValueType, active, nextCycleID) {
+			return false
+		}
+	case *ConstValueType:
+		appendKeyTag(b, "constvalue")
+		appendKeyInt(b, int(tt.Value.Kind))
+		appendKeyInt64(b, tt.Value.Int)
+		appendKeyString(b, tt.Value.String)
+		appendKeyBool(b, tt.Value.Bool)
 	case *StructStateCaseType:
 		appendKeyTag(b, "structstatecase")
 		appendKeyString(b, tt.StructName)
@@ -150,6 +162,7 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		appendKeyBool(b, tt.HasConstSize)
 		appendKeyInt64(b, tt.ConstSize)
 		appendKeyString(b, tt.Size)
+		appendKeyString(b, tt.ConstParam)
 		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
 			return false
 		}

@@ -82,6 +82,16 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			return
 		}
+		if valueParam, ok := a.lookupConstParam(n.Name); ok {
+			if param, paramOK := valueParam.(*ConstParamType); paramOK && param.ValueType != nil {
+				result = param.ValueType
+				return
+			}
+			if value, valueOK := valueParam.(*ConstValueType); valueOK && value.Value.Kind == ConstInt {
+				result = a.namedTypes["usize"]
+				return
+			}
+		}
 		if a.currentScope != nil {
 			if hint, ok := a.currentScope.LookupConditionalBindingHint(n.Name); ok {
 				a.errorf(n.Pos(), "%s", hint)

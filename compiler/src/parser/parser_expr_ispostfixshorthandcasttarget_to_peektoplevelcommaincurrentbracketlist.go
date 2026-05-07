@@ -292,6 +292,9 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 }
 func (p *Parser) parseGenericTypeArgExpr() ast.TypeExpr {
 	switch p.peek() {
+	case lexer.TOKEN_INT_LIT, lexer.TOKEN_HEX_LIT:
+		pos := p.cur().Pos
+		return &ast.GenericValueArgTypeExpr{Position: pos, Value: p.parseExpr()}
 	case lexer.TOKEN_AMPERSAND:
 		pos := p.cur().Pos
 		p.advance()
@@ -451,8 +454,11 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 			if !hasTopLevelComma && afterBracket == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) {
 				afterIdent := p.tokens[p.pos+2].Kind
 				isArray = afterIdent != lexer.TOKEN_AMPERSAND && afterIdent != lexer.TOKEN_QUESTION &&
-					afterIdent != lexer.TOKEN_BANG && afterIdent != lexer.TOKEN_RBRACKET && afterIdent != lexer.TOKEN_COMMA &&
+					afterIdent != lexer.TOKEN_BANG && afterIdent != lexer.TOKEN_COMMA &&
 					afterIdent != lexer.TOKEN_LBRACKET && afterIdent != lexer.TOKEN_PIPE && afterIdent != lexer.TOKEN_DOT
+				if afterIdent == lexer.TOKEN_RBRACKET {
+					isArray = len(name) == 1 && name[0] >= 'A' && name[0] <= 'Z'
+				}
 			}
 			if hasTopLevelComma {
 				isArray = false

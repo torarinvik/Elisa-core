@@ -14,6 +14,12 @@ func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {
 	arr := &ArrayType{Elem: a.resolveType(expr.Elem), Size: a.exprSummary(expr.Size)}
 	value, ok := a.evalConstExpr(expr.Size)
 	if !ok || value.Kind != ConstInt {
+		if ident, identOK := expr.Size.(*ast.Ident); identOK {
+			if _, paramOK := a.lookupConstParam(ident.Name); paramOK {
+				arr.ConstParam = ident.Name
+				return arr
+			}
+		}
 		a.errorf(expr.Size.Pos(), "array size must be a compile-time integer")
 		return arr
 	}
@@ -100,6 +106,12 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		}
 		return ConstValue{Kind: ConstInt, Int: value}, true
 	case *ast.Ident:
+		if t, ok := a.lookupConstParam(n.Name); ok {
+			if valueType, ok := t.(*ConstValueType); ok && valueType != nil {
+				return valueType.Value, true
+			}
+			return ConstValue{}, false
+		}
 		value, ok := a.lookupVisibleConst(n.Name)
 		return value, ok
 	case *ast.FieldExpr:

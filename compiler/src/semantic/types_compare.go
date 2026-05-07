@@ -115,6 +115,12 @@ func SameType(a, b Type) bool {
 	case *TypeParamType:
 		tb, ok := b.(*TypeParamType)
 		return ok && ta.Name == tb.Name
+	case *ConstParamType:
+		tb, ok := b.(*ConstParamType)
+		return ok && ta.Name == tb.Name && SameType(ta.ValueType, tb.ValueType)
+	case *ConstValueType:
+		tb, ok := b.(*ConstValueType)
+		return ok && ta.Value == tb.Value
 	case *AssociatedTypeProjection:
 		tb, ok := b.(*AssociatedTypeProjection)
 		return ok && ta.InterfaceName == tb.InterfaceName && ta.Name == tb.Name && SameType(ta.Receiver, tb.Receiver)

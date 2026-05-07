@@ -70,6 +70,8 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 	refStorageArgs := make([]Type, 0)
 	refStateNames := make([]string, 0)
 	refStateArgs := make([]Type, 0)
+	constNames := make([]string, 0)
+	constArgs := make([]Type, 0)
 	for i, param := range params {
 		var arg Type
 		if i < len(args) {
@@ -93,15 +95,51 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 		case ast.GenericParamRefState:
 			refStateNames = append(refStateNames, param.Name)
 			refStateArgs = append(refStateArgs, arg)
+		case ast.GenericParamValue:
+			constNames = append(constNames, param.Name)
+			if arg != nil {
+				constArgs = append(constArgs, arg)
+			} else {
+				constArgs = append(constArgs, &ConstParamType{Name: param.Name, ValueType: a.resolveType(&ast.NamedType{Position: param.Position, Name: param.InterfaceBound})})
+			}
 		}
 	}
 	a.withTypeParamInterfaces(typeInterfaces, func() {
 		a.withTypeParams(typeNames, typeArgs, func() {
 			a.withRefStorageParams(refStorageNames, refStorageArgs, func() {
-				a.withRefStateParams(refStateNames, refStateArgs, fn)
+				a.withRefStateParams(refStateNames, refStateArgs, func() {
+					a.withConstParams(constNames, constArgs, fn)
+				})
 			})
 		})
 	})
+}
+
+func (a *Analyzer) withConstParams(names []string, args []Type, fn func()) {
+	if len(names) == 0 {
+		fn()
+		return
+	}
+	bindings := make(map[string]Type, len(names))
+	for i, name := range names {
+		if i < len(args) && args[i] != nil {
+			bindings[name] = args[i]
+		} else {
+			bindings[name] = &ConstParamType{Name: name}
+		}
+	}
+	a.constParamScopes = append(a.constParamScopes, bindings)
+	fn()
+	a.constParamScopes = a.constParamScopes[:len(a.constParamScopes)-1]
+}
+
+func (a *Analyzer) lookupConstParam(name string) (Type, bool) {
+	for i := len(a.constParamScopes) - 1; i >= 0; i-- {
+		if t, ok := a.constParamScopes[i][name]; ok {
+			return t, true
+		}
+	}
+	return nil, false
 }
 
 func (a *Analyzer) lookupTypeParam(name string) (Type, bool) {

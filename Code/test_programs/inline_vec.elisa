@@ -1,0 +1,60 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+
+def inline_vec4_inline_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        values: mutable InlineVec[i32, 4] = inline_vec[i32, 4](a)
+        inline_vec_push[i32, 4](values, 2)
+        inline_vec_push[i32, 4](values, 3)
+        inline_vec_push[i32, 4](values, 5)
+
+        -1 return if inline_vec_count[i32, 4](values) != 3usize
+        -2 return if inline_vec_spilled[i32, 4](values)
+        return inline_vec_get[i32, 4](values, 0usize) + inline_vec_get[i32, 4](values, 1usize) + inline_vec_get[i32, 4](values, 2usize)
+
+
+def inline_vec4_spill_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        values: mutable InlineVec[i32, 4] = inline_vec[i32, 4](a)
+        inline_vec_push[i32, 4](values, 1)
+        inline_vec_push[i32, 4](values, 2)
+        inline_vec_push[i32, 4](values, 3)
+        inline_vec_push[i32, 4](values, 4)
+        inline_vec_push[i32, 4](values, 5)
+        inline_vec_push[i32, 4](values, 6)
+
+        -1 return if inline_vec_count[i32, 4](values) != 6usize
+        -2 return if not inline_vec_spilled[i32, 4](values)
+        inline_vec_set[i32, 4](values, 2usize, 30)
+        return inline_vec_get[i32, 4](values, 0usize) + inline_vec_get[i32, 4](values, 2usize) + inline_vec_get[i32, 4](values, 5usize)
+
+
+def inline_vec8_view_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        values: mutable InlineVec[i32, 8] = inline_vec[i32, 8](a)
+        for index in 0..<9usize:
+            inline_vec_push[i32, 8](values, index.i32())
+
+        -1 return if inline_vec_count[i32, 8](values) != 9usize
+        -2 return if not inline_vec_spilled[i32, 8](values)
+
+        view: dview[i32] = inline_vec_view[i32, 8](values)
+        sum: mutable i32 = 0
+        for index in 0..<view.len:
+            sum <- sum + view[index]
+        return sum
+
+
+def inline_vec_clear_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        values: mutable InlineVec[i32, 4] = inline_vec[i32, 4](a)
+        for index in 0..<5usize:
+            inline_vec_push[i32, 4](values, index.i32())
+
+        -1 return if not inline_vec_spilled[i32, 4](values)
+        inline_vec_clear[i32, 4](values)
+        -2 return if inline_vec_count[i32, 4](values) != 0usize
+        -3 return if inline_vec_spilled[i32, 4](values)
+
+        inline_vec_push[i32, 4](values, 42)
+        return inline_vec_get[i32, 4](values, 0usize)

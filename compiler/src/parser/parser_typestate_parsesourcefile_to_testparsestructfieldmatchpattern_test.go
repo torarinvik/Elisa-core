@@ -370,6 +370,29 @@ func TestParseStructDeclWithNamedRefQualifiers(t *testing.T) {
 		t.Fatalf("expected state param state, got %q", refType.StateParam)
 	}
 }
+func TestParseStructDeclWithValueGenericParam(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct InlineVec[T, N: usize]:\n    items: T[N]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if len(decl.GenericParams) != 2 || decl.GenericParams[0].Kind != ast.GenericParamType || decl.GenericParams[1].Kind != ast.GenericParamValue {
+		t.Fatalf("expected type param followed by value param, got %#v", decl.GenericParams)
+	}
+	if decl.GenericParams[1].Name != "N" || decl.GenericParams[1].InterfaceBound != "usize" {
+		t.Fatalf("expected value param N: usize, got %#v", decl.GenericParams[1])
+	}
+	arrayType, ok := decl.Fields[0].Type.(*ast.ArrayType)
+	if !ok {
+		t.Fatalf("expected T[N] to parse as array type, got %T", decl.Fields[0].Type)
+	}
+	if _, ok := arrayType.Size.(*ast.Ident); !ok {
+		t.Fatalf("expected array size to remain value param identifier, got %T", arrayType.Size)
+	}
+}
 func TestParseNamedRefStateAttachesToNearestRef(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Holder[refstate s]:\n    value: i32&&[s]\n")
 	if len(errs) != 0 {

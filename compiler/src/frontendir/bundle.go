@@ -99,6 +99,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.TailType{})
 		gob.Register(&ast.ArrayType{})
 		gob.Register(&ast.BuiltinTypeExpr{})
+		gob.Register(&ast.GenericValueArgTypeExpr{})
 		gob.Register(&ast.FuncTypeExpr{})
 		gob.Register(&ast.ErrorSetExpr{})
 		gob.Register(&ast.ErrorUnionTypeExpr{})

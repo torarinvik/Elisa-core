@@ -375,6 +375,12 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if _, exists := bindings[p.Name]; !exists {
 			bindings[p.Name] = actual
 		}
+	case *ConstParamType:
+		if _, exists := bindings[p.Name]; !exists {
+			if value, ok := actual.(*ConstValueType); ok {
+				bindings[p.Name] = value
+			}
+		}
 	case *RefStorageParamType:
 		if _, exists := bindings[p.Name]; !exists {
 			bindings[p.Name] = actual
@@ -415,6 +421,11 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *ArrayType:
 		if act, ok := actual.(*ArrayType); ok {
+			if p.ConstParam != "" && act.HasConstSize {
+				if _, exists := bindings[p.ConstParam]; !exists {
+					bindings[p.ConstParam] = &ConstValueType{Value: ConstValue{Kind: ConstInt, Int: act.ConstSize}}
+				}
+			}
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		}
 	case *DArrayType:

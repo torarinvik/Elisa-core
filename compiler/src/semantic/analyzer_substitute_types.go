@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strconv"
+
 	"elisacore/src/ast"
 )
 
@@ -21,6 +23,13 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if resolved, ok := bindings[n.Name]; ok {
 			return resolved
 		}
+		return n
+	case *ConstParamType:
+		if resolved, ok := bindings[n.Name]; ok {
+			return resolved
+		}
+		return n
+	case *ConstValueType:
 		return n
 	case *IDType:
 		tag := a.substituteTypeWithDepth(n.Tag, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
@@ -105,7 +114,14 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if IsInvalidType(elem) {
 			return invalidType
 		}
-		return &ArrayType{Elem: elem, Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
+		if n.ConstParam != "" {
+			if resolved, ok := bindings[n.ConstParam]; ok {
+				if value, valueOK := resolved.(*ConstValueType); valueOK && value.Value.Kind == ConstInt {
+					return &ArrayType{Elem: elem, Size: strconv.FormatInt(value.Value.Int, 10), HasConstSize: true, ConstSize: value.Value.Int, SurfaceName: n.SurfaceName}
+				}
+			}
+		}
+		return &ArrayType{Elem: elem, Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, ConstParam: n.ConstParam, SurfaceName: n.SurfaceName}
 	case *DArrayType:
 		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(elem) {

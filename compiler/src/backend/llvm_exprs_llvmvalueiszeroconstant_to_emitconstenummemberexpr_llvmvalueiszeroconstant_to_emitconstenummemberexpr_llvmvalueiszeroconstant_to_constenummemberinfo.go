@@ -454,7 +454,19 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		llvmValue, llvmType, err := s.emitConstValue(value)
 		return llvmValue, llvmType, err
 	}
-	return nil, nil, fmt.Errorf("unknown identifier %q during LLVM lowering", expr.Name)
+	if s.typeMap != nil {
+		if bound, ok := s.typeMap[expr.Name]; ok {
+			if value, valueOK := bound.(*semantic.ConstValueType); valueOK {
+				llvmValue, llvmType, err := s.emitConstValue(value.Value)
+				return llvmValue, llvmType, err
+			}
+		}
+	}
+	fnName := "<unknown>"
+	if s.decl != nil {
+		fnName = s.decl.Name
+	}
+	return nil, nil, fmt.Errorf("unknown identifier %q during LLVM lowering in %s", expr.Name, fnName)
 }
 func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetType, string, bool) {
 	ident, ok := expr.Object.(*ast.Ident)

@@ -489,6 +489,12 @@ func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstan
 	if len(params) != len(inst.Args) {
 		return nil, fmt.Errorf("generic instance %s has %d args, expected %d", inst.Name, len(inst.Args), len(params))
 	}
+	for _, arg := range inst.Args {
+		if _, unresolved := arg.(*semantic.ConstParamType); unresolved {
+			g.structBodies[name] = true
+			return ty, nil
+		}
+	}
 	subst := genericBindingsForArgs(params, inst.Args)
 	if base.Decl == nil {
 		return nil, fmt.Errorf("generic struct %s is missing declaration metadata", base.Name)
@@ -501,7 +507,7 @@ func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstan
 		}
 		fieldType, err := g.lowerType(substituteType(field.Type, subst, g.result.StaticImpls))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("lowering field %s.%s for %s: %w", base.Name, fieldDecl.Name, name, err)
 		}
 		fields = append(fields, fieldType)
 	}

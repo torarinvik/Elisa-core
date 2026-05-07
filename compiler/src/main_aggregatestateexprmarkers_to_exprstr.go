@@ -229,6 +229,8 @@ func typeStr(t ast.TypeExpr) string {
 			args = append(args, typeStr(a))
 		}
 		return n.Name + "[" + strings.Join(args, ", ") + "]"
+	case *ast.GenericValueArgTypeExpr:
+		return exprStr(n.Value)
 	case *ast.AggregateStateTypeExpr:
 		return typeStr(n.Base) + aggregateStateExprMarkers(n.States, n.State)
 	case *ast.RefStateLiteralTypeExpr:

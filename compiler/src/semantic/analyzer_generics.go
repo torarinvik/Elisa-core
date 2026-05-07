@@ -122,6 +122,18 @@ func (a *Analyzer) typeSatisfiesStaticInterface(candidate Type, iface *StaticInt
 
 func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.GenericParam) Type {
 	switch param.Kind {
+	case ast.GenericParamValue:
+		if named, ok := expr.(*ast.NamedType); ok {
+			if t, paramOK := a.lookupConstParam(named.Name); paramOK {
+				return t
+			}
+		}
+		value, ok := a.genericValueArgConst(expr)
+		if !ok || value.Kind != ConstInt {
+			a.errorf(expr.Pos(), "generic argument for value parameter %q must be a compile-time integer", param.Name)
+			return invalidType
+		}
+		return &ConstValueType{Value: value}
 	case ast.GenericParamState:
 		return a.resolveNamedStateGenericArg(expr, param)
 	case ast.GenericParamRefStorage:
@@ -190,6 +202,22 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 			}
 		}
 		return resolved
+	}
+}
+
+func (a *Analyzer) genericValueArgConst(expr ast.TypeExpr) (ConstValue, bool) {
+	switch n := expr.(type) {
+	case *ast.GenericValueArgTypeExpr:
+		return a.evalConstExpr(n.Value)
+	case *ast.NamedType:
+		if valueType, ok := a.lookupConstParam(n.Name); ok {
+			if concrete, concreteOK := valueType.(*ConstValueType); concreteOK && concrete != nil {
+				return concrete.Value, true
+			}
+		}
+		return a.lookupVisibleConst(n.Name)
+	default:
+		return ConstValue{}, false
 	}
 }
 

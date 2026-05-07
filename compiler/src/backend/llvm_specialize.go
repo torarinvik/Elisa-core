@@ -105,8 +105,52 @@ func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes 
 	for i := 0; i < limit; i++ {
 		collectSpecializationBindings(fn.Params[i], argTypes[i], bindings)
 	}
+	params := funcGenericParams(fn)
+	for _, param := range params {
+		if _, ok := bindings[param.Name]; ok || param.Kind != ast.GenericParamValue {
+			continue
+		}
+		for _, argType := range argTypes {
+			if value, ok := findConstGenericArgInType(argType, param.Name); ok {
+				bindings[param.Name] = value
+				break
+			}
+		}
+	}
 	_ = args
 	return bindings
+}
+
+func findConstGenericArgInType(t semantic.Type, name string) (*semantic.ConstValueType, bool) {
+	switch tt := t.(type) {
+	case *semantic.GenericInstanceType:
+		params := structGenericParams(asStructType(tt.Base))
+		for i, param := range params {
+			if i >= len(tt.Args) {
+				break
+			}
+			if param.Name == name {
+				if value, ok := tt.Args[i].(*semantic.ConstValueType); ok {
+					return value, true
+				}
+			}
+			if value, ok := findConstGenericArgInType(tt.Args[i], name); ok {
+				return value, true
+			}
+		}
+	case *semantic.RefType:
+		return findConstGenericArgInType(tt.Elem, name)
+	case *semantic.ArrayType:
+		return findConstGenericArgInType(tt.Elem, name)
+	case *semantic.DArrayType:
+		return findConstGenericArgInType(tt.Elem, name)
+	}
+	return nil, false
+}
+
+func asStructType(t semantic.Type) *semantic.StructType {
+	st, _ := t.(*semantic.StructType)
+	return st
 }
 
 func inferTypeBindingsFromFuncTypes(pattern *semantic.FuncType, actual *semantic.FuncType) map[string]semantic.Type {
@@ -170,6 +214,12 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		if _, ok := bindings[p.Name]; !ok {
 			bindings[p.Name] = actual
 		}
+	case *semantic.ConstParamType:
+		if _, ok := bindings[p.Name]; !ok {
+			if value, ok := actual.(*semantic.ConstValueType); ok {
+				bindings[p.Name] = value
+			}
+		}
 	case *semantic.RefStorageParamType:
 		if _, ok := bindings[p.Name]; !ok {
 			bindings[p.Name] = actual
@@ -199,6 +249,11 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		}
 	case *semantic.ArrayType:
 		if a, ok := actual.(*semantic.ArrayType); ok {
+			if p.ConstParam != "" && a.HasConstSize {
+				if _, ok := bindings[p.ConstParam]; !ok {
+					bindings[p.ConstParam] = &semantic.ConstValueType{Value: semantic.ConstValue{Kind: semantic.ConstInt, Int: a.ConstSize}}
+				}
+			}
 			collectSpecializationBindings(p.Elem, a.Elem, bindings)
 		}
 	case *semantic.ViewType:

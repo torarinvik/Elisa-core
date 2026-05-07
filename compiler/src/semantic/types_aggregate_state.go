@@ -62,6 +62,8 @@ func DefaultNamedStateType(t Type) Type {
 			args[i] = &RefStateParamType{Name: param.Name}
 		case ast.GenericParamState:
 			args[i] = fullNamedStateType(base)
+		case ast.GenericParamValue:
+			args[i] = &ConstParamType{Name: param.Name, ValueType: &BuiltinType{Name: param.InterfaceBound}}
 		}
 	}
 	return &GenericInstanceType{Name: base.Name, Base: base, Args: args}

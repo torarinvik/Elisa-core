@@ -130,6 +130,18 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if err != nil {
 			return nil, err
 		}
+		if ident, ok := n.Size.(*ast.Ident); ok {
+			if bound, boundOK := s.typeMap[ident.Name]; boundOK {
+				switch value := bound.(type) {
+				case *semantic.ConstValueType:
+					if value.Value.Kind == semantic.ConstInt {
+						return &semantic.ArrayType{Elem: elem, Size: fmt.Sprintf("%d", value.Value.Int), HasConstSize: true, ConstSize: value.Value.Int}, nil
+					}
+				case *semantic.ConstParamType:
+					return &semantic.ArrayType{Elem: elem, Size: ident.Name, ConstParam: ident.Name}, nil
+				}
+			}
+		}
 		size, err := s.evalConstIntExpr(n.Size)
 		if err != nil {
 			return nil, err
@@ -194,12 +206,36 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			args = append(args, resolved)
 		}
 		return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}), nil
+	case *ast.GenericValueArgTypeExpr:
+		value, err := s.evalConstIntExpr(n.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &semantic.ConstValueType{Value: semantic.ConstValue{Kind: semantic.ConstInt, Int: value}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported type expression %T", expr)
 	}
 }
 func (s *functionState) resolveGenericArgForParam(expr ast.TypeExpr, param ast.GenericParam) (semantic.Type, error) {
 	switch param.Kind {
+	case ast.GenericParamValue:
+		valueExpr, ok := expr.(*ast.GenericValueArgTypeExpr)
+		if !ok {
+			if named, namedOK := expr.(*ast.NamedType); namedOK {
+				if s.typeMap != nil {
+					if bound, boundOK := s.typeMap[named.Name]; boundOK {
+						return bound, nil
+					}
+				}
+				return &semantic.ConstParamType{Name: named.Name}, nil
+			}
+			return nil, fmt.Errorf("generic argument for value parameter %q must be a compile-time integer", param.Name)
+		}
+		value, err := s.evalConstIntExpr(valueExpr.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &semantic.ConstValueType{Value: semantic.ConstValue{Kind: semantic.ConstInt, Int: value}}, nil
 	case ast.GenericParamState:
 		allowed := make(map[string]bool, len(param.StateCases))
 		for _, name := range param.StateCases {

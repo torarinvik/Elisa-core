@@ -563,3 +563,20 @@ def run() -> i64:
 	requireFunctionReturnTypeString(t, result, "apply_i64", "i64")
 	requireFunctionReturnTypeString(t, result, "run", "i64")
 }
+func TestAnalyzeAcceptsValueGenericStructAndFunction(t *testing.T) {
+	src := `struct Fixed[T, N: usize]:
+    items: T[N]
+
+def first[T, N: usize](value: Fixed[T, N]) -> T:
+    return value.items[0]
+
+def run(values: i32[4]) -> i32:
+    fixed: Fixed[i32, 4] = Fixed[i32, 4](values)
+    return first[i32, 4](fixed)
+`
+	result, errs := parseAndAnalyze(t, "value_generic_struct_function.elisa", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "first", "T")
+	requireFunctionReturnTypeString(t, result, "run", "i32")
+}

@@ -170,7 +170,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 	}
 	bindings := make(map[string]semantic.Type, len(params))
 	for i, arg := range expr.TypeArgs {
-		resolved, err := s.resolveTypeExpr(arg)
+		resolved, err := s.resolveGenericArgForParam(arg, params[i])
 		if err != nil {
 			return nil, nil, err
 		}

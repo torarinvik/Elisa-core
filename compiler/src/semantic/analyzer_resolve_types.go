@@ -220,6 +220,13 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			a.errorf(n.Pos(), "type %q cannot be used with generic arguments", n.Name)
 			return invalidType
 		}
+	case *ast.GenericValueArgTypeExpr:
+		value, ok := a.evalConstExpr(n.Value)
+		if !ok {
+			a.errorf(n.Pos(), "generic value argument must be compile-time constant")
+			return invalidType
+		}
+		return &ConstValueType{Value: value}
 	default:
 		return invalidType
 	}

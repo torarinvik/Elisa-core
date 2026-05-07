@@ -13,6 +13,10 @@ func matchTypePattern(pattern, actual Type) bool {
 	if _, ok := pattern.(*TypeParamType); ok {
 		return true
 	}
+	if _, ok := pattern.(*ConstParamType); ok {
+		_, ok = actual.(*ConstValueType)
+		return ok
+	}
 	if _, ok := pattern.(*RefStorageParamType); ok {
 		_, ok = actual.(*RefStorageValueType)
 		return ok

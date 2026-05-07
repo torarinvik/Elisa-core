@@ -15,6 +15,8 @@ func (*BuiltinType) isType()           {}
 func (*BitIntType) isType()            {}
 func (*IDType) isType()                {}
 func (*TypeParamType) isType()         {}
+func (*ConstParamType) isType()        {}
+func (*ConstValueType) isType()        {}
 func (*StructStateCaseType) isType()   {}
 func (*StructStateSetType) isType()    {}
 func (*RefStorageParamType) isType()   {}
@@ -78,6 +80,27 @@ func (t *IDType) String() string {
 	return fmt.Sprintf("id[%s]", t.Tag.String())
 }
 func (t *TypeParamType) String() string { return t.Name }
+func (t *ConstParamType) String() string {
+	return t.Name
+}
+func (t *ConstValueType) String() string {
+	if t == nil {
+		return "<invalid-const>"
+	}
+	switch t.Value.Kind {
+	case ConstInt:
+		return fmt.Sprintf("%d", t.Value.Int)
+	case ConstBool:
+		if t.Value.Bool {
+			return "true"
+		}
+		return "false"
+	case ConstString:
+		return fmt.Sprintf("%q", t.Value.String)
+	default:
+		return "<const>"
+	}
+}
 func (t *StructStateCaseType) String() string {
 	if t == nil {
 		return "<invalid-struct-state>"

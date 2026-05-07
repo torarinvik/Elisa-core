@@ -67,6 +67,13 @@ func (s *functionState) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
 	return value.Bool, true
 }
 func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
+	if ident, ok := expr.(*ast.Ident); ok && s.typeMap != nil {
+		if bound, ok := s.typeMap[ident.Name]; ok {
+			if value, valueOK := bound.(*semantic.ConstValueType); valueOK {
+				return value.Value, true
+			}
+		}
+	}
 	if castExpr, ok := expr.(*ast.CastExpr); ok {
 		operand, ok := s.evalConstExpr(castExpr.Operand)
 		if !ok {

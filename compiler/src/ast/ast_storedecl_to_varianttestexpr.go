@@ -17,6 +17,7 @@ const (
 	GenericParamRefState
 	GenericParamRegion
 	GenericParamPermission
+	GenericParamValue
 )
 
 type GenericParam struct {
@@ -304,6 +305,10 @@ type GenericType struct {
 	Position lexer.Pos
 	Name     string
 	Args     []TypeExpr
+}
+type GenericValueArgTypeExpr struct {
+	Position lexer.Pos
+	Value    Expr
 }
 type AggregateStateTypeExpr struct {
 	Position lexer.Pos

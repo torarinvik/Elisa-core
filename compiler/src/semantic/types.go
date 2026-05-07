@@ -75,6 +75,15 @@ type TypeParamType struct {
 	Name string
 }
 
+type ConstParamType struct {
+	Name      string
+	ValueType Type
+}
+
+type ConstValueType struct {
+	Value ConstValue
+}
+
 type StructStateCaseType struct {
 	StructName string
 	Case       string
@@ -204,6 +213,7 @@ type ArrayType struct {
 	Size         string
 	HasConstSize bool
 	ConstSize    int64
+	ConstParam   string
 	SurfaceName  string
 }
 

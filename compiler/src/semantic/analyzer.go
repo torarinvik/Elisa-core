@@ -106,6 +106,7 @@ type Analyzer struct {
 	interfaceAssocTypeScopes          []map[string]Type
 	refStorageParamScopes             []map[string]Type
 	refStateParamScopes               []map[string]Type
+	constParamScopes                  []map[string]Type
 	shapeParamScopes                  []map[string]Shape
 	regionParamScopes                 []map[string]bool
 	permissionParamScopes             []map[string]bool

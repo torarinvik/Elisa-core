@@ -32,6 +32,7 @@ import "C"
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
+	"strconv"
 	"strings"
 	"unsafe"
 )
@@ -45,6 +46,13 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		if mapped, ok := subst[tt.Name]; ok {
 			return mapped
 		}
+		return t
+	case *semantic.ConstParamType:
+		if mapped, ok := subst[tt.Name]; ok {
+			return mapped
+		}
+		return t
+	case *semantic.ConstValueType:
 		return t
 	case *semantic.AssociatedTypeProjection:
 		receiver := substituteType(tt.Receiver, subst, impls)
@@ -96,7 +104,15 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		}
 		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
-		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst, impls), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
+		elem := substituteType(tt.Elem, subst, impls)
+		if tt.ConstParam != "" {
+			if mapped, ok := subst[tt.ConstParam]; ok {
+				if value, valueOK := mapped.(*semantic.ConstValueType); valueOK && value.Value.Kind == semantic.ConstInt {
+					return &semantic.ArrayType{Elem: elem, Size: strconv.FormatInt(value.Value.Int, 10), HasConstSize: true, ConstSize: value.Value.Int, SurfaceName: tt.SurfaceName}
+				}
+			}
+		}
+		return &semantic.ArrayType{Elem: elem, Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, ConstParam: tt.ConstParam, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:
 		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst, impls), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
 	case *semantic.ViewType:

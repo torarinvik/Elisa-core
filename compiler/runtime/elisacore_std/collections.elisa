@@ -64,6 +64,14 @@ struct SymbolTable[K, T]:
     items: mutable IndexMap[K, T]
 
 
+struct InlineVec[T, N: usize]:
+    owner: mutable Arena&?
+    inline_items: mutable T[N]
+    overflow: mutable darray[T]
+    len: mutable usize
+    is_spilled: mutable bool
+
+
 struct IndexMapNamespace:
     _unused: u8
 
@@ -72,8 +80,13 @@ struct SymbolTableNamespace:
     _unused: u8
 
 
+struct InlineVecNamespace:
+    _unused: u8
+
+
 global indexmap: IndexMapNamespace = IndexMapNamespace(0u8)
 global symtab: SymbolTableNamespace = SymbolTableNamespace(0u8)
+global inlinevec: InlineVecNamespace = InlineVecNamespace(0u8)
 
 # ------------------------------------------------------------
 # Dynamic array helpers (replacement for C macros)
@@ -196,6 +209,129 @@ def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_
         out.count <- view.len
         out.capacity <- view.len
         return out
+
+
+# ------------------------------------------------------------
+# Inline vectors
+# ------------------------------------------------------------
+
+def inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]:
+    out: mutable InlineVec[T, N] = zeroed
+    out.owner as & <- owner
+    return out
+
+
+def inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
+    return vec.len
+
+
+def count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
+    return inline_vec_count[T, N](vec)
+
+
+def inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return vec.is_spilled
+
+
+@ufcs_only
+def spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return inline_vec_spilled[T, N](vec)
+
+
+def inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
+    assert index < vec.len
+    if vec.is_spilled:
+        return vec.overflow[index]
+    return vec.inline_items[index]
+
+
+@ufcs_only
+def get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
+    return inline_vec_get[T, N](vec, index)
+
+
+def inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
+    assert index < vec.len
+    if vec.is_spilled:
+        vec.overflow[index] <- item
+    else:
+        vec.inline_items[index] <- item
+
+
+@ufcs_only
+def set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
+    inline_vec_set[T, N](vec, index, item)
+
+
+def inline_vec_spill[T, N: usize](vec: mutable InlineVec[T, N]&):
+    can Memory.Allocate, Abort.Panic:
+        if vec.is_spilled:
+            return
+
+        assert vec.owner != null
+        owner: mutable Arena& = vec.owner
+        in owner:
+            _ = vec.overflow.reserve(N * 2usize)
+            for index in 0..<vec.len:
+                vec.overflow.push(vec.inline_items[index])
+
+        vec.is_spilled <- true
+
+
+def inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        if vec.is_spilled:
+            assert vec.owner != null
+            owner: mutable Arena& = vec.owner
+            in owner:
+                vec.overflow.push(item)
+            vec.len <- vec.len + 1
+            return
+
+        if vec.len < N:
+            vec.inline_items[vec.len] <- item
+            vec.len <- vec.len + 1
+            return
+
+        inline_vec_spill[T, N](vec)
+        assert vec.owner != null
+        owner: mutable Arena& = vec.owner
+        in owner:
+            vec.overflow.push(item)
+        vec.len <- vec.len + 1
+
+
+@ufcs_only
+def push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        inline_vec_push[T, N](vec, item)
+
+
+def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
+    elem_size: usize = sizeof(T)
+    DynArrayView(null, 0, elem_size) return if vec.len == 0
+    if vec.is_spilled:
+        assert vec.overflow.items != null
+        return DynArrayView(vec.overflow.items.cast[void&], vec.len, elem_size)
+    return DynArrayView(vec.inline_items[0].ref[T&].cast[void&], vec.len, elem_size)
+
+
+@ufcs_only
+def view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
+    return inline_vec_view[T, N](vec)
+
+
+def inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&):
+    if vec.is_spilled:
+        vec.overflow.count <- 0
+    vec.len <- 0
+    vec.is_spilled <- false
+
+
+@ufcs_only
+def clear[T, N: usize](vec: mutable InlineVec[T, N]&):
+    inline_vec_clear[T, N](vec)
+
 
 def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]&:
     can Memory.Allocate, Abort.Panic:

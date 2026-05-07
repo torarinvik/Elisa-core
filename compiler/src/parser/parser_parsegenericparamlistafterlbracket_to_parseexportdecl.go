@@ -18,6 +18,7 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 	seenRefState := map[string]bool{}
 	seenRegion := map[string]bool{}
 	seenPermission := map[string]bool{}
+	seenValue := map[string]bool{}
 	for {
 		paramPos := p.cur().Pos
 		kind := ast.GenericParamType
@@ -82,8 +83,11 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 			if p.match(lexer.TOKEN_COLON) {
 				boundName = p.parseQualifiedDeclName()
 			}
-			if seenType[name] || seenRegion[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {
+			if seenType[name] || seenRegion[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] || seenValue[name] {
 				p.errorf("duplicate function generic parameter %q", name)
+			} else if boundName != "" && isBuiltinValueGenericParamTypeName(boundName) {
+				seenValue[name] = true
+				genericParams = append(genericParams, ast.GenericParam{Position: paramPos, Kind: ast.GenericParamValue, Name: name, InterfaceBound: boundName})
 			} else {
 				seenType[name] = true
 				typeParams = append(typeParams, name)
@@ -95,6 +99,17 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 		}
 	}
 	return typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams
+}
+
+func isBuiltinValueGenericParamTypeName(name string) bool {
+	switch name {
+	case "usize", "isize", "uintptr",
+		"int", "i8", "i16", "i32", "i64",
+		"u8", "u16", "u32", "u64":
+		return true
+	default:
+		return false
+	}
 }
 func (p *Parser) parsePermissionRef() ast.PermissionRef {
 	pos := p.cur().Pos
