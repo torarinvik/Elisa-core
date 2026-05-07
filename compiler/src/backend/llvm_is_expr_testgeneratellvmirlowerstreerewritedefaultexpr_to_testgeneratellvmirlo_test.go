@@ -35,6 +35,46 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersCategoryUnionTreeRewriteDefaultExpr(t *testing.T) {
+	src := `@layout(category_union)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+def simplify(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Expr:
+			Lua.Expr.Int(expr):
+				default
+			Lua.Expr.Binary(expr, left, right):
+				default
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_rewrite_default.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"define %Lua__TreeHandle @simplify(%Lua__TreeHandle ",
+		"tree.default.kind.ptr",
+		"tree.default.src.payload.value",
+		"tree.default.payload.memcpy",
+		"tree.default.count.ptr",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union tree rewrite default lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "%Lua_Expr_Binary__TreeTable") || strings.Contains(output, "tree.default.src.row") {
+		t.Fatalf("expected category_union rewrite default lowering to avoid exact per-variant rows, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeRewriteDefaultExprWithChildren(t *testing.T) {
 	src := `tree Lua:
 	common:
