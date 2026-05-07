@@ -376,7 +376,8 @@ func TestGenerateLLVMIRLowersStringMatchStatementsWithTinyLiteralFastPath(t *tes
 	}
 }
 func TestGenerateLLVMIRLowersTreeMembersAndFieldAccess(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -426,7 +427,8 @@ def cond_span(branch: Lua.ElseIf) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersNestedTreeCategories(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	@role(expr)
 	node Expr:
 		Nil

@@ -8,7 +8,8 @@ import (
 )
 
 func TestGenerateLLVMIRLowersTreeRewriteDefaultExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -76,7 +77,8 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 }
 
 func TestGenerateLLVMIRLowersTreeRewriteDefaultExprWithChildren(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -105,7 +107,8 @@ def simplify(block: Lua.Block) -> Lua.Block:
 	}
 }
 func TestGenerateLLVMIRLowersTreeRewriteImplicitDefaultRecordUpdate(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -150,7 +153,8 @@ func TestGenerateLLVMIRLowersSequenceRewriteExpr(t *testing.T) {
 	}
 }
 func TestGenerateLLVMIRLowersTreeTargetSequenceRewriteExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -197,7 +201,8 @@ func TestGenerateLLVMIRLowersSequenceRewriteEmitAllExpr(t *testing.T) {
 	}
 }
 func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -229,7 +234,8 @@ def clone_expr(node: Lua.Expr) -> Lua.Expr:
 	}
 }
 func TestGenerateLLVMIRLowersGuardedTreeFoldExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)

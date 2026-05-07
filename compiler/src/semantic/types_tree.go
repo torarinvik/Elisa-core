@@ -1,7 +1,7 @@
 package semantic
 
 func DefaultTreeLayout() TreeLayout {
-	return TreeLayoutPerVariantRows
+	return TreeLayoutCategoryUnion
 }
 
 func (layout TreeLayout) String() string {

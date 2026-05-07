@@ -67,9 +67,9 @@ func normalizePackedFieldStorageAnnotationArg(value string) (PackedFieldStorageM
 
 func normalizeTreeLayoutAnnotationArg(value string) (TreeLayout, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "per_variant_rows", "per-variant-rows", "pervariantrows", "variant_rows", "variant-rows", "aos", "default":
+	case "per_variant_rows", "per-variant-rows", "pervariantrows", "variant_rows", "variant-rows", "aos":
 		return TreeLayoutPerVariantRows, true
-	case "category_union", "category-union", "categoryunion", "union", "dense_category", "dense-category":
+	case "category_union", "category-union", "categoryunion", "union", "dense_category", "dense-category", "default":
 		return TreeLayoutCategoryUnion, true
 	default:
 		return DefaultTreeLayout(), false

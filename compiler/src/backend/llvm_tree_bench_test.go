@@ -40,24 +40,25 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 				default
 
 def score(node: Lua.Expr) -> i64:
-	return visit node as Lua.Expr:
-		Lua.Expr.Nil(expr):
-			0i64
-		Lua.Expr.Int(expr):
-			expr.value
-		Lua.Expr.Binary(expr):
-			expr.left.span + expr.right.span
-		Lua.Expr.Call(expr):
-			expr.callee.span + expr.args.len.cast[i64]
+	in perm:
+		return visit node as Lua.Expr:
+			Lua.Expr.Nil(expr):
+				0i64
+			Lua.Expr.Int(expr):
+				expr.value
+			Lua.Expr.Binary(expr):
+				expr.left.span + expr.right.span
+			Lua.Expr.Call(expr):
+				expr.callee.span + expr.args.len.cast[i64]
 `
 }
 
 func BenchmarkGenerateLLVMIRTreeAoSRows(b *testing.B) {
-	benchmarkGenerateLLVMIRTreeLayout(b, "tree_aos_rows_bench.elisa", treeBenchmarkSource(""))
+	benchmarkGenerateLLVMIRTreeLayout(b, "tree_aos_rows_bench.elisa", treeBenchmarkSource("per_variant_rows"))
 }
 
 func BenchmarkGenerateLLVMIRTreeCategoryUnion(b *testing.B) {
-	benchmarkGenerateLLVMIRTreeLayout(b, "tree_category_union_bench.elisa", treeBenchmarkSource("category_union"))
+	benchmarkGenerateLLVMIRTreeLayout(b, "tree_category_union_bench.elisa", treeBenchmarkSource(""))
 }
 
 func benchmarkGenerateLLVMIRTreeLayout(b *testing.B, filename string, src string) {

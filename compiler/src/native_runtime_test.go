@@ -180,6 +180,7 @@ func TestRunCLIExecutesPerVariantTreeFoldRewriteNativeSmoke(t *testing.T) {
 	testInclude = filepath.ToSlash(testInclude)
 	src := fmt.Sprintf(`# include %q
 
+@layout(per_variant_rows)
 tree Lua:
 	common:
 		span: i64
@@ -257,6 +258,7 @@ func TestRunCLIExecutesTreeAttributeNativeSmoke(t *testing.T) {
 	testInclude = filepath.ToSlash(testInclude)
 	src := fmt.Sprintf(`# include %q
 
+@layout(per_variant_rows)
 tree Sparse:
 	@role(expr)
 	node Expr:
@@ -269,6 +271,7 @@ attribute Sparse.Expr.checksum -> i64:
 	Sparse.Expr.Binary(expr, left, right):
 		return left.checksum + right.checksum + 1
 
+@layout(per_variant_rows)
 tree Dense:
 	@role(expr)
 	node Expr:
@@ -337,6 +340,7 @@ func TestRunCLIExecutesMixedTreeChildrenCloneRewriteNativeSmoke(t *testing.T) {
 	testInclude = filepath.ToSlash(testInclude)
 	src := fmt.Sprintf(`# include %q
 
+@layout(per_variant_rows)
 tree Flow:
 	@role(stmt)
 	node Stmt:
@@ -354,6 +358,7 @@ def count_stmt_children(stmt: Flow.Stmt) -> i64:
 		total <- total + 1
 	return total
 
+@layout(per_variant_rows)
 tree Lua:
 	@role(expr)
 	node Expr:

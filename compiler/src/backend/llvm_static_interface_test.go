@@ -69,6 +69,7 @@ def entry() -> int:
 
 func TestGenerateLLVMIRLowersDerivedParseBuilderImplMethods(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "static_interface_derived_parse_builder.elisa", `
+@layout(per_variant_rows)
 tree Lua:
 	common:
 		span: i64

@@ -816,6 +816,29 @@ func (s *functionState) ensureTreeOwnerStoreValue(owner treeAllocOwnerBinding, f
 	if owner.storeValue != nil && owner.storeType != nil {
 		return owner.storeValue, owner.storeType, nil
 	}
+	cacheKey := treeResolvedStoreCacheKey{
+		block:  C.LLVMGetInsertBlock(s.builder),
+		family: family,
+		isPerm: owner.isPerm,
+		arena:  owner.arenaRef,
+	}
+	if s.treeResolvedStores != nil {
+		if cached, ok := s.treeResolvedStores[cacheKey]; ok && cached.value != nil && cached.storeType != nil {
+			return cached.value, cached.storeType, nil
+		}
+	}
+	cacheResolved := func(value C.LLVMValueRef, storeType *semantic.TreeStoreType) (C.LLVMValueRef, *semantic.TreeStoreType, error) {
+		if value == nil || storeType == nil {
+			return value, storeType, nil
+		}
+		key := cacheKey
+		key.block = C.LLVMGetInsertBlock(s.builder)
+		if s.treeResolvedStores == nil {
+			s.treeResolvedStores = map[treeResolvedStoreCacheKey]treeResolvedStoreSlot{}
+		}
+		s.treeResolvedStores[key] = treeResolvedStoreSlot{value: value, storeType: storeType}
+		return value, storeType, nil
+	}
 	if owner.isPerm {
 		globalStorePtr, err := s.g.ensureTreePermStoreGlobal(family)
 		if err != nil {
@@ -847,7 +870,7 @@ func (s *functionState) ensureTreeOwnerStoreValue(owner treeAllocOwnerBinding, f
 		if err != nil {
 			return nil, nil, err
 		}
-		return resolved, family.StoreType, nil
+		return cacheResolved(resolved, family.StoreType)
 	}
 	if owner.arenaRef == nil {
 		return nil, nil, fmt.Errorf("missing Arena owner for tree store")
@@ -892,7 +915,7 @@ func (s *functionState) ensureTreeOwnerStoreValue(owner treeAllocOwnerBinding, f
 	if err != nil {
 		return nil, nil, err
 	}
-	return resolved, family.StoreType, nil
+	return cacheResolved(resolved, family.StoreType)
 }
 func (s *functionState) emitTreeStateTablePtr(stateValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, name string) (C.LLVMValueRef, error) {
 	if family == nil {

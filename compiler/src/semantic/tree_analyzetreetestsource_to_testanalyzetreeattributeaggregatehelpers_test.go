@@ -197,15 +197,15 @@ func TestAnalyzeTreeLayoutAnnotationsDefaultAndDiagnostics(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Lua tree type, got %T", result.NamedTypes["Lua"])
 	}
-	if family.Layout != TreeLayoutPerVariantRows || family.LayoutExplicit {
-		t.Fatalf("expected default per_variant_rows tree layout, got %s explicit=%v", family.Layout, family.LayoutExplicit)
+	if family.Layout != TreeLayoutCategoryUnion || family.LayoutExplicit {
+		t.Fatalf("expected default category_union tree layout, got %s explicit=%v", family.Layout, family.LayoutExplicit)
 	}
 	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
 	if !ok {
 		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
 	}
-	if exprType.Layout != TreeLayoutPerVariantRows || exprType.LayoutExplicit {
-		t.Fatalf("expected Expr to inherit default per_variant_rows layout, got %s explicit=%v", exprType.Layout, exprType.LayoutExplicit)
+	if exprType.Layout != TreeLayoutCategoryUnion || exprType.LayoutExplicit {
+		t.Fatalf("expected Expr to inherit default category_union layout, got %s explicit=%v", exprType.Layout, exprType.LayoutExplicit)
 	}
 
 	bad := analyzeTreeTestSourceWithSemanticErrors(t, "tree_layout_bad.elisa", `@layout(banana)

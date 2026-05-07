@@ -8,7 +8,8 @@ import (
 )
 
 func TestGenerateLLVMIRLowersCloneBuiltinForDArrayAndTree(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -38,7 +39,8 @@ def clone_items(owner: mutable Arena&, items: dview[u32], block: Lua.Block) -> L
 }
 
 func TestGenerateLLVMIRLowersCloneBuiltinForTreeCategoryWithCrossCategoryChildren(t *testing.T) {
-	src := `tree Syntax:
+	src := `@layout(per_variant_rows)
+tree Syntax:
 	common:
 		span: i64
 	@role(form)

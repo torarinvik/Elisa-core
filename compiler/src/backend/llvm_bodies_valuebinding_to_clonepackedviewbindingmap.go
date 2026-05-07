@@ -58,6 +58,7 @@ type functionState struct {
 	treeRewriteDefault           *treeRewriteDefaultContext
 	currentSequenceRewrite       *sequenceRewriteCodegenContext
 	treeImplicitStores           map[treeImplicitStoreCacheKey]treeImplicitStoreSlot
+	treeResolvedStores           map[treeResolvedStoreCacheKey]treeResolvedStoreSlot
 	packedStoreValueKey1         packedStoreExtractCacheKey
 	packedStoreValue1            C.LLVMValueRef
 	packedStoreValueKey2         packedStoreExtractCacheKey
@@ -144,6 +145,16 @@ type treeImplicitStoreCacheKey struct {
 }
 type treeImplicitStoreSlot struct {
 	ptr       C.LLVMValueRef
+	storeType *semantic.TreeStoreType
+}
+type treeResolvedStoreCacheKey struct {
+	block  C.LLVMBasicBlockRef
+	family *semantic.TreeType
+	isPerm bool
+	arena  C.LLVMValueRef
+}
+type treeResolvedStoreSlot struct {
+	value     C.LLVMValueRef
 	storeType *semantic.TreeStoreType
 }
 type packedStoreExtractCacheKey struct {

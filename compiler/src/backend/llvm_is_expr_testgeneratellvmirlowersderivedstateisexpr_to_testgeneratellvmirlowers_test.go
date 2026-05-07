@@ -152,7 +152,8 @@ def check(stmt: Stmt) -> void:
 	}
 }
 func TestGenerateLLVMIRLowersExpectTreeBlockFieldShapeListPattern(t *testing.T) {
-	src := `tree Perl:
+	src := `@layout(per_variant_rows)
+tree Perl:
     block Block:
         stmts: darray[Stmt]
 
@@ -370,7 +371,8 @@ def fallback(maybe: i64?) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersNestedLetOverTreeConditionBoundOptional(t *testing.T) {
-	src := `tree Tiny:
+	src := `@layout(per_variant_rows)
+tree Tiny:
 	common:
 		span: i64
 	@role(expr)
@@ -405,7 +407,8 @@ def score(stmt: Tiny.Stmt) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -444,7 +447,8 @@ def starts_with_nil(node: Lua.Expr) -> bool:
 	}
 }
 func TestGenerateLLVMIRLowersTreeConstructorsWithArenaOwners(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -472,7 +476,8 @@ def build(owner: Arena) -> Lua.Expr:
 	}
 }
 func TestGenerateLLVMIRLowersFirstClassTreeViewWithoutExtraCarrier(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -503,7 +508,8 @@ def child_span(node: Lua.Expr) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersBareTreeVariantSurfaceTypeWithoutExtraCarrier(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -534,7 +540,8 @@ def child_span(node: Lua.Expr) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersTreeMatchStatementsAndExpressions(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)

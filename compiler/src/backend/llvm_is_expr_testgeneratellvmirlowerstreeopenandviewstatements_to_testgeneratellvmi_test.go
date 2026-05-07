@@ -8,7 +8,8 @@ import (
 )
 
 func TestGenerateLLVMIRLowersTreeOpenAndViewStatements(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -85,6 +86,37 @@ def make_int(value: i64) -> Lua.Expr:
 	}
 	if strings.Contains(output, "active_tree_store") {
 		t.Fatalf("expected category_union constructor to avoid hidden active store globals, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRDefaultsTreeLayoutToCategoryUnion(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+
+def make_int(value: i64) -> Lua.Expr:
+	in perm:
+		return Lua.Expr.Int(span: 1, value: value)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_default_category_union.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"define i32 @make_int",
+		"tree.category.kind.ptr",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected default tree layout to lower as category_union and contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "%Lua__TreeHandle = type") || strings.Contains(output, "active_tree_store") {
+		t.Fatalf("expected default tree layout to use dense handles without active store, got:\n%s", output)
 	}
 }
 
@@ -180,7 +212,8 @@ def build_store() -> void:
 	}
 }
 func TestGenerateLLVMIRLowersTreeChildrenLoops(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -379,7 +412,8 @@ func TestGenerateLLVMIRLowersEnumerateTupleLoops(t *testing.T) {
 	}
 }
 func TestGenerateLLVMIRLowersMixedTreeChildrenToRootLoops(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(stmt)
@@ -409,7 +443,8 @@ def count_children(stmt: Lua.Stmt) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersTreeSequenceFieldViews(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(stmt)
@@ -447,7 +482,8 @@ def elseif_total(stmt: Lua.Stmt.IfStmt) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersOptionalTreeChildFields(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(stmt)
@@ -499,7 +535,8 @@ def score(node: Lua.Stmt) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersTreeVisitExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -529,7 +566,8 @@ def score(node: Lua.Expr) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersGuardedTreeVisitExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(stmt)
@@ -571,7 +609,8 @@ def score_node(node: Lua.Node) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersTreeKindFieldAndShorthandMembers(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -623,7 +662,8 @@ def explicit_root_binary_kind() -> Lua.Node.Kind:
 	}
 }
 func TestGenerateLLVMIRLowersExactTreeVisitExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	@role(stmt)
 	node Stmt:
 		ExprStmt(expr: Expr)
@@ -650,7 +690,8 @@ def stmt_total(block: Lua.Block) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersTreeFoldExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -683,7 +724,8 @@ def score(node: Lua.Expr) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersDirectTreeAttributeReads(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	@role(expr)
 	node Expr:
 		Int(value: i64)
@@ -710,7 +752,8 @@ def checksum_of(node: Lua.Expr) -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersProjectedTreeAttributeReads(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	@role(expr)
 	node Expr:
 		Int(value: i64)
@@ -740,7 +783,8 @@ def count_of(node: Lua.Expr) -> usize:
 	}
 }
 func TestGenerateLLVMIRLowersTreeAttributeAggregateHelpers(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	@role(expr)
 	node Expr:
 		Nil
@@ -776,7 +820,8 @@ def all_children_leaf(node: Lua.Expr) -> bool:
 	}
 }
 func TestGenerateLLVMIRLowersTreeRewriteExpr(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -804,7 +849,8 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 	}
 }
 func TestGenerateLLVMIRLowersExactTreeRecordUpdates(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)
@@ -833,7 +879,8 @@ def rewrite_binary_explicit(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr,
 }
 
 func TestGenerateLLVMIREnsuresTreeRowLayoutMatchesSourceFieldOrder(t *testing.T) {
-	src := `tree Lua:
+	src := `@layout(per_variant_rows)
+tree Lua:
 	common:
 		span: i64
 	@role(expr)

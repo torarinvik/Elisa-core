@@ -4,18 +4,18 @@ This note documents the current LLVM backend contract for Elisa `tree` values. I
 
 ## Supported Layouts
 
-- `@layout(per_variant_rows)` is the default tree layout.
-- `@layout(category_union)` is an explicit dense category layout.
+- `@layout(category_union)` is the default dense tree layout.
+- `@layout(per_variant_rows)` is an explicit legacy row layout.
 - Unsupported layouts must fail with deterministic backend diagnostics.
 - Layout selection is centralized in backend `treeLayoutPlan` helpers; new tree lowering paths should use those helpers instead of direct layout checks.
 
 ## Handle ABI
 
-- The public lowered handle remains `%Tree__TreeHandle = { ptr, i64 }`.
-- The pointer lane carries the tree store state.
-- The `i64` key lane packs the exact tag and row index.
-- Row index packing traps with `llvm.trap` if the row cannot fit in the key lane.
-- A future compact-handle phase may move to store-relative `u32` or `u64` handles, but this is out of scope for the current backend contract.
+- `category_union` lowers tree handles to store-relative `u32` row ids.
+- `category_union` tags live in root/category tag arrays, not inside the handle.
+- `category_union` handles require an explicit matching store context for reads; the backend must not synthesize hidden active-store globals.
+- `per_variant_rows` keeps the legacy `%Tree__TreeHandle = { ptr, i64 }` carrier, where the pointer lane carries store state and the `i64` key lane packs exact tag plus row index.
+- Legacy row-index packing traps with `llvm.trap` if the row cannot fit in the key lane.
 
 ## Store And Field Semantics
 
@@ -29,4 +29,4 @@ This note documents the current LLVM backend contract for Elisa `tree` values. I
 
 - Both supported layouts should be covered by IR-shape regression tests.
 - Native `-emit test` smoke coverage should exercise constructors, field reads, `kind`, `is`, children traversal, fold, rewrite default, record update, clone, and attributes.
-- Benchmarks should compare `per_variant_rows` and `category_union` on similar AST workloads before changing defaults or capacity policy.
+- Benchmarks should continue comparing `per_variant_rows` and `category_union` on similar AST workloads before changing capacity policy.
