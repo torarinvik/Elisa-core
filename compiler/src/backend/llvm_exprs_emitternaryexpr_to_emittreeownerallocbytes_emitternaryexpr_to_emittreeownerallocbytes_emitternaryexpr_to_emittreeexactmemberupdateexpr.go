@@ -307,6 +307,58 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 	if err != nil {
 		return nil, nil, err
 	}
+	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
+		sourceStateValue := s.emitTreeHandleStateValue(handleValue, "tree.update.src")
+		sourceRowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.update.src")
+		if err != nil {
+			return nil, nil, err
+		}
+		sourceTablePtr, err := s.emitTreeCategoryUnionTablePtr(sourceStateValue, family, viewType.Category, "tree.update.src")
+		if err != nil {
+			return nil, nil, err
+		}
+		arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.update.store.arena")
+		stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.update.store.state")
+		slot, err := s.emitTreeCategoryUnionAppendSlot(arenaValue, stateValue, family, viewType.Category, "tree.update")
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := s.emitTreeCategoryUnionKindAtIndex(slot.tablePtr, viewType.Category, slot.rowIndex, tag, "tree.update"); err != nil {
+			return nil, nil, err
+		}
+		patchNames := make([]string, 0, len(orderedArgs))
+		patchValues := make([]C.LLVMValueRef, 0, len(orderedArgs))
+		for i, fieldDecl := range fieldDecls {
+			if i >= len(orderedArgs) || orderedArgs[i] == nil {
+				continue
+			}
+			field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
+			if !ok {
+				return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
+			}
+			fieldValue, _, err := s.emitExpr(orderedArgs[i], field.Type)
+			if err != nil {
+				return nil, nil, err
+			}
+			patchNames = append(patchNames, fieldDecl.Name)
+			patchValues = append(patchValues, fieldValue)
+		}
+		if err := s.emitTreeCopyCategoryUnionPayloadAndPatch(sourceTablePtr, slot.tablePtr, viewType.Category, viewType.Variant, sourceRowIndex, slot.rowIndex, patchNames, patchValues, "tree.update"); err != nil {
+			return nil, nil, err
+		}
+		if err := s.emitTreeCategoryUnionTableSetCount(slot.tablePtr, viewType.Category, slot.neededCount, "tree.update"); err != nil {
+			return nil, nil, err
+		}
+		keyValue, err := s.buildTreeHandleKey(tag, slot.rowIndex, "tree.update")
+		if err != nil {
+			return nil, nil, err
+		}
+		handleValue, err = s.buildTreeHandleValue(family, stateValue, keyValue, "tree.update")
+		if err != nil {
+			return nil, nil, err
+		}
+		return handleValue, memberType, nil
+	}
 	sourceAccess, err := s.emitTreeExactTableAccessFromHandle(handleValue, family, memberType, "tree.update.src")
 	if err != nil {
 		return nil, nil, err

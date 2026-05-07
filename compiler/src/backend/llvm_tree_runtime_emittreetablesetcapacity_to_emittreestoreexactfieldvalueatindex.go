@@ -552,6 +552,29 @@ func (s *functionState) emitTreeCategoryUnionFieldValueAtIndex(tablePtr C.LLVMVa
 	value := C.LLVMBuildLoad2(s.builder, elemLLVMType, elemPtr, cStringFree(name+".payload.elem"))
 	return value, field.Type, nil
 }
+func (s *functionState) emitTreeCategoryUnionPayloadValueAtIndex(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, variant *semantic.EnumVariant, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, C.LLVMTypeRef, error) {
+	if category == nil || variant == nil {
+		return nil, nil, fmt.Errorf("missing category-union tree payload metadata")
+	}
+	payloadType, err := s.g.lowerTreeCategoryUnionVariantPayloadType(category, variant)
+	if err != nil {
+		return nil, nil, err
+	}
+	if C.LLVMGetTypeKind(payloadType) == C.LLVMVoidTypeKind {
+		return C.LLVMGetUndef(payloadType), payloadType, nil
+	}
+	payloadsPtr, err := s.emitTreeCategoryUnionPayloadsPointerValue(tablePtr, category, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadRowType, err := s.g.ensureTreeCategoryUnionPayloadType(category)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadRowPtr := C.LLVMBuildGEP2(s.builder, payloadRowType, payloadsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".payload.row.ptr"))
+	payloadValue := C.LLVMBuildLoad2(s.builder, payloadType, payloadRowPtr, cStringFree(name+".payload.value"))
+	return payloadValue, payloadType, nil
+}
 func (s *functionState) emitTreeCategoryUnionSurfaceFieldValue(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, variant *semantic.EnumVariant, fieldName string, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
 	memberType := category.VariantViewType(variant)
 	field, ok := semantic.TreeVariantSurfaceFieldInfo(memberType, fieldName)
@@ -633,6 +656,28 @@ func (s *functionState) emitTreeCopyRowAndPatch(tablePtr C.LLVMValueRef, memberT
 		return err
 	}
 	return s.emitTreeStoreExactRowValue(tablePtr, memberType, rowIndex, patched, name)
+}
+func (s *functionState) emitTreeCopyCategoryUnionPayloadAndPatch(sourceTablePtr C.LLVMValueRef, destTablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, variant *semantic.EnumVariant, sourceRowIndex C.LLVMValueRef, destRowIndex C.LLVMValueRef, fieldNames []string, fieldValues []C.LLVMValueRef, name string) error {
+	if len(fieldNames) != len(fieldValues) {
+		return fmt.Errorf("category-union tree row patch for %s.%s expects %d field names and %d values", category.Name, variant.Name, len(fieldNames), len(fieldValues))
+	}
+	payloadValue, payloadType, err := s.emitTreeCategoryUnionPayloadValueAtIndex(sourceTablePtr, category, variant, sourceRowIndex, name+".src")
+	if err != nil {
+		return err
+	}
+	if C.LLVMGetTypeKind(payloadType) == C.LLVMVoidTypeKind {
+		return nil
+	}
+	memberType := category.VariantViewType(variant)
+	patched := payloadValue
+	for i, fieldName := range fieldNames {
+		fieldIndex, _, err := treeExactFieldIndex(memberType, fieldName)
+		if err != nil {
+			return err
+		}
+		patched = C.LLVMBuildInsertValue(s.builder, patched, fieldValues[i], C.unsigned(fieldIndex), cStringFree(name+".payload.field"))
+	}
+	return s.emitTreeCategoryUnionPayloadAtIndex(destTablePtr, category, variant, destRowIndex, payloadType, patched, name)
 }
 func (s *functionState) emitTreePatchExactRowFields(memberType semantic.Type, rowValue C.LLVMValueRef, fieldNames []string, fieldValues []C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	if len(fieldNames) != len(fieldValues) {
