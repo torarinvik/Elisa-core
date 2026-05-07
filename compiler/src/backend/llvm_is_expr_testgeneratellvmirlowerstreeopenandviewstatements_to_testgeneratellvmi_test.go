@@ -197,6 +197,45 @@ def count_nodes(node: Lua.Expr) -> i64:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersCategoryUnionTreeChildrenLoops(t *testing.T) {
+	src := `@layout(category_union)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Unary(expr: Expr)
+		Binary(left: Expr, right: Expr)
+
+def count_nodes(node: Lua.Expr) -> i64:
+	total: mutable i64 = 1
+	for child in children(node):
+		total <- total + count_nodes(child)
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_children.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"TreeChildren",
+		"tree.children.count.phi",
+		"tree.children.value.phi",
+		"tree.payload.field.payload.row.ptr",
+		"tree.payload.field.payload.elem.ptr",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union children lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "%Lua_Expr_Binary__TreeTable") || strings.Contains(output, "tree.children.rows.ptr") {
+		t.Fatalf("expected category_union children lowering to avoid exact per-variant rows, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersEnumerateTupleLoops(t *testing.T) {
 	src := `def sum_pairs(items: darray[usize]) -> usize:
 	total: mutable usize = 0

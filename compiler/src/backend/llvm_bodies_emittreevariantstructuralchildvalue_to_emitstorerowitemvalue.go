@@ -115,20 +115,12 @@ func (s *functionState) emitTreeExactStructuralChildCount(nodeValue C.LLVMValueR
 	if family == nil {
 		return nil, fmt.Errorf("children(...) exact member is missing tree family metadata")
 	}
-	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
-	if err != nil {
-		return nil, err
-	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
 	}
 	total := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	rowValue, _, err := s.emitTreeExactRowValueAtIndex(access.tablePtr, memberType, access.rowIndex, name)
-	if err != nil {
-		return nil, err
-	}
 	for _, fieldDecl := range treeExactFieldDecls(memberType) {
 		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 		if !ok {
@@ -137,7 +129,7 @@ func (s *functionState) emitTreeExactStructuralChildCount(nodeValue C.LLVMValueR
 		relation := semantic.TreeFieldStructuralRelation(family, field.Type)
 		switch relation {
 		case ast.EnumPayloadRelationChild:
-			fieldValue, _, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, fieldDecl.Name, name)
+			fieldValue, _, err := s.emitTreeMemberFieldValueAtHandle(nodeValue, family, memberType, fieldDecl.Name, name)
 			if err != nil {
 				return nil, err
 			}
@@ -152,7 +144,7 @@ func (s *functionState) emitTreeExactStructuralChildCount(nodeValue C.LLVMValueR
 			}
 			total = C.LLVMBuildAdd(s.builder, total, childCount, cStringFree(name+".count"))
 		case ast.EnumPayloadRelationChildren:
-			fieldValue, _, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, fieldDecl.Name, name)
+			fieldValue, _, err := s.emitTreeMemberFieldValueAtHandle(nodeValue, family, memberType, fieldDecl.Name, name)
 			if err != nil {
 				return nil, err
 			}
@@ -170,10 +162,6 @@ func (s *functionState) emitTreeExactStructuralChildValue(nodeValue C.LLVMValueR
 	if family == nil {
 		return nil, fmt.Errorf("children(...) exact member is missing tree family metadata")
 	}
-	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
-	if err != nil {
-		return nil, err
-	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -190,10 +178,6 @@ func (s *functionState) emitTreeExactStructuralChildValue(nodeValue C.LLVMValueR
 	remaining := indexValue
 	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
-	rowValue, _, err := s.emitTreeExactRowValueAtIndex(access.tablePtr, memberType, access.rowIndex, name)
-	if err != nil {
-		return nil, err
-	}
 	for _, fieldDecl := range treeExactFieldDecls(memberType) {
 		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 		if !ok {
@@ -203,7 +187,7 @@ func (s *functionState) emitTreeExactStructuralChildValue(nodeValue C.LLVMValueR
 		if relation != ast.EnumPayloadRelationChild && relation != ast.EnumPayloadRelationChildren {
 			continue
 		}
-		fieldValue, _, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, fieldDecl.Name, name)
+		fieldValue, _, err := s.emitTreeMemberFieldValueAtHandle(nodeValue, family, memberType, fieldDecl.Name, name)
 		if err != nil {
 			return nil, err
 		}

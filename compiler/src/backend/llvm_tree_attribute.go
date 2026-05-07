@@ -441,21 +441,13 @@ func (s *functionState) emitTreeAttributeNamedChildBindingLocals(nodeValue C.LLV
 	if family == nil {
 		return fmt.Errorf("attribute child binding source %s is missing tree family metadata", treeExactMemberSurfaceName(memberType))
 	}
-	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
-	if err != nil {
-		return err
-	}
-	rowValue, _, err := s.emitTreeExactRowValueAtIndex(access.tablePtr, memberType, access.rowIndex, name)
-	if err != nil {
-		return err
-	}
 	bound := map[string]bool{}
 	for _, childBinding := range semantic.TreeStructuralChildBindings(memberType) {
 		bindName, wanted := requested[childBinding.Name]
 		if !wanted {
 			continue
 		}
-		surfaceValue, surfaceType, err := s.emitTreeExactSurfaceFieldValueFromRow(memberType, rowValue, childBinding.Name, name+"."+childBinding.Name+".surface")
+		surfaceValue, surfaceType, err := s.emitTreeMemberSurfaceFieldValueAtHandle(nodeValue, family, memberType, childBinding.Name, name+"."+childBinding.Name+".surface")
 		if err != nil {
 			return err
 		}

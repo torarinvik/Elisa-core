@@ -564,6 +564,44 @@ func (s *functionState) emitTreeCategoryUnionSurfaceFieldValue(tablePtr C.LLVMVa
 	}
 	return s.treeFieldSurfaceValue(value, rawType, field.Type, name)
 }
+func (s *functionState) emitTreeMemberFieldValueAtHandle(nodeValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
+		stateValue := s.emitTreeHandleStateValue(nodeValue, name)
+		rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name)
+		if err != nil {
+			return nil, nil, err
+		}
+		tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, family, viewType.Category, name)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitTreeCategoryUnionFieldValueAtIndex(tablePtr, viewType.Category, viewType.Variant, fieldName, rowIndex, name)
+	}
+	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.emitTreeExactFieldValueAtIndex(access.tablePtr, memberType, fieldName, access.rowIndex, name)
+}
+func (s *functionState) emitTreeMemberSurfaceFieldValueAtHandle(nodeValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType); ok && viewType != nil && viewType.Category != nil && viewType.Category.Layout == semantic.TreeLayoutCategoryUnion {
+		stateValue := s.emitTreeHandleStateValue(nodeValue, name)
+		rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name)
+		if err != nil {
+			return nil, nil, err
+		}
+		tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, family, viewType.Category, name)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitTreeCategoryUnionSurfaceFieldValue(tablePtr, viewType.Category, viewType.Variant, fieldName, rowIndex, name)
+	}
+	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.emitTreeExactSurfaceFieldValue(access.tablePtr, memberType, fieldName, access.rowIndex, name)
+}
 func (s *functionState) emitTreePatchExactRowFieldValue(memberType semantic.Type, rowValue C.LLVMValueRef, fieldName string, fieldValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	fieldIndex, _, err := treeExactFieldIndex(memberType, fieldName)
 	if err != nil {

@@ -51,10 +51,6 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 	if family == nil {
 		return fmt.Errorf("fold child binding source %s is missing tree family metadata", treeExactMemberSurfaceName(memberType))
 	}
-	access, err := s.emitTreeExactTableAccessFromHandle(nodeValue, family, memberType, name)
-	if err != nil {
-		return err
-	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -63,10 +59,6 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 	zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	offsetValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	oneValue := C.LLVMConstInt(usizeLLVMType, 1, 0)
-	rowValue, _, err := s.emitTreeExactRowValueAtIndex(access.tablePtr, memberType, access.rowIndex, name)
-	if err != nil {
-		return err
-	}
 	boundFields := map[string]bool{}
 	for _, childBinding := range semantic.TreeStructuralChildBindings(memberType) {
 		bindName, wanted := requested[childBinding.Name]
@@ -82,7 +74,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 					}
 				}
 			}
-			fieldValue, _, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, childBinding.Name, name+"."+childBinding.Name)
+			fieldValue, _, err := s.emitTreeMemberFieldValueAtHandle(nodeValue, family, memberType, childBinding.Name, name+"."+childBinding.Name)
 			if err != nil {
 				return err
 			}
@@ -159,7 +151,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 					}
 				}
 			}
-			fieldValue, _, err := s.emitTreeExactFieldValueFromRow(memberType, rowValue, childBinding.Name, name+"."+childBinding.Name)
+			fieldValue, _, err := s.emitTreeMemberFieldValueAtHandle(nodeValue, family, memberType, childBinding.Name, name+"."+childBinding.Name)
 			if err != nil {
 				return err
 			}
