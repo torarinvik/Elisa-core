@@ -347,11 +347,7 @@ func (s *functionState) emitTreeFoldImplicitRewriteDefaultSwitch(helper *treeFol
 	switchInst := C.LLVMBuildSwitch(s.builder, tagValue, missingFailBB, C.unsigned(len(missing)))
 	for _, member := range missing {
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".default.arm"))
-		tag, ok := treeExactMemberTag(member)
-		if !ok {
-			return fmt.Errorf("missing exact tag for %s", treeExactMemberSurfaceName(member))
-		}
-		tagConst, err := s.enumTagConstant(tag)
+		tagConst, err := s.treeExactMemberTagConstant(member)
 		if err != nil {
 			return err
 		}

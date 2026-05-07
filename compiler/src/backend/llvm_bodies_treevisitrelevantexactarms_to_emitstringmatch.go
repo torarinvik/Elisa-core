@@ -272,11 +272,7 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 				continue
 			}
 			bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.arm"))
-			tag, ok := treeExactMemberTag(member)
-			if !ok {
-				return nil, nil, fmt.Errorf("missing exact tag for %s", memberName)
-			}
-			tagConst, err := s.errorCodeConstant(tag)
+			tagConst, err := s.treeExactMemberTagConstant(member)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -343,11 +339,7 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 			continue
 		}
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.arm"))
-		tag, ok := treeExactMemberTag(armInfo.member)
-		if !ok {
-			return nil, nil, fmt.Errorf("missing exact tag for %s", treeExactMemberSurfaceName(armInfo.member))
-		}
-		tagConst, err := s.errorCodeConstant(tag)
+		tagConst, err := s.treeExactMemberTagConstant(armInfo.member)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -186,6 +186,13 @@ func treeExactMemberTag(memberType semantic.Type) (uint32, bool) {
 		return semantic.TreeExactTag(memberType)
 	}
 }
+func (s *functionState) treeExactMemberTagConstant(memberType semantic.Type) (C.LLVMValueRef, error) {
+	tag, ok := treeExactMemberTag(memberType)
+	if !ok {
+		return nil, fmt.Errorf("missing exact tree tag for %s", treeExactMemberSurfaceName(memberType))
+	}
+	return s.enumTagConstant(tag)
+}
 func treeCategoryMembersInTagOrder(categoryType *semantic.TreeCategoryType) []semantic.Type {
 	if categoryType == nil {
 		return nil

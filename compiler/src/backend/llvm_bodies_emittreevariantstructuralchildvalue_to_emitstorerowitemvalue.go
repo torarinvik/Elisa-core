@@ -272,11 +272,7 @@ func (s *functionState) emitTreeChildrenCount(sourceType semantic.Type, nodeValu
 			var incomingValues []C.LLVMValueRef
 			var incomingBlocks []C.LLVMBasicBlockRef
 			for _, member := range semantic.TreeFamilyExactMembersInTagOrder(family) {
-				tag, ok := treeExactMemberTag(member)
-				if !ok {
-					continue
-				}
-				tagConst, err := s.enumTagConstant(tag)
+				tagConst, err := s.treeExactMemberTagConstant(member)
 				if err != nil {
 					return nil, err
 				}
@@ -365,11 +361,7 @@ func (s *functionState) emitTreeChildrenValue(sourceType semantic.Type, nodeValu
 			var incomingValues []C.LLVMValueRef
 			var incomingBlocks []C.LLVMBasicBlockRef
 			for _, member := range semantic.TreeFamilyExactMembersInTagOrder(family) {
-				tag, ok := treeExactMemberTag(member)
-				if !ok {
-					continue
-				}
-				tagConst, err := s.enumTagConstant(tag)
+				tagConst, err := s.treeExactMemberTagConstant(member)
 				if err != nil {
 					return nil, err
 				}

@@ -396,11 +396,7 @@ func (s *functionState) emitTreeFoldSwitchDispatch(helper *treeFoldHelperInfo, e
 		}
 		coveredMembers[treeExactMemberSurfaceName(armInfo.member)] = true
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm"))
-		tag, ok := treeExactMemberTag(armInfo.member)
-		if !ok {
-			return nil, false, fmt.Errorf("missing exact tag for %s", treeExactMemberSurfaceName(armInfo.member))
-		}
-		tagConst, err := s.enumTagConstant(tag)
+		tagConst, err := s.treeExactMemberTagConstant(armInfo.member)
 		if err != nil {
 			return nil, false, err
 		}
@@ -470,11 +466,7 @@ func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelper
 		}
 		coveredMembers[memberName] = true
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm"))
-		tag, ok := treeExactMemberTag(member)
-		if !ok {
-			return nil, false, fmt.Errorf("missing exact tag for %s", treeExactMemberSurfaceName(member))
-		}
-		tagConst, err := s.enumTagConstant(tag)
+		tagConst, err := s.treeExactMemberTagConstant(member)
 		if err != nil {
 			return nil, false, err
 		}

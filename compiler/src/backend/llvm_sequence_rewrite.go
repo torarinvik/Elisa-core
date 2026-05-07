@@ -103,11 +103,7 @@ func (s *functionState) emitSequenceRewriteTreeArmMatch(elemValue C.LLVMValueRef
 	if err != nil {
 		return err
 	}
-	tag, ok := treeExactMemberTag(memberType)
-	if !ok {
-		return fmt.Errorf("missing exact tree tag for %s", treeExactMemberSurfaceName(memberType))
-	}
-	tagConst, err := s.errorCodeConstant(tag)
+	tagConst, err := s.treeExactMemberTagConstant(memberType)
 	if err != nil {
 		return err
 	}

@@ -275,11 +275,7 @@ func (s *functionState) emitTreeAttributeSwitchDispatch(helper *treeAttributeHel
 			continue
 		}
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm"))
-		tag, ok := semantic.TreeExactTag(member)
-		if !ok {
-			return nil, false, fmt.Errorf("missing exact tree tag for %s", memberName)
-		}
-		tagConst, err := s.enumTagConstant(tag)
+		tagConst, err := s.treeExactMemberTagConstant(member)
 		if err != nil {
 			return nil, false, err
 		}
