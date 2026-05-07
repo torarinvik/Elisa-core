@@ -193,7 +193,11 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 		envParam := C.LLVMGetParam(fnValue, C.unsigned(paramOffset))
 		for i, capture := range captures {
 			fieldPtr := C.LLVMBuildStructGEP2(builder, envType, envParam, C.unsigned(i), cStringFree(helperName+"."+capture.name+".env.ptr"))
-			captureValue := C.LLVMBuildLoad2(builder, mustLowerType(state, capture.binding.typ), fieldPtr, cStringFree(helperName+"."+capture.name+".env"))
+			captureLLVMType, err := state.g.lowerType(capture.binding.typ)
+			if err != nil {
+				return nil, err
+			}
+			captureValue := C.LLVMBuildLoad2(builder, captureLLVMType, fieldPtr, cStringFree(helperName+"."+capture.name+".env"))
 			alloca, err := state.createEntryAlloca(capture.name, capture.binding.typ)
 			if err != nil {
 				return nil, err

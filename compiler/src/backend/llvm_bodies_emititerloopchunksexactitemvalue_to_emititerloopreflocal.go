@@ -222,11 +222,23 @@ func (s *functionState) emitIterLoopElementAddress(sourceAlloca C.LLVMValueRef, 
 		ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, sourceAlloca, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(sourceName+".iter.ptr"))
 		return ptr, tt.Elem, nil
 	case *semantic.DArrayType:
-		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, mustLowerType(s, tt), tt.Elem, indexValue)
+		containerLLVMType, err := s.g.lowerType(tt)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, containerLLVMType, tt.Elem, indexValue)
 	case *semantic.ViewType:
-		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, mustLowerType(s, tt), tt.Elem, indexValue)
+		containerLLVMType, err := s.g.lowerType(tt)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, containerLLVMType, tt.Elem, indexValue)
 	case *semantic.DArrayViewType:
-		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, mustLowerType(s, tt), tt.Elem, indexValue)
+		containerLLVMType, err := s.g.lowerType(tt)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, containerLLVMType, tt.Elem, indexValue)
 	case *semantic.StoreRowsViewType:
 		return nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
 	case *semantic.GenericInstanceType:
@@ -277,13 +289,6 @@ func (s *functionState) emitIterLoopElementAddress(sourceAlloca C.LLVMValueRef, 
 	default:
 		return nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
 	}
-}
-func mustLowerType(s *functionState, t semantic.Type) C.LLVMTypeRef {
-	llvmType, err := s.g.lowerType(t)
-	if err != nil {
-		return nil
-	}
-	return llvmType
 }
 func (s *functionState) emitIterLoopStringIndexValue(stringValue C.LLVMValueRef, operandType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
 	helperName, _, ok := runtimeStringIndexedOperand(operandType)

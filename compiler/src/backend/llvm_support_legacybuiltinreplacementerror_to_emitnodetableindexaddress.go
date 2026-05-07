@@ -388,7 +388,11 @@ func (s *functionState) emitStoreRowFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	elemPtr, elemType, err := s.emitRuntimePointerIndexedAddressWithType(columnPtr, mustLowerType(s, darrayType), darrayType.Elem, indexValue)
+	darrayLLVMType, err := s.g.lowerType(darrayType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	elemPtr, elemType, err := s.emitRuntimePointerIndexedAddressWithType(columnPtr, darrayLLVMType, darrayType.Elem, indexValue)
 	if err != nil {
 		return nil, nil, true, err
 	}
