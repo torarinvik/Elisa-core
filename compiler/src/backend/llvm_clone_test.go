@@ -86,9 +86,9 @@ def clone_expr(owner: mutable Arena&, expr: Lua.Expr) -> Lua.Expr:
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 	for _, check := range []string{
-		"define %Lua__TreeHandle @clone_expr",
-		"define private %Lua__TreeHandle @tree_fold_",
-		"node.default.arm",
+		"define i32 @clone_expr",
+		"define private i32 @tree_fold_",
+		"category.default.arm",
 		"tree.default.payload.memcpy",
 		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
 	} {

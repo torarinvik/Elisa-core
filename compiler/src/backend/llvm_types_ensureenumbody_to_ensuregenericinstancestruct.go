@@ -77,6 +77,9 @@ func (g *llvmGenerator) lowerTreeCategoryType(category *semantic.TreeCategoryTyp
 	if category.Family == nil {
 		return nil, fmt.Errorf("tree category %s is missing family metadata", category.Name)
 	}
+	if treeCategoryLayoutPlan(category).isCategoryUnion() {
+		return g.ensureTreeDenseHandleCarrierType()
+	}
 	if _, err := g.ensureTreeHandleCarrierType(category.Family); err != nil {
 		return nil, err
 	}

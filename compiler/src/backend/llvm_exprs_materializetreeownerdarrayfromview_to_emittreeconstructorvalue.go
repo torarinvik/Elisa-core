@@ -557,6 +557,16 @@ func (s *functionState) emitTreeCategoryUnionConstructorValue(treeType *semantic
 	if treeType == nil || treeType.Family == nil || variant == nil {
 		return nil, nil, fmt.Errorf("missing category-union tree constructor metadata")
 	}
+	storeLLVMType, err := s.g.lowerTreeStoreType(treeType.Family.StoreType)
+	if err != nil {
+		return nil, nil, err
+	}
+	activeStore := C.LLVMGetUndef(storeLLVMType)
+	activeStore = C.LLVMBuildInsertValue(s.builder, activeStore, arenaValue, 0, cStringFree("tree.category.active.arena"))
+	activeStore = C.LLVMBuildInsertValue(s.builder, activeStore, stateValue, 1, cStringFree("tree.category.active.state"))
+	if err := s.emitTreeCategoryUnionSetActiveStore(treeType.Family, activeStore); err != nil {
+		return nil, nil, err
+	}
 	slot, err := s.emitTreeCategoryUnionAppendSlot(arenaValue, stateValue, treeType.Family, treeType, "tree.category")
 	if err != nil {
 		return nil, nil, err
@@ -598,11 +608,7 @@ func (s *functionState) emitTreeCategoryUnionConstructorValue(treeType *semantic
 	if err := s.emitTreeCategoryUnionTableSetCount(slot.tablePtr, treeType, slot.neededCount, "tree.category"); err != nil {
 		return nil, nil, err
 	}
-	keyValue, err := s.buildTreeHandleKey(variant.Tag, slot.rowIndex, "tree.category")
-	if err != nil {
-		return nil, nil, err
-	}
-	handleValue, err := s.buildTreeHandleValue(treeType.Family, stateValue, keyValue, "tree.category")
+	handleValue, err := s.coerceValue(slot.rowIndex, s.g.result.NamedTypes["usize"], s.g.result.NamedTypes["u32"])
 	if err != nil {
 		return nil, nil, err
 	}

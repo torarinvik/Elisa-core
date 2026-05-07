@@ -234,6 +234,9 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 		if err := s.emitTreeCategoryUnionTableSetCount(slot.tablePtr, viewType.Category, slot.neededCount, "tree.default"); err != nil {
 			return nil, nil, err
 		}
+		if err := s.emitTreeCategoryUnionSetActiveStore(family, storeValue); err != nil {
+			return nil, nil, err
+		}
 		keyValue, err := s.buildTreeHandleKey(tag, slot.rowIndex, "tree.default")
 		if err != nil {
 			return nil, nil, err

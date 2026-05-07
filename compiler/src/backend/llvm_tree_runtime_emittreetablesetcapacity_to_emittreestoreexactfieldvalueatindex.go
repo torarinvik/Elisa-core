@@ -713,6 +713,19 @@ func (s *functionState) emitTreeCategoryUnionKindAtIndex(tablePtr C.LLVMValueRef
 	return nil
 }
 
+func (s *functionState) emitTreeCategoryUnionKindValueAtIndex(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, rowIndex C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	kindsPtr, err := s.emitTreeCategoryUnionKindsPointerValue(tablePtr, category, name)
+	if err != nil {
+		return nil, err
+	}
+	kindType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	kindPtr := C.LLVMBuildGEP2(s.builder, kindType, kindsPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), 1, cStringFree(name+".kind.ptr"))
+	return C.LLVMBuildLoad2(s.builder, kindType, kindPtr, cStringFree(name+".kind")), nil
+}
+
 func (s *functionState) emitTreeCategoryUnionPayloadAtIndex(tablePtr C.LLVMValueRef, category *semantic.TreeCategoryType, variant *semantic.EnumVariant, rowIndex C.LLVMValueRef, payloadType C.LLVMTypeRef, payloadValue C.LLVMValueRef, name string) error {
 	payloadsPtr, err := s.emitTreeCategoryUnionPayloadsPointerValue(tablePtr, category, name)
 	if err != nil {

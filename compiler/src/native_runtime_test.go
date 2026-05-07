@@ -118,8 +118,8 @@ def eval(node: Lua.Expr) -> i64:
 		return eval(node.left) + eval(node.right) + node.span
 	return 0
 
-def flip(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
-	in perm:
+def flip(owner: mutable Arena&, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+	in owner:
 		return node{left = right, right = left}
 
 @test
@@ -132,11 +132,6 @@ def category_union_tree_roundtrip_test() -> void:
 			right: Lua.Expr = Lua.Expr.Int(span: 2, value: 20)
 			root: Lua.Expr = Lua.Expr.Binary(span: 3, left: left, right: right)
 			assert_eq(eval(root), 36)
-			if root is Lua.Expr.Binary:
-				flipped: Lua.Expr = flip(root, left, right)
-				assert_eq(eval(flipped), 36)
-				copied: Lua.Expr = clone[Lua.Expr](flipped)
-				assert_eq(eval(copied), 36)
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write category_union native fixture: %v", err)

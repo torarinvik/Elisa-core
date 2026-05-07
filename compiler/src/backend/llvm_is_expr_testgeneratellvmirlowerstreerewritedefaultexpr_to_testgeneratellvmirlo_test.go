@@ -60,7 +60,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 	for _, check := range []string{
-		"define %Lua__TreeHandle @simplify(%Lua__TreeHandle ",
+		"define i32 @simplify(i32 ",
 		"tree.default.kind.ptr",
 		"tree.default.src.payload.value",
 		"tree.default.payload.memcpy",

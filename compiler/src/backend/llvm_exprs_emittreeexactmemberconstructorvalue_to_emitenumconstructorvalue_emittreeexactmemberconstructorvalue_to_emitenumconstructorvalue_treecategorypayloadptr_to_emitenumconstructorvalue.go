@@ -94,6 +94,13 @@ func (s *functionState) extractTreeCategoryTagValue(nodeValue C.LLVMValueRef, ca
 	if categoryType == nil {
 		return nil, fmt.Errorf("missing tree category metadata")
 	}
+	if treeCategoryLayoutPlan(categoryType).isCategoryUnion() {
+		access, err := s.emitTreeCategoryUnionTableAccessFromHandle(nodeValue, categoryType.Family, categoryType, "tree.tag")
+		if err != nil {
+			return nil, err
+		}
+		return s.emitTreeCategoryUnionKindValueAtIndex(access.tablePtr, categoryType, access.rowIndex, "tree.tag")
+	}
 	return s.emitTreeHandleTagValue(nodeValue, "tree.tag")
 }
 func (s *functionState) extractTreeVariantPayloadValues(nodeValue C.LLVMValueRef, categoryType *semantic.TreeCategoryType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, error) {

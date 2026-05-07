@@ -350,7 +350,9 @@ func (s *functionState) emitCloneTreeValue(sourceValue C.LLVMValueRef, sourceTyp
 	rootName := semantic.StripAggregateStateType(targetType).String()
 	switch tt := semantic.StripAggregateStateType(targetType).(type) {
 	case *semantic.TreeCategoryType:
-		if tt != nil && tt.Family != nil && tt.Family.NodeType != nil {
+		if tt != nil && treeCategoryLayoutPlan(tt).isCategoryUnion() {
+			rootName = tt.String()
+		} else if tt != nil && tt.Family != nil && tt.Family.NodeType != nil {
 			rootName = tt.Family.NodeType.String()
 		}
 	case *semantic.TreeNodeType:

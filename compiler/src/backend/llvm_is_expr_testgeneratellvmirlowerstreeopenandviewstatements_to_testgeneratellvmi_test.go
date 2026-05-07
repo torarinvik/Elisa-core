@@ -74,11 +74,14 @@ def make_int(value: i64) -> Lua.Expr:
 		"tree.category.kind.ptr",
 		"tree.category.payload.memcpy",
 		"tree.category.count.ptr",
-		"define %Lua__TreeHandle @make_int",
+		"define i32 @make_int",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected category_union constructor lowering to contain %q, got:\n%s", check, output)
 		}
+	}
+	if strings.Contains(output, "%Lua__TreeHandle = type") {
+		t.Fatalf("expected category_union constructor to lower handles as dense i32 rows, got legacy handle carrier:\n%s", output)
 	}
 }
 
@@ -112,9 +115,9 @@ def payload_score(node: Lua.Expr) -> i64:
 	}
 	for _, check := range []string{
 		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
-		"define i64 @score_int(%Lua__TreeHandle ",
-		"define i64 @score(%Lua__TreeHandle ",
-		"define i64 @payload_score(%Lua__TreeHandle ",
+		"define i64 @score_int(i32 ",
+		"define i64 @score(i32 ",
+		"define i64 @payload_score(i32 ",
 		"tree.field.payload.row.ptr",
 		"tree.field.payload.elem.ptr",
 		"tree.payload.field.payload.elem.ptr",
@@ -256,7 +259,7 @@ def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lu
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 	for _, check := range []string{
-		"define %Lua__TreeHandle @rewrite_binary",
+		"define i32 @rewrite_binary",
 		"tree.update.kind.ptr",
 		"tree.update.src.payload.value",
 		"tree.update.payload.memcpy",
@@ -292,23 +295,9 @@ def count_children(stmt: Lua.Stmt) -> i64:
 	return total
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_children_root.elisa", src)
-	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
-	if err != nil {
-		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
-	}
-	for _, check := range []string{
-		"define i64 @count_children(%Lua__TreeHandle ",
-		"TreeChildren",
-		"tree.children.value.phi",
-		"%Lua_Stmt__TreeUnionTable = type { i64, i64, ptr, ptr }",
-		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
-	} {
-		if !strings.Contains(output, check) {
-			t.Fatalf("expected category_union mixed tree children lowering to include %q, got:\n%s", check, output)
-		}
-	}
-	if strings.Contains(output, "%Lua_Stmt_IfStmt__TreeTable") || strings.Contains(output, "%Lua_Expr_Name__TreeTable") {
-		t.Fatalf("expected category_union mixed tree children lowering to avoid exact per-variant rows, got:\n%s", output)
+	_, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err == nil || !strings.Contains(err.Error(), "cannot be widened to root Lua.Node without root handle storage") {
+		t.Fatalf("expected category_union root children lowering to diagnose missing root handle storage, got: %v", err)
 	}
 }
 
@@ -340,8 +329,8 @@ def name_id(name: Lua.Expr.Atom.Name) -> i64:
 	for _, check := range []string{
 		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
 		"%Lua_Expr_Atom__TreeUnionTable = type { i64, i64, ptr, ptr }",
-		"define i64 @atom_id(%Lua__TreeHandle ",
-		"define i64 @name_id(%Lua__TreeHandle ",
+		"define i64 @atom_id(i32 ",
+		"define i64 @name_id(i32 ",
 		"tree.field.payload.row.ptr",
 		"tree.field.payload.elem.ptr",
 	} {

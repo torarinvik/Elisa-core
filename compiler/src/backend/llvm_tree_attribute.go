@@ -253,7 +253,13 @@ func (s *functionState) emitTreeAttributeSwitchDispatch(helper *treeAttributeHel
 	if helper == nil {
 		return nil, false, fmt.Errorf("missing tree attribute helper metadata")
 	}
-	tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".tag")
+	var tagValue C.LLVMValueRef
+	var err error
+	if helper.root.kind == treeFoldRootCategory && helper.root.category != nil {
+		tagValue, err = s.extractTreeCategoryTagValue(nodeValue, helper.root.category)
+	} else {
+		tagValue, err = s.emitTreeHandleTagValue(nodeValue, name+".tag")
+	}
 	if err != nil {
 		return nil, false, err
 	}

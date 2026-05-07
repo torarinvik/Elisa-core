@@ -367,7 +367,13 @@ func (s *functionState) emitTreeFoldSwitchDispatch(helper *treeFoldHelperInfo, e
 	if len(relevant) == 0 && (helper == nil || !helper.hasImplicitRewriteDefault()) {
 		return nil, false, fmt.Errorf("fold over %s has no relevant arms", helper.root.bindType().String())
 	}
-	tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".tag")
+	var tagValue C.LLVMValueRef
+	var err error
+	if helper.root.kind == treeFoldRootCategory && helper.root.category != nil {
+		tagValue, err = s.extractTreeCategoryTagValue(nodeValue, helper.root.category)
+	} else {
+		tagValue, err = s.emitTreeHandleTagValue(nodeValue, name+".tag")
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -422,7 +428,13 @@ func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelper
 	if len(members) == 0 {
 		return nil, false, fmt.Errorf("fold over %s has no relevant arms", helper.root.bindType().String())
 	}
-	tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".tag")
+	var tagValue C.LLVMValueRef
+	var err error
+	if helper.root.kind == treeFoldRootCategory && helper.root.category != nil {
+		tagValue, err = s.extractTreeCategoryTagValue(nodeValue, helper.root.category)
+	} else {
+		tagValue, err = s.emitTreeHandleTagValue(nodeValue, name+".tag")
+	}
 	if err != nil {
 		return nil, false, err
 	}

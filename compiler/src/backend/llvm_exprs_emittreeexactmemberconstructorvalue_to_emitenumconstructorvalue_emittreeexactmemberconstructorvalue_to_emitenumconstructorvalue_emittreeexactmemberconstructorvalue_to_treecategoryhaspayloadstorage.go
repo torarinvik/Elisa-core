@@ -276,7 +276,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			return value, kindType, true, nil
 		}
 		if field, ok := semantic.TreeCategorySurfaceFieldInfo(tt, expr.Field); ok {
-			tagValue, err := s.emitTreeHandleTagValue(handleValue, "tree.field")
+			tagValue, err := s.extractTreeCategoryTagValue(handleValue, tt)
 			if err != nil {
 				return nil, nil, true, err
 			}

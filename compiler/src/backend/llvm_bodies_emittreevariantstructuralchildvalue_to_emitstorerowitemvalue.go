@@ -257,6 +257,9 @@ func (s *functionState) emitTreeChildrenCount(sourceType semantic.Type, nodeValu
 		case *semantic.TreeBlockType, *semantic.TreeStructType:
 			return s.emitTreeExactStructuralChildCount(nodeValue, exact, name)
 		case *semantic.TreeNodeType:
+			if family != nil && treeFamilyLayoutPlan(family).isCategoryUnion() {
+				return nil, fmt.Errorf("children(...) over %s is not supported for category_union roots; use a concrete tree category", exact.String())
+			}
 			tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".node")
 			if err != nil {
 				return nil, err
@@ -347,6 +350,9 @@ func (s *functionState) emitTreeChildrenValue(sourceType semantic.Type, nodeValu
 		case *semantic.TreeBlockType, *semantic.TreeStructType:
 			return s.emitTreeExactStructuralChildValue(nodeValue, exact, indexValue, itemType, name)
 		case *semantic.TreeNodeType:
+			if family != nil && treeFamilyLayoutPlan(family).isCategoryUnion() {
+				return nil, fmt.Errorf("children(...) over %s is not supported for category_union roots; use a concrete tree category", exact.String())
+			}
 			tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".node")
 			if err != nil {
 				return nil, err

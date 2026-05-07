@@ -158,6 +158,9 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		if !ok || family == nil {
 			return nil, fmt.Errorf("missing tree variant view metadata")
 		}
+		if tt.Category != nil && treeCategoryLayoutPlan(tt.Category).isCategoryUnion() {
+			return g.ensureTreeDenseHandleCarrierType()
+		}
 		return g.ensureTreeHandleCarrierType(family)
 	case *semantic.TreeNodeType:
 		if tt == nil || tt.Family == nil {

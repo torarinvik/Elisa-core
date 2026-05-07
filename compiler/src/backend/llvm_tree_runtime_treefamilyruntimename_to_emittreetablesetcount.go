@@ -271,6 +271,13 @@ func (g *llvmGenerator) ensureTreeHandleCarrierType(treeType *semantic.TreeType)
 	if treeType == nil {
 		return nil, fmt.Errorf("missing tree family for handle lowering")
 	}
+	return g.ensureTreeLegacyHandleCarrierType(treeType)
+}
+
+func (g *llvmGenerator) ensureTreeLegacyHandleCarrierType(treeType *semantic.TreeType) (C.LLVMTypeRef, error) {
+	if treeType == nil {
+		return nil, fmt.Errorf("missing tree family for legacy handle lowering")
+	}
 	name := treeHandleCarrierName(treeType)
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
@@ -287,6 +294,10 @@ func (g *llvmGenerator) ensureTreeHandleCarrierType(treeType *semantic.TreeType)
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
+}
+
+func (g *llvmGenerator) ensureTreeDenseHandleCarrierType() (C.LLVMTypeRef, error) {
+	return g.lowerBuiltin("u32")
 }
 func (g *llvmGenerator) ensureTreeCategoryUnionPayloadType(category *semantic.TreeCategoryType) (C.LLVMTypeRef, error) {
 	if category == nil {
@@ -458,6 +469,38 @@ func (g *llvmGenerator) ensureTreeStoreStateType(treeType *semantic.TreeType) (C
 func treePermStoreGlobalName(treeType *semantic.TreeType) string {
 	return treeFamilyRuntimeName(treeType) + "__perm_tree_store"
 }
+func treeActiveStoreGlobalName(treeType *semantic.TreeType) string {
+	return treeFamilyRuntimeName(treeType) + "__active_tree_store"
+}
+func (g *llvmGenerator) ensureTreeActiveStoreGlobal(treeType *semantic.TreeType) (C.LLVMValueRef, error) {
+	if treeType == nil || treeType.StoreType == nil {
+		return nil, fmt.Errorf("missing tree family store metadata for active tree store")
+	}
+	name := treeActiveStoreGlobalName(treeType)
+	if value, ok := g.globals[name]; ok && value != nil {
+		if C.LLVMIsDeclaration(value) != 0 {
+			storeType, err := g.lowerTreeStoreType(treeType.StoreType)
+			if err != nil {
+				return nil, err
+			}
+			C.LLVMSetInitializer(value, C.LLVMConstNull(storeType))
+			C.LLVMSetLinkage(value, C.LLVMPrivateLinkage)
+		}
+		return value, nil
+	}
+	value, err := g.addGlobal(name, treeType.StoreType, false)
+	if err != nil {
+		return nil, err
+	}
+	storeType, err := g.lowerTreeStoreType(treeType.StoreType)
+	if err != nil {
+		return nil, err
+	}
+	C.LLVMSetInitializer(value, C.LLVMConstNull(storeType))
+	C.LLVMSetLinkage(value, C.LLVMPrivateLinkage)
+	g.globals[name] = value
+	return value, nil
+}
 func (g *llvmGenerator) ensureTreePermStoreGlobal(treeType *semantic.TreeType) (C.LLVMValueRef, error) {
 	if treeType == nil || treeType.StoreType == nil {
 		return nil, fmt.Errorf("missing tree family store metadata for perm store")
@@ -527,7 +570,11 @@ func (s *functionState) buildTreeHandleValue(treeType *semantic.TreeType, stateV
 	if treeType == nil {
 		return nil, fmt.Errorf("missing tree family for handle value")
 	}
-	handleType, err := s.g.ensureTreeHandleCarrierType(treeType)
+	if treeFamilyLayoutPlan(treeType).isCategoryUnion() {
+		_ = stateValue
+		return s.coerceValue(keyValue, s.g.result.NamedTypes["usize"], s.g.result.NamedTypes["u32"])
+	}
+	handleType, err := s.g.ensureTreeLegacyHandleCarrierType(treeType)
 	if err != nil {
 		return nil, err
 	}
@@ -594,6 +641,14 @@ func (s *functionState) emitTreeHandleTagValue(handleValue C.LLVMValueRef, name 
 	return s.emitTreeTagValueFromKey(s.emitTreeHandleKeyValue(handleValue, name), name)
 }
 func (s *functionState) emitTreeHandleIndexValue(handleValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	valueType := C.LLVMTypeOf(handleValue)
+	if C.LLVMGetTypeKind(valueType) == C.LLVMIntegerTypeKind && C.LLVMGetIntTypeWidth(valueType) == 32 {
+		indexType, err := s.treeHandleIndexType()
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMBuildZExt(s.builder, handleValue, indexType, cStringFree(name+".index")), nil
+	}
 	return s.emitTreeIndexValueFromKey(s.emitTreeHandleKeyValue(handleValue, name), name)
 }
 func (s *functionState) buildTreeHandleKey(tag uint32, rowIndexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
@@ -811,12 +866,66 @@ type treeHandleAccess struct {
 }
 
 func (s *functionState) emitTreeHandleAccess(handleValue C.LLVMValueRef, name string) (treeHandleAccess, error) {
+	if C.LLVMGetTypeKind(C.LLVMTypeOf(handleValue)) == C.LLVMIntegerTypeKind && C.LLVMGetIntTypeWidth(C.LLVMTypeOf(handleValue)) == 32 {
+		return treeHandleAccess{}, fmt.Errorf("compact tree handle access requires category metadata")
+	}
 	stateValue := s.emitTreeHandleStateValue(handleValue, name+".state")
 	rowIndex, err := s.emitTreeHandleIndexValue(handleValue, name+".index")
 	if err != nil {
 		return treeHandleAccess{}, err
 	}
 	return treeHandleAccess{stateValue: stateValue, rowIndex: rowIndex}, nil
+}
+
+func (s *functionState) emitTreeCategoryUnionActiveStateValue(family *semantic.TreeType, name string) (C.LLVMValueRef, error) {
+	if family == nil || family.StoreType == nil {
+		return nil, fmt.Errorf("missing tree family for category-union active store access")
+	}
+	activePtr, err := s.g.ensureTreeActiveStoreGlobal(family)
+	if err != nil {
+		return nil, err
+	}
+	activeStore, err := s.loadValue(activePtr, family.StoreType, name+".active.store")
+	if err != nil {
+		return nil, err
+	}
+	activeState := s.emitTreeStoreStateValueNamed(activeStore, name+".active.state")
+	nullPtr := C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0))
+	hasActive := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), activeState, nullPtr, cStringFree(name+".active.ready"))
+	activeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".active"))
+	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fallback"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".state.cont"))
+	C.LLVMBuildCondBr(s.builder, hasActive, activeBB, fallbackBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, activeBB)
+	activeEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	storeValue, _, err := s.ensureTreeOwnerStoreValue(treeAllocOwnerBinding{isPerm: true}, family)
+	if err != nil {
+		return nil, err
+	}
+	fallbackState := s.emitTreeStoreStateValueNamed(storeValue, name+".perm.state")
+	fallbackEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, contBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	phi := C.LLVMBuildPhi(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), cStringFree(name+".state"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{activeState, fallbackState}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{activeEnd, fallbackEnd}), 2)
+	return phi, nil
+}
+
+func (s *functionState) emitTreeCategoryUnionSetActiveStore(family *semantic.TreeType, storeValue C.LLVMValueRef) error {
+	if family == nil || family.StoreType == nil {
+		return fmt.Errorf("missing tree family for category-union active store update")
+	}
+	activePtr, err := s.g.ensureTreeActiveStoreGlobal(family)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, storeValue, activePtr)
+	return nil
 }
 
 func (s *functionState) emitTreeExactTableAccessFromHandle(handleValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, name string) (treeExactTableAccess, error) {
@@ -831,6 +940,21 @@ func (s *functionState) emitTreeExactTableAccessFromHandle(handleValue C.LLVMVal
 	return treeExactTableAccess{rowIndex: handleAccess.rowIndex, tablePtr: tablePtr}, nil
 }
 func (s *functionState) emitTreeCategoryUnionTableAccessFromHandle(handleValue C.LLVMValueRef, family *semantic.TreeType, category *semantic.TreeCategoryType, name string) (treeCategoryUnionTableAccess, error) {
+	if C.LLVMGetTypeKind(C.LLVMTypeOf(handleValue)) == C.LLVMIntegerTypeKind && C.LLVMGetIntTypeWidth(C.LLVMTypeOf(handleValue)) == 32 {
+		stateValue, err := s.emitTreeCategoryUnionActiveStateValue(family, name)
+		if err != nil {
+			return treeCategoryUnionTableAccess{}, err
+		}
+		rowIndex, err := s.emitTreeHandleIndexValue(handleValue, name+".index")
+		if err != nil {
+			return treeCategoryUnionTableAccess{}, err
+		}
+		tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, family, category, name)
+		if err != nil {
+			return treeCategoryUnionTableAccess{}, err
+		}
+		return treeCategoryUnionTableAccess{rowIndex: rowIndex, tablePtr: tablePtr}, nil
+	}
 	handleAccess, err := s.emitTreeHandleAccess(handleValue, name)
 	if err != nil {
 		return treeCategoryUnionTableAccess{}, err
