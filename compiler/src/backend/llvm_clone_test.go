@@ -64,3 +64,39 @@ def clone_form(owner: mutable Arena&, form: Syntax.Form) -> Syntax.Form:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersCloneBuiltinForCategoryUnionTree(t *testing.T) {
+	src := `@layout(category_union)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+def clone_expr(owner: mutable Arena&, expr: Lua.Expr) -> Lua.Expr:
+	can Abort.Panic, Memory.Allocate:
+		in owner:
+			return clone[Lua.Expr](expr)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_clone_category_union.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"define %Lua__TreeHandle @clone_expr",
+		"define private %Lua__TreeHandle @tree_fold_",
+		"node.default.arm",
+		"tree.default.payload.memcpy",
+		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category_union clone lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "%Lua_Expr_Binary__TreeTable") {
+		t.Fatalf("expected category_union clone lowering to avoid exact per-variant rows, got:\n%s", output)
+	}
+}

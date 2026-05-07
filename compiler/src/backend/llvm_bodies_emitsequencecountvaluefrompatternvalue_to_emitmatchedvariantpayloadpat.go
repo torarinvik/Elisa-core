@@ -368,6 +368,13 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 }
 func (s *functionState) emitStructMatchFieldValue(actualValue C.LLVMValueRef, actualType semantic.Type, field structLiteralField, name string) (C.LLVMValueRef, error) {
 	switch tt := semantic.StripAggregateStateType(actualType).(type) {
+	case *semantic.TreeVariantViewType:
+		family := treeExactMemberFamily(tt)
+		if family == nil {
+			return nil, fmt.Errorf("tree struct pattern source %s is missing tree family metadata", treeExactMemberSurfaceName(tt))
+		}
+		surfaceValue, _, err := s.emitTreeMemberSurfaceFieldValueAtHandle(actualValue, family, tt, field.Decl.Name, name)
+		return surfaceValue, err
 	case *semantic.TreeBlockType, *semantic.TreeStructType:
 		access, err := s.emitTreeExactTableAccessFromHandle(actualValue, treeExactMemberFamily(tt), tt, name)
 		if err != nil {
