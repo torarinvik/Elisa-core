@@ -162,3 +162,80 @@ def category_union_tree_roundtrip_test() -> void:
 		}
 	}
 }
+
+func TestRunCLIExecutesPerVariantTreeFoldRewriteNativeSmoke(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "per_variant_tree_fold_rewrite_native_fixture.elisa")
+	testPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "test.elisa")
+	testInclude, err := filepath.Rel(fixtureDir, testPath)
+	if err != nil {
+		t.Fatalf("failed to compute test include path: %v", err)
+	}
+	testInclude = filepath.ToSlash(testInclude)
+	src := fmt.Sprintf(`# include %q
+
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+def score(node: Lua.Expr) -> i64:
+	return fold node as Lua.Node into i64:
+		Lua.Expr.Int(expr, children) when expr.value > 0:
+			expr.value + expr.span + children.len.i64()
+		Lua.Expr.Int(expr, children):
+			expr.span
+		Lua.Expr.Binary(expr, left, right):
+			left + right + expr.span
+
+def rewrite_spans(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Expr default:
+			Lua.Expr.Binary(expr, left, right):
+				default{span = expr.span + 10, left, right}
+
+@test
+def per_variant_tree_fold_rewrite_test() -> void:
+	can Abort.Panic, Memory.Allocate:
+		region scratch(8192)
+		owner: mutable Arena& = scratch.ref[mutable Arena&]
+		in owner:
+			left: Lua.Expr = Lua.Expr.Int(span: 1, value: 10)
+			right: Lua.Expr = Lua.Expr.Int(span: 2, value: -5)
+			root: Lua.Expr = Lua.Expr.Binary(span: 3, left: left, right: right)
+			assert_eq(score(root), 16)
+			rewritten: Lua.Expr = rewrite_spans(root)
+			assert_eq(score(rewritten), 26)
+`, testInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write per_variant native tree fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected per_variant native tree test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] per_variant_tree_fold_rewrite_test",
+		"[       OK ] per_variant_tree_fold_rewrite_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected per_variant native tree test output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
