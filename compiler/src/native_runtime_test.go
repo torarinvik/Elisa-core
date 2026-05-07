@@ -239,3 +239,84 @@ def per_variant_tree_fold_rewrite_test() -> void:
 		}
 	}
 }
+
+func TestRunCLIExecutesTreeAttributeNativeSmoke(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "tree_attribute_native_fixture.elisa")
+	testPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "test.elisa")
+	testInclude, err := filepath.Rel(fixtureDir, testPath)
+	if err != nil {
+		t.Fatalf("failed to compute test include path: %v", err)
+	}
+	testInclude = filepath.ToSlash(testInclude)
+	src := fmt.Sprintf(`# include %q
+
+tree Sparse:
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+attribute Sparse.Expr.checksum -> i64:
+	Sparse.Expr.Int(expr):
+		return expr.value
+	Sparse.Expr.Binary(expr, left, right):
+		return left.checksum + right.checksum + 1
+
+@layout(category_union)
+tree Dense:
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+attribute Dense.Expr.checksum -> i64:
+	Dense.Expr.Int(expr):
+		return expr.value
+	Dense.Expr.Binary(expr, left, right):
+		return left.checksum + right.checksum + 2
+
+@test
+def tree_attribute_native_test() -> void:
+	can Abort.Panic, Memory.Allocate:
+		region scratch(8192)
+		owner: mutable Arena& = scratch.ref[mutable Arena&]
+		in owner:
+			sleft: Sparse.Expr = Sparse.Expr.Int(value: 10)
+			sright: Sparse.Expr = Sparse.Expr.Int(value: 20)
+			sroot: Sparse.Expr = Sparse.Expr.Binary(left: sleft, right: sright)
+			assert_eq(sroot.checksum, 31)
+			dleft: Dense.Expr = Dense.Expr.Int(value: 3)
+			dright: Dense.Expr = Dense.Expr.Int(value: 4)
+			droot: Dense.Expr = Dense.Expr.Binary(left: dleft, right: dright)
+			assert_eq(droot.checksum, 9)
+`, testInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write tree attribute native fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected tree attribute native test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] tree_attribute_native_test",
+		"[       OK ] tree_attribute_native_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree attribute native test output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
