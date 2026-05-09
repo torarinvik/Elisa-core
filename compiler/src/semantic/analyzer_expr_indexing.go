@@ -6,6 +6,21 @@ import (
 
 func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	objType := a.analyzeExpr(expr.Object)
+	if flagType, ok := FlagsInstanceType(objType); ok {
+		indexType := a.analyzeValueExpr(expr.Index, flagType)
+		if expr.Fallback != nil {
+			a.errorf(expr.Pos(), "flags membership indexing does not support fallback values")
+			_ = a.analyzeValueExpr(expr.Fallback, a.namedTypes["bool"])
+		}
+		if !AssignableTo(flagType, indexType) {
+			a.errorf(expr.Index.Pos(), "flags index expects %s, got %s", flagType, indexType)
+			a.reportShapeMismatchNotes(expr.Index.Pos(), flagType, indexType)
+		}
+		result := a.namedTypes["bool"]
+		a.reportInvalidRegionUse(expr, result)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
+		return result
+	}
 	indexExpected := a.namedTypes["usize"]
 	if indexExpected == nil {
 		indexExpected = builtinUsizeType()

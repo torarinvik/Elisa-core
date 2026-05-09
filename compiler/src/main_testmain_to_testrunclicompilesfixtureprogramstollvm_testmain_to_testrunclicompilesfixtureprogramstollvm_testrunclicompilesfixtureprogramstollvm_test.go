@@ -189,7 +189,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define %Optional__FixtureSymbol @lookup__cstr_key_shape__FixtureSymbol(",
 				"define i32 @lookup_id__cstr_key_shape__FixtureSymbol(",
 				"define i64 @set__cstr_key_shape__FixtureSymbol(",
-				"define i1 @has__cstr_key_shape__FixtureSymbol(",
+				"define i1 @ovl__has__semantic_RefType_SymbolTable_K_T__has__cstr_key_shape__FixtureSymbol(",
 				"define i64 @ovl__count__semantic_RefType_SymbolTable_K_T__count__cstr_key_shape__FixtureSymbol(",
 				"define %Optional__FixtureSymbol @get__cstr_key_shape__FixtureSymbol(",
 				"call i32 @declare__cstr_key_shape__FixtureSymbol(",

@@ -72,6 +72,10 @@ struct InlineVec[T, N: usize]:
     is_spilled: mutable bool
 
 
+struct Flags[T]:
+    bits: mutable u64
+
+
 struct IndexMapNamespace:
     _unused: u8
 
@@ -84,9 +88,14 @@ struct InlineVecNamespace:
     _unused: u8
 
 
+struct FlagsNamespace:
+    _unused: u8
+
+
 global indexmap: IndexMapNamespace = IndexMapNamespace(0u8)
 global symtab: SymbolTableNamespace = SymbolTableNamespace(0u8)
 global inlinevec: InlineVecNamespace = InlineVecNamespace(0u8)
+global flags: FlagsNamespace = FlagsNamespace(0u8)
 
 # ------------------------------------------------------------
 # Dynamic array helpers (replacement for C macros)
@@ -331,6 +340,96 @@ def inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&):
 @ufcs_only
 def clear[T, N: usize](vec: mutable InlineVec[T, N]&):
     inline_vec_clear[T, N](vec)
+
+
+# ------------------------------------------------------------
+# Typed enum flags
+# ------------------------------------------------------------
+
+def flags_new[T](api: FlagsNamespace) -> Flags[T]:
+    _ = api
+    result: Flags[T] = zeroed
+    return result
+
+
+def new[T](api: FlagsNamespace) -> Flags[T]:
+    return flags_new[T](api)
+
+
+def flags_empty[T]() -> Flags[T]:
+    result: Flags[T] = zeroed
+    return result
+
+
+def flags_from_bits[T](bits: u64) -> Flags[T]:
+    result: mutable Flags[T] = zeroed
+    result.bits <- bits
+    return result
+
+
+def flags_bits[T](items: Flags[T]&) -> u64:
+    return items.bits
+
+
+def bits[T](items: Flags[T]&) -> u64:
+    return flags_bits[T](items)
+
+
+def flags_mask[T](value: T) -> u64:
+    index: u64 = value.u64()
+    assert index < 64u64
+    return 1u64 << index.u32()
+
+
+def flags_has[T](items: Flags[T]&, value: T) -> bool:
+    return (items.bits & flags_mask[T](value)) != 0u64
+
+
+def has[T](items: Flags[T]&, value: T) -> bool:
+    return flags_has[T](items, value)
+
+
+def flags_add[T](items: mutable Flags[T]&, value: T):
+    items.bits <- items.bits | flags_mask[T](value)
+
+
+def add[T](items: mutable Flags[T]&, value: T):
+    flags_add[T](items, value)
+
+
+def flags_remove[T](items: mutable Flags[T]&, value: T):
+    items.bits <- items.bits & ~flags_mask[T](value)
+
+
+def remove[T](items: mutable Flags[T]&, value: T):
+    flags_remove[T](items, value)
+
+
+def flags_set[T](items: mutable Flags[T]&, value: T, enabled: bool):
+    if enabled:
+        items.add(value)
+    else:
+        items.remove(value)
+
+
+def flags_clear[T](items: mutable Flags[T]&):
+    items.bits <- 0u64
+
+
+def flags_any[T](items: Flags[T]&) -> bool:
+    return items.bits != 0u64
+
+
+def flags_union[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T](left.bits | right.bits)
+
+
+def flags_intersection[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T](left.bits & right.bits)
+
+
+def flags_difference[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T](left.bits & ~right.bits)
 
 
 def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]&:

@@ -109,6 +109,36 @@ func TestRunCLICompilesConstEnumSourceToLLVM(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCLICompilesConstEnumFlagsToLLVM(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir, err := os.MkdirTemp(repoRoot, ".tmp-const-enum-flags-*")
+	if err != nil {
+		t.Fatalf("failed to create const enum flags fixture dir: %v", err)
+	}
+	defer os.RemoveAll(fixtureDir)
+	fixturePath := filepath.Join(fixtureDir, "const_enum_flags.elisa")
+	src := "include \"../compiler/runtime/elisacore_std/elisacore_runtime.elisa\"\n\nconst enum RoutineFlag of u8:\n    External\n    Forward\n    VarArgs\n    Export\n\n\ndef build_flags() -> Flags[RoutineFlag]:\n    out: mutable Flags[RoutineFlag] = flags.new()\n    out.add(RoutineFlag.External)\n    out.add(RoutineFlag.VarArgs)\n    return out\n\n\ndef has_varargs(value: Flags[RoutineFlag]&) -> bool:\n    return value[RoutineFlag.VarArgs]\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write const enum flags LLVM fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"%Flags__RoutineFlag = type { i64 }", "define %Flags__RoutineFlag @build_flags()", "define i1 @has_varargs(ptr", "flags.has"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
 func TestRunCLIRejectsLegacyCastSyntax(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "legacy_cast_error.elisa")

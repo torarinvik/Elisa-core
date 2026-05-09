@@ -534,6 +534,9 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	if expr != nil && expr.Fallback != nil {
 		return s.emitIndexFallbackExpr(expr)
 	}
+	if flagType, ok := semantic.FlagsInstanceType(s.exprType(expr.Object)); ok {
+		return s.emitFlagsIndexExpr(expr, flagType)
+	}
 	if value, actualType, handled, err := s.emitPackedStoreIndexExpr(expr); handled {
 		return value, actualType, err
 	}
