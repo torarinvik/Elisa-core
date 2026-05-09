@@ -44,10 +44,14 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 		return result
 	}
+	indexCheckType := indexType
+	if idType, ok := indexType.(*IDType); ok && idType != nil {
+		indexCheckType = idType.Storage
+	}
 	if _, ok := NodeKeyEnumType(indexType); !ok {
-		if !IsNumericType(indexType) {
+		if !IsNumericType(indexCheckType) {
 			a.errorf(expr.Index.Pos(), "index must be numeric, got %s", indexType)
-		} else if !IsIntegralStorageType(indexType) {
+		} else if !IsIntegralStorageType(indexCheckType) {
 			a.errorf(expr.Index.Pos(), "index must be integral, got %s", indexType)
 		}
 	}

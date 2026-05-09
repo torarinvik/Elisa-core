@@ -467,6 +467,9 @@ func numericCastType(t semantic.Type) semantic.Type {
 	if storage, ok := semantic.ConstEnumStorageType(t); ok {
 		return storage
 	}
+	if idType, ok := t.(*semantic.IDType); ok && idType != nil && idType.Storage != nil {
+		return idType.Storage
+	}
 	return t
 }
 func isNumericCastType(t semantic.Type) bool {

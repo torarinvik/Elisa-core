@@ -409,6 +409,28 @@ func singleExplicitErrorFamily(tags []ast.ErrorTagExpr) (string, bool) {
 }
 func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr) (semantic.Type, error) {
 	switch expr.Name {
+	case "id":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			return nil, fmt.Errorf("id expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		tag, err := s.resolveTypeExpr(expr.TypeArgs[0])
+		if err != nil {
+			return nil, err
+		}
+		return &semantic.IDType{Tag: tag, Storage: s.g.result.NamedTypes["u32"]}, nil
+	case "RowId":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			return nil, fmt.Errorf("RowId expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		tag, err := s.resolveTypeExpr(expr.TypeArgs[0])
+		if err != nil {
+			return nil, err
+		}
+		store, ok := tag.(*semantic.StructType)
+		if !ok || store == nil || store.StoreDecl == nil || !store.StoreDecl.Soa {
+			return nil, fmt.Errorf("RowId expects an soa type argument, got %s", tag)
+		}
+		return &semantic.IDType{Tag: tag, Storage: s.g.result.NamedTypes["u32"]}, nil
 	case "array":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("array expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

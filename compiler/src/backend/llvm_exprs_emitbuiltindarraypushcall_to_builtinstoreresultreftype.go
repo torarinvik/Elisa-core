@@ -589,3 +589,9 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 func builtinStoreResultRefType(storeType *semantic.StructType) *semantic.RefType {
 	return &semantic.RefType{Elem: storeType, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 }
+func builtinStorePushResultType(storeType *semantic.StructType, u32Type semantic.Type) semantic.Type {
+	if storeType != nil && storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
+		return &semantic.IDType{Tag: storeType, Storage: u32Type}
+	}
+	return builtinStoreResultRefType(storeType)
+}

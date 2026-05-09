@@ -147,6 +147,18 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			return invalidType
 		}
 		return &IDType{Tag: tag, Storage: a.namedTypes["u32"]}
+	case "RowId":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "RowId expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		tag := a.resolveType(expr.TypeArgs[0])
+		store, ok := tag.(*StructType)
+		if IsInvalidType(tag) || !ok || store == nil || store.StoreDecl == nil || !store.StoreDecl.Soa {
+			a.errorf(expr.Pos(), "RowId expects an soa type argument, got %s", tag)
+			return invalidType
+		}
+		return &IDType{Tag: tag, Storage: a.namedTypes["u32"]}
 	case "array":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
 			a.errorf(expr.Pos(), "array expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

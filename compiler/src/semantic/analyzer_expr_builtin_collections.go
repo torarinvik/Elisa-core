@@ -270,6 +270,13 @@ func builtinStoreResultRefType(storeType *StructType, receiverRefType *RefType) 
 	return &RefType{Elem: storeType, Mutable: true, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
 }
 
+func builtinStorePushResultType(storeType *StructType, receiverRefType *RefType, u32Type Type) Type {
+	if storeType != nil && storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
+		return &IDType{Tag: storeType, Storage: u32Type}
+	}
+	return builtinStoreResultRefType(storeType, receiverRefType)
+}
+
 func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "push" || fieldExpr.Object == nil {
@@ -291,7 +298,7 @@ func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) 
 			a.analyzeExpr(arg)
 		}
 		a.errorf(expr.Pos(), "store push expects %d arguments, got %d", len(storeType.StoreFieldOrder), len(expr.Args))
-		resultType := builtinStoreResultRefType(storeType, receiverRefType)
+		resultType := builtinStorePushResultType(storeType, receiverRefType, a.namedTypes["u32"])
 		a.exprTypes[expr] = resultType
 		return resultType, true
 	}
@@ -307,7 +314,7 @@ func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) 
 		}
 		a.consumeAffineValueExpr(expr.Args[i], darrayField.Elem, "move into store push")
 	}
-	resultType := builtinStoreResultRefType(storeType, receiverRefType)
+	resultType := builtinStorePushResultType(storeType, receiverRefType, a.namedTypes["u32"])
 	a.exprTypes[expr.Func] = &FuncType{Name: "store.push", Params: []Type{resultType}, Return: resultType}
 	a.exprTypes[expr] = resultType
 	return resultType, true

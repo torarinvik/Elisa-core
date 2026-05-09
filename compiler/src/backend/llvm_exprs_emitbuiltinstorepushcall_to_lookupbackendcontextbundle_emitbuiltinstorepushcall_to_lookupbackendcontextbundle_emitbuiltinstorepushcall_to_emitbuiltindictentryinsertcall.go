@@ -101,6 +101,8 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
+	var rowIndexValue C.LLVMValueRef
+	var rowIndexType semantic.Type
 	for i, name := range storeType.StoreFieldOrder {
 		fieldPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, loweredStoreType, name)
 		if err != nil {
@@ -119,6 +121,10 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 			return nil, nil, true, err
 		}
 		currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("store."+name+".push.count"))
+		if i == 0 {
+			rowIndexValue = currentCount
+			rowIndexType = usizeType
+		}
 		neededValue := C.LLVMBuildAdd(s.builder, currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("store."+name+".push.needed"))
 		if err := s.emitBuiltinDArrayEnsureCapacity(fieldPtr, darrayType, owner.arenaRef, neededValue, "store."+name+".push"); err != nil {
 			return nil, nil, true, err
@@ -137,7 +143,18 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 		C.LLVMBuildStore(s.builder, itemValue, slotPtr)
 		C.LLVMBuildStore(s.builder, neededValue, countPtr)
 	}
-	return storePtr, builtinStoreResultRefType(storeType), true, nil
+	resultType := builtinStorePushResultType(storeType, s.g.result.NamedTypes["u32"])
+	if storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
+		if rowIndexValue == nil {
+			return nil, nil, true, fmt.Errorf("soa push requires at least one field")
+		}
+		rowValue, err := s.coerceValue(rowIndexValue, rowIndexType, resultType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return rowValue, resultType, true, nil
+	}
+	return storePtr, resultType, true, nil
 }
 func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)

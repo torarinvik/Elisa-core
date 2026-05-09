@@ -85,6 +85,33 @@ def wrap(raw: u32) -> NameId:
 	}
 }
 
+func TestRowIDTypeRequiresSOATag(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "row_id_type_ok.elisa", `
+soa SymbolRows:
+	name: u32
+
+type SymbolRow = RowId[SymbolRows]
+`)
+	rowID, ok := result.NamedTypes["SymbolRow"].(*IDType)
+	if !ok {
+		t.Fatalf("expected SymbolRow to resolve to IDType, got %T", result.NamedTypes["SymbolRow"])
+	}
+	if !SameType(rowID.Storage, result.NamedTypes["u32"]) {
+		t.Fatalf("expected RowId storage to be u32, got %s", rowID.Storage)
+	}
+
+	bad := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "row_id_type_reject.elisa", `
+struct Plain:
+	name: u32
+
+type PlainRow = RowId[Plain]
+`)
+	joined := strings.Join(bad.Errors(), "\n")
+	if !strings.Contains(joined, "RowId expects an soa type argument, got Plain") {
+		t.Fatalf("expected RowId non-SOA rejection, got:\n%s", joined)
+	}
+}
+
 func TestIDTypeRejectsAccidentalIntegerAndOtherIDAssignment(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "id_type_alias_reject.elisa", `
 extern Name

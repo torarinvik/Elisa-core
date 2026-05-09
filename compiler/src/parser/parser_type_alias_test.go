@@ -37,14 +37,15 @@ func TestParseIDTypeAliasSpellings(t *testing.T) {
 	file, errs := parseSourceFile(t, `type NameId = id[Name]
 type SymbolId = Id[Symbol]
 type ScopeId = ID[Scope]
+type SymbolRow = RowId[SymbolRows]
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
-	if len(file.Decls) != 3 {
-		t.Fatalf("expected 3 decls, got %d", len(file.Decls))
+	if len(file.Decls) != 4 {
+		t.Fatalf("expected 4 decls, got %d", len(file.Decls))
 	}
-	for i, declNode := range file.Decls {
+	for i, declNode := range file.Decls[:3] {
 		decl, ok := declNode.(*ast.TypeAliasDecl)
 		if !ok {
 			t.Fatalf("expected type alias decl, got %T", declNode)
@@ -59,6 +60,14 @@ type ScopeId = ID[Scope]
 		if len(builtin.TypeArgs) != 1 {
 			t.Fatalf("decl %d: expected one tag type arg, got %d", i, len(builtin.TypeArgs))
 		}
+	}
+	rowDecl, ok := file.Decls[3].(*ast.TypeAliasDecl)
+	if !ok {
+		t.Fatalf("expected RowId type alias decl, got %T", file.Decls[3])
+	}
+	rowBuiltin, ok := rowDecl.Target.(*ast.BuiltinTypeExpr)
+	if !ok || rowBuiltin.Name != "RowId" || len(rowBuiltin.TypeArgs) != 1 {
+		t.Fatalf("expected RowId builtin type expr, got %T %#v", rowDecl.Target, rowDecl.Target)
 	}
 }
 
