@@ -182,6 +182,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinStoreRowsCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinSOAValidCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitBuiltinDictEntryCall(expr); handled {
 		return value, actualType, err
 	}

@@ -443,6 +443,34 @@ func (a *Analyzer) analyzeBuiltinStoreRowsCall(expr *ast.CallExpr) (Type, bool) 
 	return resultType, true
 }
 
+func (a *Analyzer) analyzeBuiltinSOAValidCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "valid" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	storeType, _, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil || storeType.StoreDecl == nil || !storeType.StoreDecl.Soa {
+		return nil, false
+	}
+	rowType := &IDType{Tag: storeType, Storage: a.namedTypes["u32"]}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "soa valid expects 1 argument, got %d", len(expr.Args))
+	} else {
+		argType := a.analyzeValueExpr(expr.Args[0], rowType)
+		if !AssignableTo(rowType, argType) {
+			a.errorf(expr.Args[0].Pos(), "soa valid expects %s, got %s", rowType, argType)
+		}
+	}
+	resultType := a.namedTypes["bool"]
+	a.exprTypes[expr.Func] = &FuncType{Name: "soa.valid", Params: []Type{receiverType, rowType}, Return: resultType}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
 func builtinDArrayPushReceiverType(t Type) (*DArrayType, *RefType, bool) {
 	if t == nil {
 		return nil, nil, false

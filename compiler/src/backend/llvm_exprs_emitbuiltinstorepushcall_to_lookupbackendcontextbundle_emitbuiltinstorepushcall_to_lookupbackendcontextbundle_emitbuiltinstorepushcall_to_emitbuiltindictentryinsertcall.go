@@ -326,6 +326,25 @@ func (s *functionState) emitBuiltinStoreRowsFieldExpr(expr *ast.FieldExpr) (C.LL
 	value = C.LLVMBuildInsertValue(s.builder, value, storePtr, 0, cStringFree("soa.rows.store"))
 	return value, resultType, true, nil
 }
+func (s *functionState) emitBuiltinSOACountFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil || expr.Field != "count" || expr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(expr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil || storeType.StoreDecl == nil || !storeType.StoreDecl.Soa {
+		return nil, nil, false, nil
+	}
+	storePtr, err := s.emitReadableStoreReceiverPtr(expr.Object, receiverType, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	countValue, err := s.emitBuiltinStoreCountValue(storePtr, storeType, "soa.count")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return countValue, s.g.result.NamedTypes["usize"], true, nil
+}
 func (s *functionState) emitBuiltinSOARowIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Fallback != nil {
 		return nil, nil, false, nil
@@ -362,6 +381,39 @@ func (s *functionState) emitBuiltinSOARowIndexExpr(expr *ast.IndexExpr) (C.LLVMV
 	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, indexValue, 1, cStringFree("soa.row.index"))
 	return rowValue, resultType, true, nil
 }
+func (s *functionState) emitBuiltinSOAValidCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "valid" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil || storeType.StoreDecl == nil || !storeType.StoreDecl.Soa {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("soa valid expects 1 argument, got %d", len(expr.Args))
+	}
+	storePtr, err := s.emitReadableStoreReceiverPtr(fieldExpr.Object, receiverType, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	countValue, err := s.emitBuiltinStoreCountValue(storePtr, storeType, "soa.valid.count")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	rowIDType := &semantic.IDType{Tag: storeType, Storage: s.g.result.NamedTypes["u32"]}
+	rowValue, _, err := s.emitExpr(expr.Args[0], rowIDType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	rowValue, err = s.coerceValue(rowValue, rowIDType, s.g.result.NamedTypes["usize"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	value := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), rowValue, countValue, cStringFree("soa.valid"))
+	return value, s.g.result.NamedTypes["bool"], true, nil
+}
 func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiverType semantic.Type, receiverRefType *semantic.RefType) (C.LLVMValueRef, error) {
 	if receiverRefType != nil {
 		ptr, _, err := s.emitExpr(receiver, receiverRefType)
@@ -381,6 +433,25 @@ func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiver
 	}
 	C.LLVMBuildStore(s.builder, value, tempAlloca)
 	return tempAlloca, nil
+}
+func (s *functionState) emitBuiltinStoreCountValue(storePtr C.LLVMValueRef, storeType *semantic.StructType, name string) (C.LLVMValueRef, error) {
+	if storeType == nil || len(storeType.StoreFieldOrder) == 0 {
+		usizeType, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMConstInt(usizeType, 0, 0), nil
+	}
+	firstField := storeType.StoreFieldOrder[0]
+	columnPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, storeType, firstField)
+	if err != nil {
+		return nil, err
+	}
+	countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(columnPtr, darrayType)
+	if err != nil {
+		return nil, err
+	}
+	return s.loadValue(countPtr, usizeType, name)
 }
 func (s *functionState) emitBuiltinDictReceiverValue(receiver ast.Expr, receiverType semantic.Type) (C.LLVMValueRef, *semantic.DictType, error) {
 	dictType, receiverRefType, ok := builtinDictReceiverType(receiverType)

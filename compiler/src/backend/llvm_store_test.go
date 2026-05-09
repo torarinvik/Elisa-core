@@ -82,8 +82,10 @@ def build(owner: Arena) -> usize:
         symbols: mutable SymbolRows = zeroed
 		symbols.reserve(4)
 		row: RowId[SymbolRows] = symbols.push(12, 3)
+        if not symbols.valid(row):
+            return 0
         view = symbols[row]
-        total: mutable usize = view.name_id + symbols.flags.count
+        total: mutable usize = view.name_id + symbols.count
         for iter_row in symbols.rows:
             total <- total + iter_row.name_id
         return total
@@ -108,6 +110,11 @@ def build(owner: Arena) -> usize:
 	for _, want := range []string{"soa.row.index", "soa.rows.store", "name_id.row.index"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected SOA row-view lowering to include %q, got:\n%s", want, output)
+		}
+	}
+	for _, want := range []string{"soa.count", "soa.valid"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected SOA table helper lowering to include %q, got:\n%s", want, output)
 		}
 	}
 }
