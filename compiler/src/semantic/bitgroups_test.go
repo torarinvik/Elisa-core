@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"elisacore/src/ast"
 	"strings"
 	"testing"
 )
@@ -125,6 +126,40 @@ func TestAnalyzePackedGroupStructIsNotCABICompatible(t *testing.T) {
 	header := result.NamedTypes["Header"].(*StructType)
 	if exportedNamedTypeAllowed(header) || isCABICompatibleType(header) {
 		t.Fatalf("expected packed-group struct to be rejected as C ABI compatible")
+	}
+}
+
+func TestAnalyzeStructLayoutModes(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "struct_layout_modes.elisa", `struct Header layout packed:
+	tag: u4
+	arity: u3
+	active: u1
+
+struct CHeader layout c:
+	kind: u32
+	flags: u32
+	size: usize
+
+struct Plain:
+	value: i32
+`)
+	header := result.NamedTypes["Header"].(*StructType)
+	if !header.PackedLayout || header.Layout != ast.StructLayoutPacked || header.ReprC {
+		t.Fatalf("expected Header to be packed and not C ABI by default, got packed=%v layout=%v reprC=%v", header.PackedLayout, header.Layout, header.ReprC)
+	}
+	if exportedNamedTypeAllowed(header) || isCABICompatibleType(header) {
+		t.Fatalf("expected packed layout struct to be rejected as C ABI compatible")
+	}
+	cHeader := result.NamedTypes["CHeader"].(*StructType)
+	if cHeader.PackedLayout || cHeader.Layout != ast.StructLayoutC || !cHeader.ReprC {
+		t.Fatalf("expected CHeader to be explicit C layout, got packed=%v layout=%v reprC=%v", cHeader.PackedLayout, cHeader.Layout, cHeader.ReprC)
+	}
+	if !exportedNamedTypeAllowed(cHeader) || !isCABICompatibleType(cHeader) {
+		t.Fatalf("expected explicit C layout struct with scalar fields to be C ABI compatible")
+	}
+	plain := result.NamedTypes["Plain"].(*StructType)
+	if plain.ReprC || plain.Layout != ast.StructLayoutDefault || exportedNamedTypeAllowed(plain) || isCABICompatibleType(plain) {
+		t.Fatalf("expected default struct to use Elisa layout rather than C ABI layout, got layout=%v reprC=%v", plain.Layout, plain.ReprC)
 	}
 }
 

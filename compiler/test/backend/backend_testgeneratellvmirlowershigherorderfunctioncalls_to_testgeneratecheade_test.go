@@ -518,7 +518,7 @@ def use_handle(value: Handle[heap, &]) -> heap Node&:
 	}
 }
 func TestGenerateLLVMIRLowersExportWrappers(t *testing.T) {
-	src := `struct Vec[T]:
+	src := `struct Vec[T] layout c:
 	x: mutable T
 	y: mutable T
 
@@ -563,7 +563,7 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 	}
 }
 func TestGenerateCHeaderForExportedVec2i(t *testing.T) {
-	src := `struct Vec[T]:
+	src := `struct Vec[T] layout c:
 	x: mutable T
 	y: mutable T
 

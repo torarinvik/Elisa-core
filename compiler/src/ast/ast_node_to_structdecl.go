@@ -547,6 +547,15 @@ type GlobalDecl struct {
 	Type     TypeExpr
 	Value    Expr
 }
+
+type StructLayoutMode int
+
+const (
+	StructLayoutDefault StructLayoutMode = iota
+	StructLayoutC
+	StructLayoutPacked
+)
+
 type StructDecl struct {
 	Position         lexer.Pos
 	Annotations      []Annotation
@@ -561,5 +570,6 @@ type StructDecl struct {
 	DerivedStates    []DerivedStateDecl
 	Affine           bool
 	ReprC            bool
+	Layout           StructLayoutMode
 	Fields           []FieldDecl
 }

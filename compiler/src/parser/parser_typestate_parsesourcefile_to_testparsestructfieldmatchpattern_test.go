@@ -78,6 +78,36 @@ struct Header:
 	}
 }
 
+func TestParseStructLayoutModes(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct Header layout packed:
+	tag: u4
+	arity: u3
+	active: u1
+
+struct CHeader layout c:
+	kind: u32
+	flags: u32
+	size: usize
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	header, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected first decl to be a struct, got %T", file.Decls[0])
+	}
+	if header.Layout != ast.StructLayoutPacked || header.ReprC {
+		t.Fatalf("expected packed struct layout with non-C ABI marker, got layout=%v reprC=%v", header.Layout, header.ReprC)
+	}
+	cHeader, ok := file.Decls[1].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected second decl to be a struct, got %T", file.Decls[1])
+	}
+	if cHeader.Layout != ast.StructLayoutC || !cHeader.ReprC {
+		t.Fatalf("expected C struct layout with C ABI marker, got layout=%v reprC=%v", cHeader.Layout, cHeader.ReprC)
+	}
+}
+
 func TestParseConstEnumAllowsInferredStorage(t *testing.T) {
 	file, errs := parseSourceFile(t, `const enum Mode:
 	None

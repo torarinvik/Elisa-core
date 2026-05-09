@@ -160,7 +160,7 @@ func (a *Analyzer) hostABILayoutForStructType(st *StructType, bindings map[strin
 	if st == nil || st.Decl == nil {
 		return hostABILayout{}, false
 	}
-	if st.HasPackedGroups {
+	if st.HasPackedGroups || st.PackedLayout {
 		return hostABILayout{}, false
 	}
 	key := st.Name

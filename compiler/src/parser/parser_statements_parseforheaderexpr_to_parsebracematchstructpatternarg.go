@@ -30,6 +30,16 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 				return expr
 			}
 		case lexer.TOKEN_IDENT:
+			if depth == 0 && p.isForHeaderWhereClauseBoundary(end) {
+				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
+				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
+				sub := New(subTokens)
+				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
+				expr := sub.parseExpr()
+				p.errors = append(p.errors, sub.Errors()...)
+				p.pos = end
+				return expr
+			}
 			if depth == 0 && p.looksLikeForStmtAt(end) {
 				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
 				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
@@ -45,6 +55,18 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 	}
 	return p.parseExpr()
 }
+
+func (p *Parser) isForHeaderWhereClauseBoundary(index int) bool {
+	if index <= p.pos || index >= len(p.tokens) {
+		return false
+	}
+	tok := p.tokens[index]
+	if tok.Kind != lexer.TOKEN_IDENT || tok.Text != "where" {
+		return false
+	}
+	return index == 0 || p.tokens[index-1].Kind != lexer.TOKEN_DOT
+}
+
 func unwrapReverseIterableSource(expr ast.Expr) (ast.Expr, bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok || call == nil {

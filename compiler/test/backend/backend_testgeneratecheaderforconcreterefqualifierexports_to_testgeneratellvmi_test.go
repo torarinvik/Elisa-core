@@ -7,10 +7,10 @@ import (
 )
 
 func TestGenerateCHeaderForConcreteRefQualifierExports(t *testing.T) {
-	src := `struct Node:
+	src := `struct Node layout c:
 	value: mutable i32
 
-struct Handle[refstorage Store, refstate State]:
+struct Handle[refstorage Store, refstate State] layout c:
 	ptr: Store Node&[State]
 
 export type Node as CtxNode
@@ -90,7 +90,7 @@ def narrow(value: f64) -> f32:
 	}
 }
 func TestGenerateCHeaderUsesFloatBuiltinMappings(t *testing.T) {
-	src := `struct Metrics:
+	src := `struct Metrics layout c:
 	ratio: f32
 	total: f64
 
@@ -394,11 +394,11 @@ def total() -> f64:
 	}
 }
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
-	src := `struct Node:
+	src := `struct Node layout c:
 	value: mutable i32
 	next: mutable Node&?
 
-struct Wrapper:
+struct Wrapper layout c:
 	node: mutable Node
 	next_ref: mutable Node&?
 

@@ -41,3 +41,29 @@ def build() -> bool:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersExplicitStructLayoutModes(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "struct_layout_modes.elisa", `struct Header layout packed:
+	tag: u4
+	arity: u3
+	active: u1
+
+struct CHeader layout c:
+	kind: u32
+	flags: u32
+	size: usize
+
+global header: Header = zeroed
+global c_header: CHeader = zeroed
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if !strings.Contains(output, "%Header = type <{ i4, i3, i1 }>") {
+		t.Fatalf("expected Header to lower as an LLVM packed struct, got IR:\n%s", output)
+	}
+	if !strings.Contains(output, "%CHeader = type { i32, i32, i64 }") {
+		t.Fatalf("expected CHeader to lower as an unpacked LLVM struct, got IR:\n%s", output)
+	}
+}

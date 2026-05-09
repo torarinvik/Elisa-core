@@ -217,10 +217,18 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			line += "mutable ref "
 		}
 		sourceText := formatExpr(n.Source)
+		var wherePredicate ast.Expr
+		if source, predicate, ok := iterForWhereSource(n.Source); ok {
+			sourceText = formatExpr(source)
+			wherePredicate = predicate
+		}
 		if n.Reverse {
 			sourceText = "rev(" + sourceText + ")"
 		}
 		line += formatMoveBindPattern(n.Pattern) + " in " + sourceText
+		if wherePredicate != nil {
+			line += " where " + formatExpr(wherePredicate)
+		}
 		if n.Filter != nil {
 			line += " if " + formatExpr(n.Filter)
 		}
@@ -368,6 +376,18 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 	case *ast.ResetStmt:
 		f.writeLine(level, "reset "+n.Name)
 	}
+}
+
+func iterForWhereSource(expr ast.Expr) (ast.Expr, ast.Expr, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || call == nil || len(call.Args) != 2 {
+		return nil, nil, false
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok || ident.Name != "where" {
+		return nil, nil, false
+	}
+	return call.Args[0], call.Args[1], true
 }
 func (f *formatter) writeMatchArms(level int, arms []ast.MatchArm) {
 	for _, arm := range arms {

@@ -7,7 +7,7 @@ import (
 )
 
 func TestAnalyzeAcceptsExportedConcreteWrappers(t *testing.T) {
-	src := `struct Vec[T]:
+	src := `struct Vec[T] layout c:
 	x: mutable T
 	y: mutable T
 
@@ -56,10 +56,10 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 	}
 }
 func TestAnalyzeAcceptsConcreteRefQualifierExports(t *testing.T) {
-	src := `struct Node:
+	src := `struct Node layout c:
 	value: mutable i32
 
-struct Handle[refstorage Store, refstate State]:
+struct Handle[refstorage Store, refstate State] layout c:
 	ptr: Store Node&[State]
 
 export type Node as CtxNode
@@ -102,10 +102,10 @@ export func keep_heap_handle(value: HeapHandle) -> HeapHandle = keep_handle[heap
 	}
 }
 func TestAnalyzeRejectsInvalidRefQualifierExportTypeArgs(t *testing.T) {
-	src := `struct Node:
+	src := `struct Node layout c:
 	value: mutable i32
 
-struct Handle[refstorage Store, refstate State]:
+struct Handle[refstorage Store, refstate State] layout c:
 	ptr: Store Node&[State]
 
 export type Handle[i32, &] as BadHandle
@@ -117,6 +117,22 @@ export type Handle[i32, &] as BadHandle
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, "generic argument \"i32\" for refstorage parameter \"Store\" must be a refstorage literal or parameter") {
 		t.Fatalf("expected refstorage export-type argument diagnostic, got:\n%s", all)
+	}
+}
+func TestAnalyzeRejectsExportTypeWithoutExplicitCLayout(t *testing.T) {
+	src := `struct Vec:
+	x: i32
+	y: i32
+
+export type Vec as VecFFI
+`
+	_, errs := parseAndAnalyze(t, "export_requires_layout_c.elisa", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, `export type "VecFFI" must name a concrete C-ABI-compatible struct or concrete instantiation`) {
+		t.Fatalf("expected explicit C layout export diagnostic, got:\n%s", all)
 	}
 }
 func TestAnalyzeCollectsKnownFunctionAnnotations(t *testing.T) {

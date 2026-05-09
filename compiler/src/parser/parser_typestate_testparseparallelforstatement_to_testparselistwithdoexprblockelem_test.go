@@ -177,6 +177,32 @@ func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
 	}
 }
 
+func TestParseIterableForStatementWithWherePredicateClause(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: int) -> bool:\n    return value > 0\n\ndef walk(items: darray[int]) -> void:\n    for item in items where keep:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	call, ok := iterStmt.Source.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected where call source, got %T", iterStmt.Source)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "where" {
+		t.Fatalf("expected where callee, got %T %#v", call.Func, call.Func)
+	}
+	if len(call.Args) != 2 {
+		t.Fatalf("expected where source and predicate args, got %d", len(call.Args))
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for item in items where keep:") {
+		t.Fatalf("expected formatter to preserve where predicate loop syntax, got:\n%s", formatted)
+	}
+}
+
 func TestParseChainedIterableForStatementLowersToNestedLoops(t *testing.T) {
 	file, errs := parseSourceFile(t, "def collect(groups: darray[darray[int]]) -> void:\n    for group in groups for value in group:\n        pass\n")
 	if len(errs) != 0 {

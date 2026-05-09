@@ -410,6 +410,8 @@ type StructType struct {
 	Fields           map[string]Field
 	Affine           bool
 	ReprC            bool
+	Layout           ast.StructLayoutMode
+	PackedLayout     bool
 	HasPackedGroups  bool
 	Alignment        int
 	HasAlignment     bool

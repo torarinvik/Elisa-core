@@ -194,6 +194,148 @@ func (s *functionState) buildEnumerateItemValue(tupleType semantic.Type, indexVa
 	value = C.LLVMBuildInsertValue(s.builder, value, itemCoerced, 1, cStringFree(name+".enumerate.item.value.insert"))
 	return value, nil
 }
+
+type iterViewTransformKind int
+
+const (
+	iterViewTransformEnumerate iterViewTransformKind = iota
+	iterViewTransformWhere
+)
+
+type iterViewTransform struct {
+	kind          iterViewTransformKind
+	itemType      semantic.Type
+	predicate     C.LLVMValueRef
+	predicateType *semantic.FuncType
+}
+
+func (s *functionState) peelIterViewTransforms(sourceName string, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, bindMode ast.IterBindMode) (C.LLVMValueRef, semantic.Type, []iterViewTransform, error) {
+	iterSourceAlloca := sourceAlloca
+	iterSourceType := sourceType
+	transforms := []iterViewTransform{}
+	for {
+		if carrierType, ok := semantic.EnumerateViewInstance(iterSourceType); ok {
+			innerSourceType, ok := semantic.EnumerateViewSourceType(carrierType)
+			if !ok || innerSourceType == nil {
+				return nil, nil, nil, fmt.Errorf("enumerate carrier is missing its source type")
+			}
+			enumerateItemType, ok := semantic.EnumerateViewItemType(carrierType)
+			if !ok || enumerateItemType == nil {
+				return nil, nil, nil, fmt.Errorf("enumerate carrier is missing its tuple item type")
+			}
+			if bindMode != ast.IterBindValue {
+				return nil, nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
+			}
+			carrierValue, err := s.loadValue(iterSourceAlloca, iterSourceType, sourceName+".enumerate.carrier")
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			innerSourceAlloca, err := s.createEntryAlloca(sourceName+".enumerate.source", innerSourceType)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			innerSourceValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".enumerate.source.extract"))
+			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
+			transforms = append(transforms, iterViewTransform{kind: iterViewTransformEnumerate, itemType: enumerateItemType})
+			iterSourceAlloca = innerSourceAlloca
+			iterSourceType = innerSourceType
+			continue
+		}
+		if carrierType, ok := semantic.FilteredViewInstance(iterSourceType); ok {
+			innerSourceType, ok := semantic.FilteredViewSourceType(carrierType)
+			if !ok || innerSourceType == nil {
+				return nil, nil, nil, fmt.Errorf("where carrier is missing its source type")
+			}
+			itemType, ok := semantic.FilteredViewItemType(carrierType)
+			if !ok || itemType == nil {
+				return nil, nil, nil, fmt.Errorf("where carrier is missing its item type")
+			}
+			predicateType := semantic.FilteredViewPredicateType(itemType)
+			if predicateType == nil {
+				return nil, nil, nil, fmt.Errorf("where carrier is missing its predicate type")
+			}
+			if bindMode != ast.IterBindValue {
+				return nil, nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
+			}
+			carrierValue, err := s.loadValue(iterSourceAlloca, iterSourceType, sourceName+".where.carrier")
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			innerSourceAlloca, err := s.createEntryAlloca(sourceName+".where.source", innerSourceType)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			innerSourceValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".where.source.extract"))
+			predicateValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 1, cStringFree(sourceName+".where.predicate.extract"))
+			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
+			transforms = append(transforms, iterViewTransform{kind: iterViewTransformWhere, itemType: itemType, predicate: predicateValue, predicateType: predicateType})
+			iterSourceAlloca = innerSourceAlloca
+			iterSourceType = innerSourceType
+			continue
+		}
+		return iterSourceAlloca, iterSourceType, transforms, nil
+	}
+}
+
+func iterLoopBaseSourceExpr(expr ast.Expr) ast.Expr {
+	for {
+		call, ok := expr.(*ast.CallExpr)
+		if !ok || call == nil {
+			return expr
+		}
+		switch callIdentName(call) {
+		case "enumerate":
+			if len(call.Args) != 1 {
+				return expr
+			}
+			expr = call.Args[0]
+		case "where":
+			if len(call.Args) != 2 {
+				return expr
+			}
+			expr = call.Args[0]
+		default:
+			return expr
+		}
+	}
+}
+
+func (s *functionState) applyIterViewTransforms(sourceName string, indexValue C.LLVMValueRef, stepBB C.LLVMBasicBlockRef, itemValue C.LLVMValueRef, itemType semantic.Type, transforms []iterViewTransform) (C.LLVMValueRef, semantic.Type, error) {
+	currentValue := itemValue
+	currentType := itemType
+	for i := len(transforms) - 1; i >= 0; i-- {
+		transform := transforms[i]
+		switch transform.kind {
+		case iterViewTransformWhere:
+			if transform.predicateType == nil || len(transform.predicateType.Params) != 1 {
+				return nil, nil, fmt.Errorf("where predicate is missing its parameter type")
+			}
+			predicateArg, err := s.coerceValue(currentValue, currentType, transform.predicateType.Params[0])
+			if err != nil {
+				return nil, nil, err
+			}
+			filterValue, err := s.emitFunctionValueCall(transform.predicate, transform.predicateType, []C.LLVMValueRef{predicateArg}, "where.predicate")
+			if err != nil {
+				return nil, nil, err
+			}
+			filterBool, err := s.coerceValue(filterValue, transform.predicateType.Return, s.g.result.NamedTypes["bool"])
+			if err != nil {
+				return nil, nil, err
+			}
+			filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("where.filter.body"))
+			C.LLVMBuildCondBr(s.builder, filterBool, filterBodyBB, stepBB)
+			C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
+		case iterViewTransformEnumerate:
+			enumeratedValue, err := s.buildEnumerateItemValue(transform.itemType, indexValue, currentValue, currentType, sourceName)
+			if err != nil {
+				return nil, nil, err
+			}
+			currentValue = enumeratedValue
+			currentType = transform.itemType
+		}
+	}
+	return currentValue, currentType, nil
+}
 func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	sourceType := s.exprType(stmt.Source)
 	if sourceType == nil {
@@ -210,34 +352,11 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	}
 	C.LLVMBuildStore(s.builder, sourceValue, sourceAlloca)
 
-	iterSourceAlloca := sourceAlloca
-	iterSourceType := sourceType
-	var enumerateItemType semantic.Type
-	if carrierType, ok := semantic.EnumerateViewInstance(sourceType); ok {
-		innerSourceType, ok := semantic.EnumerateViewSourceType(carrierType)
-		if !ok || innerSourceType == nil {
-			return fmt.Errorf("enumerate carrier is missing its source type")
-		}
-		enumerateItemType, ok = semantic.EnumerateViewItemType(carrierType)
-		if !ok || enumerateItemType == nil {
-			return fmt.Errorf("enumerate carrier is missing its tuple item type")
-		}
-		if stmt.Mode != ast.IterBindValue {
-			return fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
-		}
-		iterSourceAlloca, err = s.createEntryAlloca(sourceName+".enumerate.source", innerSourceType)
-		if err != nil {
-			return err
-		}
-		innerSourceValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".enumerate.source.extract"))
-		C.LLVMBuildStore(s.builder, innerSourceValue, iterSourceAlloca)
-		iterSourceType = innerSourceType
+	iterSourceAlloca, iterSourceType, transforms, err := s.peelIterViewTransforms(sourceName, sourceAlloca, sourceType, stmt.Mode)
+	if err != nil {
+		return err
 	}
-
-	iterSourceExpr := stmt.Source
-	if enumerateCall, ok := stmt.Source.(*ast.CallExpr); ok && callIdentName(enumerateCall) == "enumerate" && len(enumerateCall.Args) == 1 {
-		iterSourceExpr = enumerateCall.Args[0]
-	}
+	iterSourceExpr := iterLoopBaseSourceExpr(stmt.Source)
 	countValue, err := s.emitIterLoopCount(iterSourceExpr, iterSourceAlloca, iterSourceType, sourceName)
 	if err != nil {
 		return err
@@ -285,16 +404,14 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			s.popScope()
 			return err
 		}
-		if enumerateItemType != nil {
-			itemValue, err = s.buildEnumerateItemValue(enumerateItemType, iterIndexValue, itemValue, resolvedItemType, sourceName)
-			if err != nil {
-				s.popScope()
-				return err
-			}
-			resolvedItemType = enumerateItemType
-			itemType = resolvedItemType
+		itemValue, resolvedItemType, err = s.applyIterViewTransforms(sourceName, iterIndexValue, stepBB, itemValue, resolvedItemType, transforms)
+		if err != nil {
+			s.popScope()
+			return err
 		}
 		if itemType == nil {
+			itemType = resolvedItemType
+		} else {
 			itemType = resolvedItemType
 		}
 		if err := s.emitIterLoopPatternBindings(stmt.Pattern, stmt.Mode, itemType, itemValue, nil); err != nil {

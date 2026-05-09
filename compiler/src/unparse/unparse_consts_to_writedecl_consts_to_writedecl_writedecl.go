@@ -348,6 +348,12 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		header += "struct " + n.Name
 		header += formatGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, nil, nil)
 		header += formatAggregateStateSuffix(n.HasStateParam, n.StateParamCount)
+		switch n.Layout {
+		case ast.StructLayoutC:
+			header += " layout c"
+		case ast.StructLayoutPacked:
+			header += " layout packed"
+		}
 		header += ":"
 		f.writeLine(level, header)
 		for _, field := range n.Fields {

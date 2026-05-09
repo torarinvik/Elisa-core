@@ -1,7 +1,7 @@
-struct Node:
+struct Node layout c:
 	value: mutable i32
 
-struct Handle[refstorage Store, refstate State]:
+struct Handle[refstorage Store, refstate State] layout c:
 	ptr: Store Node&[State]
 
 export type Node as CtxNode

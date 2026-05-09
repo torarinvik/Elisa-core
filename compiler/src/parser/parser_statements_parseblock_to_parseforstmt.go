@@ -541,6 +541,14 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		body := p.parseForStmtBody()
 		return &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
 	}
+	if p.matchIdentText("where") {
+		predicate := p.parseForHeaderExpr()
+		startOrSource = &ast.CallExpr{
+			Position: pos,
+			Func:     &ast.Ident{Position: pos, Name: "where"},
+			Args:     []ast.Expr{startOrSource, predicate},
+		}
+	}
 	var filter ast.Expr
 	if p.match(lexer.TOKEN_IF) {
 		filter = p.parseExpr()

@@ -117,6 +117,8 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					Fields:           map[string]Field{},
 					Affine:           n.Affine,
 					ReprC:            n.ReprC,
+					Layout:           n.Layout,
+					PackedLayout:     n.Layout == ast.StructLayoutPacked,
 					Decl:             n,
 				}
 				a.namedTypes[qualifiedName] = st

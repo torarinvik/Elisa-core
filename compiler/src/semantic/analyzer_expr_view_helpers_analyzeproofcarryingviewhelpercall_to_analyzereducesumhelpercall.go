@@ -13,6 +13,8 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 		return a.analyzeIterableBoolAggregateHelperCall(expr, "all"), true
 	case "enumerate":
 		return a.analyzeEnumerateHelperCall(expr), true
+	case "where":
+		return a.analyzeWhereHelperCall(expr), true
 	case "readonly":
 		return a.analyzeReadonlyHelperCall(expr), true
 	case "split_at":
@@ -73,6 +75,46 @@ func (a *Analyzer) analyzeEnumerateHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	return &GenericInstanceType{Name: "EnumerateView", Base: base, Args: []Type{sourceType, itemType}}
+}
+
+func (a *Analyzer) analyzeWhereHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 2 {
+		a.errorf(expr.Pos(), "where expects 2 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	sourceType := a.analyzeExpr(expr.Args[0])
+	info, ok := a.resolveIterLoopSourceInfo(expr.Args[0], sourceType)
+	if !ok {
+		a.errorf(expr.Args[0].Pos(), "where expects an iterable source, got %s", sourceType)
+		return invalidType
+	}
+	predicateType := a.analyzeExpr(expr.Args[1])
+	fnType, ok := predicateType.(*FuncType)
+	if !ok || fnType == nil {
+		a.errorf(expr.Args[1].Pos(), "where predicate must be a function, got %s", predicateType)
+		return invalidType
+	}
+	if len(fnType.Params) != 1 {
+		a.errorf(expr.Args[1].Pos(), "where predicate must take exactly one argument, got %d", len(fnType.Params))
+		return invalidType
+	}
+	if !AssignableTo(fnType.Params[0], info.ItemType) {
+		a.errorf(expr.Args[1].Pos(), "where predicate expects %s, but iterable yields %s", fnType.Params[0], info.ItemType)
+		return invalidType
+	}
+	if !IsBoolType(fnType.Return) {
+		a.errorf(expr.Args[1].Pos(), "where predicate must return bool, got %s", fnType.Return)
+		return invalidType
+	}
+	base, ok := a.namedTypes["FilteredView"].(*StructType)
+	if !ok || base == nil {
+		a.errorf(expr.Pos(), "missing builtin FilteredView carrier type")
+		return invalidType
+	}
+	return &GenericInstanceType{Name: "FilteredView", Base: base, Args: []Type{sourceType, info.ItemType}}
 }
 
 type treeChildrenSourceKind int

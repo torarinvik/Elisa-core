@@ -444,6 +444,95 @@ func TestGenerateLLVMIRLowersEnumerateTupleLoops(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersWhereFilteredViewLoops(t *testing.T) {
+	src := `def keep_large(value: i64) -> bool:
+	return value > 2
+
+def sum_filtered(items: i64[4]) -> i64:
+	total: mutable i64 = 0
+	for value in items where keep_large:
+		total <- total + value
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_where_filtered_view_loop.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"where.source.insert", "where.predicate.insert", "where.predicate", "where.filter.body"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected where filtered view lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersWhereOverEnumerateViewLoops(t *testing.T) {
+	src := `def keep_even_pair(pair: (index: usize, value: i64)) -> bool:
+	return pair.index % 2 == 0
+
+def sum_even_indexed(items: i64[4]) -> i64:
+	total: mutable i64 = 0
+	for index, value in where(enumerate(items), keep_even_pair):
+		total <- total + value + index.i64()
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_where_over_enumerate_view_loop.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"enumerate.item.index.insert", "enumerate.item.value.insert", "where.predicate", "where.filter.body", "iter.tuple.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected where-over-enumerate lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersEnumerateOverWhereViewLoops(t *testing.T) {
+	src := `def keep_large(value: i64) -> bool:
+	return value > 2
+
+def sum_indexed_filtered(items: i64[4]) -> i64:
+	total: mutable i64 = 0
+	for index, value in enumerate(where(items, keep_large)):
+		total <- total + value + index.i64()
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_enumerate_over_where_view_loop.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"where.predicate", "where.filter.body", "enumerate.item.index.insert", "enumerate.item.value.insert", "iter.tuple.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected enumerate-over-where lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersBoolAggregatesOverWhereViews(t *testing.T) {
+	src := `def keep_true(value: bool) -> bool:
+	return value
+
+def has_selected_truth(values: bool[4]) -> bool:
+	return any(where(values, keep_true))
+
+def all_selected_truth(values: bool[4]) -> bool:
+	return all(values.where(keep_true))
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_bool_aggregates_over_where.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @has_selected_truth(", "define i1 @all_selected_truth(", "where.predicate", "where.filter.body", "any.short_circuit", "all.short_circuit"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected bool aggregate over where lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersMixedTreeChildrenToRootLoops(t *testing.T) {
 	src := `@layout(per_variant_rows)
 tree Lua:

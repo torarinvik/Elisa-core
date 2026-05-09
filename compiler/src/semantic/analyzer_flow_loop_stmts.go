@@ -171,6 +171,9 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		if itemType, ok := EnumerateViewItemType(tt); ok {
 			return iterLoopSourceInfo{ItemType: itemType}, true
 		}
+		if itemType, ok := FilteredViewItemType(tt); ok {
+			return iterLoopSourceInfo{ItemType: itemType}, true
+		}
 		if itemType, ok := TreeChildrenItemType(tt); ok {
 			return iterLoopSourceInfo{ItemType: itemType}, true
 		}

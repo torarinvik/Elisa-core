@@ -615,7 +615,11 @@ func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (
 		}
 		fields = append(fields, fieldType)
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	packed := C.LLVMBool(0)
+	if st.PackedLayout {
+		packed = C.LLVMBool(1)
+	}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), packed)
 	g.structBodies[name] = true
 	return ty, nil
 }

@@ -1,4 +1,4 @@
-struct Vec[T]:
+struct Vec[T] layout c:
 	x: mutable T
 	y: mutable T
 

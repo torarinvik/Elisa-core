@@ -155,6 +155,8 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 		return s.emitIterableBoolAggregateHelperCall(expr, "all", false)
 	case "enumerate":
 		return s.emitEnumerateHelperCall(expr)
+	case "where":
+		return s.emitWhereHelperCall(expr)
 	case "readonly":
 		return s.emitReadonlyHelperCall(expr)
 	case "split_at":
@@ -189,7 +191,12 @@ func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, 
 	if err != nil {
 		return nil, nil, true, err
 	}
-	countValue, err := s.emitIterLoopCount(expr.Args[0], sourceAlloca, sourceType, helperName)
+	iterSourceAlloca, iterSourceType, transforms, err := s.peelIterViewTransforms(helperName, sourceAlloca, sourceType, ast.IterBindValue)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	iterSourceExpr := iterLoopBaseSourceExpr(expr.Args[0])
+	countValue, err := s.emitIterLoopCount(iterSourceExpr, iterSourceAlloca, iterSourceType, helperName)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -227,7 +234,11 @@ func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, 
 	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
-	itemValue, itemType, err := s.emitIterLoopElementValue(expr.Args[0], sourceAlloca, sourceType, indexValue, helperName)
+	itemValue, itemType, err := s.emitIterLoopElementValue(iterSourceExpr, iterSourceAlloca, iterSourceType, indexValue, helperName)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	itemValue, itemType, err = s.applyIterViewTransforms(helperName, indexValue, loopContinueBB, itemValue, itemType, transforms)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -280,6 +291,41 @@ func (s *functionState) emitEnumerateHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, sourceValue, 0, cStringFree("enumerate.source.insert"))
 	return resultValue, resultType, true, nil
 }
+
+func (s *functionState) emitWhereHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 2 {
+		return nil, nil, true, fmt.Errorf("where expects 2 arguments, got %d", len(expr.Args))
+	}
+	sourceType := s.exprType(expr.Args[0])
+	if sourceType == nil {
+		return nil, nil, true, fmt.Errorf("where source is missing a semantic type")
+	}
+	predicateType, ok := s.exprType(expr.Args[1]).(*semantic.FuncType)
+	if !ok || predicateType == nil {
+		return nil, nil, true, fmt.Errorf("where predicate is missing a function type")
+	}
+	resultType := s.exprType(expr)
+	if resultType == nil {
+		return nil, nil, true, fmt.Errorf("where result is missing a semantic type")
+	}
+	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	predicateValue, _, err := s.emitExpr(expr.Args[1], predicateType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultValue := C.LLVMGetUndef(resultLLVMType)
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, sourceValue, 0, cStringFree("where.source.insert"))
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, predicateValue, 1, cStringFree("where.predicate.insert"))
+	return resultValue, resultType, true, nil
+}
+
 func (s *functionState) emitTreeTraversalHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	switch callIdentName(expr) {
 	case "children":

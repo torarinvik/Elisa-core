@@ -89,7 +89,7 @@ def fold() -> i64:
 
 func TestGenerateCHeaderRendersAlignedStructAndGlobal(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "header_align.elisa", `@align(64)
-struct Counter:
+struct Counter layout c:
     value: i64
 
 global counter: Counter = zeroed

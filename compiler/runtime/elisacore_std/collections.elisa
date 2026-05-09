@@ -220,6 +220,11 @@ def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_
         return out
 
 
+@ufcs_only
+def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
+    return FilteredView[S, T](source, predicate)
+
+
 # ------------------------------------------------------------
 # Inline vectors
 # ------------------------------------------------------------

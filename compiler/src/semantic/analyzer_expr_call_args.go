@@ -281,6 +281,39 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 	if _, ok := a.lookupFieldNoError(receiverType, fieldExpr.Field); ok {
 		return extensionMethodCallRewriteNone
 	}
+	if fieldExpr.Field == "where" {
+		prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
+		prependedArgs = append(prependedArgs, fieldExpr.Object)
+		prependedArgs = append(prependedArgs, expr.Args...)
+		expr.Args = prependedArgs
+		if len(expr.ArgNames) != 0 {
+			prependedNames := make([]string, 0, len(expr.ArgNames)+1)
+			prependedNames = append(prependedNames, "")
+			prependedNames = append(prependedNames, expr.ArgNames...)
+			expr.ArgNames = prependedNames
+		}
+		if len(expr.ArgShorthand) != 0 {
+			prependedShorthand := make([]bool, 0, len(expr.ArgShorthand)+1)
+			prependedShorthand = append(prependedShorthand, false)
+			prependedShorthand = append(prependedShorthand, expr.ArgShorthand...)
+			expr.ArgShorthand = prependedShorthand
+		}
+		if len(expr.ArgItemOrder) != 0 {
+			prependedItems := make([]ast.CallArgItem, 0, len(expr.ArgItemOrder)+1)
+			prependedItems = append(prependedItems, ast.CallArgItem{Position: fieldExpr.Object.Pos(), ArgIndex: 0})
+			for _, item := range expr.ArgItemOrder {
+				if item.IsPack {
+					prependedItems = append(prependedItems, item)
+					continue
+				}
+				item.ArgIndex++
+				prependedItems = append(prependedItems, item)
+			}
+			expr.ArgItemOrder = prependedItems
+		}
+		expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: fieldExpr.Field}
+		return extensionMethodCallRewriteApplied
+	}
 	method, ok, err := a.lookupVisibleExtensionMethod(fieldExpr.Field, receiverType)
 	if err != nil {
 		a.errorf(expr.Pos(), "%s", err.Error())
