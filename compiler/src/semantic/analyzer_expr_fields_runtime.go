@@ -67,6 +67,11 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		objType = ref.Elem
 	}
 	objType = StripAggregateStateType(objType)
+	if fieldName == "rows" {
+		if storeType, _, ok := builtinStoreReceiverType(objType); ok && storeType != nil && storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
+			return Field{Name: fieldName, Type: &StoreRowsViewType{Store: storeType}, Mutable: false}, true
+		}
+	}
 	if field, ok := storeRowViewField(objType, fieldName); ok {
 		return field, true
 	}

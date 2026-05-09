@@ -130,6 +130,9 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if value, fieldType, handled, err := s.emitBuiltinDictEntryFieldExpr(expr); handled {
 		return value, fieldType, err
 	}
+	if value, fieldType, handled, err := s.emitBuiltinStoreRowsFieldExpr(expr); handled {
+		return value, fieldType, err
+	}
 	ptr, fieldType, addressErr := s.emitReadableFieldAddress(expr)
 	if addressErr == nil {
 		value, loadErr := s.loadValue(ptr, fieldType, expr.Field)

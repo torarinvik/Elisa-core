@@ -82,7 +82,11 @@ def build(owner: Arena) -> usize:
         symbols: mutable SymbolRows = zeroed
 		symbols.reserve(4)
 		row: RowId[SymbolRows] = symbols.push(12, 3)
-        return symbols.name_id[row] + symbols.flags.count
+        view = symbols[row]
+        total: mutable usize = view.name_id + symbols.flags.count
+        for iter_row in symbols.rows:
+            total <- total + iter_row.name_id
+        return total
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_soa.elisa", src)
 	if st, ok := result.NamedTypes["SymbolRows"].(*semantic.StructType); !ok || st == nil || !st.Store || st.StoreDecl == nil || !st.StoreDecl.Soa {
@@ -100,6 +104,11 @@ def build(owner: Arena) -> usize:
 	}
 	if !strings.Contains(output, "trunc") {
 		t.Fatalf("expected SOA push row id to narrow from usize to u32 storage, got:\n%s", output)
+	}
+	for _, want := range []string{"soa.row.index", "soa.rows.store", "name_id.row.index"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected SOA row-view lowering to include %q, got:\n%s", want, output)
+		}
 	}
 }
 

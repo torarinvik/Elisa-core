@@ -543,6 +543,9 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	if value, actualType, handled, err := s.emitChunksExactIndexExpr(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinSOARowIndexExpr(expr); handled {
+		return value, actualType, err
+	}
 	if _, ok := semanticStringArrayType(s.exprType(expr.Object)); ok {
 		return s.emitStaticStringIndexExpr(expr)
 	}

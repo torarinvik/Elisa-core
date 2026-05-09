@@ -25,6 +25,9 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if indexExpected == nil {
 		indexExpected = builtinUsizeType()
 	}
+	if storeType, _, ok := builtinStoreReceiverType(objType); ok && storeType != nil && storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
+		indexExpected = &IDType{Tag: storeType, Storage: a.namedTypes["u32"]}
+	}
 	indexType := a.analyzeValueExpr(expr.Index, indexExpected)
 	finish := func(result Type) Type {
 		if expr.Fallback != nil {
@@ -59,6 +62,13 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if result, handled := a.analyzeDenseNodeKeyIndexExpr(expr, objType, keyEnum); handled {
 			return finish(result)
 		}
+	}
+	if storeType, _, ok := builtinStoreReceiverType(objType); ok && storeType != nil && storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
+		rowType := &IDType{Tag: storeType, Storage: a.namedTypes["u32"]}
+		if !AssignableTo(rowType, indexType) {
+			a.errorf(expr.Index.Pos(), "soa row index expects %s, got %s", rowType, indexType)
+		}
+		return finish(&StoreRowViewType{Store: storeType})
 	}
 	if arr, ok := objType.(*ArrayType); ok {
 		if expr.Fallback == nil {

@@ -301,6 +301,67 @@ func (s *functionState) emitBuiltinStoreRowsCall(expr *ast.CallExpr) (C.LLVMValu
 	value = C.LLVMBuildInsertValue(s.builder, value, storePtr, 0, cStringFree("store.rows.store"))
 	return value, resultType, true, nil
 }
+func (s *functionState) emitBuiltinStoreRowsFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil || expr.Field != "rows" || expr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(expr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil || storeType.StoreDecl == nil || !storeType.StoreDecl.Soa {
+		return nil, nil, false, nil
+	}
+	storePtr, err := s.emitReadableStoreReceiverPtr(expr.Object, receiverType, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultType, ok := s.exprType(expr).(*semantic.StoreRowsViewType)
+	if !ok || resultType == nil {
+		resultType = &semantic.StoreRowsViewType{Store: storeType}
+	}
+	rowViewLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	value := C.LLVMGetUndef(rowViewLLVMType)
+	value = C.LLVMBuildInsertValue(s.builder, value, storePtr, 0, cStringFree("soa.rows.store"))
+	return value, resultType, true, nil
+}
+func (s *functionState) emitBuiltinSOARowIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil || expr.Fallback != nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(expr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil || storeType.StoreDecl == nil || !storeType.StoreDecl.Soa {
+		return nil, nil, false, nil
+	}
+	storePtr, err := s.emitReadableStoreReceiverPtr(expr.Object, receiverType, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	rowIDType := &semantic.IDType{Tag: storeType, Storage: s.g.result.NamedTypes["u32"]}
+	indexValue, _, err := s.emitExpr(expr.Index, rowIDType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	indexValue, err = s.coerceValue(indexValue, rowIDType, usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultType, ok := s.exprType(expr).(*semantic.StoreRowViewType)
+	if !ok || resultType == nil {
+		resultType = &semantic.StoreRowViewType{Store: storeType}
+	}
+	rowLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	rowValue := C.LLVMGetUndef(rowLLVMType)
+	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, storePtr, 0, cStringFree("soa.row.store"))
+	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, indexValue, 1, cStringFree("soa.row.index"))
+	return rowValue, resultType, true, nil
+}
 func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiverType semantic.Type, receiverRefType *semantic.RefType) (C.LLVMValueRef, error) {
 	if receiverRefType != nil {
 		ptr, _, err := s.emitExpr(receiver, receiverRefType)
