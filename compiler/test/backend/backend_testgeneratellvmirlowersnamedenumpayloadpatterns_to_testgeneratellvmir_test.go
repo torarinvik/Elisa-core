@@ -505,6 +505,37 @@ def recover(span: i64) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersPayloadErrorMatch(t *testing.T) {
+	src := `error BackendError:
+	UnsupportedType(span: i64, code: i32)
+	Other
+
+def recover(e: BackendError) -> i64:
+	match e:
+		BackendError.UnsupportedType(span, code):
+			return span + code.i64()
+		BackendError.Other:
+			return 0
+`
+	result := parseAndAnalyze(t, "backend_payload_error_match.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	for _, check := range []string{
+		"%ErrSet__BackendError = type { i32, i64, i32 }",
+		"define i64 @recover(",
+		"errset.code",
+		"errset.payload",
+		"match.error.payload",
+		"add i64",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRRemapsErrorCodesWhenWideningErrorSets(t *testing.T) {
 	src := `error SourceError:
 	NotFound

@@ -142,12 +142,22 @@ func (a *Analyzer) analyzeTopLevelErrorSetMatchPattern(pattern ast.MatchPattern,
 			a.errorf(p.Pos(), "error set %q has no tag %q", errorSetType.Name, p.Variant)
 			return false
 		}
-		if len(p.Args) != 0 {
-			a.errorf(p.Pos(), "match arm %q expects 0 payload patterns, got %d", errorSetType.Name+"."+p.Variant, len(p.Args))
+		qualified := QualifyErrorTag(errorSetType.Name, p.Variant)
+		payloadTypes := errorSetType.PayloadForTag(qualified)
+		if len(p.Args) != len(payloadTypes) {
+			a.errorf(p.Pos(), "match arm %q expects %d payload patterns, got %d", errorSetType.Name+"."+p.Variant, len(payloadTypes), len(p.Args))
 			return false
 		}
 		if covered != nil {
-			covered[QualifyErrorTag(errorSetType.Name, p.Variant)] = true
+			covered[qualified] = true
+		}
+		for i := range p.Args {
+			arg := &p.Args[i]
+			if arg.Name != "" {
+				a.errorf(arg.Position, "error-set payload patterns do not support named fields yet")
+				continue
+			}
+			a.analyzeNestedMatchPattern(arg.Pattern, payloadTypes[i], nil, scope)
 		}
 		return false
 	case *ast.MatchBindPattern:

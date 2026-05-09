@@ -284,16 +284,64 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			if !errorSetType.HasQualifiedTag(errorSetType.Name, p.Variant) {
 				return nil, packedPayloadValueCache{}, fmt.Errorf("error set %s has no tag %s", errorSetType.Name, p.Variant)
 			}
-			if len(p.Args) != 0 {
-				return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %q expects 0 payload patterns, got %d", errorSetType.Name+"."+p.Variant, len(p.Args))
+			qualifiedTag := semantic.QualifyErrorTag(errorSetType.Name, p.Variant)
+			payloadTypes := errorSetType.PayloadForTag(qualifiedTag)
+			if len(p.Args) != len(payloadTypes) {
+				return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %q expects %d payload patterns, got %d", errorSetType.Name+"."+p.Variant, len(payloadTypes), len(p.Args))
 			}
-			fieldExpr := &ast.FieldExpr{Position: p.Position, Object: &ast.Ident{Position: p.Position, Name: errorSetType.Name}, Field: p.Variant}
-			memberValue, _, err := s.emitErrorTagExpr(fieldExpr, errorSetType)
+			errorCodeValue, err := s.extractErrorSetCode(actualValue, errorSetType)
 			if err != nil {
 				return nil, packedPayloadValueCache{}, err
 			}
-			pred := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), actualValue, memberValue, cStringFree("match.tag"))
-			C.LLVMBuildCondBr(s.builder, pred, successBB, failureBB)
+			code, ok := errorSetType.TagCode(qualifiedTag)
+			if !ok {
+				return nil, packedPayloadValueCache{}, fmt.Errorf("missing error tag %s", qualifiedTag)
+			}
+			memberValue, err := s.errorCodeConstant(code)
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			pred := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCodeValue, memberValue, cStringFree("match.tag"))
+			if len(p.Args) == 0 {
+				C.LLVMBuildCondBr(s.builder, pred, successBB, failureBB)
+				return decodedActualValue, packedPayloadValueCache{}, nil
+			}
+			payloadBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.error.payload"))
+			C.LLVMBuildCondBr(s.builder, pred, payloadBB, failureBB)
+			C.LLVMPositionBuilderAtEnd(s.builder, payloadBB)
+			payloadValues, err := s.extractErrorSetPayloadValues(actualValue, errorSetType, qualifiedTag)
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			lastNestedPattern := -1
+			for i := range p.Args {
+				if p.Args[i].Pattern != nil {
+					lastNestedPattern = i
+				}
+			}
+			if lastNestedPattern < 0 {
+				C.LLVMBuildBr(s.builder, successBB)
+				return decodedActualValue, packedPayloadValueCache{}, nil
+			}
+			for i := range p.Args {
+				arg := &p.Args[i]
+				if arg.Name != "" {
+					return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %s.%s uses named payload patterns but error payloads are unnamed", p.EnumName, p.Variant)
+				}
+				if arg.Pattern == nil {
+					continue
+				}
+				nextSuccess := successBB
+				if i != lastNestedPattern {
+					nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.error.pattern.next"))
+				}
+				if _, _, err := s.emitMatchPatternTest(arg.Pattern, payloadValues[i], nil, payloadTypes[i], store, nil, nil, nextSuccess, failureBB); err != nil {
+					return nil, packedPayloadValueCache{}, err
+				}
+				if i != lastNestedPattern {
+					C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+				}
+			}
 			return decodedActualValue, packedPayloadValueCache{}, nil
 		}
 		if constEnumType, ok := resolveMatchableConstEnumType(actualType); ok {

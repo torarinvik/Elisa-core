@@ -433,6 +433,24 @@ def fail(span: i64) -> i64 error[BackendError]:
 	_ = requireFuncDecl(t, result, "fail")
 }
 
+func TestAnalyzePayloadErrorMatchBindsPayloads(t *testing.T) {
+	src := `error BackendError:
+	UnsupportedType(span: i64, code: i32)
+	Other
+
+def recover(e: BackendError) -> i64:
+	match e:
+		BackendError.UnsupportedType(span, code):
+			return span + code.i64()
+		BackendError.Other:
+			return 0
+`
+	result, errs := parseAndAnalyze(t, "payload_error_match.elisa", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	_ = requireFuncDecl(t, result, "recover")
+}
+
 func TestAnalyzePayloadErrorConstructorChecksArguments(t *testing.T) {
 	src := `error BackendError:
 	UnsupportedType(span: i64, code: i32)

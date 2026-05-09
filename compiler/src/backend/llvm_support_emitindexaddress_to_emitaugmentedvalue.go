@@ -480,6 +480,31 @@ func (s *functionState) extractErrorSetCode(value C.LLVMValueRef, errorSet *sema
 	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("errset.code")), nil
 }
 
+func (s *functionState) extractErrorSetPayloadValues(value C.LLVMValueRef, errorSet *semantic.ErrorSetType, tag string) ([]C.LLVMValueRef, error) {
+	if errorSet == nil {
+		return nil, fmt.Errorf("missing error set type")
+	}
+	payloadTypes := errorSet.PayloadForTag(tag)
+	values := make([]C.LLVMValueRef, 0, len(payloadTypes))
+	fieldIndex := 1
+	for _, candidate := range errorSet.Tags {
+		payload := errorSet.PayloadForTag(candidate)
+		for range payload {
+			if candidate == tag {
+				values = append(values, C.LLVMBuildExtractValue(s.builder, value, C.unsigned(fieldIndex), cStringFree("errset.payload")))
+				if len(values) == len(payloadTypes) {
+					return values, nil
+				}
+			}
+			fieldIndex++
+		}
+	}
+	if len(values) != len(payloadTypes) {
+		return nil, fmt.Errorf("missing payload fields for error tag %s", tag)
+	}
+	return values, nil
+}
+
 func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
 	if unionType == nil {
 		return nil, fmt.Errorf("missing error union type")
