@@ -554,5 +554,5 @@ func storeRowViewField(t Type, fieldName string) (Field, bool) {
 	if !ok || darrayType == nil {
 		return Field{}, false
 	}
-	return Field{Name: fieldName, Type: darrayType.Elem, Mutable: false}, true
+	return Field{Name: fieldName, Type: darrayType.Elem, Mutable: true}, true
 }

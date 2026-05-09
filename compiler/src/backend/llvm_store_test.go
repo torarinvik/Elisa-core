@@ -85,7 +85,10 @@ def build(owner: Arena) -> usize:
         if not symbols.valid(row):
             return 0
         view = symbols[row]
+        view.flags <- 5
+        symbols[row].name_id <- 20
         total: mutable usize = view.name_id + symbols.count
+        total <- total + view.flags.cast[usize]
         for iter_row in symbols.rows:
             total <- total + iter_row.name_id
         return total
@@ -107,9 +110,14 @@ def build(owner: Arena) -> usize:
 	if !strings.Contains(output, "trunc") {
 		t.Fatalf("expected SOA push row id to narrow from usize to u32 storage, got:\n%s", output)
 	}
-	for _, want := range []string{"soa.row.index", "soa.rows.store", "name_id.row.index"} {
+	for _, want := range []string{"soa.row.index", "soa.rows.store", "name_id.row.index", "flags.row.index"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected SOA row-view lowering to include %q, got:\n%s", want, output)
+		}
+	}
+	for _, want := range []string{"store i32 5", "store i64 20"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected mutable SOA row-view store %q, got:\n%s", want, output)
 		}
 	}
 	for _, want := range []string{"soa.count", "soa.valid"} {

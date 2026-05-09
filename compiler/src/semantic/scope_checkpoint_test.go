@@ -220,8 +220,31 @@ def build(owner: Arena) -> usize:
 	}
 }
 
-func TestAnalyzeRejectsStoreRowMutationAndRefBinding(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_rows_readonly.elisa", `
+func TestAnalyzeAllowsStoreRowMutation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "store_rows_mutation.elisa", `
+store PendingGotoStore:
+    name_key: usize
+    depth: usize
+
+def build(owner: Arena) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        pending: mutable PendingGotoStore = zeroed
+        pending.push(1, 2)
+        total: mutable usize = 0
+        for row in pending.rows():
+            row.name_key <- 9
+            row.depth <- 7
+            total <- total + row.name_key + row.depth
+        return total
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeRejectsStoreRowsRefBinding(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_rows_ref_binding.elisa", `
 store PendingGotoStore:
     name_key: usize
     depth: usize
@@ -231,15 +254,10 @@ def build(owner: Arena) -> void:
     in alloc:
         pending: mutable PendingGotoStore = zeroed
         pending.push(1, 2)
-        for row in pending.rows():
-            row.name_key <- 9
         for ref row in pending.rows():
             pass
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `field "name_key" is immutable`) {
-		t.Fatalf("expected readonly row field diagnostic, got:\n%s", all)
-	}
 	if !strings.Contains(all, "for ref requires an addressable array-like iterable") {
 		t.Fatalf("expected store rows ref-binding diagnostic, got:\n%s", all)
 	}
