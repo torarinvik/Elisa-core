@@ -108,6 +108,9 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	linkArgs = append(linkArgs, foreignFiles...)
 	linkArgs = append(linkArgs, linkFlags...)
+	if resultNeedsLLVMCAPILinkage(result) {
+		linkArgs = appendMissingLinkFlags(linkArgs, llvmNativeLinkFlags(linkFlags)...)
+	}
 	linkArgs = append(linkArgs, "-o", exePath)
 
 	linkCmd := exec.Command(clangPath, linkArgs...)
@@ -120,6 +123,102 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	timing.Link = time.Since(linkStart)
 	return exePath, cleanup, timing, nil
+}
+
+func resultNeedsLLVMCAPILinkage(result *semantic.Result) bool {
+	if result == nil || result.GlobalScope == nil {
+		return false
+	}
+	for _, sym := range result.GlobalScope.Symbols {
+		if sym == nil || (sym.Kind != semantic.SymbolExternFunc && sym.Kind != semantic.SymbolExternVar) {
+			continue
+		}
+		linkName := strings.TrimSpace(sym.LinkName)
+		if strings.HasPrefix(linkName, "LLVM") || strings.HasPrefix(sym.Name, "llvm_") {
+			return true
+		}
+	}
+	return false
+}
+
+func llvmNativeLinkFlags(existing []string) []string {
+	flags := make([]string, 0, 8)
+	switch runtime.GOOS {
+	case "darwin":
+		switch runtime.GOARCH {
+		case "arm64":
+			flags = appendExistingLibraryDirFlag(flags, "/opt/homebrew/opt/llvm/lib", existing)
+		case "amd64":
+			flags = appendExistingLibraryDirFlag(flags, "/usr/local/opt/llvm/lib", existing)
+		}
+	case "linux":
+		for _, dir := range []string{
+			"/usr/lib/llvm-21/lib",
+			"/usr/lib/llvm-20/lib",
+			"/usr/lib/llvm-19/lib",
+			"/usr/lib/llvm-18/lib",
+			"/usr/lib/llvm-17/lib",
+			"/usr/lib/llvm-16/lib",
+			"/usr/lib/llvm-15/lib",
+		} {
+			flags = appendExistingLibraryDirFlag(flags, dir, existing)
+		}
+	}
+	flags = append(flags, "-lLLVM-C", "-lLLVM")
+	return flags
+}
+
+func appendExistingLibraryDirFlag(flags []string, dir string, existing []string) []string {
+	if dir == "" || linkFlagsContainLibraryDir(existing, dir) {
+		return flags
+	}
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return append(flags, "-L"+dir)
+	}
+	return flags
+}
+
+func appendMissingLinkFlags(base []string, candidates ...string) []string {
+	result := append([]string(nil), base...)
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || linkFlagsContain(result, candidate) {
+			continue
+		}
+		result = append(result, candidate)
+	}
+	return result
+}
+
+func linkFlagsContain(flags []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for index, flag := range flags {
+		trimmed := strings.TrimSpace(flag)
+		if trimmed == target {
+			return true
+		}
+		if strings.HasPrefix(target, "-l") && trimmed == "-l" && index+1 < len(flags) && strings.TrimSpace(flags[index+1]) == strings.TrimPrefix(target, "-l") {
+			return true
+		}
+	}
+	return false
+}
+
+func linkFlagsContainLibraryDir(flags []string, dir string) bool {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	for index, flag := range flags {
+		trimmed := strings.TrimSpace(flag)
+		if strings.HasPrefix(trimmed, "-L") && filepath.Clean(strings.TrimSpace(strings.TrimPrefix(trimmed, "-L"))) == dir {
+			return true
+		}
+		if trimmed == "-L" && index+1 < len(flags) && filepath.Clean(strings.TrimSpace(flags[index+1])) == dir {
+			return true
+		}
+	}
+	return false
 }
 
 func withDefaultNativeRuntimeForeignFiles(foreignFiles []string) ([]string, error) {
