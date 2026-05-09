@@ -219,6 +219,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("store") {
 		return p.parseStoreDecl()
 	}
+	if p.peekIdentText("soa") {
+		return p.parseSoaDecl()
+	}
 	if p.peekIdentText("affine") {
 		return p.parseStructDecl()
 	}
@@ -232,6 +235,9 @@ func (p *Parser) parseDecl() ast.Decl {
 		}
 		if p.peekIdentText("store") {
 			return p.parseStoreDeclWithAnnotations(annotations)
+		}
+		if p.peekIdentText("soa") {
+			return p.parseSoaDeclWithAnnotations(annotations)
 		}
 		if p.peekIdentText("affine") {
 			return p.parseStructDeclWithAnnotations(annotations)
@@ -247,14 +253,14 @@ func (p *Parser) parseDecl() ast.Decl {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 				return p.parsePackedEnumDeclWithAnnotations(annotations)
 			}
-			p.errorf("declaration annotations must be followed by def, extern, struct, store, tree, enum, packed enum, or impl, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		case lexer.TOKEN_ENUM:
 			return p.parseEnumDeclWithAnnotations(annotations)
 		case lexer.TOKEN_STRUCT:
 			return p.parseStructDeclWithAnnotations(annotations)
 		default:
-			p.errorf("declaration annotations must be followed by def, extern, struct, store, tree, enum, packed enum, or impl, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		}
 	}
@@ -299,6 +305,9 @@ func (p *Parser) parseDecl() ast.Decl {
 func (p *Parser) parseStoreDecl() *ast.StoreDecl {
 	return p.parseStoreDeclWithAnnotations(nil)
 }
+func (p *Parser) parseSoaDecl() *ast.StoreDecl {
+	return p.parseSoaDeclWithAnnotations(nil)
+}
 func (p *Parser) parseTypeAliasDecl() ast.Decl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
@@ -309,8 +318,14 @@ func (p *Parser) parseTypeAliasDecl() ast.Decl {
 	return &ast.TypeAliasDecl{Position: pos, Name: name, Target: target}
 }
 func (p *Parser) parseStoreDeclWithAnnotations(annotations []ast.Annotation) *ast.StoreDecl {
+	return p.parseColumnStoreDeclWithAnnotations("store", false, annotations)
+}
+func (p *Parser) parseSoaDeclWithAnnotations(annotations []ast.Annotation) *ast.StoreDecl {
+	return p.parseColumnStoreDeclWithAnnotations("soa", true, annotations)
+}
+func (p *Parser) parseColumnStoreDeclWithAnnotations(keyword string, soa bool, annotations []ast.Annotation) *ast.StoreDecl {
 	pos := p.cur().Pos
-	p.expectIdentText("store")
+	p.expectIdentText(keyword)
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
@@ -324,7 +339,7 @@ func (p *Parser) parseStoreDeclWithAnnotations(annotations []ast.Annotation) *as
 		fields = append(fields, p.parseFieldDecl())
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return &ast.StoreDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Fields: fields}
+	return &ast.StoreDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Soa: soa, Fields: fields}
 }
 func (p *Parser) parseAnnotations() []ast.Annotation {
 	annotations := make([]ast.Annotation, 0, 1)

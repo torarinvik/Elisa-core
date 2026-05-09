@@ -6,6 +6,7 @@ type StoreDecl struct {
 	Position    lexer.Pos
 	Annotations []Annotation
 	Name        string
+	Soa         bool
 	Fields      []FieldDecl
 }
 type GenericParamKind int

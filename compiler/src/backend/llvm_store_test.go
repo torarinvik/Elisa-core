@@ -71,6 +71,36 @@ def build(owner: Arena) -> usize:
 	}
 }
 
+func TestGenerateLLVMIRLowersSOASugar(t *testing.T) {
+	src := `soa SymbolRows:
+    name_id: usize
+    flags: u32
+
+def build(owner: Arena) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        symbols: mutable SymbolRows = zeroed
+		symbols.reserve(4)
+		row = symbols.push(12, 3)
+		_ = row
+        return symbols.name_id.count + symbols.flags.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_soa.elisa", src)
+	if st, ok := result.NamedTypes["SymbolRows"].(*semantic.StructType); !ok || st == nil || !st.Store || st.StoreDecl == nil || !st.StoreDecl.Soa {
+		t.Fatalf("expected SOA declaration to analyze as a column store, got %#v", result.NamedTypes["SymbolRows"])
+	}
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "store.name_id.push.slot") {
+		t.Fatalf("expected SOA push lowering for first column, got:\n%s", output)
+	}
+	if !strings.Contains(output, "store.flags.push.slot") {
+		t.Fatalf("expected SOA push lowering for second column, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersStoreRowsIteration(t *testing.T) {
 	src := `store PendingGotoStore:
     name_key: usize

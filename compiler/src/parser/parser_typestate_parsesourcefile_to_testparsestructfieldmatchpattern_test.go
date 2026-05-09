@@ -108,6 +108,27 @@ struct CHeader layout c:
 	}
 }
 
+func TestParseSOADecl(t *testing.T) {
+	file, errs := parseSourceFile(t, `soa PascalSymbols:
+	name_id: NameId
+	span: Span
+	flags: u32
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StoreDecl)
+	if !ok {
+		t.Fatalf("expected SOA decl to parse as a column store decl, got %T", file.Decls[0])
+	}
+	if !decl.Soa {
+		t.Fatalf("expected SOA marker on parsed declaration")
+	}
+	if decl.Name != "PascalSymbols" || len(decl.Fields) != 3 {
+		t.Fatalf("unexpected SOA declaration: %#v", decl)
+	}
+}
+
 func TestParseConstEnumAllowsInferredStorage(t *testing.T) {
 	file, errs := parseSourceFile(t, `const enum Mode:
 	None
