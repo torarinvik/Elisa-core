@@ -132,6 +132,26 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		}
 		return enumType
 	}
+	if errSet, qualifiedTag, payloadTypes, ok := a.errorConstructorCall(expr); ok {
+		if len(expr.Args) != len(payloadTypes) {
+			a.errorf(expr.Pos(), "error constructor %q expects %d arguments, got %d", ErrorTagDiagnosticName(qualifiedTag), len(payloadTypes), len(expr.Args))
+		}
+		limit := len(expr.Args)
+		if len(payloadTypes) < limit {
+			limit = len(payloadTypes)
+		}
+		for i := 0; i < len(expr.Args); i++ {
+			if i < limit {
+				actual := a.analyzeValueExpr(expr.Args[i], payloadTypes[i])
+				if !AssignableTo(payloadTypes[i], actual) {
+					a.errorf(expr.Args[i].Pos(), "error constructor argument %d to %q expects %s, got %s", i+1, ErrorTagDiagnosticName(qualifiedTag), payloadTypes[i], actual)
+				}
+			} else {
+				a.analyzeExpr(expr.Args[i])
+			}
+		}
+		return errSet
+	}
 	if treeType, variant, ok := a.treeConstructorCall(expr); ok {
 		if variant != nil {
 			a.requireActiveTreeConstructorOwner(expr.Pos(), treeType, variant)

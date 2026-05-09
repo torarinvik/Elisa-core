@@ -392,6 +392,9 @@ func formatCatchExpr(expr *ast.CatchExpr) string {
 	writeArm := func(arm ast.CatchArm) {
 		builder.WriteByte('\n')
 		builder.WriteString(indentUnit)
+		if arm.ErrorBinding {
+			builder.WriteString("error ")
+		}
 		builder.WriteString(arm.Name)
 		builder.WriteString(":")
 		for _, stmt := range arm.Body {

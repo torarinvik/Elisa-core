@@ -53,7 +53,7 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 		writeSimpleReferenceSection(b, headingPrefix, "Error set", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), func() {
 			fmt.Fprintf(b, "- tags:\n")
 			for _, tag := range n.Tags {
-				fmt.Fprintf(b, "  - `%s`\n", tag)
+				fmt.Fprintf(b, "  - `%s`\n", tag.Name)
 			}
 		})
 	case *ast.UsingDecl:

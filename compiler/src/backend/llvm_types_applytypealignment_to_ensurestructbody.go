@@ -110,6 +110,9 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	case *semantic.ConstEnumType:
 		return g.lowerType(tt.Storage)
 	case *semantic.ErrorSetType:
+		if tt.HasPayloads() {
+			return g.ensureErrorSetType(tt)
+		}
 		return g.lowerBuiltin("u32")
 	case *semantic.AssociatedTypeProjection:
 		resolved, err := g.resolveAssociatedTypeProjection(tt)

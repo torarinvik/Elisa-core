@@ -418,6 +418,34 @@ def load(flag: bool) -> i64:
 	}
 	requireExprTypeString(t, result, catchExpr, "i64")
 }
+
+func TestAnalyzePayloadErrorConstructors(t *testing.T) {
+	src := `error BackendError:
+	UnsupportedType(span: i64, code: i32)
+	Other
+
+def fail(span: i64) -> i64 error[BackendError]:
+	raise BackendError.UnsupportedType(span, 7)
+`
+	result, errs := parseAndAnalyze(t, "payload_error_constructor.elisa", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	_ = requireFuncDecl(t, result, "fail")
+}
+
+func TestAnalyzePayloadErrorConstructorChecksArguments(t *testing.T) {
+	src := `error BackendError:
+	UnsupportedType(span: i64, code: i32)
+
+def fail() -> i64 error[BackendError]:
+	raise BackendError.UnsupportedType("bad" as u8&, 7)
+`
+	_, errs := parseAndAnalyze(t, "payload_error_constructor_bad_arg.elisa", src)
+	if !strings.Contains(strings.Join(errs, "\n"), `error constructor argument 1 to "BackendError.UnsupportedType" expects i64`) {
+		t.Fatalf("expected payload argument diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeCatchExprRequiresExhaustiveErrorArms(t *testing.T) {
 	src := `error FileError:
 	NotFound

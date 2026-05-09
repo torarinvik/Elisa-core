@@ -75,7 +75,15 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	case *ast.ErrorDecl:
 		f.writeLine(level, "error "+n.Name+":")
 		for _, tag := range n.Tags {
-			f.writeLine(level+1, tag)
+			line := tag.Name
+			if len(tag.Payload) != 0 {
+				parts := make([]string, 0, len(tag.Payload))
+				for _, payload := range tag.Payload {
+					parts = append(parts, payload.Name+": "+formatTypeExpr(payload.Type))
+				}
+				line += "(" + strings.Join(parts, ", ") + ")"
+			}
+			f.writeLine(level+1, line)
 		}
 	case *ast.EffectsDecl:
 		line := "effectalias " + n.Name + " ="

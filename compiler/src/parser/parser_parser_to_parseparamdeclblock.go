@@ -435,13 +435,24 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
-	var tags []string
+	var tags []ast.ErrorVariantDecl
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		tags = append(tags, p.expect(lexer.TOKEN_IDENT).Text)
+		tagTok := p.expect(lexer.TOKEN_IDENT)
+		var payload []ast.ParamDecl
+		if p.match(lexer.TOKEN_LPAREN) {
+			for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+				payload = append(payload, p.parseParam(false))
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+		}
+		tags = append(tags, ast.ErrorVariantDecl{Position: tagTok.Pos, Name: tagTok.Text, Payload: payload})
 		p.expectNewline()
 	}
 	p.expect(lexer.TOKEN_DEDENT)

@@ -40,7 +40,12 @@ type ConstEnumMemberDecl struct {
 type ErrorDecl struct {
 	Position lexer.Pos
 	Name     string
-	Tags     []string
+	Tags     []ErrorVariantDecl
+}
+type ErrorVariantDecl struct {
+	Position lexer.Pos
+	Name     string
+	Payload  []ParamDecl
 }
 type EffectsDecl struct {
 	Position     lexer.Pos

@@ -111,8 +111,9 @@ type RefStateValueType struct {
 }
 
 type ErrorSetType struct {
-	Name string
-	Tags []string
+	Name     string
+	Tags     []string
+	Payloads map[string][]Type
 }
 
 type ErrorUnionType struct {

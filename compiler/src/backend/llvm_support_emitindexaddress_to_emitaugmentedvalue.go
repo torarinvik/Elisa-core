@@ -334,6 +334,9 @@ func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.Er
 	if semantic.SameType(actual, expected) {
 		return value, nil
 	}
+	if actual.HasPayloads() || expected.HasPayloads() {
+		return nil, fmt.Errorf("cannot remap payload-carrying error set %s into %s", actual.String(), expected.String())
+	}
 	if !semantic.ErrorSetAssignable(expected, actual) {
 		return nil, fmt.Errorf("cannot remap %s into %s", actual.String(), expected.String())
 	}
@@ -432,6 +435,51 @@ func (s *functionState) buildErrorUnionFailure(unionType *semantic.ErrorUnionTyp
 	}
 	return s.buildErrorUnionValue(unionType, errorCode, payload)
 }
+
+func (s *functionState) buildErrorSetValue(errorSet *semantic.ErrorSetType, tag string, args []C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if errorSet == nil {
+		return nil, fmt.Errorf("missing error set type")
+	}
+	code, ok := errorSet.TagCode(tag)
+	if !ok {
+		return nil, fmt.Errorf("missing error tag %s", tag)
+	}
+	codeValue, err := s.errorCodeConstant(code)
+	if err != nil {
+		return nil, err
+	}
+	if !errorSet.HasPayloads() {
+		return codeValue, nil
+	}
+	llvmType, err := s.g.lowerType(errorSet)
+	if err != nil {
+		return nil, err
+	}
+	value := C.LLVMGetUndef(llvmType)
+	value = C.LLVMBuildInsertValue(s.builder, value, codeValue, 0, cStringFree("errset.code"))
+	fieldIndex := 1
+	for _, candidate := range errorSet.Tags {
+		payload := errorSet.PayloadForTag(candidate)
+		for payloadIndex := range payload {
+			if candidate == tag && payloadIndex < len(args) {
+				value = C.LLVMBuildInsertValue(s.builder, value, args[payloadIndex], C.unsigned(fieldIndex), cStringFree("errset.payload"))
+			}
+			fieldIndex++
+		}
+	}
+	return value, nil
+}
+
+func (s *functionState) extractErrorSetCode(value C.LLVMValueRef, errorSet *semantic.ErrorSetType) (C.LLVMValueRef, error) {
+	if errorSet == nil {
+		return nil, fmt.Errorf("missing error set type")
+	}
+	if !errorSet.HasPayloads() {
+		return value, nil
+	}
+	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("errset.code")), nil
+}
+
 func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
 	if unionType == nil {
 		return nil, fmt.Errorf("missing error union type")

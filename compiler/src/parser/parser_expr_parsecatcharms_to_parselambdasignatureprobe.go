@@ -12,13 +12,13 @@ func (p *Parser) parseCatchArms() (ast.CatchArm, []ast.CatchArm) {
 	p.expect(lexer.TOKEN_INDENT)
 	p.skipNewlines()
 	if p.peek() == lexer.TOKEN_DEDENT || p.peek() == lexer.TOKEN_EOF {
-		p.errorf("catch expression requires a `value:` success arm")
+		p.errorf("catch expression requires a success arm")
 		p.expect(lexer.TOKEN_DEDENT)
 		return ast.CatchArm{}, nil
 	}
 	success := p.parseCatchArm()
-	if success.Name != "value" {
-		p.errorf("catch expression must start with a `value:` success arm")
+	if success.ErrorBinding {
+		p.errorf("catch expression must start with a success arm")
 	}
 	var arms []ast.CatchArm
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
@@ -32,6 +32,14 @@ func (p *Parser) parseCatchArms() (ast.CatchArm, []ast.CatchArm) {
 	return success, arms
 }
 func (p *Parser) parseCatchArm() ast.CatchArm {
+	if p.peek() == lexer.TOKEN_ERROR && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
+		pos := p.cur().Pos
+		p.advance()
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_COLON)
+		body := p.parseCatchArmBody(pos)
+		return ast.CatchArm{Position: pos, Name: name, ErrorBinding: true, Body: body}
+	}
 	name, pos := p.parseQualifiedTargetName()
 	p.expect(lexer.TOKEN_COLON)
 	body := p.parseCatchArmBody(pos)

@@ -6,6 +6,9 @@ import (
 )
 
 func (a *Analyzer) errorExprTagName(expr ast.Expr) (string, bool) {
+	if callExpr, ok := expr.(*ast.CallExpr); ok {
+		return a.errorExprTagName(callExpr.Func)
+	}
 	fieldExpr, ok := expr.(*ast.FieldExpr)
 	if !ok {
 		return "", false
@@ -24,6 +27,32 @@ func (a *Analyzer) errorExprTagName(expr ast.Expr) (string, bool) {
 	}
 	return QualifyErrorTag(ident.Name, fieldExpr.Field), true
 }
+
+func (a *Analyzer) errorConstructorCall(expr *ast.CallExpr) (*ErrorSetType, string, []Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, "", nil, false
+	}
+	ident, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok {
+		return nil, "", nil, false
+	}
+	base, _, ok := a.lookupVisibleType(ident.Name)
+	if !ok {
+		return nil, "", nil, false
+	}
+	errSet, ok := base.(*ErrorSetType)
+	if !ok {
+		return nil, "", nil, false
+	}
+	qualifiedTag := QualifyErrorTag(ident.Name, fieldExpr.Field)
+	if !errSet.HasTag(qualifiedTag) {
+		a.errorf(expr.Pos(), "error set %q has no tag %q", ErrorSetDiagnosticName(errSet), fieldExpr.Field)
+		return errSet, qualifiedTag, nil, true
+	}
+	return errSet, qualifiedTag, errSet.PayloadForTag(qualifiedTag), true
+}
+
 func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
 	ident, ok := expr.Object.(*ast.Ident)
 	if !ok {

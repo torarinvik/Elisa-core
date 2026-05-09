@@ -566,6 +566,38 @@ func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType)
 	g.structBodies[name] = true
 	return ty, nil
 }
+
+func (g *llvmGenerator) ensureErrorSetType(errorSet *semantic.ErrorSetType) (C.LLVMTypeRef, error) {
+	if errorSet == nil {
+		return nil, fmt.Errorf("missing error set metadata")
+	}
+	name := "ErrSet__" + sanitizeIdentifier(errorSet.String())
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	codeType, err := g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	fields := []C.LLVMTypeRef{codeType}
+	for _, tag := range errorSet.Tags {
+		for _, payloadType := range errorSet.PayloadForTag(tag) {
+			loweredPayload, err := g.lowerType(payloadType)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, loweredPayload)
+		}
+	}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
 func (g *llvmGenerator) ensureOptionalType(optionalType *semantic.OptionalType) (C.LLVMTypeRef, error) {
 	if optionalType == nil || optionalType.Value == nil {
 		return nil, fmt.Errorf("missing optional metadata")

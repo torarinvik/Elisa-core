@@ -94,12 +94,50 @@ func (s *functionState) emitErrorTagExpr(expr *ast.FieldExpr, errorType *semanti
 	if !ok {
 		return nil, nil, fmt.Errorf("unknown error tag %s.%s", errorType.Name, expr.Field)
 	}
+	if errorType.HasPayloads() {
+		value, err := s.buildErrorSetValue(errorType, semantic.QualifyErrorTag(ident.Name, expr.Field), nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		return value, errorType, nil
+	}
 	value, err := s.errorCodeConstant(code)
 	if err != nil {
 		return nil, nil, err
 	}
 	return value, errorType, nil
 }
+
+func (s *functionState) errorConstructorInfo(expr *ast.CallExpr) (*semantic.ErrorSetType, string, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, "", false
+	}
+	errorType, qualifiedTag, ok := s.errorTagInfo(fieldExpr)
+	return errorType, qualifiedTag, ok
+}
+
+func (s *functionState) emitErrorConstructorValue(expr *ast.CallExpr, errorType *semantic.ErrorSetType, qualifiedTag string) (C.LLVMValueRef, semantic.Type, error) {
+	payloadTypes := errorType.PayloadForTag(qualifiedTag)
+	args := make([]C.LLVMValueRef, 0, len(expr.Args))
+	for i, arg := range expr.Args {
+		var expected semantic.Type
+		if i < len(payloadTypes) {
+			expected = payloadTypes[i]
+		}
+		value, _, err := s.emitExpr(arg, expected)
+		if err != nil {
+			return nil, nil, err
+		}
+		args = append(args, value)
+	}
+	value, err := s.buildErrorSetValue(errorType, qualifiedTag, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, errorType, nil
+}
+
 func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, semantic.Type, error) {
 	currentUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType)
 	if !ok {
@@ -110,7 +148,17 @@ func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, sema
 		errorType  semantic.Type
 		err        error
 	)
-	if fieldExpr, ok := expr.Error.(*ast.FieldExpr); ok {
+	if callExpr, ok := expr.Error.(*ast.CallExpr); ok {
+		if constructorErrorType, qualifiedTag, ok := s.errorConstructorInfo(callExpr); ok {
+			mappedTag, matched := semantic.MatchErrorTag(currentUnion.Errors, qualifiedTag)
+			if !matched || !semantic.SameType(constructorErrorType, currentUnion.Errors) {
+				return nil, nil, fmt.Errorf("payload error raise currently requires destination error set %s, got %s", constructorErrorType, currentUnion.Errors)
+			}
+			errorValue, errorType, err = s.emitErrorConstructorValue(callExpr, currentUnion.Errors, mappedTag)
+		} else {
+			errorValue, errorType, err = s.emitExpr(expr.Error, currentUnion.Errors)
+		}
+	} else if fieldExpr, ok := expr.Error.(*ast.FieldExpr); ok {
 		if _, qualifiedTag, ok := s.errorTagInfo(fieldExpr); ok {
 			mappedTag, matched := semantic.MatchErrorTag(currentUnion.Errors, qualifiedTag)
 			if matched {
@@ -118,7 +166,11 @@ func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, sema
 				if !ok {
 					return nil, nil, fmt.Errorf("missing destination error tag %s", mappedTag)
 				}
-				errorValue, err = s.errorCodeConstant(code)
+				if currentUnion.Errors.HasPayloads() {
+					errorValue, err = s.buildErrorSetValue(currentUnion.Errors, mappedTag, nil)
+				} else {
+					errorValue, err = s.errorCodeConstant(code)
+				}
 				errorType = currentUnion.Errors
 			} else {
 				errorValue, errorType, err = s.emitExpr(expr.Error, currentUnion.Errors)
@@ -144,7 +196,11 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		if err != nil {
 			return nil, nil, err
 		}
-		errorCode, err := s.extractErrorUnionCode(fallibleValue, unionType)
+		errorValue, err := s.extractErrorUnionCode(fallibleValue, unionType)
+		if err != nil {
+			return nil, nil, err
+		}
+		errorCode, err := s.extractErrorSetCode(errorValue, unionType.Errors)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -163,7 +219,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 			if _, ok := s.fnType.Return.(*semantic.ErrorUnionType); !ok {
 				return nil, nil, fmt.Errorf("try propagation requires an error-union function return")
 			}
-			if err := s.emitFunctionReturn(errorCode, unionType.Errors); err != nil {
+			if err := s.emitFunctionReturn(errorValue, unionType.Errors); err != nil {
 				return nil, nil, err
 			}
 
@@ -319,7 +375,11 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 	if err != nil {
 		return nil, nil, err
 	}
-	errorCode, err := s.extractErrorUnionCode(fallibleValue, unionType)
+	errorValue, err := s.extractErrorUnionCode(fallibleValue, unionType)
+	if err != nil {
+		return nil, nil, err
+	}
+	errorCode, err := s.extractErrorSetCode(errorValue, unionType.Errors)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -328,10 +388,21 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	successCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree("catch.ok"))
+	var errorBindingArm *ast.CatchArm
+	for i := range expr.Arms {
+		if expr.Arms[i].ErrorBinding {
+			errorBindingArm = &expr.Arms[i]
+			break
+		}
+	}
 	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.value"))
 	dispatchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.dispatch"))
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.merge"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.fail"))
+	failName := "catch.fail"
+	if errorBindingArm != nil {
+		failName = "catch.error"
+	}
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(failName))
 	C.LLVMBuildCondBr(s.builder, successCond, successBB, dispatchBB)
 
 	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
@@ -370,6 +441,9 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 	C.LLVMPositionBuilderAtEnd(s.builder, dispatchBB)
 	switchInst := C.LLVMBuildSwitch(s.builder, errorCode, failBB, C.unsigned(len(expr.Arms)))
 	for _, arm := range expr.Arms {
+		if arm.ErrorBinding {
+			continue
+		}
 		matchedTag, ok := semantic.MatchErrorTag(unionType.Errors, arm.Name)
 		if !ok {
 			return nil, nil, fmt.Errorf("catch arm %q does not match %s", arm.Name, semantic.ErrorSetDiagnosticName(unionType.Errors))
@@ -407,7 +481,29 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-	if len(covered) == len(unionType.Errors.Tags) || semantic.IsNeverType(resultType) {
+	if errorBindingArm != nil {
+		s.pushScope()
+		errorPtr, err := s.emitStackTempValue(errorValue, unionType.Errors, "catch.error")
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		s.defineBinding(errorBindingArm.Name, valueBinding{ptr: errorPtr, typ: unionType.Errors, mutable: false})
+		armValue, reachable, err := s.emitMatchExprArmBody(errorBindingArm.Body, resultType)
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			armEnd := C.LLVMGetInsertBlock(s.builder)
+			incomingBlocks = append(incomingBlocks, armEnd)
+			if !isVoidType(resultType) {
+				incomingValues = append(incomingValues, armValue)
+			}
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+	} else if len(covered) == len(unionType.Errors.Tags) || semantic.IsNeverType(resultType) {
 		C.LLVMBuildUnreachable(s.builder)
 	} else {
 		failEnd := C.LLVMGetInsertBlock(s.builder)

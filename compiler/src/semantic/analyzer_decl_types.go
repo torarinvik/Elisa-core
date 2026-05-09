@@ -236,15 +236,24 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				}
 				seenTags := map[string]bool{}
 				resolvedTags := make([]string, 0, len(n.Tags))
+				payloads := map[string][]Type{}
 				for _, tag := range n.Tags {
-					if seenTags[tag] {
-						a.errorf(n.Pos(), "duplicate error tag %q in error set %q", tag, n.Name)
+					if seenTags[tag.Name] {
+						a.errorf(tag.Position, "duplicate error tag %q in error set %q", tag.Name, n.Name)
 						continue
 					}
-					seenTags[tag] = true
-					resolvedTags = append(resolvedTags, QualifyErrorTag(qualifiedName, tag))
+					seenTags[tag.Name] = true
+					qualifiedTag := QualifyErrorTag(qualifiedName, tag.Name)
+					resolvedTags = append(resolvedTags, qualifiedTag)
+					if len(tag.Payload) != 0 {
+						payloadTypes := make([]Type, 0, len(tag.Payload))
+						for _, payload := range tag.Payload {
+							payloadTypes = append(payloadTypes, a.resolveType(payload.Type))
+						}
+						payloads[qualifiedTag] = payloadTypes
+					}
 				}
-				a.namedTypes[qualifiedName] = &ErrorSetType{Name: qualifiedName, Tags: resolvedTags}
+				a.namedTypes[qualifiedName] = &ErrorSetType{Name: qualifiedName, Tags: resolvedTags, Payloads: payloads}
 			case *ast.PermissionDecl:
 			case *ast.EffectDecl:
 			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:

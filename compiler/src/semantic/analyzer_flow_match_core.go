@@ -402,8 +402,8 @@ func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 		}
 		return invalidType
 	}
-	if expr.Success.Name != "value" {
-		a.errorf(expr.Success.Position, "catch success arm must be `value:`")
+	if expr.Success.ErrorBinding {
+		a.errorf(expr.Success.Position, "catch success arm cannot be an error binding")
 	}
 	if len(expr.Arms) == 0 {
 		a.errorf(expr.Pos(), "catch requires at least one error arm")
@@ -466,7 +466,19 @@ func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 	mergeArm(expr.Success.Position, expr.Success.Body, successScope)
 	a.currentValueBindings = savedValueBindings
 	covered := map[string]bool{}
+	hasErrorBinding := false
 	for _, arm := range expr.Arms {
+		if arm.ErrorBinding {
+			if hasErrorBinding {
+				a.errorf(arm.Position, "catch error binding is unreachable because an earlier error binding already handles all errors")
+			}
+			hasErrorBinding = true
+			errorScope := NewScope(a.currentScope)
+			errorSym := &Symbol{Name: arm.Name, Kind: SymbolLocal, Type: unionType.Errors, Mutable: false}
+			a.defineLocalInScope(errorScope, errorSym, arm.Position)
+			mergeArm(arm.Position, arm.Body, errorScope)
+			continue
+		}
 		matchedTag, ok := MatchErrorTag(unionType.Errors, arm.Name)
 		if !ok {
 			a.errorf(arm.Position, "catch arm %q does not match %s", arm.Name, ErrorSetDiagnosticName(unionType.Errors))
@@ -479,7 +491,7 @@ func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 		covered[matchedTag] = true
 		mergeArm(arm.Position, arm.Body, NewScope(a.currentScope))
 	}
-	if len(covered) != len(unionType.Errors.Tags) {
+	if !hasErrorBinding && len(covered) != len(unionType.Errors.Tags) {
 		missing := make([]string, 0, len(unionType.Errors.Tags))
 		for _, tag := range unionType.Errors.Tags {
 			if !covered[tag] {

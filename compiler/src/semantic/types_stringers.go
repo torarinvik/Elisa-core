@@ -245,6 +245,16 @@ func ErrorSetTagsEqual(a *ErrorSetType, b *ErrorSetType) bool {
 		if a.Tags[i] != b.Tags[i] {
 			return false
 		}
+		aPayload := a.PayloadForTag(a.Tags[i])
+		bPayload := b.PayloadForTag(b.Tags[i])
+		if len(aPayload) != len(bPayload) {
+			return false
+		}
+		for j := range aPayload {
+			if !SameType(aPayload[j], bPayload[j]) {
+				return false
+			}
+		}
 	}
 	return true
 }
@@ -269,6 +279,7 @@ func CanonicalizeErrorSetSelections(familySets map[string]*ErrorSetType, fullFam
 
 	nameParts := make([]string, 0)
 	canonicalTags := make([]string, 0)
+	canonicalPayloads := map[string][]Type{}
 	for _, familyName := range familyNames {
 		errSet := familySets[familyName]
 		if errSet == nil {
@@ -278,6 +289,11 @@ func CanonicalizeErrorSetSelections(familySets map[string]*ErrorSetType, fullFam
 		if fullFamilies[familyName] || errorSetSelectionIsFull(errSet, selected) {
 			nameParts = append(nameParts, familyName)
 			canonicalTags = append(canonicalTags, errSet.Tags...)
+			for _, qualifiedTag := range errSet.Tags {
+				if payload := errSet.Payloads[qualifiedTag]; len(payload) != 0 {
+					canonicalPayloads[qualifiedTag] = payload
+				}
+			}
 			continue
 		}
 		for _, qualifiedTag := range errSet.Tags {
@@ -286,9 +302,12 @@ func CanonicalizeErrorSetSelections(familySets map[string]*ErrorSetType, fullFam
 			}
 			nameParts = append(nameParts, qualifiedTag)
 			canonicalTags = append(canonicalTags, qualifiedTag)
+			if payload := errSet.Payloads[qualifiedTag]; len(payload) != 0 {
+				canonicalPayloads[qualifiedTag] = payload
+			}
 		}
 	}
-	return &ErrorSetType{Name: "error[" + strings.Join(nameParts, ", ") + "]", Tags: canonicalTags}
+	return &ErrorSetType{Name: "error[" + strings.Join(nameParts, ", ") + "]", Tags: canonicalTags, Payloads: canonicalPayloads}
 }
 
 func errorSetSelectionIsFull(errSet *ErrorSetType, selected map[string]bool) bool {

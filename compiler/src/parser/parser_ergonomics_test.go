@@ -399,11 +399,9 @@ extern read_value(flag: bool) -> i64 error[FileError]
 
 def load(flag: bool) -> i64:
 	return catch read_value(flag):
-		value: value
-		NotFound:
+		loaded: loaded
+		error e:
 			1
-		FileError.Busy:
-			2
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -420,20 +418,46 @@ def load(flag: bool) -> i64:
 	if !ok {
 		t.Fatalf("expected catch expr, got %T", ret.Value)
 	}
-	if catchExpr.Success.Name != "value" || len(catchExpr.Success.Body) != 1 {
+	if catchExpr.Success.Name != "loaded" || len(catchExpr.Success.Body) != 1 {
 		t.Fatalf("unexpected catch success arm %#v", catchExpr.Success)
 	}
-	if len(catchExpr.Arms) != 2 {
-		t.Fatalf("expected two error arms, got %#v", catchExpr.Arms)
+	if len(catchExpr.Arms) != 1 {
+		t.Fatalf("expected one error arm, got %#v", catchExpr.Arms)
 	}
-	if catchExpr.Arms[0].Name != "NotFound" || catchExpr.Arms[1].Name != "FileError.Busy" {
+	if catchExpr.Arms[0].Name != "e" || !catchExpr.Arms[0].ErrorBinding {
 		t.Fatalf("unexpected catch arm names %#v", catchExpr.Arms)
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"catch read_value(flag):",
-		"value:",
-		"FileError.Busy:",
+		"loaded:",
+		"error e:",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseErrorDeclPayloadVariants(t *testing.T) {
+	file, errs := parseSourceFile(t, `error PascalBackendError:
+	UnsupportedType(span: Span, type_expr: PascalType.Type)
+	LLVMVerificationFailed(span: Span)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.ErrorDecl)
+	if !ok {
+		t.Fatalf("expected error decl, got %T", file.Decls[0])
+	}
+	if len(decl.Tags) != 2 || decl.Tags[0].Name != "UnsupportedType" || len(decl.Tags[0].Payload) != 2 {
+		t.Fatalf("unexpected error payload variants: %#v", decl.Tags)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"UnsupportedType(span: Span, type_expr: PascalType.Type)",
+		"LLVMVerificationFailed(span: Span)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)

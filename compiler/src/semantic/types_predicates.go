@@ -60,6 +60,25 @@ func (t *ErrorSetType) TagCodeFor(setName string, tagName string) (uint32, bool)
 	return t.TagCode(QualifyErrorTag(setName, tagName))
 }
 
+func (t *ErrorSetType) PayloadForTag(name string) []Type {
+	if t == nil || t.Payloads == nil {
+		return nil
+	}
+	return t.Payloads[name]
+}
+
+func (t *ErrorSetType) HasPayloads() bool {
+	if t == nil {
+		return false
+	}
+	for _, tag := range t.Tags {
+		if len(t.PayloadForTag(tag)) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func MatchErrorTag(dst *ErrorSetType, srcTag string) (string, bool) {
 	if dst == nil {
 		return "", false

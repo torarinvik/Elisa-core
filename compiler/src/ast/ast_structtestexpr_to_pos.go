@@ -29,9 +29,10 @@ type TryExpr struct {
 	UsesDefaultShorthandForm bool
 }
 type CatchArm struct {
-	Position lexer.Pos
-	Name     string
-	Body     []Stmt
+	Position     lexer.Pos
+	Name         string
+	ErrorBinding bool
+	Body         []Stmt
 }
 type CatchExpr struct {
 	Position lexer.Pos

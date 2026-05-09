@@ -103,6 +103,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinCloneCall(expr); handled {
 		return value, actualType, err
 	}
+	if errorType, qualifiedTag, ok := s.errorConstructorInfo(expr); ok {
+		return s.emitErrorConstructorValue(expr, errorType, qualifiedTag)
+	}
 	if enumType, variant, ok := s.enumConstructorInfo(expr); ok {
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown enum constructor")

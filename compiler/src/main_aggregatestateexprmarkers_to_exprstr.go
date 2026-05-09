@@ -452,7 +452,11 @@ func exprStr(e ast.Expr) string {
 	case *ast.CatchExpr:
 		lines := []string{fmt.Sprintf("catch %s:", exprStr(n.Value))}
 		formatArm := func(arm ast.CatchArm) {
-			lines = append(lines, "    "+arm.Name+":")
+			prefix := ""
+			if arm.ErrorBinding {
+				prefix = "error "
+			}
+			lines = append(lines, "    "+prefix+arm.Name+":")
 			for _, stmt := range arm.Body {
 				lines = append(lines, "        "+strings.ReplaceAll(unparse.FormatStmt(stmt), "\n", "\n        "))
 			}
