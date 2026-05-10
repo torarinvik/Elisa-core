@@ -209,7 +209,7 @@ func (p *Parser) parseMatch() ast.Stmt {
 			Cond:                  &ast.OptionalBindExpr{Position: pos, Name: name, Value: value},
 			Then:                  []ast.Stmt{&ast.MatchStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: name}, Arms: arms}},
 			DeprecatedSyntax:      "match?",
-			DeprecatedReplacement: "match value if maybe is value else void",
+			DeprecatedReplacement: "match maybe with a null arm",
 		}
 	}
 	value := p.parseMatchHeadExpr()
