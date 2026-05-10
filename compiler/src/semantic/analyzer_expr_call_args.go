@@ -281,7 +281,7 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 	if _, ok := a.lookupFieldNoError(receiverType, fieldExpr.Field); ok {
 		return extensionMethodCallRewriteNone
 	}
-	if fieldExpr.Field == "where" {
+	if fieldExpr.Field == "where" || fieldExpr.Field == "enumerate" {
 		prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
 		prependedArgs = append(prependedArgs, fieldExpr.Object)
 		prependedArgs = append(prependedArgs, expr.Args...)

@@ -445,6 +445,25 @@ func TestGenerateLLVMIRLowersEnumerateTupleLoops(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersMethodEnumerateTupleLoops(t *testing.T) {
+	src := `def sum_pairs(items: darray[usize]) -> usize:
+	total: mutable usize = 0
+	for index, value in items.enumerate():
+		total <- total + index + value
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_method_enumerate_tuple_loop.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @sum_pairs(", "enumerate.source.insert", "enumerate.item.index.insert", "enumerate.item.value.insert", "iter.tuple.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected method enumerate tuple loop lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersWhereFilteredViewLoops(t *testing.T) {
 	src := `def keep_large(value: i64) -> bool:
 	return value > 2
