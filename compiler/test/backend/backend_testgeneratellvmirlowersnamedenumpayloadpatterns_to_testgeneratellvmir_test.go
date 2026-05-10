@@ -439,7 +439,7 @@ def load_with_fallback(path: u8&) -> u8&:
 	return text
 
 def load_with_default(path: u8&) -> u8&:
-	text: u8& = try? read_file(path) default "" as u8&
+	text: u8& = try read_file(path) else "" as u8&
 	return text
 `
 	result := parseAndAnalyze(t, "backend_error_handling.elisa", src)
