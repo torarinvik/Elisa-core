@@ -281,6 +281,8 @@ func appendIsTargetExprs(out []ast.Expr, expr ast.Expr) []ast.Expr {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return appendIsTargetExprs(out, n.Inner)
+	case *ast.IsAliasExpr:
+		return appendIsTargetExprs(out, n.Target)
 	case *ast.IsPatternExpr:
 		for _, target := range n.Targets {
 			out = appendIsTargetExprs(out, target)
@@ -392,6 +394,9 @@ func (a *Analyzer) structIsTargetPattern(expr ast.Expr) (*ast.MatchStructPattern
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return a.structIsTargetPattern(paren.Inner)
 	}
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return a.structIsTargetPattern(alias.Target)
+	}
 	if testExpr, ok := expr.(*ast.StructTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
 		return testExpr.Pattern, true
 	}
@@ -413,6 +418,9 @@ func (a *Analyzer) validateStructIsTargetPattern(pattern *ast.MatchStructPattern
 	}
 }
 func (a *Analyzer) enumVariantIsTargetPattern(expr ast.Expr, enumType *EnumType, variant *EnumVariant) (*ast.MatchVariantPattern, bool) {
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return a.enumVariantIsTargetPattern(alias.Target, enumType, variant)
+	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
 		return testExpr.Pattern, true
 	}
@@ -434,6 +442,9 @@ func (a *Analyzer) validateEnumVariantIsTargetPattern(pattern *ast.MatchVariantP
 	}
 }
 func (a *Analyzer) treeVariantIsTargetPattern(expr ast.Expr, treeType *TreeCategoryType, variant *EnumVariant) (*ast.MatchVariantPattern, bool) {
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return a.treeVariantIsTargetPattern(alias.Target, treeType, variant)
+	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
 		return testExpr.Pattern, true
 	}

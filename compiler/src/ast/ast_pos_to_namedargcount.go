@@ -89,6 +89,7 @@ func (n *TupleExpr) Pos() lexer.Pos       { return n.Position }
 func (n *VariantTestExpr) Pos() lexer.Pos { return n.Position }
 func (n *StructTestExpr) Pos() lexer.Pos  { return n.Position }
 func (n *IsPatternExpr) Pos() lexer.Pos   { return n.Position }
+func (n *IsAliasExpr) Pos() lexer.Pos     { return n.Position }
 func (n *TypeExprExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ParenExpr) Pos() lexer.Pos       { return n.Position }
 func (n *RaiseExpr) Pos() lexer.Pos       { return n.Position }
@@ -281,6 +282,7 @@ func (*TupleExpr) nodeTag()                         {}
 func (*VariantTestExpr) nodeTag()                   {}
 func (*StructTestExpr) nodeTag()                    {}
 func (*IsPatternExpr) nodeTag()                     {}
+func (*IsAliasExpr) nodeTag()                       {}
 func (*TypeExprExpr) nodeTag()                      {}
 func (*ParenExpr) nodeTag()                         {}
 func (*RaiseExpr) nodeTag()                         {}
@@ -478,6 +480,7 @@ func (*TupleExpr) exprTag()                         {}
 func (*VariantTestExpr) exprTag()                   {}
 func (*StructTestExpr) exprTag()                    {}
 func (*IsPatternExpr) exprTag()                     {}
+func (*IsAliasExpr) exprTag()                       {}
 func (*TypeExprExpr) exprTag()                      {}
 func (*ParenExpr) exprTag()                         {}
 func (*RaiseExpr) exprTag()                         {}

@@ -317,6 +317,8 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		for _, target := range n.Targets {
 			a.validatePermissionExpr(target, granted)
 		}
+	case *ast.IsAliasExpr:
+		a.validatePermissionExpr(n.Target, granted)
 	}
 }
 

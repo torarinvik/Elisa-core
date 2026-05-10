@@ -321,6 +321,9 @@ func (s *functionState) treeIsTargetPattern(expr ast.Expr) (*semantic.TreeCatego
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return s.treeIsTargetPattern(paren.Inner)
 	}
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return s.treeIsTargetPattern(alias.Target)
+	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
 		if testExpr == nil || testExpr.Pattern == nil {
 			return nil, nil, nil, false

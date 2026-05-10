@@ -10,6 +10,11 @@ type IsPatternExpr struct {
 	Position lexer.Pos
 	Targets  []Expr
 }
+type IsAliasExpr struct {
+	Position lexer.Pos
+	Target   Expr
+	Alias    string
+}
 type TypeExprExpr struct {
 	Position lexer.Pos
 	Type     TypeExpr

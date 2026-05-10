@@ -322,5 +322,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		for _, target := range n.Targets {
 			c.collectExpr(target)
 		}
+	case *ast.IsAliasExpr:
+		c.collectExpr(n.Target)
 	}
 }

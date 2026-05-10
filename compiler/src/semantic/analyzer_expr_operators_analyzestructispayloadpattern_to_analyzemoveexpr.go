@@ -37,6 +37,9 @@ func (a *Analyzer) resolveEnumVariantIsTarget(expr ast.Expr) (*EnumType, *EnumVa
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return a.resolveEnumVariantIsTarget(paren.Inner)
 	}
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return a.resolveEnumVariantIsTarget(alias.Target)
+	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
 		if testExpr == nil || testExpr.Pattern == nil {
 			return nil, nil, false
@@ -75,6 +78,9 @@ func (a *Analyzer) resolveEnumVariantIsTarget(expr ast.Expr) (*EnumType, *EnumVa
 func (a *Analyzer) resolveTreeVariantIsTarget(expr ast.Expr) (*TreeCategoryType, *EnumVariant, bool) {
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return a.resolveTreeVariantIsTarget(paren.Inner)
+	}
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return a.resolveTreeVariantIsTarget(alias.Target)
 	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
 		if testExpr == nil || testExpr.Pattern == nil {
@@ -179,6 +185,9 @@ func resolveMatchableTreeCategoryType(actual Type) (*TreeCategoryType, *TreeVari
 func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, bool) {
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return a.resolveNamedStateIsTarget(paren.Inner)
+	}
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return a.resolveNamedStateIsTarget(alias.Target)
 	}
 	typedExpr, ok := expr.(*ast.TypeExprExpr)
 	if !ok || typedExpr == nil || typedExpr.Type == nil {

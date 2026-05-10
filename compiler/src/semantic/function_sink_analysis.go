@@ -207,6 +207,8 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 		for _, target := range n.Targets {
 			a.appendImplicitSinkFlowInstrsForExpr(block, target)
 		}
+	case *ast.IsAliasExpr:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Target)
 	}
 }
 

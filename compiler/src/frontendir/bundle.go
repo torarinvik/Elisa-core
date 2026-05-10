@@ -191,6 +191,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.MatchRestPattern{})
 		gob.Register(&ast.MatchStructPattern{})
 		gob.Register(&ast.MatchVariantPattern{})
+		gob.Register(&ast.IsAliasExpr{})
 		gob.Register(&ast.ExpectPatternStmt{})
 		gob.Register(&ast.MoveBindNamePattern{})
 		gob.Register(&ast.MoveBindStructPattern{})

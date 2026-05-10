@@ -246,6 +246,11 @@ func formatExpr(expr ast.Expr) string {
 			parts = append(parts, formatExpr(target))
 		}
 		return strings.Join(parts, " | ")
+	case *ast.IsAliasExpr:
+		if n.Target == nil {
+			return "as " + n.Alias
+		}
+		return formatExpr(n.Target) + " as " + n.Alias
 	case *ast.TypeExprExpr:
 		return formatTypeExpr(n.Type)
 	case *ast.ParenExpr:

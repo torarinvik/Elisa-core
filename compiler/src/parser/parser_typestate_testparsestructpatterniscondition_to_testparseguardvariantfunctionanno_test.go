@@ -86,6 +86,39 @@ func TestParseVariantPatternIsConditionWithBindings(t *testing.T) {
 		t.Fatalf("expected right bind, got %T %#v", target.Pattern.Args[1].Pattern, target.Pattern.Args[1].Pattern)
 	}
 }
+func TestParseVariantPatternIsConditionWithAlias(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Pair(left: i64, right: i64)\n\ndef score(node: Expr) -> i64:\n    if node is Expr.Pair(left, right) as pair:\n        return pair.left + pair.right\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ifStmt := decl.Body[0].(*ast.IfStmt)
+	cond := ifStmt.Cond.(*ast.BinaryExpr)
+	alias, ok := cond.Right.(*ast.IsAliasExpr)
+	if !ok || alias.Alias != "pair" {
+		t.Fatalf("expected aliased is target, got %T %#v", cond.Right, cond.Right)
+	}
+	target, ok := alias.Target.(*ast.VariantTestExpr)
+	if !ok || target.Pattern == nil || target.Pattern.Variant != "Pair" {
+		t.Fatalf("expected aliased variant test target, got %T %#v", alias.Target, alias.Target)
+	}
+}
+func TestParseVariantIsConditionWithoutPayloadWithAlias(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Pair(left: i64, right: i64)\n\ndef score(node: Expr) -> i64:\n    if node is Expr.Pair as pair:\n        return pair.left + pair.right\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ifStmt := decl.Body[0].(*ast.IfStmt)
+	cond := ifStmt.Cond.(*ast.BinaryExpr)
+	alias, ok := cond.Right.(*ast.IsAliasExpr)
+	if !ok || alias.Alias != "pair" {
+		t.Fatalf("expected aliased is target, got %T %#v", cond.Right, cond.Right)
+	}
+	if _, ok := alias.Target.(*ast.TypeExprExpr); !ok {
+		t.Fatalf("expected aliased type target, got %T %#v", alias.Target, alias.Target)
+	}
+}
 func TestParseIfLetCondition(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(maybe: i64?) -> i64:\n    if let value = maybe and value > 0:\n        return value\n    return 0\n")
 	if len(errs) != 0 {

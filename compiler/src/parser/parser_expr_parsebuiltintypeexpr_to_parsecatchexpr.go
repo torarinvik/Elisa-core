@@ -270,6 +270,16 @@ func (p *Parser) parseIsTestExpr() ast.Expr {
 	return &ast.IsPatternExpr{Position: pos, Targets: targets}
 }
 func (p *Parser) parseSingleIsTestTargetExpr() ast.Expr {
+	target := p.parseSingleIsTestTargetExprWithoutAlias()
+	if p.peek() == lexer.TOKEN_AS && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		pos := p.cur().Pos
+		p.advance()
+		alias := p.expect(lexer.TOKEN_IDENT).Text
+		return &ast.IsAliasExpr{Position: pos, Target: target, Alias: alias}
+	}
+	return target
+}
+func (p *Parser) parseSingleIsTestTargetExprWithoutAlias() ast.Expr {
 	if p.peekQualifiedVariantTargetWithPayload() {
 		return p.parseVariantIsTestExpr()
 	}

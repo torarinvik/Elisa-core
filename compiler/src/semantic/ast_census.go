@@ -280,6 +280,8 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 		for _, target := range n.Targets {
 			c.countExpr(target)
 		}
+	case *ast.IsAliasExpr:
+		c.countExpr(n.Target)
 	}
 }
 

@@ -104,7 +104,11 @@ func unwrapDirectConditionPattern(expr ast.Expr) (*ast.BinaryExpr, ast.Expr, ast
 		if n.Op != lexer.TOKEN_IS {
 			return nil, nil, nil, false
 		}
-		switch testExpr := n.Right.(type) {
+		right := n.Right
+		if alias, ok := right.(*ast.IsAliasExpr); ok && alias != nil {
+			right = alias.Target
+		}
+		switch testExpr := right.(type) {
 		case *ast.StructTestExpr:
 			if testExpr == nil || testExpr.Pattern == nil {
 				return nil, nil, nil, false
@@ -121,6 +125,39 @@ func unwrapDirectConditionPattern(expr ast.Expr) (*ast.BinaryExpr, ast.Expr, ast
 	default:
 		return nil, nil, nil, false
 	}
+}
+
+func (a *Analyzer) conditionAliasBindingType(leftExpr ast.Expr, target ast.Expr, leftType Type) (string, Type, bool) {
+	alias, ok := target.(*ast.IsAliasExpr)
+	if !ok || alias == nil || alias.Alias == "" || alias.Alias == "_" {
+		return "", nil, false
+	}
+	if enumType, variant, ok := a.resolveEnumVariantIsTarget(alias.Target); ok && enumType != nil && variant != nil {
+		matchableEnum, _, ok := resolveMatchableEnumType(leftType)
+		if ok && matchableEnum != nil && matchableEnum.Name == enumType.Name {
+			return alias.Alias, variant.PackedViewType(matchableEnum), true
+		}
+	}
+	if treeType, variant, ok := a.resolveTreeVariantIsTarget(alias.Target); ok && treeType != nil && variant != nil {
+		matchableTree, _, ok := resolveMatchableTreeCategoryType(leftType)
+		if ok && matchableTree != nil && matchableTree.Name == treeType.Name {
+			return alias.Alias, matchableTree.VariantViewType(variant), true
+		}
+	}
+	if targetBase, targetState, ok := a.resolveNamedStateIsTarget(alias.Target); ok && targetBase != nil && targetState != nil {
+		leftBase, ok := namedStateStructBase(leftType)
+		if ok && leftBase != nil && leftBase.Name == targetBase.Name {
+			currentState, ok := namedStateCurrentArg(leftType)
+			if !ok || currentState == nil {
+				currentState = fullNamedStateType(leftBase)
+			}
+			refinedState := intersectNamedStateType(currentState, targetState, leftBase.NamedStateCases)
+			if refinedState != nil {
+				return alias.Alias, instantiateNamedStateStructLiteralType(leftBase, leftType, refinedState), true
+			}
+		}
+	}
+	return alias.Alias, leftType, true
 }
 
 func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPattern, expected Type, out map[string]Type) {
@@ -263,6 +300,15 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 			}
 			return out
 		}
+		if n.Op == lexer.TOKEN_IS {
+			valueType := a.exprTypes[n.Left]
+			if valueType == nil {
+				valueType = a.analyzeExpr(n.Left)
+			}
+			if name, typ, ok := a.conditionAliasBindingType(n.Left, n.Right, valueType); ok && typ != nil {
+				return map[string]Type{name: typ}
+			}
+		}
 	}
 	_, valueExpr, pattern, ok := unwrapDirectConditionPattern(expr)
 	if !ok || valueExpr == nil || pattern == nil {
@@ -273,6 +319,11 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 		valueType = a.analyzeExpr(valueExpr)
 	}
 	out := map[string]Type{}
+	if binary, ok := expr.(*ast.BinaryExpr); ok && binary != nil {
+		if name, typ, ok := a.conditionAliasBindingType(valueExpr, binary.Right, valueType); ok && typ != nil {
+			out[name] = typ
+		}
+	}
 	a.collectConditionStructPatternBindingTypes(pattern, valueType, out)
 	if len(out) == 0 {
 		return nil
@@ -324,6 +375,15 @@ func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map
 			}
 			return out
 		}
+		if n.Op == lexer.TOKEN_IS {
+			valueType := a.exprTypes[n.Left]
+			if valueType == nil {
+				valueType = a.analyzeExpr(n.Left)
+			}
+			if name, typ, ok := a.conditionAliasBindingType(n.Left, n.Right, valueType); ok && typ != nil {
+				return map[string]Type{name: typ}
+			}
+		}
 	}
 	_, valueExpr, pattern, ok := unwrapDirectConditionPattern(expr)
 	if !ok || valueExpr == nil || pattern == nil {
@@ -334,6 +394,11 @@ func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map
 		valueType = a.analyzeExpr(valueExpr)
 	}
 	out := map[string]Type{}
+	if binary, ok := expr.(*ast.BinaryExpr); ok && binary != nil {
+		if name, typ, ok := a.conditionAliasBindingType(valueExpr, binary.Right, valueType); ok && typ != nil {
+			out[name] = typ
+		}
+	}
 	a.collectConditionStructPatternBindingTypes(pattern, valueType, out)
 	if len(out) == 0 {
 		return nil
@@ -441,6 +506,21 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 			}
 			return
 		}
+		if n.Op == lexer.TOKEN_IS {
+			valueType := a.exprTypes[n.Left]
+			if valueType == nil {
+				valueType = a.analyzeExprInScope(n.Left, scope)
+			}
+			if name, typ, ok := a.conditionAliasBindingType(n.Left, n.Right, valueType); ok && typ != nil {
+				sym := &Symbol{Name: name, Kind: SymbolLocal, Type: typ, Node: n.Right, Mutable: false}
+				a.defineLocalInScope(scope, sym, n.Right.Pos())
+				a.recordValueBinding(sym, n.Left)
+				a.recordBorrowedOwnerRefBinding(sym, n.Left)
+				a.recordFunctionValueBinding(sym, n.Left)
+				a.recordImmutableSymbolOptimizationFacts(sym, n.Left)
+				a.recordRegionRefBinding(sym, n.Left)
+			}
+		}
 	}
 	_, valueExpr, pattern, ok := unwrapDirectConditionPattern(expr)
 	if !ok || valueExpr == nil || pattern == nil {
@@ -449,6 +529,19 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 	valueType := a.exprTypes[valueExpr]
 	if valueType == nil {
 		valueType = a.analyzeExprInScope(valueExpr, scope)
+	}
+	if binary, ok := expr.(*ast.BinaryExpr); ok && binary != nil {
+		if name, typ, ok := a.conditionAliasBindingType(valueExpr, binary.Right, valueType); ok && typ != nil {
+			sym := &Symbol{Name: name, Kind: SymbolLocal, Type: typ, Node: binary.Right, Mutable: false}
+			a.defineLocalInScope(scope, sym, binary.Right.Pos())
+			if valueExpr != nil {
+				a.recordValueBinding(sym, valueExpr)
+				a.recordBorrowedOwnerRefBinding(sym, valueExpr)
+				a.recordFunctionValueBinding(sym, valueExpr)
+				a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
+				a.recordRegionRefBinding(sym, valueExpr)
+			}
+		}
 	}
 	a.bindConditionStructPatternLocals(scope, pattern, valueType, valueExpr)
 }

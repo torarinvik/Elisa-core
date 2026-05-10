@@ -89,6 +89,8 @@ func appendIsTargetExprsBackend(out []ast.Expr, expr ast.Expr) []ast.Expr {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return appendIsTargetExprsBackend(out, n.Inner)
+	case *ast.IsAliasExpr:
+		return appendIsTargetExprsBackend(out, n.Target)
 	case *ast.IsPatternExpr:
 		for _, target := range n.Targets {
 			out = appendIsTargetExprsBackend(out, target)
@@ -181,6 +183,9 @@ func (s *functionState) structIsTargetPattern(expr ast.Expr) (*ast.MatchStructPa
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return s.structIsTargetPattern(paren.Inner)
 	}
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return s.structIsTargetPattern(alias.Target)
+	}
 	if testExpr, ok := expr.(*ast.StructTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
 		return testExpr.Pattern, true
 	}
@@ -219,6 +224,9 @@ func (s *functionState) emitStructIsTest(leftExpr ast.Expr, pattern *ast.MatchSt
 func (s *functionState) enumIsTargetPattern(expr ast.Expr) (*semantic.EnumType, *semantic.EnumVariant, *ast.MatchVariantPattern, bool) {
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return s.enumIsTargetPattern(paren.Inner)
+	}
+	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
+		return s.enumIsTargetPattern(alias.Target)
 	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
 		if testExpr == nil || testExpr.Pattern == nil {

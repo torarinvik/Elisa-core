@@ -22,6 +22,8 @@ func (s *functionState) conditionTargetPattern(expr ast.Expr) (ast.MatchPattern,
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return s.conditionTargetPattern(n.Inner)
+	case *ast.IsAliasExpr:
+		return s.conditionTargetPattern(n.Target)
 	case *ast.StructTestExpr:
 		if n != nil && n.Pattern != nil {
 			return n.Pattern, true
@@ -41,7 +43,11 @@ func (s *functionState) directConditionPattern(expr ast.Expr) (ast.Expr, ast.Mat
 		if n.Op != lexer.TOKEN_IS {
 			return nil, nil, false
 		}
-		pattern, ok := s.conditionTargetPattern(n.Right)
+		right := n.Right
+		if alias, ok := right.(*ast.IsAliasExpr); ok && alias != nil {
+			right = alias.Target
+		}
+		pattern, ok := s.conditionTargetPattern(right)
 		if !ok || pattern == nil {
 			return nil, nil, false
 		}
@@ -49,6 +55,80 @@ func (s *functionState) directConditionPattern(expr ast.Expr) (ast.Expr, ast.Mat
 	default:
 		return nil, nil, false
 	}
+}
+
+func backendMatchableEnumType(actual semantic.Type) (*semantic.EnumType, bool) {
+	switch tt := actual.(type) {
+	case *semantic.EnumType:
+		return tt, tt != nil
+	case *semantic.PackedVariantViewType:
+		if tt != nil && tt.Enum != nil {
+			return tt.Enum, true
+		}
+	}
+	return nil, false
+}
+
+func backendMatchableTreeCategoryType(actual semantic.Type) (*semantic.TreeCategoryType, bool) {
+	actual = semantic.StripAggregateStateType(actual)
+	switch tt := actual.(type) {
+	case *semantic.TreeCategoryType:
+		return tt, tt != nil
+	case *semantic.TreeVariantViewType:
+		if tt != nil && tt.Category != nil {
+			return tt.Category, true
+		}
+	}
+	return nil, false
+}
+
+func (s *functionState) conditionAliasBindingType(target ast.Expr, leftType semantic.Type) (string, semantic.Type, bool) {
+	alias, ok := target.(*ast.IsAliasExpr)
+	if !ok || alias == nil || alias.Alias == "" || alias.Alias == "_" {
+		return "", nil, false
+	}
+	if enumType, variant, _, ok := s.enumIsTargetPattern(alias.Target); ok && enumType != nil && variant != nil {
+		actualEnum, ok := backendMatchableEnumType(leftType)
+		if ok && actualEnum != nil && actualEnum.Name == enumType.Name {
+			return alias.Alias, variant.PackedViewType(actualEnum), true
+		}
+	}
+	if treeType, variant, _, ok := s.treeIsTargetPattern(alias.Target); ok && treeType != nil && variant != nil {
+		actualTree, ok := backendMatchableTreeCategoryType(leftType)
+		if ok && actualTree != nil && actualTree.Name == treeType.Name {
+			return alias.Alias, actualTree.VariantViewType(variant), true
+		}
+	}
+	return alias.Alias, leftType, true
+}
+
+func backendConditionAliasNeedsValueSlot(typ semantic.Type) bool {
+	switch semantic.StripAggregateStateType(typ).(type) {
+	case *semantic.PackedVariantViewType:
+		return false
+	default:
+		return true
+	}
+}
+
+func (s *functionState) bindConditionAliasValue(expr *ast.BinaryExpr) error {
+	if expr == nil || expr.Op != lexer.TOKEN_IS {
+		return nil
+	}
+	name, typ, ok := s.conditionAliasBindingType(expr.Right, s.exprType(expr.Left))
+	if !ok || name == "" || typ == nil || !backendConditionAliasNeedsValueSlot(typ) {
+		return nil
+	}
+	binding, ok := s.lookupBinding(name)
+	if !ok || binding.ptr == nil {
+		return nil
+	}
+	value, _, err := s.emitExpr(expr.Left, typ)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, value, binding.ptr)
+	return nil
 }
 func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) semantic.Type {
 	if expr == nil {
@@ -375,13 +455,30 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 				}
 				return out, nil
 			}
+			if n.Op == lexer.TOKEN_IS {
+				leftType := s.exprType(n.Left)
+				if name, typ, ok := s.conditionAliasBindingType(n.Right, leftType); ok && typ != nil {
+					if backendConditionAliasNeedsValueSlot(typ) {
+						return map[string]semantic.Type{name: typ}, nil
+					}
+					return nil, nil
+				}
+			}
 		}
 		leftExpr, pattern, ok := s.directConditionPattern(expr)
 		if !ok || leftExpr == nil || pattern == nil {
 			return nil, nil
 		}
 		out := map[string]semantic.Type{}
-		if err := collectPattern(pattern, s.exprType(leftExpr), out); err != nil {
+		leftType := s.exprType(leftExpr)
+		if binary, ok := expr.(*ast.BinaryExpr); ok && binary != nil {
+			if name, typ, ok := s.conditionAliasBindingType(binary.Right, leftType); ok && typ != nil {
+				if backendConditionAliasNeedsValueSlot(typ) {
+					out[name] = typ
+				}
+			}
+		}
+		if err := collectPattern(pattern, leftType, out); err != nil {
 			return nil, err
 		}
 		if len(out) == 0 {
@@ -462,11 +559,18 @@ func (s *functionState) bindConditionVariantViews(expr ast.Expr) error {
 		if n.Op != lexer.TOKEN_IS {
 			return nil
 		}
+		if err := s.bindConditionAliasValue(n); err != nil {
+			return err
+		}
 		name, viewType, ok := s.conditionVariantViewInfo(n)
 		if !ok || name == "" || viewType == nil || viewType.Enum == nil {
 			return nil
 		}
-		binding, ok := s.lookupBinding(name)
+		sourceName := name
+		if left, ok := n.Left.(*ast.Ident); ok && left != nil && left.Name != "" {
+			sourceName = left.Name
+		}
+		binding, ok := s.lookupBinding(sourceName)
 		if !ok || binding.ptr == nil {
 			return nil
 		}
@@ -499,9 +603,17 @@ func (s *functionState) conditionVariantViewInfo(expr *ast.BinaryExpr) (string, 
 	if !ok || left == nil || left.Name == "" {
 		return "", nil, false
 	}
-	targetEnum, targetVariant, ok := s.enumIsTarget(expr.Right)
+	bindName := left.Name
+	target := expr.Right
+	if alias, ok := target.(*ast.IsAliasExpr); ok && alias != nil {
+		if alias.Alias != "" && alias.Alias != "_" {
+			bindName = alias.Alias
+		}
+		target = alias.Target
+	}
+	targetEnum, targetVariant, ok := s.enumIsTarget(target)
 	if !ok || targetEnum == nil || targetVariant == nil {
-		pattern, ok := s.conditionTargetPattern(expr.Right)
+		pattern, ok := s.conditionTargetPattern(target)
 		if !ok || pattern == nil {
 			return "", nil, false
 		}
@@ -524,7 +636,7 @@ func (s *functionState) conditionVariantViewInfo(expr *ast.BinaryExpr) (string, 
 	if !ok || actualEnum == nil || actualEnum.Name != targetEnum.Name {
 		return "", nil, false
 	}
-	return left.Name, targetVariant.PackedViewType(actualEnum), true
+	return bindName, targetVariant.PackedViewType(actualEnum), true
 }
 
 func (s *functionState) enumTypeForVariantViewExpr(expr ast.Expr) (*semantic.EnumType, bool) {

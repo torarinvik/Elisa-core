@@ -209,6 +209,8 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 		for _, target := range n.Targets {
 			appendBasicFlowExprInstrs(block, target)
 		}
+	case *ast.IsAliasExpr:
+		appendBasicFlowExprInstrs(block, n.Target)
 	}
 }
 
