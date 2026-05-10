@@ -33,6 +33,11 @@ struct NameTable:
     buckets: mutable darray[NameBucket]
 
 
+struct InternedName:
+    table: NameTable&
+    id: NameId
+
+
 def name_table_init(owner: mutable Arena&) -> NameTable:
     return NameTable{owner: owner, entries: [], buckets: []}
 
@@ -103,6 +108,46 @@ def valid_id(table: NameTable&, name_id: NameId) -> bool:
 @ufcs_only
 def text(table: NameTable&, name_id: NameId) -> sview:
     return name_table_text(table, name_id)
+
+
+@ufcs_only
+def interned(table: NameTable&, name_id: NameId) -> InternedName:
+    return InternedName{table: table, id: name_id}
+
+
+@ufcs_only
+def valid(name: InternedName) -> bool:
+    return name.table.valid_id(name.id)
+
+
+@ufcs_only
+def value(name: InternedName) -> NameId:
+    return name.id
+
+
+@ufcs_only
+def text(name: InternedName) -> sview:
+    return name.table.text(name.id)
+
+
+@ufcs_only
+def matches_view(name: InternedName, text: sview, policy: NameCasePolicy) -> bool:
+    return name.table.has_text_view(name.id, text, policy)
+
+
+@ufcs_only
+def matches(name: InternedName, text: cstr, policy: NameCasePolicy) -> bool:
+    return name.matches_view(name_cstr_view(text), policy)
+
+
+@ufcs_only
+def matches_cs(name: InternedName, text: cstr) -> bool:
+    return name.matches(text, NameCasePolicy.CaseSensitive)
+
+
+@ufcs_only
+def matches_ci(name: InternedName, text: cstr) -> bool:
+    return name.matches(text, NameCasePolicy.AsciiCaseInsensitive)
 
 
 def name_table_eq(left: NameId, right: NameId) -> bool:

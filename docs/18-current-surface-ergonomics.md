@@ -490,6 +490,14 @@ symbol: PascalSymbol? = symbols.lookup(name_id)
 ```
 
 ```elisa
+name_id: NameId = names.intern_ci("forward")
+name: InternedName = names.interned(name_id)
+
+if name.matches_ci("forward"):
+    mark_forward()
+```
+
+```elisa
 soa PascalSymbols:
     name_id: NameId
     value_type: PascalSemanticValueType
@@ -500,6 +508,8 @@ symbols.flags[id].add(PascalSymbolFlag.Routine)
 ```
 
 Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
+
+Use `NameId` for compact storage in ASTs and symbol tables. Use `InternedName` as a short-lived view when code needs to compare, validate, or read the text from a particular `NameTable`.
 
 ## Bit-Level Storage And Layout Modes
 

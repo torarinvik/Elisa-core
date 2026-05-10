@@ -15,5 +15,12 @@ def interned_name_methods_smoke(a: mutable Arena&) -> i32:
         -4 return if names.has_text_cs(hello_id, "hello")
         -5 return if not names.has_text_ci(lower_id, "MIXED")
 
-        text: sview = names.text(copy_id)
+        copy_name: InternedName = names.interned(copy_id)
+        lower_name: InternedName = names.interned(lower_id)
+        -6 return if not copy_name.valid()
+        -7 return if copy_name.value() != copy_id
+        -8 return if not copy_name.matches_cs("Copied")
+        -9 return if not lower_name.matches_ci("MIXED")
+
+        text: sview = copy_name.text()
         return text.len.i32()
