@@ -520,6 +520,9 @@ forward_id: NameId = names.intern_ci("forward")
 if name_table_eq(name_id, forward_id):
     mark_forward()
 
+if name_id in [names.intern_ci("read"), names.intern_ci("write"), names.intern_ci("reset")]:
+    mark_standard_io()
+
 if name_id.valid():
     text: sview = name_id.text(names)
 ```
@@ -538,7 +541,7 @@ Use `Flags[T]` for typed sets of const-enum values that grow or flow through API
 
 Use `owner.builder()` when constructing arena-owned dynamic arrays. The expected builder type supplies the element type, which keeps parser and semantic builders close to the data they are assembling.
 
-Use `NameId` for compact storage in ASTs and symbol tables. Prefer `name_id.valid()`, `name_id.invalid()`, and `name_id.text(names)` for ordinary checks. For hot keyword/builtin checks, intern the expected words once and compare ids with `name_table_eq(name_id, cached_id)` rather than repeatedly comparing text. Use `InternedName` as a short-lived view when code needs to carry both the table and id together; it can be explicitly cast back to `NameId`.
+Use `NameId` for compact storage in ASTs and symbol tables. Prefer `name_id.valid()`, `name_id.invalid()`, and `name_id.text(names)` for ordinary checks. For hot keyword/builtin checks, intern the expected words once and compare ids with `name_table_eq(name_id, cached_id)` rather than repeatedly comparing text. Use `name_id in [cached_a, cached_b, cached_c]` instead of long `or` chains when checking a small fixed set of cached ids. Use `InternedName` as a short-lived view when code needs to carry both the table and id together; it can be explicitly cast back to `NameId`.
 
 ## Bit-Level Storage And Layout Modes
 
