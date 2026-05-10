@@ -230,6 +230,17 @@ def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_
         return out
 
 
+def darray_view[T](da: darray[T]) -> dview[T]:
+    elem_size: usize = sizeof(T)
+    DynArrayView(null, 0, elem_size) return if da.items == null or da.count == 0
+    return DynArrayView(da.items.cast[void&], da.count, elem_size)
+
+
+@ufcs_only
+def view[T](da: darray[T]) -> dview[T]:
+    return darray_view[T](da)
+
+
 @ufcs_only
 def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
     return FilteredView[S, T](source, predicate)
@@ -891,9 +902,7 @@ def index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
 
 
 def index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
-    elem_size: usize = sizeof(IndexMapEntry[K, T])
-    DynArrayView(null, 0, elem_size) return if map.entries.items == null or map.entries.count == 0
-    return DynArrayView(map.entries.items.cast[void&], map.entries.count, elem_size)
+    return darray_view[IndexMapEntry[K, T]](map.entries)
 
 
 @ufcs_only

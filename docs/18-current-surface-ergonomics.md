@@ -499,6 +499,9 @@ params.push(param)
 builder: mutable DArrayBuilder[Pascal.Decl] = owner.builder()
 builder.push(decl)
 decls: darray[Pascal.Decl] = builder.finish()
+
+for decl in darray_view(decls):
+    visit_decl(decl)
 ```
 
 ```elisa

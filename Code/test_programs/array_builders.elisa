@@ -12,7 +12,10 @@ def array_builder_smoke(a: mutable Arena&) -> i32:
         -2 return if builder.count() != 6
         -3 return if builder.get(3) != 6
         values: darray[i32] = builder.finish()
-        return values[0] + values[3] + values[5]
+        total: mutable i32 = 0
+        for value in darray_view(values):
+            total <- total + value
+        return total
 
 
 def array_builder_clear_smoke(a: mutable Arena&) -> i32:
