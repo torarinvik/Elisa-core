@@ -29,6 +29,10 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeErrorSetMatchStmt(stmt, valueType, errorSetType)
 		return
 	}
+	if optionalType, ok := valueType.(*OptionalType); ok {
+		a.analyzeOptionalMatchStmt(stmt, optionalType)
+		return
+	}
 	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
 	if ok {
 		a.analyzeTreeMatchStmt(stmt, treeType)
@@ -50,7 +54,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeStructMatchStmt(stmt, valueType)
 		return
 	}
-	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, tree-category, string, tuple, sequence, or struct value, got %s", valueType)
+	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, optional, tree-category, string, tuple, sequence, or struct value, got %s", valueType)
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
 	}

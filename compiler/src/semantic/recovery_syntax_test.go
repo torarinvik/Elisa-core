@@ -49,3 +49,21 @@ def fallback_value(maybe: i64?) -> i64:
 		}
 	}
 }
+
+func TestAnalyzeOptionalMatchWithNullAndPayloadPatterns(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "optional_match_null_payload.elisa", `
+enum Expr:
+	Int(value: i64)
+	Missing
+
+def score(maybe: Expr?) -> i64:
+	match maybe:
+		null:
+			return 0
+		Expr.Int(value):
+			return value
+		_:
+			return 2
+	return 3
+`)
+}

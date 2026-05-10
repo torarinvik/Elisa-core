@@ -493,6 +493,9 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	if ok {
 		return s.emitErrorSetMatch(stmt, errorSetType)
 	}
+	if optionalType, ok := s.exprType(stmt.Value).(*semantic.OptionalType); ok {
+		return s.emitOptionalMatch(stmt, optionalType)
+	}
 	treeType, _, ok := resolveMatchableTreeCategoryTypeBackend(s.exprType(stmt.Value))
 	if ok {
 		return s.emitTreeMatch(stmt, treeType)
@@ -509,7 +512,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	if resolveMatchableStructTypeBackend(s.exprType(stmt.Value)) {
 		return s.emitStructMatch(stmt)
 	}
-	return fmt.Errorf("match requires an enum, const enum, error set, tree-category, string, tuple, sequence, or struct value")
+	return fmt.Errorf("match requires an enum, const enum, error set, optional, tree-category, string, tuple, sequence, or struct value")
 }
 func (s *functionState) emitExpectPatternStmt(stmt *ast.ExpectPatternStmt) error {
 	if stmt == nil {

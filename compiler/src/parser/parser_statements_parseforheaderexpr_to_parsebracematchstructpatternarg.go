@@ -397,10 +397,10 @@ func (p *Parser) parseMatchPattern() ast.MatchPattern {
 		pattern = &ast.MatchTuplePattern{Position: pattern.Pos(), Elems: elems}
 	}
 	switch pattern.(type) {
-	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern, *ast.MatchListPattern:
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern, *ast.MatchBindPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern, *ast.MatchListPattern:
 		return pattern
 	default:
-		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a string literal, a tuple pattern, a list pattern, or _")
+		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a literal, a binding, a tuple pattern, a list pattern, or _")
 		return pattern
 	}
 }
