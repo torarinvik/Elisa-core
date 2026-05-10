@@ -235,6 +235,23 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "array_builders",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "array_builders.elisa"),
+			checks: []string{
+				"%DArrayBuilder__i32 = type { ptr, %DynArray__i32 }",
+				"@arraybuilder = global %DArrayBuilderNamespace",
+				"define i32 @array_builder_smoke(ptr",
+				"define i32 @array_builder_clear_smoke(ptr",
+				"define %DArrayBuilder__i32 @darray_builder__i32(",
+				"define void @darray_builder_push__i32(",
+				"define i32 @darray_builder_get__i32(",
+				"define %DynArray__i32 @darray_builder_finish__i32(",
+				"call void @ovl__push__semantic_RefType_mutable_DArrayBuilder_T__push__i32(",
+				"call i32 @ovl__get__semantic_RefType_DArrayBuilder_T__get__i32(",
+				"call %DynArray__i32 @ovl__finish__semantic_RefType_DArrayBuilder_T__finish__i32(",
+			},
+		},
+		{
 			name: "frontend_lexer",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa"),
 			checks: []string{

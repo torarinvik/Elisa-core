@@ -72,6 +72,11 @@ struct InlineVec[T, N: usize]:
     is_spilled: mutable bool
 
 
+struct DArrayBuilder[T]:
+    owner: mutable Arena&?
+    items: mutable darray[T]
+
+
 struct Flags[T]:
     bits: mutable u64
 
@@ -88,6 +93,10 @@ struct InlineVecNamespace:
     _unused: u8
 
 
+struct DArrayBuilderNamespace:
+    _unused: u8
+
+
 struct FlagsNamespace:
     _unused: u8
 
@@ -95,6 +104,7 @@ struct FlagsNamespace:
 global indexmap: IndexMapNamespace = IndexMapNamespace(0)
 global symtab: SymbolTableNamespace = SymbolTableNamespace(0)
 global inlinevec: InlineVecNamespace = InlineVecNamespace(0)
+global arraybuilder: DArrayBuilderNamespace = DArrayBuilderNamespace(0)
 global flags: FlagsNamespace = FlagsNamespace(0)
 
 # ------------------------------------------------------------
@@ -223,6 +233,106 @@ def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_
 @ufcs_only
 def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
     return FilteredView[S, T](source, predicate)
+
+
+# ------------------------------------------------------------
+# Arena-owned dynamic array builders
+# ------------------------------------------------------------
+
+def darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
+    result: mutable DArrayBuilder[T] = zeroed
+    result.owner as & <- owner
+    return result
+
+
+def new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[T]:
+    _ = api
+    return darray_builder[T](owner)
+
+
+def darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize:
+    return builder.items.count
+
+
+@ufcs_only
+def count[T](builder: DArrayBuilder[T]&) -> usize:
+    return darray_builder_count[T](builder)
+
+
+def darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool:
+    return builder.items.count == 0
+
+
+@ufcs_only
+def is_empty[T](builder: DArrayBuilder[T]&) -> bool:
+    return darray_builder_is_empty[T](builder)
+
+
+def darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
+    assert index < builder.items.count
+    return builder.items[index]
+
+
+@ufcs_only
+def get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
+    return darray_builder_get[T](builder, index)
+
+
+def darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize):
+    can Memory.Allocate, Abort.Panic:
+        assert builder.owner != null
+        owner: mutable Arena& = builder.owner
+        in owner:
+            _ = builder.items.reserve(capacity)
+
+
+@ufcs_only
+def reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize):
+    can Memory.Allocate, Abort.Panic:
+        darray_builder_reserve[T](builder, capacity)
+
+
+def darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        assert builder.owner != null
+        owner: mutable Arena& = builder.owner
+        in owner:
+            builder.items.push(item)
+
+
+@ufcs_only
+def push[T](builder: mutable DArrayBuilder[T]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        darray_builder_push[T](builder, item)
+
+
+def darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]:
+    elem_size: usize = sizeof(T)
+    DynArrayView(null, 0, elem_size) return if builder.items.items == null or builder.items.count == 0
+    return DynArrayView(builder.items.items.cast[void&], builder.items.count, elem_size)
+
+
+@ufcs_only
+def view[T](builder: DArrayBuilder[T]&) -> dview[T]:
+    return darray_builder_view[T](builder)
+
+
+def darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
+    return builder.items
+
+
+@ufcs_only
+def finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
+    return darray_builder_finish[T](builder)
+
+
+def darray_builder_clear[T](builder: mutable DArrayBuilder[T]&):
+    builder.items.count <- 0
+
+
+@ufcs_only
+def clear[T](builder: mutable DArrayBuilder[T]&):
+    darray_builder_clear[T](builder)
 
 
 # ------------------------------------------------------------

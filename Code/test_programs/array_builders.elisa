@@ -1,0 +1,27 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+
+def array_builder_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        builder: mutable DArrayBuilder[i32] = arraybuilder.new(a)
+        -1 return if not builder.is_empty()
+        builder.reserve(6)
+        for index in 0..<6:
+            builder.push((index * 2).i32())
+
+        -2 return if builder.count() != 6
+        -3 return if builder.get(3) != 6
+        values: darray[i32] = builder.finish()
+        return values[0] + values[3] + values[5]
+
+
+def array_builder_clear_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        builder: mutable DArrayBuilder[i32] = arraybuilder.new(a)
+        builder.push(7)
+        builder.push(11)
+        -1 return if builder.count() != 2
+        builder.clear()
+        -2 return if not builder.is_empty()
+        builder.push(23)
+        return builder.finish()[0]
