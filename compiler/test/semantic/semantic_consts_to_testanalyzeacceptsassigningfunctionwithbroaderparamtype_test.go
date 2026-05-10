@@ -58,6 +58,24 @@ func requireNoWarnings(t *testing.T, result *semantic.Result) {
 		t.Fatalf("expected no warnings, got:\n%s", strings.Join(warns, "\n"))
 	}
 }
+
+func TestAnalyzeWarnsOnNumericLiteralTypeSuffixes(t *testing.T) {
+	src := `def use() -> i64:
+    x: i64 = 42i64
+    y: f64 = 1.5f64
+    return x
+`
+	result, errs := parseAndAnalyze(t, "numeric_literal_suffix_warning.elisa", src)
+	requireNoErrors(t, errs)
+	warns := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(warns, `numeric literal suffix "i64" is discouraged`) {
+		t.Fatalf("expected integer literal suffix warning, got:\n%s", warns)
+	}
+	if !strings.Contains(warns, `numeric literal suffix "f64" is discouraged`) {
+		t.Fatalf("expected float literal suffix warning, got:\n%s", warns)
+	}
+}
+
 func TestAnalyzeContextuallyCoercesStringLiteralsToCStrAndSView(t *testing.T) {
 	src := `extern take_cstr(text: cstr) -> void
 extern take_sview(text: sview) -> void

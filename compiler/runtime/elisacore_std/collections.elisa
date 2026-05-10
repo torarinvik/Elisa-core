@@ -41,7 +41,7 @@ def __cast__(value: u32) -> SymbolTableId:
     return value.cast[SymbolTableId]
 
 
-global SYMBOL_TABLE_INVALID_ID: SymbolTableId = 0u32.SymbolTableId()
+global SYMBOL_TABLE_INVALID_ID: SymbolTableId = 0.u32().SymbolTableId()
 
 
 struct SymbolEntry[K, T]:
@@ -92,10 +92,10 @@ struct FlagsNamespace:
     _unused: u8
 
 
-global indexmap: IndexMapNamespace = IndexMapNamespace(0u8)
-global symtab: SymbolTableNamespace = SymbolTableNamespace(0u8)
-global inlinevec: InlineVecNamespace = InlineVecNamespace(0u8)
-global flags: FlagsNamespace = FlagsNamespace(0u8)
+global indexmap: IndexMapNamespace = IndexMapNamespace(0)
+global symtab: SymbolTableNamespace = SymbolTableNamespace(0)
+global inlinevec: InlineVecNamespace = InlineVecNamespace(0)
+global flags: FlagsNamespace = FlagsNamespace(0)
 
 # ------------------------------------------------------------
 # Dynamic array helpers (replacement for C macros)
@@ -285,7 +285,7 @@ def inline_vec_spill[T, N: usize](vec: mutable InlineVec[T, N]&):
         assert vec.owner != null
         owner: mutable Arena& = vec.owner
         in owner:
-            _ = vec.overflow.reserve(N * 2usize)
+            _ = vec.overflow.reserve(N * 2)
             for index in 0..<vec.len:
                 vec.overflow.push(vec.inline_items[index])
 
@@ -382,12 +382,12 @@ def bits[T](items: Flags[T]&) -> u64:
 
 def flags_mask[T](value: T) -> u64:
     index: u64 = value.u64()
-    assert index < 64u64
-    return 1u64 << index.u32()
+    assert index < 64
+    return 1.u64() << index.u32()
 
 
 def flags_has[T](items: Flags[T]&, value: T) -> bool:
-    return (items.bits & flags_mask[T](value)) != 0u64
+    return (items.bits & flags_mask[T](value)) != 0
 
 
 def has[T](items: Flags[T]&, value: T) -> bool:
@@ -418,11 +418,11 @@ def flags_set[T](items: mutable Flags[T]&, value: T, enabled: bool):
 
 
 def flags_clear[T](items: mutable Flags[T]&):
-    items.bits <- 0u64
+    items.bits <- 0
 
 
 def flags_any[T](items: Flags[T]&) -> bool:
-    return items.bits != 0u64
+    return items.bits != 0
 
 
 def flags_union[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
@@ -496,7 +496,7 @@ def arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, c
 def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]&:
     can Memory.Allocate, Abort.Panic:
         in a:
-            return sb.extend([0u8])
+            return sb.extend([0.u8()])
 
 # ------------------------------------------------------------
 # Dictionary helpers
@@ -685,7 +685,7 @@ def index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[
 
 def index_map_new[K, T](owner: mutable Arena&) -> IndexMap[K, T]:
     can Memory.Allocate, Abort.Panic:
-        return index_map[K, T](owner, 32usize)
+        return index_map[K, T](owner, 32)
 
 
 def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
@@ -829,7 +829,7 @@ def symbol_table[K, T](owner: mutable Arena&, initial_capacity: usize) -> Symbol
 def new[K, T](api: SymbolTableNamespace, owner: mutable Arena&) -> SymbolTable[K, T]:
     can Memory.Allocate, Abort.Panic:
         _ = api
-        return symbol_table[K, T](owner, 32usize)
+        return symbol_table[K, T](owner, 32)
 
 
 def with_capacity[K, T](api: SymbolTableNamespace, owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]:

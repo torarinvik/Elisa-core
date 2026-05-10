@@ -389,7 +389,10 @@ func TestAnalyzeExplicitIntLiteralSuffixOverridesUsizeContext(t *testing.T) {
 `
 	result, errs := parseAndAnalyze(t, "contextual_int_literal_suffix_override_ok.elisa", src)
 	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
+	warns := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(warns, `numeric literal suffix "i32" is discouraged`) {
+		t.Fatalf("expected numeric suffix warning, got:\n%s", warns)
+	}
 
 	fn := requireFuncDecl(t, result, "ok")
 	localInit, ok := fn.Body[0].(*ast.VarDeclStmt)

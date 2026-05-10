@@ -108,6 +108,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.IntLit:
 		if n.Suffix != "" {
+			a.warnNumericLiteralSuffix(n, n.Suffix)
 			if t, ok := a.namedTypes[n.Suffix]; ok {
 				result = t
 				return
@@ -125,6 +126,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.FloatLit:
 		if n.Suffix != "" {
+			a.warnNumericLiteralSuffix(n, n.Suffix)
 			if t, ok := a.namedTypes[n.Suffix]; ok {
 				result = t
 				return

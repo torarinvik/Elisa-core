@@ -454,8 +454,8 @@ def inspect(text: cstr[row], buf: array[i32, 8]) -> int:
 	full_prefix: StringView = ctx_string_view_prefix(base, base.len)
 	full_suffix: StringView = ctx_string_view_suffix(base, 0)
 	region scratch(1024)
-	fresh_view_a: StringView = sview(new[scratch] 3u8, 0, 1)
-	fresh_view_b: StringView = sview(new[scratch] 4u8, 0, 1)
+	fresh_view_a: StringView = sview(new[scratch] 3, 0, 1)
+	fresh_view_b: StringView = sview(new[scratch] 4, 0, 1)
 	alloc_a: scratch i32& = new[scratch] 1
 	alloc_b: scratch i32& = new[scratch] 2
 	alloc_alias: scratch i32& = alloc_a

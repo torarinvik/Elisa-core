@@ -6,7 +6,7 @@ struct FixtureSymbol:
 
 def stable_symbol_table_smoke(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.with_capacity(a, 4usize)
+        table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.with_capacity(a, 4)
 
         alpha_id: SymbolTableId = table.declare("alpha", FixtureSymbol{value: 7})
         beta_id: SymbolTableId = table.declare("beta", FixtureSymbol{value: 3})
@@ -19,7 +19,7 @@ def stable_symbol_table_smoke(a: mutable Arena&) -> i32:
         found_alpha_id: SymbolTableId = table.lookup_id("alpha")
         -4 return if found_alpha_id != alpha_id
         -5 return if not table.has("beta")
-        -6 return if table.count() != 2usize
+        -6 return if table.count() != 2
 
         alpha: mutable FixtureSymbol = zeroed
         if let found_alpha = table.lookup("alpha"):
@@ -52,7 +52,7 @@ def stable_index_map_smoke(a: mutable Arena&) -> i32:
         -1 return if alpha_index != alpha_index_again
         -2 return if alpha_index == beta_index
         -3 return if not map.has("beta")
-        -4 return if map.count() != 2usize
+        -4 return if map.count() != 2
 
         if let alpha = map.get("alpha"):
             beta_entry: IndexMapEntry[cstr[key_shape], FixtureSymbol] = map.entry(beta_index)

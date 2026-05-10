@@ -366,6 +366,20 @@ func (a *Analyzer) warnf(pos lexer.Pos, format string, args ...interface{}) {
 	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
 }
 
+func (a *Analyzer) warnNumericLiteralSuffix(expr ast.Expr, suffix string) {
+	if suffix == "" || expr == nil {
+		return
+	}
+	if a.numericLiteralSuffixWarnings == nil {
+		a.numericLiteralSuffixWarnings = map[ast.Expr]bool{}
+	}
+	if a.numericLiteralSuffixWarnings[expr] {
+		return
+	}
+	a.numericLiteralSuffixWarnings[expr] = true
+	a.warnf(expr.Pos(), "numeric literal suffix %q is discouraged; let the literal type be inferred from context or use an explicit cast", suffix)
+}
+
 func (a *Analyzer) deprecatedf(pos lexer.Pos, format string, args ...interface{}) {
 	if a.suppressDiagnostics {
 		return

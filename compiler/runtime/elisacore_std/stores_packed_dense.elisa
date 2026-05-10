@@ -182,7 +182,7 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
     (handle >> 49.uintptr()).u32() return if handle & 1.uintptr() != 0.uintptr()
 
     region_index: usize = (handle >> 32.uintptr()).usize()
-    offset_words_plus_one: usize = ((handle & 0xffffffffu64.uintptr()) >> 1.uintptr()).usize()
+    offset_words_plus_one: usize = ((handle & 0xffffffff.u64().uintptr()) >> 1.uintptr()).usize()
     assert offset_words_plus_one > 0
 
     if state_bits != null:
@@ -291,7 +291,7 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
             panic("packed store read_word cannot read inline word handles")
 
         region_index: usize = (handle >> 32.uintptr()).usize()
-        offset_words_plus_one: usize = ((handle & 0xffffffffu64.uintptr()) >> 1.uintptr()).usize()
+        offset_words_plus_one: usize = ((handle & 0xffffffff.u64().uintptr()) >> 1.uintptr()).usize()
         assert offset_words_plus_one > 0
 
         if state_bits != null:

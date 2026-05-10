@@ -38,7 +38,7 @@ def probe_keyword_hit(text: cstr) -> bool:
 def probe_first_scalar(owner: mutable Arena&) -> i64:
 	in owner:
 		values: darray[i64] = [11, 22]
-		return values[0u]
+		return values[0]
 
 @test
 def keyword_compare_test() -> void:
@@ -387,7 +387,7 @@ def mixed_tree_children_clone_rewrite_test() -> void:
 		region scratch(12288)
 		flow_store = Flow.Store(scratch)
 		in flow_store:
-			condition: Flow.Expr = Flow.Expr.Name(name_index: 7u32)
+			condition: Flow.Expr = Flow.Expr.Name(name_index: 7.u32())
 			stmts: darray[Flow.Stmt] = []
 			body: Flow.Block = Flow.Block(stmts: stmts)
 			stmt: Flow.Stmt = Flow.Stmt.IfStmt(condition: condition, body: body)

@@ -7,7 +7,7 @@ def __cast__(value: u32) -> NameId:
     return value.cast[NameId]
 
 
-global NAME_TABLE_INVALID_ID: NameId = 0u32.NameId()
+global NAME_TABLE_INVALID_ID: NameId = 0.u32().NameId()
 const NAME_TABLE_INITIAL_BUCKETS: usize = 16
 
 
