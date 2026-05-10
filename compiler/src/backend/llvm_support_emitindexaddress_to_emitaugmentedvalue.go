@@ -516,6 +516,18 @@ func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType,
 	if err != nil {
 		return nil, err
 	}
+	errorType, err := s.g.lowerType(unionType.Errors)
+	if err != nil {
+		return nil, err
+	}
+	if C.LLVMTypeOf(errorCode) != errorType {
+		if !unionType.Errors.HasPayloads() {
+			return nil, fmt.Errorf("error union code type mismatch")
+		}
+		errorSetValue := C.LLVMGetUndef(errorType)
+		errorSetValue = C.LLVMBuildInsertValue(s.builder, errorSetValue, errorCode, 0, cStringFree("errset.code"))
+		errorCode = errorSetValue
+	}
 	value := C.LLVMGetUndef(llvmType)
 	value = C.LLVMBuildInsertValue(s.builder, value, errorCode, 0, cStringFree("errunion.err"))
 	value = C.LLVMBuildInsertValue(s.builder, value, payload, 1, cStringFree("errunion.value"))

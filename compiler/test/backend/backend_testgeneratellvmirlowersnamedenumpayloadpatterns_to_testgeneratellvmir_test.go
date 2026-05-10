@@ -505,6 +505,31 @@ def recover(span: i64) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersPayloadErrorSuccessReturn(t *testing.T) {
+	src := `error BackendError:
+	UnsupportedType(span: i64, code: i32)
+
+def ok() -> i64 error[BackendError]:
+	return 7
+`
+	result := parseAndAnalyze(t, "backend_payload_error_success.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	for _, check := range []string{
+		"%ErrSet__BackendError = type { i32, i64, i32 }",
+		"define %ErrSet__BackendError @ok(ptr",
+		"store i64 7",
+		"ret %ErrSet__BackendError { i32 0",
+		"ret %ErrSet__BackendError",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersPayloadErrorMatch(t *testing.T) {
 	src := `error BackendError:
 	UnsupportedType(span: i64, code: i32)
