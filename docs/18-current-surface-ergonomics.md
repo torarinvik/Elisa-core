@@ -79,23 +79,34 @@ def read(node: Node&?) -> i64:
     return 0
 ```
 
-Use `return?` for the common early-return form where a function should return an optional payload if it is present, otherwise continue.
+Prefer unified `else` recovery for nullable values and handled error unions. Plain `value else fallback` unwraps an optional or nullable reference and uses the fallback when absent. `else return`, `else raise`, and `else void` make the recovery action explicit.
 
 ```elisa
-def first_present(left: Item?, right: Item?) -> Item?:
-    return? left
-    return? right
-    return null
+def required_name(name: NameId?) -> NameId error[LookupError]:
+    return name else raise LookupError.MissingName
+
+def first_or_default(value: Item?) -> Item:
+    return value else Item.Default
+
+def visit_if_present(value: Item?) -> void:
+    value else void
 ```
 
-This is equivalent to:
+For error unions, bare `try fallible()` still propagates the error. `try fallible() else ...` handles the error locally and produces the success value.
 
 ```elisa
-if let value = left:
-    return value
+def load_or_default(path: Path) -> Buffer:
+    return try read_file(path) else Buffer.Empty
+
+def load_with_log(path: Path) -> Buffer:
+    return try read_file(path) else err:
+        log_error(err)
+        return Buffer.Empty
 ```
 
-`return?` can also be used as a guarded early return with an ordinary boolean or pattern condition. Pattern bindings from the condition are available in the returned expression.
+`return?`, `match?`, and `try? ... default` remain accepted as migration syntax, but they are deprecated in favor of the unified `else` forms.
+
+Legacy `return?` can still be used as a guarded early return with an ordinary boolean or pattern condition. Pattern bindings from the condition are available in the returned expression.
 
 ```elisa
 def int_or_zero(node: Expr) -> i64:
@@ -417,6 +428,111 @@ Current rules:
 - range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now
 - the predicate is analyzed in a scope where the loop name is bound to the iterable element type
 - use explicit loops when the body has side effects or needs multiple statements
+
+## Proof-carrying view helpers
+
+View helpers can be written either as ordinary free functions or as receiver-style calls. The receiver form is syntax sugar: the compiler rewrites the receiver as the first helper argument, so the same optimization facts and lowering paths are preserved.
+
+```elisa
+def sum_selected(values: dview[i32]) -> i32:
+    source: dview[i32] = values.readonly()
+    return source.where(keep_positive).reduce_sum(identity)
+
+def check(values: bool[8]) -> bool:
+    return values.where(is_enabled).all()
+
+def chunks(values: dview[i32]) -> ChunksExactView[i32]:
+    return values.readonly().chunks_exact(4)
+
+def halves(values: dview[i32]) -> SplitView[i32]:
+    return values.split_at(8)
+```
+
+Current receiver helpers:
+
+- `source.where(predicate)` and `where(source, predicate)`
+- `source.enumerate()` and `enumerate(source)`
+- `source.any()` / `source.all()` and `any(source)` / `all(source)`
+- `source.readonly()` and `readonly(source)`
+- `source.split_at(index)` and `split_at(source, index)`
+- `source.chunks_exact(width)` and `chunks_exact(source, width)`
+- `source.reduce_sum(callback)` and `reduce_sum(source, callback)`
+
+Actual fields and declared methods still win over helper rewriting, so this surface remains compatible with ordinary member access.
+
+## Data-Oriented Helpers
+
+Elisa Core now has a small set of built-in data-oriented containers and layout surfaces used heavily by the Pascal, Lua, and ATPL implementations.
+
+```elisa
+const enum RoutineDirective:
+    External
+    Forward
+    CDecl
+    VarArgs
+
+directives: mutable Flags[RoutineDirective] = flags.new()
+directives.add(RoutineDirective.External)
+
+if directives[RoutineDirective.External]:
+    mark_imported()
+```
+
+```elisa
+params: mutable InlineVec[PascalParamSpec, 8] = inline_vec.new()
+params.push(param)
+```
+
+```elisa
+symbols: SymbolTable[NameId, PascalSymbol] = symtab.new(owner)
+id: SymbolId = symbols.declare(name_id, PascalSymbol{...})
+symbol: PascalSymbol? = symbols.lookup(name_id)
+```
+
+```elisa
+soa PascalSymbols:
+    name_id: NameId
+    value_type: PascalSemanticValueType
+    flags: Flags[PascalSymbolFlag]
+
+id: RowId[PascalSymbols] = symbols.push(...)
+symbols.flags[id].add(PascalSymbolFlag.Routine)
+```
+
+Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
+
+## Bit-Level Storage And Layout Modes
+
+Narrow integers, `bitset`, `bitfield`, and explicit struct layout modes make compact representation visible in source.
+
+```elisa
+const enum Mode of u4:
+    None
+    Read
+    Write
+
+struct Header:
+    flags: bitset:
+        has_payload
+        is_exported
+
+    layout: bitfield:
+        mode: Mode
+        arity: u3
+        active: u1
+
+struct PackedHeader layout packed:
+    tag: u4
+    arity: u3
+    active: u1
+
+struct CHeader layout c:
+    kind: u32
+    flags: u32
+    size: usize
+```
+
+Packed members are storage-level fields, not independently addressable values. Runtime narrowing into `uN` / `iN` storage should be explicit; compile-time overflow is rejected.
 
 ## Grammar recovery policies
 
@@ -1553,14 +1669,21 @@ Current implementation notes:
 Iterable loops may now include an inline filter after the source expression.
 
 ```elisa
-for {left, right: value} in items if left != 0:
+for {left, right: value} in items where left != 0:
     total <- total + value
+
+for token in tokens where token.kind == TokenKind.IDENT:
+    names.push(token.NameId())
+
+for decl in block.decls where Pascal.Decl.LabelDecl(labels):
+    validate_labels(labels)
 ```
 
 Current rules:
 
 - the binder runs before the filter, so the filter may reference destructured names such as `left`
-- the loop binder may be a simple name or an irrefutable brace destructure pattern
+- the loop binder may be a simple name, an irrefutable brace destructure pattern, or a typed variant filter pattern
+- the filter may be an ordinary boolean expression or a pattern predicate
 - this works over ordinary iterable sources and store-row iterators such as `rows()`
 
 ## `do:` expression blocks

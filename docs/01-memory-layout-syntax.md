@@ -1,5 +1,18 @@
-Below is a syntax-only mini spec, ordered from **easiest to implement** to **hardest**.
-This ordering is based on compiler effort, not usefulness.
+Below is the historical memory-layout mini spec. The current implemented spelling for explicit struct layout modes is suffix-based:
+
+```elisa
+struct PackedHeader layout packed:
+    tag: u8
+    len: u16
+
+struct CHeader layout c:
+    kind: u32
+    flags: u32
+```
+
+See `docs/18-current-surface-ergonomics.md` for the current surface that also includes narrow integers, `bitfield`, `bitset`, `Flags[T]`, SOA stores, and `InlineVec`.
+
+The older sections below remain useful as design notes for future layout modes.
 
 ---
 

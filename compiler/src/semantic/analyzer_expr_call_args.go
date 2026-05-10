@@ -281,7 +281,7 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 	if _, ok := a.lookupFieldNoError(receiverType, fieldExpr.Field); ok {
 		return extensionMethodCallRewriteNone
 	}
-	if fieldExpr.Field == "where" || fieldExpr.Field == "enumerate" {
+	if proofCarryingViewReceiverHelper(fieldExpr.Field) {
 		prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
 		prependedArgs = append(prependedArgs, fieldExpr.Object)
 		prependedArgs = append(prependedArgs, expr.Args...)
@@ -402,6 +402,17 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 	}
 	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: method.Symbol.Name}
 	return extensionMethodCallRewriteApplied
+}
+
+func proofCarryingViewReceiverHelper(name string) bool {
+	switch name {
+	case "where", "enumerate",
+		"any", "all",
+		"readonly", "split_at", "chunks_exact", "reduce_sum":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) prepareUFCSReceiverArg(receiver ast.Expr, receiverType Type, expected Type) ast.Expr {

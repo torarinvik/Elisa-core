@@ -454,10 +454,15 @@ categories and helper-produced facts.
 
 Recommended later helper surfaces:
 
-- `split_at(...)`
-- `chunks_exact(...)`
+- `split_at(source, index)` / `source.split_at(index)`
+- `chunks_exact(source, width)` / `source.chunks_exact(width)`
+- `enumerate(source)` / `source.enumerate()`
+- `where(source, predicate)` / `source.where(predicate)`
+- `readonly(source)` / `source.readonly()`
+- `any(source)` / `source.any()`
+- `all(source)` / `source.all()`
+- `reduce_sum(source, callback)` / `source.reduce_sum(callback)`
 - `zip_exact(...)`
-- `enumerate(...)`
 
 These are good follow-ons because they can produce optimization legality facts
 without inventing target-specific pragmas or a separate parallel-iterator

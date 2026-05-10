@@ -30,7 +30,7 @@ def sum_one(value: i32) -> i32:
 
 def kernel(buf: dview[i32]) -> i32:
 	source: dview[i32] = readonly(buf[0:16])
-	return reduce_sum(source, sum_one)
+	return source.reduce_sum(sum_one)
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {

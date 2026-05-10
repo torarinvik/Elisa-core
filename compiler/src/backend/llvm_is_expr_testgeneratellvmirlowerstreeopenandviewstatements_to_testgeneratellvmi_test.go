@@ -554,7 +554,7 @@ func TestGenerateLLVMIRLowersBoolAggregatesOverWhereViews(t *testing.T) {
 	return value
 
 def has_selected_truth(values: bool[4]) -> bool:
-	return any(where(values, keep_true))
+	return values.where(keep_true).any()
 
 def all_selected_truth(values: bool[4]) -> bool:
 	return all(values.where(keep_true))
