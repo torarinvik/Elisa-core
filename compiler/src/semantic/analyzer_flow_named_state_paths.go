@@ -139,20 +139,27 @@ func namedStateTargetPathExpr(pos lexer.Pos, root *Symbol, steps []borrowReturnA
 }
 
 func (a *Analyzer) namedStateMutationTargetPath(expr ast.Expr) (*Symbol, []borrowReturnAnnotationStep, bool) {
+	return a.namedStateMutationTargetPathDepth(expr, 0)
+}
+
+func (a *Analyzer) namedStateMutationTargetPathDepth(expr ast.Expr, depth int) (*Symbol, []borrowReturnAnnotationStep, bool) {
 	if expr == nil {
+		return nil, nil, false
+	}
+	if depth > 64 {
 		return nil, nil, false
 	}
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return a.namedStateMutationTargetPath(n.Inner)
+		return a.namedStateMutationTargetPathDepth(n.Inner, depth+1)
 	case *ast.CastExpr:
-		return a.namedStateMutationTargetPath(n.Operand)
+		return a.namedStateMutationTargetPathDepth(n.Operand, depth+1)
 	case *ast.MoveExpr:
-		return a.namedStateMutationTargetPath(n.Operand)
+		return a.namedStateMutationTargetPathDepth(n.Operand, depth+1)
 	case *ast.CanExpr:
-		return a.namedStateMutationTargetPath(n.Expr)
+		return a.namedStateMutationTargetPathDepth(n.Expr, depth+1)
 	case *ast.AddrOfExpr:
-		return a.namedStateMutationTargetPath(n.Operand)
+		return a.namedStateMutationTargetPathDepth(n.Operand, depth+1)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, nil, false
@@ -163,13 +170,13 @@ func (a *Analyzer) namedStateMutationTargetPath(expr ast.Expr) (*Symbol, []borro
 		}
 		if _, isRef := sym.Type.(*RefType); isRef && a.currentValueBindings != nil {
 			if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
-				if root, steps, ok := a.namedStateMutationTargetPath(valueExpr); ok {
+				if root, steps, ok := a.namedStateMutationTargetPathDepth(valueExpr, depth+1); ok {
 					return root, steps, true
 				}
 			}
 			if root := symbolAliasRoot(sym); root != nil && root != sym {
 				if valueExpr, ok := a.currentValueBindings[root]; ok && valueExpr != nil {
-					if resolvedRoot, steps, ok := a.namedStateMutationTargetPath(valueExpr); ok {
+					if resolvedRoot, steps, ok := a.namedStateMutationTargetPathDepth(valueExpr, depth+1); ok {
 						return resolvedRoot, steps, true
 					}
 				}
@@ -177,13 +184,13 @@ func (a *Analyzer) namedStateMutationTargetPath(expr ast.Expr) (*Symbol, []borro
 		}
 		return sym, nil, true
 	case *ast.FieldExpr:
-		root, steps, ok := a.namedStateMutationTargetPath(n.Object)
+		root, steps, ok := a.namedStateMutationTargetPathDepth(n.Object, depth+1)
 		if !ok || root == nil {
 			return nil, nil, false
 		}
 		return root, append(steps, borrowReturnAnnotationStep{Field: n.Field}), true
 	case *ast.IndexExpr:
-		root, steps, ok := a.namedStateMutationTargetPath(n.Object)
+		root, steps, ok := a.namedStateMutationTargetPathDepth(n.Object, depth+1)
 		if !ok || root == nil {
 			return nil, nil, false
 		}
