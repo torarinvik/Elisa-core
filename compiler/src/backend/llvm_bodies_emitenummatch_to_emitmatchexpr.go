@@ -416,6 +416,9 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	if ok {
 		return s.emitErrorSetMatchExpr(expr, resultType, errorSetType)
 	}
+	if optionalType, ok := s.exprType(expr.Value).(*semantic.OptionalType); ok {
+		return s.emitOptionalMatchExpr(expr, resultType, optionalType)
+	}
 	treeType, _, ok := resolveMatchableTreeCategoryTypeBackend(s.exprType(expr.Value))
 	if ok {
 		return s.emitTreeMatchExpr(expr, resultType, treeType)
@@ -429,5 +432,5 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	if resolveMatchableStructTypeBackend(s.exprType(expr.Value)) {
 		return s.emitStructMatchExpr(expr, resultType)
 	}
-	return nil, nil, fmt.Errorf("match requires an enum, const enum, error set, tree-category, string, tuple, or struct value")
+	return nil, nil, fmt.Errorf("match requires an enum, const enum, error set, optional, tree-category, string, tuple, or struct value")
 }

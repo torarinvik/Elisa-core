@@ -372,6 +372,9 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if ok {
 		return a.analyzeErrorSetMatchExpr(expr, valueType, errorSetType)
 	}
+	if optionalType, ok := valueType.(*OptionalType); ok {
+		return a.analyzeOptionalMatchExpr(expr, optionalType)
+	}
 	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
 	if ok {
 		return a.analyzeTreeMatchExpr(expr, treeType)
@@ -385,7 +388,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if _, ok := a.resolvedStructFields(valueType); ok {
 		return a.analyzeStructMatchExpr(expr, valueType)
 	}
-	a.errorf(expr.Pos(), "match requires an enum, const enum, error set, tree-category, string, tuple, or struct value, got %s", valueType)
+	a.errorf(expr.Pos(), "match requires an enum, const enum, error set, optional, tree-category, string, tuple, or struct value, got %s", valueType)
 	for _, arm := range expr.Arms {
 		a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
 	}

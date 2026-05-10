@@ -293,6 +293,8 @@ func (p *Parser) parsePrimary() ast.Expr {
 		return &ast.TryExpr{Position: pos, Value: value}
 	case lexer.TOKEN_CATCH:
 		return p.parseCatchExpr()
+	case lexer.TOKEN_MATCH:
+		return p.parseMatchExpr()
 	case lexer.TOKEN_RAISE:
 		pos := p.cur().Pos
 		p.advance()

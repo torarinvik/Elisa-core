@@ -67,3 +67,20 @@ def score(maybe: Expr?) -> i64:
 	return 3
 `)
 }
+
+func TestAnalyzeOptionalMatchExpressionWithNullAndPayloadPatterns(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "optional_match_expr_null_payload.elisa", `
+enum Expr:
+	Int(value: i64)
+	Missing
+
+def score(maybe: Expr?) -> i64:
+	return match maybe:
+		null:
+			0
+		Expr.Int(value):
+			value
+		_:
+			2
+`)
+}

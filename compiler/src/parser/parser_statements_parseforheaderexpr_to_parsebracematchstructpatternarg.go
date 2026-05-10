@@ -220,6 +220,17 @@ func (p *Parser) parseMatch() ast.Stmt {
 	arms := p.parseMatchArms()
 	return &ast.MatchStmt{Position: pos, Value: value, Store: store, Arms: arms}
 }
+func (p *Parser) parseMatchExpr() ast.Expr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_MATCH)
+	value := p.parseMatchHeadExpr()
+	var store ast.Expr
+	if p.match(lexer.TOKEN_IN) {
+		store = p.parseExpr()
+	}
+	arms := p.parseMatchArms()
+	return &ast.MatchExpr{Position: pos, Value: value, Store: store, Arms: arms}
+}
 func (p *Parser) parseMatchHeadExpr() ast.Expr {
 	first := p.withInMembershipDisabled(p.parseExpr)
 	if p.peek() != lexer.TOKEN_COMMA {

@@ -522,10 +522,21 @@ func TestParseRejectsDoExprBlockFinalMatchStatement(t *testing.T) {
 		t.Fatalf("expected final-expression diagnostic, got:\n%s", all)
 	}
 }
-func TestParseRejectsDirectMatchExprSyntax(t *testing.T) {
-	_, errs := parseSourceFile(t, "const enum Op of i32:\n    ADD = 1\n\ndef keep(op: Op) -> i64:\n    return match op:\n        Op.ADD:\n            10\n")
-	if len(errs) == 0 {
-		t.Fatal("expected parser error for direct match expression syntax, got none")
+func TestParseDirectMatchExprSyntax(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum Op of i32:\n    ADD = 1\n\ndef keep(op: Op) -> i64:\n    return match op:\n        Op.ADD:\n            10\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	ret, ok := fn.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", fn.Body[0])
+	}
+	if _, ok := ret.Value.(*ast.MatchExpr); !ok {
+		t.Fatalf("expected match expression return value, got %T", ret.Value)
 	}
 }
 func TestFormatCallWithDoExprBlockArg(t *testing.T) {
