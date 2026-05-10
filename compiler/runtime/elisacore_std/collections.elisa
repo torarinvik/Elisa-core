@@ -748,9 +748,12 @@ def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
 
 def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
     can Memory.Allocate, Abort.Panic:
-        if let existing_index = index_map_find_index[K, T](map, key):
-            map.entries[existing_index].value <- value
-            return existing_index
+        match index_map_find_index[K, T](map, key):
+            null:
+                pass
+            existing_index:
+                map.entries[existing_index].value <- value
+                return existing_index
 
         assert map.owner != null
         owner: mutable Arena& = map.owner
@@ -777,10 +780,9 @@ def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
 
 
 def index_map_get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
-    if let index = index_map_find_index[K, T](map, key):
-        value: T = index_map_value[K, T](map, index)
-        return value
-    return null
+    index: usize = index_map_find_index[K, T](map, key) else return null
+    value: T = index_map_value[K, T](map, index)
+    return value
 
 
 def get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
@@ -852,9 +854,8 @@ def symbol_table_valid_id[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTabl
 
 
 def symbol_table_find_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
-    if let index = index_map_find_index[K, T](table.items, key):
-        return symbol_table_id_from_index(index)
-    return SYMBOL_TABLE_INVALID_ID
+    index: usize = index_map_find_index[K, T](table.items, key) else return SYMBOL_TABLE_INVALID_ID
+    return symbol_table_id_from_index(index)
 
 
 def symbol_table_contains[K, T](table: SymbolTable[K, T]&, key: K) -> bool:

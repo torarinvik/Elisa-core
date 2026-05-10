@@ -21,11 +21,7 @@ def stable_symbol_table_smoke(a: mutable Arena&) -> i32:
         -5 return if not table.has("beta")
         -6 return if table.count() != 2
 
-        alpha: mutable FixtureSymbol = zeroed
-        if let found_alpha = table.lookup("alpha"):
-            alpha <- found_alpha
-        else:
-            return -7
+        alpha: FixtureSymbol = table.lookup("alpha") else return -7
         beta: FixtureSymbol = table.value(beta_id)
         return alpha.value + beta.value
 
@@ -36,9 +32,8 @@ def stable_symbol_table_default_capacity(a: mutable Arena&) -> i32:
         symbol_id: SymbolTableId = table.declare("gamma", FixtureSymbol{value: 19})
         symbol: FixtureSymbol? = table.lookup("gamma")
         -1 return if symbol_id == SYMBOL_TABLE_INVALID_ID
-        if let found = symbol:
-            return found.value
-        return -2
+        found: FixtureSymbol = symbol else return -2
+        return found.value
 
 
 def stable_index_map_smoke(a: mutable Arena&) -> i32:
@@ -54,7 +49,6 @@ def stable_index_map_smoke(a: mutable Arena&) -> i32:
         -3 return if not map.has("beta")
         -4 return if map.count() != 2
 
-        if let alpha = map.get("alpha"):
-            beta_entry: IndexMapEntry[cstr[key_shape], FixtureSymbol] = map.entry(beta_index)
-            return alpha.value + beta_entry.value.value
-    return -5
+        alpha: FixtureSymbol = map.get("alpha") else return -5
+        beta_entry: IndexMapEntry[cstr[key_shape], FixtureSymbol] = map.entry(beta_index)
+        return alpha.value + beta_entry.value.value
