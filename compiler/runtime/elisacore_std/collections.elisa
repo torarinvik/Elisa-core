@@ -902,7 +902,7 @@ def index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
 
 
 def index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
-    return darray_view[IndexMapEntry[K, T]](map.entries)
+    return map.entries.view()
 
 
 @ufcs_only

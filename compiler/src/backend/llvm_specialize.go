@@ -94,16 +94,16 @@ func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes 
 	if fn == nil {
 		return bindings
 	}
-	if resultType != nil && fn.Return != nil {
-		collectSpecializationBindings(fn.Return, resultType, bindings)
-		collectSpecializationBindings(semantic.StripAggregateStateType(fn.Return), semantic.StripAggregateStateType(resultType), bindings)
-	}
 	limit := len(fn.Params)
 	if len(argTypes) < limit {
 		limit = len(argTypes)
 	}
 	for i := 0; i < limit; i++ {
 		collectSpecializationBindings(fn.Params[i], argTypes[i], bindings)
+	}
+	if resultType != nil && fn.Return != nil {
+		collectSpecializationBindings(fn.Return, resultType, bindings)
+		collectSpecializationBindings(semantic.StripAggregateStateType(fn.Return), semantic.StripAggregateStateType(resultType), bindings)
 	}
 	params := funcGenericParams(fn)
 	for _, param := range params {
