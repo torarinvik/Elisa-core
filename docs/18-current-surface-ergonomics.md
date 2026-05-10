@@ -484,6 +484,12 @@ params.push(param)
 ```
 
 ```elisa
+builder: mutable DArrayBuilder[Pascal.Decl] = owner.builder()
+builder.push(decl)
+decls: darray[Pascal.Decl] = builder.finish()
+```
+
+```elisa
 symbols: SymbolTable[NameId, PascalSymbol] = symtab.new(owner)
 id: SymbolId = symbols.declare(name_id, PascalSymbol{...})
 symbol: PascalSymbol? = symbols.lookup(name_id)
@@ -508,6 +514,8 @@ symbols.flags[id].add(PascalSymbolFlag.Routine)
 ```
 
 Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
+
+Use `owner.builder()` when constructing arena-owned dynamic arrays. The expected builder type supplies the element type, which keeps parser and semantic builders close to the data they are assembling.
 
 Use `NameId` for compact storage in ASTs and symbol tables. Use `InternedName` as a short-lived view when code needs to compare, validate, or read the text from a particular `NameTable`.
 
@@ -543,6 +551,28 @@ struct CHeader layout c:
 ```
 
 Packed members are storage-level fields, not independently addressable values. Runtime narrowing into `uN` / `iN` storage should be explicit; compile-time overflow is rejected.
+
+## Layout Introspection
+
+Use layout introspection when code needs target-aware size, alignment, or field-offset facts without hand-maintaining numeric constants.
+
+```elisa
+struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+header_size: usize = sizeof(Header)
+header_align: usize = alignof(Header)
+count_offset: usize = offsetof(Header, count)
+```
+
+Current rules:
+
+- `sizeof(T)`, `alignof(T)`, and `offsetof(T, field)` return `usize`
+- results are computed from the backend target data layout
+- `offsetof` currently accepts a direct field name on a lowered struct-like type
+- prefer these builtins in runtime, FFI, packed-layout, and backend test code instead of duplicating ABI constants by hand
 
 ## Grammar recovery policies
 
@@ -1687,6 +1717,9 @@ for token in tokens where token.kind == TokenKind.IDENT:
 
 for decl in block.decls where Pascal.Decl.LabelDecl(labels):
     validate_labels(labels)
+
+for decl in block.decls where Pascal.Decl.LabelDecl(labels) for label in labels:
+    validate_label(label)
 ```
 
 Current rules:
@@ -1694,6 +1727,7 @@ Current rules:
 - the binder runs before the filter, so the filter may reference destructured names such as `left`
 - the loop binder may be a simple name, an irrefutable brace destructure pattern, or a typed variant filter pattern
 - the filter may be an ordinary boolean expression or a pattern predicate
+- loop headers can chain another `for` clause to express a simple nested iteration without adding an extra indentation level
 - this works over ordinary iterable sources and store-row iterators such as `rows()`
 
 ## `do:` expression blocks

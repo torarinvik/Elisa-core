@@ -64,6 +64,10 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 			}
 		case *ast.SizeofExpr:
 			t = s.g.result.NamedTypes["usize"]
+		case *ast.AlignofExpr:
+			t = s.g.result.NamedTypes["usize"]
+		case *ast.OffsetofExpr:
+			t = s.g.result.NamedTypes["usize"]
 		case *ast.AddrOfExpr:
 			innerType := s.exprType(n.Operand)
 			if innerType != nil {

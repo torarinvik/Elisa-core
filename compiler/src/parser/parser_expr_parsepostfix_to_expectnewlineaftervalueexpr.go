@@ -274,6 +274,22 @@ func (p *Parser) parsePrimary() ast.Expr {
 		typ := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 		return &ast.SizeofExpr{Position: pos, Type: typ}
+	case lexer.TOKEN_ALIGNOF:
+		pos := p.cur().Pos
+		p.advance()
+		p.expect(lexer.TOKEN_LPAREN)
+		typ := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+		return &ast.AlignofExpr{Position: pos, Type: typ}
+	case lexer.TOKEN_OFFSETOF:
+		pos := p.cur().Pos
+		p.advance()
+		p.expect(lexer.TOKEN_LPAREN)
+		typ := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_COMMA)
+		field := p.expect(lexer.TOKEN_IDENT)
+		p.expect(lexer.TOKEN_RPAREN)
+		return &ast.OffsetofExpr{Position: pos, Type: typ, Field: field.Text}
 	case lexer.TOKEN_TRY:
 		pos := p.cur().Pos
 		p.advance()

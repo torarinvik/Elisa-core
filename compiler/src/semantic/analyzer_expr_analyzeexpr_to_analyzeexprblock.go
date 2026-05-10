@@ -469,6 +469,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		a.resolveType(n.Type)
 		result = a.namedTypes["usize"]
 		return
+	case *ast.AlignofExpr:
+		a.resolveType(n.Type)
+		result = a.namedTypes["usize"]
+		return
+	case *ast.OffsetofExpr:
+		a.resolveType(n.Type)
+		result = a.namedTypes["usize"]
+		return
 	case *ast.TernaryExpr:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {

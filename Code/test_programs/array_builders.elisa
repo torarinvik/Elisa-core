@@ -3,7 +3,7 @@ include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
 def array_builder_smoke(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        builder: mutable DArrayBuilder[i32] = arraybuilder.new(a)
+        builder: mutable DArrayBuilder[i32] = a.builder()
         -1 return if not builder.is_empty()
         builder.reserve(6)
         for index in 0..<6:
@@ -17,7 +17,7 @@ def array_builder_smoke(a: mutable Arena&) -> i32:
 
 def array_builder_clear_smoke(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        builder: mutable DArrayBuilder[i32] = arraybuilder.new(a)
+        builder: mutable DArrayBuilder[i32] = a.builder()
         builder.push(7)
         builder.push(11)
         -1 return if builder.count() != 2

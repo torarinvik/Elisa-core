@@ -99,6 +99,10 @@ func optimizationExprString(expr ast.Expr) string {
 		return fmt.Sprintf("%s.cast", optimizationExprString(n.Operand))
 	case *ast.SizeofExpr:
 		return "sizeof(...)"
+	case *ast.AlignofExpr:
+		return "alignof(...)"
+	case *ast.OffsetofExpr:
+		return "offsetof(...)"
 	case *ast.TernaryExpr:
 		return fmt.Sprintf("(%s if %s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Cond), optimizationExprString(n.Alt))
 	case *ast.AddrOfExpr:

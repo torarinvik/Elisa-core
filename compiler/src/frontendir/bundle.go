@@ -128,6 +128,8 @@ func registerBundleTypes() {
 		gob.Register(&ast.ListComprehensionExpr{})
 		gob.Register(&ast.CastExpr{})
 		gob.Register(&ast.SizeofExpr{})
+		gob.Register(&ast.AlignofExpr{})
+		gob.Register(&ast.OffsetofExpr{})
 		gob.Register(&ast.TernaryExpr{})
 		gob.Register(&ast.AddrOfExpr{})
 		gob.Register(&ast.SpecializeExpr{})

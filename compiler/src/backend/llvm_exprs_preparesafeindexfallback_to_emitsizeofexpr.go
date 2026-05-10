@@ -571,3 +571,43 @@ func (s *functionState) emitSizeofExpr(expr *ast.SizeofExpr) (C.LLVMValueRef, se
 	}
 	return C.LLVMConstInt(usizeType, C.ulonglong(size), 0), s.g.result.NamedTypes["usize"], nil
 }
+
+func (s *functionState) emitAlignofExpr(expr *ast.AlignofExpr) (C.LLVMValueRef, semantic.Type, error) {
+	t, err := s.resolveTypeExpr(expr.Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	alignment, err := s.g.abiAlignmentOfType(t)
+	if err != nil {
+		return nil, nil, err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, err
+	}
+	return C.LLVMConstInt(usizeType, C.ulonglong(alignment), 0), s.g.result.NamedTypes["usize"], nil
+}
+
+func (s *functionState) emitOffsetofExpr(expr *ast.OffsetofExpr) (C.LLVMValueRef, semantic.Type, error) {
+	t, err := s.resolveTypeExpr(expr.Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	_, fieldIndex, containerType, _, err := s.g.fieldInfo(t, expr.Field)
+	if err != nil {
+		return nil, nil, err
+	}
+	containerLLVMType, err := s.g.lowerType(containerType)
+	if err != nil {
+		return nil, nil, err
+	}
+	offset, err := s.g.abiOffsetOfLLVMElement(containerLLVMType, fieldIndex)
+	if err != nil {
+		return nil, nil, err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, err
+	}
+	return C.LLVMConstInt(usizeType, C.ulonglong(offset), 0), s.g.result.NamedTypes["usize"], nil
+}

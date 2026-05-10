@@ -243,6 +243,27 @@ func (g *llvmGenerator) abiSizeOfLLVMType(llvmType C.LLVMTypeRef) (uint64, error
 	return uint64(C.LLVMABISizeOfType(g.targetData, llvmType)), nil
 }
 
+func (g *llvmGenerator) abiAlignmentOfType(t semantic.Type) (uint64, error) {
+	if isVoidType(t) {
+		return 1, nil
+	}
+	if err := g.ensureTargetMachine(); err != nil {
+		return 0, err
+	}
+	llvmType, err := g.lowerType(t)
+	if err != nil {
+		return 0, err
+	}
+	return g.abiAlignmentOfLLVMType(llvmType)
+}
+
+func (g *llvmGenerator) abiAlignmentOfLLVMType(llvmType C.LLVMTypeRef) (uint64, error) {
+	if err := g.ensureTargetMachine(); err != nil {
+		return 0, err
+	}
+	return uint64(C.LLVMABIAlignmentOfType(g.targetData, llvmType)), nil
+}
+
 func (g *llvmGenerator) abiOffsetOfLLVMElement(llvmType C.LLVMTypeRef, elementIndex int) (uint64, error) {
 	if llvmType == nil {
 		return 0, fmt.Errorf("cannot compute ABI offset for nil LLVM type")

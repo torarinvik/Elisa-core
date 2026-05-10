@@ -276,6 +276,10 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitCastExpr(n)
 	case *ast.SizeofExpr:
 		value, actualType, err = s.emitSizeofExpr(n)
+	case *ast.AlignofExpr:
+		value, actualType, err = s.emitAlignofExpr(n)
+	case *ast.OffsetofExpr:
+		value, actualType, err = s.emitOffsetofExpr(n)
 	case *ast.TernaryExpr:
 		value, actualType, err = s.emitTernaryExpr(n)
 	case *ast.AddrOfExpr:

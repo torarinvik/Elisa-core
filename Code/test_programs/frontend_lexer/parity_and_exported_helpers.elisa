@@ -124,7 +124,7 @@ def frontend_case_with_and_context_keywords() -> bool:
 
 
 def frontend_case_lookup_keyword_table() -> bool:
-    entries: FrontendKeywordEntry[45] = [
+    entries: FrontendKeywordEntry[47] = [
         FrontendKeywordEntry("as", FrontendTokenKind.As),
         FrontendKeywordEntry("if", FrontendTokenKind.If),
         FrontendKeywordEntry("in", FrontendTokenKind.In),
@@ -159,6 +159,8 @@ def frontend_case_lookup_keyword_table() -> bool:
         FrontendKeywordEntry("packed", FrontendTokenKind.Packed),
         FrontendKeywordEntry("return", FrontendTokenKind.Return),
         FrontendKeywordEntry("sizeof", FrontendTokenKind.Sizeof),
+        FrontendKeywordEntry("alignof", FrontendTokenKind.Alignof),
+        FrontendKeywordEntry("offsetof", FrontendTokenKind.Offsetof),
         FrontendKeywordEntry("static", FrontendTokenKind.Static),
         FrontendKeywordEntry("struct", FrontendTokenKind.Struct),
         FrontendKeywordEntry("zeroed", FrontendTokenKind.Zeroed),

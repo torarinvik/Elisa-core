@@ -78,6 +78,8 @@ func (n *CastExpr) Pos() lexer.Pos       { return n.Position }
 func (n *CascadeExpr) Pos() lexer.Pos    { return n.Position }
 func (n *LambdaExpr) Pos() lexer.Pos     { return n.Position }
 func (n *SizeofExpr) Pos() lexer.Pos     { return n.Position }
+func (n *AlignofExpr) Pos() lexer.Pos    { return n.Position }
+func (n *OffsetofExpr) Pos() lexer.Pos   { return n.Position }
 func (n *TernaryExpr) Pos() lexer.Pos    { return n.Position }
 func (n *AddrOfExpr) Pos() lexer.Pos     { return n.Position }
 func (n *SpecializeExpr) Pos() lexer.Pos { return n.Position }
@@ -273,6 +275,8 @@ func (*CastExpr) nodeTag()                          {}
 func (*CascadeExpr) nodeTag()                       {}
 func (*LambdaExpr) nodeTag()                        {}
 func (*SizeofExpr) nodeTag()                        {}
+func (*AlignofExpr) nodeTag()                       {}
+func (*OffsetofExpr) nodeTag()                      {}
 func (*TernaryExpr) nodeTag()                       {}
 func (*AddrOfExpr) nodeTag()                        {}
 func (*SpecializeExpr) nodeTag()                    {}
@@ -471,6 +475,8 @@ func (*CastExpr) exprTag()                          {}
 func (*CascadeExpr) exprTag()                       {}
 func (*LambdaExpr) exprTag()                        {}
 func (*SizeofExpr) exprTag()                        {}
+func (*AlignofExpr) exprTag()                       {}
+func (*OffsetofExpr) exprTag()                      {}
 func (*TernaryExpr) exprTag()                       {}
 func (*AddrOfExpr) exprTag()                        {}
 func (*SpecializeExpr) exprTag()                    {}

@@ -87,6 +87,26 @@ def fold() -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersLayoutIntrospectionBuiltins(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_layout_introspection.elisa", `struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+def layout_total() -> usize:
+    return sizeof(Header) + alignof(Header) + offsetof(Header, count) + offsetof(Header, payload)
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel0, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	if !strings.Contains(output, "ret i64 36") {
+		t.Fatalf("expected layout_total to fold size/align/offsets to 36, got IR:\n%s", output)
+	}
+}
+
 func TestGenerateCHeaderRendersAlignedStructAndGlobal(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "header_align.elisa", `@align(64)
 struct Counter layout c:

@@ -44,6 +44,8 @@ enum FrontendTokenKind:
     False
     Zeroed
     Sizeof
+    Alignof
+    Offsetof
     Tail
     Try
     Catch

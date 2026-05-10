@@ -250,6 +250,11 @@ def new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[
     return darray_builder[T](owner)
 
 
+@ufcs_only
+def builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
+    return darray_builder[T](owner)
+
+
 def darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize:
     return builder.items.count
 

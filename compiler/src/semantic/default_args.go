@@ -163,6 +163,10 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		}
 	case *ast.SizeofExpr:
 		return &ast.SizeofExpr{Position: n.Position, Type: n.Type}
+	case *ast.AlignofExpr:
+		return &ast.AlignofExpr{Position: n.Position, Type: n.Type}
+	case *ast.OffsetofExpr:
+		return &ast.OffsetofExpr{Position: n.Position, Type: n.Type, Field: n.Field}
 	case *ast.TernaryExpr:
 		value := cloneDefaultArgExpr(n.Value)
 		cond := cloneDefaultArgExpr(n.Cond)

@@ -562,6 +562,15 @@ type SizeofExpr struct {
 	Position lexer.Pos
 	Type     TypeExpr
 }
+type AlignofExpr struct {
+	Position lexer.Pos
+	Type     TypeExpr
+}
+type OffsetofExpr struct {
+	Position lexer.Pos
+	Type     TypeExpr
+	Field    string
+}
 type TernaryExpr struct {
 	Position lexer.Pos
 	Value    Expr

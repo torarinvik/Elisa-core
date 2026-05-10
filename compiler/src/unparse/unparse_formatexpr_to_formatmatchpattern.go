@@ -178,6 +178,10 @@ func formatExpr(expr ast.Expr) string {
 		return formatLambdaExpr(n)
 	case *ast.SizeofExpr:
 		return "sizeof(" + formatTypeExpr(n.Type) + ")"
+	case *ast.AlignofExpr:
+		return "alignof(" + formatTypeExpr(n.Type) + ")"
+	case *ast.OffsetofExpr:
+		return "offsetof(" + formatTypeExpr(n.Type) + ", " + n.Field + ")"
 	case *ast.TernaryExpr:
 		return "(" + formatExpr(n.Value) + " if " + formatExpr(n.Cond) + " else " + formatExpr(n.Alt) + ")"
 	case *ast.AddrOfExpr:
