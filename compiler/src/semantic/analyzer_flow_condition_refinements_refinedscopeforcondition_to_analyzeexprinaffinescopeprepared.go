@@ -93,9 +93,6 @@ func (a *Analyzer) refinedExprPackedVariantView(expr *ast.BinaryExpr, truthy boo
 	if !ok || enumType == nil || variant == nil {
 		return nil, nil, false
 	}
-	if !enumType.Packed {
-		return nil, nil, false
-	}
 	leftType := a.exprTypes[expr.Left]
 	if leftType == nil {
 		leftType = a.analyzeExpr(expr.Left)

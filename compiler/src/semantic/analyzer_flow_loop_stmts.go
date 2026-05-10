@@ -320,6 +320,13 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 
 	loopScope := NewScope(a.currentScope)
 	a.bindIterLoopPattern(loopScope, stmt.Pattern, stmt.Mode, info.ItemType, info.ItemFacts, info.HasItemFacts)
+	if stmt.PatternFilter != nil {
+		var valueExpr ast.Expr
+		if namePattern, ok := stmt.Pattern.(*ast.MoveBindNamePattern); ok && namePattern.Name != "_" {
+			valueExpr = &ast.Ident{Position: namePattern.Pos(), Name: namePattern.Name}
+		}
+		a.analyzeNestedMatchPattern(stmt.PatternFilter, info.ItemType, valueExpr, loopScope)
+	}
 	if stmt.Filter != nil {
 		condType := a.analyzeCondExprInScope(stmt.Filter, loopScope)
 		if !IsBoolType(condType) {

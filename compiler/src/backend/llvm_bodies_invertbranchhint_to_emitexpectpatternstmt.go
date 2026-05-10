@@ -97,6 +97,10 @@ func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 
 		C.LLVMPositionBuilderAtEnd(s.builder, thenBB)
 		s.scope = condScope
+		if err := s.bindConditionVariantViews(stmt.Cond); err != nil {
+			s.scope = parentScope
+			return err
+		}
 		if err := s.emitBlock(stmt.Then, true); err != nil {
 			s.scope = parentScope
 			return err
@@ -127,11 +131,6 @@ func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 		}
 		return nil
 	}
-	condValue, _, err := s.emitExpr(stmt.Cond, s.g.result.NamedTypes["bool"])
-	if err != nil {
-		return err
-	}
-
 	thenName := cString("if.then")
 	defer C.free(unsafe.Pointer(thenName))
 	thenBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, thenName)
@@ -145,12 +144,19 @@ func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 		elseName := cString("if.else")
 		defer C.free(unsafe.Pointer(elseName))
 		elseBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, elseName)
-		s.buildCondBrWithHint(condValue, thenBB, elseBB, stmt.Hint)
+		if err := s.emitConditionBranchWithBindings(stmt.Cond, thenBB, elseBB, stmt.Hint); err != nil {
+			return err
+		}
 	} else {
-		s.buildCondBrWithHint(condValue, thenBB, mergeBB, stmt.Hint)
+		if err := s.emitConditionBranchWithBindings(stmt.Cond, thenBB, mergeBB, stmt.Hint); err != nil {
+			return err
+		}
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, thenBB)
+	if err := s.bindConditionVariantViews(stmt.Cond); err != nil {
+		return err
+	}
 	if err := s.emitBlock(stmt.Then, true); err != nil {
 		return err
 	}

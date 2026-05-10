@@ -229,6 +229,9 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		if wherePredicate != nil {
 			line += " where " + formatExpr(wherePredicate)
 		}
+		if n.PatternFilter != nil {
+			line += " where " + formatMatchPattern(n.PatternFilter)
+		}
 		if n.Filter != nil {
 			line += " if " + formatExpr(n.Filter)
 		}

@@ -398,6 +398,10 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		return s.emitNullLiteral()
 	} else if viewType, ok := actualType.(*semantic.PackedVariantViewType); ok {
 		if binding, ok := s.lookupPackedVariantView(expr.Name); ok {
+			if viewType.Enum != nil && !viewType.Enum.Packed && binding.ptr != nil {
+				value, err := s.loadValue(binding.ptr, viewType.Enum, expr.Name)
+				return value, viewType.Enum, err
+			}
 			return s.materializePackedVariantViewValue(binding)
 		}
 		if ptr, valueType, err := s.emitIdentValueAddress(expr); err == nil {
@@ -406,15 +410,22 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 				if err != nil {
 					return nil, nil, err
 				}
-				store, ok := s.lookupPackedStore(enumType)
-				if !ok {
-					return nil, nil, fmt.Errorf("packedview %s requires store context for %q", viewType.String(), expr.Name)
+				var store *packedStoreBinding
+				if enumType.StoreType != nil {
+					resolvedStore, ok := s.lookupPackedStore(enumType)
+					if ok {
+						store = &resolvedStore
+					}
 				}
-				value, err := s.buildPackedVariantViewValue(viewType, handle, &store)
+				value, err := s.buildPackedVariantViewValue(viewType, handle, store)
 				if err != nil {
 					return nil, nil, err
 				}
-				s.bindPackedVariantView(expr.Name, viewType, nil, handle, store, packedPayloadValueCache{})
+				if store != nil {
+					s.bindPackedVariantView(expr.Name, viewType, nil, handle, *store, packedPayloadValueCache{})
+				} else {
+					s.bindPackedVariantView(expr.Name, viewType, nil, handle, packedStoreBinding{}, packedPayloadValueCache{})
+				}
 				return value, viewType, nil
 			}
 		}

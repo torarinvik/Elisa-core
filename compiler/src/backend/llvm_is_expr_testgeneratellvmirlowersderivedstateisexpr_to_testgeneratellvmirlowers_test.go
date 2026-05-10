@@ -50,6 +50,27 @@ def is_pi(node: Expr) -> bool:
 		}
 	}
 }
+func TestGenerateLLVMIRLowersEnumVariantViewAfterIsExpr(t *testing.T) {
+	src := `enum Expr:
+	Pair(left: i64, right: i64)
+	Int(value: i64)
+
+def score(node: Expr) -> i64:
+	if node is Expr.Pair:
+		return node.left + node.right
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_enum_variant_view_after_is.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score(", "enum.payload.ptr", "match.payload.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected enum variant view lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
 func TestGenerateLLVMIRLowersPatternTernaryBindings(t *testing.T) {
 	src := `enum Expr:
     Int(value: i64)

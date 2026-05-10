@@ -541,12 +541,17 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		body := p.parseForStmtBody()
 		return &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
 	}
+	var patternFilter ast.MatchPattern
 	if p.matchIdentText("where") {
-		predicate := p.parseForHeaderExpr()
-		startOrSource = &ast.CallExpr{
-			Position: pos,
-			Func:     &ast.Ident{Position: pos, Name: "where"},
-			Args:     []ast.Expr{startOrSource, predicate},
+		if p.peekForWherePatternFilter() {
+			patternFilter = p.parseMatchPattern()
+		} else {
+			predicate := p.parseForHeaderExpr()
+			startOrSource = &ast.CallExpr{
+				Position: pos,
+				Func:     &ast.Ident{Position: pos, Name: "where"},
+				Args:     []ast.Expr{startOrSource, predicate},
+			}
 		}
 	}
 	var filter ast.Expr
@@ -554,7 +559,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		filter = p.parseExpr()
 	}
 	body := p.parseForStmtBody()
-	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, Filter: filter, Body: body}
+	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, PatternFilter: patternFilter, Filter: filter, Body: body}
 }
 
 func (p *Parser) parseForStmtBody() []ast.Stmt {
@@ -564,4 +569,27 @@ func (p *Parser) parseForStmtBody() []ast.Stmt {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	return p.parseBlock()
+}
+
+func (p *Parser) peekForWherePatternFilter() bool {
+	switch p.peek() {
+	case lexer.TOKEN_DOT, lexer.TOKEN_CARET, lexer.TOKEN_STRING_LIT, lexer.TOKEN_INT_LIT, lexer.TOKEN_FLOAT_LIT,
+		lexer.TOKEN_HEX_LIT, lexer.TOKEN_CHAR_LIT, lexer.TOKEN_TRUE, lexer.TOKEN_FALSE, lexer.TOKEN_NULL,
+		lexer.TOKEN_MINUS, lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+		return true
+	case lexer.TOKEN_IDENT:
+		if p.cur().Text == "_" {
+			return true
+		}
+		if p.pos+1 >= len(p.tokens) {
+			return false
+		}
+		next := p.tokens[p.pos+1].Kind
+		if next == lexer.TOKEN_LPAREN || next == lexer.TOKEN_LBRACE || next == lexer.TOKEN_DOT {
+			return true
+		}
+		return false
+	default:
+		return false
+	}
 }

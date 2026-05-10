@@ -63,6 +63,11 @@ func AssignableTo(dst, src Type) bool {
 	if SameType(dst, src) {
 		return true
 	}
+	if dstEnum, ok := dst.(*EnumType); ok {
+		if srcView, ok := src.(*PackedVariantViewType); ok && srcView.Enum != nil {
+			return SameType(dstEnum, srcView.Enum)
+		}
+	}
 	if dstErr, ok := dst.(*ErrorSetType); ok {
 		if srcErr, ok := src.(*ErrorSetType); ok {
 			return ErrorSetAssignable(dstErr, srcErr)

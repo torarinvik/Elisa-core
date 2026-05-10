@@ -323,13 +323,28 @@ func (s *functionState) materializePackedVariantViewValue(binding packedVariantV
 		if binding.ptr == nil {
 			return nil, nil, fmt.Errorf("packedview %s is missing both handle and decoded row", binding.typ.String())
 		}
-		if binding.store.typ == nil || binding.store.value == nil {
-			return nil, nil, fmt.Errorf("packedview %s requires store context for materialization", binding.typ.String())
+		if binding.typ.Enum != nil && !binding.typ.Enum.Packed {
+			value, err := s.loadValue(binding.ptr, binding.typ.Enum, "enum.view.value")
+			if err != nil {
+				return nil, nil, err
+			}
+			return value, binding.typ.Enum, nil
 		}
-		var err error
-		handle, err = s.encodePackedEnumHandleWithStore(binding.ptr, binding.typ.Enum, binding.store.value)
-		if err != nil {
-			return nil, nil, err
+		if binding.typ.Enum != nil && binding.typ.Enum.Packed && (binding.typ.Enum.StoreType == nil || binding.store.typ == nil || binding.store.value == nil) {
+			loadedHandle, err := s.loadValue(binding.ptr, binding.typ.Enum, "packedview.handle")
+			if err != nil {
+				return nil, nil, err
+			}
+			handle = loadedHandle
+		} else {
+			if binding.store.typ == nil || binding.store.value == nil {
+				return nil, nil, fmt.Errorf("packedview %s requires store context for materialization", binding.typ.String())
+			}
+			var err error
+			handle, err = s.encodePackedEnumHandleWithStore(binding.ptr, binding.typ.Enum, binding.store.value)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	value, err := s.buildPackedVariantViewValue(binding.typ, handle, &binding.store)

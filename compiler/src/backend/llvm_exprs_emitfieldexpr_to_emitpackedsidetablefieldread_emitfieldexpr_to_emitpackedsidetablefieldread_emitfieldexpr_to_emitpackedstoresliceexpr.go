@@ -312,7 +312,13 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
 		}
 	}
-	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, binding.handle, binding.typ.Enum, binding.typ.Variant, nil, origin)
+	payloadSourcePtr := binding.handle
+	decodedPayloadPtr := binding.ptr
+	if !binding.typ.Enum.Packed {
+		payloadSourcePtr = binding.ptr
+		decodedPayloadPtr = nil
+	}
+	payloadValues, err := s.loadEnumVariantPayload(decodedPayloadPtr, payloadSourcePtr, binding.typ.Enum, binding.typ.Variant, nil, origin)
 	if err != nil {
 		return nil, nil, true, err
 	}

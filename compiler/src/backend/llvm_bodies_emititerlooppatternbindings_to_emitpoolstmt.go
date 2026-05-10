@@ -398,6 +398,8 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		lastIndex := C.LLVMBuildSub(s.builder, countValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.rev.last"))
 		iterIndexValue = C.LLVMBuildSub(s.builder, lastIndex, indexValue, cStringFree("iter.rev.index"))
 	}
+	var boundItemValue C.LLVMValueRef
+	var boundItemPtr C.LLVMValueRef
 	if stmt.Mode == ast.IterBindValue {
 		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(iterSourceExpr, iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
 		if err != nil {
@@ -414,6 +416,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		} else {
 			itemType = resolvedItemType
 		}
+		boundItemValue = itemValue
 		if err := s.emitIterLoopPatternBindings(stmt.Pattern, stmt.Mode, itemType, itemValue, nil); err != nil {
 			s.popScope()
 			return err
@@ -427,10 +430,27 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		if itemType == nil {
 			itemType = resolvedItemType
 		}
+		boundItemPtr = itemPtr
 		if err := s.emitIterLoopPatternBindings(stmt.Pattern, stmt.Mode, itemType, nil, itemPtr); err != nil {
 			s.popScope()
 			return err
 		}
+	}
+	if stmt.PatternFilter != nil {
+		filterValue := boundItemValue
+		if filterValue == nil {
+			filterValue, err = s.loadValue(boundItemPtr, itemType, "iter.pattern.value")
+			if err != nil {
+				s.popScope()
+				return err
+			}
+		}
+		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.pattern.filter.body"))
+		if _, _, err := s.emitMatchPatternTest(stmt.PatternFilter, filterValue, nil, itemType, nil, nil, nil, filterBodyBB, stepBB); err != nil {
+			s.popScope()
+			return err
+		}
+		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	if stmt.Filter != nil {
 		filterValue, filterType, err := s.emitExpr(stmt.Filter, nil)

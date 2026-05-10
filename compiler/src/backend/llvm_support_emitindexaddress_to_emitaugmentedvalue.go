@@ -255,6 +255,9 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 			if err != nil {
 				return nil, err
 			}
+			if !expectedEnum.Packed && binding.ptr != nil {
+				return s.loadValue(binding.ptr, expectedEnum, "enum.view.value")
+			}
 			return binding.handle, nil
 		}
 		if coerced, ok, err := s.coercePackedEnumHandleValue(value, actual, expectedEnum); ok || err != nil {
@@ -263,11 +266,14 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 	}
 	if expectedView, ok := expected.(*semantic.PackedVariantViewType); ok {
 		if actualEnum, ok := actual.(*semantic.EnumType); ok && actualEnum == expectedView.Enum && actualEnum.Packed {
-			store, ok := s.lookupPackedStore(actualEnum)
-			if !ok {
-				return nil, fmt.Errorf("packedview %s requires store context for materialization", expectedView.String())
+			var store *packedStoreBinding
+			if actualEnum.StoreType != nil {
+				resolvedStore, ok := s.lookupPackedStore(actualEnum)
+				if ok {
+					store = &resolvedStore
+				}
 			}
-			return s.buildPackedVariantViewValue(expectedView, value, &store)
+			return s.buildPackedVariantViewValue(expectedView, value, store)
 		}
 	}
 	if expectedNode, ok := semantic.StripAggregateStateType(expected).(*semantic.TreeNodeType); ok && expectedNode != nil && expectedNode.Family != nil && treeFamilyLayoutPlan(expectedNode.Family).isCategoryUnion() {

@@ -412,7 +412,7 @@ func (s *functionState) createConditionBindingScope(expr ast.Expr) (*codegenScop
 	if err != nil {
 		return nil, false, err
 	}
-	if len(infos) == 0 {
+	if len(infos) == 0 && !s.conditionCanBindVariantView(expr) {
 		return nil, false, nil
 	}
 	scope := &codegenScope{parent: s.scope}
@@ -425,6 +425,127 @@ func (s *functionState) createConditionBindingScope(expr ast.Expr) (*codegenScop
 	}
 	return scope, true, nil
 }
+
+func (s *functionState) conditionCanBindVariantView(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case nil:
+		return false
+	case *ast.ParenExpr:
+		return s.conditionCanBindVariantView(n.Inner)
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND {
+			return s.conditionCanBindVariantView(n.Left) || s.conditionCanBindVariantView(n.Right)
+		}
+		if n.Op != lexer.TOKEN_IS {
+			return false
+		}
+		_, _, ok := s.conditionVariantViewInfo(n)
+		return ok
+	default:
+		return false
+	}
+}
+
+func (s *functionState) bindConditionVariantViews(expr ast.Expr) error {
+	switch n := expr.(type) {
+	case nil:
+		return nil
+	case *ast.ParenExpr:
+		return s.bindConditionVariantViews(n.Inner)
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND {
+			if err := s.bindConditionVariantViews(n.Left); err != nil {
+				return err
+			}
+			return s.bindConditionVariantViews(n.Right)
+		}
+		if n.Op != lexer.TOKEN_IS {
+			return nil
+		}
+		name, viewType, ok := s.conditionVariantViewInfo(n)
+		if !ok || name == "" || viewType == nil || viewType.Enum == nil {
+			return nil
+		}
+		binding, ok := s.lookupBinding(name)
+		if !ok || binding.ptr == nil {
+			return nil
+		}
+		if viewType.Enum.Packed {
+			var store packedStoreBinding
+			if viewType.Enum.StoreType != nil {
+				resolvedStore, ok := s.lookupPackedStore(viewType.Enum)
+				if !ok {
+					return nil
+				}
+				store = resolvedStore
+			}
+			handle, err := s.loadValue(binding.ptr, viewType.Enum, name+".view")
+			if err != nil {
+				return err
+			}
+			s.bindPackedVariantView(name, viewType, nil, handle, store, packedPayloadValueCache{})
+			return nil
+		}
+		s.bindPackedVariantView(name, viewType, binding.ptr, nil, packedStoreBinding{}, packedPayloadValueCache{})
+	}
+	return nil
+}
+
+func (s *functionState) conditionVariantViewInfo(expr *ast.BinaryExpr) (string, *semantic.PackedVariantViewType, bool) {
+	if expr == nil || expr.Op != lexer.TOKEN_IS {
+		return "", nil, false
+	}
+	left, ok := expr.Left.(*ast.Ident)
+	if !ok || left == nil || left.Name == "" {
+		return "", nil, false
+	}
+	targetEnum, targetVariant, ok := s.enumIsTarget(expr.Right)
+	if !ok || targetEnum == nil || targetVariant == nil {
+		pattern, ok := s.conditionTargetPattern(expr.Right)
+		if !ok || pattern == nil {
+			return "", nil, false
+		}
+		variantPattern, ok := pattern.(*ast.MatchVariantPattern)
+		if !ok || variantPattern == nil {
+			return "", nil, false
+		}
+		if actualEnum, ok := s.enumTypeForVariantViewExpr(expr.Left); ok && actualEnum != nil {
+			targetEnum = actualEnum
+			targetVariant, ok = actualEnum.Variant(variantPattern.Variant)
+			if !ok || targetVariant == nil || actualEnum.Name != variantPattern.EnumName {
+				return "", nil, false
+			}
+		}
+	}
+	if targetEnum == nil || targetVariant == nil {
+		return "", nil, false
+	}
+	actualEnum, ok := s.enumTypeForVariantViewExpr(expr.Left)
+	if !ok || actualEnum == nil || actualEnum.Name != targetEnum.Name {
+		return "", nil, false
+	}
+	return left.Name, targetVariant.PackedViewType(actualEnum), true
+}
+
+func (s *functionState) enumTypeForVariantViewExpr(expr ast.Expr) (*semantic.EnumType, bool) {
+	left, ok := expr.(*ast.Ident)
+	if !ok || left == nil || left.Name == "" {
+		return nil, false
+	}
+	var actual semantic.Type
+	if binding, ok := s.lookupBinding(left.Name); ok && binding.typ != nil {
+		actual = binding.typ
+	} else {
+		actual = s.exprType(expr)
+	}
+	if refType, ok := actual.(*semantic.RefType); ok && refType != nil {
+		actual = refType.Elem
+	}
+	actual = semantic.StripAggregateStateType(actual)
+	enumType, ok := actual.(*semantic.EnumType)
+	return enumType, ok && enumType != nil
+}
+
 func (s *functionState) collectMatchPatternBindings(pattern ast.MatchPattern, expected semantic.Type, out map[string]semantic.Type) error {
 	if pattern == nil || expected == nil || out == nil {
 		return nil

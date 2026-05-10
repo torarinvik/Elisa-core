@@ -309,13 +309,14 @@ const (
 )
 
 type IterForStmt struct {
-	Position lexer.Pos
-	Reverse  bool
-	Pattern  MoveBindPattern
-	Mode     IterBindMode
-	Source   Expr
-	Filter   Expr
-	Body     []Stmt
+	Position      lexer.Pos
+	Reverse       bool
+	Pattern       MoveBindPattern
+	Mode          IterBindMode
+	Source        Expr
+	PatternFilter MatchPattern
+	Filter        Expr
+	Body          []Stmt
 }
 type ParallelForStmt struct {
 	Position  lexer.Pos
