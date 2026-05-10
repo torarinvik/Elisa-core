@@ -235,12 +235,27 @@ def inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]:
     return out
 
 
+def new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> InlineVec[T, N]:
+    _ = api
+    return inline_vec[T, N](owner)
+
+
 def inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
     return vec.len
 
 
+@ufcs_only
 def count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
     return inline_vec_count[T, N](vec)
+
+
+def inline_vec_is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return vec.len == 0
+
+
+@ufcs_only
+def is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return inline_vec_is_empty[T, N](vec)
 
 
 def inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
@@ -319,6 +334,30 @@ def inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
 def push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
     can Memory.Allocate, Abort.Panic:
         inline_vec_push[T, N](vec, item)
+
+
+def inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
+    assert vec.len > 0
+    vec.len <- vec.len - 1
+    if vec.is_spilled:
+        vec.overflow.count <- vec.len
+        return vec.overflow[vec.len]
+    return vec.inline_items[vec.len]
+
+
+@ufcs_only
+def pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
+    return inline_vec_pop[T, N](vec)
+
+
+def inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T:
+    assert vec.len > 0
+    return inline_vec_get[T, N](vec, vec.len - 1)
+
+
+@ufcs_only
+def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
+    return inline_vec_last[T, N](vec)
 
 
 def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:

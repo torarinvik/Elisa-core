@@ -3,42 +3,42 @@ include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
 def inline_vec4_inline_smoke(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        values: mutable InlineVec[i32, 4] = inline_vec[i32, 4](a)
-        inline_vec_push[i32, 4](values, 2)
-        inline_vec_push[i32, 4](values, 3)
-        inline_vec_push[i32, 4](values, 5)
+        values: mutable InlineVec[i32, 4] = inlinevec.new(a)
+        values.push(2)
+        values.push(3)
+        values.push(5)
 
-        -1 return if inline_vec_count[i32, 4](values) != 3
-        -2 return if inline_vec_spilled[i32, 4](values)
-        return inline_vec_get[i32, 4](values, 0) + inline_vec_get[i32, 4](values, 1) + inline_vec_get[i32, 4](values, 2)
+        -1 return if values.count() != 3
+        -2 return if values.spilled()
+        return values.get(0) + values.get(1) + values.get(2)
 
 
 def inline_vec4_spill_smoke(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        values: mutable InlineVec[i32, 4] = inline_vec[i32, 4](a)
-        inline_vec_push[i32, 4](values, 1)
-        inline_vec_push[i32, 4](values, 2)
-        inline_vec_push[i32, 4](values, 3)
-        inline_vec_push[i32, 4](values, 4)
-        inline_vec_push[i32, 4](values, 5)
-        inline_vec_push[i32, 4](values, 6)
+        values: mutable InlineVec[i32, 4] = inlinevec.new(a)
+        values.push(1)
+        values.push(2)
+        values.push(3)
+        values.push(4)
+        values.push(5)
+        values.push(6)
 
-        -1 return if inline_vec_count[i32, 4](values) != 6
-        -2 return if not inline_vec_spilled[i32, 4](values)
-        inline_vec_set[i32, 4](values, 2, 30)
-        return inline_vec_get[i32, 4](values, 0) + inline_vec_get[i32, 4](values, 2) + inline_vec_get[i32, 4](values, 5)
+        -1 return if values.count() != 6
+        -2 return if not values.spilled()
+        values.set(2, 30)
+        return values.get(0) + values.get(2) + values.get(5)
 
 
 def inline_vec8_view_smoke(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        values: mutable InlineVec[i32, 8] = inline_vec[i32, 8](a)
+        values: mutable InlineVec[i32, 8] = inlinevec.new(a)
         for index in 0..<9:
-            inline_vec_push[i32, 8](values, index.i32())
+            values.push(index.i32())
 
-        -1 return if inline_vec_count[i32, 8](values) != 9
-        -2 return if not inline_vec_spilled[i32, 8](values)
+        -1 return if values.count() != 9
+        -2 return if not values.spilled()
 
-        view: dview[i32] = inline_vec_view[i32, 8](values)
+        view: dview[i32] = values.view()
         sum: mutable i32 = 0
         for index in 0..<view.len:
             sum <- sum + view[index]
@@ -47,14 +47,28 @@ def inline_vec8_view_smoke(a: mutable Arena&) -> i32:
 
 def inline_vec_clear_smoke(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        values: mutable InlineVec[i32, 4] = inline_vec[i32, 4](a)
+        values: mutable InlineVec[i32, 4] = inlinevec.new(a)
         for index in 0..<5:
-            inline_vec_push[i32, 4](values, index.i32())
+            values.push(index.i32())
 
-        -1 return if not inline_vec_spilled[i32, 4](values)
-        inline_vec_clear[i32, 4](values)
-        -2 return if inline_vec_count[i32, 4](values) != 0
-        -3 return if inline_vec_spilled[i32, 4](values)
+        -1 return if not values.spilled()
+        values.clear()
+        -2 return if values.count() != 0
+        -3 return if values.spilled()
+        -4 return if not values.is_empty()
 
-        inline_vec_push[i32, 4](values, 42)
-        return inline_vec_get[i32, 4](values, 0)
+        values.push(42)
+        return values.get(0)
+
+
+def inline_vec_pop_last_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        values: mutable InlineVec[i32, 4] = inlinevec.new(a)
+        values.push(10)
+        values.push(20)
+        values.push(30)
+
+        -1 return if values.last() != 30
+        popped: i32 = values.pop()
+        -2 return if values.count() != 2
+        return popped + values.last()
