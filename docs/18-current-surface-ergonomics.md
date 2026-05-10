@@ -18,12 +18,24 @@ def right_span(node: Lua.Expr) -> i64:
     return 0
 ```
 
+When several payload fields are needed, bind a variant projection alias with `as`. The alias has the exact variant-view type inside the truthy branch, so ordinary field access reads the variant payload without repeating each binding in the condition.
+
+```elisa
+def binary_score(node: Lua.Expr) -> i64:
+    if node is Lua.Expr.Binary as binary:
+        return binary.left.span + binary.right.span
+    return 0
+```
+
+Use direct payload bindings when the branch only needs one or two values, and use `as alias` when the branch works with the variant as a small record-like view. Prefer a full `match` when several variants are part of the same decision.
+
 Current rules:
 
 - `Variant(field: pattern)` works for enum and tree-category variant `is` tests when the variant declares named payloads
 - named payload patterns in `is` expressions and direct condition patterns may omit fields; omitted fields are ignored
 - positional payload patterns still use the full variant arity
 - positional and named payload patterns cannot be mixed in one variant pattern
+- `expr is Variant as alias` binds `alias` as a narrowed variant view in the truthy branch
 - ordinary `match` arms remain exhaustive for named payload patterns, so `match value: Type.Variant(field: x): ...` must still name every payload field
 
 ## Optional AST payloads
