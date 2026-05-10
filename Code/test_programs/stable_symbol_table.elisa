@@ -21,9 +21,13 @@ def stable_symbol_table_smoke(a: mutable Arena&) -> i32:
         -5 return if not table.has("beta")
         -6 return if table.count() != 2
 
+        total: mutable i32 = 0
+        for entry in table.entry_view():
+            total <- total + entry.value.value
+
         alpha: FixtureSymbol = table.lookup("alpha") else return -7
         beta: FixtureSymbol = table.value(beta_id)
-        return alpha.value + beta.value
+        return alpha.value + beta.value + total
 
 
 def stable_symbol_table_default_capacity(a: mutable Arena&) -> i32:
@@ -49,6 +53,10 @@ def stable_index_map_smoke(a: mutable Arena&) -> i32:
         -3 return if not map.has("beta")
         -4 return if map.count() != 2
 
+        total: mutable i32 = 0
+        for entry in map.entry_view():
+            total <- total + entry.value.value
+
         alpha: FixtureSymbol = map.get("alpha") else return -5
         beta_entry: IndexMapEntry[cstr[key_shape], FixtureSymbol] = map.entry(beta_index)
-        return alpha.value + beta_entry.value.value
+        return alpha.value + beta_entry.value.value + total

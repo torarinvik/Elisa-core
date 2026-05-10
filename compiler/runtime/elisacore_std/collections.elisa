@@ -890,6 +890,12 @@ def index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
     return index_map_entry[K, T](map, index).value
 
 
+def index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
+    elem_size: usize = sizeof(IndexMapEntry[K, T])
+    DynArrayView(null, 0, elem_size) return if map.entries.items == null or map.entries.count == 0
+    return DynArrayView(map.entries.items.cast[void&], map.entries.count, elem_size)
+
+
 @ufcs_only
 def entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
     return index_map_entry[K, T](map, index)
@@ -898,6 +904,11 @@ def entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
 @ufcs_only
 def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
     return index_map_value[K, T](map, index)
+
+
+@ufcs_only
+def entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
+    return index_map_entries[K, T](map)
 
 
 def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
@@ -1030,6 +1041,10 @@ def symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId
     return symbol_table_entry[K, T](table, symbol_id).value
 
 
+def symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]:
+    return index_map_entries[K, T](table.items)
+
+
 @ufcs_only
 def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
     return symbol_table_entry[K, T](table, symbol_id)
@@ -1038,6 +1053,11 @@ def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEn
 @ufcs_only
 def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
     return symbol_table_value[K, T](table, symbol_id)
+
+
+@ufcs_only
+def entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]:
+    return symbol_table_entries[K, T](table)
 
 
 def symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:

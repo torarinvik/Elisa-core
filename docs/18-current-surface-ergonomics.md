@@ -505,6 +505,9 @@ decls: darray[Pascal.Decl] = builder.finish()
 symbols: SymbolTable[NameId, PascalSymbol] = symtab.new(owner)
 id: SymbolId = symbols.declare(name_id, PascalSymbol{...})
 symbol: PascalSymbol? = symbols.lookup(name_id)
+
+for entry in symbols.entry_view():
+    visit(entry.key, entry.value)
 ```
 
 ```elisa
