@@ -1,0 +1,19 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+include "../../compiler/runtime/elisacore_std/names.elisa"
+
+
+def interned_name_methods_smoke(a: mutable Arena&) -> i32:
+    can Memory.Allocate, Abort.Panic:
+        names: mutable NameTable = name_table_init(a)
+        hello_id: NameId = names.intern("Hello", NameCasePolicy.CaseSensitive)
+        copy_id: NameId = names.intern_copy(name_cstr_view("Copied"), NameCasePolicy.CaseSensitive)
+        lower_id: NameId = names.intern_ci("mixed")
+
+        -1 return if not names.valid_id(hello_id)
+        -2 return if not names.valid_id(copy_id)
+        -3 return if not names.has_text_cs(hello_id, "Hello")
+        -4 return if names.has_text_cs(hello_id, "hello")
+        -5 return if not names.has_text_ci(lower_id, "MIXED")
+
+        text: sview = names.text(copy_id)
+        return text.len.i32()

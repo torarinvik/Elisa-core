@@ -222,6 +222,19 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "interned_names",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "interned_names.elisa"),
+			checks: []string{
+				"define i32 @interned_name_methods_smoke(ptr",
+				"call i32 @__ovl__intern__",
+				"call i32 @__ovl__intern_ci__",
+				"call i1 @__ovl__valid_id__",
+				"call i1 @__ovl__has_text_cs__",
+				"call i1 @__ovl__has_text_ci__",
+				"call %StringView @__ovl__text__",
+			},
+		},
+		{
 			name: "frontend_lexer",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa"),
 			checks: []string{

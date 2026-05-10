@@ -95,6 +95,16 @@ def name_table_text(table: NameTable&, name_id: NameId) -> sview:
     return table.entries[(!name_id).usize() - 1].text
 
 
+@ufcs_only
+def valid_id(table: NameTable&, name_id: NameId) -> bool:
+    return name_table_valid_id(table, name_id)
+
+
+@ufcs_only
+def text(table: NameTable&, name_id: NameId) -> sview:
+    return name_table_text(table, name_id)
+
+
 def name_table_eq(left: NameId, right: NameId) -> bool:
     return left == right and left != NAME_TABLE_INVALID_ID
 
@@ -167,6 +177,12 @@ def name_table_intern_view(table: mutable NameTable&, text: sview, policy: NameC
             return name_id
 
 
+@ufcs_only
+def intern_view(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
+    can Memory.Allocate, Abort.Panic:
+        return name_table_intern_view(table, text, policy)
+
+
 def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
         hash: u64 = name_text_hash(text, policy)
@@ -188,6 +204,46 @@ def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameC
             return name_id
 
 
+@ufcs_only
+def intern_copy(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
+    can Memory.Allocate, Abort.Panic:
+        return name_table_intern_copy(table, text, policy)
+
+
 def name_table_intern(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
         return table.name_table_intern_copy(text, policy)
+
+
+@ufcs_only
+def intern(table: mutable NameTable&, text: cstr, policy: NameCasePolicy) -> NameId:
+    can Memory.Allocate, Abort.Panic:
+        return name_table_intern(table, name_cstr_view(text), policy)
+
+
+@ufcs_only
+def intern_ci(table: mutable NameTable&, text: cstr) -> NameId:
+    can Memory.Allocate, Abort.Panic:
+        return name_table_intern(table, name_cstr_view(text), NameCasePolicy.AsciiCaseInsensitive)
+
+
+@ufcs_only
+def has_text_view(table: NameTable&, name_id: NameId, text: sview, policy: NameCasePolicy) -> bool:
+    false return if not name_table_valid_id(table, name_id)
+    entry: NameEntry = name_table_entry(table, name_id)
+    return name_text_eq(entry.text, text, policy)
+
+
+@ufcs_only
+def has_text(table: NameTable&, name_id: NameId, text: cstr, policy: NameCasePolicy) -> bool:
+    return table.has_text_view(name_id, name_cstr_view(text), policy)
+
+
+@ufcs_only
+def has_text_cs(table: NameTable&, name_id: NameId, text: cstr) -> bool:
+    return table.has_text(name_id, text, NameCasePolicy.CaseSensitive)
+
+
+@ufcs_only
+def has_text_ci(table: NameTable&, name_id: NameId, text: cstr) -> bool:
+    return table.has_text(name_id, text, NameCasePolicy.AsciiCaseInsensitive)
