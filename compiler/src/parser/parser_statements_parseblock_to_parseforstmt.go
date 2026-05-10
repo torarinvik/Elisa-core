@@ -598,7 +598,19 @@ func (p *Parser) peekForWherePatternFilter() bool {
 			for index+1 < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_DOT && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
 				index += 2
 			}
-			return index < len(p.tokens) && (p.tokens[index].Kind == lexer.TOKEN_LPAREN || p.tokens[index].Kind == lexer.TOKEN_LBRACE)
+			if index >= len(p.tokens) {
+				return false
+			}
+			switch p.tokens[index].Kind {
+			case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACE:
+				return true
+			case lexer.TOKEN_COLON:
+				return forWhereIdentLooksLikePatternType(p.cur().Text)
+			case lexer.TOKEN_IDENT:
+				return p.tokens[index].Text == "for" && forWhereIdentLooksLikePatternType(p.cur().Text)
+			default:
+				return false
+			}
 		}
 		return false
 	default:

@@ -1742,6 +1742,9 @@ for token in tokens where token.kind == TokenKind.IDENT:
 for decl in block.decls where Pascal.Decl.LabelDecl(labels):
     validate_labels(labels)
 
+for decl in block.decls where Pascal.Decl.LabelDecl:
+    validate_label_decl(decl)
+
 for decl in block.decls where Pascal.Decl.LabelDecl(labels) for label in labels:
     validate_label(label)
 ```
@@ -1751,6 +1754,7 @@ Current rules:
 - the binder runs before the filter, so the filter may reference destructured names such as `left`
 - the loop binder may be a simple name, an irrefutable brace destructure pattern, or a typed variant filter pattern
 - the filter may be an ordinary boolean expression or a pattern predicate
+- a variant pattern filter may omit payload parentheses when it only tests the variant kind and does not bind payload fields
 - loop headers can chain another `for` clause to express a simple nested iteration without adding an extra indentation level
 - this works over ordinary iterable sources and store-row iterators such as `rows()`
 

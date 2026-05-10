@@ -173,6 +173,30 @@ func TestParseIterableForStatementWithPatternFilter(t *testing.T) {
 		t.Fatalf("expected formatter to preserve pattern filter, got:\n%s", formatted)
 	}
 }
+func TestParseIterableForStatementWithBareVariantPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    None\n\ndef walk(items: darray[Expr]) -> void:\n    for item in items where Expr.Int:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := iterStmt.PatternFilter.(*ast.MatchVariantPattern)
+	if !ok {
+		t.Fatalf("expected variant pattern filter, got %T", iterStmt.PatternFilter)
+	}
+	if pattern.EnumName != "Expr" || pattern.Variant != "Int" {
+		t.Fatalf("unexpected pattern filter target: %#v", pattern)
+	}
+	if len(pattern.Args) != 0 {
+		t.Fatalf("expected bare variant pattern to bind no arguments, got %d", len(pattern.Args))
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for item in items where Expr.Int:") {
+		t.Fatalf("expected formatter to preserve bare pattern filter, got:\n%s", formatted)
+	}
+}
 func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
 	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for index, value in enumerate(items):\n        pass\n")
 	if len(errs) != 0 {
