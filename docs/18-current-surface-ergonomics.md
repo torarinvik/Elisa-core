@@ -509,10 +509,12 @@ symbol: PascalSymbol? = symbols.lookup(name_id)
 
 ```elisa
 name_id: NameId = names.intern_ci("forward")
-name: InternedName = names.interned(name_id)
 
-if name.matches_ci("forward"):
+if name_id.matches_ci(names, "forward"):
     mark_forward()
+
+if name_id.valid():
+    text: sview = name_id.text(names)
 ```
 
 ```elisa
@@ -529,7 +531,7 @@ Use `Flags[T]` for typed sets of const-enum values that grow or flow through API
 
 Use `owner.builder()` when constructing arena-owned dynamic arrays. The expected builder type supplies the element type, which keeps parser and semantic builders close to the data they are assembling.
 
-Use `NameId` for compact storage in ASTs and symbol tables. Use `InternedName` as a short-lived view when code needs to compare, validate, or read the text from a particular `NameTable`.
+Use `NameId` for compact storage in ASTs and symbol tables. Prefer `name_id.valid()`, `name_id.invalid()`, `name_id.text(names)`, and `name_id.matches_ci(names, "...")` for ordinary checks. Use `InternedName` as a short-lived view when code needs to carry both the table and id together.
 
 ## Bit-Level Storage And Layout Modes
 
