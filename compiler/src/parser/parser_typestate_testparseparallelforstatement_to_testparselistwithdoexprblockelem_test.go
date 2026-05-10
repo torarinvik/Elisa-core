@@ -232,6 +232,100 @@ func TestParseIterableForStatementWithWherePredicateClause(t *testing.T) {
 	}
 }
 
+func TestParseIterableForStatementWithInlineWhereFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for item in items where item > 0:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if _, ok := iterStmt.WhereFilter.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected binary where filter, got %T", iterStmt.WhereFilter)
+	}
+	if _, ok := iterStmt.Source.(*ast.Ident); !ok {
+		t.Fatalf("expected plain source expression, got %T", iterStmt.Source)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for item in items where (item > 0):") {
+		t.Fatalf("expected formatter to preserve inline where filter, got:\n%s", formatted)
+	}
+}
+
+func TestParseIterableForStatementWithInlineFieldWhereFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Item:\n    kind: int\n\ndef walk(items: darray[Item]) -> void:\n    for item in items where item.kind == 1:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if _, ok := iterStmt.WhereFilter.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected binary where filter, got %T", iterStmt.WhereFilter)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for item in items where (item.kind == 1):") {
+		t.Fatalf("expected formatter to preserve inline field where filter, got:\n%s", formatted)
+	}
+}
+
+func TestParseIterableForStatementWithInlineQualifiedFieldWhereFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum TokenKind:\n    IDENT\n    EOF\n\nstruct Token:\n    kind: TokenKind\n\ndef walk(items: darray[Token]) -> void:\n    for item in items where item.kind == TokenKind.IDENT:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[2].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if _, ok := iterStmt.WhereFilter.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected binary where filter, got %T", iterStmt.WhereFilter)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for item in items where (item.kind == TokenKind.IDENT):") {
+		t.Fatalf("expected formatter to preserve inline qualified field where filter, got:\n%s", formatted)
+	}
+}
+
+func TestParseIterableForStatementWithInlineCallWhereFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "def is_selected(item: int) -> bool:\n    return item > 0\n\ndef walk(items: darray[int]) -> void:\n    for item in items where is_selected(item):\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if _, ok := iterStmt.WhereFilter.(*ast.CallExpr); !ok {
+		t.Fatalf("expected call where filter, got %T", iterStmt.WhereFilter)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for item in items where is_selected(item):") {
+		t.Fatalf("expected formatter to preserve inline call where filter, got:\n%s", formatted)
+	}
+}
+
+func TestParseIterableForStatementKeepsQualifiedVariantWherePattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(decls: darray[Pascal.Decl]) -> void:\n    for decl in decls where Pascal.Decl.VarDecl(var_name_id, type_expr, _):\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := iterStmt.PatternFilter.(*ast.MatchVariantPattern)
+	if !ok {
+		t.Fatalf("expected qualified variant pattern filter, got %T", iterStmt.PatternFilter)
+	}
+	if pattern.EnumName != "Pascal.Decl" || pattern.Variant != "VarDecl" {
+		t.Fatalf("unexpected variant pattern: %#v", pattern)
+	}
+}
+
 func TestParseChainedIterableForStatementLowersToNestedLoops(t *testing.T) {
 	file, errs := parseSourceFile(t, "def collect(groups: darray[darray[int]]) -> void:\n    for group in groups for value in group:\n        pass\n")
 	if len(errs) != 0 {

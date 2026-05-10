@@ -124,6 +124,7 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 	case *ast.IterForStmt:
 		c.countExpr(n.Source)
 		c.countMatchPattern(n.PatternFilter)
+		c.countExpr(n.WhereFilter)
 		c.countExpr(n.Filter)
 		c.countMoveBindPattern(n.Pattern)
 		c.countStmts(n.Body)

@@ -97,7 +97,7 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 		case *ast.ForStmt:
 			current = b.buildLoopBody(current, n.Body)
 		case *ast.IterForStmt:
-			current = b.buildIterLoopBody(current, n.Filter, n.Body)
+			current = b.buildIterLoopBody(current, combineIterForFilters(n.WhereFilter, n.Filter), n.Body)
 		case *ast.ParallelForStmt:
 			current = b.buildLoopBody(current, n.Body)
 		case *ast.PoolStmt:
@@ -217,6 +217,16 @@ func (b *cfgBuilder) buildIterLoopBody(exits []int, filter ast.Expr, body []ast.
 		out = append(out, afterBlock)
 	}
 	return dedupeCFGBlockIDs(out)
+}
+
+func combineIterForFilters(whereFilter ast.Expr, filter ast.Expr) ast.Expr {
+	if whereFilter == nil {
+		return filter
+	}
+	if filter == nil {
+		return whereFilter
+	}
+	return &ast.BinaryExpr{Position: whereFilter.Pos(), Op: lexer.TOKEN_AND, Left: whereFilter, Right: filter}
 }
 
 func (b *cfgBuilder) buildMatch(exits []int, stmt *ast.MatchStmt) []int {

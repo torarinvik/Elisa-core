@@ -174,6 +174,7 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectStmts(n.Body)
 	case *ast.IterForStmt:
 		c.collectExpr(n.Source)
+		c.collectExpr(n.WhereFilter)
 		c.collectExpr(n.Filter)
 		c.collectStmts(n.Body)
 	case *ast.ParallelForStmt:

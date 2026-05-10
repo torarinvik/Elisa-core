@@ -86,6 +86,7 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Step)
 	case *ast.IterForStmt:
 		appendBasicFlowExprInstrs(block, n.Source)
+		appendBasicFlowExprInstrs(block, n.WhereFilter)
 		appendBasicFlowExprInstrs(block, n.Filter)
 	case *ast.ParallelForStmt:
 		appendBasicFlowExprInstrs(block, n.Source)

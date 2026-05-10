@@ -175,6 +175,7 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.IterForStmt:
 		a.validatePermissionExpr(n.Source, granted)
+		a.validatePermissionExpr(n.WhereFilter, granted)
 		a.validatePermissionExpr(n.Filter, granted)
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.ParallelForStmt:

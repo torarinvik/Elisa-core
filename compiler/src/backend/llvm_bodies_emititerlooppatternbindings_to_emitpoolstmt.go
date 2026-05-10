@@ -452,6 +452,21 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		}
 		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
+	if stmt.WhereFilter != nil {
+		filterValue, filterType, err := s.emitExpr(stmt.WhereFilter, nil)
+		if err != nil {
+			s.popScope()
+			return err
+		}
+		filterBool, err := s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
+		if err != nil {
+			s.popScope()
+			return err
+		}
+		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.where.filter.body"))
+		C.LLVMBuildCondBr(s.builder, filterBool, filterBodyBB, stepBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
+	}
 	if stmt.Filter != nil {
 		filterValue, filterType, err := s.emitExpr(stmt.Filter, nil)
 		if err != nil {

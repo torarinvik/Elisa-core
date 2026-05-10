@@ -112,6 +112,8 @@ func normalizeCascadeStmt(stmt ast.Stmt, target ast.Expr) []ast.Stmt {
 		n.Body = normalizeCascadeStmtList(n.Body, target)
 	case *ast.IterForStmt:
 		n.Source = normalizeCascadeExpr(n.Source, target, false)
+		n.WhereFilter = normalizeCascadeExpr(n.WhereFilter, target, false)
+		n.Filter = normalizeCascadeExpr(n.Filter, target, false)
 		n.Body = normalizeCascadeStmtList(n.Body, target)
 	case *ast.ParallelForStmt:
 		n.Source = normalizeCascadeExpr(n.Source, target, false)

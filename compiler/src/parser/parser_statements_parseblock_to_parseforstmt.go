@@ -542,15 +542,20 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		return &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
 	}
 	var patternFilter ast.MatchPattern
+	var whereFilter ast.Expr
 	if p.matchIdentText("where") {
 		if p.peekForWherePatternFilter() {
 			patternFilter = p.parseMatchPattern()
 		} else {
-			predicate := p.parseForHeaderExpr()
-			startOrSource = &ast.CallExpr{
-				Position: pos,
-				Func:     &ast.Ident{Position: pos, Name: "where"},
-				Args:     []ast.Expr{startOrSource, predicate},
+			whereExpr := p.parseForHeaderExpr()
+			if p.isForWherePredicateShorthand(whereExpr) {
+				startOrSource = &ast.CallExpr{
+					Position: pos,
+					Func:     &ast.Ident{Position: pos, Name: "where"},
+					Args:     []ast.Expr{startOrSource, whereExpr},
+				}
+			} else {
+				whereFilter = whereExpr
 			}
 		}
 	}
@@ -559,7 +564,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		filter = p.parseExpr()
 	}
 	body := p.parseForStmtBody()
-	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, PatternFilter: patternFilter, Filter: filter, Body: body}
+	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, PatternFilter: patternFilter, WhereFilter: whereFilter, Filter: filter, Body: body}
 }
 
 func (p *Parser) parseForStmtBody() []ast.Stmt {
@@ -585,11 +590,31 @@ func (p *Parser) peekForWherePatternFilter() bool {
 			return false
 		}
 		next := p.tokens[p.pos+1].Kind
-		if next == lexer.TOKEN_LPAREN || next == lexer.TOKEN_LBRACE || next == lexer.TOKEN_DOT {
-			return true
+		if next == lexer.TOKEN_LPAREN || next == lexer.TOKEN_LBRACE {
+			return forWhereIdentLooksLikePatternType(p.cur().Text)
+		}
+		if next == lexer.TOKEN_DOT {
+			index := p.pos + 1
+			for index+1 < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_DOT && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
+				index += 2
+			}
+			return index < len(p.tokens) && (p.tokens[index].Kind == lexer.TOKEN_LPAREN || p.tokens[index].Kind == lexer.TOKEN_LBRACE)
 		}
 		return false
 	default:
 		return false
 	}
+}
+
+func (p *Parser) isForWherePredicateShorthand(expr ast.Expr) bool {
+	_, ok := expr.(*ast.Ident)
+	return ok
+}
+
+func forWhereIdentLooksLikePatternType(name string) bool {
+	if name == "" {
+		return false
+	}
+	ch := name[0]
+	return ch >= 'A' && ch <= 'Z'
 }

@@ -98,6 +98,7 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForNode(block *CFGBlock, node ast
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Step)
 	case *ast.IterForStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Source)
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.WhereFilter)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Filter)
 	case *ast.ParallelForStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Source)

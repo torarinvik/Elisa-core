@@ -467,6 +467,25 @@ def sum_filtered(items: i64[4]) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersInlineWhereFilterLoops(t *testing.T) {
+	src := `def sum_filtered(items: i64[4]) -> i64:
+	total: mutable i64 = 0
+	for value in items where value > 2:
+		total <- total + value
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_inline_where_filter_loop.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"iter.where.filter.body", "icmp sgt", "define i64 @sum_filtered("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected inline where filter lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersWhereOverEnumerateViewLoops(t *testing.T) {
 	src := `def keep_even_pair(pair: (index: usize, value: i64)) -> bool:
 	return pair.index % 2 == 0

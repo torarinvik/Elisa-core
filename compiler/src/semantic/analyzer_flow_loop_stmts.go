@@ -327,6 +327,12 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		}
 		a.analyzeNestedMatchPattern(stmt.PatternFilter, info.ItemType, valueExpr, loopScope)
 	}
+	if stmt.WhereFilter != nil {
+		condType := a.analyzeCondExprInScope(stmt.WhereFilter, loopScope)
+		if !IsBoolType(condType) {
+			a.errorf(stmt.WhereFilter.Pos(), "for where filter must be bool, got %s", condType)
+		}
+	}
 	if stmt.Filter != nil {
 		condType := a.analyzeCondExprInScope(stmt.Filter, loopScope)
 		if !IsBoolType(condType) {
@@ -341,6 +347,8 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	var bodySnapshot affineFlowSnapshot
 	if stmt.Filter != nil {
 		bodySnapshot = a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.Filter, true)
+	} else if stmt.WhereFilter != nil {
+		bodySnapshot = a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.WhereFilter, true)
 	} else {
 		bodySnapshot = a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	}

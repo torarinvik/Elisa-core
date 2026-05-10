@@ -315,6 +315,7 @@ type IterForStmt struct {
 	Mode          IterBindMode
 	Source        Expr
 	PatternFilter MatchPattern
+	WhereFilter   Expr
 	Filter        Expr
 	Body          []Stmt
 }

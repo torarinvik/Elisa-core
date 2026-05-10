@@ -122,6 +122,8 @@ func (a *Analyzer) validateDeferStmtBodyStmt(stmt ast.Stmt) {
 		a.validateDeferStmtBody(n.Body)
 	case *ast.IterForStmt:
 		a.validateDeferStmtBodyExpr(n.Source)
+		a.validateDeferStmtBodyExpr(n.WhereFilter)
+		a.validateDeferStmtBodyExpr(n.Filter)
 		a.validateDeferStmtBody(n.Body)
 	case *ast.ParallelForStmt:
 		a.validateDeferStmtBodyExpr(n.Source)

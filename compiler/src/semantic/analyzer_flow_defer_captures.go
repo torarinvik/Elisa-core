@@ -108,6 +108,8 @@ func (c *deferCaptureCollector) collectStmt(stmt ast.Stmt, locals map[string]boo
 		for _, name := range parallelForMatchArmPatternNames(n.PatternFilter) {
 			bodyLocals[name] = true
 		}
+		c.collectExpr(n.WhereFilter, bodyLocals)
+		c.collectExpr(n.Filter, bodyLocals)
 		for _, innerStmt := range n.Body {
 			c.collectStmt(innerStmt, bodyLocals)
 		}
