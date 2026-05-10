@@ -35,6 +35,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	}
 	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
 	if ok {
+		a.recordImplicitTreeStoreUseForType(valueType)
 		a.analyzeTreeMatchStmt(stmt, treeType)
 		return
 	}

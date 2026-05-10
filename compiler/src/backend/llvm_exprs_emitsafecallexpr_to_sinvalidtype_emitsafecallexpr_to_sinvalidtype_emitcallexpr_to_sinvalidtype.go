@@ -210,7 +210,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if funcType == nil {
 		return nil, nil, fmt.Errorf("call target does not have a function type")
 	}
-	if len(funcType.ImplicitParamNames) != 0 && !expr.ResolvedImplicitArgsValid {
+	if len(funcType.ImplicitParamNames) != 0 && (!expr.ResolvedImplicitArgsValid || len(expr.ResolvedImplicitArgs) != len(funcType.ImplicitParamNames)) {
 		if recovered, ok := s.recoverImplicitCallArgs(expr, funcType); ok {
 			expr.ResolvedImplicitArgs = recovered
 			expr.ResolvedImplicitArgsValid = true
@@ -225,6 +225,13 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		if i < len(funcType.Params) {
 			expected = funcType.Params[i]
 		}
+		if value, ok, err := s.emitImplicitTreeStoreCallArg(arg, expected, funcType); ok || err != nil {
+			if err != nil {
+				return nil, nil, err
+			}
+			args = append(args, value)
+			continue
+		}
 		value, _, err := s.emitCallArg(arg, expected, funcType, i)
 		if err != nil {
 			return nil, nil, err
@@ -232,6 +239,34 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		args = append(args, value)
 	}
 	return s.emitResolvedCall(callee, funcType, s.directCallTarget(expr.Func), args)
+}
+
+func (s *functionState) emitImplicitTreeStoreCallArg(arg ast.Expr, expected semantic.Type, calleeType *semantic.FuncType) (C.LLVMValueRef, bool, error) {
+	storeType, ok := expected.(*semantic.TreeStoreType)
+	if !ok || storeType == nil || storeType.Family == nil {
+		return nil, false, nil
+	}
+	ident, ok := arg.(*ast.Ident)
+	if !ok || ident == nil || ident.Name != semantic.TreeStoreImplicitParamName(storeType.Family) {
+		return nil, false, nil
+	}
+	owner, ok := s.lookupTreeAllocOwnerForFamily(storeType.Family)
+	if !ok {
+		callee := "<unknown>"
+		if calleeType != nil && calleeType.Name != "" {
+			callee = calleeType.Name
+		}
+		caller := "<helper>"
+		if s != nil && s.decl != nil {
+			caller = s.decl.Name
+		}
+		return nil, true, fmt.Errorf("call from %s to %s requires tree store context for %s; use in owner/in perm around the call", caller, callee, storeType.Family.Name)
+	}
+	value, _, err := s.ensureTreeOwnerStoreValue(owner, storeType.Family)
+	if err != nil {
+		return nil, true, err
+	}
+	return value, true, nil
 }
 
 func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

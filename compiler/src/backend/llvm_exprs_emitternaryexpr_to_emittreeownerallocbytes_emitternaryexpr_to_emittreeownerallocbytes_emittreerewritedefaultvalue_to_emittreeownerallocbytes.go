@@ -96,7 +96,7 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 	if !ok {
 		return nil, nil, fmt.Errorf("rewrite default is missing an exact tree tag for %s", memberType.String())
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	owner, ok := s.lookupTreeAllocOwnerForFamily(family)
 	if !ok {
 		return nil, nil, fmt.Errorf("default requires an active in <owner>: scope")
 	}

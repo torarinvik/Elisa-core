@@ -55,6 +55,7 @@ type functionState struct {
 	regions                      []regionBinding
 	packedStores                 map[string]packedStoreBinding
 	treeAllocOwner               treeAllocOwnerBinding
+	implicitTreeStoreOwners      map[string]treeAllocOwnerBinding
 	treeRewriteDefault           *treeRewriteDefaultContext
 	currentSequenceRewrite       *sequenceRewriteCodegenContext
 	treeImplicitStores           map[treeImplicitStoreCacheKey]treeImplicitStoreSlot
@@ -336,6 +337,8 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		C.LLVMBuildStore(builder, paramValue, alloca)
 		state.defineBinding(name, valueBinding{ptr: alloca, typ: fnType.Params[typeIndex], mutable: mutable})
 		state.bindPackedStoreValue(fnType.Params[typeIndex], paramValue)
+		state.bindImplicitTreeStoreValue(fnType.Params[typeIndex], paramValue)
+		state.bindImplicitTreeOwnerParam(name, fnType.Params[typeIndex], alloca, paramValue)
 		return nil
 	}
 

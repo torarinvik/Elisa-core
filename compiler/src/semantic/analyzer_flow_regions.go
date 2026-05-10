@@ -36,6 +36,8 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
+	savedTreeOwner := a.currentTreeAllocOwner
+	savedAllocExpr := a.currentAllocExpr
 	guardSym := &Symbol{Name: stmt.GuardName, Kind: SymbolLocal, Type: guardType, Node: stmt, Mutable: true}
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
@@ -64,6 +66,8 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
+	a.currentTreeAllocOwner = savedTreeOwner
+	a.currentAllocExpr = savedAllocExpr
 }
 
 func scopedArenaOwnerRefType(pos lexer.Pos) ast.TypeExpr {
@@ -149,6 +153,8 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) {
 	if a.currentRegions != nil {
 		a.currentRegions[sym] = regionState{}
 	}
+	a.currentTreeAllocOwner = treeAllocOwnerBinding{Kind: treeAllocOwnerRegion, RegionName: stmt.Name}
+	a.currentAllocExpr = &ast.Ident{Position: stmt.Position, Name: stmt.Name}
 }
 
 func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {

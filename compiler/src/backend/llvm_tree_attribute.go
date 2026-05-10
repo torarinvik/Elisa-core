@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"fmt"
+	"sort"
 	"unsafe"
 
 	"elisacore/src/ast"
@@ -26,6 +27,7 @@ type treeAttributeHelperInfo struct {
 	llvmFnType C.LLVMTypeRef
 	storeParam bool
 	storeType  *semantic.TreeStoreType
+	storeTypes []*semantic.TreeStoreType
 	defined    bool
 }
 
@@ -142,12 +144,17 @@ func (s *functionState) newTreeAttributeHelper(attr *semantic.TreeAttribute) (*t
 	}
 	name := s.g.nextSyntheticName("tree_attr_")
 	params := []semantic.Type{attr.Receiver}
-	storeParam := false
+	storeTypes := s.g.categoryUnionTreeStoreTypesForAttribute(attr)
+	storeParam := len(storeTypes) != 0
 	var storeType *semantic.TreeStoreType
-	if root.family != nil && treeFamilyLayoutPlan(root.family).isCategoryUnion() && root.family.StoreType != nil {
-		storeParam = true
-		storeType = root.family.StoreType
-		params = append(params, storeType)
+	if storeParam {
+		storeType = storeTypes[0]
+		for _, candidate := range storeTypes {
+			params = append(params, candidate)
+			if root.family != nil && candidate.Family == root.family {
+				storeType = candidate
+			}
+		}
 	}
 	funcType := &semantic.FuncType{Name: name, Params: params, Return: attr.ReturnType}
 	llvmFnType, err := s.g.lowerFunctionType(funcType)
@@ -168,7 +175,46 @@ func (s *functionState) newTreeAttributeHelper(attr *semantic.TreeAttribute) (*t
 		llvmFnType: llvmFnType,
 		storeParam: storeParam,
 		storeType:  storeType,
+		storeTypes: storeTypes,
 	}, nil
+}
+
+func (g *llvmGenerator) categoryUnionTreeStoreTypesForAttribute(attr *semantic.TreeAttribute) []*semantic.TreeStoreType {
+	if g == nil || g.result == nil || attr == nil {
+		return nil
+	}
+	storesByFamily := map[string]*semantic.TreeStoreType{}
+	addFamily := func(family *semantic.TreeType) {
+		if family == nil || family.Layout != semantic.TreeLayoutCategoryUnion || family.StoreType == nil {
+			return
+		}
+		storesByFamily[family.Name] = family.StoreType
+	}
+	if root, err := treeAttributeRootInfo(attr.Receiver); err == nil {
+		addFamily(root.family)
+	}
+	for _, attrs := range g.result.TreeAttributes {
+		for _, candidate := range attrs {
+			if candidate == nil || candidate.Name != attr.Name {
+				continue
+			}
+			root, err := treeAttributeRootInfo(candidate.Receiver)
+			if err != nil {
+				continue
+			}
+			addFamily(root.family)
+		}
+	}
+	names := make([]string, 0, len(storesByFamily))
+	for name := range storesByFamily {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	stores := make([]*semantic.TreeStoreType, 0, len(names))
+	for _, name := range names {
+		stores = append(stores, storesByFamily[name])
+	}
+	return stores
 }
 
 func (s *functionState) defineTreeAttributeHelper(helper *treeAttributeHelperInfo) error {
@@ -195,8 +241,13 @@ func (s *functionState) defineTreeAttributeHelper(helper *treeAttributeHelperInf
 	}
 	nodeParam := C.LLVMGetParam(helper.fnValue, C.unsigned(paramOffset))
 	if helper.storeParam {
-		storeParam := C.LLVMGetParam(helper.fnValue, C.unsigned(paramOffset+1))
-		state.treeAllocOwner = treeAllocOwnerBinding{storeValue: storeParam, storeType: helper.storeType}
+		for i, storeType := range helper.storeTypes {
+			storeParam := C.LLVMGetParam(helper.fnValue, C.unsigned(paramOffset+1+i))
+			state.bindImplicitTreeStoreValue(storeType, storeParam)
+			if storeType == helper.storeType {
+				state.treeAllocOwner = treeAllocOwnerBinding{storeValue: storeParam, storeType: storeType}
+			}
+		}
 	}
 	return state.emitTreeAttributeHelperBody(helper, nodeParam)
 }
@@ -207,15 +258,24 @@ func (s *functionState) emitTreeAttributeHelperCall(helper *treeAttributeHelperI
 	}
 	callArgs := []C.LLVMValueRef{nodeValue}
 	if helper.storeParam {
-		owner, ok := s.lookupTreeAllocOwner()
-		if !ok {
-			return nil, fmt.Errorf("category_union tree attribute %s requires an explicit tree store context", helper.attr.Name)
+		for _, storeType := range helper.storeTypes {
+			if storeType == nil || storeType.Family == nil {
+				return nil, fmt.Errorf("missing tree attribute store metadata")
+			}
+			owner, ok := s.lookupTreeAllocOwnerForFamily(storeType.Family)
+			if !ok {
+				caller := "<helper>"
+				if s.decl != nil {
+					caller = s.decl.Name
+				}
+				return nil, fmt.Errorf("category_union tree attribute %s for %s requires an explicit tree store context in %s", helper.attr.Name, storeType.Family.Name, caller)
+			}
+			storeValue, _, err := s.ensureTreeOwnerStoreValue(owner, storeType.Family)
+			if err != nil {
+				return nil, err
+			}
+			callArgs = append(callArgs, storeValue)
 		}
-		storeValue, _, err := s.ensureTreeOwnerStoreValue(owner, helper.root.family)
-		if err != nil {
-			return nil, err
-		}
-		callArgs = append(callArgs, storeValue)
 	}
 	if retUnion, ok := nonVoidErrorUnion(helper.resultType); ok {
 		resultSlot, err := s.emitStackTempZeroed(retUnion.Value, name+".result")
@@ -285,6 +345,8 @@ func (s *functionState) emitTreeAttributeSwitchDispatch(helper *treeAttributeHel
 	var err error
 	if helper.root.kind == treeFoldRootCategory && helper.root.category != nil {
 		tagValue, err = s.extractTreeCategoryTagValue(nodeValue, helper.root.category)
+	} else if helper.root.kind == treeFoldRootFamily && helper.root.family != nil {
+		tagValue, err = s.emitTreeRootTagValue(nodeValue, helper.root.family, name+".tag")
 	} else {
 		tagValue, err = s.emitTreeHandleTagValue(nodeValue, name+".tag")
 	}
@@ -362,6 +424,14 @@ func (s *functionState) emitTreeAttributeArmSequence(helper *treeAttributeHelper
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail"))
 	incomingValues := make([]C.LLVMValueRef, 0, len(arms)+1)
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(arms)+1)
+	armNodeValue := nodeValue
+	if helper.root.kind == treeFoldRootFamily && helper.root.family != nil {
+		var err error
+		armNodeValue, err = s.emitTreeRootDispatchMemberValue(nodeValue, helper.root.family, memberType, name+".member")
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	for i, arm := range arms {
 		bodyEntryBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm.entry"))
 		var nextBB C.LLVMBasicBlockRef
@@ -374,16 +444,16 @@ func (s *functionState) emitTreeAttributeArmSequence(helper *treeAttributeHelper
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyEntryBB)
 		s.pushScope()
 		if arm.BindName != "" && arm.BindName != "_" {
-			if err := s.emitMoveBindLocal(arm.BindName, memberType, nodeValue); err != nil {
+			if err := s.emitMoveBindLocal(arm.BindName, memberType, armNodeValue); err != nil {
 				s.popScope()
 				return nil, false, err
 			}
 		}
-		if err := s.emitTreeAttributeImplicitChildrenLocal(helper.attr.Receiver, nodeValue, memberType, name+".children"); err != nil {
+		if err := s.emitTreeAttributeImplicitChildrenLocal(helper.attr.Receiver, armNodeValue, memberType, name+".children"); err != nil {
 			s.popScope()
 			return nil, false, err
 		}
-		if err := s.emitTreeAttributeNamedChildBindingLocals(nodeValue, memberType, arm, name+".named"); err != nil {
+		if err := s.emitTreeAttributeNamedChildBindingLocals(armNodeValue, memberType, arm, name+".named"); err != nil {
 			s.popScope()
 			return nil, false, err
 		}

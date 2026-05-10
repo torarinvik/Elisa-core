@@ -181,16 +181,22 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 			a.errorf(expr.Pos(), "internal error: implicit parameter %q index out of bounds for call to %q", name, ft.Name)
 			continue
 		}
+		expectedType := a.substituteType(ft.Params[paramIndex], bindings, shapeBindings, regionBindings, permissionBindings)
 		argExpr, ok := working[name]
 		if !ok || argExpr == nil {
 			if fallback, found := a.lookupSameNameImplicitExpr(name, working); found {
 				argExpr = fallback
+			} else if storeType, isTreeStore := expectedType.(*TreeStoreType); isTreeStore && storeType != nil {
+				a.recordImplicitTreeStoreUse(storeType)
+				argExpr = treeStoreImplicitArgExpr(storeType)
+				a.exprTypes[argExpr] = expectedType
+				resolved = append(resolved, argExpr)
+				continue
 			} else {
 				a.errorf(expr.Pos(), "missing implicit argument %q for call to %q", name, ft.Name)
 				continue
 			}
 		}
-		expectedType := a.substituteType(ft.Params[paramIndex], bindings, shapeBindings, regionBindings, permissionBindings)
 		var actualType Type
 		argExpr, actualType = a.analyzeCallLikeValueExpr(argExpr, expectedType)
 		if !AssignableTo(expectedType, actualType) {

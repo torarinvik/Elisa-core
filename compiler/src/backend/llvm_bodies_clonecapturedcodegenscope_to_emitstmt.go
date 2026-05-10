@@ -229,11 +229,16 @@ func (s *functionState) emitRegionDecl(n *ast.RegionStmt) error {
 	C.LLVMBuildStore(s.builder, zero, alloca)
 	s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
 	s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
+	s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: alloca}
 	return s.emitRegionInit(alloca, arenaType, n.Capacity)
 }
 func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	s.pushScope()
 	defer s.popScope()
+	savedTreeOwner := s.treeAllocOwner
+	defer func() {
+		s.treeAllocOwner = savedTreeOwner
+	}()
 	if err := s.emitRegionDecl(n); err != nil {
 		return err
 	}

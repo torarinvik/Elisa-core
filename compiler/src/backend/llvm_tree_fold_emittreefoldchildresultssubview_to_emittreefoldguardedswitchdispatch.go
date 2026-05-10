@@ -195,13 +195,21 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 	return nil
 }
 func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, arm ast.VisitArm) (C.LLVMValueRef, bool, error) {
-	childViewValue, err := s.emitTreeFoldChildResultsView(helper, envValue, nodeValue, memberType, "fold.arm")
+	armNodeValue := nodeValue
+	if helper != nil && helper.root.kind == treeFoldRootFamily && helper.root.family != nil {
+		var err error
+		armNodeValue, err = s.emitTreeRootDispatchMemberValue(nodeValue, helper.root.family, memberType, "fold.arm.member")
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	childViewValue, err := s.emitTreeFoldChildResultsView(helper, envValue, armNodeValue, memberType, "fold.arm")
 	if err != nil {
 		return nil, false, err
 	}
 	s.pushScope()
 	if arm.BindName != "" && arm.BindName != "_" {
-		if err := s.emitMoveBindLocal(arm.BindName, memberType, nodeValue); err != nil {
+		if err := s.emitMoveBindLocal(arm.BindName, memberType, armNodeValue); err != nil {
 			s.popScope()
 			return nil, false, err
 		}
@@ -213,14 +221,14 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 			return nil, false, err
 		}
 	}
-	if err := s.emitTreeFoldNamedChildBindingLocals(helper, nodeValue, memberType, childViewValue, arm, "fold.arm.named"); err != nil {
+	if err := s.emitTreeFoldNamedChildBindingLocals(helper, armNodeValue, memberType, childViewValue, arm, "fold.arm.named"); err != nil {
 		s.popScope()
 		return nil, false, err
 	}
 	savedRewriteDefault := s.treeRewriteDefault
 	if helper.rewrite {
 		if _, exact := semantic.TreeExactTag(memberType); exact {
-			s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: nodeValue, childViewValue: childViewValue}
+			s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: armNodeValue, childViewValue: childViewValue}
 		} else {
 			s.treeRewriteDefault = nil
 		}
@@ -231,9 +239,17 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 	return armValue, reachable, err
 }
 func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, arms []ast.VisitArm, failUnreachable bool, name string) (C.LLVMValueRef, bool, error) {
+	armNodeValue := nodeValue
+	if helper != nil && helper.root.kind == treeFoldRootFamily && helper.root.family != nil {
+		var err error
+		armNodeValue, err = s.emitTreeRootDispatchMemberValue(nodeValue, helper.root.family, memberType, name+".member")
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	if len(arms) == 0 {
 		if helper != nil && helper.hasImplicitRewriteDefault() {
-			value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, nodeValue, memberType, name)
+			value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, armNodeValue, memberType, name)
 			return value, false, err
 		}
 		if semantic.IsNeverType(helper.resultType) || failUnreachable {
@@ -260,13 +276,13 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 		}
 		C.LLVMBuildBr(s.builder, bodyEntryBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyEntryBB)
-		childViewValue, err := s.emitTreeFoldChildResultsView(helper, envValue, nodeValue, memberType, name+".arm")
+		childViewValue, err := s.emitTreeFoldChildResultsView(helper, envValue, armNodeValue, memberType, name+".arm")
 		if err != nil {
 			return nil, false, err
 		}
 		s.pushScope()
 		if arm.BindName != "" && arm.BindName != "_" {
-			if err := s.emitMoveBindLocal(arm.BindName, memberType, nodeValue); err != nil {
+			if err := s.emitMoveBindLocal(arm.BindName, memberType, armNodeValue); err != nil {
 				s.popScope()
 				return nil, false, err
 			}
@@ -278,7 +294,7 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 				return nil, false, err
 			}
 		}
-		if err := s.emitTreeFoldNamedChildBindingLocals(helper, nodeValue, memberType, childViewValue, arm, name+".named"); err != nil {
+		if err := s.emitTreeFoldNamedChildBindingLocals(helper, armNodeValue, memberType, childViewValue, arm, name+".named"); err != nil {
 			s.popScope()
 			return nil, false, err
 		}
@@ -295,7 +311,7 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 		savedRewriteDefault := s.treeRewriteDefault
 		if helper.rewrite {
 			if _, exact := semantic.TreeExactTag(memberType); exact {
-				s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: nodeValue, childViewValue: childViewValue}
+				s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: armNodeValue, childViewValue: childViewValue}
 			} else {
 				s.treeRewriteDefault = nil
 			}
@@ -316,7 +332,7 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 		C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
 	}
 	if helper != nil && helper.hasImplicitRewriteDefault() {
-		value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, nodeValue, memberType, name)
+		value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, armNodeValue, memberType, name)
 		if err != nil {
 			return nil, false, err
 		}
@@ -371,6 +387,8 @@ func (s *functionState) emitTreeFoldSwitchDispatch(helper *treeFoldHelperInfo, e
 	var err error
 	if helper.root.kind == treeFoldRootCategory && helper.root.category != nil {
 		tagValue, err = s.extractTreeCategoryTagValue(nodeValue, helper.root.category)
+	} else if helper.root.kind == treeFoldRootFamily && helper.root.family != nil {
+		tagValue, err = s.emitTreeRootTagValue(nodeValue, helper.root.family, name+".tag")
 	} else {
 		tagValue, err = s.emitTreeHandleTagValue(nodeValue, name+".tag")
 	}
@@ -432,6 +450,8 @@ func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelper
 	var err error
 	if helper.root.kind == treeFoldRootCategory && helper.root.category != nil {
 		tagValue, err = s.extractTreeCategoryTagValue(nodeValue, helper.root.category)
+	} else if helper.root.kind == treeFoldRootFamily && helper.root.family != nil {
+		tagValue, err = s.emitTreeRootTagValue(nodeValue, helper.root.family, name+".tag")
 	} else {
 		tagValue, err = s.emitTreeHandleTagValue(nodeValue, name+".tag")
 	}

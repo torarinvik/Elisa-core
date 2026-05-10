@@ -239,7 +239,7 @@ def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binar
 	if !ok {
 		t.Fatalf("expected keep_binary function type, got %T", sym.Type)
 	}
-	if len(fnType.Params) != 1 || fnType.Return == nil {
+	if fnType.ExplicitParamCount != 1 || len(fnType.Params) < 1 || fnType.Return == nil {
 		t.Fatalf("unexpected keep_binary function type shape: %#v", fnType)
 	}
 	if fnType.Params[0].String() != "Lua.Expr.Binary" {

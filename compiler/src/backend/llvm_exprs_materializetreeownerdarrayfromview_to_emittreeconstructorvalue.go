@@ -493,7 +493,7 @@ func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeTyp
 	if owner != nil {
 		resolvedOwner = *owner
 	} else {
-		activeOwner, ok := s.lookupTreeAllocOwner()
+		activeOwner, ok := s.lookupTreeAllocOwnerForFamily(treeType.Family)
 		if !ok {
 			return nil, nil, fmt.Errorf("tree constructor %s.%s requires an active in <owner>: scope or explicit new[owner]", treeType.Name, variant.Name)
 		}

@@ -32,6 +32,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	}
 	if attr, ok := a.lookupTreeAttribute(objType, expr.Field); ok {
 		a.attributeFieldRefs[expr] = &AttributeFieldRef{Attribute: attr}
+		a.recordImplicitTreeStoreUseForTreeAttribute(attr)
 		attrType := a.specializeProjectedFunctionFieldType(expr, attr.ReturnType)
 		a.reportInvalidRegionUse(expr, attrType)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(attrType, map[string]bool{}) {
@@ -52,6 +53,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	}
 	if projectedType, attr, ok := a.lookupProjectedTreeAttributeSequence(objType, expr.Field); ok {
 		a.attributeFieldRefs[expr] = &AttributeFieldRef{Attribute: attr}
+		a.recordImplicitTreeStoreUseForTreeAttribute(attr)
 		a.reportInvalidRegionUse(expr, projectedType)
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, projectedType)
 		return projectedType

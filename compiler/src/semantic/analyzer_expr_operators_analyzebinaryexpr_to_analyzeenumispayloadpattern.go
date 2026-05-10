@@ -354,6 +354,7 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 				a.errorf(expr.Left.Pos(), "is requires an enum or tree-category value for variant tests, got %s", left)
 				continue
 			}
+			a.recordImplicitTreeStoreUseForType(left)
 			matchableTree, _, _ := resolveMatchableTreeCategoryType(left)
 			if matchableTree == nil || treeType == nil || matchableTree.Name != treeType.Name {
 				expected := "<invalid>"

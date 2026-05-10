@@ -10,6 +10,16 @@ func MergeTypes(a, b Type) Type {
 	if SameType(a, b) {
 		return a
 	}
+	if av, ok := a.(*PackedVariantViewType); ok && av != nil && av.Enum != nil {
+		if SameType(av.Enum, b) {
+			return b
+		}
+	}
+	if bv, ok := b.(*PackedVariantViewType); ok && bv != nil && bv.Enum != nil {
+		if SameType(a, bv.Enum) {
+			return a
+		}
+	}
 	if au, ok := a.(*ErrorUnionType); ok {
 		if bu, ok := b.(*ErrorUnionType); ok {
 			merged := MergeTypes(au.Value, bu.Value)

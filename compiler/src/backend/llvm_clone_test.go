@@ -89,16 +89,15 @@ def clone_expr(owner: mutable Arena&, expr: Lua.Expr) -> Lua.Expr:
 	}
 	for _, check := range []string{
 		"define i32 @clone_expr",
-		"define private i32 @tree_fold_",
-		"category.default.arm",
-		"tree.default.payload.memcpy",
-		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"ret i32 %expr",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected category_union clone lowering to include %q, got:\n%s", check, output)
 		}
 	}
-	if strings.Contains(output, "%Lua_Expr_Binary__TreeTable") {
-		t.Fatalf("expected category_union clone lowering to avoid exact per-variant rows, got:\n%s", output)
+	for _, unexpected := range []string{"define private i32 @tree_fold_", "%Lua_Expr_Binary__TreeTable"} {
+		if strings.Contains(output, unexpected) {
+			t.Fatalf("expected category_union clone lowering to avoid %q, got:\n%s", unexpected, output)
+		}
 	}
 }

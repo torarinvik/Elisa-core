@@ -18,6 +18,7 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 		}
 		return invalidType
 	}
+	a.recordImplicitTreeStoreUseForFamily(root.Family)
 	keyword := expr.Keyword
 	if keyword == "" {
 		keyword = "fold"

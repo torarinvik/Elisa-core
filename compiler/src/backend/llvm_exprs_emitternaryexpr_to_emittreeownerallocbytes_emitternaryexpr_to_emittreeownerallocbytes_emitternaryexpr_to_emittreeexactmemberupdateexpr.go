@@ -292,7 +292,7 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 	if owner != nil {
 		resolvedOwner = *owner
 	} else {
-		activeOwner, ok := s.lookupTreeAllocOwner()
+		activeOwner, ok := s.lookupTreeAllocOwnerForFamily(family)
 		if !ok {
 			return nil, nil, fmt.Errorf("tree update of %s requires an active in <owner>: scope or explicit new[owner]", memberType.String())
 		}

@@ -466,7 +466,11 @@ func (s *functionState) emitTreeFoldExactStructuralChildNodeValue(nodeValue C.LL
 			resolvedType = valueType
 		}
 		if resolvedType == nil || !semantic.AssignableTo(rootType, resolvedType) {
-			return nil, fmt.Errorf("fold child %s is not assignable to root %s", resolvedType.String(), rootType.String())
+			caller := "<helper>"
+			if s.decl != nil {
+				caller = s.decl.Name
+			}
+			return nil, fmt.Errorf("fold child %s is not assignable to root %s in %s", resolvedType.String(), rootType.String(), caller)
 		}
 		incomingValues = append(incomingValues, matchValue)
 		incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))

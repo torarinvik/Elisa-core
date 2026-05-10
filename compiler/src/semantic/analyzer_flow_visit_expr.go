@@ -14,6 +14,7 @@ func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 		}
 		return invalidType
 	}
+	a.recordImplicitTreeStoreUseForFamily(root.Family)
 	covered := map[string]bool{}
 	priorKeys := map[string]bool{}
 	hasWildcard := false

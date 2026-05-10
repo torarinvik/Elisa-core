@@ -257,7 +257,7 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 	if visitArmsHaveGuard(expr.Arms) {
 		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.end"))
 		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.fail"))
-		tagValue, err := s.emitTreeHandleTagValue(treeValue, "visit.node")
+		tagValue, err := s.emitTreeRootTagValue(treeValue, rootType.Family, "visit.node")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -278,7 +278,11 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 			}
 			C.LLVMAddCase(switchInst, tagConst, bodyBB)
 			C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
-			armValue, terminated, err := s.emitExactVisitArmSequence(treeValue, member, memberArms, resultType, "visit.node.exact")
+			memberValue, err := s.emitTreeRootDispatchMemberValue(treeValue, rootType.Family, member, "visit.node.member")
+			if err != nil {
+				return nil, nil, err
+			}
+			armValue, terminated, err := s.emitExactVisitArmSequence(memberValue, member, memberArms, resultType, "visit.node.exact")
 			if err != nil {
 				return nil, nil, err
 			}
@@ -316,7 +320,7 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 	if len(relevantArms) == 0 {
 		return nil, nil, fmt.Errorf("visit expression over %s has no relevant arms", rootType.String())
 	}
-	tagValue, err := s.emitTreeHandleTagValue(treeValue, "visit.node")
+	tagValue, err := s.emitTreeRootTagValue(treeValue, rootType.Family, "visit.node")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -336,9 +340,13 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 		}
 		C.LLVMAddCase(switchInst, tagConst, bodyBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		memberValue, err := s.emitTreeRootDispatchMemberValue(treeValue, rootType.Family, armInfo.member, "visit.node.member")
+		if err != nil {
+			return nil, nil, err
+		}
 		s.pushScope()
 		if armInfo.arm.BindName != "" && armInfo.arm.BindName != "_" {
-			if err := s.emitMoveBindLocal(armInfo.arm.BindName, armInfo.member, treeValue); err != nil {
+			if err := s.emitMoveBindLocal(armInfo.arm.BindName, armInfo.member, memberValue); err != nil {
 				s.popScope()
 				return nil, nil, err
 			}

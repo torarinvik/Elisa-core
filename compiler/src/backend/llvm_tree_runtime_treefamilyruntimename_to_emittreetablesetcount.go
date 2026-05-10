@@ -714,6 +714,41 @@ func (s *functionState) emitTreeIndexValueFromKey(keyValue C.LLVMValueRef, name 
 func (s *functionState) emitTreeHandleTagValue(handleValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	return s.emitTreeTagValueFromKey(s.emitTreeHandleKeyValue(handleValue, name), name)
 }
+func (s *functionState) emitTreeRootTagValue(handleValue C.LLVMValueRef, family *semantic.TreeType, name string) (C.LLVMValueRef, error) {
+	if family == nil {
+		return nil, fmt.Errorf("missing tree family for root tag access")
+	}
+	if treeFamilyLayoutPlan(family).isCategoryUnion() {
+		stateValue, err := s.emitTreeCategoryUnionContextStateValue(family, name)
+		if err != nil {
+			return nil, err
+		}
+		tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, name)
+		if err != nil {
+			return nil, err
+		}
+		rowIndex, err := s.emitTreeHandleIndexValue(handleValue, name)
+		if err != nil {
+			return nil, err
+		}
+		return s.emitTreeRootUnionKindValueAtIndex(tablePtr, family, rowIndex, name)
+	}
+	return s.emitTreeHandleTagValue(handleValue, name)
+}
+func (s *functionState) emitTreeRootDispatchMemberValue(rootValue C.LLVMValueRef, family *semantic.TreeType, memberType semantic.Type, name string) (C.LLVMValueRef, error) {
+	if family == nil || !treeFamilyLayoutPlan(family).isCategoryUnion() {
+		return rootValue, nil
+	}
+	viewType, ok := semantic.StripAggregateStateType(memberType).(*semantic.TreeVariantViewType)
+	if !ok || viewType == nil || viewType.Category == nil || !treeCategoryLayoutPlan(viewType.Category).isCategoryUnion() {
+		return rootValue, nil
+	}
+	payloadValue, _, err := s.emitTreeRootUnionPayloadForHandle(rootValue, family, name)
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildExtractValue(s.builder, payloadValue, 1, cStringFree(name+".category.handle")), nil
+}
 func (s *functionState) emitTreeHandleIndexValue(handleValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	valueType := C.LLVMTypeOf(handleValue)
 	if C.LLVMGetTypeKind(valueType) == C.LLVMIntegerTypeKind && C.LLVMGetIntTypeWidth(valueType) == 32 {
@@ -975,7 +1010,7 @@ type treeHandleAccess struct {
 
 func (s *functionState) emitTreeHandleAccess(handleValue C.LLVMValueRef, name string) (treeHandleAccess, error) {
 	if C.LLVMGetTypeKind(C.LLVMTypeOf(handleValue)) == C.LLVMIntegerTypeKind && C.LLVMGetIntTypeWidth(C.LLVMTypeOf(handleValue)) == 32 {
-		return treeHandleAccess{}, fmt.Errorf("compact tree handle access requires category metadata")
+		return treeHandleAccess{}, fmt.Errorf("compact tree handle access requires category metadata at %s", name)
 	}
 	stateValue := s.emitTreeHandleStateValue(handleValue, name+".state")
 	rowIndex, err := s.emitTreeHandleIndexValue(handleValue, name+".index")
@@ -989,9 +1024,13 @@ func (s *functionState) emitTreeCategoryUnionContextStateValue(family *semantic.
 	if family == nil || family.StoreType == nil {
 		return nil, fmt.Errorf("missing tree family for category-union store context")
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	owner, ok := s.lookupTreeAllocOwnerForFamily(family)
 	if !ok {
-		return nil, fmt.Errorf("category_union tree handle read for %s requires an explicit tree store context; use in owner/in perm around the read", family.Name)
+		caller := "<helper>"
+		if s.decl != nil {
+			caller = s.decl.Name
+		}
+		return nil, fmt.Errorf("category_union tree handle read for %s at %s requires an explicit tree store context in %s; use in owner/in perm around the read", family.Name, name, caller)
 	}
 	storeValue, _, err := s.ensureTreeOwnerStoreValue(owner, family)
 	if err != nil {
@@ -1004,9 +1043,13 @@ func (s *functionState) emitTreeCategoryUnionContextStoreValue(family *semantic.
 	if family == nil || family.StoreType == nil {
 		return nil, fmt.Errorf("missing tree family for category-union store context")
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	owner, ok := s.lookupTreeAllocOwnerForFamily(family)
 	if !ok {
-		return nil, fmt.Errorf("category_union tree handle read for %s requires an explicit tree store context; use in owner/in perm around the read", family.Name)
+		caller := "<helper>"
+		if s.decl != nil {
+			caller = s.decl.Name
+		}
+		return nil, fmt.Errorf("category_union tree handle read for %s at %s requires an explicit tree store context in %s; use in owner/in perm around the read", family.Name, name, caller)
 	}
 	storeValue, _, err := s.ensureTreeOwnerStoreValue(owner, family)
 	if err != nil {

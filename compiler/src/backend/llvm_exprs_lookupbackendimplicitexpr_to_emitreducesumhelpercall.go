@@ -128,9 +128,17 @@ func (s *functionState) recoverImplicitCallArgs(expr *ast.CallExpr, funcType *se
 		working[item.Arg.Name] = item.Arg.Value
 	}
 	resolved := make([]ast.Expr, 0, len(funcType.ImplicitParamNames))
-	for _, name := range funcType.ImplicitParamNames {
+	explicitCount := backendExplicitParamCount(funcType, nil)
+	for i, name := range funcType.ImplicitParamNames {
 		value, ok := s.lookupBackendImplicitExpr(name, working)
 		if !ok {
+			paramIndex := explicitCount + i
+			if paramIndex < len(funcType.Params) {
+				if storeType, isTreeStore := funcType.Params[paramIndex].(*semantic.TreeStoreType); isTreeStore && storeType != nil {
+					resolved = append(resolved, &ast.Ident{Name: semantic.TreeStoreImplicitParamName(storeType.Family)})
+					continue
+				}
+			}
 			return nil, false
 		}
 		resolved = append(resolved, value)

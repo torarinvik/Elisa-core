@@ -96,7 +96,7 @@ func (s *functionState) emitTreeExactMemberConstructorValue(callExpr *ast.CallEx
 	if owner != nil {
 		resolvedOwner = *owner
 	} else {
-		activeOwner, ok := s.lookupTreeAllocOwner()
+		activeOwner, ok := s.lookupTreeAllocOwnerForFamily(family)
 		if !ok {
 			return nil, nil, fmt.Errorf("tree constructor %s requires an active in <owner>: scope or explicit new[owner]", memberType.String())
 		}
@@ -276,6 +276,26 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				surfaceValue, surfaceType, err := s.emitTreeCategoryUnionSurfaceFieldValue(access.tablePtr, tt.Category, tt.Variant, expr.Field, access.rowIndex, "tree.field")
 				return surfaceValue, surfaceType, true, err
 			}
+			if tt.Category != nil && tt.Category.Family != nil && treeFamilyLayoutPlan(tt.Category.Family).isCategoryUnion() {
+				stateValue, err := s.emitTreeCategoryUnionContextStateValue(tt.Category.Family, "tree.field")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, tt.Category.Family, "tree.field")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				surfaceValue, surfaceType, err := s.emitTreeRootUnionExactFieldValueAtIndex(tablePtr, tt.Category.Family, tt, expr.Field, rowIndex, "tree.field")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				value, valueType, err := s.treeFieldSurfaceValue(surfaceValue, surfaceType, field.Type, "tree.field")
+				return value, valueType, true, err
+			}
 			access, err := s.emitTreeExactTableAccessFromHandle(handleValue, tt.Category.Family, tt, "tree.field")
 			if err != nil {
 				return nil, nil, true, err
@@ -405,9 +425,29 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			value := C.LLVMConstInt(llvmType, C.ulonglong(tag), 0)
 			return value, kindType, true, nil
 		}
-		_, ok := semantic.TreeExactSurfaceFieldInfo(tt, expr.Field)
+		field, ok := semantic.TreeExactSurfaceFieldInfo(tt, expr.Field)
 		if !ok {
 			return nil, nil, true, fmt.Errorf("%s has no field %s", baseType.String(), expr.Field)
+		}
+		if family := treeExactMemberFamily(tt); family != nil && treeFamilyLayoutPlan(family).isCategoryUnion() {
+			stateValue, err := s.emitTreeCategoryUnionContextStateValue(family, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			fieldValue, fieldType, err := s.emitTreeRootUnionExactFieldValueAtIndex(tablePtr, family, tt, expr.Field, rowIndex, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			surfaceValue, surfaceType, err := s.treeFieldSurfaceValue(fieldValue, fieldType, field.Type, "tree.field")
+			return surfaceValue, surfaceType, true, err
 		}
 		access, err := s.emitTreeExactTableAccessFromHandle(handleValue, treeExactMemberFamily(tt), tt, "tree.field")
 		if err != nil {

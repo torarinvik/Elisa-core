@@ -31,6 +31,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
+	savedFunctionTreeStores := a.currentFunctionUsedTreeStores
+	savedTreeOwner := a.currentTreeAllocOwner
+	savedAllocExpr := a.currentAllocExpr
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedImplicitScopes := a.currentImplicitScopes
@@ -50,6 +53,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
+	a.currentTreeAllocOwner = treeAllocOwnerBinding{}
+	a.currentAllocExpr = nil
+	a.currentFunctionUsedTreeStores = map[string]*TreeStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
@@ -91,6 +97,10 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
+					savedBodyTreeOwner := a.currentTreeAllocOwner
+					if owner, ok := a.inferFunctionTreeAllocOwnerFromParams(allParamDecls, fnType); ok {
+						a.currentTreeAllocOwner = owner
+					}
 					savedBodyImplicitScopes := a.currentImplicitScopes
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
@@ -101,6 +111,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						}
 					})
 					a.currentImplicitScopes = savedBodyImplicitScopes
+					a.currentTreeAllocOwner = savedBodyTreeOwner
 				})
 			})
 		})
@@ -122,6 +133,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		}
 		fnType.ReturnBorrowedOwnerRefsKnown = true
 		fnType.FreshReturnShapeParams = mergeShapeParamNames(fnType.FreshReturnShapeParams, inferredFreshReturnShapeParams(a.returnFreshShapeStatus))
+		appendInferredTreeStoreParams(fnType, a.currentFunctionUsedTreeStores)
 		inferredRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
 		inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
 		fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
@@ -145,6 +157,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
+	a.currentFunctionUsedTreeStores = savedFunctionTreeStores
+	a.currentTreeAllocOwner = savedTreeOwner
+	a.currentAllocExpr = savedAllocExpr
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentImplicitScopes = savedImplicitScopes

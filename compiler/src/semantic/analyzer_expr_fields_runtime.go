@@ -90,6 +90,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		return field, true
 	}
 	if attr, ok := a.lookupTreeAttribute(objType, fieldName); ok {
+		a.recordImplicitTreeStoreUseForTreeAttribute(attr)
 		return Field{Name: fieldName, Type: attr.ReturnType, Mutable: false}, true
 	}
 	if viewType, ok := objType.(*TreeVariantViewType); ok {
@@ -100,9 +101,11 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 			return Field{}, false
 		}
+		a.recordImplicitTreeStoreUseForType(objType)
 		return field, true
 	}
 	if field, ok := TreeKindFieldInfo(objType); ok && fieldName == field.Name {
+		a.recordImplicitTreeStoreUseForType(objType)
 		return field, true
 	}
 	if viewType, ok := objType.(*PackedVariantViewType); ok {
@@ -133,6 +136,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 			return Field{}, false
 		}
+		a.recordImplicitTreeStoreUseForType(objType)
 		return field, true
 	}
 	if runtimeBacked := a.runtimeBackedStructType(objType); runtimeBacked != nil {
@@ -175,6 +179,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 			return Field{}, false
 		}
+		a.recordImplicitTreeStoreUseForType(objType)
 		return field, true
 	case *TreeStructType:
 		field, ok := TreeExactSurfaceFieldInfo(t, fieldName)
@@ -184,6 +189,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 			return Field{}, false
 		}
+		a.recordImplicitTreeStoreUseForType(objType)
 		return field, true
 	case *GenericInstanceType:
 		baseStruct, ok := t.Base.(*StructType)

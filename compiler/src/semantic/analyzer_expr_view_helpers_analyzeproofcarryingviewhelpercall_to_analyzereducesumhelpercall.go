@@ -340,6 +340,7 @@ func (a *Analyzer) analyzeChildrenHelperCall(expr *ast.CallExpr) Type {
 		a.errorf(expr.Args[0].Pos(), "children expects a tree node, refined tree view, exact tree member, or Family.Node value, got %s", carrierSourceType)
 		return invalidType
 	}
+	a.recordImplicitTreeStoreUseForType(carrierSourceType)
 	itemType, ok := treeChildrenCandidateItemType(carrierSourceType)
 	if !ok {
 		a.errorf(expr.Args[0].Pos(), "children(...) requires at least one structural child edge on %s", treeChildrenSourceLabel(carrierSourceType))

@@ -108,7 +108,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		a.errorf(decl.Pos(), "export target %q is not a function", decl.TargetName)
 		return
 	}
-	if len(targetBase.ImplicitParamNames) != 0 {
+	if !exportTargetImplicitParamsAreBackendOnly(targetBase) {
 		a.errorf(decl.Pos(), "export target %q must not have implicit parameters in v1", decl.TargetName)
 		return
 	}
@@ -245,7 +245,7 @@ func sameExportSignature(left *FuncType, right *FuncType) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	if left.Variadic != right.Variadic || funcTypeExplicitParamCount(left) != funcTypeExplicitParamCount(right) || len(left.ExplicitParamNames) != len(right.ExplicitParamNames) || len(left.ImplicitParamNames) != len(right.ImplicitParamNames) || len(left.Params) != len(right.Params) {
+	if left.Variadic != right.Variadic || funcTypeExplicitParamCount(left) != funcTypeExplicitParamCount(right) || len(left.ExplicitParamNames) != len(right.ExplicitParamNames) {
 		return false
 	}
 	for i := range left.ExplicitParamNames {
@@ -253,20 +253,35 @@ func sameExportSignature(left *FuncType, right *FuncType) bool {
 			return false
 		}
 	}
-	if len(left.ImplicitParamNames) != len(right.ImplicitParamNames) {
+	rightExplicitCount := funcTypeExplicitParamCount(right)
+	if len(left.Params) < len(left.ExplicitParamNames) || len(right.Params) < rightExplicitCount {
 		return false
 	}
-	for i := range left.ImplicitParamNames {
-		if left.ImplicitParamNames[i] != right.ImplicitParamNames[i] {
-			return false
-		}
-	}
-	for i := range left.Params {
+	for i := range left.ExplicitParamNames {
 		if !SameType(left.Params[i], right.Params[i]) {
 			return false
 		}
 	}
 	return SameType(left.Return, right.Return)
+}
+
+func exportTargetImplicitParamsAreBackendOnly(fn *FuncType) bool {
+	if fn == nil {
+		return true
+	}
+	explicitCount := funcTypeExplicitParamCount(fn)
+	if len(fn.ImplicitParamNames) == 0 {
+		return true
+	}
+	if len(fn.Params) < explicitCount+len(fn.ImplicitParamNames) {
+		return false
+	}
+	for i := range fn.ImplicitParamNames {
+		if _, ok := fn.Params[explicitCount+i].(*TreeStoreType); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func exportedNamedTypeAllowed(t Type) bool {

@@ -111,6 +111,25 @@ def unwrap(node: Expr) -> i64:
 		}
 	}
 }
+func TestGenerateLLVMIRLowersRefinedVariantValueInContextualTernary(t *testing.T) {
+	src := `enum Expr:
+    Pair(left: i64, right: i64)
+    Int(value: i64)
+
+def choose(node: Expr, fallback: Expr) -> Expr:
+    return node if node is Expr.Pair else fallback
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_refined_variant_contextual_ternary.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define", "@choose", "ternary.then", "termp"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected contextual ternary variant lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
 func TestGenerateLLVMIRLowersPatternGuardReturn(t *testing.T) {
 	src := `enum Expr:
     Int(value: i64)

@@ -103,6 +103,12 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	defer C.free(unsafe.Pointer(entryName))
 	entry := C.LLVMAppendBasicBlockInContext(g.context, fnValue, entryName)
 	C.LLVMPositionBuilderAtEnd(builder, entry)
+	state := &functionState{
+		g:       g,
+		fnValue: fnValue,
+		fnType:  targetType,
+		builder: builder,
+	}
 
 	llvmTargetType, err := g.lowerFunctionType(targetType)
 	if err != nil {
@@ -116,6 +122,27 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 			return err
 		}
 		args = append(args, unpacked)
+	}
+	explicitCount := backendExplicitParamCount(targetType, nil)
+	if explicitCount == 0 && len(exported.Signature.Params) != 0 {
+		explicitCount = len(exported.Signature.Params)
+	}
+	if len(targetType.ImplicitParamNames) != 0 {
+		if len(targetType.Params) < explicitCount+len(targetType.ImplicitParamNames) {
+			return fmt.Errorf("export wrapper %s target implicit parameter metadata is incomplete", exported.PublicName)
+		}
+		for i, name := range targetType.ImplicitParamNames {
+			paramType := targetType.Params[explicitCount+i]
+			storeType, ok := paramType.(*semantic.TreeStoreType)
+			if !ok || storeType == nil || storeType.Family == nil {
+				return fmt.Errorf("export wrapper %s implicit parameter %s is not backend-synthesizable", exported.PublicName, name)
+			}
+			storeValue, _, err := state.ensureTreeOwnerStoreValue(treeAllocOwnerBinding{isPerm: true}, storeType.Family)
+			if err != nil {
+				return err
+			}
+			args = append(args, storeValue)
+		}
 	}
 	callName := ""
 	if !isVoidType(targetType.Return) {

@@ -431,6 +431,10 @@ func (a *Analyzer) analyzeContextualTernaryExpr(expr *ast.TernaryExpr, expected 
 	if mergedFunctionValues, ok := a.intersectFunctionValueFlows(leftSnapshot.FunctionValues, rightSnapshot.FunctionValues); ok {
 		a.currentFunctionValues = mergedFunctionValues
 	}
+	if expected != nil && AssignableTo(expected, left) && AssignableTo(expected, right) {
+		a.recordAnalyzedExprType(expr, expected)
+		return expected
+	}
 	merged := MergeTypes(left, right)
 	if IsInvalidType(merged) {
 		a.errorf(expr.Pos(), "ternary branches are incompatible: %s and %s", left, right)

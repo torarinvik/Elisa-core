@@ -134,6 +134,7 @@ type Analyzer struct {
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
 	currentTreeAllocOwner             treeAllocOwnerBinding
+	currentFunctionUsedTreeStores     map[string]*TreeStoreType
 	currentRewriteDefault             *rewriteDefaultContext
 	currentSequenceRewrite            *sequenceRewriteContext
 	currentAllocExpr                  ast.Expr
