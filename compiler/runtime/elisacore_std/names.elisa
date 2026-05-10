@@ -116,6 +116,41 @@ def interned(table: NameTable&, name_id: NameId) -> InternedName:
 
 
 @ufcs_only
+def valid(name_id: NameId) -> bool:
+    return name_id != NAME_TABLE_INVALID_ID
+
+
+@ufcs_only
+def invalid(name_id: NameId) -> bool:
+    return name_id == NAME_TABLE_INVALID_ID
+
+
+@ufcs_only
+def text(name_id: NameId, table: NameTable&) -> sview:
+    return table.text(name_id)
+
+
+@ufcs_only
+def matches_view(name_id: NameId, table: NameTable&, text: sview, policy: NameCasePolicy) -> bool:
+    return table.has_text_view(name_id, text, policy)
+
+
+@ufcs_only
+def matches(name_id: NameId, table: NameTable&, text: cstr, policy: NameCasePolicy) -> bool:
+    return name_id.matches_view(table, name_cstr_view(text), policy)
+
+
+@ufcs_only
+def matches_cs(name_id: NameId, table: NameTable&, text: cstr) -> bool:
+    return name_id.matches(table, text, NameCasePolicy.CaseSensitive)
+
+
+@ufcs_only
+def matches_ci(name_id: NameId, table: NameTable&, text: cstr) -> bool:
+    return name_id.matches(table, text, NameCasePolicy.AsciiCaseInsensitive)
+
+
+@ufcs_only
 def valid(name: InternedName) -> bool:
     return name.table.valid_id(name.id)
 
