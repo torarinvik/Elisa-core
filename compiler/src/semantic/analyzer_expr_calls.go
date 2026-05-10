@@ -164,6 +164,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		}
 		return a.analyzeTreeExactMemberConstructorCallExpr(expr, memberType)
 	}
+	if targetType, ok := a.analyzeTypeConstructorCall(expr); ok {
+		return targetType
+	}
 	fnType := a.analyzeExpr(expr.Func)
 	ft, ok := fnType.(*FuncType)
 	if !ok {

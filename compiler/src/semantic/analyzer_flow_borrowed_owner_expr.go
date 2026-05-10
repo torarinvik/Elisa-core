@@ -194,6 +194,9 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		if _, ok := a.freezeStoreArg(n); ok {
 			return borrowedOwnerRefState{}, false
 		}
+		if len(n.Args) == 1 && a.isTypeConstructorCall(n) {
+			return a.borrowedOwnerRefStateForExpr(n.Args[0])
+		}
 		fnType, _ := a.exprTypes[n.Func].(*FuncType)
 		if fnType == nil {
 			if analyzed := a.analyzeExpr(n.Func); analyzed != nil {

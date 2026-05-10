@@ -306,6 +306,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return mergeRegionRefStatesWithExplicitFields(states, fieldStates)
 		}
 		fnType, _ := a.exprTypes[n.Func].(*FuncType)
+		if fnType == nil && len(n.Args) == 1 && a.isTypeConstructorCall(n) {
+			return a.regionRefStateForExpr(n.Args[0])
+		}
 		if fnType == nil {
 			if analyzed := a.analyzeExpr(n.Func); analyzed != nil {
 				fnType, _ = analyzed.(*FuncType)

@@ -13,7 +13,7 @@ def array_builder_smoke(a: mutable Arena&) -> i32:
         -3 return if builder.get(3) != 6
         values: darray[i32] = builder.finish()
         total: mutable i32 = 0
-        for value in darray_view(values):
+        for value in values.view():
             total <- total + value
         return total
 

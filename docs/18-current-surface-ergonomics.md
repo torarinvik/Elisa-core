@@ -500,7 +500,7 @@ builder: mutable DArrayBuilder[Pascal.Decl] = owner.builder()
 builder.push(decl)
 decls: darray[Pascal.Decl] = builder.finish()
 
-for decl in darray_view(decls):
+for decl in decls.view():
     visit_decl(decl)
 ```
 
@@ -1973,18 +1973,26 @@ def score(op: Op) -> i64:
     return op.i64()
 ```
 
+The same hook-backed conversion is also available as a type-constructor call:
+
+```elisa
+def score(op: Op) -> i64:
+    return i64(op)
+```
+
 Current rules:
 
 - `as` is the concise ordinary cast/coercion surface used throughout self-hosted code
 - `.cast[T]` is the explicit low-level reinterpret cast surface
 - `.ref[T&]` is the explicit lvalue/reference reinterpretation surface
 - postfix shorthand like `op.i64()` dispatches to a visible exact `__cast__(value: Source) -> Target` hook when one exists
+- prefix type-constructor shorthand like `i64(op)` uses the same cast path and the same exact `__cast__` hook lookup as `op.i64()`
 - optional postfix shorthand like `text.int?()` dispatches to a visible exact `__cast__(value: Source) -> int?` hook when one exists
 - ordinary explicit casts continue to use normal cast rules rather than hook dispatch
 - the postfix hook surface is intentionally exact-source/exact-target rather than a broad overload search
 - legacy expression-arrow casts such as `value -> T` are deprecated; `->` remains for function signatures, grammar signatures, effects, and other arrow-shaped declarations
 
-That distinction matters when reading code: `value as T` is an explicit ordinary cast, `value.cast[T]` is a low-level reinterpretation, `slot.ref[T&]` is a reference reinterpretation, `value.T()` is a hook-backed conversion shorthand, and `value.T?()` is the same hook mechanism returning an optional.
+That distinction matters when reading code: `value as T` is an explicit ordinary cast, `value.cast[T]` is a low-level reinterpretation, `slot.ref[T&]` is a reference reinterpretation, `value.T()` and `T(value)` are hook-backed conversion shorthands, and `value.T?()` is the same hook mechanism returning an optional.
 
 ## Checked `ensures` clauses
 

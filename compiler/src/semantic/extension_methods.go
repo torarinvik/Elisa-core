@@ -155,6 +155,9 @@ func (a *Analyzer) ufcsReceiverAssignableTo(expected Type, actual Type) bool {
 	if SameType(expected, actual) {
 		return true
 	}
+	if AssignableTo(expected, actual) {
+		return true
+	}
 	expectedRef, ok := expected.(*RefType)
 	if !ok || expectedRef == nil {
 		return false
@@ -180,6 +183,9 @@ func ufcsReceiverBaseCompatible(expected Type, actual Type) bool {
 	expected = StripAggregateStateType(expected)
 	actual = StripAggregateStateType(actual)
 	if SameType(expected, actual) {
+		return true
+	}
+	if matchTypePattern(expected, actual) || assignableRuntimeCompatible(expected, actual) {
 		return true
 	}
 	switch exp := expected.(type) {

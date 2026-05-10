@@ -250,6 +250,41 @@ def read(box: Box) -> i64:
 	}
 }
 
+func TestAnalyzeUFCSFreeFunctionMatchesGenericRuntimeSurfaceReceiver(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_darray_view.elisa", `
+def view[T](values: darray[T]) -> dview[T]:
+    return zeroed
+
+def read(values: darray[i32]) -> usize:
+    return values.view().len
+`)
+
+	funcSym, ok := result.GlobalScope.Lookup("read")
+	if !ok {
+		t.Fatal("expected read symbol")
+	}
+	decl := funcSym.Node.(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	field, ok := ret.Value.(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected return field expr, got %T", ret.Value)
+	}
+	call, ok := field.Object.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected rewritten UFCS call as field receiver, got %T", field.Object)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "view" {
+		t.Fatalf("expected UFCS callee view, got %T %#v", call.Func, call.Func)
+	}
+	if len(call.LoweredArgs()) != 1 {
+		t.Fatalf("expected receiver arg only, got %d", len(call.LoweredArgs()))
+	}
+	if receiver, ok := call.LoweredArgs()[0].(*ast.Ident); !ok || receiver.Name != "values" {
+		t.Fatalf("expected inserted receiver arg values, got %T %#v", call.LoweredArgs()[0], call.LoweredArgs()[0])
+	}
+}
+
 func TestAnalyzeUFCSRuntimeReceiverMethodsOnGenericStructs(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "ufcs_runtime_receiver_methods.elisa", `
 struct FixtureSymbol:

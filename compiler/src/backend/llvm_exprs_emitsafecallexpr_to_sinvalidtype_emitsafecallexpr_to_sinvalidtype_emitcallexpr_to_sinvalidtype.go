@@ -200,6 +200,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitTypeConstructorCastCall(expr); handled {
+		return value, actualType, err
+	}
 	callee, funcType, err := s.resolveCallTarget(expr)
 	if err != nil {
 		return nil, nil, err
@@ -230,6 +233,147 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	}
 	return s.emitResolvedCall(callee, funcType, s.directCallTarget(expr.Func), args)
 }
+
+func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if s == nil || expr == nil {
+		return nil, nil, false, nil
+	}
+	if s.g != nil && s.g.result != nil {
+		if _, ok := s.g.result.ExprTypes[expr.Func].(*semantic.FuncType); ok {
+			return nil, nil, false, nil
+		}
+	}
+	targetExpr, ok := backendTypeExprFromConstructorCallee(expr.Func)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	if s.g == nil || s.g.result == nil || !backendTypeConstructorTargetKnown(targetExpr, s.g.result.NamedTypes) {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("type constructor cast expects exactly 1 positional argument")
+	}
+	targetType := s.exprType(expr)
+	if targetType == nil {
+		resolved, err := s.resolveTypeExpr(targetExpr)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		targetType = resolved
+	}
+	if s.g != nil && s.g.result != nil && s.g.result.CastHooks != nil {
+		if sym, ok := s.g.result.CastHooks[expr]; ok && sym != nil {
+			fnType, ok := sym.Type.(*semantic.FuncType)
+			if !ok || fnType == nil || len(fnType.Params) != 1 {
+				return nil, nil, true, fmt.Errorf("invalid semantic cast hook for %T", expr)
+			}
+			arg, _, err := s.emitExpr(expr.Args[0], fnType.Params[0])
+			if err != nil {
+				return nil, nil, true, err
+			}
+			callee, err := s.g.ensureFunctionDeclared(sym.Name, fnType)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			llvmFnType, err := s.g.lowerFunctionType(fnType)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arg}, "casthook")
+			return call, fnType.Return, true, nil
+		}
+	}
+	operandExpected := semantic.Type(nil)
+	if _, ok := expr.Args[0].(*ast.ZeroedLit); ok {
+		operandExpected = targetType
+	}
+	value, actualType, err := s.emitExpr(expr.Args[0], operandExpected)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	coerced, err := s.coerceValue(value, actualType, targetType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return coerced, targetType, true, nil
+}
+
+func backendTypeConstructorTargetKnown(expr ast.TypeExpr, namedTypes map[string]semantic.Type) bool {
+	if expr == nil || namedTypes == nil {
+		return false
+	}
+	switch n := expr.(type) {
+	case *ast.NamedType:
+		_, ok := namedTypes[n.Name]
+		return ok
+	case *ast.GenericType:
+		_, ok := namedTypes[n.Name]
+		return ok
+	case *ast.BuiltinTypeExpr:
+		_, ok := namedTypes[n.Name]
+		return ok
+	default:
+		return false
+	}
+}
+
+func backendTypeExprFromConstructorCallee(expr ast.Expr) (ast.TypeExpr, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n == nil || n.Name == "" {
+			return nil, false
+		}
+		return &ast.NamedType{Position: n.Position, Name: n.Name}, true
+	case *ast.FieldExpr:
+		name, ok := backendQualifiedTypePathFromExpr(n)
+		if !ok || name == "" {
+			return nil, false
+		}
+		return &ast.NamedType{Position: n.Position, Name: name}, true
+	case *ast.TypeExprExpr:
+		if n == nil || n.Type == nil {
+			return nil, false
+		}
+		return n.Type, true
+	case *ast.SpecializeExpr:
+		name, ok := backendQualifiedTypePathFromExpr(n.Operand)
+		if !ok || name == "" {
+			return nil, false
+		}
+		return &ast.GenericType{Position: n.Position, Name: name, Args: n.TypeArgs}, true
+	case *ast.ParenExpr:
+		return backendTypeExprFromConstructorCallee(n.Inner)
+	default:
+		return nil, false
+	}
+}
+
+func backendQualifiedTypePathFromExpr(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n == nil || n.Name == "" {
+			return "", false
+		}
+		return n.Name, true
+	case *ast.FieldExpr:
+		prefix, ok := backendQualifiedTypePathFromExpr(n.Object)
+		if !ok || prefix == "" || n.Field == "" {
+			return "", false
+		}
+		return prefix + "." + n.Field, true
+	case *ast.ParenExpr:
+		return backendQualifiedTypePathFromExpr(n.Inner)
+	case *ast.TypeExprExpr:
+		named, ok := n.Type.(*ast.NamedType)
+		if !ok || named == nil || named.Name == "" {
+			return "", false
+		}
+		return named.Name, true
+	default:
+		return "", false
+	}
+}
+
 func builtinDArrayPushReceiverType(t semantic.Type) (*semantic.DArrayType, *semantic.RefType, bool) {
 	if t == nil {
 		return nil, nil, false

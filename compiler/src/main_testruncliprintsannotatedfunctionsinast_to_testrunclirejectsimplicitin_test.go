@@ -415,6 +415,33 @@ func TestRunCLICompilesBuiltinPostfixCastWithoutHook(t *testing.T) {
 		t.Fatalf("expected builtin postfix cast to avoid __cast__ hook lowering, got:\n%s", output)
 	}
 }
+
+func TestRunCLICompilesBuiltinTypeConstructorCastWithoutHook(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "builtin_type_constructor_cast_llvm.elisa")
+	src := "def via_constructor() -> i64:\n    return i64(21)\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write builtin type-constructor cast fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "define i64 @via_constructor(") {
+		t.Fatalf("expected LLVM output to contain via_constructor definition, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @cast__") {
+		t.Fatalf("expected builtin type-constructor cast to avoid __cast__ hook lowering, got:\n%s", output)
+	}
+}
+
 func TestRunCLICompilesPostfixCastHookToHookCall(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_llvm.elisa")
@@ -443,6 +470,36 @@ func TestRunCLICompilesPostfixCastHookToHookCall(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCLICompilesTypeConstructorCastHookToHookCall(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "type_constructor_cast_hook_llvm.elisa")
+	src := "enum Op:\n    Add\n    Sub\n\ndef __cast__(op: Op) -> i64:\n    if op == Op.Add:\n        return 10\n    return 20\n\ndef via_constructor(op: Op) -> i64:\n    return i64(op)\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write type-constructor cast hook LLVM fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"define i64 @cast__Op__to__i64__L5_C1(",
+		"define i64 @via_constructor(",
+		"call i64 @cast__Op__to__i64__L5_C1(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLICompilesOptionalPostfixCastHookToHookCall(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "optional_postfix_cast_hook_llvm.elisa")
