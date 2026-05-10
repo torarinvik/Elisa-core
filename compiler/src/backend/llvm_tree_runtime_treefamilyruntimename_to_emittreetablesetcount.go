@@ -851,6 +851,34 @@ func (s *functionState) ensureTreeOwnerStoreValue(owner treeAllocOwnerBinding, f
 	if owner.storeValue != nil && owner.storeType != nil {
 		return owner.storeValue, owner.storeType, nil
 	}
+	if owner.storePtr != nil && owner.storeType != nil {
+		storeValue, err := s.loadValue(owner.storePtr, owner.storeType, "tree.implicit.store.load")
+		if err != nil {
+			return nil, nil, err
+		}
+		stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.implicit.store.state")
+		nullPtr := C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0))
+		isReady := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), stateValue, nullPtr, cStringFree("tree.implicit.store.ready"))
+		initBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.implicit.store.init"))
+		contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.implicit.store.cont"))
+		C.LLVMBuildCondBr(s.builder, isReady, contBB, initBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, initBB)
+		if owner.arenaRef == nil {
+			return nil, nil, fmt.Errorf("missing Arena owner for tree store")
+		}
+		initialized, err := s.emitTreeStoreValueFromArenaRef(owner.arenaRef, owner.storeType)
+		if err != nil {
+			return nil, nil, err
+		}
+		C.LLVMBuildStore(s.builder, initialized, owner.storePtr)
+		C.LLVMBuildBr(s.builder, contBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+		resolved, err := s.loadValue(owner.storePtr, owner.storeType, "tree.implicit.store.value")
+		if err != nil {
+			return nil, nil, err
+		}
+		return resolved, owner.storeType, nil
+	}
 	cacheKey := treeResolvedStoreCacheKey{
 		block:  C.LLVMGetInsertBlock(s.builder),
 		family: family,
@@ -927,6 +955,12 @@ func (s *functionState) ensureTreeOwnerStoreValue(owner treeAllocOwnerBinding, f
 		s.emitEntryStore(slotPtr, zeroValue)
 		slot = treeImplicitStoreSlot{ptr: slotPtr, storeType: family.StoreType}
 		s.treeImplicitStores[key] = slot
+	}
+	if s.implicitTreeStoreOwners == nil {
+		s.implicitTreeStoreOwners = map[string]treeAllocOwnerBinding{}
+	}
+	if existing, ok := s.implicitTreeStoreOwners[family.Name]; !ok || (existing.storeValue == nil && existing.storePtr == nil) || existing.storeType == nil {
+		s.implicitTreeStoreOwners[family.Name] = treeAllocOwnerBinding{arenaRef: owner.arenaRef, storePtr: slot.ptr, storeType: family.StoreType}
 	}
 	storeValue, err := s.loadValue(slot.ptr, family.StoreType, "tree.implicit.store.load")
 	if err != nil {

@@ -310,17 +310,20 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: declType, mutable: n.Mutable})
+		var initValue C.LLVMValueRef
 		if n.Value != nil {
 			value, _, err := s.emitExpr(n.Value, declType)
 			if err != nil {
 				return err
 			}
+			initValue = value
 			C.LLVMBuildStore(s.builder, value, alloca)
 			s.bindPackedStoreValue(declType, value)
 			if err := s.bindPackedStoreOriginsForExprPath(n.Name, n.Value, declType); err != nil {
 				return err
 			}
 		}
+		s.bindImplicitTreeOwnerParam(n.Name, declType, alloca, initValue)
 		return nil
 	case *ast.LetDestructureStmt:
 		return s.emitLetDestructureStmt(n)

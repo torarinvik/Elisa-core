@@ -154,19 +154,22 @@ func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwne
 	return treeAllocOwnerBinding{}, false, nil
 }
 func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
-	if s.treeAllocOwner.isPerm || s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.storeValue != nil {
+	if s.treeAllocOwner.isPerm || s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.storePtr != nil || s.treeAllocOwner.storeValue != nil {
 		return s.treeAllocOwner, true
 	}
 	return treeAllocOwnerBinding{}, false
 }
 func (s *functionState) lookupTreeAllocOwnerForFamily(family *semantic.TreeType) (treeAllocOwnerBinding, bool) {
+	if s != nil && s.treeAllocOwner.isPerm {
+		return s.treeAllocOwner, true
+	}
 	if s != nil && family != nil && s.implicitTreeStoreOwners != nil {
-		if owner, ok := s.implicitTreeStoreOwners[family.Name]; ok && owner.storeValue != nil && owner.storeType != nil {
+		if owner, ok := s.implicitTreeStoreOwners[family.Name]; ok && owner.storeType != nil && (owner.storeValue != nil || owner.storePtr != nil) {
 			return owner, true
 		}
 	}
 	if owner, ok := s.lookupTreeAllocOwner(); ok {
-		if owner.storeValue == nil || owner.storeType == nil || owner.storeType.Family == family {
+		if (owner.storeValue == nil && owner.storePtr == nil) || owner.storeType == nil || owner.storeType.Family == family {
 			return owner, true
 		}
 		if owner.arenaRef != nil {

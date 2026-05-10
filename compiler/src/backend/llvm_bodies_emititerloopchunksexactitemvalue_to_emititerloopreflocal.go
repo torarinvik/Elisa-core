@@ -384,7 +384,11 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 			}
 			innerSourceValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".iter.projected.inner.extract"))
 			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
-			itemValue, _, err := s.emitIterLoopElementValue(nil, innerSourceAlloca, projectedSourceType, indexValue, sourceName+".iter.projected")
+			itemValue, itemType, err := s.emitIterLoopElementValue(nil, innerSourceAlloca, projectedSourceType, indexValue, sourceName+".iter.projected")
+			if err != nil {
+				return nil, nil, err
+			}
+			itemValue, err = s.coerceValue(itemValue, itemType, attrRef.Attribute.Receiver)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -180,80 +180,213 @@ func treeFamiliesExposedByFunctionBoundary(fnType *FuncType) map[string]*TreeSto
 		explicitCount = len(fnType.Params)
 	}
 	for i := 0; i < explicitCount; i++ {
-		collectTreeFamiliesInType(fnType.Params[i], out, map[*StructType]bool{})
+		collectTreeFamiliesInType(fnType.Params[i], out, map[*StructType]bool{}, map[string]bool{})
 	}
-	collectTreeFamiliesInType(fnType.Return, out, map[*StructType]bool{})
+	collectTreeFamiliesInType(fnType.Return, out, map[*StructType]bool{}, map[string]bool{})
 	return out
 }
 
-func collectTreeFamiliesInType(t Type, out map[string]*TreeStoreType, seenStructs map[*StructType]bool) {
+func collectTreeFamiliesInType(t Type, out map[string]*TreeStoreType, seenStructs map[*StructType]bool, seenTrees map[string]bool) {
 	if t == nil {
 		return
 	}
 	switch tt := t.(type) {
 	case *RefType:
-		collectTreeFamiliesInType(tt.Elem, out, seenStructs)
+		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
 	case *ErrorUnionType:
-		collectTreeFamiliesInType(tt.Value, out, seenStructs)
+		collectTreeFamiliesInType(tt.Value, out, seenStructs, seenTrees)
 	case *OptionalType:
-		collectTreeFamiliesInType(tt.Value, out, seenStructs)
+		collectTreeFamiliesInType(tt.Value, out, seenStructs, seenTrees)
 	case *TupleType:
 		for _, field := range tt.Fields {
-			collectTreeFamiliesInType(field.Type, out, seenStructs)
+			collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
 		}
 	case *ArrayType:
-		collectTreeFamiliesInType(tt.Elem, out, seenStructs)
+		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
 	case *DArrayType:
-		collectTreeFamiliesInType(tt.Elem, out, seenStructs)
+		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
 	case *ViewType:
-		collectTreeFamiliesInType(tt.Elem, out, seenStructs)
+		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
 	case *DArrayViewType:
-		collectTreeFamiliesInType(tt.Elem, out, seenStructs)
+		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
 	case *DictType:
-		collectTreeFamiliesInType(tt.Key, out, seenStructs)
-		collectTreeFamiliesInType(tt.Value, out, seenStructs)
+		collectTreeFamiliesInType(tt.Key, out, seenStructs, seenTrees)
+		collectTreeFamiliesInType(tt.Value, out, seenStructs, seenTrees)
 	case *DictEntryType:
 		if tt.Dict != nil {
-			collectTreeFamiliesInType(tt.Dict, out, seenStructs)
+			collectTreeFamiliesInType(tt.Dict, out, seenStructs, seenTrees)
 		}
 	case *GenericInstanceType:
-		collectTreeFamiliesInType(tt.Base, out, seenStructs)
+		collectTreeFamiliesInType(tt.Base, out, seenStructs, seenTrees)
 		for _, arg := range tt.Args {
-			collectTreeFamiliesInType(arg, out, seenStructs)
+			collectTreeFamiliesInType(arg, out, seenStructs, seenTrees)
 		}
 	case *AggregateStateType:
-		collectTreeFamiliesInType(tt.Base, out, seenStructs)
+		collectTreeFamiliesInType(tt.Base, out, seenStructs, seenTrees)
 	case *StructType:
 		if tt == nil || seenStructs[tt] {
 			return
 		}
 		seenStructs[tt] = true
 		for _, field := range tt.Fields {
-			collectTreeFamiliesInType(field.Type, out, seenStructs)
+			collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+		}
+	case *EnumType:
+		if tt == nil {
+			return
+		}
+		key := "enum:" + tt.Name
+		if seenTrees[key] {
+			return
+		}
+		seenTrees[key] = true
+		for _, field := range tt.Common {
+			collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+		}
+		for _, variant := range tt.Variants {
+			if variant == nil {
+				continue
+			}
+			for _, payloadType := range variant.Payload {
+				collectTreeFamiliesInType(payloadType, out, seenStructs, seenTrees)
+			}
+		}
+	case *PackedVariantViewType:
+		if tt == nil || tt.Enum == nil || tt.Variant == nil {
+			return
+		}
+		key := "packed-variant:" + tt.Enum.Name + "." + tt.Variant.Name
+		if seenTrees[key] {
+			return
+		}
+		seenTrees[key] = true
+		for _, field := range tt.Enum.Common {
+			collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+		}
+		for _, payloadType := range tt.Variant.Payload {
+			collectTreeFamiliesInType(payloadType, out, seenStructs, seenTrees)
 		}
 	case *TreeNodeType:
 		if tt.Family != nil && tt.Family.Layout == TreeLayoutCategoryUnion && tt.Family.StoreType != nil {
 			out[tt.Family.Name] = tt.Family.StoreType
+			collectTreeFamilyPayloadFamilies(tt.Family, out, seenStructs, seenTrees)
 		}
 	case *TreeCategoryType:
 		if tt.Family != nil && tt.Family.Layout == TreeLayoutCategoryUnion && tt.Family.StoreType != nil {
 			out[tt.Family.Name] = tt.Family.StoreType
+			collectTreeCategoryPayloadFamilies(tt, out, seenStructs, seenTrees)
 		}
 	case *TreeVariantViewType:
 		if tt.Category != nil && tt.Category.Family != nil && tt.Category.Family.Layout == TreeLayoutCategoryUnion && tt.Category.Family.StoreType != nil {
 			out[tt.Category.Family.Name] = tt.Category.Family.StoreType
+			collectTreeVariantPayloadFamilies(tt, out, seenStructs, seenTrees)
 		}
 	case *TreeBlockType:
 		if tt.Family != nil && tt.Family.Layout == TreeLayoutCategoryUnion && tt.Family.StoreType != nil {
 			out[tt.Family.Name] = tt.Family.StoreType
+			collectTreeBlockPayloadFamilies(tt, out, seenStructs, seenTrees)
 		}
 	case *TreeStructType:
 		if tt.Family != nil && tt.Family.Layout == TreeLayoutCategoryUnion && tt.Family.StoreType != nil {
 			out[tt.Family.Name] = tt.Family.StoreType
+			collectTreeStructPayloadFamilies(tt, out, seenStructs, seenTrees)
 		}
 	case *TreeStoreType:
 		if tt.Family != nil && tt.Family.Layout == TreeLayoutCategoryUnion {
 			out[tt.Family.Name] = tt
+		}
+	}
+}
+
+func collectTreeFamilyPayloadFamilies(family *TreeType, out map[string]*TreeStoreType, seenStructs map[*StructType]bool, seenTrees map[string]bool) {
+	if family == nil {
+		return
+	}
+	key := "family:" + family.Name
+	if seenTrees[key] {
+		return
+	}
+	seenTrees[key] = true
+	for _, member := range family.MemberTypes {
+		collectTreeFamiliesInType(member, out, seenStructs, seenTrees)
+	}
+	for _, field := range family.Common {
+		collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+	}
+}
+
+func collectTreeCategoryPayloadFamilies(category *TreeCategoryType, out map[string]*TreeStoreType, seenStructs map[*StructType]bool, seenTrees map[string]bool) {
+	if category == nil {
+		return
+	}
+	key := "category:" + category.Name
+	if seenTrees[key] {
+		return
+	}
+	seenTrees[key] = true
+	for _, field := range category.Common {
+		collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+	}
+	for _, variant := range category.Variants {
+		collectTreeVariantPayloadFamilies(&TreeVariantViewType{Category: category, Variant: variant}, out, seenStructs, seenTrees)
+	}
+}
+
+func collectTreeVariantPayloadFamilies(view *TreeVariantViewType, out map[string]*TreeStoreType, seenStructs map[*StructType]bool, seenTrees map[string]bool) {
+	if view == nil || view.Variant == nil {
+		return
+	}
+	if view.Category != nil {
+		key := "variant:" + view.Category.Name + "." + view.Variant.Name
+		if seenTrees[key] {
+			return
+		}
+		seenTrees[key] = true
+	}
+	for _, fieldType := range view.Variant.Payload {
+		collectTreeFamiliesInType(fieldType, out, seenStructs, seenTrees)
+	}
+	if view.Category != nil {
+		for _, field := range view.Category.Common {
+			collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+		}
+	}
+}
+
+func collectTreeBlockPayloadFamilies(block *TreeBlockType, out map[string]*TreeStoreType, seenStructs map[*StructType]bool, seenTrees map[string]bool) {
+	if block == nil {
+		return
+	}
+	key := "block:" + block.Name
+	if seenTrees[key] {
+		return
+	}
+	seenTrees[key] = true
+	for _, field := range block.Fields {
+		collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+	}
+	if block.Family != nil {
+		for _, field := range block.Family.Common {
+			collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+		}
+	}
+}
+
+func collectTreeStructPayloadFamilies(structType *TreeStructType, out map[string]*TreeStoreType, seenStructs map[*StructType]bool, seenTrees map[string]bool) {
+	if structType == nil {
+		return
+	}
+	key := "struct:" + structType.Name
+	if seenTrees[key] {
+		return
+	}
+	seenTrees[key] = true
+	for _, field := range structType.Fields {
+		collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
+	}
+	if structType.Family != nil {
+		for _, field := range structType.Family.Common {
+			collectTreeFamiliesInType(field.Type, out, seenStructs, seenTrees)
 		}
 	}
 }

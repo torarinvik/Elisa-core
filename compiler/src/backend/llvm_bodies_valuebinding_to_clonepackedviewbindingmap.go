@@ -133,6 +133,7 @@ type packedStoreBinding struct {
 type treeAllocOwnerBinding struct {
 	isPerm     bool
 	arenaRef   C.LLVMValueRef
+	storePtr   C.LLVMValueRef
 	storeValue C.LLVMValueRef
 	storeType  *semantic.TreeStoreType
 }
