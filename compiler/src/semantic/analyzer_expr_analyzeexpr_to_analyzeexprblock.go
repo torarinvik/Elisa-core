@@ -1,6 +1,9 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+)
 
 func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	defer func() {
@@ -280,9 +283,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = neverType
 		return
 	case *ast.TryExpr:
+		recovery := recoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
+		if n.UsesDefaultShorthandForm {
+			a.deprecatedf(n.Pos(), "`try? ... default` is deprecated; use `try ... else ...`")
+		}
 		valueType := a.analyzeExpr(n.Value)
 		if unionType, ok := valueType.(*ErrorUnionType); ok {
-			if n.Fallback == nil {
+			if recovery == nil {
 				currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 				if !ok {
 					a.errorf(n.Pos(), "try without else requires the current function to return an error union")
@@ -292,7 +299,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				result = unionType.Value
 				return
 			}
-			fallbackType := a.analyzeExpr(n.Fallback)
+			fallbackType := a.analyzeRecoveryClause(recovery, unionType.Value, unionType.Errors, "try fallback")
 			if !IsNeverType(fallbackType) && !AssignableTo(unionType.Value, fallbackType) {
 				a.errorf(n.Pos(), "try fallback expects %s, got %s", unionType.Value, fallbackType)
 				a.reportShapeMismatchNotes(n.Pos(), unionType.Value, fallbackType)
@@ -301,7 +308,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			return
 		}
 		if n.UsesDefaultShorthandForm {
-			a.analyzeExpr(n.Fallback)
+			a.analyzeRecoveryClause(recovery, invalidType, nil, "try fallback")
 			a.errorf(n.Pos(), "try? ... default requires an error union, got %s", valueType)
 			if optionalType, ok := valueType.(*OptionalType); ok {
 				result = optionalType.Value
@@ -311,12 +318,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			return
 		}
 		if optionalType, ok := valueType.(*OptionalType); ok {
-			if n.Fallback == nil {
+			a.deprecatedf(n.Pos(), "`try` on optional values is deprecated; use `value else ...`")
+			if recovery == nil {
 				a.errorf(n.Pos(), "try without else requires an error union, got %s", valueType)
 				result = optionalType.Value
 				return
 			}
-			fallbackType := a.analyzeExpr(n.Fallback)
+			fallbackType := a.analyzeRecoveryClause(recovery, optionalType.Value, nil, "try fallback")
 			if !IsNeverType(fallbackType) && !AssignableTo(optionalType.Value, fallbackType) {
 				a.errorf(n.Pos(), "try fallback expects %s, got %s", optionalType.Value, fallbackType)
 				a.reportShapeMismatchNotes(n.Pos(), optionalType.Value, fallbackType)
@@ -331,15 +339,19 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeCatchExpr(n)
 		return
 	case *ast.UnwrapElseExpr:
+		recovery := recoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
 		valueType := a.analyzeExpr(n.Value)
-		refType, ok := valueType.(*RefType)
-		if !ok || refType.State == RefStateNonNull {
-			a.errorf(n.Pos(), nullableRefRequirementMessage("else recovery", valueType.String()))
+		var resultType Type
+		if refType, ok := valueType.(*RefType); ok && refType.State == RefStateNullable {
+			resultType = cloneRefTypeWithState(refType, RefStateNonNull)
+		} else if optionalType, ok := valueType.(*OptionalType); ok {
+			resultType = optionalType.Value
+		} else {
+			a.errorf(n.Pos(), "else recovery requires an optional or nullable reference (refstate fact nullable), got %s", valueType)
 			result = invalidType
 			return
 		}
-		resultType := cloneRefTypeWithState(refType, RefStateNonNull)
-		fallbackType := a.analyzeExpr(n.Fallback)
+		fallbackType := a.analyzeRecoveryClause(recovery, resultType, nil, "else fallback")
 		if !IsNeverType(fallbackType) && !AssignableTo(resultType, fallbackType) {
 			a.errorf(n.Pos(), "else fallback expects %s, got %s", resultType, fallbackType)
 			a.reportShapeMismatchNotes(n.Pos(), resultType, fallbackType)
@@ -573,4 +585,79 @@ func (a *Analyzer) analyzeExprBlock(expr *ast.ExprBlock) Type {
 	})
 	a.currentScope = savedScope
 	return result
+}
+
+func recoveryClauseForExpr(recovery *ast.RecoveryClause, fallback ast.Expr, pos lexer.Pos) *ast.RecoveryClause {
+	if recovery != nil {
+		return recovery
+	}
+	if fallback == nil {
+		return nil
+	}
+	if raise, ok := fallback.(*ast.RaiseExpr); ok {
+		return &ast.RecoveryClause{Position: fallback.Pos(), Kind: ast.RecoveryRaise, Value: raise.Error}
+	}
+	return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryValue, Value: fallback}
+}
+
+func (a *Analyzer) analyzeRecoveryClause(recovery *ast.RecoveryClause, expected Type, errorType Type, label string) Type {
+	if recovery == nil {
+		return invalidType
+	}
+	switch recovery.Kind {
+	case ast.RecoveryValue:
+		return a.analyzeExpr(recovery.Value)
+	case ast.RecoveryRaise:
+		return a.analyzeExpr(&ast.RaiseExpr{Position: recovery.Position, Error: recovery.Value})
+	case ast.RecoveryReturn:
+		a.analyzeRecoveryReturn(recovery)
+		return neverType
+	case ast.RecoveryVoid:
+		if expected != nil && !isVoidType(expected) && !IsInvalidType(expected) {
+			a.errorf(recovery.Position, "%s cannot use else void for non-void result %s", label, expected)
+		}
+		return a.namedTypes["void"]
+	case ast.RecoveryBlock:
+		scope := NewScope(a.currentScope)
+		if recovery.Binding != "" {
+			if errorType == nil {
+				a.errorf(recovery.Position, "else error binding requires an error-union operand")
+				errorType = invalidType
+			}
+			a.defineLocalInScope(scope, &Symbol{Name: recovery.Binding, Kind: SymbolLocal, Type: errorType, Mutable: false}, recovery.Position)
+		}
+		a.analyzeBlockInScope(recovery.Body, scope)
+		if blockDefinitelyExits(recovery.Body) {
+			return neverType
+		}
+		if expected != nil && !isVoidType(expected) && !IsInvalidType(expected) {
+			a.errorf(recovery.Position, "%s block must return, raise, or produce %s", label, expected)
+		}
+		return a.namedTypes["void"]
+	default:
+		return invalidType
+	}
+}
+
+func (a *Analyzer) analyzeRecoveryReturn(recovery *ast.RecoveryClause) {
+	if a.currentReturn == nil {
+		a.errorf(recovery.Position, "return recovery is only valid inside a function")
+		if recovery.Value != nil {
+			a.analyzeExpr(recovery.Value)
+		}
+		return
+	}
+	if recovery.Value == nil {
+		if !isVoidType(a.currentReturn) {
+			a.errorf(recovery.Position, "return recovery expects %s, got void", a.currentReturn)
+		}
+		return
+	}
+	valueType := a.analyzeExpr(recovery.Value)
+	expectedReturn := a.matchReturnType(valueType)
+	if !AssignableTo(expectedReturn, valueType) {
+		a.errorf(recovery.Position, "return type expects %s, got %s", expectedReturn, valueType)
+		a.reportShapeMismatchNotes(recovery.Position, expectedReturn, valueType)
+	}
+	a.consumeAffineValueExpr(recovery.Value, expectedReturn, "return")
 }

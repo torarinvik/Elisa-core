@@ -104,6 +104,39 @@ def by_reverse_family_order() -> int error[NetworkError, FileError]:
 		t.Fatalf("expected canonical error union struct name, got:\n%s", output)
 	}
 }
+func TestGenerateLLVMIRDistinguishesOptionalErrorUnionPayloadNames(t *testing.T) {
+	src := `error ProbeError:
+	Bad
+
+def raw(flag: bool) -> int error[ProbeError]:
+	if flag:
+		raise ProbeError.Bad
+	return 1
+
+def maybe(flag: bool) -> int? error[ProbeError]:
+	if flag:
+		raise ProbeError.Bad
+	return null
+`
+	result := parseAndAnalyze(t, "backend_error_union_optional_payload_names.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Optional__int = type { i1, i64 }",
+		"define i32 @raw(ptr ",
+		"define i32 @maybe(ptr ",
+		"store i64 1, ptr %0",
+		"store %Optional__int zeroinitializer, ptr %0",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
 func TestGenerateLLVMIRAcceptsBareFamilyErrorSetShorthand(t *testing.T) {
 	src := `error IoError:
 	NotFound
@@ -153,6 +186,45 @@ def fallback_value(flag: bool) -> int:
 		"define i64 @fallback_value(i1",
 		"extractvalue %Optional__int",
 		"phi i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersUnifiedElseRecovery(t *testing.T) {
+	src := `error FileError:
+	NotFound
+
+extern read_value(flag: bool) -> int error[FileError]
+
+def maybe_value(flag: bool) -> int?:
+	if flag:
+		return 7
+	return null
+
+def optional_return(flag: bool) -> int:
+	return maybe_value(flag) else return 11
+
+def try_error_binding(flag: bool) -> int:
+	return try read_value(flag) else err:
+		return 13
+`
+	result := parseAndAnalyze(t, "backend_unified_else_recovery.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @optional_return(i1",
+		"define i64 @try_error_binding(i1",
+		"unwrap.fallback",
+		"try.fallback",
+		"ret i64 11",
+		"ret i64 13",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

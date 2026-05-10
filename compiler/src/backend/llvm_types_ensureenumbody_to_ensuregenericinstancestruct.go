@@ -545,7 +545,7 @@ func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType)
 	if unionType == nil || unionType.Errors == nil {
 		return nil, fmt.Errorf("missing error union metadata")
 	}
-	name := "ErrUnion__" + sanitizeIdentifier(unionType.Errors.String()) + "__" + sanitizeIdentifier(unionType.Value.String())
+	name := "ErrUnion__" + sanitizeIdentifier(unionType.Errors.String()) + "__" + llvmTypeSymbolName(unionType.Value)
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err
@@ -565,6 +565,18 @@ func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType)
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
+}
+
+func llvmTypeSymbolName(t semantic.Type) string {
+	switch tt := t.(type) {
+	case *semantic.OptionalType:
+		if tt == nil || tt.Value == nil {
+			return "Optional__invalid"
+		}
+		return "Optional__" + llvmTypeSymbolName(tt.Value)
+	default:
+		return sanitizeIdentifier(t.String())
+	}
 }
 
 func (g *llvmGenerator) ensureErrorSetType(errorSet *semantic.ErrorSetType) (C.LLVMTypeRef, error) {

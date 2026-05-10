@@ -171,17 +171,21 @@ func (p *Parser) parseReturn() ast.Stmt {
 			cond := p.parseExpr()
 			p.expectNewlineAfterValueExpr(cond)
 			return &ast.IfStmt{
-				Position: pos,
-				Cond:     cond,
-				Then:     []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: value}},
+				Position:              pos,
+				Cond:                  cond,
+				Then:                  []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: value}},
+				DeprecatedSyntax:      "return?",
+				DeprecatedReplacement: "return value else return null",
 			}
 		}
 		p.expectNewlineAfterValueExpr(value)
 		name := "__return_optional"
 		return &ast.IfStmt{
-			Position: pos,
-			Cond:     &ast.OptionalBindExpr{Position: pos, Name: name, Value: value},
-			Then:     []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: name}}},
+			Position:              pos,
+			Cond:                  &ast.OptionalBindExpr{Position: pos, Name: name, Value: value},
+			Then:                  []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: name}}},
+			DeprecatedSyntax:      "return?",
+			DeprecatedReplacement: "return value else return null",
 		}
 	}
 	var value ast.Expr
@@ -214,7 +218,12 @@ func (p *Parser) parseOptionalReturnWith(pos lexer.Pos) ast.Stmt {
 		p.errorAt(pos, "return? with requires at least one optional binding")
 	}
 	value := p.parseOptionalReturnWithValue(pos)
-	return buildOptionalReturnWithChain(pos, bindings, value, 0)
+	stmt := buildOptionalReturnWithChain(pos, bindings, value, 0)
+	if ifStmt, ok := stmt.(*ast.IfStmt); ok {
+		ifStmt.DeprecatedSyntax = "return?"
+		ifStmt.DeprecatedReplacement = "return value else return null"
+	}
+	return stmt
 }
 func (p *Parser) skipOptionalReturnWithBindingTrivia() {
 	p.skipNewlines()

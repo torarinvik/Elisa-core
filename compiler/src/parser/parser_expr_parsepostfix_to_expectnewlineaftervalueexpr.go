@@ -285,6 +285,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 				Position:                 pos,
 				Value:                    value,
 				Fallback:                 fallback,
+				Recovery:                 &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryValue, Value: fallback},
 				UsesDefaultShorthandForm: true,
 			}
 		}
@@ -500,5 +501,19 @@ func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
 	if _, ok := expr.(*ast.ExprBlock); ok {
 		return
 	}
+	if exprHasBlockRecovery(expr) {
+		return
+	}
 	p.expectNewline()
+}
+
+func exprHasBlockRecovery(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.TryExpr:
+		return n.Recovery != nil && n.Recovery.Kind == ast.RecoveryBlock
+	case *ast.UnwrapElseExpr:
+		return n.Recovery != nil && n.Recovery.Kind == ast.RecoveryBlock
+	default:
+		return false
+	}
 }

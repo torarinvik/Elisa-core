@@ -22,10 +22,28 @@ type RaiseExpr struct {
 	Position lexer.Pos
 	Error    Expr
 }
+type RecoveryKind int
+
+const (
+	RecoveryValue RecoveryKind = iota
+	RecoveryReturn
+	RecoveryRaise
+	RecoveryVoid
+	RecoveryBlock
+)
+
+type RecoveryClause struct {
+	Position lexer.Pos
+	Kind     RecoveryKind
+	Value    Expr
+	Binding  string
+	Body     []Stmt
+}
 type TryExpr struct {
 	Position                 lexer.Pos
 	Value                    Expr
 	Fallback                 Expr
+	Recovery                 *RecoveryClause
 	UsesDefaultShorthandForm bool
 }
 type CatchArm struct {
@@ -44,6 +62,7 @@ type UnwrapElseExpr struct {
 	Position lexer.Pos
 	Value    Expr
 	Fallback Expr
+	Recovery *RecoveryClause
 }
 type OptionalBindExpr struct {
 	Position lexer.Pos
@@ -256,12 +275,14 @@ type ReturnStmt struct {
 	Value    Expr
 }
 type IfStmt struct {
-	Position lexer.Pos
-	Hint     BranchHint
-	Cond     Expr
-	Then     []Stmt
-	Elifs    []ElifClause
-	Else     []Stmt
+	Position              lexer.Pos
+	Hint                  BranchHint
+	Cond                  Expr
+	Then                  []Stmt
+	Elifs                 []ElifClause
+	Else                  []Stmt
+	DeprecatedSyntax      string
+	DeprecatedReplacement string
 }
 type WhileStmt struct {
 	Position lexer.Pos

@@ -76,6 +76,7 @@ import "C"
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
 	"strconv"
@@ -189,8 +190,72 @@ func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, sema
 	}
 	return nil, s.exprType(expr), nil
 }
+
+func astRecoveryClauseForExpr(recovery *ast.RecoveryClause, fallback ast.Expr, pos lexer.Pos) *ast.RecoveryClause {
+	if recovery != nil {
+		return recovery
+	}
+	if fallback == nil {
+		return nil
+	}
+	if raise, ok := fallback.(*ast.RaiseExpr); ok {
+		return &ast.RecoveryClause{Position: fallback.Pos(), Kind: ast.RecoveryRaise, Value: raise.Error}
+	}
+	return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryValue, Value: fallback}
+}
+
+func (s *functionState) emitRecoveryClause(recovery *ast.RecoveryClause, resultType semantic.Type, errorValue C.LLVMValueRef, errorType semantic.Type) (C.LLVMValueRef, bool, error) {
+	if recovery == nil {
+		return nil, false, fmt.Errorf("missing recovery clause")
+	}
+	switch recovery.Kind {
+	case ast.RecoveryValue:
+		value, _, err := s.emitExpr(recovery.Value, resultType)
+		return value, !s.currentBlockTerminated(), err
+	case ast.RecoveryRaise:
+		_, _, err := s.emitRaiseExpr(&ast.RaiseExpr{Position: recovery.Position, Error: recovery.Value})
+		return nil, false, err
+	case ast.RecoveryReturn:
+		err := s.emitStmt(&ast.ReturnStmt{Position: recovery.Position, Value: recovery.Value})
+		return nil, false, err
+	case ast.RecoveryVoid:
+		return nil, !s.currentBlockTerminated(), nil
+	case ast.RecoveryBlock:
+		s.pushScope()
+		if recovery.Binding != "" {
+			if errorValue == nil || errorType == nil {
+				s.popScope()
+				return nil, false, fmt.Errorf("else error binding requires an error-union operand")
+			}
+			errorPtr, err := s.emitStackTempValue(errorValue, errorType, "else.error")
+			if err != nil {
+				s.popScope()
+				return nil, false, err
+			}
+			s.defineBinding(recovery.Binding, valueBinding{ptr: errorPtr, typ: errorType, mutable: false})
+		}
+		for _, stmt := range recovery.Body {
+			if err := s.emitStmt(stmt); err != nil {
+				s.popScope()
+				return nil, false, err
+			}
+			if s.currentBlockTerminated() {
+				break
+			}
+		}
+		s.popScope()
+		if !s.currentBlockTerminated() && !isVoidType(resultType) {
+			return nil, false, fmt.Errorf("else recovery block must return or raise for non-void result")
+		}
+		return nil, !s.currentBlockTerminated(), nil
+	default:
+		return nil, false, fmt.Errorf("unsupported recovery clause")
+	}
+}
+
 func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
+	recovery := astRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
 	if unionType, ok := s.exprType(expr.Value).(*semantic.ErrorUnionType); ok {
 		fallibleValue, _, err := s.emitExpr(expr.Value, nil)
 		if err != nil {
@@ -210,7 +275,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		}
 		successCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree("try.ok"))
 
-		if expr.Fallback == nil {
+		if recovery == nil {
 			okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.ok"))
 			errBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.err"))
 			C.LLVMBuildCondBr(s.builder, successCond, okBB, errBB)
@@ -260,11 +325,11 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
-		fallbackValue, _, err := s.emitExpr(expr.Fallback, resultType)
+		fallbackValue, reachable, err := s.emitRecoveryClause(recovery, resultType, errorValue, unionType.Errors)
 		if err != nil {
 			return nil, nil, err
 		}
-		if !s.currentBlockTerminated() {
+		if reachable && !s.currentBlockTerminated() {
 			fallbackEnd := C.LLVMGetInsertBlock(s.builder)
 			C.LLVMBuildBr(s.builder, mergeBB)
 			if !isVoidType(resultType) {
@@ -296,7 +361,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 	if !ok {
 		return nil, nil, fmt.Errorf("try requires a lowered fallible operand")
 	}
-	if expr.Fallback == nil {
+	if recovery == nil {
 		return nil, nil, fmt.Errorf("try without else is only supported for error unions")
 	}
 	fallibleValue, _, err := s.emitExpr(expr.Value, nil)
@@ -333,11 +398,11 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
-	fallbackValue, _, err := s.emitExpr(expr.Fallback, resultType)
+	fallbackValue, reachable, err := s.emitRecoveryClause(recovery, resultType, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !s.currentBlockTerminated() {
+	if reachable && !s.currentBlockTerminated() {
 		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
 		C.LLVMBuildBr(s.builder, mergeBB)
 		if !isVoidType(resultType) {
@@ -538,25 +603,41 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 	return phi, resultType, nil
 }
 func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (C.LLVMValueRef, semantic.Type, error) {
-	valueType, ok := s.exprType(expr.Value).(*semantic.RefType)
-	if !ok {
-		return nil, nil, fmt.Errorf("else recovery requires a reference operand")
-	}
+	valueType := s.exprType(expr.Value)
 	resultType := s.exprType(expr)
 	value, _, err := s.emitExpr(expr.Value, valueType)
 	if err != nil {
 		return nil, nil, err
 	}
-	llvmRefType, err := s.g.lowerType(valueType)
-	if err != nil {
-		return nil, nil, err
+	var okCond C.LLVMValueRef
+	var okValue C.LLVMValueRef
+	switch t := valueType.(type) {
+	case *semantic.RefType:
+		llvmRefType, err := s.g.lowerType(valueType)
+		if err != nil {
+			return nil, nil, err
+		}
+		nullValue := C.LLVMConstNull(llvmRefType)
+		okCond = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("unwrap.nonnull"))
+		okValue = value
+	case *semantic.OptionalType:
+		okCond, err = s.extractOptionalPresent(value, t)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !isVoidType(resultType) {
+			okValue, err = s.extractOptionalPayload(value, t)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	default:
+		return nil, nil, fmt.Errorf("else recovery requires an optional value or nullable ref")
 	}
-	nullValue := C.LLVMConstNull(llvmRefType)
-	nonNullCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("unwrap.nonnull"))
 	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.ok"))
 	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.fallback"))
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.merge"))
-	C.LLVMBuildCondBr(s.builder, nonNullCond, okBB, fallbackBB)
+	C.LLVMBuildCondBr(s.builder, okCond, okBB, fallbackBB)
 
 	incomingValues := make([]C.LLVMValueRef, 0, 2)
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
@@ -565,25 +646,33 @@ func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (C.LLVMValu
 	if !s.currentBlockTerminated() {
 		okEnd := C.LLVMGetInsertBlock(s.builder)
 		C.LLVMBuildBr(s.builder, mergeBB)
-		incomingValues = append(incomingValues, value)
+		if !isVoidType(resultType) {
+			incomingValues = append(incomingValues, okValue)
+		}
 		incomingBlocks = append(incomingBlocks, okEnd)
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
-	fallbackValue, _, err := s.emitExpr(expr.Fallback, resultType)
+	recovery := astRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
+	fallbackValue, reachable, err := s.emitRecoveryClause(recovery, resultType, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !s.currentBlockTerminated() {
+	if reachable && !s.currentBlockTerminated() {
 		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
 		C.LLVMBuildBr(s.builder, mergeBB)
-		incomingValues = append(incomingValues, fallbackValue)
+		if !isVoidType(resultType) {
+			incomingValues = append(incomingValues, fallbackValue)
+		}
 		incomingBlocks = append(incomingBlocks, fallbackEnd)
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if len(incomingValues) == 0 {
+	if len(incomingBlocks) == 0 {
 		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if isVoidType(resultType) {
 		return nil, resultType, nil
 	}
 	if len(incomingValues) == 1 {

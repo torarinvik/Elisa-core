@@ -102,12 +102,14 @@ func (p *Parser) parseExpr() ast.Expr {
 	if p.peek() == lexer.TOKEN_ELSE {
 		pos := p.cur().Pos
 		p.advance()
-		alt := p.parseExpr()
-		if tryExpr, ok := expr.(*ast.TryExpr); ok && tryExpr.Fallback == nil {
-			tryExpr.Fallback = alt
+		recovery := p.parseRecoveryClause(pos)
+		fallback := recoveryFallbackExpr(recovery)
+		if tryExpr, ok := expr.(*ast.TryExpr); ok && tryExpr.Recovery == nil && tryExpr.Fallback == nil {
+			tryExpr.Recovery = recovery
+			tryExpr.Fallback = fallback
 			return tryExpr
 		}
-		return &ast.UnwrapElseExpr{Position: pos, Value: expr, Fallback: alt}
+		return &ast.UnwrapElseExpr{Position: pos, Value: expr, Fallback: fallback, Recovery: recovery}
 	}
 	if p.matchIdentText("can") {
 		permissions := p.parsePermissionRefs(false)
@@ -115,6 +117,53 @@ func (p *Parser) parseExpr() ast.Expr {
 	}
 
 	return expr
+}
+
+func (p *Parser) parseRecoveryClause(pos lexer.Pos) *ast.RecoveryClause {
+	switch p.peek() {
+	case lexer.TOKEN_RETURN:
+		p.advance()
+		return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryReturn, Value: p.parseOptionalRecoveryExpr()}
+	case lexer.TOKEN_RAISE:
+		p.advance()
+		return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryRaise, Value: p.parseOr()}
+	case lexer.TOKEN_IDENT:
+		if p.cur().Text == "void" {
+			p.advance()
+			return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryVoid}
+		}
+		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			binding := p.cur().Text
+			p.advance()
+			p.expect(lexer.TOKEN_COLON)
+			p.expectNewline()
+			return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryBlock, Binding: binding, Body: p.parseBlock()}
+		}
+	}
+	return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryValue, Value: p.parseExpr()}
+}
+
+func (p *Parser) parseOptionalRecoveryExpr() ast.Expr {
+	switch p.peek() {
+	case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF, lexer.TOKEN_DEDENT, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_COMMA:
+		return nil
+	default:
+		return p.parseExpr()
+	}
+}
+
+func recoveryFallbackExpr(recovery *ast.RecoveryClause) ast.Expr {
+	if recovery == nil {
+		return nil
+	}
+	switch recovery.Kind {
+	case ast.RecoveryValue:
+		return recovery.Value
+	case ast.RecoveryRaise:
+		return &ast.RaiseExpr{Position: recovery.Position, Error: recovery.Value}
+	default:
+		return nil
+	}
 }
 func (p *Parser) parseChildrenCallArgs() ([]ast.Expr, []string) {
 	if p.peek() == lexer.TOKEN_RPAREN {

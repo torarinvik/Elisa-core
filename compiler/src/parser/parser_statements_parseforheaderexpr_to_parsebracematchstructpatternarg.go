@@ -205,9 +205,11 @@ func (p *Parser) parseMatch() ast.Stmt {
 		}
 		arms := p.parseMatchArms()
 		return &ast.IfStmt{
-			Position: pos,
-			Cond:     &ast.OptionalBindExpr{Position: pos, Name: name, Value: value},
-			Then:     []ast.Stmt{&ast.MatchStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: name}, Arms: arms}},
+			Position:              pos,
+			Cond:                  &ast.OptionalBindExpr{Position: pos, Name: name, Value: value},
+			Then:                  []ast.Stmt{&ast.MatchStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: name}, Arms: arms}},
+			DeprecatedSyntax:      "match?",
+			DeprecatedReplacement: "match value if maybe is value else void",
 		}
 	}
 	value := p.parseMatchHeadExpr()

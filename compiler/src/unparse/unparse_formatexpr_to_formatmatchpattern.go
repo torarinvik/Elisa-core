@@ -257,14 +257,14 @@ func formatExpr(expr ast.Expr) string {
 			return "try? " + formatExpr(n.Value) + " default " + formatExpr(n.Fallback)
 		}
 		line := "try " + formatExpr(n.Value)
-		if n.Fallback != nil {
-			line += " else " + formatExpr(n.Fallback)
+		if n.Recovery != nil || n.Fallback != nil {
+			line += " else " + formatRecoveryClause(n.Recovery, n.Fallback)
 		}
 		return line
 	case *ast.CatchExpr:
 		return formatCatchExpr(n)
 	case *ast.UnwrapElseExpr:
-		return formatExpr(n.Value) + " else " + formatExpr(n.Fallback)
+		return formatExpr(n.Value) + " else " + formatRecoveryClause(n.Recovery, n.Fallback)
 	case *ast.OptionalBindExpr:
 		return "let " + n.Name + " = " + formatExpr(n.Value)
 	case *ast.AllocExpr:
@@ -305,6 +305,32 @@ func formatExpr(expr ast.Expr) string {
 		return "emit " + formatExpr(n.Value)
 	default:
 		return "<expr>"
+	}
+}
+
+func formatRecoveryClause(recovery *ast.RecoveryClause, fallback ast.Expr) string {
+	if recovery == nil {
+		return formatExpr(fallback)
+	}
+	switch recovery.Kind {
+	case ast.RecoveryValue:
+		return formatExpr(recovery.Value)
+	case ast.RecoveryReturn:
+		if recovery.Value == nil {
+			return "return"
+		}
+		return "return " + formatExpr(recovery.Value)
+	case ast.RecoveryRaise:
+		return "raise " + formatExpr(recovery.Value)
+	case ast.RecoveryVoid:
+		return "void"
+	case ast.RecoveryBlock:
+		if recovery.Binding != "" {
+			return recovery.Binding + ": ..."
+		}
+		return ": ..."
+	default:
+		return formatExpr(fallback)
 	}
 }
 func isRefCastTarget(t ast.TypeExpr) bool {

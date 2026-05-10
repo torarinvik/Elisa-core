@@ -139,6 +139,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.IsPatternExpr{})
 		gob.Register(&ast.ParenExpr{})
 		gob.Register(&ast.RaiseExpr{})
+		gob.Register(&ast.RecoveryClause{})
 		gob.Register(&ast.TryExpr{})
 		gob.Register(&ast.CatchExpr{})
 		gob.Register(&ast.UnwrapElseExpr{})
