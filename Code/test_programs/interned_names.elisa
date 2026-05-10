@@ -21,6 +21,7 @@ def interned_name_methods_smoke(a: mutable Arena&) -> i32:
         -7 return if copy_name.value() != copy_id
         -8 return if not copy_name.matches_cs("Copied")
         -9 return if not lower_name.matches_ci("MIXED")
+        -10 return if copy_name.NameId() != copy_id
 
         text: sview = copy_name.text()
         return text.len.i32()

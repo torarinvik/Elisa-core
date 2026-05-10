@@ -38,6 +38,10 @@ struct InternedName:
     id: NameId
 
 
+def __cast__(name: InternedName) -> NameId:
+    return name.id
+
+
 def name_table_init(owner: mutable Arena&) -> NameTable:
     return NameTable{owner: owner, entries: [], buckets: []}
 
