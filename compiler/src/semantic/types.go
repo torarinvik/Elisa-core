@@ -110,6 +110,14 @@ type RefStateValueType struct {
 	State RefState
 }
 
+type RegionParamType struct {
+	Name string
+}
+
+type RegionValueType struct {
+	Name string
+}
+
 type ErrorSetType struct {
 	Name     string
 	Tags     []string
@@ -404,6 +412,8 @@ type StructType struct {
 	TypeParams       []string
 	RefStorageParams []string
 	RefStateParams   []string
+	RegionParams     []string
+	RegionOwner      string
 	GenericParams    []ast.GenericParam
 	NamedStateCases  []string
 	DerivedStates    []StructDerivedState

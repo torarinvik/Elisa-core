@@ -207,7 +207,8 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			return Field{}, false
 		}
 		bindings := genericBindingsForStructInstance(baseStruct, t.Args)
-		field.Type = a.substituteType(field.Type, bindings, nil, nil, nil)
+		regionBindings := regionBindingsForStructInstance(baseStruct, t.Args)
+		field.Type = a.substituteType(field.Type, bindings, nil, regionBindings, nil)
 		return field, true
 	default:
 		if emitDiagnostics {

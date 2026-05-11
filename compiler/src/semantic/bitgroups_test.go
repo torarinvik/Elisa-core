@@ -140,6 +140,14 @@ struct CHeader layout c:
 	flags: u32
 	size: usize
 
+layout aos struct Particle:
+	x: f32
+	y: f32
+
+layout soa struct ParticleRows:
+	x: f32
+	y: f32
+
 struct Plain:
 	value: i32
 `)
@@ -157,9 +165,83 @@ struct Plain:
 	if !exportedNamedTypeAllowed(cHeader) || !isCABICompatibleType(cHeader) {
 		t.Fatalf("expected explicit C layout struct with scalar fields to be C ABI compatible")
 	}
+	particle := result.NamedTypes["Particle"].(*StructType)
+	if particle.Layout != ast.StructLayoutAOS || particle.Store || particle.StoreDecl != nil {
+		t.Fatalf("expected Particle to stay an AOS struct, got layout=%v store=%v storeDecl=%#v", particle.Layout, particle.Store, particle.StoreDecl)
+	}
+	particleRows := result.NamedTypes["ParticleRows"].(*StructType)
+	if particleRows.Layout != ast.StructLayoutSOA || !particleRows.Store || particleRows.StoreDecl == nil || !particleRows.StoreDecl.Soa {
+		t.Fatalf("expected ParticleRows to analyze as SOA-backed store layout, got layout=%v store=%v storeDecl=%#v", particleRows.Layout, particleRows.Store, particleRows.StoreDecl)
+	}
 	plain := result.NamedTypes["Plain"].(*StructType)
 	if plain.ReprC || plain.Layout != ast.StructLayoutDefault || exportedNamedTypeAllowed(plain) || isCABICompatibleType(plain) {
 		t.Fatalf("expected default struct to use Elisa layout rather than C ABI layout, got layout=%v reprC=%v", plain.Layout, plain.ReprC)
+	}
+}
+
+func TestAnalyzeStructRegionOwnerScope(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_scope.elisa", `struct Expr in owner:
+	left: owner Expr&?
+	right: owner Expr&?
+
+struct Explicit[region arena]:
+	next: arena Explicit&?
+`)
+	expr := result.NamedTypes["Expr"].(*StructType)
+	if len(expr.RegionParams) != 1 || expr.RegionParams[0] != "owner" || expr.RegionOwner != "owner" {
+		t.Fatalf("expected Expr to record owner region sugar, got params=%v owner=%q", expr.RegionParams, expr.RegionOwner)
+	}
+	leftRef, ok := expr.Fields["left"].Type.(*RefType)
+	if !ok {
+		t.Fatalf("expected Expr.left to resolve as a ref type, got %T", expr.Fields["left"].Type)
+	}
+	if leftRef.Region != "owner" {
+		t.Fatalf("expected Expr.left region qualifier to resolve to owner, got %q", leftRef.Region)
+	}
+	explicit := result.NamedTypes["Explicit"].(*StructType)
+	if len(explicit.RegionParams) != 1 || explicit.RegionParams[0] != "arena" || explicit.RegionOwner != "" {
+		t.Fatalf("expected Explicit to record explicit region parameter only, got params=%v owner=%q", explicit.RegionParams, explicit.RegionOwner)
+	}
+	nextRef, ok := explicit.Fields["next"].Type.(*RefType)
+	if !ok {
+		t.Fatalf("expected Explicit.next to resolve as a ref type, got %T", explicit.Fields["next"].Type)
+	}
+	if nextRef.Region != "arena" {
+		t.Fatalf("expected Explicit.next region qualifier to resolve to arena, got %q", nextRef.Region)
+	}
+}
+
+func TestAnalyzeStructRegionOwnerUseSiteInstantiation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_use_site.elisa", `struct Expr in owner:
+	next: owner Expr&?
+
+def build() -> void:
+	region scratch(1024)
+	head: Expr[scratch] = Expr{
+		next: null
+	}
+	_ = head.next
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("expected region-owned struct instantiation to analyze cleanly, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func TestAnalyzeStructRegionOwnerWithTypeParams(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_type_param.elisa", `struct Box[T, region owner]:
+	value: T
+	next: owner Box[T, owner]&?
+
+def build() -> void:
+	region scratch(1024)
+	box: Box[i64, scratch] = Box{
+		value: 42,
+		next: null
+	}
+	_ = box.next
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("expected mixed type and region struct params to analyze cleanly, got:\n%s", strings.Join(result.Errors(), "\n"))
 	}
 }
 

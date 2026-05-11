@@ -23,6 +23,8 @@ func (*RefStorageParamType) isType()   {}
 func (*RefStorageValueType) isType()   {}
 func (*RefStateParamType) isType()     {}
 func (*RefStateValueType) isType()     {}
+func (*RegionParamType) isType()       {}
+func (*RegionValueType) isType()       {}
 func (*ErrorSetType) isType()          {}
 func (*ErrorUnionType) isType()        {}
 func (*OptionalType) isType()          {}
@@ -78,6 +80,18 @@ func (t *IDType) String() string {
 		return "id[<invalid>]"
 	}
 	return fmt.Sprintf("id[%s]", t.Tag.String())
+}
+func (t *RegionParamType) String() string {
+	if t == nil {
+		return "<invalid-region-param>"
+	}
+	return t.Name
+}
+func (t *RegionValueType) String() string {
+	if t == nil {
+		return "<invalid-region>"
+	}
+	return t.Name
 }
 func (t *TypeParamType) String() string { return t.Name }
 func (t *ConstParamType) String() string {

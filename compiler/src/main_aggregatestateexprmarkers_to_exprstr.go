@@ -84,7 +84,21 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if n.Affine {
 			affine = "affine "
 		}
-		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, nil, nil)
+		layoutPrefix := ""
+		switch n.Layout {
+		case ast.StructLayoutAOS:
+			layoutPrefix = "layout aos "
+		case ast.StructLayoutSOA:
+			layoutPrefix = "layout soa "
+		}
+		regionParams := n.RegionParams
+		if n.RegionOwner != "" {
+			regionParams = nil
+		}
+		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, regionParams, nil)
+		if n.RegionOwner != "" {
+			tparams += " in " + n.RegionOwner
+		}
 		stateParamCount := n.StateParamCount
 		if stateParamCount == 0 && n.HasStateParam {
 			stateParamCount = 1
@@ -92,7 +106,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if stateParamCount > 0 {
 			tparams += aggregateStatePlaceholders(stateParamCount)
 		}
-		fmt.Fprintf(w, "%s%sstruct %s%s (%d fields)\n", prefix, affine, n.Name, tparams, len(n.Fields))
+		fmt.Fprintf(w, "%s%s%sstruct %s%s (%d fields)\n", prefix, affine, layoutPrefix, n.Name, tparams, len(n.Fields))
 	case *ast.InterfaceDecl:
 		kind := "static interface"
 		if n.Protocol {

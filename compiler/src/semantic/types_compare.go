@@ -140,6 +140,12 @@ func SameType(a, b Type) bool {
 	case *RefStateValueType:
 		tb, ok := b.(*RefStateValueType)
 		return ok && ta.State == tb.State
+	case *RegionParamType:
+		tb, ok := b.(*RegionParamType)
+		return ok && ta.Name == tb.Name
+	case *RegionValueType:
+		tb, ok := b.(*RegionValueType)
+		return ok && ta.Name == tb.Name
 	case *ErrorSetType:
 		tb, ok := b.(*ErrorSetType)
 		return ok && ErrorSetTagsEqual(ta, tb)

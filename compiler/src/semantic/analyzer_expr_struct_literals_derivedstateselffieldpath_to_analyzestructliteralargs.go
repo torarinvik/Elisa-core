@@ -60,7 +60,7 @@ func allocOwnerPos(expr *ast.AllocExpr) lexer.Pos {
 	}
 	return lexer.Pos{}
 }
-func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *StructType, bindings map[string]Type) {
+func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *StructType, bindings map[string]Type, regionBindings map[string]string) {
 	if base == nil || base.Decl == nil {
 		for _, spread := range expr.Spreads {
 			a.analyzeExpr(spread)
@@ -106,7 +106,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			}
 			expected := field.Type
 			if len(bindings) > 0 {
-				expected = a.substituteType(expected, bindings, nil, nil, nil)
+				expected = a.substituteType(expected, bindings, nil, regionBindings, nil)
 			}
 			arg, actual := a.analyzeCallLikeValueExpr(expr.Args[i], expected)
 			expr.Args[i] = arg
@@ -164,7 +164,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		}
 		expected := field.Type
 		if len(bindings) > 0 {
-			expected = a.substituteType(expected, bindings, nil, nil, nil)
+			expected = a.substituteType(expected, bindings, nil, regionBindings, nil)
 		}
 		var actual Type
 		expr.Args[i], actual = a.analyzeCallLikeValueExpr(expr.Args[i], expected)

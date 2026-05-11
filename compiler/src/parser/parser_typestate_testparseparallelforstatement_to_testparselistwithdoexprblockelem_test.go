@@ -415,6 +415,31 @@ func TestParseChainedIterableForStatementLowersToNestedLoops(t *testing.T) {
 	}
 }
 
+func TestParseChainedIterableForStatementAfterWhereLowersToNestedLoops(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Block:\n    labels: darray[int]\n\ndef collect(blocks: darray[Block]) -> void:\n    for block in blocks where block.labels.count > 0 for label in block.labels:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	outer, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected outer iterable for stmt, got %T", decl.Body[0])
+	}
+	if outer.WhereFilter == nil {
+		t.Fatalf("expected outer loop to keep where filter")
+	}
+	if len(outer.Body) != 1 {
+		t.Fatalf("expected outer body to contain nested loop, got %d statements", len(outer.Body))
+	}
+	inner, ok := outer.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected inner iterable for stmt, got %T", outer.Body[0])
+	}
+	if pattern, ok := inner.Pattern.(*ast.MoveBindNamePattern); !ok || pattern.Name != "label" {
+		t.Fatalf("expected inner binder label, got %T %#v", inner.Pattern, inner.Pattern)
+	}
+}
+
 func TestParseChainedRangeForStatementLowersToNestedLoops(t *testing.T) {
 	file, errs := parseSourceFile(t, "def mix(rounds: usize, len: usize) -> void:\n    for round in 0..<rounds for i in 0..<len:\n        pass\n")
 	if len(errs) != 0 {

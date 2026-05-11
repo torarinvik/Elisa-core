@@ -71,11 +71,29 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			return mapped
 		}
 		return t
+	case *semantic.RegionParamType:
+		if mapped, ok := subst[tt.Name]; ok {
+			return mapped
+		}
+		return t
+	case *semantic.RegionValueType:
+		return t
 	case *semantic.ErrorUnionType:
 		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst, impls), Errors: tt.Errors}
 	case *semantic.OptionalType:
 		return &semantic.OptionalType{Value: substituteType(tt.Value, subst, impls)}
 	case *semantic.RefType:
+		region := tt.Region
+		if region != "" {
+			if mapped, ok := subst[region]; ok {
+				switch mapped := mapped.(type) {
+				case *semantic.RegionParamType:
+					region = mapped.Name
+				case *semantic.RegionValueType:
+					region = mapped.Name
+				}
+			}
+		}
 		state := tt.State
 		stateParam := tt.StateParam
 		if stateParam != "" {
@@ -102,7 +120,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 				}
 			}
 		}
-		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		elem := substituteType(tt.Elem, subst, impls)
 		if tt.ConstParam != "" {
@@ -174,11 +192,26 @@ func structGenericParams(base *semantic.StructType) []ast.GenericParam {
 		return nil
 	}
 	if len(base.GenericParams) != 0 {
-		return base.GenericParams
+		params := append([]ast.GenericParam(nil), base.GenericParams...)
+		seenRegion := map[string]bool{}
+		for _, param := range params {
+			if param.Kind == ast.GenericParamRegion {
+				seenRegion[param.Name] = true
+			}
+		}
+		for _, name := range base.RegionParams {
+			if !seenRegion[name] {
+				params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
+			}
+		}
+		return params
 	}
-	params := make([]ast.GenericParam, 0, len(base.TypeParams)+1)
+	params := make([]ast.GenericParam, 0, len(base.TypeParams)+len(base.RegionParams)+1)
 	for _, name := range base.TypeParams {
 		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	for _, name := range base.RegionParams {
+		params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
 	}
 	if len(base.NamedStateCases) != 0 {
 		params = append(params, ast.GenericParam{Kind: ast.GenericParamState, Name: "state", StateCases: append([]string(nil), base.NamedStateCases...), StateOwner: base.Name})

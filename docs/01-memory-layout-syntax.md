@@ -211,25 +211,22 @@ Declares a named allocation region.
 ## 13. `struct T in Region`
 
 ```elisa
-region ParseArena
-
-struct Expr in ParseArena:
+struct Expr in owner:
     kind: ExprKind
-    left: Expr?
-    right: Expr?
+    left: owner Expr&?
+    right: owner Expr&?
 ```
 
 **Syntax meaning:**
-Declares that instances of the type belong to the named region.
+Declares a struct with an owner-region parameter using sugar for
+`struct Expr[region owner]: ...`.
 
 ---
 
 ## 14. `layout ... in Region`
 
 ```elisa
-region SimArena
-
-layout soa struct Particle in SimArena:
+layout soa struct Particle in owner:
     x: f32
     y: f32
     z: f32
@@ -239,7 +236,8 @@ layout soa struct Particle in SimArena:
 ```
 
 **Syntax meaning:**
-Combines physical layout selection with region-based allocation.
+Combines physical layout selection with an owner-region parameter, using sugar
+for `layout soa struct Particle[region owner]: ...`.
 
 ---
 

@@ -4,6 +4,19 @@ import (
 	"elisacore/src/ast"
 )
 
+func synthesizedStoreDeclFromStruct(n *ast.StructDecl) *ast.StoreDecl {
+	if n == nil || n.Layout != ast.StructLayoutSOA {
+		return nil
+	}
+	return &ast.StoreDecl{
+		Position:    n.Position,
+		Annotations: append([]ast.Annotation(nil), n.Annotations...),
+		Name:        n.Name,
+		Soa:         true,
+		Fields:      append([]ast.FieldDecl(nil), n.Fields...),
+	}
+}
+
 func (a *Analyzer) collectConstValues(decls []scopedDecl) {
 	for _, scoped := range decls {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
@@ -107,11 +120,14 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
+				storeDecl := synthesizedStoreDeclFromStruct(n)
 				st := &StructType{
 					Name:             qualifiedName,
 					TypeParams:       append([]string(nil), n.TypeParams...),
 					RefStorageParams: append([]string(nil), n.RefStorageParams...),
 					RefStateParams:   append([]string(nil), n.RefStateParams...),
+					RegionParams:     append([]string(nil), n.RegionParams...),
+					RegionOwner:      n.RegionOwner,
 					GenericParams:    append([]ast.GenericParam(nil), n.GenericParams...),
 					NamedStateCases:  append([]string(nil), n.NamedStateCases...),
 					Fields:           map[string]Field{},
@@ -120,6 +136,9 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					Layout:           n.Layout,
 					PackedLayout:     n.Layout == ast.StructLayoutPacked,
 					Decl:             n,
+					StoreDecl:        storeDecl,
+					Store:            storeDecl != nil,
+					StoreFieldOrder:  make([]string, 0, len(n.Fields)),
 				}
 				a.namedTypes[qualifiedName] = st
 			case *ast.StoreDecl:

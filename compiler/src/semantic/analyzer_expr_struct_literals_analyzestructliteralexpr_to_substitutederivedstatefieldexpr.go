@@ -9,7 +9,7 @@ import (
 
 func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Type) Type {
 	targetType := a.structLiteralTargetType(expr, expected)
-	base, bindings, ok := structLiteralBaseAndBindings(targetType)
+	base, bindings, regionBindings, ok := structLiteralBaseAndBindings(targetType)
 	if !ok || base == nil {
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
@@ -35,7 +35,7 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		}
 		a.consumeAffineValueExpr(spread, targetType, "move into struct literal spread base")
 	}
-	a.analyzeStructLiteralArgs(expr, base, bindings)
+	a.analyzeStructLiteralArgs(expr, base, bindings, regionBindings)
 	if len(base.NamedStateCases) == 0 {
 		return targetType
 	}
@@ -445,7 +445,7 @@ func (a *Analyzer) structLiteralTargetType(expr *ast.StructLitExpr, expected Typ
 	if len(expr.TypeArgs) != 0 {
 		return a.resolveType(&ast.GenericType{Position: expr.Position, Name: expr.Name, Args: expr.TypeArgs})
 	}
-	if base, _, ok := structLiteralBaseAndBindings(expected); ok && structTypeMatchesLiteralName(base, expr.Name) {
+	if base, _, _, ok := structLiteralBaseAndBindings(expected); ok && structTypeMatchesLiteralName(base, expr.Name) {
 		return expected
 	}
 	if t, _, ok := a.lookupVisibleType(expr.Name); ok {
@@ -459,19 +459,19 @@ func structTypeMatchesLiteralName(base *StructType, name string) bool {
 	}
 	return base.Name == name || strings.HasSuffix(base.Name, "."+name)
 }
-func structLiteralBaseAndBindings(t Type) (*StructType, map[string]Type, bool) {
+func structLiteralBaseAndBindings(t Type) (*StructType, map[string]Type, map[string]string, bool) {
 	t = StripAggregateStateType(t)
 	switch tt := t.(type) {
 	case *StructType:
-		return tt, nil, true
+		return tt, nil, nil, true
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
 		if !ok || base == nil {
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
-		return base, genericBindingsForStructInstance(base, tt.Args), true
+		return base, genericBindingsForStructInstance(base, tt.Args), regionBindingsForStructInstance(base, tt.Args), true
 	default:
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 }
 func instantiateNamedStateStructLiteralType(base *StructType, template Type, state Type) Type {

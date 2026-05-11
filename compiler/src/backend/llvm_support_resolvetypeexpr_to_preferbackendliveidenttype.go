@@ -265,6 +265,25 @@ func (s *functionState) resolveGenericArgForParam(expr ast.TypeExpr, param ast.G
 			}
 			return nil, fmt.Errorf("generic argument %q for named struct state parameter of %q must be a declared state name or union", resolved.String(), param.StateOwner)
 		}
+	case ast.GenericParamRegion:
+		named, ok := expr.(*ast.NamedType)
+		if !ok {
+			return nil, fmt.Errorf("generic argument for region parameter %q must be a region name", param.Name)
+		}
+		if s.typeMap != nil {
+			if bound, ok := s.typeMap[named.Name]; ok {
+				switch bound := bound.(type) {
+				case *semantic.RegionParamType:
+					return bound, nil
+				case *semantic.RegionValueType:
+					return bound, nil
+				}
+			}
+		}
+		if binding, ok := s.lookupBinding(named.Name); ok && binding.typ != nil && binding.typ.String() == "Arena" {
+			return &semantic.RegionValueType{Name: named.Name}, nil
+		}
+		return nil, fmt.Errorf("generic argument %q for region parameter %q must name a visible region or region parameter", named.Name, param.Name)
 	default:
 		return s.resolveTypeExpr(expr)
 	}

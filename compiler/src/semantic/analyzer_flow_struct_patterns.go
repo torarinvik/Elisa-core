@@ -21,8 +21,9 @@ type moveBindResolvedVariantField struct {
 
 func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, bool) {
 	var (
-		base     *StructType
-		bindings map[string]Type
+		base           *StructType
+		bindings       map[string]Type
+		regionBindings map[string]string
 	)
 	actual = StripAggregateStateType(actual)
 	switch tt := actual.(type) {
@@ -99,6 +100,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 		}
 		base = structBase
 		bindings = genericBindingsForStructInstance(base, tt.Args)
+		regionBindings = regionBindingsForStructInstance(base, tt.Args)
 	default:
 		return nil, false
 	}
@@ -117,7 +119,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 		}
 		fieldType := field.Type
 		if len(bindings) != 0 {
-			fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+			fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
 		}
 		fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: fieldType, Mutable: field.Mutable, Index: i})
 	}

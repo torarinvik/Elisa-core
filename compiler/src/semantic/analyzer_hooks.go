@@ -98,11 +98,11 @@ func (a *Analyzer) constructorDeclInitHookName(namespace string, decl *ast.FuncD
 	if !ok {
 		return "", false
 	}
-	targetBase, _, ok := structLiteralBaseAndBindings(targetType)
+	targetBase, _, _, ok := structLiteralBaseAndBindings(targetType)
 	if !ok || targetBase == nil {
 		return "", false
 	}
-	returnBase, _, ok := structLiteralBaseAndBindings(fnType.Return)
+	returnBase, _, _, ok := structLiteralBaseAndBindings(fnType.Return)
 	if !ok || returnBase == nil {
 		return "", false
 	}
@@ -172,7 +172,7 @@ func (a *Analyzer) registerInitHook(namespace string, decl *ast.FuncDecl, lookup
 		a.errorf(decl.Pos(), "__init__ hook %q must return a concrete struct type", declName)
 		return
 	}
-	if base, _, ok := structLiteralBaseAndBindings(fnType.Return); !ok || base == nil {
+	if base, _, _, ok := structLiteralBaseAndBindings(fnType.Return); !ok || base == nil {
 		a.errorf(decl.Pos(), "__init__ hook %q must return a concrete struct type, got %s", declName, fnType.Return)
 		return
 	}

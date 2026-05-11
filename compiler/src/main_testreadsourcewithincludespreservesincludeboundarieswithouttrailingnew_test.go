@@ -194,7 +194,7 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "module_interface_fixture.elisa")
 	interfacePath := filepath.Join(fixtureDir, "module_interface_fixture.elisai")
-	src := "struct Box[T]:\n    value: T\n\nglobal counter: int = 0\n\nstatic interface Builder:\n    type State\n    def state() -> State\n\ndef identity[T](value: T) -> T:\n    return value\n\ndef needs_builder[B: Builder]() -> B.State can[Console.Write]:\n    can Console.Write:\n        signal Console.Write\n    return B.state()\n\nnamespace util:\n    def inc(value: int) -> int:\n        return value + 1\n"
+	src := "struct Box[T]:\n    value: T\n\nstruct Expr in owner:\n    next: owner Expr&?\n\nglobal counter: int = 0\n\nstatic interface Builder:\n    type State\n    def state() -> State\n\ndef identity[T](value: T) -> T:\n    return value\n\ndef needs_builder[B: Builder]() -> B.State can[Console.Write]:\n    can Console.Write:\n        signal Console.Write\n    return B.state()\n\nnamespace util:\n    def inc(value: int) -> int:\n        return value + 1\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write interface fixture: %v", err)
 	}
@@ -218,6 +218,8 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 	interfaceSource := string(data)
 	for _, check := range []string{
 		"struct Box[T]:",
+		"struct Expr in owner:",
+		"next: owner Expr&?",
 		"extern counter: int",
 		"extern identity[T](value: T) -> T",
 		"static interface Builder:",

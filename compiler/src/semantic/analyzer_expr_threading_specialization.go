@@ -55,10 +55,11 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 	case *GenericInstanceType:
 		if base, ok := tt.Base.(*StructType); ok {
 			bindings := genericBindingsForStructInstance(base, tt.Args)
+			regionBindings := regionBindingsForStructInstance(base, tt.Args)
 			for _, field := range base.Fields {
 				fieldType := field.Type
 				if len(bindings) != 0 {
-					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+					fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
 				}
 				if !a.typeStructurallyThreadShareable(fieldType, seen) {
 					return false
@@ -304,12 +305,13 @@ func (a *Analyzer) specializeCallbackCarryingType(expected Type, actual Type) (T
 			return expected, false
 		}
 		bindings := genericBindingsForStructInstance(baseStruct, tt.Args)
+		regionBindings := regionBindingsForStructInstance(baseStruct, tt.Args)
 		changed := false
 		fields := cloneStructFields(baseStruct.Fields)
 		for name, field := range baseStruct.Fields {
 			expectedFieldType := field.Type
 			if len(bindings) != 0 {
-				expectedFieldType = a.substituteType(expectedFieldType, bindings, nil, nil, nil)
+				expectedFieldType = a.substituteType(expectedFieldType, bindings, nil, regionBindings, nil)
 			}
 			actualFieldType, ok := a.lookupResolvedFieldType(actual, name)
 			if !ok {
@@ -382,6 +384,7 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 			return expected, false
 		}
 		bindings := genericBindingsForStructInstance(baseStruct, tt.Args)
+		regionBindings := regionBindingsForStructInstance(baseStruct, tt.Args)
 		changed := false
 		fields := cloneStructFields(baseStruct.Fields)
 		for name, field := range baseStruct.Fields {
@@ -391,7 +394,7 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 			}
 			expectedFieldType := field.Type
 			if len(bindings) != 0 {
-				expectedFieldType = a.substituteType(expectedFieldType, bindings, nil, nil, nil)
+				expectedFieldType = a.substituteType(expectedFieldType, bindings, nil, regionBindings, nil)
 			}
 			nextType, fieldChanged := a.specializeCallbackCarryingTypeFromExpr(expectedFieldType, fieldExpr)
 			if !fieldChanged {

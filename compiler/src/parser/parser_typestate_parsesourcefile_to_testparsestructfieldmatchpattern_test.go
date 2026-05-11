@@ -89,6 +89,14 @@ struct CHeader layout c:
 	kind: u32
 	flags: u32
 	size: usize
+
+layout aos struct Particle:
+	x: f32
+	y: f32
+
+layout soa struct ParticleRows:
+	x: f32
+	y: f32
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -106,6 +114,111 @@ struct CHeader layout c:
 	}
 	if cHeader.Layout != ast.StructLayoutC || !cHeader.ReprC {
 		t.Fatalf("expected C struct layout with C ABI marker, got layout=%v reprC=%v", cHeader.Layout, cHeader.ReprC)
+	}
+	particle, ok := file.Decls[2].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected third decl to be a struct, got %T", file.Decls[2])
+	}
+	if particle.Layout != ast.StructLayoutAOS || particle.ReprC {
+		t.Fatalf("expected AOS struct layout with non-C ABI marker, got layout=%v reprC=%v", particle.Layout, particle.ReprC)
+	}
+	particleRows, ok := file.Decls[3].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected fourth decl to be a struct, got %T", file.Decls[3])
+	}
+	if particleRows.Layout != ast.StructLayoutSOA || particleRows.ReprC {
+		t.Fatalf("expected SOA struct layout with non-C ABI marker, got layout=%v reprC=%v", particleRows.Layout, particleRows.ReprC)
+	}
+}
+
+func TestParseStructRegionOwnerForms(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct Expr[region owner]:
+	left: owner Expr&?
+	right: owner Expr&?
+
+layout soa struct SymbolRows in owner:
+	name_id: NameId
+	span: Span
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	expr, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected first decl to be a struct, got %T", file.Decls[0])
+	}
+	if len(expr.RegionParams) != 1 || expr.RegionParams[0] != "owner" {
+		t.Fatalf("expected explicit struct region param [owner], got %v", expr.RegionParams)
+	}
+	if expr.RegionOwner != "" {
+		t.Fatalf("expected explicit generic region form to keep empty RegionOwner sugar marker, got %q", expr.RegionOwner)
+	}
+	leftType, ok := expr.Fields[0].Type.(*ast.RefType)
+	if !ok {
+		t.Fatalf("expected left field to parse as ref type, got %T", expr.Fields[0].Type)
+	}
+	if leftType.Region != "owner" && leftType.StorageParam != "owner" {
+		t.Fatalf("expected left field to carry owner qualifier, got region=%q storageParam=%q", leftType.Region, leftType.StorageParam)
+	}
+	rows, ok := file.Decls[1].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected second decl to be a struct, got %T", file.Decls[1])
+	}
+	if rows.Layout != ast.StructLayoutSOA {
+		t.Fatalf("expected SymbolRows to keep SOA layout, got %v", rows.Layout)
+	}
+	if rows.RegionOwner != "owner" {
+		t.Fatalf("expected sugar owner marker, got %q", rows.RegionOwner)
+	}
+	if len(rows.RegionParams) != 1 || rows.RegionParams[0] != "owner" {
+		t.Fatalf("expected sugar form to desugar to region param [owner], got %v", rows.RegionParams)
+	}
+}
+
+func TestFormatStructRegionOwnerFormsRoundTrips(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct Expr[region owner]:
+	left: owner Expr&?
+
+struct Box[T, region owner]:
+	value: T
+	next: owner Box[T, owner]&?
+
+layout soa struct SymbolRows in owner:
+	name_id: NameId
+	span: Span
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"struct Expr[region owner]:",
+		"struct Box[T, region owner]:",
+		"layout soa struct SymbolRows in owner:",
+		"next: owner Box[T, owner]&?",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	roundTripped, roundTripErrs := parseSourceFile(t, formatted)
+	if len(roundTripErrs) != 0 {
+		t.Fatalf("formatted region-owner source did not parse again: %v\n%s", roundTripErrs, formatted)
+	}
+	if len(roundTripped.Decls) != len(file.Decls) {
+		t.Fatalf("expected %d decls after round trip, got %d", len(file.Decls), len(roundTripped.Decls))
+	}
+}
+
+func TestParseStructRegionOwnerRejectsDuplicateExplicitRegion(t *testing.T) {
+	_, errs := parseSourceFile(t, `struct Expr[region owner] in owner:
+	next: owner Expr&?
+`)
+	if len(errs) == 0 {
+		t.Fatalf("expected duplicate owner region diagnostic")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), `duplicate struct region parameter "owner"`) {
+		t.Fatalf("expected duplicate owner region diagnostic, got: %v", errs)
 	}
 }
 

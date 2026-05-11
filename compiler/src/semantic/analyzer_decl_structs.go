@@ -31,10 +31,17 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 			continue
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
-			if storeDecl != nil {
+			if storeDecl != nil || (stDecl != nil && stDecl.Layout == ast.StructLayoutSOA) {
+				if storeDecl == nil {
+					storeDecl = synthesizedStoreDeclFromStruct(stDecl)
+				}
 				for _, field := range storeDecl.Fields {
 					if _, exists := st.Fields[field.Name]; exists {
-						a.errorf(field.Position, "duplicate field %q in store %q", field.Name, storeDecl.Name)
+						typeKind := "store"
+						if stDecl != nil {
+							typeKind = "layout soa struct"
+						}
+						a.errorf(field.Position, "duplicate field %q in %s %q", field.Name, typeKind, storeDecl.Name)
 						continue
 					}
 					fieldType := a.resolveType(field.Type)
@@ -49,37 +56,39 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 			}
 			a.analyzeStructAnnotations(stDecl, st)
 			a.withGenericParams(stDecl.GenericParams, nil, func() {
-				for _, field := range stDecl.Fields {
-					if len(field.Annotations) != 0 {
-						for _, annotation := range field.Annotations {
-							a.errorf(annotation.Position, "field annotation @%s is only supported on packed enum common fields", annotation.Name)
+				a.withRegionParams(stDecl.RegionParams, func() {
+					for _, field := range stDecl.Fields {
+						if len(field.Annotations) != 0 {
+							for _, annotation := range field.Annotations {
+								a.errorf(annotation.Position, "field annotation @%s is only supported on packed enum common fields", annotation.Name)
+							}
 						}
-					}
-					if _, exists := st.Fields[field.Name]; exists {
-						a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
-						continue
-					}
-					if field.BitGroup != nil {
-						groupType := a.resolveBitGroupType(stDecl.Name+"."+field.Name, field.BitGroup)
-						st.HasPackedGroups = true
+						if _, exists := st.Fields[field.Name]; exists {
+							a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
+							continue
+						}
+						if field.BitGroup != nil {
+							groupType := a.resolveBitGroupType(stDecl.Name+"."+field.Name, field.BitGroup)
+							st.HasPackedGroups = true
+							st.Fields[field.Name] = Field{
+								Name: field.Name,
+								Type: groupType,
+							}
+							continue
+						}
+						fieldType := a.resolveType(field.Type)
+						if field.IsTail {
+							fieldType = &RefType{Elem: fieldType, State: RefStateNonNull, Storage: RefStorageAny}
+						}
 						st.Fields[field.Name] = Field{
-							Name: field.Name,
-							Type: groupType,
+							Name:    field.Name,
+							Type:    fieldType,
+							Mutable: field.Mutable,
+							IsTail:  field.IsTail,
 						}
-						continue
 					}
-					fieldType := a.resolveType(field.Type)
-					if field.IsTail {
-						fieldType = &RefType{Elem: fieldType, State: RefStateNonNull, Storage: RefStorageAny}
-					}
-					st.Fields[field.Name] = Field{
-						Name:    field.Name,
-						Type:    fieldType,
-						Mutable: field.Mutable,
-						IsTail:  field.IsTail,
-					}
-				}
-				a.validateStructDerivedStates(stDecl, st)
+					a.validateStructDerivedStates(stDecl, st)
+				})
 			})
 		})
 	}

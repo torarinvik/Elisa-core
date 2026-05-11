@@ -1,0 +1,21 @@
+struct Expr in owner:
+    value: i64
+    next: owner Expr&?
+
+struct Box[T, region owner]:
+    value: T
+    next: owner Box[T, owner]&?
+
+def main() -> i64:
+    region scratch(4096)
+    expr: Expr[scratch] = Expr{
+        value: 7,
+        next: null
+    }
+    box: Box[i64, scratch] = Box{
+        value: 35,
+        next: null
+    }
+    if expr.next == null and box.next == null:
+        return expr.value + box.value
+    return 0

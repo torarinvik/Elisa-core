@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 	"elisacore/src/semantic"
@@ -124,6 +125,63 @@ def build(owner: Arena) -> usize:
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected SOA table helper lowering to include %q, got:\n%s", want, output)
 		}
+	}
+}
+
+func TestGenerateLLVMIRLowersLayoutSOAStructSugar(t *testing.T) {
+	src := `layout soa struct SymbolRows:
+    name_id: usize
+    flags: u32
+
+def build(owner: Arena) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        symbols: mutable SymbolRows = zeroed
+		symbols.reserve(4)
+		row: RowId[SymbolRows] = symbols.push(12, 3)
+        if not symbols.valid(row):
+            return 0
+        symbols[row].flags <- 5
+        return symbols[row].name_id + symbols.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_layout_soa.elisa", src)
+	if st, ok := result.NamedTypes["SymbolRows"].(*semantic.StructType); !ok || st == nil || st.Layout != ast.StructLayoutSOA || !st.Store || st.StoreDecl == nil || !st.StoreDecl.Soa {
+		t.Fatalf("expected layout soa struct to analyze as an SOA-backed struct, got %#v", result.NamedTypes["SymbolRows"])
+	}
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, want := range []string{"store.name_id.push.slot", "store.flags.push.slot", "soa.row.index", "soa.count"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected layout soa lowering to include %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersRegionOwnedStructInstance(t *testing.T) {
+	src := `struct Expr in owner:
+    next: owner Expr&?
+
+def build() -> i64:
+    region scratch(1024)
+    head: Expr[scratch] = Expr{
+        next: null
+    }
+    if head.next == null:
+        return 1
+    return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_region_owner.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@build") {
+		t.Fatalf("expected LLVM output for build, got:\n%s", output)
+	}
+	if !strings.Contains(output, "%Expr") && !strings.Contains(output, "Expr") {
+		t.Fatalf("expected region-owned struct type to lower through ordinary struct codegen, got:\n%s", output)
 	}
 }
 

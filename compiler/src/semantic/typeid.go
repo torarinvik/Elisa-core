@@ -122,6 +122,12 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 	case *RefStateValueType:
 		appendKeyTag(b, "refstatevalue")
 		appendKeyInt(b, int(tt.State))
+	case *RegionParamType:
+		appendKeyTag(b, "regionparam")
+		appendKeyString(b, tt.Name)
+	case *RegionValueType:
+		appendKeyTag(b, "regionvalue")
+		appendKeyString(b, tt.Name)
 	case *ErrorSetType:
 		appendKeyTag(b, "errorset")
 		appendKeyStringSlice(b, tt.Tags)

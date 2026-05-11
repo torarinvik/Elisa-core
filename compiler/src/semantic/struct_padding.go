@@ -119,13 +119,13 @@ func (a *Analyzer) hostABILayoutForType(t Type, seen map[string]bool) (hostABILa
 		if !ok || st == nil {
 			return hostABILayout{}, false
 		}
-		return a.hostABILayoutForStructType(st, nil, seen)
+		return a.hostABILayoutForStructType(st, nil, nil, seen)
 	case *ViewType, *DArrayViewType:
 		st, ok := a.namedTypes["DynArrayView"].(*StructType)
 		if !ok || st == nil {
 			return hostABILayout{}, false
 		}
-		return a.hostABILayoutForStructType(st, nil, seen)
+		return a.hostABILayoutForStructType(st, nil, nil, seen)
 	case *DArrayType:
 		base, ok := a.namedTypes["DynArray"].(*StructType)
 		if !ok || base == nil {
@@ -143,20 +143,20 @@ func (a *Analyzer) hostABILayoutForType(t Type, seen map[string]bool) (hostABILa
 	case *PackedEnumStoreType, *PackedVariantViewType, *EnumType, *OptionalType, *ErrorUnionType:
 		return hostABILayout{}, false
 	case *StructType:
-		return a.hostABILayoutForStructType(tt, nil, seen)
+		return a.hostABILayoutForStructType(tt, nil, nil, seen)
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
 		if !ok || base == nil {
 			return hostABILayout{}, false
 		}
 		bindings := genericBindingsForStructInstance(base, tt.Args)
-		return a.hostABILayoutForStructType(base, bindings, seen)
+		return a.hostABILayoutForStructType(base, bindings, regionBindingsForStructInstance(base, tt.Args), seen)
 	default:
 		return hostABILayout{}, false
 	}
 }
 
-func (a *Analyzer) hostABILayoutForStructType(st *StructType, bindings map[string]Type, seen map[string]bool) (hostABILayout, bool) {
+func (a *Analyzer) hostABILayoutForStructType(st *StructType, bindings map[string]Type, regionBindings map[string]string, seen map[string]bool) (hostABILayout, bool) {
 	if st == nil || st.Decl == nil {
 		return hostABILayout{}, false
 	}
@@ -180,7 +180,7 @@ func (a *Analyzer) hostABILayoutForStructType(st *StructType, bindings map[strin
 		}
 		fieldType := field.Type
 		if len(bindings) != 0 {
-			fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+			fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
 		}
 		layout, ok := a.hostABILayoutForType(fieldType, seen)
 		if !ok || layout.Align <= 0 {

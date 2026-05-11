@@ -100,6 +100,20 @@ type SymbolRow = RowId[SymbolRows]
 		t.Fatalf("expected RowId storage to be u32, got %s", rowID.Storage)
 	}
 
+	layoutResult := analyzeFunctionAnalysisTestSource(t, "row_id_layout_soa_ok.elisa", `
+layout soa struct LayoutRows:
+	name: u32
+
+type LayoutRow = RowId[LayoutRows]
+`)
+	layoutRowID, ok := layoutResult.NamedTypes["LayoutRow"].(*IDType)
+	if !ok {
+		t.Fatalf("expected LayoutRow to resolve to IDType, got %T", layoutResult.NamedTypes["LayoutRow"])
+	}
+	if !SameType(layoutRowID.Storage, layoutResult.NamedTypes["u32"]) {
+		t.Fatalf("expected layout soa RowId storage to be u32, got %s", layoutRowID.Storage)
+	}
+
 	bad := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "row_id_type_reject.elisa", `
 struct Plain:
 	name: u32

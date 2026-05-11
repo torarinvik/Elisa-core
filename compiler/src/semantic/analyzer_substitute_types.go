@@ -61,6 +61,13 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 			return resolved
 		}
 		return n
+	case *RegionParamType:
+		if resolved, ok := bindings[n.Name]; ok {
+			return resolved
+		}
+		return n
+	case *RegionValueType:
+		return n
 	case *ErrorUnionType:
 		value := a.substituteTypeWithDepth(n.Value, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(value) {

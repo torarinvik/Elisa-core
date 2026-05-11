@@ -551,18 +551,36 @@ func ind(level int) string {
 func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string) string {
 	parts := make([]string, 0, len(genericParams)+len(typeParams)+len(refStorageParams)+len(refStateParams)+len(regionParams)+len(permissionParams))
 	if len(genericParams) != 0 {
+		seenRegion := map[string]bool{}
+		seenPermission := map[string]bool{}
 		for _, param := range genericParams {
 			switch param.Kind {
 			case ast.GenericParamRefStorage:
 				parts = append(parts, "refstorage "+param.Name)
 			case ast.GenericParamRefState:
 				parts = append(parts, "refstate "+param.Name)
+			case ast.GenericParamRegion:
+				seenRegion[param.Name] = true
+				parts = append(parts, "region "+param.Name)
+			case ast.GenericParamPermission:
+				seenPermission[param.Name] = true
+				parts = append(parts, "permission "+param.Name)
 			default:
 				if param.InterfaceBound != "" {
 					parts = append(parts, param.Name+": "+param.InterfaceBound)
 				} else {
 					parts = append(parts, param.Name)
 				}
+			}
+		}
+		for _, name := range regionParams {
+			if !seenRegion[name] {
+				parts = append(parts, "region "+name)
+			}
+		}
+		for _, name := range permissionParams {
+			if !seenPermission[name] {
+				parts = append(parts, "permission "+name)
 			}
 		}
 	} else {
@@ -573,12 +591,12 @@ func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []stri
 		for _, name := range refStateParams {
 			parts = append(parts, "refstate "+name)
 		}
-	}
-	for _, name := range regionParams {
-		parts = append(parts, "region "+name)
-	}
-	for _, name := range permissionParams {
-		parts = append(parts, "permission "+name)
+		for _, name := range regionParams {
+			parts = append(parts, "region "+name)
+		}
+		for _, name := range permissionParams {
+			parts = append(parts, "permission "+name)
+		}
 	}
 	if len(parts) == 0 {
 		return ""

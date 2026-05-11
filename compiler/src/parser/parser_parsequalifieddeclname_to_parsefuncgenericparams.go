@@ -402,9 +402,11 @@ func (p *Parser) parseStructDecl() *ast.StructDecl {
 	return p.parseStructDeclWithAnnotations(nil)
 }
 func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *ast.StructDecl {
-	pos := p.cur().Pos
+	return p.parseStructDeclWithLeadingLayout(annotations, ast.StructLayoutDefault, false, p.cur().Pos)
+}
+func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, leadingLayout ast.StructLayoutMode, leadingReprC bool, pos lexer.Pos) *ast.StructDecl {
 	affine := p.matchIdentText("affine")
-	reprC := false
+	reprC := leadingReprC
 	if p.peek() == lexer.TOKEN_REPR {
 		p.errorf("legacy `repr(c) struct` syntax is no longer supported; use `struct` instead")
 		p.advance()
@@ -419,6 +421,7 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 	var typeParams []string
 	var refStorageParams []string
 	var refStateParams []string
+	var regionParams []string
 	var genericParams []ast.GenericParam
 	hasStateParam := false
 	stateParamCount := 0
@@ -437,7 +440,7 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 		namedStateCases = p.parseNamedStructStateBracket(name)
 		genericParams = append(genericParams, ast.GenericParam{Position: pos, Kind: ast.GenericParamState, Name: "state", StateCases: append([]string(nil), namedStateCases...), StateOwner: name})
 	} else if p.match(lexer.TOKEN_LBRACKET) {
-		typeParams, refStorageParams, refStateParams, _, _, genericParams = p.parseGenericParamListAfterLBracket(false, false)
+		typeParams, refStorageParams, refStateParams, regionParams, _, genericParams = p.parseGenericParamListAfterLBracket(true, false)
 		p.expect(lexer.TOKEN_RBRACKET)
 		if states, ok := p.peekAggregateStateBracketList(); ok {
 			states = p.parseAggregateStateBracketList()
@@ -455,15 +458,21 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 		}
 	}
 
-	layout := ast.StructLayoutDefault
+	layout := leadingLayout
 	if p.matchIdentText("layout") {
 		mode := p.cur()
 		if mode.Kind != lexer.TOKEN_IDENT && mode.Kind != lexer.TOKEN_PACKED {
-			p.errorf("expected struct layout mode `c` or `packed`, got %s", mode)
+			p.errorf("expected struct layout mode `aos`, `soa`, `c`, or `packed`, got %s", mode)
 		} else {
 			p.advance()
 		}
 		switch mode.Text {
+		case "aos":
+			layout = ast.StructLayoutAOS
+			reprC = false
+		case "soa":
+			layout = ast.StructLayoutSOA
+			reprC = false
 		case "c":
 			layout = ast.StructLayoutC
 			reprC = true
@@ -471,7 +480,24 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 			layout = ast.StructLayoutPacked
 			reprC = false
 		default:
-			p.errorf("unsupported struct layout %q; expected `c` or `packed`", mode.Text)
+			p.errorf("unsupported struct layout %q; expected `aos`, `soa`, `c`, or `packed`", mode.Text)
+		}
+	}
+
+	regionOwner := ""
+	if p.match(lexer.TOKEN_IN) {
+		regionOwner = p.expect(lexer.TOKEN_IDENT).Text
+		duplicate := false
+		for _, existing := range regionParams {
+			if existing == regionOwner {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			p.errorf("duplicate struct region parameter %q", regionOwner)
+		} else {
+			regionParams = append(regionParams, regionOwner)
 		}
 	}
 
@@ -494,7 +520,7 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, Affine: affine, ReprC: reprC, Layout: layout, Fields: fields}
+	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, RegionOwner: regionOwner, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, Affine: affine, ReprC: reprC, Layout: layout, Fields: fields}
 }
 func (p *Parser) peekNamedStructStateBracket() bool {
 	return p.peek() == lexer.TOKEN_LBRACKET && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "state"

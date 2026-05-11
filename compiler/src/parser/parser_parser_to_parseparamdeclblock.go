@@ -225,6 +225,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("tree") {
 		return p.parseTreeDecl()
 	}
+	if p.peekIdentText("layout") {
+		return p.parseLayoutStructDecl()
+	}
 	if p.peekIdentText("store") {
 		return p.parseStoreDecl()
 	}
@@ -241,6 +244,9 @@ func (p *Parser) parseDecl() ast.Decl {
 		}
 		if p.peekIdentText("tree") {
 			return p.parseTreeDeclWithAnnotations(annotations)
+		}
+		if p.peekIdentText("layout") {
+			return p.parseLayoutStructDeclWithAnnotations(annotations)
 		}
 		if p.peekIdentText("store") {
 			return p.parseStoreDeclWithAnnotations(annotations)
@@ -262,14 +268,14 @@ func (p *Parser) parseDecl() ast.Decl {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 				return p.parsePackedEnumDeclWithAnnotations(annotations)
 			}
-			p.errorf("declaration annotations must be followed by def, extern, struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, layout struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		case lexer.TOKEN_ENUM:
 			return p.parseEnumDeclWithAnnotations(annotations)
 		case lexer.TOKEN_STRUCT:
 			return p.parseStructDeclWithAnnotations(annotations)
 		default:
-			p.errorf("declaration annotations must be followed by def, extern, struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, layout struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		}
 	}
@@ -314,6 +320,9 @@ func (p *Parser) parseDecl() ast.Decl {
 func (p *Parser) parseStoreDecl() *ast.StoreDecl {
 	return p.parseStoreDeclWithAnnotations(nil)
 }
+func (p *Parser) parseLayoutStructDecl() *ast.StructDecl {
+	return p.parseLayoutStructDeclWithAnnotations(nil)
+}
 func (p *Parser) parseSoaDecl() *ast.StoreDecl {
 	return p.parseSoaDeclWithAnnotations(nil)
 }
@@ -328,6 +337,32 @@ func (p *Parser) parseTypeAliasDecl() ast.Decl {
 }
 func (p *Parser) parseStoreDeclWithAnnotations(annotations []ast.Annotation) *ast.StoreDecl {
 	return p.parseColumnStoreDeclWithAnnotations("store", false, annotations)
+}
+func (p *Parser) parseLayoutStructDeclWithAnnotations(annotations []ast.Annotation) *ast.StructDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("layout")
+	mode := p.cur()
+	if mode.Kind != lexer.TOKEN_IDENT && mode.Kind != lexer.TOKEN_PACKED {
+		p.errorf("expected layout mode before struct, got %s", mode)
+		return p.parseStructDeclWithLeadingLayout(annotations, ast.StructLayoutDefault, false, pos)
+	}
+	p.advance()
+	layout := ast.StructLayoutDefault
+	reprC := false
+	switch mode.Text {
+	case "aos":
+		layout = ast.StructLayoutAOS
+	case "soa":
+		layout = ast.StructLayoutSOA
+	case "c":
+		layout = ast.StructLayoutC
+		reprC = true
+	case "packed":
+		layout = ast.StructLayoutPacked
+	default:
+		p.errorf("unsupported layout-prefixed struct mode %q; expected `aos`, `soa`, `c`, or `packed`", mode.Text)
+	}
+	return p.parseStructDeclWithLeadingLayout(annotations, layout, reprC, pos)
 }
 func (p *Parser) parseSoaDeclWithAnnotations(annotations []ast.Annotation) *ast.StoreDecl {
 	return p.parseColumnStoreDeclWithAnnotations("soa", true, annotations)

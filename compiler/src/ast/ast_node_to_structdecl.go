@@ -557,6 +557,8 @@ type StructLayoutMode int
 
 const (
 	StructLayoutDefault StructLayoutMode = iota
+	StructLayoutAOS
+	StructLayoutSOA
 	StructLayoutC
 	StructLayoutPacked
 )
@@ -568,6 +570,8 @@ type StructDecl struct {
 	TypeParams       []string
 	RefStorageParams []string
 	RefStateParams   []string
+	RegionParams     []string
+	RegionOwner      string
 	GenericParams    []GenericParam
 	HasStateParam    bool
 	StateParamCount  int

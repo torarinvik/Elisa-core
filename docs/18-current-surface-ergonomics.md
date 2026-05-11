@@ -720,7 +720,7 @@ if name_id.valid():
 ```
 
 ```elisa
-soa PascalSymbols:
+layout soa struct PascalSymbols:
     name_id: NameId
     value_type: PascalSemanticValueType
     flags: Flags[PascalSymbolFlag]

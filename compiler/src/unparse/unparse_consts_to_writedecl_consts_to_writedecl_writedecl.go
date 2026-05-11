@@ -350,11 +350,25 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	case *ast.StructDecl:
 		f.writeAnnotations(level, n.Annotations)
 		header := ""
+		prefix := ""
 		if n.Affine {
 			header += "affine "
 		}
-		header += "struct " + n.Name
-		header += formatGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, nil, nil)
+		switch n.Layout {
+		case ast.StructLayoutAOS:
+			prefix = "layout aos "
+		case ast.StructLayoutSOA:
+			prefix = "layout soa "
+		}
+		header += prefix + "struct " + n.Name
+		if n.RegionOwner != "" {
+			header += formatGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, nil, nil)
+		} else {
+			header += formatGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, nil)
+		}
+		if n.RegionOwner != "" {
+			header += " in " + n.RegionOwner
+		}
 		header += formatAggregateStateSuffix(n.HasStateParam, n.StateParamCount)
 		switch n.Layout {
 		case ast.StructLayoutC:

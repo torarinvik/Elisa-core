@@ -142,6 +142,46 @@ func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) 
 	}
 }
 
+func TestRunCLICompilesRegionOwnedStructFixture(t *testing.T) {
+	sourcePath := filepath.Join("..", "..", "Code", "test_programs", "region_owned_structs.elisa")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-owned struct fixture to compile, stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"define i64 @main()", "%Expr", "%Box"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected llvm output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "region_owned_struct_ast.elisa")
+	src := "struct Expr in owner:\n    next: owner Expr&?\n\nstruct Explicit[region arena]:\n    next: arena Explicit&?\n\nlayout soa struct Rows in owner:\n    value: i64\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write region-owned AST fixture: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-owned AST fixture to print, stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"struct Expr in owner", "struct Explicit[region arena]", "layout soa struct Rows in owner"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "struct Expr[region owner] in owner") {
+		t.Fatalf("expected AST output to avoid duplicating owner region sugar, got:\n%s", output)
+	}
+}
+
 func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "grammar_return.elisa")

@@ -52,11 +52,26 @@ func (a *Analyzer) genericTypeAsArrayType(expr *ast.GenericType) (*ast.ArrayType
 
 func genericParamsForStructType(base *StructType) []ast.GenericParam {
 	if len(base.GenericParams) != 0 {
-		return base.GenericParams
+		params := append([]ast.GenericParam(nil), base.GenericParams...)
+		seenRegion := map[string]bool{}
+		for _, param := range params {
+			if param.Kind == ast.GenericParamRegion {
+				seenRegion[param.Name] = true
+			}
+		}
+		for _, name := range base.RegionParams {
+			if !seenRegion[name] {
+				params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
+			}
+		}
+		return params
 	}
-	params := make([]ast.GenericParam, 0, len(base.TypeParams)+1)
+	params := make([]ast.GenericParam, 0, len(base.TypeParams)+len(base.RegionParams)+1)
 	for _, name := range base.TypeParams {
 		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	for _, name := range base.RegionParams {
+		params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
 	}
 	if len(base.NamedStateCases) != 0 {
 		params = append(params, ast.GenericParam{Kind: ast.GenericParamState, Name: "state", StateCases: append([]string(nil), base.NamedStateCases...), StateOwner: base.Name})
@@ -106,6 +121,29 @@ func genericBindingsForParams(params []ast.GenericParam, args []Type) map[string
 
 func genericBindingsForStructInstance(base *StructType, args []Type) map[string]Type {
 	return genericBindingsForParams(genericParamsForStructType(base), args)
+}
+
+func regionBindingsForStructInstance(base *StructType, args []Type) map[string]string {
+	params := genericParamsForStructType(base)
+	if len(params) == 0 || len(args) == 0 {
+		return nil
+	}
+	bindings := map[string]string{}
+	for i, param := range params {
+		if param.Kind != ast.GenericParamRegion || i >= len(args) || args[i] == nil {
+			continue
+		}
+		switch arg := args[i].(type) {
+		case *RegionParamType:
+			bindings[param.Name] = arg.Name
+		case *RegionValueType:
+			bindings[param.Name] = arg.Name
+		}
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	return bindings
 }
 
 func (a *Analyzer) typeSatisfiesStaticInterface(candidate Type, iface *StaticInterface) bool {
@@ -167,6 +205,20 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 			return resolved
 		}
 		a.errorf(expr.Pos(), "generic argument %q for refstate parameter %q must be a refstate literal or parameter", resolved, param.Name)
+		return invalidType
+	case ast.GenericParamRegion:
+		named, ok := expr.(*ast.NamedType)
+		if !ok {
+			a.errorf(expr.Pos(), "generic argument for region parameter %q must be a region name", param.Name)
+			return invalidType
+		}
+		if a.lookupRegionParam(named.Name) {
+			return &RegionParamType{Name: named.Name}
+		}
+		if a.regionQualifierDefined(named.Name) {
+			return &RegionValueType{Name: named.Name}
+		}
+		a.errorf(expr.Pos(), "generic argument %q for region parameter %q must name a visible region or region parameter", named.Name, param.Name)
 		return invalidType
 	default:
 		resolved := a.resolveType(expr)
