@@ -346,7 +346,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "region_ref_types",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "region_ref_types.elisa"),
 			checks: []string{
-				"%RegionNode = type { ptr, i32 }",
+				"%RegionNode__scratch = type { ptr, i32 }",
 				"define i32 @region_ref_sum(i32 ",
 				"call ptr @arena_alloc(ptr",
 				"load i32, ptr",

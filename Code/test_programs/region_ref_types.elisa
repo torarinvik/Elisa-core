@@ -1,11 +1,11 @@
-struct RegionNode:
-    next: RegionNode&?
+struct RegionNode in owner:
+    next: owner RegionNode&?
     value: i32
 
 
 def region_ref_sum(seed: i32) -> i32:
     region scratch(1024)
-    first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
-    second: scratch RegionNode& = new[scratch] RegionNode(first.cast[RegionNode&?], seed + 1)
-    alias: RegionNode& = second
+    first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
+    second: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](first.cast[scratch RegionNode&?], seed + 1)
+    alias: scratch RegionNode[scratch]& = second
     return first.value + alias.value

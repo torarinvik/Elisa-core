@@ -397,8 +397,8 @@ def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsProduceAndRebaseTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "produce_rebase_fact_transforms.elisa", `struct RegionNode:
-	next: RegionNode&?
+	result := analyzeFunctionAnalysisTestSource(t, "produce_rebase_fact_transforms.elisa", `struct RegionNode in owner:
+	next: owner RegionNode&?
 	value: i32
 
 packed enum Expr:
@@ -408,7 +408,7 @@ packed enum Expr:
 
 def build_region(seed: i32) -> i32:
 	region scratch(1024)
-	first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
+	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
 	return first.value
 
 def freeze_expr_store(owner: Arena) -> Expr.Store[Frozen]:
@@ -508,14 +508,14 @@ def destroy_demo() -> void:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsAliasClassTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "alias_fact_transforms.elisa", `struct RegionNode:
-	next: RegionNode&?
+	result := analyzeFunctionAnalysisTestSource(t, "alias_fact_transforms.elisa", `struct RegionNode in owner:
+	next: owner RegionNode&?
 	value: i32
 
 def alias_region_ref(seed: i32) -> i32:
 	region scratch(1024)
-	first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
-	alias: mutable RegionNode& = first
+	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
+	alias: mutable scratch RegionNode[scratch]& = first
 	return alias.value
 `)
 	analysis, ok := result.FunctionAnalysisByName("alias_region_ref")
@@ -530,14 +530,14 @@ def alias_region_ref(seed: i32) -> i32:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsAliasClassMutationTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "alias_mutation_fact_transforms.elisa", `struct RegionNode:
-	next: RegionNode&?
+	result := analyzeFunctionAnalysisTestSource(t, "alias_mutation_fact_transforms.elisa", `struct RegionNode in owner:
+	next: owner RegionNode&?
 	value: mutable i32
 
 def alias_region_mutation(seed: i32) -> i32:
 	region scratch(1024)
-	first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
-	alias: mutable RegionNode& = first
+	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
+	alias: mutable scratch RegionNode[scratch]& = first
 	alias.value <- alias.value + 1
 	return first.value
 `)
