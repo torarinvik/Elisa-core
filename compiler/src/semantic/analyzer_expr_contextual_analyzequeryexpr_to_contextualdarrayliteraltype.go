@@ -18,6 +18,13 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 	loopScope := NewScope(a.currentScope)
 	pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
 	a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
+	if expr.PatternFilter != nil {
+		var valueExpr ast.Expr
+		if expr.Name != "_" {
+			valueExpr = &ast.Ident{Position: expr.Pos(), Name: expr.Name}
+		}
+		a.analyzeNestedMatchPattern(expr.PatternFilter, info.ItemType, valueExpr, loopScope)
+	}
 	if expr.Filter != nil {
 		condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
 		if !IsBoolType(condType) {

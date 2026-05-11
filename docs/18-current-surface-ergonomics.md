@@ -2226,6 +2226,14 @@ comprehensions. Fixed array literals remain pure values:
 values: int[3] = [1, 2, 3]
 ```
 
+Projection queries can also filter with a pattern and use the pattern payload
+bindings in the projected value:
+
+```elisa
+ints: darray[i64] = value for each item in exprs where Expr.Int(value)
+first_name: cstr? = name for first member in members where Member.Named(name)
+```
+
 This is sugar for the explicit region-plus-`in` shape:
 
 - `scratch` is a named arena region

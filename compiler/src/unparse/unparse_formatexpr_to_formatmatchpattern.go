@@ -170,10 +170,10 @@ func formatExpr(expr ast.Expr) string {
 		return line
 	case *ast.QueryExpr:
 		if n.Kind == ast.QueryExprFirst && n.Projection != nil {
-			return formatExpr(n.Projection) + " for first " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter)
+			return formatExpr(n.Projection) + " for first " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter)
 		}
 		if n.Kind == ast.QueryExprEach && n.Projection != nil {
-			return formatExpr(n.Projection) + " for each " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter)
+			return formatExpr(n.Projection) + " for each " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter)
 		}
 		keyword := "any"
 		switch n.Kind {
@@ -188,7 +188,7 @@ func formatExpr(expr ast.Expr) string {
 		case ast.QueryExprEach:
 			keyword = "each"
 		}
-		return keyword + " " + n.Name + " in " + formatExpr(n.Source) + " where " + formatExpr(n.Filter)
+		return keyword + " " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter)
 	case *ast.CastExpr:
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
 			if target, ok := formatPostfixShorthandCastTarget(n.Target); ok {
@@ -349,7 +349,10 @@ func formatExpr(expr ast.Expr) string {
 	}
 }
 
-func formatQueryFilter(filter ast.Expr) string {
+func formatQueryFilter(filter ast.Expr, pattern ast.MatchPattern) string {
+	if pattern != nil {
+		return " where " + formatMatchPattern(pattern)
+	}
 	if filter == nil {
 		return ""
 	}

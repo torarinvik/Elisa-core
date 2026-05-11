@@ -141,11 +141,16 @@ func (p *Parser) parseProjectionQueryExpr(projection ast.Expr) ast.Expr {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_IN)
 	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	var patternFilter ast.MatchPattern
 	var filter ast.Expr
 	if p.matchIdentText("where") {
-		filter = p.parseExpr()
+		if p.peekWhereViewPatternFilter() {
+			patternFilter = p.parseMatchPattern()
+		} else {
+			filter = p.parseExpr()
+		}
 	}
-	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter, Projection: projection}
+	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter, PatternFilter: patternFilter, Projection: projection}
 }
 
 func (p *Parser) parseWhereViewExpr(source ast.Expr) ast.Expr {

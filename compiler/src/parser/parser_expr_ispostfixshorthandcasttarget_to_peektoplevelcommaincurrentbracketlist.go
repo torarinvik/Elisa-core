@@ -127,8 +127,14 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	p.expect(lexer.TOKEN_IN)
 	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	p.expectIdentText("where")
-	filter := p.parseExpr()
-	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter}
+	var patternFilter ast.MatchPattern
+	var filter ast.Expr
+	if p.peekWhereViewPatternFilter() {
+		patternFilter = p.parseMatchPattern()
+	} else {
+		filter = p.parseExpr()
+	}
+	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter, PatternFilter: patternFilter}
 }
 func (p *Parser) looksLikeQueryExpr() bool {
 	if p.peek() != lexer.TOKEN_IDENT || p.pos+3 >= len(p.tokens) {

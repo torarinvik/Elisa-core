@@ -81,6 +81,26 @@ func TestParseEachProjectionQueryExpr(t *testing.T) {
 	}
 }
 
+func TestParseProjectionQueryPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Missing\n\ndef keep(items: darray[Expr]) -> darray[i64]:\n    return value for each item in items where Expr.Int(value)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok {
+		t.Fatalf("expected query expr, got %T", ret.Value)
+	}
+	if query.PatternFilter == nil || query.Filter != nil {
+		t.Fatalf("expected pattern filter query, got filter=%T pattern=%T", query.Filter, query.PatternFilter)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return value for each item in items where Expr.Int(value)") {
+		t.Fatalf("expected formatted pattern-filter query expression, got:\n%s", formatted)
+	}
+}
+
 func TestParseExpressionWhereViewWithExplicitBinder(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(items: darray[i64]) -> bool:\n    return all((items where item: item > 0))\n")
 	if len(errs) != 0 {

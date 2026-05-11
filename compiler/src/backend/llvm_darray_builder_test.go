@@ -220,6 +220,28 @@ def enabled_names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
 	}
 }
 
+func TestGenerateLLVMIRLowersEachProjectionQueryPatternFilter(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return value for each item in items where Expr.Int(value)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_each_projection_query_pattern.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"iter.pattern.filter.body", "match.tag", "darray.push"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected pattern-filter projection query IR to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

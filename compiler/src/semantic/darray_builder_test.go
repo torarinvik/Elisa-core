@@ -415,6 +415,42 @@ def enabled_names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
 	}
 }
 
+func TestAnalyzeEachProjectionQueryPatternFilter(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "each_projection_query_pattern.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return value for each item in items where Expr.Int(value)
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "ints" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected ints function declaration")
+	}
+	inStmt := fn.Body[1].(*ast.InStoreStmt)
+	ret := inStmt.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok || query.PatternFilter == nil {
+		t.Fatalf("expected pattern-filter projection query expr, got %T %#v", ret.Value, ret.Value)
+	}
+	darrayType, ok := result.ExprTypes[query].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected pattern-filter projection query to resolve to darray type, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+	}
+	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected pattern-filter projection query element i64, got %#v", darrayType.Elem)
+	}
+}
+
 func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.elisa", `def build(items: darray[i64]) -> darray[i64]:
     return [item + 1 for item in items]
