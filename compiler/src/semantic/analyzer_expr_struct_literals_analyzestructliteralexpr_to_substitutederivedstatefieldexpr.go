@@ -64,17 +64,23 @@ func (a *Analyzer) expandStructLiteralParamPackSpreads(expr *ast.StructLitExpr) 
 	args := make([]ast.Expr, 0, len(expr.Args))
 	argNames := make([]string, 0, len(expr.ArgNames))
 	indexByName := map[string]int{}
-	setArg := func(name string, value ast.Expr) {
+	sourcePackByName := map[string]string{}
+	setArg := func(name string, value ast.Expr, sourcePack string, pos lexer.Pos) {
 		if name == "" || value == nil {
 			return
 		}
 		if index, ok := indexByName[name]; ok {
+			if sourcePack != "" && sourcePackByName[name] != "" && sourcePackByName[name] != sourcePack {
+				a.errorf(pos, "struct literal %q field %q is provided by both explicit bundles %q and %q", expr.Name, name, sourcePackByName[name], sourcePack)
+			}
 			args[index] = value
+			sourcePackByName[name] = sourcePack
 			return
 		}
 		indexByName[name] = len(args)
 		args = append(args, value)
 		argNames = append(argNames, name)
+		sourcePackByName[name] = sourcePack
 	}
 	structSpreads := make([]ast.Expr, 0, len(expr.Spreads))
 	for _, spread := range expr.Spreads {
@@ -93,12 +99,12 @@ func (a *Analyzer) expandStructLiteralParamPackSpreads(expr *ast.StructLitExpr) 
 		}
 		for _, field := range pack.Fields {
 			if value, ok := values[field.Name]; ok {
-				setArg(field.Name, value)
+				setArg(field.Name, value, ident.Name, ident.Pos())
 			}
 		}
 	}
 	for i, arg := range expr.Args {
-		setArg(expr.ArgName(i), arg)
+		setArg(expr.ArgName(i), arg, "", arg.Pos())
 	}
 	if len(args) != 0 || len(expr.Args) != 0 {
 		expr.Args = args

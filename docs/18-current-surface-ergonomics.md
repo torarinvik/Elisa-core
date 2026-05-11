@@ -1230,6 +1230,7 @@ Current rules:
 - `field: alias` renames the bound local or supplied expression source
 - `Type{...base, field: expr}` starts a brace struct literal from an existing value and overrides named fields; this is useful for default packs and small immutable updates
 - local `args name:` blocks declare compile-time named argument packs; spread them with `Type{...name}` to split large constructor or struct-literal argument lists into reusable groups
+- spreading two local argument packs that provide the same field is a diagnostic; write an explicit named field after the spreads when you intentionally want to override one value
 - `base{field, other = expr}` creates a record-update expression by copying `base` and replacing only the mentioned fields
 
 ```elisa

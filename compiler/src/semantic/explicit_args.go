@@ -196,6 +196,7 @@ func (a *Analyzer) analyzeArgsScopeStmt(stmt *ast.ArgsScopeStmt) {
 	}
 	items := orderedArgsScopeItems(stmt.ParamPacks, stmt.Args, stmt.ItemOrder)
 	working := a.combinedExplicitBindings()
+	sourcePacks := map[string]string{}
 	tempStmts := make([]ast.Stmt, 0)
 	originalBody := append([]ast.Stmt(nil), stmt.Body...)
 	materialize := func(name string, expr ast.Expr, shorthand bool, pos lexer.Pos) ast.Expr {
@@ -217,6 +218,10 @@ func (a *Analyzer) analyzeArgsScopeStmt(stmt *ast.ArgsScopeStmt) {
 				if !ok || valueExpr == nil {
 					continue
 				}
+				if prevPack := sourcePacks[field.Name]; prevPack != "" && prevPack != item.Pack.Name {
+					a.errorf(item.Pack.Position, "ambient argument %q is provided by both explicit bundles %q and %q", field.Name, prevPack, item.Pack.Name)
+					continue
+				}
 				shorthand := false
 				for _, arg := range item.Pack.Args {
 					if arg.Name == field.Name {
@@ -225,11 +230,13 @@ func (a *Analyzer) analyzeArgsScopeStmt(stmt *ast.ArgsScopeStmt) {
 					}
 				}
 				working[field.Name] = materialize(field.Name, valueExpr, shorthand, item.Pack.Position)
+				sourcePacks[field.Name] = item.Pack.Name
 			}
 			continue
 		}
 		valueExpr := a.resolveWithArgValueExpr(item.Arg, "argument")
 		working[item.Arg.Name] = materialize(item.Arg.Name, valueExpr, item.Arg.Shorthand, item.Arg.Position)
+		delete(sourcePacks, item.Arg.Name)
 	}
 	if len(tempStmts) != 0 {
 		stmt.Body = append(append(make([]ast.Stmt, 0, len(tempStmts)+len(originalBody)), tempStmts...), originalBody...)

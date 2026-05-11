@@ -207,6 +207,25 @@ def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i6
 	}
 }
 
+func TestAnalyzeRejectsStructLiteralArgsPackFieldConflict(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_struct_literal_args_pack_conflict.elisa", `struct Accessors:
+    read_name_id: i64?
+    write_name_id: i64?
+
+def update(next_read: i64?, next_write: i64?) -> Accessors:
+    args primary:
+        read_name_id: i64? = next_read
+    args duplicate:
+        read_name_id: i64? = next_write
+        write_name_id: i64? = next_write
+    return Accessors{...primary, ...duplicate}
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `field "read_name_id" is provided by both explicit bundles "primary" and "duplicate"`) {
+		t.Fatalf("expected struct literal pack conflict diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsLocalParamPackUseBeforeDeclaration(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_local_pack_use_before_decl.elisa", `def consume(left: i64, right: i64) -> i64:
     return left + right

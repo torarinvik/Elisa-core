@@ -68,6 +68,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 	ordered := make([]ast.Expr, explicitParamCount)
 	filled := make([]bool, explicitParamCount)
 	sources := make([]callArgSource, explicitParamCount)
+	sourcePacks := make([]string, explicitParamCount)
 	if expr.HasArgForward {
 		for i, name := range ft.ExplicitParamNames {
 			if arg, ok := a.lookupCallForwardValueExpr(name); ok {
@@ -114,13 +115,19 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 					ok = false
 					continue
 				case callArgSourcePack:
-					a.errorf(item.Pack.Position, "function %q parameter %q is specified more than once", ft.Name, field.Name)
+					prevPack := sourcePacks[index]
+					if prevPack != "" && prevPack != item.Pack.Name {
+						a.errorf(item.Pack.Position, "function %q parameter %q is provided by both explicit bundles %q and %q", ft.Name, field.Name, prevPack, item.Pack.Name)
+					} else {
+						a.errorf(item.Pack.Position, "function %q parameter %q is specified more than once", ft.Name, field.Name)
+					}
 					ok = false
 					continue
 				}
 				ordered[index] = valueExpr
 				filled[index] = true
 				sources[index] = callArgSourcePack
+				sourcePacks[index] = item.Pack.Name
 			}
 			continue
 		}
