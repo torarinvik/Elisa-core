@@ -26,13 +26,14 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 			return resultType
 		}
 	}
-	if expr.Spread != nil {
-		spread, actual := a.analyzeCallLikeValueExpr(expr.Spread, targetType)
-		expr.Spread = spread
+	a.expandStructLiteralParamPackSpreads(expr)
+	for i, spreadExpr := range expr.Spreads {
+		spread, actual := a.analyzeCallLikeValueExpr(spreadExpr, targetType)
+		expr.Spreads[i] = spread
 		if !AssignableTo(targetType, actual) {
-			a.errorf(expr.Spread.Pos(), "struct literal spread expects %s, got %s", targetType, actual)
+			a.errorf(spread.Pos(), "struct literal spread expects %s, got %s", targetType, actual)
 		}
-		a.consumeAffineValueExpr(expr.Spread, targetType, "move into struct literal spread base")
+		a.consumeAffineValueExpr(spread, targetType, "move into struct literal spread base")
 	}
 	a.analyzeStructLiteralArgs(expr, base, bindings)
 	if len(base.NamedStateCases) == 0 {
@@ -54,6 +55,56 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		a.errorf(expr.Pos(), "struct literal %q does not satisfy derived state %s", expr.Name, desiredState)
 	}
 	return targetType
+}
+
+func (a *Analyzer) expandStructLiteralParamPackSpreads(expr *ast.StructLitExpr) {
+	if a == nil || expr == nil || len(expr.Spreads) == 0 {
+		return
+	}
+	args := make([]ast.Expr, 0, len(expr.Args))
+	argNames := make([]string, 0, len(expr.ArgNames))
+	indexByName := map[string]int{}
+	setArg := func(name string, value ast.Expr) {
+		if name == "" || value == nil {
+			return
+		}
+		if index, ok := indexByName[name]; ok {
+			args[index] = value
+			return
+		}
+		indexByName[name] = len(args)
+		args = append(args, value)
+		argNames = append(argNames, name)
+	}
+	structSpreads := make([]ast.Expr, 0, len(expr.Spreads))
+	for _, spread := range expr.Spreads {
+		ident, ok := spread.(*ast.Ident)
+		if !ok || ident == nil {
+			structSpreads = append(structSpreads, spread)
+			continue
+		}
+		if _, _, ok := a.lookupVisibleParamPack(ident.Name); !ok {
+			structSpreads = append(structSpreads, spread)
+			continue
+		}
+		pack, values := a.expandParamPackUseValues(ast.ParamPackUse{Position: ident.Pos(), Name: ident.Name, Bare: true}, "argument")
+		if pack == nil {
+			continue
+		}
+		for _, field := range pack.Fields {
+			if value, ok := values[field.Name]; ok {
+				setArg(field.Name, value)
+			}
+		}
+	}
+	for i, arg := range expr.Args {
+		setArg(expr.ArgName(i), arg)
+	}
+	if len(args) != 0 || len(expr.Args) != 0 {
+		expr.Args = args
+		expr.ArgNames = argNames
+	}
+	expr.Spreads = structSpreads
 }
 func (a *Analyzer) analyzeInitHookStructConstructor(expr *ast.StructLitExpr, targetType Type) (Type, bool) {
 	hooks := a.lookupVisibleInitHooks(targetType)

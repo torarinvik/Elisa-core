@@ -174,6 +174,39 @@ def build() -> i64:
 	}
 }
 
+func TestAnalyzeLocalParamPackStructLiteralSpread(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_struct_literal_args_pack_spread.elisa", `struct Accessors:
+    read_name_id: i64?
+    write_name_id: i64?
+    index_expr: i64?
+    stored_expr: i64?
+
+def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i64?) -> Accessors:
+    params name_ids:
+        read_name_id: i64? = next_read
+        write_name_id: i64? = next_write
+    params expressions:
+        index_expr: i64? = next_index
+        stored_expr: i64? = null
+    return Accessors{...current, ...name_ids, ...expressions}
+`)
+	updateSym, _ := result.GlobalScope.Lookup("update")
+	updateDecl := updateSym.Node.(*ast.FuncDecl)
+	ret := updateDecl.Body[len(updateDecl.Body)-1].(*ast.ReturnStmt)
+	lit := ret.Value.(*ast.StructLitExpr)
+	if len(lit.Spreads) != 1 {
+		t.Fatalf("expected args-pack spreads to expand away and leave current as struct spread, got %#v", lit.Spreads)
+	}
+	if !lit.ResolvedArgsValid || len(lit.ResolvedArgs) != 4 {
+		t.Fatalf("expected resolved struct args, got %#v", lit.ResolvedArgs)
+	}
+	for index, name := range []string{"read_name_id", "write_name_id", "index_expr", "stored_expr"} {
+		if lit.ArgName(index) != name {
+			t.Fatalf("expected arg %d to be %q, got %q", index, name, lit.ArgName(index))
+		}
+	}
+}
+
 func TestAnalyzeRejectsLocalParamPackUseBeforeDeclaration(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_local_pack_use_before_decl.elisa", `def consume(left: i64, right: i64) -> i64:
     return left + right

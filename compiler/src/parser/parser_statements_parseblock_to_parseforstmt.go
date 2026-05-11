@@ -80,7 +80,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeParallelForStmt() {
 				return p.parseParallelForStmt()
 			}
-		case "params":
+		case "params", "parameters", "args":
 			if p.looksLikeLocalParamsStmt() {
 				return p.parseLocalParamsStmt()
 			}
@@ -206,7 +206,11 @@ func (p *Parser) looksLikeLocalParamsStmt() bool {
 }
 func (p *Parser) parseLocalParamsStmt() *ast.LocalParamsStmt {
 	pos := p.cur().Pos
-	p.expectIdentText("params")
+	if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "params" || p.cur().Text == "parameters" || p.cur().Text == "args") {
+		p.advance()
+	} else {
+		p.expectIdentText("params")
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	params := p.parseParamDeclBlock(true)
 	return &ast.LocalParamsStmt{Position: pos, Name: name, Params: params}

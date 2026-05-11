@@ -414,7 +414,7 @@ def update(base: Accessors, name: i64) -> Accessors:
 	if !ok {
 		t.Fatalf("expected struct literal return value, got %T", ret.Value)
 	}
-	if lit.Spread == nil {
+	if len(lit.Spreads) != 1 {
 		t.Fatal("expected struct literal spread")
 	}
 	if got := lit.ArgName(0); got != "read_name_id" {
@@ -423,6 +423,55 @@ def update(base: Accessors, name: i64) -> Accessors:
 	formatted := unparse.FormatDecl(updateDecl)
 	if !strings.Contains(formatted, "Accessors{...base, read_name_id: name, default_enabled: true}") {
 		t.Fatalf("expected formatted spread literal, got:\n%s", formatted)
+	}
+}
+
+func TestParseLocalArgsPacksForStructLiteralSpread(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct Accessors:
+    read_name_id: i64?
+    write_name_id: i64?
+    index_expr: i64?
+    stored_expr: i64?
+
+def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i64?) -> Accessors:
+    params name_ids:
+        read_name_id: i64? = next_read
+        write_name_id: i64? = next_write
+    params expressions:
+        index_expr: i64? = next_index
+        stored_expr: i64? = null
+    return Accessors{...current, ...name_ids, ...expressions}
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	updateDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected update function decl, got %T", file.Decls[1])
+	}
+	if _, ok := updateDecl.Body[0].(*ast.LocalParamsStmt); !ok {
+		t.Fatalf("expected first local args pack, got %T", updateDecl.Body[0])
+	}
+	if _, ok := updateDecl.Body[1].(*ast.LocalParamsStmt); !ok {
+		t.Fatalf("expected second local args pack, got %T", updateDecl.Body[1])
+	}
+	ret := updateDecl.Body[2].(*ast.ReturnStmt)
+	lit, ok := ret.Value.(*ast.StructLitExpr)
+	if !ok {
+		t.Fatalf("expected struct literal return value, got %T", ret.Value)
+	}
+	if len(lit.Spreads) != 3 {
+		t.Fatalf("expected current plus two args-pack spreads, got %#v", lit.Spreads)
+	}
+	formatted := unparse.FormatDecl(updateDecl)
+	for _, want := range []string{
+		"bundle name_ids explicit:",
+		"bundle expressions explicit:",
+		"return Accessors{...current, ...name_ids, ...expressions}",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
 	}
 }
 

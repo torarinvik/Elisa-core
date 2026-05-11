@@ -200,8 +200,11 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		return nil, nil, err
 	}
 	value := C.LLVMGetUndef(llvmType)
-	if expr.Spread != nil {
-		spreadValue, spreadType, err := s.emitExpr(expr.Spread, structType)
+	for i, spread := range expr.Spreads {
+		if i > 0 {
+			return nil, nil, fmt.Errorf("struct literal lowering supports at most one non-pack struct spread")
+		}
+		spreadValue, spreadType, err := s.emitExpr(spread, structType)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -216,7 +219,7 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 			break
 		}
 		if arg == nil {
-			if expr.Spread != nil {
+			if len(expr.Spreads) != 0 {
 				continue
 			}
 			return nil, nil, fmt.Errorf("struct literal field %d was not resolved", i)

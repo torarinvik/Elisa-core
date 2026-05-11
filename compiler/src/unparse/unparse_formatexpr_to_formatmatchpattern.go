@@ -227,9 +227,9 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.StructLitExpr:
 		typeName := formatStructLiteralTypeName(n.Name, n.TypeArgs)
 		if n.Brace {
-			parts := make([]string, 0, len(n.Args)+1)
-			if n.Spread != nil {
-				parts = append(parts, "..."+formatExpr(n.Spread))
+			parts := make([]string, 0, len(n.Args)+len(n.Spreads))
+			for _, spread := range n.Spreads {
+				parts = append(parts, "..."+formatExpr(spread))
 			}
 			for i, arg := range n.Args {
 				parts = append(parts, formatStructLiteralField(n.ArgName(i), arg, true))

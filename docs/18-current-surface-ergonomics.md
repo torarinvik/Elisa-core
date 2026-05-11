@@ -1227,7 +1227,20 @@ Current rules:
 - `field` inside a brace literal or brace pattern is field punning sugar for “use the same name on both sides”
 - `field: alias` renames the bound local or supplied expression source
 - `Type{...base, field: expr}` starts a brace struct literal from an existing value and overrides named fields; this is useful for default packs and small immutable updates
+- local `params name:` blocks declare compile-time named argument packs; spread them with `Type{...name}` to split large constructor or struct-literal argument lists into reusable groups
 - `base{field, other = expr}` creates a record-update expression by copying `base` and replacing only the mentioned fields
+
+```elisa
+params name_ids:
+    read_name_id: NameId? = next_read
+    write_name_id: NameId? = next_write
+
+params expressions:
+    index_expr: Expr? = next_index
+    stored_expr: Expr? = null
+
+return Accessors{...current, ...name_ids, default_enabled: true, ...expressions}
+```
 
 The same brace destructuring grammar also works for store-row values:
 

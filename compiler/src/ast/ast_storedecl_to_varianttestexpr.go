@@ -604,7 +604,7 @@ type StructLitExpr struct {
 	Args     []Expr
 	ArgNames []string
 	Brace    bool
-	Spread   Expr
+	Spreads  []Expr
 
 	ResolvedArgsValid bool
 	ResolvedArgs      []Expr
