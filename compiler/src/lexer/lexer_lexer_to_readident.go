@@ -195,9 +195,10 @@ func (l *Lexer) handleIndentation() {
 				Pos:  l.curPos(),
 			}))
 		}
-		if l.indentStack[len(l.indentStack)-1] != indent {
+		if l.indentStack[len(l.indentStack)-1] < indent {
+			l.indentStack = append(l.indentStack, indent)
 			l.pendingToks = append(l.pendingToks, l.finishToken(Token{
-				Kind: TOKEN_DEDENT,
+				Kind: TOKEN_INDENT,
 				Pos:  l.curPos(),
 			}))
 		}

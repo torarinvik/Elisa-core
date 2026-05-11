@@ -246,6 +246,9 @@ func (p *Parser) parseOptionalReturnWithValue(pos lexer.Pos) ast.Expr {
 				break
 			}
 		}
+		if p.match(lexer.TOKEN_INDENT) {
+			consumedBlockIndent = true
+		}
 	}
 	value := p.parseValueExprAllowTuple()
 	p.expectNewlineAfterValueExpr(value)
@@ -467,7 +470,7 @@ func (p *Parser) parseIfLetClause(pos lexer.Pos, hint ast.BranchHint, isElif boo
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
-		p.skipNewlines()
+		p.skipOptionalBindingContinuationTrivia()
 	}
 	var cond ast.Expr
 	if p.match(lexer.TOKEN_AND) {
@@ -475,8 +478,17 @@ func (p *Parser) parseIfLetClause(pos lexer.Pos, hint ast.BranchHint, isElif boo
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
+	for p.peek() == lexer.TOKEN_DEDENT {
+		p.advance()
+	}
 	body := p.parseBlock()
 	return ifClause{Position: pos, Cond: cond, OptionalBindings: bindings, Body: body}
+}
+func (p *Parser) skipOptionalBindingContinuationTrivia() {
+	p.skipNewlines()
+	if p.peek() == lexer.TOKEN_INDENT {
+		p.advance()
+	}
 }
 func (p *Parser) parseGuardConditionExpr() ast.Expr {
 	depth := 0

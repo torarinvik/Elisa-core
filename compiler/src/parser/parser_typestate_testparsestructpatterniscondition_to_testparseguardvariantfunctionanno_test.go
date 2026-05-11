@@ -201,6 +201,63 @@ func TestParseIfLetMultipleBindingsLowersToNestedIfs(t *testing.T) {
 		t.Fatalf("expected condition then binary condition, got %T %#v", guard.Cond, guard.Cond)
 	}
 }
+func TestParseIfLetMultipleBindingsMayWrapLines(t *testing.T) {
+	file, errs := parseSourceFile(t, `def keep(lower: i64?, upper: i64?, value: i64?) -> void:
+    if let actual_lower = lower,
+           actual_upper = upper,
+           actual_value = value:
+        return
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	outer, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected outer optional bind if, got %T", decl.Body[0])
+	}
+	if bind, ok := outer.Cond.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_lower" {
+		t.Fatalf("expected actual_lower optional bind, got %T %#v", outer.Cond, outer.Cond)
+	}
+	second, ok := outer.Then[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected second optional bind if, got %T", outer.Then[0])
+	}
+	if bind, ok := second.Cond.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_upper" {
+		t.Fatalf("expected actual_upper optional bind, got %T %#v", second.Cond, second.Cond)
+	}
+	third, ok := second.Then[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected third optional bind if, got %T", second.Then[0])
+	}
+	if bind, ok := third.Cond.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_value" {
+		t.Fatalf("expected actual_value optional bind, got %T %#v", third.Cond, third.Cond)
+	}
+}
+func TestParseIfLetWrappedBindingsCanHaveElifLet(t *testing.T) {
+	file, errs := parseSourceFile(t, `def keep(lower: i64?, upper: i64?, fallback: i64?) -> void:
+    if let actual_lower = lower,
+           actual_upper = upper:
+        return
+    elif let actual_fallback = fallback:
+        return
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	outer, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected outer optional bind if, got %T", decl.Body[0])
+	}
+	elifBranch, ok := outer.Else[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected failed first binding to branch to elif optional bind, got %T", outer.Else[0])
+	}
+	if bind, ok := elifBranch.Cond.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_fallback" {
+		t.Fatalf("expected actual_fallback optional bind, got %T %#v", elifBranch.Cond, elifBranch.Cond)
+	}
+}
 func TestParseReturnQuestionLowersToIfLetReturn(t *testing.T) {
 	file, errs := parseSourceFile(t, "def first(found: i64?) -> i64?:\n    return? found\n    return null\n")
 	if len(errs) != 0 {
