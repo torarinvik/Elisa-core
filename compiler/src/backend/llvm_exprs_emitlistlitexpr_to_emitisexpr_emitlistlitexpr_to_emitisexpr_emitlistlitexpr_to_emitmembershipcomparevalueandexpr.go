@@ -323,7 +323,7 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 		if expr.Projection == nil {
 			return nil, nil, fmt.Errorf("each query expression requires a projection")
 		}
-		init = &ast.ListLitExpr{Position: expr.Position}
+		init = &ast.ListLitExpr{Position: expr.Position, Owner: expr.Owner}
 		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
 			s.g.result.ExprTypes[init] = darrayType
 		}
@@ -363,19 +363,23 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
 		s.g.result.ExprTypes[init] = resultType
 	}
+	loopStmt := ast.Stmt(&ast.IterForStmt{
+		Position:      expr.Position,
+		Pattern:       &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
+		Mode:          ast.IterBindValue,
+		Source:        expr.Source,
+		PatternFilter: expr.PatternFilter,
+		Filter:        filter,
+		Body:          body,
+	})
+	if expr.Owner != nil {
+		loopStmt = &ast.InStoreStmt{Position: expr.Position, Store: expr.Owner, Body: []ast.Stmt{loopStmt}}
+	}
 	block := &ast.ExprBlock{
 		Position: expr.Position,
 		Stmts: []ast.Stmt{
 			&ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: init},
-			&ast.IterForStmt{
-				Position:      expr.Position,
-				Pattern:       &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
-				Mode:          ast.IterBindValue,
-				Source:        expr.Source,
-				PatternFilter: expr.PatternFilter,
-				Filter:        filter,
-				Body:          body,
-			},
+			loopStmt,
 		},
 		Value: resultIdent,
 	}

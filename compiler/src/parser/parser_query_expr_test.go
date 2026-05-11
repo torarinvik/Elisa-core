@@ -101,6 +101,26 @@ func TestParseProjectionQueryPatternFilter(t *testing.T) {
 	}
 }
 
+func TestParseEachProjectionQueryWithExplicitOwner(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Entry:\n    name: i64\n\ndef keep(owner: Arena, items: darray[Entry]) -> darray[i64]:\n    alloc: mutable Arena& = (&owner).cast[mutable Arena&]\n    return item.name for each item in items with alloc\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[1].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok {
+		t.Fatalf("expected query expr, got %T", ret.Value)
+	}
+	if query.Owner == nil {
+		t.Fatal("expected explicit query owner")
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return item.name for each item in items with alloc") {
+		t.Fatalf("expected formatted owner query expression, got:\n%s", formatted)
+	}
+}
+
 func TestParseExpressionWhereViewWithExplicitBinder(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(items: darray[i64]) -> bool:\n    return all((items where item: item > 0))\n")
 	if len(errs) != 0 {

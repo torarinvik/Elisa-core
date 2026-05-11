@@ -537,6 +537,7 @@ type QueryExpr struct {
 	Filter        Expr
 	PatternFilter MatchPattern
 	Projection    Expr
+	Owner         Expr
 }
 type CastExprOrigin int
 

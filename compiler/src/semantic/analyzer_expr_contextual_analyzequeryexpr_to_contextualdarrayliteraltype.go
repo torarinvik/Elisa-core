@@ -15,6 +15,15 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 	if a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
 		a.errorf(expr.Pos(), "query expression value iteration does not support affine element type %s; use an explicit loop with ref binding", info.ItemType)
 	}
+	if expr.Owner != nil {
+		owner, ownerType, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
+		if !ok || owner.Kind != treeAllocOwnerArena {
+			a.errorf(expr.Owner.Pos(), "query expression owner must be an Arena or mutable Arena&, got %s", ownerType)
+		}
+		if expr.Kind != ast.QueryExprEach {
+			a.errorf(expr.Owner.Pos(), "query expression owner is only valid for each projection queries")
+		}
+	}
 	loopScope := NewScope(a.currentScope)
 	pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
 	a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
@@ -50,7 +59,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 			result = &OptionalType{Value: info.ItemType}
 		}
 	case ast.QueryExprEach:
-		if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		if expr.Owner == nil && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 			a.errorf(expr.Pos(), "each query expression requires an active in <arena>: scope")
 		}
 		if expr.Projection == nil {

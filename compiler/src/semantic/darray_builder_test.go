@@ -451,6 +451,35 @@ def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
 	}
 }
 
+func TestAnalyzeEachProjectionQueryWithExplicitOwner(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "each_projection_query_explicit_owner.elisa", `struct Entry:
+    name: i64
+
+def names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    return entry.name for each entry in entries with alloc
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "names" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected names function declaration")
+	}
+	ret := fn.Body[1].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok || query.Owner == nil {
+		t.Fatalf("expected explicit-owner projection query expr, got %T %#v", ret.Value, ret.Value)
+	}
+	if _, ok := result.ExprTypes[query].(*DArrayType); !ok {
+		t.Fatalf("expected explicit-owner projection query to resolve to darray type, got %T", result.ExprTypes[query])
+	}
+}
+
 func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.elisa", `def build(items: darray[i64]) -> darray[i64]:
     return [item + 1 for item in items]

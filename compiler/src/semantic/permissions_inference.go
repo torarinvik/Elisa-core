@@ -287,6 +287,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Source)
 		c.collectExpr(n.Filter)
 		c.collectExpr(n.Projection)
+		c.collectExpr(n.Owner)
 	case *ast.ParenExpr:
 		c.collectExpr(n.Inner)
 	case *ast.RaiseExpr:

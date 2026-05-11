@@ -242,6 +242,27 @@ def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
 	}
 }
 
+func TestGenerateLLVMIRLowersEachProjectionQueryWithExplicitOwner(t *testing.T) {
+	src := `struct Entry:
+    name: i64
+
+def names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    return entry.name for each entry in entries with alloc
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_each_projection_query_explicit_owner.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "darray.push") {
+		t.Fatalf("expected explicit-owner projection query to push projected elements, got:\n%s", output)
+	}
+	if !strings.Contains(output, "darray.push.owner.arena") || !strings.Contains(output, "call ptr @arena_alloc(ptr %darray.push.owner.arena") {
+		t.Fatalf("expected explicit-owner projection query to allocate from its owner, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

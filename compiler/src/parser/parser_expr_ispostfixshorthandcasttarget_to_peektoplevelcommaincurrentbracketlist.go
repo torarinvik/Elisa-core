@@ -125,7 +125,9 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_IN)
-	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	source := p.withInMembershipDisabled(func() ast.Expr {
+		return p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	})
 	p.expectIdentText("where")
 	var patternFilter ast.MatchPattern
 	var filter ast.Expr
@@ -134,7 +136,11 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	} else {
 		filter = p.parseExpr()
 	}
-	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter, PatternFilter: patternFilter}
+	var owner ast.Expr
+	if p.match(lexer.TOKEN_WITH) {
+		owner = p.withInMembershipDisabled(p.parseExpr)
+	}
+	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter, PatternFilter: patternFilter, Owner: owner}
 }
 func (p *Parser) looksLikeQueryExpr() bool {
 	if p.peek() != lexer.TOKEN_IDENT || p.pos+3 >= len(p.tokens) {
