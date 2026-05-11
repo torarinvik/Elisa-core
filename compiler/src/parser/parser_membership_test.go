@@ -60,6 +60,32 @@ func TestParseBraceMembershipExpr(t *testing.T) {
 	}
 }
 
+func TestParseBraceMembershipShorthandMembers(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum TokenKind of u32:\n    IF\n    LET\n    IDENT\n\ndef keep(kind: TokenKind) -> bool:\n    return kind in {.IF, .LET}\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	inExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || inExpr.Op != lexer.TOKEN_IN {
+		t.Fatalf("expected membership expr, got %#v", ret.Value)
+	}
+	list, ok := inExpr.Right.(*ast.ListLitExpr)
+	if !ok || !list.Brace || len(list.Elems) != 2 {
+		t.Fatalf("expected two-element brace membership literal, got %#v", inExpr.Right)
+	}
+	if shorthand, ok := list.Elems[0].(*ast.ShorthandMemberExpr); !ok || len(shorthand.Parts) != 1 || shorthand.Parts[0] != "IF" {
+		t.Fatalf("expected first candidate to be .IF shorthand, got %#v", list.Elems[0])
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "kind in {.IF, .LET}") {
+		t.Fatalf("expected shorthand membership to unparse, got:\n%s", formatted)
+	}
+}
+
 func TestParseTokenSetDecl(t *testing.T) {
 	file, errs := parseSourceFile(t, "tokenset ExprStart = [TokenKind.IF, TokenKind.LET]\n")
 	if len(errs) != 0 {

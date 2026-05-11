@@ -64,6 +64,56 @@ func TestAnalyzeBraceMembershipExprUsesBoolAndArrayLiteralType(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBraceMembershipInfersShorthandMembers(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_shorthand.elisa", `const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+
+def keep(kind: TokenKind) -> bool:
+    return kind in {.IF, .LET}
+`)
+
+	decl := result.File.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	inExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected membership binary expr, got %T", ret.Value)
+	}
+	if got := result.ExprTypes[inExpr].String(); got != "bool" {
+		t.Fatalf("expected membership expr type bool, got %s", got)
+	}
+	list, ok := inExpr.Right.(*ast.ListLitExpr)
+	if !ok || !list.Brace {
+		t.Fatalf("expected brace membership rhs literal, got %T %#v", inExpr.Right, inExpr.Right)
+	}
+	arrayType, ok := result.ExprTypes[list].(*ArrayType)
+	if !ok || arrayType == nil {
+		t.Fatalf("expected membership rhs list type, got %T %#v", result.ExprTypes[list], result.ExprTypes[list])
+	}
+	if got := arrayType.Elem.String(); got != "TokenKind" {
+		t.Fatalf("expected membership rhs element type TokenKind, got %s", got)
+	}
+	first, ok := list.Elems[0].(*ast.ShorthandMemberExpr)
+	if !ok {
+		t.Fatalf("expected first candidate shorthand member, got %T", list.Elems[0])
+	}
+	if got := result.ExprTypes[first].String(); got != "TokenKind" {
+		t.Fatalf("expected shorthand member type TokenKind, got %s", got)
+	}
+}
+
+func TestAnalyzeBraceMembershipRejectsShorthandWithoutEnumContext(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "brace_membership_shorthand_bad.elisa", `def keep(value: i64) -> bool:
+    return value in {.IF}
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "shorthand member \".IF\" requires an expected const enum type") {
+		t.Fatalf("expected shorthand enum-context diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsStandaloneBraceMembershipSetLiteral(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "standalone_brace_membership_literal.elisa", `def keep() -> i64:
     return {1, 2, 3}

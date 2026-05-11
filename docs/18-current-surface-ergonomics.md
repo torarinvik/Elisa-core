@@ -118,6 +118,29 @@ def load_with_log(path: Path) -> Buffer:
 
 `return?`, `match?`, and `try? ... default` remain accepted as migration syntax, but they are deprecated in favor of the unified `else` forms.
 
+## Membership Candidate Sets
+
+The membership operator accepts list literals and brace candidate sets on its right-hand side. Brace sets are expression-local membership candidates, not standalone set values.
+
+```elisa
+def is_small(value: i64) -> bool:
+    return value in {1, 2, 3}
+```
+
+When the left-hand side has a const enum type, candidates may use shorthand enum members. The shorthand is resolved from the left-hand side type, so repeated enum qualifiers are unnecessary.
+
+```elisa
+const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+
+def starts_expr(kind: TokenKind) -> bool:
+    return kind in {.IF, .LET}
+```
+
+Use the fully qualified form when the expected enum type is not obvious from context.
+
 Legacy `return?` can still be used as a guarded early return with an ordinary boolean or pattern condition. Pattern bindings from the condition are available in the returned expression.
 
 ```elisa

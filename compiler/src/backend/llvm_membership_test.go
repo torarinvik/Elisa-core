@@ -41,6 +41,28 @@ func TestGenerateLLVMIRLowersBraceMembershipExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersBraceMembershipShorthandMembers(t *testing.T) {
+	src := `const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+
+def keep(kind: TokenKind) -> bool:
+    return kind in {.IF, .LET}
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_brace_membership_shorthand.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @keep(i32 ", "membership.next.0", "membership.result"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected shorthand membership lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTokenSetMembershipExpr(t *testing.T) {
 	src := `const enum TokenKind of u32:
     IF
