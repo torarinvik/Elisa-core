@@ -277,7 +277,9 @@ When an early optional result depends on several optional inputs, prefer multi-b
 
 ```elisa
 def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
-    if let lower_value = lower, upper_value = upper, value_int = value:
+    if let lower_value = lower,
+           upper_value = upper,
+           value_int = value:
         return value_int >= lower_value and value_int <= upper_value
     return null
 ```
@@ -285,7 +287,8 @@ def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
 The same form works when the present branch performs diagnostics, mutation, or several statements.
 
 ```elisa
-if let actual_lower = lower_value, actual_upper = upper_value:
+if let actual_lower = lower_value,
+       actual_upper = upper_value:
     actual_lower > actual_upper then:
         record_diagnostic()
     return

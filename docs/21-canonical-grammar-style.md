@@ -291,7 +291,8 @@ def integer_range_contains(lower: Expr, upper: Expr, value: Expr) -> bool?:
 Use the same multi-binding form when the present branch performs diagnostics, mutation, or multiple statements:
 
 ```elisa
-if let lower_value = integer_literal(lower), upper_value = integer_literal(upper):
+if let lower_value = integer_literal(lower),
+       upper_value = integer_literal(upper):
     lower_value > upper_value then:
         record_diagnostic()
     return
