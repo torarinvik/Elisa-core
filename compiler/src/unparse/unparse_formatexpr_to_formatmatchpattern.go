@@ -155,7 +155,10 @@ func formatExpr(expr ast.Expr) string {
 		return line + "]"
 	case *ast.QueryExpr:
 		if n.Kind == ast.QueryExprFirst && n.Projection != nil {
-			return formatExpr(n.Projection) + " for first " + n.Name + " in " + formatExpr(n.Source) + " where " + formatExpr(n.Filter)
+			return formatExpr(n.Projection) + " for first " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter)
+		}
+		if n.Kind == ast.QueryExprEach && n.Projection != nil {
+			return formatExpr(n.Projection) + " for each " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter)
 		}
 		keyword := "any"
 		switch n.Kind {
@@ -167,6 +170,8 @@ func formatExpr(expr ast.Expr) string {
 			keyword = "first"
 		case ast.QueryExprCount:
 			keyword = "count"
+		case ast.QueryExprEach:
+			keyword = "each"
 		}
 		return keyword + " " + n.Name + " in " + formatExpr(n.Source) + " where " + formatExpr(n.Filter)
 	case *ast.CastExpr:
@@ -327,6 +332,13 @@ func formatExpr(expr ast.Expr) string {
 	default:
 		return "<expr>"
 	}
+}
+
+func formatQueryFilter(filter ast.Expr) string {
+	if filter == nil {
+		return ""
+	}
+	return " where " + formatExpr(filter)
 }
 
 func formatRecoveryClause(recovery *ast.RecoveryClause, fallback ast.Expr) string {

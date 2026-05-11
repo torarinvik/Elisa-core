@@ -429,6 +429,16 @@ def first_positive(values: darray[i64]) -> i64?:
 def first_enabled_name(entries: darray[Entry]) -> NameId?:
     return entry.name_id for first entry in entries where entry.enabled
 
+def enabled_names(owner: Arena, entries: darray[Entry]) -> darray[NameId]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return entry.name_id for each entry in entries where entry.enabled
+
+def all_names(owner: Arena, entries: darray[Entry]) -> darray[NameId]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return entry.name_id for each entry in entries
+
 def positive_count(values: darray[i64]) -> usize:
     return count value in values where value > 0
 ```
@@ -438,7 +448,8 @@ Current rules:
 - `any name in source where predicate` returns `bool`
 - `all name in source where predicate` returns `bool`
 - `first name in source where predicate` returns the element as `T?`
-- `projection for first name in source where predicate` returns the projected value as `U?`
+- `projection for first name in source where predicate` returns the projected value as `U?`; the `where` clause may be omitted to project the first element
+- `projection for each name in source where predicate` returns projected values as `darray[U]` and requires an active `in <arena>:` scope; the `where` clause may be omitted for pure maps
 - `count name in source where predicate` returns `usize`
 - the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `source.enumerate()`, and tree child views
 - range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now

@@ -18,9 +18,11 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 	loopScope := NewScope(a.currentScope)
 	pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
 	a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
-	condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
-	if !IsBoolType(condType) {
-		a.errorf(expr.Filter.Pos(), "query expression predicate must be bool, got %s", condType)
+	if expr.Filter != nil {
+		condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
+		if !IsBoolType(condType) {
+			a.errorf(expr.Filter.Pos(), "query expression predicate must be bool, got %s", condType)
+		}
 	}
 	var result Type
 	switch expr.Kind {
@@ -39,6 +41,25 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 			}
 		} else {
 			result = &OptionalType{Value: info.ItemType}
+		}
+	case ast.QueryExprEach:
+		if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+			a.errorf(expr.Pos(), "each query expression requires an active in <arena>: scope")
+		}
+		if expr.Projection == nil {
+			a.errorf(expr.Pos(), "each query expression requires a projection before for each")
+			result = invalidType
+			break
+		}
+		savedScope := a.currentScope
+		a.currentScope = loopScope
+		projectionType := a.analyzeExpr(expr.Projection)
+		a.currentScope = savedScope
+		if projectionType == nil || IsInvalidType(projectionType) {
+			result = invalidType
+		} else {
+			a.consumeAffineValueExpr(expr.Projection, projectionType, "move into each query element")
+			result = &DArrayType{Elem: projectionType, Shape: &WildcardShape{}, SurfaceName: "darray"}
 		}
 	case ast.QueryExprCount:
 		result = a.namedTypes["usize"]

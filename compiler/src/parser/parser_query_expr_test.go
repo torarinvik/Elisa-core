@@ -57,6 +57,29 @@ func TestParseFirstProjectionQueryExpr(t *testing.T) {
 	}
 }
 
+func TestParseEachProjectionQueryExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Entry:\n    name: i64\n    enabled: bool\n\ndef keep(items: darray[Entry]) -> darray[i64]:\n    return item.name for each item in items\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok {
+		t.Fatalf("expected query expr, got %T", ret.Value)
+	}
+	if query.Kind != ast.QueryExprEach || query.Name != "item" || query.Projection == nil {
+		t.Fatalf("unexpected projection query shape: %#v", query)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return item.name for each item in items") {
+		t.Fatalf("expected formatted each projection query expression, got:\n%s", formatted)
+	}
+}
+
 func TestParseExpressionWhereViewWithExplicitBinder(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(items: darray[i64]) -> bool:\n    return all((items where item: item > 0))\n")
 	if len(errs) != 0 {

@@ -278,6 +278,42 @@ def first_enabled(entries: darray[Entry]) -> i64?:
 	}
 }
 
+func TestAnalyzeEachProjectionQueryExpr(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "each_projection_query.elisa", `struct Entry:
+    name: i64
+    enabled: bool
+
+def enabled_names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return entry.name for each entry in entries
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "enabled_names" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected enabled_names function declaration")
+	}
+	inStmt := fn.Body[1].(*ast.InStoreStmt)
+	ret := inStmt.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok || query.Projection == nil {
+		t.Fatalf("expected projection query expr, got %T %#v", ret.Value, ret.Value)
+	}
+	darrayType, ok := result.ExprTypes[query].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected projection query to resolve to darray type, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+	}
+	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected projection query element i64, got %#v", darrayType.Elem)
+	}
+}
+
 func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.elisa", `def build(items: darray[i64]) -> darray[i64]:
     return [item + 1 for item in items]

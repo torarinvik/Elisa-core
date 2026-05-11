@@ -91,7 +91,7 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 func (p *Parser) parseExpr() ast.Expr {
 	expr := p.parseOr()
 
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "first" {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && (p.tokens[p.pos+1].Text == "first" || p.tokens[p.pos+1].Text == "each") {
 		return p.parseProjectionQueryExpr(expr)
 	}
 	if p.allowWhereExpr && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where" {
@@ -128,13 +128,24 @@ func (p *Parser) parseExpr() ast.Expr {
 func (p *Parser) parseProjectionQueryExpr(projection ast.Expr) ast.Expr {
 	pos := projection.Pos()
 	p.expectIdentText("for")
-	p.expectIdentText("first")
+	kindText := p.expect(lexer.TOKEN_IDENT).Text
+	kind := ast.QueryExprFirst
+	switch kindText {
+	case "first":
+		kind = ast.QueryExprFirst
+	case "each":
+		kind = ast.QueryExprEach
+	default:
+		p.errorAt(pos, "projection query expression expects first or each, got %q", kindText)
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_IN)
 	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
-	p.expectIdentText("where")
-	filter := p.parseExpr()
-	return &ast.QueryExpr{Position: pos, Kind: ast.QueryExprFirst, Name: name, Source: source, Filter: filter, Projection: projection}
+	var filter ast.Expr
+	if p.matchIdentText("where") {
+		filter = p.parseExpr()
+	}
+	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter, Projection: projection}
 }
 
 func (p *Parser) parseWhereViewExpr(source ast.Expr) ast.Expr {

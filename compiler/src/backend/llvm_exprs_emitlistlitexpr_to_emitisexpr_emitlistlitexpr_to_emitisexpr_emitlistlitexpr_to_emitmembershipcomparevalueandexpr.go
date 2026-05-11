@@ -255,6 +255,28 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 	case ast.QueryExprCount:
 		init = &ast.IntLit{Position: expr.Position, Value: "0", Suffix: "usize"}
 		body = []ast.Stmt{&ast.AugAssignStmt{Position: expr.Position, Op: lexer.TOKEN_PLUSEQ, Target: resultIdent, Value: &ast.IntLit{Position: expr.Position, Value: "1", Suffix: "usize"}}}
+	case ast.QueryExprEach:
+		darrayType, ok := resultType.(*semantic.DArrayType)
+		if !ok || darrayType == nil {
+			return nil, nil, fmt.Errorf("each query expression requires a darray result type")
+		}
+		if expr.Projection == nil {
+			return nil, nil, fmt.Errorf("each query expression requires a projection")
+		}
+		init = &ast.ListLitExpr{Position: expr.Position}
+		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[init] = darrayType
+		}
+		pushCall := &ast.CallExpr{
+			Position: expr.Position,
+			Func: &ast.FieldExpr{
+				Position: expr.Position,
+				Object:   resultIdent,
+				Field:    "push",
+			},
+			Args: []ast.Expr{expr.Projection},
+		}
+		body = []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: pushCall}}
 	case ast.QueryExprFirst:
 		optionalType, ok := resultType.(*semantic.OptionalType)
 		if !ok || optionalType == nil {
@@ -265,7 +287,11 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 			s.g.result.ExprTypes[init] = optionalType
 		}
 		nullCheck := &ast.BinaryExpr{Position: expr.Position, Op: lexer.TOKEN_EQEQ, Left: resultIdent, Right: &ast.NullLit{Position: expr.Position}}
-		filter = &ast.BinaryExpr{Position: expr.Position, Op: lexer.TOKEN_AND, Left: nullCheck, Right: expr.Filter}
+		if expr.Filter != nil {
+			filter = &ast.BinaryExpr{Position: expr.Position, Op: lexer.TOKEN_AND, Left: nullCheck, Right: expr.Filter}
+		} else {
+			filter = nullCheck
+		}
 		value := expr.Projection
 		if value == nil {
 			value = &ast.Ident{Position: expr.Position, Name: expr.Name}

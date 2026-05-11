@@ -522,6 +522,7 @@ const (
 	QueryExprAll
 	QueryExprFirst
 	QueryExprCount
+	QueryExprEach
 )
 
 type QueryExpr struct {

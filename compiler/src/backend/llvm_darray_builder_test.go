@@ -143,6 +143,29 @@ def first_enabled(entries: darray[Entry]) -> i64?:
 	}
 }
 
+func TestGenerateLLVMIRLowersEachProjectionQueryExpr(t *testing.T) {
+	src := `struct Entry:
+    name: i64
+    enabled: bool
+
+def enabled_names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return entry.name for each entry in entries
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_each_projection_query.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "query.result") {
+		t.Fatalf("expected each projection query to lower through query result temporary, got:\n%s", output)
+	}
+	if !strings.Contains(output, "darray.push") {
+		t.Fatalf("expected each projection query to push projected elements, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
