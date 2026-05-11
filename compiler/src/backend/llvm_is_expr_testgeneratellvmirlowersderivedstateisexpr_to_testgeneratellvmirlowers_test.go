@@ -170,6 +170,27 @@ def is_rel(kind: Tok) -> bool:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersIsNotExpr(t *testing.T) {
+	src := `const enum Tok of i32:
+	IDENT = 1
+	NUMBER = 2
+
+def keep(kind: Tok) -> bool:
+	return kind is not .IDENT
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_is_not_expr.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @keep(i32 ", "isvalue.eq", "nottmp"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected is-not lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersExpectFieldShapeListRestPattern(t *testing.T) {
 	src := `struct Block:
     stmts: int[3]

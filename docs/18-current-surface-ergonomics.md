@@ -183,6 +183,15 @@ def starts_expr(kind: TokenKind) -> bool:
 
 Use the fully qualified form when the expected enum type is not obvious from context.
 
+## Negated Type And Variant Tests
+
+Use `is not` for direct negated type, state, variant, and structural pattern tests. It is equivalent to `not (value is Pattern)`, but reads better in guard and early-return code.
+
+```elisa
+def is_non_identifier(kind: TokenKind) -> bool:
+    return kind is not .IDENT
+```
+
 ## Pattern Alternatives
 
 Nested match patterns can use `|` for no-binding alternatives. This is useful when several literal or payloadless variants should take the same path inside a larger structural pattern.

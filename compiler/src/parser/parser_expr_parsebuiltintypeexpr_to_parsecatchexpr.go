@@ -393,6 +393,13 @@ func (p *Parser) parseComparison() ast.Expr {
 		op := p.advance()
 		var right ast.Expr
 		if op.Kind == lexer.TOKEN_IS {
+			if p.peek() == lexer.TOKEN_NOT {
+				notToken := p.advance()
+				right = p.parseIsTestExpr()
+				test := &ast.BinaryExpr{Position: op.Pos, Op: op.Kind, Left: left, Right: right}
+				left = &ast.UnaryExpr{Position: notToken.Pos, Op: lexer.TOKEN_NOT, Operand: test}
+				continue
+			}
 			right = p.parseIsTestExpr()
 		} else {
 			right = p.parseAs()

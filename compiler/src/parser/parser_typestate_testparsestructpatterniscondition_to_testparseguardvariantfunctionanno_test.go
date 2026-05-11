@@ -40,6 +40,30 @@ func TestParseStructPatternIsCondition(t *testing.T) {
 		t.Fatalf("expected literal nested field pattern, got %T", spanPattern.Args[0].Pattern)
 	}
 }
+
+func TestParseIsNotCondition(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Nil\n\ndef keep(node: Expr) -> bool:\n    return node is not Expr.Nil\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	notExpr, ok := ret.Value.(*ast.UnaryExpr)
+	if !ok || notExpr.Op != lexer.TOKEN_NOT {
+		t.Fatalf("expected is-not to parse as unary not, got %T %#v", ret.Value, ret.Value)
+	}
+	cond, ok := notExpr.Operand.(*ast.BinaryExpr)
+	if !ok || cond.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected is-not operand to be is-expression, got %T %#v", notExpr.Operand, notExpr.Operand)
+	}
+	if _, ok := cond.Right.(*ast.TypeExprExpr); !ok {
+		t.Fatalf("expected is target, got %T %#v", cond.Right, cond.Right)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "node is not Expr.Nil") {
+		t.Fatalf("expected is-not to unparse, got:\n%s", formatted)
+	}
+}
+
 func TestParseStructPatternIsConditionWithBindings(t *testing.T) {
 	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    INTEGER = 1\n\nstruct Span:\n    start: int\n    finish: int\n\nstruct Token:\n    kind: Tok\n    span: Span\n    value: int\n\ndef score(tok: Token) -> int:\n    if tok is Token(kind: .INTEGER, span: Span(start: start), value: value):\n        return start + value\n    return 0\n")
 	if len(errs) != 0 {
