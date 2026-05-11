@@ -26,6 +26,13 @@ func matchPatternContainsBindNames(pattern ast.MatchPattern) bool {
 			}
 		}
 		return false
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			if matchPatternContainsBindNames(option) {
+				return true
+			}
+		}
+		return false
 	case *ast.MatchStructPattern:
 		for _, arg := range p.Args {
 			if matchPatternContainsBindNames(arg.Pattern) {

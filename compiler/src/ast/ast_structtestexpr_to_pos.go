@@ -157,6 +157,10 @@ type MatchListPattern struct {
 	Position lexer.Pos
 	Elems    []MatchPattern
 }
+type MatchOrPattern struct {
+	Position lexer.Pos
+	Options  []MatchPattern
+}
 type MatchRestPattern struct {
 	Position lexer.Pos
 }

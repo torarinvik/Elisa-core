@@ -134,6 +134,13 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 		default:
 			return false
 		}
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			if a.matchPatternCovers(option, current, expected) {
+				return true
+			}
+		}
+		return false
 	case *ast.MatchTuplePattern:
 		currTuple, ok := current.(*ast.MatchTuplePattern)
 		if !ok {
@@ -419,6 +426,12 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 			parts = append(parts, matchPatternSummary(elem))
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
+	case *ast.MatchOrPattern:
+		parts := make([]string, 0, len(p.Options))
+		for _, option := range p.Options {
+			parts = append(parts, matchPatternSummary(option))
+		}
+		return strings.Join(parts, " | ")
 	case *ast.MatchRestPattern:
 		return "..."
 	case *ast.MatchStructPattern:

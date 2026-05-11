@@ -476,6 +476,10 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "variant is payload pattern")
 	case *ast.MatchLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "variant is payload pattern")
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			a.analyzeVariantIsPayloadPattern(option, expected)
+		}
 	case *ast.MatchStructPattern:
 		a.analyzeStructIsPayloadPattern(p, expected)
 	case *ast.MatchVariantPattern:
@@ -531,6 +535,10 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "variant is payload pattern")
 	case *ast.MatchLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "variant is payload pattern")
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			a.analyzeEnumIsPayloadPattern(option, expected)
+		}
 	case *ast.MatchStructPattern:
 		a.analyzeStructIsPayloadPattern(p, expected)
 	case *ast.MatchVariantPattern:

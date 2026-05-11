@@ -391,19 +391,37 @@ func (p *Parser) parseMatchArm() []ast.MatchArm {
 	return arms
 }
 func (p *Parser) parseTopLevelMatchPatterns() []ast.MatchPattern {
-	patterns := []ast.MatchPattern{p.parseMatchPattern()}
+	patterns := []ast.MatchPattern{p.parseMatchPatternNoOr()}
 	for p.peek() == lexer.TOKEN_PIPE {
 		p.advance()
-		patterns = append(patterns, p.parseMatchPattern())
+		patterns = append(patterns, p.parseMatchPatternNoOr())
 	}
 	return patterns
 }
 func (p *Parser) parseMatchPattern() ast.MatchPattern {
+	return p.parseNestedOrMatchPattern()
+}
+func (p *Parser) parseNestedOrMatchPattern() ast.MatchPattern {
+	pattern := p.parseNestedMatchPattern()
+	if p.peek() != lexer.TOKEN_PIPE {
+		return pattern
+	}
+	options := []ast.MatchPattern{pattern}
+	for p.match(lexer.TOKEN_PIPE) {
+		options = append(options, p.parseNestedMatchPattern())
+	}
+	orPattern := &ast.MatchOrPattern{Position: pattern.Pos(), Options: options}
+	if matchPatternContainsBindNames(orPattern) {
+		p.errorAt(orPattern.Position, "or-pattern alternatives cannot bind names yet")
+	}
+	return orPattern
+}
+func (p *Parser) parseMatchPatternNoOr() ast.MatchPattern {
 	pattern := p.parseNestedMatchPattern()
 	if p.peek() == lexer.TOKEN_COMMA {
 		elems := []ast.MatchPattern{pattern}
 		for p.match(lexer.TOKEN_COMMA) {
-			elems = append(elems, p.parseNestedMatchPattern())
+			elems = append(elems, p.parseNestedOrMatchPattern())
 		}
 		pattern = &ast.MatchTuplePattern{Position: pattern.Pos(), Elems: elems}
 	}
@@ -488,7 +506,7 @@ func (p *Parser) parseMatchListPattern(pos lexer.Pos) ast.MatchPattern {
 				}
 				break
 			}
-			elems = append(elems, p.parseNestedMatchPattern())
+			elems = append(elems, p.parseNestedOrMatchPattern())
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}
@@ -549,13 +567,13 @@ func (p *Parser) parseMatchStructPatternArg() ast.MatchPatternArg {
 	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_COLON {
 		pos := p.cur().Pos
 		p.errorf("struct pattern fields must use name: pattern")
-		pattern := p.parseNestedMatchPattern()
+		pattern := p.parseNestedOrMatchPattern()
 		return ast.MatchPatternArg{Position: pos, Pattern: pattern}
 	}
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
-	pattern := p.parseNestedMatchPattern()
+	pattern := p.parseNestedOrMatchPattern()
 	return ast.MatchPatternArg{Position: pos, Name: name, Pattern: pattern}
 }
 func (p *Parser) parseBraceMatchStructPatternArg() ast.MatchPatternArg {
@@ -568,6 +586,6 @@ func (p *Parser) parseBraceMatchStructPatternArg() ast.MatchPatternArg {
 			Pattern:  &ast.MatchBindPattern{Position: pos, Name: name},
 		}
 	}
-	pattern := p.parseNestedMatchPattern()
+	pattern := p.parseNestedOrMatchPattern()
 	return ast.MatchPatternArg{Position: pos, Name: name, Pattern: pattern}
 }

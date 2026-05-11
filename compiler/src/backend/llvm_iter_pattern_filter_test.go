@@ -50,3 +50,32 @@ def count_ints(items: array[Expr, 3]) -> i64:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersNestedOrPattern(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_nested_or_pattern.elisa", `
+enum Token:
+    Ident
+    Keyword
+    Other
+
+enum Expr:
+    Leaf(kind: Token)
+    Missing
+
+def score(expr: Expr) -> i64:
+    match expr:
+        Expr.Leaf(Token.Ident | Token.Keyword):
+            return 1
+        _:
+            return 0
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	for _, check := range []string{"match.or.next", "match.tag", "define i64 @score("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected nested or-pattern IR to contain %q, got:\n%s", check, output)
+		}
+	}
+}

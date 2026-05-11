@@ -118,6 +118,11 @@ func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expe
 			fields = a.collectMoveBindVariantBindings(p.Elems[i], resolvedFields[i].Type, childPath, fields)
 		}
 		return fields
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			fields = a.collectMoveBindVariantBindings(option, expected, path, fields)
+		}
+		return fields
 	case *ast.MatchStructPattern:
 		resolvedFields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
 		if !ok {

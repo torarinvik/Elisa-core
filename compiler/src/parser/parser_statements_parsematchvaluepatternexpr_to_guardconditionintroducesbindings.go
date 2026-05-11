@@ -62,10 +62,10 @@ func (p *Parser) parseMatchPatternArg() ast.MatchPatternArg {
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_COLON)
-		pattern := p.parseNestedMatchPattern()
+		pattern := p.parseNestedOrMatchPattern()
 		return ast.MatchPatternArg{Position: pos, Name: name, Pattern: pattern}
 	}
-	pattern := p.parseNestedMatchPattern()
+	pattern := p.parseNestedOrMatchPattern()
 	return ast.MatchPatternArg{Position: pattern.Pos(), Pattern: pattern}
 }
 func (p *Parser) parseRegion() *ast.RegionStmt {

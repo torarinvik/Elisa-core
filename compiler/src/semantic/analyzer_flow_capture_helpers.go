@@ -168,6 +168,12 @@ func parallelForMatchArmPatternNames(pattern ast.MatchPattern) []string {
 			out = append(out, parallelForMatchArmPatternNames(elem)...)
 		}
 		return out
+	case *ast.MatchOrPattern:
+		var out []string
+		for _, option := range p.Options {
+			out = append(out, parallelForMatchArmPatternNames(option)...)
+		}
+		return out
 	default:
 		return nil
 	}

@@ -201,6 +201,24 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			return nil, packedPayloadValueCache{}, err
 		}
 		return decodedActualValue, packedPayloadValueCache{}, nil
+	case *ast.MatchOrPattern:
+		if len(p.Options) == 0 {
+			C.LLVMBuildBr(s.builder, failureBB)
+			return decodedActualValue, packedPayloadValueCache{}, nil
+		}
+		for i, option := range p.Options {
+			nextFailure := failureBB
+			if i != len(p.Options)-1 {
+				nextFailure = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.or.next"))
+			}
+			if _, _, err := s.emitMatchPatternTest(option, actualValue, decodedActualValue, actualType, store, originExpr, precomputedTagValue, successBB, nextFailure); err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			if i != len(p.Options)-1 {
+				C.LLVMPositionBuilderAtEnd(s.builder, nextFailure)
+			}
+		}
+		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchTuplePattern:
 		fields, err := s.resolveTupleMatchPatternElems(p, actualType)
 		if err != nil {

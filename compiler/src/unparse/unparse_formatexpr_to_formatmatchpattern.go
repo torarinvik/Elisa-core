@@ -655,6 +655,12 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 			parts = append(parts, formatMatchPattern(elem))
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
+	case *ast.MatchOrPattern:
+		parts := make([]string, 0, len(n.Options))
+		for _, option := range n.Options {
+			parts = append(parts, formatMatchPattern(option))
+		}
+		return strings.Join(parts, " | ")
 	case *ast.MatchRestPattern:
 		return "..."
 	case *ast.MatchStructPattern:

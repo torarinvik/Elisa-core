@@ -141,6 +141,29 @@ def starts_expr(kind: TokenKind) -> bool:
 
 Use the fully qualified form when the expected enum type is not obvious from context.
 
+## Pattern Alternatives
+
+Nested match patterns can use `|` for no-binding alternatives. This is useful when several literal or payloadless variants should take the same path inside a larger structural pattern.
+
+```elisa
+enum Token:
+    Ident
+    Keyword
+    Other
+
+enum Expr:
+    Leaf(kind: Token)
+
+def is_named_leaf(expr: Expr) -> bool:
+    match expr:
+        Expr.Leaf(Token.Ident | Token.Keyword):
+            return true
+        _:
+            return false
+```
+
+OR-pattern alternatives cannot bind names yet; use separate top-level arms when each alternative needs payload bindings.
+
 Legacy `return?` can still be used as a guarded early return with an ordinary boolean or pattern condition. Pattern bindings from the condition are available in the returned expression.
 
 ```elisa

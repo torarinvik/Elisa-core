@@ -206,6 +206,10 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 			}
 			a.collectConditionStructPatternBindingTypes(elem, elemType, out)
 		}
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			a.collectConditionStructPatternBindingTypes(option, expected, out)
+		}
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
 		case *EnumType:
@@ -605,6 +609,10 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 				}
 			}
 			a.bindConditionStructPatternLocals(scope, elem, elemType, indexExpr)
+		}
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			a.bindConditionStructPatternLocals(scope, option, expected, valueExpr)
 		}
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {

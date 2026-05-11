@@ -3,6 +3,7 @@ package parser
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/unparse"
 	"strings"
 	"testing"
 )
@@ -548,6 +549,42 @@ func TestParsePackedIfNestedPayloadPattern(t *testing.T) {
 	rightBind, ok := pattern.Args[1].Pattern.(*ast.MatchBindPattern)
 	if !ok || rightBind.Name != "rhs" {
 		t.Fatalf("expected rhs bind pattern, got %T %#v", pattern.Args[1].Pattern, pattern.Args[1].Pattern)
+	}
+}
+
+func TestParseNestedOrPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Token:\n    Ident\n    Keyword\n    Other\n\nenum Expr:\n    Leaf(kind: Token)\n\ndef score(expr: Expr) -> int:\n    match expr:\n        Expr.Leaf(Token.Ident | Token.Keyword):\n            return 1\n        _:\n            return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[2].(*ast.FuncDecl)
+	matchStmt := decl.Body[0].(*ast.MatchStmt)
+	pattern := matchStmt.Arms[0].Pattern.(*ast.MatchVariantPattern)
+	if len(pattern.Args) != 1 {
+		t.Fatalf("expected one payload arg, got %#v", pattern.Args)
+	}
+	orPattern, ok := pattern.Args[0].Pattern.(*ast.MatchOrPattern)
+	if !ok || len(orPattern.Options) != 2 {
+		t.Fatalf("expected two-option nested or pattern, got %T %#v", pattern.Args[0].Pattern, pattern.Args[0].Pattern)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "Expr.Leaf(Token.Ident | Token.Keyword):") {
+		t.Fatalf("expected nested or pattern to format, got:\n%s", formatted)
+	}
+}
+func TestParseNestedOrPatternRejectsBindings(t *testing.T) {
+	_, errs := parseSourceFile(t, "enum Token:\n    Ident(value: int)\n    Keyword\n\nenum Expr:\n    Leaf(kind: Token)\n\ndef score(expr: Expr) -> int:\n    match expr:\n        Expr.Leaf(Token.Ident(value) | Token.Keyword):\n            return 1\n        _:\n            return 0\n")
+	if len(errs) == 0 {
+		t.Fatalf("expected parser error for binding nested or pattern")
+	}
+	found := false
+	for _, err := range errs {
+		if strings.Contains(err, "or-pattern alternatives cannot bind names yet") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected binding rejection diagnostic, got %v", errs)
 	}
 }
 func TestParseEnumVariantIsCondition(t *testing.T) {

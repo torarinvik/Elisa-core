@@ -399,6 +399,12 @@ func matchPatternNeedsPayloadDecode(pattern ast.MatchPattern) bool {
 				return true
 			}
 		}
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			if matchPatternNeedsPayloadDecode(option) {
+				return true
+			}
+		}
 	}
 	return false
 }
