@@ -277,20 +277,18 @@ else_stmt = else_clause()?
 args = delimited(.LPAREN, expression() |> separated_by(stop: RParenSync), .RPAREN, ExpectedRightParen)?
 ```
 
-When ordinary Elisa core support code needs to return an optional value only after several optional inputs are present, prefer `return? with` over a nested `if let` ladder:
+When ordinary Elisa core support code needs to return an optional value only after several optional inputs are present, prefer multi-binding `if let` over a nested ladder:
 
 ```elisa
 def integer_range_contains(lower: Expr, upper: Expr, value: Expr) -> bool?:
-    return? with lower_value = integer_literal(lower),
-                 upper_value = integer_literal(upper),
-                 actual_value = integer_literal(value):
-        actual_value >= lower_value and actual_value <= upper_value
+    if let lower_value = integer_literal(lower),
+           upper_value = integer_literal(upper),
+           actual_value = integer_literal(value):
+        return actual_value >= lower_value and actual_value <= upper_value
     return null
 ```
 
-This is only for optional-return control flow. Use plain `if let` when the present branch performs diagnostics, mutation, or multiple statements.
-
-For those side-effecting branches, prefer the multi-binding form over a nested ladder:
+Use the same multi-binding form when the present branch performs diagnostics, mutation, or multiple statements:
 
 ```elisa
 if let lower_value = integer_literal(lower), upper_value = integer_literal(upper):

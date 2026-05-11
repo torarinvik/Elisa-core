@@ -249,14 +249,6 @@ def leaf_value(expr: Expr) -> i64:
             return 0
 ```
 
-Legacy `return?` can still be used as a guarded early return with an ordinary boolean or pattern condition. Pattern bindings from the condition are available in the returned expression.
-
-```elisa
-def int_or_zero(node: Expr) -> i64:
-    return? value if node is Expr.Int(value)
-    return 0
-```
-
 For expression-level branches, use the normal `value if condition else fallback` form. When the condition is a direct pattern test, its bindings are available in the true branch.
 
 ```elisa
@@ -281,20 +273,16 @@ if type_expr == null or depth > 32:
 
 Prefer the ordinary `if` form when the condition or returned expression needs multiple lines, diagnostics, mutation, or comments.
 
-When an early optional return depends on several optional inputs, use `return? with`. Each binding unwraps an optional in order; if any binding is absent, execution continues after the statement. The body expression runs only when all bindings are present.
+When an early optional result depends on several optional inputs, prefer multi-binding `if let`. Each binding unwraps an optional in order, and the branch runs only when all bindings are present.
 
 ```elisa
 def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
-    return? with lower_value = lower,
-                 upper_value = upper,
-                 value_int = value:
-        value_int >= lower_value and value_int <= upper_value
+    if let lower_value = lower, upper_value = upper, value_int = value:
+        return value_int >= lower_value and value_int <= upper_value
     return null
 ```
 
-This keeps the common all-present case flat while still lowering to ordinary nested optional binds, so the lower-level control flow remains inspectable when needed.
-
-When the present branch performs diagnostics, mutation, or several statements, use multi-binding `if let` instead. Each binding is unwrapped left-to-right, and the branch runs only when every optional is present.
+The same form works when the present branch performs diagnostics, mutation, or several statements.
 
 ```elisa
 if let actual_lower = lower_value, actual_upper = upper_value:
@@ -305,30 +293,18 @@ if let actual_lower = lower_value, actual_upper = upper_value:
 
 This lowers to the same ordinary optional-bind ladder you would write by hand. A short condition can be kept as a statement block with `then:` when that makes the guard read naturally.
 
-Use `match? name = optional:` when the present branch immediately wants to match on the unwrapped value.
+When the present branch immediately wants to match on the unwrapped value, combine `if let` with an ordinary `match`.
 
 ```elisa
 def describe(maybe: Expr?) -> i64:
-    match? expr = maybe:
-        Expr.Int(value):
-            return value
-        _:
-            return 0
+    if let expr = maybe:
+        match expr:
+            Expr.Int(value):
+                return value
+            _:
+                return 0
     return -1
 ```
-
-This lowers to an ordinary optional bind followed by a statement-form `match`:
-
-```elisa
-if let expr = maybe:
-    match expr:
-        Expr.Int(value):
-            return value
-        _:
-            return 0
-```
-
-When the unwrapped name is not needed outside the match head, `match? optional:` uses an internal binding.
 
 If the true branch contains another low-precedence operator, wrap it so the intended branch value is clear:
 
@@ -343,11 +319,7 @@ Current rules:
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
 - `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
 - `condition then:` lowers to an ordinary `if condition:` statement block and is intended for short guard-style branches
-- `return? value` returns the unwrapped payload only when `value` is present; otherwise execution continues with the next statement
-- `return? value if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
 - `value return if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
-- `return? with name = optional, other = optional:` returns the body expression only when every binding is present; otherwise execution continues
-- `match? name = optional:` matches the unwrapped value only when the optional is present; otherwise execution continues after the match statement
 - `value if expr is Pattern(bindings) else fallback` exposes the pattern bindings only in the true branch
 - `value?.(fn)` unwraps `value` only when it is present and calls `fn(unwrapped_value)`
 - the result is optional unless the transform returns `void`, in which case the whole expression is `void`
