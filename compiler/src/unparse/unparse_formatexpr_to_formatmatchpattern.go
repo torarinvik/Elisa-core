@@ -38,6 +38,12 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.ZeroedLit:
 		return "zeroed"
 	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_IS {
+			right := formatExpr(n.Right)
+			if strings.Contains(right, "\n") {
+				return formatExpr(n.Left) + " is " + right
+			}
+		}
 		return "(" + formatExpr(n.Left) + " " + lexer.TokenName(n.Op) + " " + formatExpr(n.Right) + ")"
 	case *ast.UnaryExpr:
 		op := lexer.TokenName(n.Op)
@@ -284,7 +290,20 @@ func formatExpr(expr ast.Expr) string {
 		for _, target := range n.Targets {
 			parts = append(parts, formatExpr(target))
 		}
-		return strings.Join(parts, " | ")
+		inline := strings.Join(parts, " | ")
+		if len(inline) <= 96 && len(parts) <= 3 {
+			return inline
+		}
+		lines := []string{"("}
+		for index, part := range parts {
+			prefix := "    "
+			if index > 0 {
+				prefix = "    | "
+			}
+			lines = append(lines, prefix+part)
+		}
+		lines = append(lines, ")")
+		return strings.Join(lines, "\n")
 	case *ast.IsAliasExpr:
 		if n.Target == nil {
 			return "as " + n.Alias

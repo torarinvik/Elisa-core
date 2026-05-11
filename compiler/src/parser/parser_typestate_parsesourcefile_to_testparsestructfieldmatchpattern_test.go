@@ -699,6 +699,37 @@ func TestParseIsConditionWithQualifiedAlternativeTargets(t *testing.T) {
 		t.Fatalf("expected three qualified alternatives, got %T %#v", cond.Right, cond.Right)
 	}
 }
+func TestParseIsConditionWithGroupedMultilineAlternativeTargets(t *testing.T) {
+	file, errs := parseSourceFile(t, `enum Decl:
+    ProcedureDecl
+    ProcedureQualifiedDecl
+    ProcedureGenericDecl
+    FunctionDecl
+
+def has_body(decl: Decl) -> bool:
+    return decl is (
+        Decl.ProcedureDecl
+        | Decl.ProcedureQualifiedDecl
+        | Decl.ProcedureGenericDecl
+        | Decl.FunctionDecl
+    )
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"return decl is (",
+		"    Decl.ProcedureDecl",
+		"    | Decl.ProcedureQualifiedDecl",
+		"    | Decl.ProcedureGenericDecl",
+		"    | Decl.FunctionDecl",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted grouped is alternatives to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
 func TestParseStructFieldMatchPattern(t *testing.T) {
 	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    INTEGER = 1\n\nstruct Span:\n    start: int\n    finish: int\n\nstruct Token:\n    kind: Tok\n    span: Span\n    value: int\n\ndef score(tok: Token) -> int:\n    match tok:\n        Token(kind: .INTEGER, span: Span(start: start), value: value):\n            return start + value\n        _:\n            return 0\n")
 	if len(errs) != 0 {
