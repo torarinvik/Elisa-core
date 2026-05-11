@@ -436,10 +436,19 @@ Current rules:
 - `all name in source where predicate` returns `bool`
 - `first name in source where predicate` returns the element as `T?`
 - `count name in source where predicate` returns `usize`
-- the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `enumerate(...)`, and tree child views
+- the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `source.enumerate()`, and tree child views
 - range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now
 - the predicate is analyzed in a scope where the loop name is bound to the iterable element type
 - use explicit loops when the body has side effects or needs multiple statements
+
+Iterable `for` loops use the same filter clause after composed sources, so tuple destructuring from `enumerate()` is available in the filter:
+
+```elisa
+for index, item in items.enumerate() where item.kind == TokenKind.IDENT:
+    result.push(item.name_id)
+```
+
+Prefer this inline `where` clause when the predicate is local to the loop. Keep `source.where(predicate)` for reusable named predicates and expression-level view composition.
 
 ## Proof-carrying view helpers
 

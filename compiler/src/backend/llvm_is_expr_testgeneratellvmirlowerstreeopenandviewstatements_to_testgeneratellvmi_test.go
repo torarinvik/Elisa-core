@@ -535,46 +535,40 @@ func TestGenerateLLVMIRLowersInlineWhereFilterLoops(t *testing.T) {
 	}
 }
 
-func TestGenerateLLVMIRLowersWhereOverEnumerateViewLoops(t *testing.T) {
-	src := `def keep_even_pair(pair: (index: usize, value: i64)) -> bool:
-	return pair.index % 2 == 0
-
-def sum_even_indexed(items: i64[4]) -> i64:
+func TestGenerateLLVMIRLowersInlineWhereOverEnumerateLoops(t *testing.T) {
+	src := `def sum_even_indexed(items: i64[4]) -> i64:
 	total: mutable i64 = 0
-	for index, value in items.enumerate().where(keep_even_pair):
+	for index, value in items.enumerate() where index % 2 == 0:
 		total <- total + value + index.i64()
 	return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_where_over_enumerate_view_loop.elisa", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_inline_where_over_enumerate_loop.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"enumerate.item.index.insert", "enumerate.item.value.insert", "where.predicate", "where.filter.body", "iter.tuple.field"} {
+	for _, check := range []string{"enumerate.item.index.insert", "enumerate.item.value.insert", "iter.where.filter.body", "iter.tuple.field"} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected where-over-enumerate lowering to include %q, got:\n%s", check, output)
+			t.Fatalf("expected inline where-over-enumerate lowering to include %q, got:\n%s", check, output)
 		}
 	}
 }
 
-func TestGenerateLLVMIRLowersEnumerateOverWhereViewLoops(t *testing.T) {
-	src := `def keep_large(value: i64) -> bool:
-	return value > 2
-
-def sum_indexed_filtered(items: i64[4]) -> i64:
+func TestGenerateLLVMIRLowersInlineWhereAfterEnumerateLoops(t *testing.T) {
+	src := `def sum_indexed_filtered(items: i64[4]) -> i64:
 	total: mutable i64 = 0
-	for index, value in items.where(keep_large).enumerate():
+	for index, value in items.enumerate() where value > 2:
 		total <- total + value + index.i64()
 	return total
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_enumerate_over_where_view_loop.elisa", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_inline_where_after_enumerate_loop.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"where.predicate", "where.filter.body", "enumerate.item.index.insert", "enumerate.item.value.insert", "iter.tuple.field"} {
+	for _, check := range []string{"iter.where.filter.body", "enumerate.item.index.insert", "enumerate.item.value.insert", "iter.tuple.field"} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected enumerate-over-where lowering to include %q, got:\n%s", check, output)
+			t.Fatalf("expected inline where-after-enumerate lowering to include %q, got:\n%s", check, output)
 		}
 	}
 }

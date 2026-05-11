@@ -313,6 +313,24 @@ func TestParseIterableForStatementWithInlineQualifiedFieldWhereFilter(t *testing
 	}
 }
 
+func TestParseIterableForStatementWithEnumerateInlineWhereFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for index, value in items.enumerate() where index > 0 and value > 2:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if _, ok := iterStmt.WhereFilter.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected binary where filter, got %T", iterStmt.WhereFilter)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for index, value in items.enumerate() where ((index > 0) and (value > 2)):") {
+		t.Fatalf("expected formatter to preserve enumerate inline where filter, got:\n%s", formatted)
+	}
+}
+
 func TestParseIterableForStatementWithInlineCallWhereFilter(t *testing.T) {
 	file, errs := parseSourceFile(t, "def is_selected(item: int) -> bool:\n    return item > 0\n\ndef walk(items: darray[int]) -> void:\n    for item in items where is_selected(item):\n        pass\n")
 	if len(errs) != 0 {
