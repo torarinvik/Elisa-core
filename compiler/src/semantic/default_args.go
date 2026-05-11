@@ -189,6 +189,10 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		}
 		return &ast.SpecializeExpr{Position: n.Position, Operand: operand, TypeArgs: append([]ast.TypeExpr(nil), n.TypeArgs...)}
 	case *ast.StructLitExpr:
+		spread := cloneDefaultArgExpr(n.Spread)
+		if n.Spread != nil && spread == nil {
+			return nil
+		}
 		args := cloneDefaultArgExprs(n.Args)
 		if len(n.Args) != 0 && args == nil {
 			return nil
@@ -200,6 +204,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 			Args:     args,
 			ArgNames: append([]string(nil), n.ArgNames...),
 			Brace:    n.Brace,
+			Spread:   spread,
 		}
 	case *ast.RecordUpdateExpr:
 		base := cloneDefaultArgExpr(n.Base)

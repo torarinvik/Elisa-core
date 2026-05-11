@@ -200,12 +200,25 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		return nil, nil, err
 	}
 	value := C.LLVMGetUndef(llvmType)
+	if expr.Spread != nil {
+		spreadValue, spreadType, err := s.emitExpr(expr.Spread, structType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !semantic.AssignableTo(structType, spreadType) {
+			return nil, nil, fmt.Errorf("struct literal spread expects %s, got %s", structType, spreadType)
+		}
+		value = spreadValue
+	}
 	args := expr.LoweredArgs()
 	for i, arg := range args {
 		if i >= len(fields) {
 			break
 		}
 		if arg == nil {
+			if expr.Spread != nil {
+				continue
+			}
 			return nil, nil, fmt.Errorf("struct literal field %d was not resolved", i)
 		}
 		fieldValue, _, err := s.emitExpr(arg, fields[i].Type)

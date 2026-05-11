@@ -264,6 +264,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			c.collectExpr(call)
 			break
 		}
+		c.collectExpr(n.Spread)
 		for _, arg := range n.Args {
 			c.collectExpr(arg)
 		}

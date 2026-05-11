@@ -380,9 +380,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LBRACE) {
 			typeArgs := p.parseStructLiteralTypeArgs()
 			p.expect(lexer.TOKEN_LBRACE)
-			args, argNames := p.parseStructLiteralBraceFields()
+			args, argNames, spread := p.parseStructLiteralBraceFields()
 			p.expect(lexer.TOKEN_RBRACE)
-			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true}
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true, Spread: spread}
 		}
 		if p.peek() == lexer.TOKEN_LPAREN && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
 			p.advance()
@@ -392,9 +392,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		if p.peek() == lexer.TOKEN_LBRACE && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
 			p.advance()
-			args, argNames := p.parseStructLiteralBraceFields()
+			args, argNames, spread := p.parseStructLiteralBraceFields()
 			p.expect(lexer.TOKEN_RBRACE)
-			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args, ArgNames: argNames, Brace: true}
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args, ArgNames: argNames, Brace: true, Spread: spread}
 		}
 		return &ast.Ident{Position: tok.Pos, Name: tok.Text}
 	case lexer.TOKEN_LPAREN:
@@ -472,13 +472,27 @@ func (p *Parser) parseStructLiteralTypeArgs() []ast.TypeExpr {
 	p.expect(lexer.TOKEN_RBRACKET)
 	return args
 }
-func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string) {
+func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string, ast.Expr) {
 	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
 	argNames := make([]string, 0, cap(args))
+	var spread ast.Expr
 	if p.peek() == lexer.TOKEN_RBRACE {
-		return args, argNames
+		return args, argNames, spread
 	}
 	for {
+		if p.match(lexer.TOKEN_ELLIPSIS) {
+			if spread != nil {
+				p.errorf("struct literal may spread at most one base value")
+			}
+			spread = p.parseExpr()
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+			if p.peek() == lexer.TOKEN_RBRACE {
+				break
+			}
+			continue
+		}
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		value := ast.Expr(&ast.Ident{Position: pos, Name: name})
@@ -494,7 +508,7 @@ func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string) {
 			break
 		}
 	}
-	return args, argNames
+	return args, argNames, spread
 }
 func (p *Parser) parseStructLiteralParenArgs() ([]ast.Expr, []string) {
 	args, argNames, _, packs, _, hasArgForward, _ := p.parseCallArgs()

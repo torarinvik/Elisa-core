@@ -1209,6 +1209,7 @@ struct Row:
 def run(row: Row, flag: bool) -> int:
     let {left: first, right} = row
     built: Row = Row{left: first, right, flag}
+    rebuilt: Row = Row{...built, left: current}
     next: Row = built{flag, right = first}
 
     if row is Row{left, right: current, flag: row_flag}:
@@ -1225,6 +1226,7 @@ Current rules:
 - `let Type{field}` is the typed version when the surface should name the expected struct explicitly
 - `field` inside a brace literal or brace pattern is field punning sugar for “use the same name on both sides”
 - `field: alias` renames the bound local or supplied expression source
+- `Type{...base, field: expr}` starts a brace struct literal from an existing value and overrides named fields; this is useful for default packs and small immutable updates
 - `base{field, other = expr}` creates a record-update expression by copying `base` and replacing only the mentioned fields
 
 The same brace destructuring grammar also works for store-row values:

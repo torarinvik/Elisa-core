@@ -62,10 +62,16 @@ func allocOwnerPos(expr *ast.AllocExpr) lexer.Pos {
 }
 func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *StructType, bindings map[string]Type) {
 	if base == nil || base.Decl == nil {
+		if expr.Spread != nil {
+			a.analyzeExpr(expr.Spread)
+		}
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
 		return
+	}
+	if expr.Spread != nil && !expr.Brace {
+		a.errorf(expr.Pos(), "struct literal spread is only valid in brace struct literals")
 	}
 	if expr.NamedArgCount() != 0 {
 		if expr.NamedArgCount() != len(expr.Args) {
@@ -120,6 +126,9 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			if _, exists := seen[i]; exists {
 				continue
 			}
+			if expr.Spread != nil {
+				continue
+			}
 			a.errorf(expr.Pos(), "struct literal %q is missing field %q", expr.Name, fieldDecl.Name)
 			ok = false
 		}
@@ -128,6 +137,14 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			expr.ResolvedArgs = ordered
 		}
 		return
+	}
+	if expr.Spread != nil {
+		if len(expr.Args) == 0 {
+			expr.ResolvedArgsValid = true
+			expr.ResolvedArgs = make([]ast.Expr, len(base.Decl.Fields))
+			return
+		}
+		a.errorf(expr.Pos(), "struct literal spread requires named field overrides")
 	}
 	expr.ResolvedArgsValid = true
 	expr.ResolvedArgs = expr.Args

@@ -26,6 +26,14 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 			return resultType
 		}
 	}
+	if expr.Spread != nil {
+		spread, actual := a.analyzeCallLikeValueExpr(expr.Spread, targetType)
+		expr.Spread = spread
+		if !AssignableTo(targetType, actual) {
+			a.errorf(expr.Spread.Pos(), "struct literal spread expects %s, got %s", targetType, actual)
+		}
+		a.consumeAffineValueExpr(expr.Spread, targetType, "move into struct literal spread base")
+	}
 	a.analyzeStructLiteralArgs(expr, base, bindings)
 	if len(base.NamedStateCases) == 0 {
 		return targetType

@@ -390,6 +390,42 @@ def build(start: i64) -> Span:
 	}
 }
 
+func TestParseBraceStructLiteralSpread(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct Accessors:
+    read_name_id: i64?
+    write_name_id: i64?
+    default_enabled: bool
+
+def update(base: Accessors, name: i64) -> Accessors:
+    return Accessors{...base, read_name_id: name, default_enabled: true}
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	updateDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected update function decl, got %T", file.Decls[1])
+	}
+	ret, ok := updateDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", updateDecl.Body[0])
+	}
+	lit, ok := ret.Value.(*ast.StructLitExpr)
+	if !ok {
+		t.Fatalf("expected struct literal return value, got %T", ret.Value)
+	}
+	if lit.Spread == nil {
+		t.Fatal("expected struct literal spread")
+	}
+	if got := lit.ArgName(0); got != "read_name_id" {
+		t.Fatalf("expected first override to target read_name_id, got %q", got)
+	}
+	formatted := unparse.FormatDecl(updateDecl)
+	if !strings.Contains(formatted, "Accessors{...base, read_name_id: name, default_enabled: true}") {
+		t.Fatalf("expected formatted spread literal, got:\n%s", formatted)
+	}
+}
+
 func TestParseCatchExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, `error FileError:
 	NotFound
