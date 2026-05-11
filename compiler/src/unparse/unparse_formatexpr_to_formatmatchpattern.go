@@ -154,6 +154,9 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return line + "]"
 	case *ast.QueryExpr:
+		if n.Kind == ast.QueryExprFirst && n.Projection != nil {
+			return formatExpr(n.Projection) + " for first " + n.Name + " in " + formatExpr(n.Source) + " where " + formatExpr(n.Filter)
+		}
 		keyword := "any"
 		switch n.Kind {
 		case ast.QueryExprAny:

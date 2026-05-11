@@ -525,11 +525,12 @@ const (
 )
 
 type QueryExpr struct {
-	Position lexer.Pos
-	Kind     QueryExprKind
-	Name     string
-	Source   Expr
-	Filter   Expr
+	Position   lexer.Pos
+	Kind       QueryExprKind
+	Name       string
+	Source     Expr
+	Filter     Expr
+	Projection Expr
 }
 type CastExprOrigin int
 

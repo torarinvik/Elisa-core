@@ -91,6 +91,9 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 func (p *Parser) parseExpr() ast.Expr {
 	expr := p.parseOr()
 
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "first" {
+		return p.parseProjectionQueryExpr(expr)
+	}
 	if p.allowWhereExpr && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where" {
 		return p.parseWhereViewExpr(expr)
 	}
@@ -120,6 +123,18 @@ func (p *Parser) parseExpr() ast.Expr {
 	}
 
 	return expr
+}
+
+func (p *Parser) parseProjectionQueryExpr(projection ast.Expr) ast.Expr {
+	pos := projection.Pos()
+	p.expectIdentText("for")
+	p.expectIdentText("first")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_IN)
+	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	p.expectIdentText("where")
+	filter := p.parseExpr()
+	return &ast.QueryExpr{Position: pos, Kind: ast.QueryExprFirst, Name: name, Source: source, Filter: filter, Projection: projection}
 }
 
 func (p *Parser) parseWhereViewExpr(source ast.Expr) ast.Expr {

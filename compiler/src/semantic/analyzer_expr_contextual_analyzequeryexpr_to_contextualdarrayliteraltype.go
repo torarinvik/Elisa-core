@@ -27,7 +27,19 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 	case ast.QueryExprAny, ast.QueryExprAll:
 		result = a.namedTypes["bool"]
 	case ast.QueryExprFirst:
-		result = &OptionalType{Value: info.ItemType}
+		if expr.Projection != nil {
+			savedScope := a.currentScope
+			a.currentScope = loopScope
+			projectionType := a.analyzeExpr(expr.Projection)
+			a.currentScope = savedScope
+			if opt, ok := IsOptionalType(projectionType); ok {
+				result = opt
+			} else {
+				result = &OptionalType{Value: projectionType}
+			}
+		} else {
+			result = &OptionalType{Value: info.ItemType}
+		}
 	case ast.QueryExprCount:
 		result = a.namedTypes["usize"]
 	default:

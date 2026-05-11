@@ -426,6 +426,9 @@ def all_nonzero(values: darray[i64]) -> bool:
 def first_positive(values: darray[i64]) -> i64?:
     return first value in values where value > 0
 
+def first_enabled_name(entries: darray[Entry]) -> NameId?:
+    return entry.name_id for first entry in entries where entry.enabled
+
 def positive_count(values: darray[i64]) -> usize:
     return count value in values where value > 0
 ```
@@ -435,6 +438,7 @@ Current rules:
 - `any name in source where predicate` returns `bool`
 - `all name in source where predicate` returns `bool`
 - `first name in source where predicate` returns the element as `T?`
+- `projection for first name in source where predicate` returns the projected value as `U?`
 - `count name in source where predicate` returns `usize`
 - the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `source.enumerate()`, and tree child views
 - range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now

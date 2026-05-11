@@ -266,7 +266,11 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 		}
 		nullCheck := &ast.BinaryExpr{Position: expr.Position, Op: lexer.TOKEN_EQEQ, Left: resultIdent, Right: &ast.NullLit{Position: expr.Position}}
 		filter = &ast.BinaryExpr{Position: expr.Position, Op: lexer.TOKEN_AND, Left: nullCheck, Right: expr.Filter}
-		body = []ast.Stmt{&ast.AssignStmt{Position: expr.Position, Target: resultIdent, Value: &ast.Ident{Position: expr.Position, Name: expr.Name}}}
+		value := expr.Projection
+		if value == nil {
+			value = &ast.Ident{Position: expr.Position, Name: expr.Name}
+		}
+		body = []ast.Stmt{&ast.AssignStmt{Position: expr.Position, Target: resultIdent, Value: value}}
 	default:
 		return nil, nil, fmt.Errorf("unknown query expression kind %d", expr.Kind)
 	}

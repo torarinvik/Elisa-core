@@ -245,6 +245,39 @@ def positive_count(items: darray[i64]) -> usize:
 	}
 }
 
+func TestAnalyzeFirstProjectionQueryExpr(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "first_projection_query.elisa", `struct Entry:
+    name: i64
+    enabled: bool
+
+def first_enabled(entries: darray[Entry]) -> i64?:
+    return entry.name for first entry in entries where entry.enabled
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "first_enabled" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected first_enabled function declaration")
+	}
+	ret := fn.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok || query.Projection == nil {
+		t.Fatalf("expected projection query expr, got %T %#v", ret.Value, ret.Value)
+	}
+	opt, ok := result.ExprTypes[query].(*OptionalType)
+	if !ok || opt == nil {
+		t.Fatalf("expected projection query to resolve to optional type, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+	}
+	if builtin, ok := opt.Value.(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected projection query optional payload i64, got %#v", opt.Value)
+	}
+}
+
 func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.elisa", `def build(items: darray[i64]) -> darray[i64]:
     return [item + 1 for item in items]

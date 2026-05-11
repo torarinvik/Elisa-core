@@ -122,6 +122,27 @@ def positive_count(items: darray[i64]) -> usize:
 	}
 }
 
+func TestGenerateLLVMIRLowersFirstProjectionQueryExpr(t *testing.T) {
+	src := `struct Entry:
+    name: i64
+    enabled: bool
+
+def first_enabled(entries: darray[Entry]) -> i64?:
+    return entry.name for first entry in entries where entry.enabled
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_first_projection_query.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "query.result") {
+		t.Fatalf("expected projection query to lower through query result temporary, got:\n%s", output)
+	}
+	if !strings.Contains(output, "iter.cond") {
+		t.Fatalf("expected projection query to lower through iterable loop blocks, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
