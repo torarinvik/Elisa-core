@@ -159,7 +159,11 @@ func formatExpr(expr ast.Expr) string {
 		if n.Filter != nil {
 			line += " if " + formatExpr(n.Filter)
 		}
-		return line + "]"
+		line += "]"
+		if n.Owner != nil {
+			line += " in " + formatExpr(n.Owner)
+		}
+		return line
 	case *ast.QueryExpr:
 		if n.Kind == ast.QueryExprFirst && n.Projection != nil {
 			return formatExpr(n.Projection) + " for first " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter)

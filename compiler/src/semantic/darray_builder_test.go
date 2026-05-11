@@ -188,6 +188,40 @@ func TestAnalyzeListComprehensionExpr(t *testing.T) {
 	}
 }
 
+func TestAnalyzeListComprehensionExprWithExplicitOwner(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_list_comprehension_explicit_owner.elisa", `def build(owner: Arena, items: darray[i64]) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    xs = [item + 1 for item in items if item > 0] in alloc
+    return xs.count
+`)
+
+	var build *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "build" {
+			build = fn
+			break
+		}
+	}
+	if build == nil {
+		t.Fatal("expected build function declaration")
+	}
+	varDecl, ok := build.Body[1].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl, got %T", build.Body[1])
+	}
+	comp, ok := varDecl.Value.(*ast.ListComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected list comprehension initializer, got %T", varDecl.Value)
+	}
+	if comp.Owner == nil {
+		t.Fatal("expected explicit owner on list comprehension")
+	}
+	compType, ok := result.ExprTypes[comp].(*DArrayType)
+	if !ok || compType == nil {
+		t.Fatalf("expected list comprehension to resolve to darray type, got %T %#v", result.ExprTypes[comp], result.ExprTypes[comp])
+	}
+}
+
 func TestAnalyzeListComprehensionExprOverRange(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_list_comprehension_range.elisa", `def build(owner: Arena, count: usize) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

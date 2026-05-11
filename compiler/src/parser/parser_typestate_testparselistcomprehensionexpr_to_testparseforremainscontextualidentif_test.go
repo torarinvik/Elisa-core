@@ -75,6 +75,32 @@ func TestParseListComprehensionExprOverRange(t *testing.T) {
 	}
 }
 
+func TestParseListComprehensionExprWithExplicitOwner(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(owner: Arena, items: darray[i64]) -> void:\n    alloc: mutable Arena& = (&owner).cast[mutable Arena&]\n    values = [item + 1 for item in items if item > 0] in alloc\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	decl, ok := fn.Body[1].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[1])
+	}
+	comp, ok := decl.Value.(*ast.ListComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected list comprehension expr, got %T", decl.Value)
+	}
+	if comp.Owner == nil {
+		t.Fatal("expected explicit owner on list comprehension")
+	}
+	if ident, ok := comp.Owner.(*ast.Ident); !ok || ident.Name != "alloc" {
+		t.Fatalf("expected owner ident alloc, got %T %#v", comp.Owner, comp.Owner)
+	}
+	formatted := unparse.FormatStmt(fn.Body[1])
+	if !strings.Contains(formatted, "] in alloc") {
+		t.Fatalf("expected formatter to preserve explicit comprehension owner, got:\n%s", formatted)
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt as Lua.Node).node\n")
 	if len(errs) != 0 {

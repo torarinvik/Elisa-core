@@ -194,7 +194,7 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 		return nil, nil, fmt.Errorf("list comprehension requires a resolved darray result type")
 	}
 	resultName := s.g.nextSyntheticName("list.comp.result.")
-	resultInit := &ast.ListLitExpr{Position: expr.Position}
+	resultInit := &ast.ListLitExpr{Position: expr.Position, Owner: expr.Owner}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
 		s.g.result.ExprTypes[resultInit] = resultType
 	}

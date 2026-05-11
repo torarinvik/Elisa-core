@@ -282,6 +282,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.RangeEnd)
 		c.collectExpr(n.RangeStep)
 		c.collectExpr(n.Filter)
+		c.collectExpr(n.Owner)
 	case *ast.QueryExpr:
 		c.collectExpr(n.Source)
 		c.collectExpr(n.Filter)

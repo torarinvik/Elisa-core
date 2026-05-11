@@ -92,6 +92,25 @@ func TestGenerateLLVMIRLowersListComprehensionExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersListComprehensionExprWithExplicitOwner(t *testing.T) {
+	src := `def build(owner: Arena, items: darray[i64]) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    xs = [item + 1 for item in items if item > 0] in alloc
+    return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_list_comprehension_explicit_owner.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "call ptr @arena_alloc(ptr %owner") {
+		t.Fatalf("expected explicit-owner list comprehension growth to allocate from its owner, got:\n%s", output)
+	}
+	if !strings.Contains(output, "darray.push.slot") {
+		t.Fatalf("expected explicit-owner list comprehension to push elements, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersRangeListComprehensionExpr(t *testing.T) {
 	src := `def build(owner: Arena, count: usize) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

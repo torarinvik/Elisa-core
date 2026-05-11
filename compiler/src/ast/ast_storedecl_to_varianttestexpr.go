@@ -516,6 +516,7 @@ type ListComprehensionExpr struct {
 	RangeStep Expr
 	RangeOp   lexer.TokenKind
 	Filter    Expr
+	Owner     Expr
 }
 type QueryExprKind int
 

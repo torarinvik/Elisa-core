@@ -101,7 +101,11 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 		filter = p.parseExpr()
 	}
 	p.expect(lexer.TOKEN_RBRACKET)
-	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter}
+	var owner ast.Expr
+	if p.match(lexer.TOKEN_IN) {
+		owner = p.withInMembershipDisabled(p.parseExpr)
+	}
+	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner}
 }
 func (p *Parser) parseQueryExpr() ast.Expr {
 	pos := p.cur().Pos

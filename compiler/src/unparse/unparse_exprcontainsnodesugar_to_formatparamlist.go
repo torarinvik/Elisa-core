@@ -70,6 +70,8 @@ func exprContainsNodeSugar(expr ast.Expr) bool {
 			}
 		}
 		return false
+	case *ast.ListComprehensionExpr:
+		return exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.Source) || exprContainsNodeSugar(n.RangeEnd) || exprContainsNodeSugar(n.RangeStep) || exprContainsNodeSugar(n.Filter) || exprContainsNodeSugar(n.Owner)
 	case *ast.ParenExpr:
 		return exprContainsNodeSugar(n.Inner)
 	case *ast.TernaryExpr:

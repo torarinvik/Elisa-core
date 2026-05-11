@@ -2214,10 +2214,11 @@ the literal:
 
 ```elisa
 values: darray[int] = [1, 2, 3] in owner
+mapped: darray[int] = [value + 1 for value in values if value > 0] in owner
 ```
 
-The direct owner form is only for arena-backed dynamic array literals. Fixed
-array literals remain pure values:
+The direct owner form is only for arena-backed dynamic array literals and
+comprehensions. Fixed array literals remain pure values:
 
 ```elisa
 values: int[3] = [1, 2, 3]
