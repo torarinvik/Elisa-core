@@ -287,6 +287,10 @@ func (p *Parser) parseValueParamPackUse() ast.ParamPackUse {
 	p.expect(lexer.TOKEN_LPAREN)
 	pack.Args, _ = p.parseNamedArgList(lexer.TOKEN_RPAREN, false)
 	p.expect(lexer.TOKEN_RPAREN)
+	if len(pack.Args) == 0 {
+		pack.DeprecatedSyntax = "use " + pack.Name + "()"
+		pack.DeprecatedReplacement = "use " + pack.Name
+	}
 	return pack
 }
 func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackUse, []ast.CallArgItem, bool, lexer.Pos) {

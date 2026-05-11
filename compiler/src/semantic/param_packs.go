@@ -14,6 +14,13 @@ func (a *Analyzer) collectParamPacks(decls []scopedDecl) {
 		if !ok || decl == nil {
 			continue
 		}
+		if decl.DeprecatedSyntax != "" {
+			if decl.DeprecatedReplacement != "" {
+				a.deprecatedf(decl.Pos(), "`%s` is deprecated; use `%s`", decl.DeprecatedSyntax, decl.DeprecatedReplacement)
+			} else {
+				a.deprecatedf(decl.Pos(), "`%s` is deprecated", decl.DeprecatedSyntax)
+			}
+		}
 		qualifiedName := joinQualifiedName(scoped.Namespace, decl.Name)
 		if _, exists := a.paramPacks[qualifiedName]; exists {
 			a.errorf(decl.Pos(), "duplicate explicit bundle %q", qualifiedName)

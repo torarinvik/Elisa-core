@@ -17,7 +17,7 @@ def consume(value: i64, width: i64 = 9, extra: i64 = 11) -> i64:
 
 def build(value: i64, extra: i64) -> i64:
     with args(use SharedArgs(value:), extra:):
-        return consume(use SharedArgs(), width: 7)
+        return consume(use SharedArgs, width: 7)
 `)
 	buildSym, _ := result.GlobalScope.Lookup("build")
 	buildDecl := buildSym.Node.(*ast.FuncDecl)
@@ -231,7 +231,7 @@ func TestAnalyzeRejectsLocalParamPackUseBeforeDeclaration(t *testing.T) {
     return left + right
 
 def build(left: i64) -> i64:
-    value: i64 = consume(use Pair())
+    value: i64 = consume(use Pair)
     args Pair:
         left: i64 = left
         right: i64 = 9
@@ -252,7 +252,7 @@ def build(left: i64) -> i64:
         left: i64 = left
         right: i64 = 9
     if true:
-        return consume(use Pair())
+        return consume(use Pair)
     return 0
 `)
 	all := strings.Join(result.Errors(), "\n")
@@ -286,6 +286,40 @@ def build(left: i64) -> i64:
 		if !strings.Contains(warnings, check) {
 			t.Fatalf("expected warning %q, got:\n%s", check, warnings)
 		}
+	}
+}
+
+func TestAnalyzeDeprecatedTopLevelParamsAlias(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_deprecated_top_level_params_alias.elisa", `params Pair:
+    left: i64
+    right: i64 = 7
+
+def add(use Pair) -> i64:
+    return left + right
+
+def build(left: i64) -> i64:
+    return add(use Pair(left:))
+`)
+	warnings := strings.Join(result.Deprecations(), "\n")
+	if !strings.Contains(warnings, "`params Pair:` is deprecated; use `bundle Pair explicit:`") {
+		t.Fatalf("expected top-level params deprecation warning, got:\n%s", warnings)
+	}
+}
+
+func TestAnalyzeDeprecatedEmptyParamPackUseParens(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_deprecated_empty_param_pack_use_parens.elisa", `bundle Pair explicit:
+    left: i64 = 3
+    right: i64 = 7
+
+def add(use Pair) -> i64:
+    return left + right
+
+def build(left: i64) -> i64:
+    return add(use Pair())
+`)
+	warnings := strings.Join(result.Deprecations(), "\n")
+	if !strings.Contains(warnings, "`use Pair()` is deprecated; use `use Pair`") {
+		t.Fatalf("expected empty param-pack use deprecation warning, got:\n%s", warnings)
 	}
 }
 

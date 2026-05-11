@@ -378,7 +378,7 @@ func cloneDefaultParamPackUses(packs []ast.ParamPackUse) []ast.ParamPackUse {
 		if len(pack.Args) != 0 && args == nil {
 			return nil
 		}
-		cloned = append(cloned, ast.ParamPackUse{Position: pack.Position, Name: pack.Name, Args: args, Bare: pack.Bare})
+		cloned = append(cloned, ast.ParamPackUse{Position: pack.Position, Name: pack.Name, Args: args, Bare: pack.Bare, DeprecatedSyntax: pack.DeprecatedSyntax, DeprecatedReplacement: pack.DeprecatedReplacement})
 	}
 	return cloned
 }

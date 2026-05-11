@@ -123,6 +123,13 @@ func (a *Analyzer) resolveCallArgValueExpr(expr *ast.CallExpr, index int, contex
 }
 
 func (a *Analyzer) expandParamPackUseValues(packUse ast.ParamPackUse, context string) (*ParamPack, map[string]ast.Expr) {
+	if packUse.DeprecatedSyntax != "" {
+		if packUse.DeprecatedReplacement != "" {
+			a.deprecatedf(packUse.Position, "`%s` is deprecated; use `%s`", packUse.DeprecatedSyntax, packUse.DeprecatedReplacement)
+		} else {
+			a.deprecatedf(packUse.Position, "`%s` is deprecated", packUse.DeprecatedSyntax)
+		}
+	}
 	pack, _, ok := a.lookupVisibleParamPack(packUse.Name)
 	if !ok || pack == nil {
 		a.errorf(packUse.Position, "unknown explicit bundle %q", packUse.Name)

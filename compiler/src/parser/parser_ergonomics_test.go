@@ -145,7 +145,7 @@ func TestParseLocalParamsStmt(t *testing.T) {
     args Pair:
         value: i64 = left
         width: i64 = 7
-    return consume(use Pair(), width: left)
+    return consume(use Pair, width: left)
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -169,7 +169,7 @@ func TestParseLocalParamsStmt(t *testing.T) {
 		"args Pair:",
 		"value: i64 = left",
 		"width: i64 = 7",
-		"return consume(use Pair(), width: left)",
+		"return consume(use Pair, width: left)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)

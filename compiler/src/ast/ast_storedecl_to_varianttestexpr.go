@@ -109,9 +109,11 @@ type ContextDecl struct {
 	Fields   []ParamDecl
 }
 type ParamsDecl struct {
-	Position lexer.Pos
-	Name     string
-	Params   []ParamDecl
+	Position              lexer.Pos
+	Name                  string
+	Params                []ParamDecl
+	DeprecatedSyntax      string
+	DeprecatedReplacement string
 }
 type WithArg struct {
 	Position  lexer.Pos
@@ -120,10 +122,12 @@ type WithArg struct {
 	Shorthand bool
 }
 type ParamPackUse struct {
-	Position lexer.Pos
-	Name     string
-	Args     []WithArg
-	Bare     bool
+	Position              lexer.Pos
+	Name                  string
+	Args                  []WithArg
+	Bare                  bool
+	DeprecatedSyntax      string
+	DeprecatedReplacement string
 }
 type WithBundleUse struct {
 	Position lexer.Pos

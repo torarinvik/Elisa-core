@@ -1171,11 +1171,12 @@ Current rules:
 - `bundle Name implicit:` declares an ambient dependency bundle
 - `bundle Name explicit:` declares a reusable top-level explicit argument pack
 - `args Name:` declares a local compile-time-only named argument pack inside a block
-- legacy `context Name:` and top-level `params Name:` still parse, but the formatter emits canonical `bundle` declarations
+- legacy `context Name:` and top-level `params Name:` still parse, but the formatter emits canonical `bundle` declarations; top-level `params Name:` is deprecated in favor of `bundle Name explicit:`
 - legacy local `params Name:`, `parameters Name:`, and `bundle Name explicit:` still parse with deprecation diagnostics; use `args Name:`
 - `def f(...) with Name -> T` makes implicit bundle fields visible by field name inside the function body
 - `def f(use Name)` expands an explicit bundle into the function's explicit parameter set
 - `call(use Name(...), other: ...)` applies an explicit bundle at a call site
+- `call(use Name)` is the canonical empty bundle application; legacy `call(use Name())` still parses with a deprecation diagnostic
 - `with args(...)` installs ambient explicit arguments for nested calls inside a block
 - calls auto-forward when the caller already has the same implicit context in scope
 - `with Name(..)` spreads same-named ambient values into the bundle, and explicit overrides win over the spread values

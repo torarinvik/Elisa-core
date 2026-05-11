@@ -566,7 +566,7 @@ func (p *Parser) parseParamsDecl() *ast.ParamsDecl {
 	p.expectIdentText("params")
 	name := p.parseQualifiedDeclName()
 	params := p.parseParamDeclBlock(true)
-	return &ast.ParamsDecl{Position: pos, Name: name, Params: params}
+	return &ast.ParamsDecl{Position: pos, Name: name, Params: params, DeprecatedSyntax: "params " + name + ":", DeprecatedReplacement: "bundle " + name + " explicit:"}
 }
 func (p *Parser) parseBundleDecl() ast.Decl {
 	pos := p.cur().Pos
