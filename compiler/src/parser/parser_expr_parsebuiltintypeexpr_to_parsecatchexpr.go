@@ -148,6 +148,9 @@ func (p *Parser) parseProjectionQueryExpr(projection ast.Expr) ast.Expr {
 	if p.matchIdentText("where") {
 		if p.peekWhereViewPatternFilter() {
 			patternFilter = p.parseMatchPattern()
+			if p.match(lexer.TOKEN_COLON) {
+				filter = p.parseExpr()
+			}
 		} else {
 			filter = p.parseExpr()
 		}

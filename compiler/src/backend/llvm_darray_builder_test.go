@@ -242,6 +242,28 @@ def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
 	}
 }
 
+func TestGenerateLLVMIRLowersEachProjectionQueryPatternFilterGuard(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return value for each item in items where Expr.Int(value): value > 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_each_projection_query_pattern_guard.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"iter.pattern.filter.body", "iter.filter.body", "darray.push"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected guarded pattern-filter projection query IR to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersEachProjectionQueryWithExplicitOwner(t *testing.T) {
 	src := `struct Entry:
     name: i64

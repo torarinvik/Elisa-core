@@ -351,6 +351,9 @@ func formatExpr(expr ast.Expr) string {
 
 func formatQueryFilter(filter ast.Expr, pattern ast.MatchPattern) string {
 	if pattern != nil {
+		if filter != nil {
+			return " where " + formatMatchPattern(pattern) + ": " + formatExpr(filter)
+		}
 		return " where " + formatMatchPattern(pattern)
 	}
 	if filter == nil {

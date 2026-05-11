@@ -503,6 +503,10 @@ def enabled_names(owner: Arena, entries: darray[Entry]) -> darray[NameId]:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     return entry.name_id for each entry in entries where entry.enabled with alloc
 
+def positive_int_payloads(owner: Arena, items: darray[Expr]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    return value for each item in items where Expr.Int(value): value > 0 with alloc
+
 def all_names(owner: Arena, entries: darray[Entry]) -> darray[NameId]:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     return entry.name_id for each entry in entries with alloc
@@ -518,6 +522,7 @@ Current rules:
 - `first name in source where predicate` returns the element as `T?`
 - `projection for first name in source where predicate` returns the projected value as `U?`; the `where` clause may be omitted to project the first element
 - `projection for each name in source where predicate with owner` returns projected values as `darray[U]`; the `where` clause may be omitted for pure maps, and `with owner` can replace an enclosing `in <arena>:` scope
+- pattern filters may add a guard after `:`, as in `where Expr.Int(value): value > 0`; this works for query expressions and iterable `for` loops
 - `count name in source where predicate` returns `usize`
 - the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `source.enumerate()`, and tree child views
 - range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now

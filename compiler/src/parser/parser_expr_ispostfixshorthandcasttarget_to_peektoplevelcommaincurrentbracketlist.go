@@ -133,6 +133,9 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	var filter ast.Expr
 	if p.peekWhereViewPatternFilter() {
 		patternFilter = p.parseMatchPattern()
+		if p.match(lexer.TOKEN_COLON) {
+			filter = p.parseExpr()
+		}
 	} else {
 		filter = p.parseExpr()
 	}

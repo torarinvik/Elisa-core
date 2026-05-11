@@ -233,8 +233,10 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 		if n.PatternFilter != nil {
 			line += " where " + formatMatchPattern(n.PatternFilter)
-		}
-		if n.WhereFilter != nil {
+			if n.WhereFilter != nil {
+				line += ": " + formatExpr(n.WhereFilter)
+			}
+		} else if n.WhereFilter != nil {
 			line += " where " + formatExpr(n.WhereFilter)
 		}
 		if n.Filter != nil {

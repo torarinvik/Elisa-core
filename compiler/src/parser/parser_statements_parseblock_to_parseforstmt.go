@@ -546,6 +546,10 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	if p.matchIdentText("where") {
 		if p.peekForWherePatternFilter() {
 			patternFilter = p.parseMatchPattern()
+			if p.peek() == lexer.TOKEN_COLON && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_NEWLINE {
+				p.advance()
+				whereFilter = p.parseForHeaderExpr()
+			}
 		} else {
 			whereExpr := p.parseForHeaderExpr()
 			if p.isForWherePredicateShorthand(whereExpr) {

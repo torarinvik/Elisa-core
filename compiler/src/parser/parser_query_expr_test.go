@@ -101,6 +101,26 @@ func TestParseProjectionQueryPatternFilter(t *testing.T) {
 	}
 }
 
+func TestParseProjectionQueryPatternFilterGuard(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Missing\n\ndef keep(items: darray[Expr]) -> darray[i64]:\n    return value for each item in items where Expr.Int(value): value > 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok {
+		t.Fatalf("expected query expr, got %T", ret.Value)
+	}
+	if query.PatternFilter == nil || query.Filter == nil {
+		t.Fatalf("expected guarded pattern filter query, got filter=%T pattern=%T", query.Filter, query.PatternFilter)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return value for each item in items where Expr.Int(value): (value > 0)") {
+		t.Fatalf("expected formatted guarded pattern filter query, got:\n%s", formatted)
+	}
+}
+
 func TestParseEachProjectionQueryWithExplicitOwner(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Entry:\n    name: i64\n\ndef keep(owner: Arena, items: darray[Entry]) -> darray[i64]:\n    alloc: mutable Arena& = (&owner).cast[mutable Arena&]\n    return item.name for each item in items with alloc\n")
 	if len(errs) != 0 {
