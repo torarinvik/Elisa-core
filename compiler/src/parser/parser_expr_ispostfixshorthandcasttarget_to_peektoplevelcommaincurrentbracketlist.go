@@ -84,7 +84,7 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	p.expectIdentText("for")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_IN)
-	source := p.withTernaryDisabled(p.parseExpr)
+	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	var filter ast.Expr
 	if p.match(lexer.TOKEN_IF) {
 		filter = p.parseExpr()
@@ -110,7 +110,7 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_IN)
-	source := p.withTernaryDisabled(p.parseExpr)
+	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	p.expectIdentText("where")
 	filter := p.parseExpr()
 	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter}

@@ -91,6 +91,9 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 func (p *Parser) parseExpr() ast.Expr {
 	expr := p.parseOr()
 
+	if p.allowWhereExpr && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where" {
+		return p.parseWhereViewExpr(expr)
+	}
 	if p.allowTernary && p.peek() == lexer.TOKEN_IF {
 		pos := p.cur().Pos
 		p.advance()
@@ -117,6 +120,36 @@ func (p *Parser) parseExpr() ast.Expr {
 	}
 
 	return expr
+}
+
+func (p *Parser) parseWhereViewExpr(source ast.Expr) ast.Expr {
+	pos := p.cur().Pos
+	p.expectIdentText("where")
+	binderPos := p.cur().Pos
+	binders := make([]string, 0, 2)
+	binders = append(binders, p.expect(lexer.TOKEN_IDENT).Text)
+	for p.match(lexer.TOKEN_COMMA) {
+		binders = append(binders, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	p.expect(lexer.TOKEN_COLON)
+	filter := p.parseExpr()
+	predicateParam := binders[0]
+	if len(binders) > 1 {
+		predicateParam = "__where_item"
+		filter = rewriteWhereTupleBinderExpr(filter, predicateParam, binders)
+	}
+	predicate := &ast.LambdaExpr{
+		Position:            binderPos,
+		Keyword:             "lambda",
+		UsesShorthandParams: true,
+		Params:              []ast.ParamDecl{{Position: binderPos, Name: predicateParam}},
+		BodyExpr:            filter,
+	}
+	return &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.Ident{Position: pos, Name: "where"},
+		Args:     []ast.Expr{source, predicate},
+	}
 }
 
 func (p *Parser) parseRecoveryClause(pos lexer.Pos) *ast.RecoveryClause {

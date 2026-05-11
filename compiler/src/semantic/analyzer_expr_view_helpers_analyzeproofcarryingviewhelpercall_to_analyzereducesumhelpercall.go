@@ -91,7 +91,8 @@ func (a *Analyzer) analyzeWhereHelperCall(expr *ast.CallExpr) Type {
 		a.errorf(expr.Args[0].Pos(), "where expects an iterable source, got %s", sourceType)
 		return invalidType
 	}
-	predicateType := a.analyzeExpr(expr.Args[1])
+	expectedPredicateType := FilteredViewPredicateType(info.ItemType)
+	predicateType := a.analyzeValueExpr(expr.Args[1], expectedPredicateType)
 	fnType, ok := predicateType.(*FuncType)
 	if !ok || fnType == nil {
 		a.errorf(expr.Args[1].Pos(), "where predicate must be a function, got %s", predicateType)

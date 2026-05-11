@@ -457,6 +457,16 @@ return all value in values where is_enabled(value)
 
 Keep `source.where(predicate)` for reusable view composition that feeds another view helper.
 
+Expression-level filtered views can use explicit binders:
+
+```elisa
+return all((items where item: item.kind == TokenKind.IDENT))
+return (items where item: item.kind == TokenKind.IDENT).reduce_sum(score_item)
+return (items.enumerate() where index, item: index > 0 and item.kind == TokenKind.IDENT).reduce_sum(score_pair)
+```
+
+The parenthesized form is useful when immediately calling another helper on the filtered view.
+
 ## Proof-carrying view helpers
 
 View helpers can be written either as ordinary free functions or as receiver-style calls. The receiver form is syntax sugar: the compiler rewrites the receiver as the first helper argument, so the same optimization facts and lowering paths are preserved.
@@ -464,7 +474,7 @@ View helpers can be written either as ordinary free functions or as receiver-sty
 ```elisa
 def sum_selected(values: dview[i32]) -> i32:
     source: dview[i32] = values.readonly()
-    return source.where(keep_positive).reduce_sum(identity)
+    return (source where value: keep_positive(value)).reduce_sum(identity)
 
 def check(values: bool[8]) -> bool:
     return all value in values where is_enabled(value)

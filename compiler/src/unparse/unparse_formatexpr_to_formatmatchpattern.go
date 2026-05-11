@@ -48,6 +48,9 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.MoveExpr:
 		return "move " + formatExpr(n.Operand)
 	case *ast.CallExpr:
+		if text, ok := formatWhereViewExpr(n); ok {
+			return text
+		}
 		funcText := formatExpr(n.Func)
 		if n.Safe {
 			if n.SafeReceiver != nil {
@@ -342,6 +345,69 @@ func formatRecoveryClause(recovery *ast.RecoveryClause, fallback ast.Expr) strin
 		return formatExpr(fallback)
 	}
 }
+
+func formatWhereViewExpr(expr *ast.CallExpr) (string, bool) {
+	if expr == nil || len(expr.Args) != 2 || len(expr.ArgNames) != 0 || len(expr.ParamPacks) != 0 || expr.HasArgForward {
+		return "", false
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident == nil || ident.Name != "where" {
+		return "", false
+	}
+	lambda, ok := expr.Args[1].(*ast.LambdaExpr)
+	if !ok || lambda == nil || !lambda.UsesShorthandParams || len(lambda.Params) != 1 || lambda.BodyExpr == nil || len(lambda.Body) != 0 {
+		return "", false
+	}
+	paramName := lambda.Params[0].Name
+	if paramName == "__where_item" {
+		return formatExpr(expr.Args[0]) + " where index, value: " + formatWhereTuplePredicateExpr(lambda.BodyExpr, paramName), true
+	}
+	return formatExpr(expr.Args[0]) + " where " + paramName + ": " + formatExpr(lambda.BodyExpr), true
+}
+
+func formatWhereTuplePredicateExpr(expr ast.Expr, tupleName string) string {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name
+	case *ast.FieldExpr:
+		if ident, ok := n.Object.(*ast.Ident); ok && ident != nil && ident.Name == tupleName {
+			switch n.Field {
+			case "index":
+				return "index"
+			case "value":
+				return "value"
+			}
+		}
+		return formatWhereTuplePredicateExpr(n.Object, tupleName) + "." + n.Field
+	case *ast.BinaryExpr:
+		return "(" + formatWhereTuplePredicateExpr(n.Left, tupleName) + " " + lexer.TokenName(n.Op) + " " + formatWhereTuplePredicateExpr(n.Right, tupleName) + ")"
+	case *ast.UnaryExpr:
+		op := lexer.TokenName(n.Op)
+		if op == "not" {
+			return "(not " + formatWhereTuplePredicateExpr(n.Operand, tupleName) + ")"
+		}
+		return "(" + op + formatWhereTuplePredicateExpr(n.Operand, tupleName) + ")"
+	case *ast.CallExpr:
+		parts := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			parts = append(parts, formatWhereTuplePredicateExpr(arg, tupleName))
+		}
+		return formatWhereTuplePredicateExpr(n.Func, tupleName) + "(" + strings.Join(parts, ", ") + ")"
+	case *ast.ParenExpr:
+		return "(" + formatWhereTuplePredicateExpr(n.Inner, tupleName) + ")"
+	case *ast.IndexExpr:
+		text := formatWhereTuplePredicateExpr(n.Object, tupleName) + "[" + formatWhereTuplePredicateExpr(n.Index, tupleName) + "]"
+		if n.Fallback != nil {
+			text += " else " + formatWhereTuplePredicateExpr(n.Fallback, tupleName)
+		}
+		return text
+	case *ast.TernaryExpr:
+		return "(" + formatWhereTuplePredicateExpr(n.Value, tupleName) + " if " + formatWhereTuplePredicateExpr(n.Cond, tupleName) + " else " + formatWhereTuplePredicateExpr(n.Alt, tupleName) + ")"
+	default:
+		return formatExpr(expr)
+	}
+}
+
 func isRefCastTarget(t ast.TypeExpr) bool {
 	switch n := t.(type) {
 	case *ast.RefType:
