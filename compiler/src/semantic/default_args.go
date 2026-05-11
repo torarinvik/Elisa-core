@@ -332,7 +332,7 @@ func cloneDefaultArgStmt(stmt ast.Stmt) ast.Stmt {
 				return nil
 			}
 		}
-		return &ast.LocalParamsStmt{Position: n.Position, Name: n.Name, Params: params}
+		return &ast.LocalParamsStmt{Position: n.Position, Name: n.Name, Params: params, DeprecatedSyntax: n.DeprecatedSyntax, DeprecatedReplacement: n.DeprecatedReplacement}
 	default:
 		return nil
 	}

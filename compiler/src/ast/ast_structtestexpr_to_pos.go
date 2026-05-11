@@ -242,9 +242,11 @@ type VarDeclStmt struct {
 	Value    Expr
 }
 type LocalParamsStmt struct {
-	Position lexer.Pos
-	Name     string
-	Params   []ParamDecl
+	Position              lexer.Pos
+	Name                  string
+	Params                []ParamDecl
+	DeprecatedSyntax      string
+	DeprecatedReplacement string
 }
 type LetDestructureStmt struct {
 	Position lexer.Pos

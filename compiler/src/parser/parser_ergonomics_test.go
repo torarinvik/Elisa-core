@@ -142,7 +142,7 @@ func TestParseWithArenaScopedAllocatorShorthand(t *testing.T) {
 
 func TestParseLocalParamsStmt(t *testing.T) {
 	file, errs := parseSourceFile(t, `def build(left: i64) -> i64:
-    bundle Pair explicit:
+    args Pair:
         value: i64 = left
         width: i64 = 7
     return consume(use Pair(), width: left)
@@ -166,7 +166,7 @@ func TestParseLocalParamsStmt(t *testing.T) {
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"bundle Pair explicit:",
+		"args Pair:",
 		"value: i64 = left",
 		"width: i64 = 7",
 		"return consume(use Pair(), width: left)",
@@ -434,10 +434,10 @@ func TestParseLocalArgsPacksForStructLiteralSpread(t *testing.T) {
     stored_expr: i64?
 
 def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i64?) -> Accessors:
-    params name_ids:
+    args name_ids:
         read_name_id: i64? = next_read
         write_name_id: i64? = next_write
-    params expressions:
+    args expressions:
         index_expr: i64? = next_index
         stored_expr: i64? = null
     return Accessors{...current, ...name_ids, ...expressions}
@@ -465,8 +465,8 @@ def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i6
 	}
 	formatted := unparse.FormatDecl(updateDecl)
 	for _, want := range []string{
-		"bundle name_ids explicit:",
-		"bundle expressions explicit:",
+		"args name_ids:",
+		"args expressions:",
 		"return Accessors{...current, ...name_ids, ...expressions}",
 	} {
 		if !strings.Contains(formatted, want) {

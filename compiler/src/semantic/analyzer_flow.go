@@ -58,6 +58,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.consumeAffineValueExpr(n.Value, bindingType, "move into local "+strconvQuote(n.Name))
 	case *ast.LocalParamsStmt:
+		if n.DeprecatedSyntax != "" {
+			if n.DeprecatedReplacement != "" {
+				a.deprecatedf(n.Pos(), "`%s` is deprecated; use `%s`", n.DeprecatedSyntax, n.DeprecatedReplacement)
+			} else {
+				a.deprecatedf(n.Pos(), "`%s` is deprecated", n.DeprecatedSyntax)
+			}
+		}
 		a.analyzeLocalParamsStmt(n)
 	case *ast.LetDestructureStmt:
 		a.analyzeLetDestructureStmt(n)

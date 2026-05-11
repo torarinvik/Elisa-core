@@ -120,7 +120,7 @@ def consume(left: i64, right: i64) -> i64:
     return left + right
 
 def build(left: i64) -> i64:
-    bundle Pair explicit:
+    args Pair:
         left: i64 = left
         right: i64 = 9
     return consume(use Pair)
@@ -182,10 +182,10 @@ func TestAnalyzeLocalParamPackStructLiteralSpread(t *testing.T) {
     stored_expr: i64?
 
 def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i64?) -> Accessors:
-    params name_ids:
+    args name_ids:
         read_name_id: i64? = next_read
         write_name_id: i64? = next_write
-    params expressions:
+    args expressions:
         index_expr: i64? = next_index
         stored_expr: i64? = null
     return Accessors{...current, ...name_ids, ...expressions}
@@ -213,7 +213,7 @@ func TestAnalyzeRejectsLocalParamPackUseBeforeDeclaration(t *testing.T) {
 
 def build(left: i64) -> i64:
     value: i64 = consume(use Pair())
-    bundle Pair explicit:
+    args Pair:
         left: i64 = left
         right: i64 = 9
     return value
@@ -229,7 +229,7 @@ func TestAnalyzeRejectsLocalParamPackFromNestedBlock(t *testing.T) {
     return left + right
 
 def build(left: i64) -> i64:
-    bundle Pair explicit:
+    args Pair:
         left: i64 = left
         right: i64 = 9
     if true:
@@ -239,6 +239,34 @@ def build(left: i64) -> i64:
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `unknown explicit bundle "Pair"`) {
 		t.Fatalf("expected nested-block visibility diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeDeprecatedLocalParamPackAliases(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_deprecated_local_pack_aliases.elisa", `def consume(left: i64, right: i64) -> i64:
+    return left + right
+
+def build(left: i64) -> i64:
+    params Pair:
+        left: i64 = left
+        right: i64 = 1
+    parameters Other:
+        left: i64 = left
+        right: i64 = 2
+    bundle Third explicit:
+        left: i64 = left
+        right: i64 = 3
+    return consume(use Pair) + consume(use Other) + consume(use Third)
+`)
+	warnings := strings.Join(result.Deprecations(), "\n")
+	for _, check := range []string{
+		"`params Pair:` is deprecated; use `args Pair:`",
+		"`parameters Other:` is deprecated; use `args Other:`",
+		"`bundle Third explicit:` is deprecated; use `args Third:`",
+	} {
+		if !strings.Contains(warnings, check) {
+			t.Fatalf("expected warning %q, got:\n%s", check, warnings)
+		}
 	}
 }
 

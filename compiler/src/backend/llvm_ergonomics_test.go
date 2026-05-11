@@ -85,10 +85,10 @@ func TestGenerateLLVMIRLowersStructLiteralArgsPackSpread(t *testing.T) {
     stored_expr: i64?
 
 def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i64?) -> bool:
-    params name_ids:
+    args name_ids:
         read_name_id: i64? = next_read
         write_name_id: i64? = next_write
-    params expressions:
+    args expressions:
         index_expr: i64? = next_index
         stored_expr: i64? = null
     next: Accessors = Accessors{...current, ...name_ids, ...expressions}

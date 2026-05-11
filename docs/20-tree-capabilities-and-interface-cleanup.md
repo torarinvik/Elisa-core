@@ -46,7 +46,7 @@ return parse_atom[AstBuilder]() with ParseCtx(parser:, alloc:)
 return parse_atom[AstBuilder]() with ParseCtx(.., alloc = scratch.ref[mutable Arena&])
 ```
 
-Explicit bundles remain part of the same model, but they are call-shaping bundles rather than ambient ones. They can also be local to a block when the pack is only meaningful inside a narrow parser/helper region.
+Explicit bundles remain part of the same model, but they are call-shaping bundles rather than ambient ones. Use `args Name:` for local packs that are only meaningful inside a narrow parser/helper region.
 
 ```elisacore
 bundle Pair explicit:
@@ -57,7 +57,7 @@ def add(use Pair) -> i64:
     return left + right
 
 def build(left: i64) -> i64:
-    bundle LocalPair explicit:
+    args LocalPair:
         left: i64 = left
         right: i64 = 9
     return add(use LocalPair)

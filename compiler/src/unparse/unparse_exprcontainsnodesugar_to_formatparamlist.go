@@ -133,7 +133,7 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 		f.writePrefixedMultiline(level, "", line)
 	case *ast.LocalParamsStmt:
-		f.writeLine(level, "bundle "+n.Name+" explicit:")
+		f.writeLine(level, "args "+n.Name+":")
 		for _, param := range n.Params {
 			f.writeLine(level+1, formatParamDecl(param))
 		}

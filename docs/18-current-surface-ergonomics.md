@@ -1151,7 +1151,7 @@ def drive(width: i64) -> i64:
         return add(use Pair(right: 5, left:), right: width) + inner() with ParseCtx(..)
 
 def build(left: i64) -> i64:
-    bundle LocalPair explicit:
+    args LocalPair:
         left: i64 = left
         right: i64 = 9
     return add(use LocalPair)
@@ -1169,8 +1169,10 @@ return inner() with ParseCtx(.., alloc = override_alloc)
 Current rules:
 
 - `bundle Name implicit:` declares an ambient dependency bundle
-- `bundle Name explicit:` declares a reusable explicit argument pack and may appear at top level or as a local compile-time-only bundle inside a block
-- legacy `context Name:` and `params Name:` still parse, but the formatter emits canonical `bundle` declarations
+- `bundle Name explicit:` declares a reusable top-level explicit argument pack
+- `args Name:` declares a local compile-time-only named argument pack inside a block
+- legacy `context Name:` and top-level `params Name:` still parse, but the formatter emits canonical `bundle` declarations
+- legacy local `params Name:`, `parameters Name:`, and `bundle Name explicit:` still parse with deprecation diagnostics; use `args Name:`
 - `def f(...) with Name -> T` makes implicit bundle fields visible by field name inside the function body
 - `def f(use Name)` expands an explicit bundle into the function's explicit parameter set
 - `call(use Name(...), other: ...)` applies an explicit bundle at a call site
@@ -1227,15 +1229,15 @@ Current rules:
 - `field` inside a brace literal or brace pattern is field punning sugar for “use the same name on both sides”
 - `field: alias` renames the bound local or supplied expression source
 - `Type{...base, field: expr}` starts a brace struct literal from an existing value and overrides named fields; this is useful for default packs and small immutable updates
-- local `params name:` blocks declare compile-time named argument packs; spread them with `Type{...name}` to split large constructor or struct-literal argument lists into reusable groups
+- local `args name:` blocks declare compile-time named argument packs; spread them with `Type{...name}` to split large constructor or struct-literal argument lists into reusable groups
 - `base{field, other = expr}` creates a record-update expression by copying `base` and replacing only the mentioned fields
 
 ```elisa
-params name_ids:
+args name_ids:
     read_name_id: NameId? = next_read
     write_name_id: NameId? = next_write
 
-params expressions:
+args expressions:
     index_expr: Expr? = next_index
     stored_expr: Expr? = null
 

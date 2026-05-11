@@ -206,6 +206,7 @@ func (p *Parser) looksLikeLocalParamsStmt() bool {
 }
 func (p *Parser) parseLocalParamsStmt() *ast.LocalParamsStmt {
 	pos := p.cur().Pos
+	syntax := p.cur().Text
 	if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "params" || p.cur().Text == "parameters" || p.cur().Text == "args") {
 		p.advance()
 	} else {
@@ -213,7 +214,12 @@ func (p *Parser) parseLocalParamsStmt() *ast.LocalParamsStmt {
 	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	params := p.parseParamDeclBlock(true)
-	return &ast.LocalParamsStmt{Position: pos, Name: name, Params: params}
+	stmt := &ast.LocalParamsStmt{Position: pos, Name: name, Params: params}
+	if syntax != "args" {
+		stmt.DeprecatedSyntax = syntax + " " + name + ":"
+		stmt.DeprecatedReplacement = "args " + name + ":"
+	}
+	return stmt
 }
 func (p *Parser) looksLikeLocalBundleStmt() bool {
 	return p.pos+3 < len(p.tokens) &&
@@ -230,7 +236,7 @@ func (p *Parser) parseLocalBundleStmt() *ast.LocalParamsStmt {
 		p.errorf("local bundle declarations only support `explicit` mode, got %q", mode)
 	}
 	params := p.parseParamDeclBlock(true)
-	return &ast.LocalParamsStmt{Position: pos, Name: name, Params: params}
+	return &ast.LocalParamsStmt{Position: pos, Name: name, Params: params, DeprecatedSyntax: "bundle " + name + " explicit:", DeprecatedReplacement: "args " + name + ":"}
 }
 func (p *Parser) looksLikePoolStmt() bool {
 	if p.pos+2 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+2].Kind != lexer.TOKEN_LPAREN {
