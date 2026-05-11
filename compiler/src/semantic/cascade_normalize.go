@@ -242,6 +242,7 @@ func normalizeCascadeExpr(expr ast.Expr, target ast.Expr, rewriteShorthand bool)
 		for i := range n.Elems {
 			n.Elems[i] = normalizeCascadeExpr(n.Elems[i], target, rewriteShorthand)
 		}
+		n.Owner = normalizeCascadeExpr(n.Owner, target, rewriteShorthand)
 		return n
 	case *ast.CastExpr:
 		n.Operand = normalizeCascadeExpr(n.Operand, target, rewriteShorthand)

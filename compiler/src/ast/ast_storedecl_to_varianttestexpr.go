@@ -505,6 +505,7 @@ type ListLitExpr struct {
 	Position lexer.Pos
 	Elems    []Expr
 	Brace    bool
+	Owner    Expr
 }
 type ListComprehensionExpr struct {
 	Position  lexer.Pos

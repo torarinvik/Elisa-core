@@ -207,6 +207,7 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 				return true
 			}
 		}
+		return exprReferencesVariantFields(n.Owner, name)
 	case *ast.CastExpr:
 		return exprReferencesVariantFields(n.Operand, name)
 	case *ast.TernaryExpr:

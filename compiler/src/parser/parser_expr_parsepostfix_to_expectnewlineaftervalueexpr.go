@@ -266,7 +266,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 			}
 		}
 		p.expect(lexer.TOKEN_RBRACKET)
-		return &ast.ListLitExpr{Position: pos, Elems: elems}
+		var owner ast.Expr
+		if p.match(lexer.TOKEN_IN) {
+			owner = p.withInMembershipDisabled(p.parseExpr)
+		}
+		return &ast.ListLitExpr{Position: pos, Elems: elems, Owner: owner}
 	case lexer.TOKEN_LBRACE:
 		pos := p.cur().Pos
 		p.advance()

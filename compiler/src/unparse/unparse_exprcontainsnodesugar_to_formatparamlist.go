@@ -45,7 +45,7 @@ func exprContainsNodeSugar(expr ast.Expr) bool {
 				return true
 			}
 		}
-		return false
+		return exprContainsNodeSugar(n.Owner)
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
 			if exprContainsNodeSugar(arg) {

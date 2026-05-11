@@ -475,7 +475,7 @@ func exprContainsCanExpr(expr ast.Expr) bool {
 				return true
 			}
 		}
-		return false
+		return exprContainsCanExpr(n.Owner)
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
 			if exprContainsCanExpr(arg) {

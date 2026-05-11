@@ -241,6 +241,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		for _, elem := range n.Elems {
 			c.collectExpr(elem)
 		}
+		c.collectExpr(n.Owner)
 	case *ast.CastExpr:
 		c.collectExpr(n.Operand)
 		if sym, ok := c.analyzer.resolvedCastHooks[n]; ok {

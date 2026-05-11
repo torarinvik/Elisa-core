@@ -94,7 +94,11 @@ func optimizationExprString(expr ast.Expr) string {
 		for _, elem := range n.Elems {
 			parts = append(parts, optimizationExprString(elem))
 		}
-		return fmt.Sprintf("[%s]", joinOptimizationStrings(parts))
+		line := fmt.Sprintf("[%s]", joinOptimizationStrings(parts))
+		if n.Owner != nil {
+			line += " in " + optimizationExprString(n.Owner)
+		}
+		return line
 	case *ast.CastExpr:
 		return fmt.Sprintf("%s.cast", optimizationExprString(n.Operand))
 	case *ast.SizeofExpr:

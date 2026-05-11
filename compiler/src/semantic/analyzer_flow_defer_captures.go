@@ -224,6 +224,7 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 		for _, elem := range n.Elems {
 			c.collectExpr(elem, locals)
 		}
+		c.collectExpr(n.Owner, locals)
 	case *ast.CastExpr:
 		c.collectExpr(n.Operand, locals)
 	case *ast.TernaryExpr:

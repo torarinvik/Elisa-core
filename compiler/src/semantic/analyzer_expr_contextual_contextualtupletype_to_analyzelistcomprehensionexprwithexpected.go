@@ -456,6 +456,15 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 	}
 	expectedArray, useExpectedArray := contextualArrayLiteralType(expected)
 	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
+	if expr.Owner != nil {
+		owner, _, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
+		if !ok || owner.Kind != treeAllocOwnerArena {
+			a.errorf(expr.Owner.Pos(), "darray literal owner must be an Arena")
+		}
+		if !useExpectedDArray {
+			a.errorf(expr.Owner.Pos(), "list literal allocation owner requires an expected darray type")
+		}
+	}
 	if len(expr.Elems) == 0 {
 		switch {
 		case useExpectedArray:

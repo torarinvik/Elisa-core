@@ -180,6 +180,7 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 		for _, elem := range n.Elems {
 			a.validateDeferStmtBodyExpr(elem)
 		}
+		a.validateDeferStmtBodyExpr(n.Owner)
 	case *ast.CastExpr:
 		a.validateDeferStmtBodyExpr(n.Operand)
 	case *ast.TernaryExpr:

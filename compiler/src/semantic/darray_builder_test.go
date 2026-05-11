@@ -100,6 +100,37 @@ def build() -> usize:
 	}
 }
 
+func TestAnalyzeDArrayLiteralWithExplicitOwner(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_explicit_owner.elisa", `def build(owner: Arena) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    xs: darray[i64] = [1, 2, 3] in alloc
+    return xs.count
+`)
+
+	var build *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "build" {
+			build = fn
+			break
+		}
+	}
+	if build == nil {
+		t.Fatal("expected build function declaration")
+	}
+	varDecl, ok := build.Body[1].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected explicit-owner darray var decl, got %T", build.Body[1])
+	}
+	literal, ok := varDecl.Value.(*ast.ListLitExpr)
+	if !ok || literal.Owner == nil {
+		t.Fatalf("expected list literal with explicit owner, got %T %#v", varDecl.Value, varDecl.Value)
+	}
+	literalType, ok := result.ExprTypes[literal].(*DArrayType)
+	if !ok || literalType == nil {
+		t.Fatalf("expected explicit-owner list literal to resolve to darray type, got %T %#v", result.ExprTypes[literal], result.ExprTypes[literal])
+	}
+}
+
 func TestAnalyzeRejectsDArrayPushOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_push_requires_scope.elisa", `def build() -> void:
     xs: mutable darray[i64] = []

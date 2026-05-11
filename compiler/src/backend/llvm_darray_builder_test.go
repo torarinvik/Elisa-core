@@ -53,6 +53,22 @@ func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersDArrayLiteralWithExplicitOwner(t *testing.T) {
+	src := `def build(owner: Arena) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    xs: darray[i64] = [1, 2, 3] in alloc
+    return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_literal_explicit_owner.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@arena_alloc") || !strings.Contains(output, "darray.literal.owner.arena") {
+		t.Fatalf("expected explicit-owner darray literal to allocate from its owner, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersListComprehensionExpr(t *testing.T) {
 	src := `def build(owner: Arena, items: darray[i64]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

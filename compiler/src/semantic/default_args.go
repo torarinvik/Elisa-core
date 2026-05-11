@@ -73,10 +73,11 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		return &ast.SliceExpr{Position: n.Position, Object: object, Start: start, End: end}
 	case *ast.ListLitExpr:
 		elems := cloneDefaultArgExprs(n.Elems)
-		if len(n.Elems) != 0 && elems == nil {
+		owner := cloneDefaultArgExpr(n.Owner)
+		if (len(n.Elems) != 0 && elems == nil) || (n.Owner != nil && owner == nil) {
 			return nil
 		}
-		return &ast.ListLitExpr{Position: n.Position, Elems: elems, Brace: n.Brace}
+		return &ast.ListLitExpr{Position: n.Position, Elems: elems, Brace: n.Brace, Owner: owner}
 	case *ast.CallExpr:
 		fn := cloneDefaultArgExpr(n.Func)
 		safeReceiver := cloneDefaultArgExpr(n.SafeReceiver)

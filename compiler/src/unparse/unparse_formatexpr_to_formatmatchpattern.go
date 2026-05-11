@@ -143,7 +143,11 @@ func formatExpr(expr ast.Expr) string {
 		if n.Brace {
 			return "{" + strings.Join(parts, ", ") + "}"
 		}
-		return "[" + strings.Join(parts, ", ") + "]"
+		line := "[" + strings.Join(parts, ", ") + "]"
+		if n.Owner != nil {
+			line += " in " + formatExpr(n.Owner)
+		}
+		return line
 	case *ast.ListComprehensionExpr:
 		line := "[" + formatExpr(n.Value) + " for " + n.Name + " in " + formatExpr(n.Source)
 		if n.RangeEnd != nil {

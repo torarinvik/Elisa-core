@@ -2209,6 +2209,20 @@ with arena scratch(8192) as owner:
     values: darray[int] = [1, 2, 3]
 ```
 
+For one-off dynamic array literals, the owner can also be attached directly to
+the literal:
+
+```elisa
+values: darray[int] = [1, 2, 3] in owner
+```
+
+The direct owner form is only for arena-backed dynamic array literals. Fixed
+array literals remain pure values:
+
+```elisa
+values: int[3] = [1, 2, 3]
+```
+
 This is sugar for the explicit region-plus-`in` shape:
 
 - `scratch` is a named arena region

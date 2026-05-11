@@ -232,6 +232,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		for _, elem := range n.Elems {
 			a.validatePermissionExpr(elem, granted)
 		}
+		a.validatePermissionExpr(n.Owner, granted)
 	case *ast.CastExpr:
 		a.validatePermissionExpr(n.Operand, granted)
 		if sym, ok := a.resolvedCastHooks[n]; ok {

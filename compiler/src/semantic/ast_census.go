@@ -223,6 +223,7 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 		for _, elem := range n.Elems {
 			c.countExpr(elem)
 		}
+		c.countExpr(n.Owner)
 	case *ast.TernaryExpr:
 		c.countExpr(n.Value)
 		c.countExpr(n.Cond)

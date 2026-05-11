@@ -163,6 +163,7 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 		for _, elem := range n.Elems {
 			appendBasicFlowExprInstrs(block, elem)
 		}
+		appendBasicFlowExprInstrs(block, n.Owner)
 	case *ast.TryExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Fallback)

@@ -167,6 +167,7 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 		for _, elem := range n.Elems {
 			a.appendImplicitSinkFlowInstrsForExpr(block, elem)
 		}
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Owner)
 	case *ast.TryExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Fallback)
