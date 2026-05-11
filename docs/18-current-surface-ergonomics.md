@@ -527,6 +527,7 @@ Current rules:
 - the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `source.enumerate()`, and tree child views
 - range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now
 - the predicate is analyzed in a scope where the loop name is bound to the iterable element type
+- pattern-bound names are scoped to the query projection, filter guard, or loop body; they do not leak after the query or loop
 - use explicit loops when the body has side effects or needs multiple statements
 
 Iterable `for` loops use the same filter clause after composed sources, so tuple destructuring from `enumerate()` is available in the filter:

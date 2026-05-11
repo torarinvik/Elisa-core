@@ -487,6 +487,22 @@ def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
 	}
 }
 
+func TestAnalyzeRejectsQueryPatternBindingOutsideFilterScope(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "query_pattern_binding_scope.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def keep(items: darray[Expr]) -> i64:
+    if (any item in items where Expr.Int(value)):
+        return value
+    return 0
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `undefined identifier "value"`) {
+		t.Fatalf("expected pattern-binding scope diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeEachProjectionQueryWithExplicitOwner(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "each_projection_query_explicit_owner.elisa", `struct Entry:
     name: i64
