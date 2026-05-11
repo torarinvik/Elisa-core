@@ -298,7 +298,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, enumerate(source), children(node), or a projected tree attribute sequence, got %s", sourceType)
+		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, source.enumerate(), children(node), or a projected tree attribute sequence, got %s", sourceType)
 		info.ItemType = invalidType
 	}
 	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {

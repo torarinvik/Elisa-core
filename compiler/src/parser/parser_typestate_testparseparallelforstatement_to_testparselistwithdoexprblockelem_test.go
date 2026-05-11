@@ -198,7 +198,7 @@ func TestParseIterableForStatementWithBareVariantPatternFilter(t *testing.T) {
 	}
 }
 func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
-	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for index, value in enumerate(items):\n        pass\n")
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for index, value in items.enumerate():\n        pass\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -221,11 +221,11 @@ func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected enumerate call source, got %T", iterStmt.Source)
 	}
-	callee, ok := call.Func.(*ast.Ident)
-	if !ok || callee.Name != "enumerate" {
+	callee, ok := call.Func.(*ast.FieldExpr)
+	if !ok || callee.Field != "enumerate" {
 		t.Fatalf("expected enumerate callee, got %T %#v", call.Func, call.Func)
 	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for index, value in enumerate(items):") {
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for index, value in items.enumerate():") {
 		t.Fatalf("expected formatter to preserve enumerate tuple loop syntax, got:\n%s", formatted)
 	}
 }

@@ -209,7 +209,7 @@ def build(owner: Arena) -> usize:
         total: mutable usize = 0
         for row in pending.rows():
             total <- total + row.name_key + row.depth
-        for index, row in enumerate(pending.rows()):
+        for index, row in pending.rows().enumerate():
             total <- total + index + row.name_key
         for row in rev(pending.rows()):
             total <- total + row.depth

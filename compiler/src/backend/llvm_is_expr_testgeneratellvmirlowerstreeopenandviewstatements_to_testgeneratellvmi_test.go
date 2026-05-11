@@ -459,7 +459,7 @@ def name_id(name: Lua.Expr.Atom.Name) -> i64:
 func TestGenerateLLVMIRLowersEnumerateTupleLoops(t *testing.T) {
 	src := `def sum_pairs(items: darray[usize]) -> usize:
 	total: mutable usize = 0
-	for index, value in enumerate(items):
+	for index, value in items.enumerate():
 		total <- total + index + value
 	return total
 `
@@ -541,7 +541,7 @@ func TestGenerateLLVMIRLowersWhereOverEnumerateViewLoops(t *testing.T) {
 
 def sum_even_indexed(items: i64[4]) -> i64:
 	total: mutable i64 = 0
-	for index, value in where(enumerate(items), keep_even_pair):
+	for index, value in items.enumerate().where(keep_even_pair):
 		total <- total + value + index.i64()
 	return total
 `
@@ -563,7 +563,7 @@ func TestGenerateLLVMIRLowersEnumerateOverWhereViewLoops(t *testing.T) {
 
 def sum_indexed_filtered(items: i64[4]) -> i64:
 	total: mutable i64 = 0
-	for index, value in enumerate(where(items, keep_large)):
+	for index, value in items.where(keep_large).enumerate():
 		total <- total + value + index.i64()
 	return total
 `

@@ -310,7 +310,7 @@ def frontend_lexer_copy_token_kinds_with_len_impl(source: u8&, source_len: usize
         if capacity < tokens.count:
             return tokens.count
 
-        for i, token in enumerate(tokens):
+        for i, token in tokens.enumerate():
             out[i] <- frontend_token_kind_code(token.kind)
         return tokens.count
 

@@ -9,7 +9,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 	sourceType := a.analyzeExpr(expr.Source)
 	info, ok := a.resolveIterLoopSourceInfo(expr.Source, sourceType)
 	if !ok {
-		a.errorf(expr.Source.Pos(), "query expression currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, enumerate(source), children(node), or a projected tree attribute sequence, got %s", sourceType)
+		a.errorf(expr.Source.Pos(), "query expression currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, source.enumerate(), children(node), or a projected tree attribute sequence, got %s", sourceType)
 		info.ItemType = invalidType
 	}
 	if a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
