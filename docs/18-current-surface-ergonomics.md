@@ -550,6 +550,15 @@ return (items where item: item.kind == TokenKind.IDENT).reduce_sum(score_item)
 return (items.enumerate() where index, item: index > 0 and item.kind == TokenKind.IDENT).reduce_sum(score_pair)
 ```
 
+They can also use the same variant and struct pattern filters as loop headers. A
+plain pattern keeps matching values; a pattern plus `:` predicate binds payload
+names inside the predicate:
+
+```elisa
+return (exprs where Expr.Int(value)).reduce_sum(score_expr)
+return (exprs where Expr.Int(value): value > 0).reduce_sum(score_expr)
+```
+
 The parenthesized form is useful when immediately calling another helper on the filtered view.
 
 ## Proof-carrying view helpers

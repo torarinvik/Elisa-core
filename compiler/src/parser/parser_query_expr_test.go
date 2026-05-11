@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/unparse"
 )
 
@@ -133,5 +134,57 @@ func TestParseExpressionWhereViewWithEnumerateBinders(t *testing.T) {
 	formatted := unparse.FormatDecl(decl)
 	if !strings.Contains(formatted, "items.enumerate() where index, value: ((index > 0) and (value > 2))") {
 		t.Fatalf("expected formatted enumerate where predicate, got:\n%s", formatted)
+	}
+}
+
+func TestParseExpressionWhereViewWithVariantPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    None\n\ndef keep(items: darray[Expr]) -> bool:\n    return any((items where Expr.Int(value)))\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	call := ret.Value.(*ast.CallExpr)
+	paren := call.Args[0].(*ast.ParenExpr)
+	whereCall := paren.Inner.(*ast.CallExpr)
+	lambda, ok := whereCall.Args[1].(*ast.LambdaExpr)
+	if !ok || len(lambda.Params) != 1 || lambda.Params[0].Name != "__where_item" {
+		t.Fatalf("expected pattern where lambda, got %T %#v", whereCall.Args[1], whereCall.Args[1])
+	}
+	condition, ok := lambda.BodyExpr.(*ast.BinaryExpr)
+	if !ok || condition.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected pattern where is condition, got %T %#v", lambda.BodyExpr, lambda.BodyExpr)
+	}
+	target, ok := condition.Right.(*ast.VariantTestExpr)
+	if !ok || target.Pattern.EnumName != "Expr" || target.Pattern.Variant != "Int" {
+		t.Fatalf("expected Expr.Int pattern target, got %T %#v", condition.Right, condition.Right)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return any((items where Expr.Int(value)))") {
+		t.Fatalf("expected formatted expression where pattern, got:\n%s", formatted)
+	}
+}
+
+func TestParseExpressionWhereViewWithVariantPatternPredicate(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    None\n\ndef keep(items: darray[Expr]) -> bool:\n    return any((items where Expr.Int(value): value > 0))\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	call := ret.Value.(*ast.CallExpr)
+	paren := call.Args[0].(*ast.ParenExpr)
+	whereCall := paren.Inner.(*ast.CallExpr)
+	lambda := whereCall.Args[1].(*ast.LambdaExpr)
+	matchExpr, ok := lambda.BodyExpr.(*ast.MatchExpr)
+	if !ok || len(matchExpr.Arms) != 2 {
+		t.Fatalf("expected pattern predicate match expression, got %T %#v", lambda.BodyExpr, lambda.BodyExpr)
+	}
+	if _, ok := matchExpr.Arms[0].Pattern.(*ast.MatchVariantPattern); !ok {
+		t.Fatalf("expected first arm to be variant pattern, got %T", matchExpr.Arms[0].Pattern)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return any((items where Expr.Int(value): (value > 0)))") {
+		t.Fatalf("expected formatted expression where pattern predicate, got:\n%s", formatted)
 	}
 }

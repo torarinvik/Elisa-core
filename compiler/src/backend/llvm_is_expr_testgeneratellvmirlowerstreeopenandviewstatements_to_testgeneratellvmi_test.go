@@ -595,6 +595,29 @@ def all_selected_truth(values: bool[4]) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersExpressionWherePatternFilters(t *testing.T) {
+	src := `enum Expr:
+	Int(value: i64)
+	None
+
+def count_positive(items: Expr[4]) -> usize:
+	total: mutable usize = 0
+	for item in (items where Expr.Int(value): value > 0):
+		total <- total + 1
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_expression_where_pattern_filter.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"where.source.insert", "where.predicate.insert", "where.filter.body", "match.tag", "icmp sgt"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected expression where pattern filter lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersMixedTreeChildrenToRootLoops(t *testing.T) {
 	src := `@layout(per_variant_rows)
 tree Lua:

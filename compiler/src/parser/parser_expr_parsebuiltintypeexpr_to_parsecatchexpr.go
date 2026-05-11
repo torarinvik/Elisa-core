@@ -151,6 +151,9 @@ func (p *Parser) parseProjectionQueryExpr(projection ast.Expr) ast.Expr {
 func (p *Parser) parseWhereViewExpr(source ast.Expr) ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("where")
+	if p.peekWhereViewPatternFilter() {
+		return p.parseWherePatternViewExpr(source, pos)
+	}
 	binderPos := p.cur().Pos
 	binders := make([]string, 0, 2)
 	binders = append(binders, p.expect(lexer.TOKEN_IDENT).Text)
@@ -175,6 +178,83 @@ func (p *Parser) parseWhereViewExpr(source ast.Expr) ast.Expr {
 		Position: pos,
 		Func:     &ast.Ident{Position: pos, Name: "where"},
 		Args:     []ast.Expr{source, predicate},
+	}
+}
+
+func (p *Parser) parseWherePatternViewExpr(source ast.Expr, pos lexer.Pos) ast.Expr {
+	pattern := p.parseMatchPattern()
+	target := matchPatternAsIsTargetExpr(pattern)
+	if target == nil {
+		p.errorAt(pattern.Pos(), "expression where pattern filter expects a variant or struct pattern")
+		target = &ast.TypeExprExpr{Position: pattern.Pos(), Type: &ast.NamedType{Position: pattern.Pos(), Name: "<error>"}}
+	}
+	item := &ast.Ident{Position: pattern.Pos(), Name: "__where_item"}
+	condition := ast.Expr(&ast.BinaryExpr{Position: pattern.Pos(), Op: lexer.TOKEN_IS, Left: item, Right: target})
+	if p.match(lexer.TOKEN_COLON) {
+		filter := p.parseExpr()
+		condition = &ast.MatchExpr{
+			Position: pattern.Pos(),
+			Value:    &ast.Ident{Position: pattern.Pos(), Name: "__where_item"},
+			Arms: []ast.MatchArm{
+				{Position: pattern.Pos(), Pattern: pattern, Body: []ast.Stmt{&ast.ExprStmt{Position: filter.Pos(), Expr: filter}}},
+				{Position: pattern.Pos(), Pattern: &ast.MatchWildcardPattern{Position: pattern.Pos()}, Body: []ast.Stmt{&ast.ExprStmt{Position: pattern.Pos(), Expr: &ast.BoolLit{Position: pattern.Pos(), Value: false}}}},
+			},
+		}
+	}
+	predicate := &ast.LambdaExpr{
+		Position:            pattern.Pos(),
+		Keyword:             "lambda",
+		UsesShorthandParams: true,
+		Params:              []ast.ParamDecl{{Position: pattern.Pos(), Name: "__where_item"}},
+		BodyExpr:            condition,
+	}
+	return &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.Ident{Position: pos, Name: "where"},
+		Args:     []ast.Expr{source, predicate},
+	}
+}
+
+func (p *Parser) peekWhereViewPatternFilter() bool {
+	if p.peek() != lexer.TOKEN_IDENT {
+		return false
+	}
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos+1].Kind
+	if next == lexer.TOKEN_LPAREN || next == lexer.TOKEN_LBRACE {
+		return forWhereIdentLooksLikePatternType(p.cur().Text)
+	}
+	if next != lexer.TOKEN_DOT {
+		return false
+	}
+	index := p.pos + 1
+	for index+1 < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_DOT && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
+		index += 2
+	}
+	if index >= len(p.tokens) || !forWhereIdentLooksLikePatternType(p.cur().Text) {
+		return false
+	}
+	if index >= len(p.tokens) {
+		return true
+	}
+	switch p.tokens[index].Kind {
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_COLON, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_COMMA, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+		return true
+	default:
+		return false
+	}
+}
+
+func matchPatternAsIsTargetExpr(pattern ast.MatchPattern) ast.Expr {
+	switch n := pattern.(type) {
+	case *ast.MatchVariantPattern:
+		return &ast.VariantTestExpr{Position: n.Position, Pattern: n}
+	case *ast.MatchStructPattern:
+		return &ast.StructTestExpr{Position: n.Position, Pattern: n}
+	default:
+		return nil
 	}
 }
 
