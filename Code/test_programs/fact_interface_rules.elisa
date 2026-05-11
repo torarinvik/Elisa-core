@@ -1,7 +1,7 @@
 struct FactBuilderTag:
     value: int
 
-static interface FactBuilder:
+protocol FactBuilder:
     type State
     def state() -> State
 

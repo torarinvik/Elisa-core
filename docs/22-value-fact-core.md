@@ -32,7 +32,7 @@ Every value can carry facts from several orthogonal classes:
 | Effects | ambient authority required | `effects[...]`, `can ...:` |
 | Error path | alternate failure/control exits | `raise`, `try`, nullable `else` recovery |
 | Optimization | readonly, exclusive, contiguous, exact extent | dense loops, frozen scans, parallel legality |
-| Interface | generic/static-interface conformance | `def f[T: Builder]`, static interfaces |
+| Interface | generic protocol conformance | `def f[T: Builder]`, `protocol Builder` |
 
 These facts do not all need to be written by the programmer. The important rule
 is that they are all part of one model, not separate mini-languages.

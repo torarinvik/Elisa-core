@@ -1,18 +1,18 @@
-# Static interfaces, extension methods, and UFCS
+# Protocols, extension methods, and UFCS
 
 This note documents the current implemented surface for compile-time interfaces and receiver-style dispatch.
 
 Like `18-current-surface-ergonomics.md`, this is a practical description of the language as accepted by the current compiler, not a forward-looking proposal.
 
-## Static interfaces and associated types
+## Protocols and associated types
 
-Static interfaces describe compile-time capabilities and associated types.
+Protocols describe compile-time capabilities and associated types.
 
 ```elisa
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type Node
     def make(value: int) -> Node
 
