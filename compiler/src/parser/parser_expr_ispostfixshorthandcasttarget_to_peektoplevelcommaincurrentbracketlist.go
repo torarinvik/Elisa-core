@@ -49,6 +49,24 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	}
 	return typ
 }
+func (p *Parser) parseTypeExprWithoutErrorUnionSuffix() ast.TypeExpr {
+	if p.match(lexer.TOKEN_MUTABLE) {
+		elem := p.parseTypeExprWithoutErrorUnionSuffix()
+		return &ast.MutableType{Position: elem.Pos(), Elem: elem}
+	}
+	if p.match(lexer.TOKEN_TAIL) {
+		elem := p.parseTypeExprWithoutErrorUnionSuffix()
+		return &ast.TailType{Position: elem.Pos(), Elem: elem}
+	}
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "func" {
+		return p.parseFuncTypeExpr()
+	}
+	if p.peek() == lexer.TOKEN_LPAREN {
+		return p.parseTupleTypeExpr()
+	}
+	storage, explicit, label, region, storageParam := p.parseRefStorageQualifier()
+	return p.parseBaseType(storage, explicit, label, region, storageParam)
+}
 func (p *Parser) parseTupleTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_LPAREN)

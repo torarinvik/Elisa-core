@@ -677,6 +677,28 @@ func TestParseIsConditionWithAlternativeTargets(t *testing.T) {
 		}
 	}
 }
+func TestParseIsConditionWithQualifiedAlternativeTargets(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Bool(value: bool)\n    Char(value: i64)\n\ndef is_scalar(value: Expr) -> bool:\n    return value is Expr.Int | Expr.Bool | Expr.Char\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || cond.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected is-expression return, got %T %#v", ret.Value, ret.Value)
+	}
+	alts, ok := cond.Right.(*ast.IsPatternExpr)
+	if !ok || len(alts.Targets) != 3 {
+		t.Fatalf("expected three qualified alternatives, got %T %#v", cond.Right, cond.Right)
+	}
+}
 func TestParseStructFieldMatchPattern(t *testing.T) {
 	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    INTEGER = 1\n\nstruct Span:\n    start: int\n    finish: int\n\nstruct Token:\n    kind: Tok\n    span: Span\n    value: int\n\ndef score(tok: Token) -> int:\n    match tok:\n        Token(kind: .INTEGER, span: Span(start: start), value: value):\n            return start + value\n        _:\n            return 0\n")
 	if len(errs) != 0 {

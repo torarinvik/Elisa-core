@@ -450,7 +450,7 @@ func (p *Parser) parseSingleIsTestTargetExprWithoutAlias() ast.Expr {
 		p.expect(lexer.TOKEN_RPAREN)
 		return &ast.ParenExpr{Position: pos, Inner: inner}
 	}
-	target := p.parseTypeExpr()
+	target := p.parseTypeExprWithoutErrorUnionSuffix()
 	return &ast.TypeExprExpr{Position: target.Pos(), Type: target}
 }
 func (p *Parser) peekQualifiedVariantTargetWithPayload() bool {
