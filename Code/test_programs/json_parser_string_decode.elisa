@@ -61,7 +61,7 @@ def json_decode_escape_codepoint(cursor: mutable JsonCursor&) -> i64:
         return -1
 
     esc: i64 = json_advance_char(cursor)
-    if esc == JSON_CH_DQUOTE or esc == JSON_CH_BSLASH or esc == JSON_CH_SLASH:
+    if esc in {JSON_CH_DQUOTE, JSON_CH_BSLASH, JSON_CH_SLASH}:
         return esc
     if esc == JSON_CH_b:
         return 8
@@ -101,7 +101,7 @@ def json_decode_escape_codepoint_from_source(source: u8&, source_end: usize, pos
     esc: i64 = source[pos[0]].i64()
     pos[0] <- pos[0] + 1
 
-    if esc == JSON_CH_DQUOTE or esc == JSON_CH_BSLASH or esc == JSON_CH_SLASH:
+    if esc in {JSON_CH_DQUOTE, JSON_CH_BSLASH, JSON_CH_SLASH}:
         return esc
     if esc == JSON_CH_b:
         return 8

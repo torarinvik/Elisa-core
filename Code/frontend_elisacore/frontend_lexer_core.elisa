@@ -130,7 +130,7 @@ def frontend_valid_suffix(view: sview) -> bool:
 def frontend_try_read_type_suffix(lexer: mutable FrontendLexer&) -> sview:
     start: usize = lexer.pos
     first: i64 = frontend_cur_char(lexer)
-    if first != FRONTEND_CH_u and first != FRONTEND_CH_i and first != FRONTEND_CH_f:
+    if not (first in {FRONTEND_CH_u, FRONTEND_CH_i, FRONTEND_CH_f}):
         return frontend_empty_view()
 
     probe: mutable usize = start + 1

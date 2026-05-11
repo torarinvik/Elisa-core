@@ -31,7 +31,7 @@ def json_number_has_fraction_or_exponent(source: u8&, source_offset: usize, sour
     end: usize = source_offset + source_len
     while pos < end:
         ch: i64 = source[pos].i64()
-        if ch == JSON_CH_DOT or ch == JSON_CH_E or ch == JSON_CH_e:
+        if ch in {JSON_CH_DOT, JSON_CH_E, JSON_CH_e}:
             return true
         pos <- pos + 1
     return false

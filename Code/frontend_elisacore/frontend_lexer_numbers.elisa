@@ -8,7 +8,7 @@ def frontend_read_number(lexer: mutable FrontendLexer&) -> FrontendToken:
     pos: FrontendPos = frontend_cur_pos(lexer)
     start: usize = lexer.pos
 
-    if frontend_cur_char(lexer) == 48 and (frontend_peek_char_at(lexer, 1) == FRONTEND_CH_x or frontend_peek_char_at(lexer, 1) == FRONTEND_CH_X):
+    if frontend_cur_char(lexer) == 48 and frontend_peek_char_at(lexer, 1) in {FRONTEND_CH_x, FRONTEND_CH_X}:
         _ = frontend_advance_char(lexer)
         _ = frontend_advance_char(lexer)
         while not frontend_is_eof(lexer) and frontend_is_hex_digit(frontend_cur_char(lexer)):
@@ -27,15 +27,15 @@ def frontend_read_number(lexer: mutable FrontendLexer&) -> FrontendToken:
         while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
             _ = frontend_advance_char(lexer)
 
-    if not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_e or frontend_cur_char(lexer) == FRONTEND_CH_E):
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) in {FRONTEND_CH_e, FRONTEND_CH_E}:
         exp_next: i64 = frontend_peek_char_at(lexer, 1)
         exp_valid: mutable bool = frontend_is_digit(exp_next)
-        if exp_next == FRONTEND_CH_PLUS or exp_next == FRONTEND_CH_MINUS:
+        if exp_next in {FRONTEND_CH_PLUS, FRONTEND_CH_MINUS}:
             exp_valid <- frontend_is_digit(frontend_peek_char_at(lexer, 2))
         if exp_valid:
             is_float <- true
             _ = frontend_advance_char(lexer)
-            if not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_PLUS or frontend_cur_char(lexer) == FRONTEND_CH_MINUS):
+            if not frontend_is_eof(lexer) and frontend_cur_char(lexer) in {FRONTEND_CH_PLUS, FRONTEND_CH_MINUS}:
                 _ = frontend_advance_char(lexer)
             while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
                 _ = frontend_advance_char(lexer)
@@ -47,7 +47,7 @@ def frontend_read_number(lexer: mutable FrontendLexer&) -> FrontendToken:
     return frontend_make_token(FrontendTokenKind.IntLit, pos, text, suffix)
 @inline(always)
 def frontend_read_number_kind(lexer: mutable FrontendLexer&) -> FrontendTokenKind:
-    if frontend_cur_char(lexer) == 48 and (frontend_peek_char_at(lexer, 1) == FRONTEND_CH_x or frontend_peek_char_at(lexer, 1) == FRONTEND_CH_X):
+    if frontend_cur_char(lexer) == 48 and frontend_peek_char_at(lexer, 1) in {FRONTEND_CH_x, FRONTEND_CH_X}:
         _ = frontend_advance_char(lexer)
         _ = frontend_advance_char(lexer)
         while not frontend_is_eof(lexer) and frontend_is_hex_digit(frontend_cur_char(lexer)):
@@ -65,15 +65,15 @@ def frontend_read_number_kind(lexer: mutable FrontendLexer&) -> FrontendTokenKin
         while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
             _ = frontend_advance_char(lexer)
 
-    if not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_e or frontend_cur_char(lexer) == FRONTEND_CH_E):
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) in {FRONTEND_CH_e, FRONTEND_CH_E}:
         exp_next: i64 = frontend_peek_char_at(lexer, 1)
         exp_valid: mutable bool = frontend_is_digit(exp_next)
-        if exp_next == FRONTEND_CH_PLUS or exp_next == FRONTEND_CH_MINUS:
+        if exp_next in {FRONTEND_CH_PLUS, FRONTEND_CH_MINUS}:
             exp_valid <- frontend_is_digit(frontend_peek_char_at(lexer, 2))
         if exp_valid:
             is_float <- true
             _ = frontend_advance_char(lexer)
-            if not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_PLUS or frontend_cur_char(lexer) == FRONTEND_CH_MINUS):
+            if not frontend_is_eof(lexer) and frontend_cur_char(lexer) in {FRONTEND_CH_PLUS, FRONTEND_CH_MINUS}:
                 _ = frontend_advance_char(lexer)
             while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
                 _ = frontend_advance_char(lexer)

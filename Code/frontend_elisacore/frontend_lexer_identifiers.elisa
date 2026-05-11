@@ -87,4 +87,4 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
     return FrontendTokenKind.Ident
 @inline(always)
 def frontend_maybe_keyword_first_char(ch: i64) -> bool:
-    return ch == 97 or ch == 99 or ch == 100 or ch == 101 or ch == 102 or ch == 103 or ch == 104 or ch == 105 or ch == 109 or ch == 110 or ch == 111 or ch == 112 or ch == 114 or ch == 115 or ch == 116 or ch == 119 or ch == 122
+    return ch in {97, 99, 100, 101, 102, 103, 104, 105, 109, 110, 111, 112, 114, 115, 116, 119, 122}

@@ -89,7 +89,7 @@ def json_ast_number_kind(source: u8&, node: JsonNode, store: JsonNode.Store[Loca
     return json_ast_number_value(source, node, store).kind
 def json_ast_number_is_integral(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
     kind: JsonNumberKind = json_ast_number_kind(source, node, store)
-    return kind == JsonNumberKind.UNSIGNED or kind == JsonNumberKind.SIGNED
+    return kind in {JsonNumberKind.UNSIGNED, JsonNumberKind.SIGNED}
 def json_ast_number_u64_value(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> u64 error[JsonNumberAccessError]:
     value: JsonNumberValue = json_ast_number_value(source, node, store)
     if value.kind == JsonNumberKind.UNSIGNED:

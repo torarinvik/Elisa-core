@@ -3,7 +3,7 @@ def json_skip_ws(cursor: mutable JsonCursor&):
     scanning: mutable bool = true
     while scanning:
         ch: i64 = json_cur_char(cursor)
-        if ch == JSON_CH_SPACE or ch == JSON_CH_TAB or ch == JSON_CH_NL or ch == JSON_CH_CR:
+        if ch in {JSON_CH_SPACE, JSON_CH_TAB, JSON_CH_NL, JSON_CH_CR}:
             _ = json_advance_char(cursor)
         else:
             scanning <- false
@@ -69,10 +69,10 @@ def json_parse_number_lexeme(cursor: mutable JsonCursor&) -> JsonLexemeResult:
             _ = json_advance_char(cursor)
 
     ch <- json_cur_char(cursor)
-    if ch == JSON_CH_e or ch == JSON_CH_E:
+    if ch in {JSON_CH_e, JSON_CH_E}:
         _ = json_advance_char(cursor)
         ch <- json_cur_char(cursor)
-        if ch == JSON_CH_PLUS or ch == JSON_CH_MINUS:
+        if ch in {JSON_CH_PLUS, JSON_CH_MINUS}:
             _ = json_advance_char(cursor)
         if not json_is_digit(json_cur_char(cursor)):
             return json_invalid_lexeme()

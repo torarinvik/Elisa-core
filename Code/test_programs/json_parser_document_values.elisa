@@ -242,6 +242,6 @@ def json_parser_value_number_data_impl(value: JsonParserValue&, out: mutable Jso
     out[0].kind <- kind_code
     out[0].unsigned_value <- number_value.unsigned_value
     out[0].signed_value <- number_value.signed_value
-    if number_value.kind == JsonNumberKind.NON_INTEGRAL or number_value.kind == JsonNumberKind.OUT_OF_RANGE:
+    if number_value.kind in {JsonNumberKind.NON_INTEGRAL, JsonNumberKind.OUT_OF_RANGE}:
         out[0].float_value <- try json_ast_number_f64_value_with_len(json_parser_document_source(impl), json_parser_document_source_len(impl), node, store) else 0.0
     return 1
