@@ -248,10 +248,22 @@ func (a *Analyzer) analyzeMembershipRangeExpr(expr *ast.MembershipRangeExpr, lef
 	if expr == nil {
 		return invalidType
 	}
+	if ce, ok := left.(*ConstEnumType); ok && ce != nil {
+		if ident, ok := expr.Start.(*ast.Ident); ok {
+			if _, ok := ce.Member(ident.Name); ok {
+				expr.Start = &ast.ShorthandMemberExpr{Position: ident.Position, Parts: []string{ident.Name}}
+			}
+		}
+		if ident, ok := expr.End.(*ast.Ident); ok {
+			if _, ok := ce.Member(ident.Name); ok {
+				expr.End = &ast.ShorthandMemberExpr{Position: ident.Position, Parts: []string{ident.Name}}
+			}
+		}
+	}
 	startType := a.analyzeValueExpr(expr.Start, left)
 	endType := a.analyzeValueExpr(expr.End, left)
-	if !IsIntegralStorageType(left) || !IsIntegralStorageType(startType) || !IsIntegralStorageType(endType) {
-		a.errorf(expr.Pos(), "membership ranges require integer-compatible bounds compatible with %s", left)
+	if !isMembershipRangeBoundType(left) || !isMembershipRangeBoundType(startType) || !isMembershipRangeBoundType(endType) {
+		a.errorf(expr.Pos(), "membership ranges require integer- or const-enum-compatible bounds compatible with %s", left)
 		return invalidType
 	}
 	if !typesComparableForEquality(left, startType) {
@@ -268,6 +280,19 @@ func (a *Analyzer) analyzeMembershipRangeExpr(expr *ast.MembershipRangeExpr, lef
 	}
 	return merged
 }
+func isMembershipRangeBoundType(t Type) bool {
+	if t == nil {
+		return false
+	}
+	if IsIntegralStorageType(t) {
+		return true
+	}
+	if ce, ok := t.(*ConstEnumType); ok && ce != nil {
+		return IsIntegralStorageType(ce.Storage)
+	}
+	return false
+}
+
 func (a *Analyzer) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr, bool) {
 	if list, ok := expr.(*ast.ListLitExpr); ok {
 		return list, true

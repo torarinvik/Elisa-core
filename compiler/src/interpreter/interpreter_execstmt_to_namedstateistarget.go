@@ -6,6 +6,7 @@ import (
 	"elisacore/src/semantic"
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -191,6 +192,18 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		return i.lookupValue(frame, n.Name)
+	case *ast.ShorthandMemberExpr:
+		if i != nil && i.result != nil && i.result.ExprTypes != nil {
+			if t, ok := i.result.ExprTypes[n]; ok {
+				if ce, ok := t.(*semantic.ConstEnumType); ok && ce != nil {
+					name := strings.Join(n.Parts, ".")
+					if member, ok := ce.Member(name); ok && member != nil {
+						return IntValue(member.Value), nil
+					}
+				}
+			}
+		}
+		return VoidValue(), fmt.Errorf("shorthand member %q has no resolved const enum type", strings.Join(n.Parts, "."))
 	case *ast.IntLit:
 		return parseIntLiteral(n)
 	case *ast.FloatLit:

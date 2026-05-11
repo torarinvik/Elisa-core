@@ -97,6 +97,30 @@ def keep(kind: TokenKind) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersBraceMembershipRangeConstEnumBounds(t *testing.T) {
+	src := `const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+    NUMBER
+    STRING
+
+def keep(kind: TokenKind) -> bool:
+    return kind in {.IF..IDENT, .NUMBER..<STRING}
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_brace_membership_range_enum.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @keep(i32 ", "membership.range.lower", "membership.range.upper", "membership.range"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected enum membership range lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTokenSetMembershipExpr(t *testing.T) {
 	src := `const enum TokenKind of u32:
     IF

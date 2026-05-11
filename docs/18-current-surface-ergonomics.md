@@ -183,6 +183,23 @@ def starts_expr(kind: TokenKind) -> bool:
 
 Use the fully qualified form when the expected enum type is not obvious from context.
 
+Range bounds may use const enum members too. When the left-hand side is a const enum, both range bounds may be written as shorthand (`.IF`) or as bare member names. The lowering compares the underlying integer storage, so adjacent enum members form an inclusive ordinal range.
+
+```elisa
+const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+    NUMBER
+    STRING
+
+def is_keyword(kind: TokenKind) -> bool:
+    return kind in {.IF..LET}
+
+def is_atom(kind: TokenKind) -> bool:
+    return kind in {.IDENT..NUMBER, .STRING}
+```
+
 ## Negated Type And Variant Tests
 
 Use `is not` for direct negated type, state, variant, and structural pattern tests. It is equivalent to `not (value is Pattern)`, but reads better in guard and early-return code.

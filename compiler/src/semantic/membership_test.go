@@ -126,13 +126,47 @@ func TestAnalyzeBraceMembershipRangeAcceptsCharBounds(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBraceMembershipRangeAcceptsConstEnumBounds(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_range_enum.elisa", `const enum TokenKind of u32:
+    IF
+    LET
+    IDENT
+    NUMBER
+    STRING
+
+def keep(kind: TokenKind) -> bool:
+    return kind in {.IF..LET, .NUMBER..<STRING}
+`)
+
+	decl := result.File.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	inExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected membership binary expr, got %T", ret.Value)
+	}
+	if got := result.ExprTypes[inExpr].String(); got != "bool" {
+		t.Fatalf("expected membership expr type bool, got %s", got)
+	}
+	list, ok := inExpr.Right.(*ast.ListLitExpr)
+	if !ok || !list.Brace || len(list.Elems) != 2 {
+		t.Fatalf("expected brace membership range literal, got %T %#v", inExpr.Right, inExpr.Right)
+	}
+	rangeExpr, ok := list.Elems[0].(*ast.MembershipRangeExpr)
+	if !ok {
+		t.Fatalf("expected first candidate range, got %T", list.Elems[0])
+	}
+	if got := result.ExprTypes[rangeExpr.Start].String(); got != "TokenKind" {
+		t.Fatalf("expected range start type TokenKind, got %s", got)
+	}
+}
+
 func TestAnalyzeBraceMembershipRangeRejectsNonIntegralBounds(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "brace_membership_range_float.elisa", `def keep(value: f64) -> bool:
     return value in {1.0..3.0}
 `)
 
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "membership ranges require integer-compatible bounds") {
+	if !strings.Contains(all, "membership ranges require integer- or const-enum-compatible bounds") {
 		t.Fatalf("expected membership range diagnostic, got:\n%s", all)
 	}
 }
