@@ -91,6 +91,38 @@ func TestParseNotInMembershipExpr(t *testing.T) {
 	}
 }
 
+func TestParseBraceMembershipRangeExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: i64) -> bool:\n    return value in {1..3, 8..<10}\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	inExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || inExpr.Op != lexer.TOKEN_IN {
+		t.Fatalf("expected membership expr, got %#v", ret.Value)
+	}
+	list, ok := inExpr.Right.(*ast.ListLitExpr)
+	if !ok || len(list.Elems) != 2 || !list.Brace {
+		t.Fatalf("expected two-element brace membership literal, got %#v", inExpr.Right)
+	}
+	first, ok := list.Elems[0].(*ast.MembershipRangeExpr)
+	if !ok || first.Op != lexer.TOKEN_RANGE {
+		t.Fatalf("expected inclusive membership range, got %#v", list.Elems[0])
+	}
+	second, ok := list.Elems[1].(*ast.MembershipRangeExpr)
+	if !ok || second.Op != lexer.TOKEN_RANGE_LT {
+		t.Fatalf("expected exclusive membership range, got %#v", list.Elems[1])
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "value in {1 .. 3, 8 ..< 10}") {
+		t.Fatalf("expected membership ranges to unparse, got:\n%s", formatted)
+	}
+}
+
 func TestParseBraceMembershipShorthandMembers(t *testing.T) {
 	file, errs := parseSourceFile(t, "const enum TokenKind of u32:\n    IF\n    LET\n    IDENT\n\ndef keep(kind: TokenKind) -> bool:\n    return kind in {.IF, .LET}\n")
 	if len(errs) != 0 {

@@ -184,6 +184,16 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 				return ConstValue{}, false
 			}
 			for _, elem := range list.Elems {
+				if rangeExpr, ok := elem.(*ast.MembershipRangeExpr); ok {
+					matched, ok := a.evalConstMembershipRange(left, rangeExpr)
+					if !ok {
+						return ConstValue{}, false
+					}
+					if matched.Bool {
+						return matched, true
+					}
+					continue
+				}
 				candidate, ok := a.evalConstExpr(elem)
 				if !ok {
 					return ConstValue{}, false
@@ -571,6 +581,30 @@ func unsignedConstCastMax(name string) (uint64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func (a *Analyzer) evalConstMembershipRange(value ConstValue, expr *ast.MembershipRangeExpr) (ConstValue, bool) {
+	if expr == nil {
+		return ConstValue{}, false
+	}
+	start, ok := a.evalConstExpr(expr.Start)
+	if !ok {
+		return ConstValue{}, false
+	}
+	end, ok := a.evalConstExpr(expr.End)
+	if !ok {
+		return ConstValue{}, false
+	}
+	if value.Kind != ConstInt || start.Kind != ConstInt || end.Kind != ConstInt {
+		return ConstValue{}, false
+	}
+	inRange := value.Int >= start.Int
+	if expr.Op == lexer.TOKEN_RANGE_LT {
+		inRange = inRange && value.Int < end.Int
+	} else {
+		inRange = inRange && value.Int <= end.Int
+	}
+	return ConstValue{Kind: ConstBool, Bool: inRange}, true
 }
 
 func usesInt64BackedUnsignedConstRange(name string) bool {

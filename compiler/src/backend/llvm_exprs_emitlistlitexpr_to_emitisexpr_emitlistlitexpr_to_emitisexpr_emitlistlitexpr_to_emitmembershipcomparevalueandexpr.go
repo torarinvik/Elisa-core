@@ -596,6 +596,9 @@ func (s *functionState) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr
 	return decl.Value, true
 }
 func (s *functionState) emitMembershipCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rightExpr ast.Expr) (C.LLVMValueRef, error) {
+	if rangeExpr, ok := rightExpr.(*ast.MembershipRangeExpr); ok {
+		return s.emitMembershipRangeCompareValueAndExpr(leftValue, leftType, rangeExpr)
+	}
 	rightType := s.exprType(rightExpr)
 	resultType := s.g.result.NamedTypes["bool"]
 	if helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(leftType, rightType); ok {
@@ -624,4 +627,41 @@ func (s *functionState) emitMembershipCompareValueAndExpr(leftValue C.LLVMValueR
 		return C.LLVMBuildFCmp(s.builder, C.LLVMRealOEQ, coercedLeft, rightValue, cStringFree("membership.eq")), nil
 	}
 	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), coercedLeft, rightValue, cStringFree("membership.eq")), nil
+}
+
+func (s *functionState) emitMembershipRangeCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rangeExpr *ast.MembershipRangeExpr) (C.LLVMValueRef, error) {
+	if rangeExpr == nil {
+		return nil, fmt.Errorf("membership range expression is nil")
+	}
+	startType := s.exprType(rangeExpr.Start)
+	endType := s.exprType(rangeExpr.End)
+	operandType := s.binaryOperandType(lexer.TOKEN_LTEQ, leftType, startType)
+	operandType = s.binaryOperandType(lexer.TOKEN_LTEQ, operandType, endType)
+	coercedLeft, err := s.coerceValue(leftValue, leftType, operandType)
+	if err != nil {
+		return nil, err
+	}
+	startValue, _, err := s.emitExpr(rangeExpr.Start, operandType)
+	if err != nil {
+		return nil, err
+	}
+	endValue, _, err := s.emitExpr(rangeExpr.End, operandType)
+	if err != nil {
+		return nil, err
+	}
+	lowerPred, err := llvmIntPredicate(lexer.TOKEN_GTEQ, operandType)
+	if err != nil {
+		return nil, err
+	}
+	upperOp := lexer.TOKEN_LTEQ
+	if rangeExpr.Op == lexer.TOKEN_RANGE_LT {
+		upperOp = lexer.TOKEN_LT
+	}
+	upperPred, err := llvmIntPredicate(upperOp, operandType)
+	if err != nil {
+		return nil, err
+	}
+	lower := C.LLVMBuildICmp(s.builder, lowerPred, coercedLeft, startValue, cStringFree("membership.range.lower"))
+	upper := C.LLVMBuildICmp(s.builder, upperPred, coercedLeft, endValue, cStringFree("membership.range.upper"))
+	return C.LLVMBuildAnd(s.builder, lower, upper, cStringFree("membership.range")), nil
 }

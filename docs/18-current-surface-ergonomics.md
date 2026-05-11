@@ -159,6 +159,16 @@ def is_large(value: i64) -> bool:
     return value not in {1, 2, 3}
 ```
 
+Brace candidate sets also support integer-compatible ranges. `a..b` includes the upper bound, while `a..<b` excludes it.
+
+```elisa
+def is_digit(ch: i64) -> bool:
+    return ch in {'0'..'9'}
+
+def is_small_or_byte(value: i64) -> bool:
+    return value in {0..<4, 16..255}
+```
+
 When the left-hand side has a const enum type, candidates may use shorthand enum members. The shorthand is resolved from the left-hand side type, so repeated enum qualifiers are unnecessary.
 
 ```elisa

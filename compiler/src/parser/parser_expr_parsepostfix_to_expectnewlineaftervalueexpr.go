@@ -281,12 +281,12 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		elems := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
 		if p.peek() != lexer.TOKEN_RBRACE {
-			elems = append(elems, p.parseExpr())
+			elems = append(elems, p.parseBraceMembershipCandidateExpr())
 			for p.match(lexer.TOKEN_COMMA) {
 				if p.peek() == lexer.TOKEN_RBRACE {
 					break
 				}
-				elems = append(elems, p.parseExpr())
+				elems = append(elems, p.parseBraceMembershipCandidateExpr())
 			}
 		}
 		p.expect(lexer.TOKEN_RBRACE)
@@ -431,6 +431,16 @@ func (p *Parser) parsePrimary() ast.Expr {
 		tok := p.advance()
 		return &ast.Ident{Position: tok.Pos, Name: "<error>"}
 	}
+}
+
+func (p *Parser) parseBraceMembershipCandidateExpr() ast.Expr {
+	start := p.parseExpr()
+	if p.peek() != lexer.TOKEN_RANGE && p.peek() != lexer.TOKEN_RANGE_LT {
+		return start
+	}
+	op := p.advance()
+	end := p.parseExpr()
+	return &ast.MembershipRangeExpr{Position: op.Pos, Start: start, End: end, Op: op.Kind}
 }
 func (p *Parser) parseExprBlockValue(pos lexer.Pos, flattenSingle bool) ast.Expr {
 	p.expect(lexer.TOKEN_COLON)

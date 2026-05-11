@@ -70,6 +70,9 @@ func (n *ShorthandMemberExpr) Pos() lexer.Pos {
 func (n *IndexExpr) Pos() lexer.Pos   { return n.Position }
 func (n *SliceExpr) Pos() lexer.Pos   { return n.Position }
 func (n *ListLitExpr) Pos() lexer.Pos { return n.Position }
+func (n *MembershipRangeExpr) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *ListComprehensionExpr) Pos() lexer.Pos {
 	return n.Position
 }
@@ -270,6 +273,7 @@ func (*ShorthandMemberExpr) nodeTag()               {}
 func (*IndexExpr) nodeTag()                         {}
 func (*SliceExpr) nodeTag()                         {}
 func (*ListLitExpr) nodeTag()                       {}
+func (*MembershipRangeExpr) nodeTag()               {}
 func (*ListComprehensionExpr) nodeTag()             {}
 func (*QueryExpr) nodeTag()                         {}
 func (*CastExpr) nodeTag()                          {}
@@ -474,6 +478,7 @@ func (*MoveBindStructPattern) moveBindPatternTag()  {}
 func (*MoveBindTuplePattern) moveBindPatternTag()   {}
 func (*MoveBindVariantPattern) moveBindPatternTag() {}
 func (*ListLitExpr) exprTag()                       {}
+func (*MembershipRangeExpr) exprTag()               {}
 func (*CastExpr) exprTag()                          {}
 func (*CascadeExpr) exprTag()                       {}
 func (*LambdaExpr) exprTag()                        {}

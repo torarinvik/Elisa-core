@@ -163,6 +163,8 @@ func formatExpr(expr ast.Expr) string {
 			line += " in " + formatExpr(n.Owner)
 		}
 		return line
+	case *ast.MembershipRangeExpr:
+		return formatExpr(n.Start) + " " + lexer.TokenName(n.Op) + " " + formatExpr(n.End)
 	case *ast.ListComprehensionExpr:
 		line := "[" + formatExpr(n.Value) + " for " + n.Name + " in " + formatExpr(n.Source)
 		if n.RangeEnd != nil {

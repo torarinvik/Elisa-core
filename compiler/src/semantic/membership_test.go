@@ -87,6 +87,56 @@ func TestAnalyzeNotInMembershipExprUsesBool(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBraceMembershipRangeExprUsesBool(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_range.elisa", `def keep(value: i64) -> bool:
+    return value in {1..3, 8..<10}
+`)
+
+	decl := result.File.Decls[0].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	inExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected membership binary expr, got %T", ret.Value)
+	}
+	if got := result.ExprTypes[inExpr].String(); got != "bool" {
+		t.Fatalf("expected membership expr type bool, got %s", got)
+	}
+	list, ok := inExpr.Right.(*ast.ListLitExpr)
+	if !ok || !list.Brace || len(list.Elems) != 2 {
+		t.Fatalf("expected brace membership range literal, got %T %#v", inExpr.Right, inExpr.Right)
+	}
+	if _, ok := list.Elems[0].(*ast.MembershipRangeExpr); !ok {
+		t.Fatalf("expected first candidate range, got %T", list.Elems[0])
+	}
+}
+
+func TestAnalyzeBraceMembershipRangeAcceptsCharBounds(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_range_char.elisa", `def keep(value: char) -> bool:
+    return value in {'0'..'9'}
+`)
+
+	decl := result.File.Decls[0].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	inExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected membership binary expr, got %T", ret.Value)
+	}
+	if got := result.ExprTypes[inExpr].String(); got != "bool" {
+		t.Fatalf("expected membership expr type bool, got %s", got)
+	}
+}
+
+func TestAnalyzeBraceMembershipRangeRejectsNonIntegralBounds(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "brace_membership_range_float.elisa", `def keep(value: f64) -> bool:
+    return value in {1.0..3.0}
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "membership ranges require integer-compatible bounds") {
+		t.Fatalf("expected membership range diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeBraceMembershipInfersShorthandMembers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_shorthand.elisa", `const enum TokenKind of u32:
     IF

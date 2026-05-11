@@ -512,6 +512,12 @@ type ListLitExpr struct {
 	Brace    bool
 	Owner    Expr
 }
+type MembershipRangeExpr struct {
+	Position lexer.Pos
+	Start    Expr
+	End      Expr
+	Op       lexer.TokenKind
+}
 type ListComprehensionExpr struct {
 	Position  lexer.Pos
 	Value     Expr

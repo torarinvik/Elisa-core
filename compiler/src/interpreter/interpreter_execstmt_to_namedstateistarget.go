@@ -459,6 +459,16 @@ func (i *Interpreter) evalMembershipExpr(frame *frame, expr *ast.BinaryExpr) (Va
 		return VoidValue(), err
 	}
 	for _, elem := range list.Elems {
+		if rangeExpr, ok := elem.(*ast.MembershipRangeExpr); ok {
+			matched, err := i.evalMembershipRangeExpr(frame, leftValue, rangeExpr)
+			if err != nil {
+				return VoidValue(), err
+			}
+			if matched {
+				return BoolValue(true), nil
+			}
+			continue
+		}
 		candidate, err := i.evalExpr(frame, elem)
 		if err != nil {
 			return VoidValue(), err
@@ -469,6 +479,31 @@ func (i *Interpreter) evalMembershipExpr(frame *frame, expr *ast.BinaryExpr) (Va
 	}
 	return BoolValue(false), nil
 }
+
+func (i *Interpreter) evalMembershipRangeExpr(frame *frame, value Value, expr *ast.MembershipRangeExpr) (bool, error) {
+	if expr == nil {
+		return false, fmt.Errorf("membership range expression is nil")
+	}
+	start, err := i.evalExpr(frame, expr.Start)
+	if err != nil {
+		return false, err
+	}
+	end, err := i.evalExpr(frame, expr.End)
+	if err != nil {
+		return false, err
+	}
+	if value.kind != valueInt || start.kind != valueInt || end.kind != valueInt {
+		return false, fmt.Errorf("membership ranges require integer-compatible values")
+	}
+	if value.int64Val < start.int64Val {
+		return false, nil
+	}
+	if expr.Op == lexer.TOKEN_RANGE_LT {
+		return value.int64Val < end.int64Val, nil
+	}
+	return value.int64Val <= end.int64Val, nil
+}
+
 func flattenInterpreterIsTargets(expr ast.Expr) []ast.Expr {
 	if expr == nil {
 		return nil

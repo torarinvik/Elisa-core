@@ -50,3 +50,18 @@ func TestExecuteNotInMembershipExpr(t *testing.T) {
 		t.Fatalf("expected not-in membership result true, got %s", got)
 	}
 }
+
+func TestExecuteMembershipRangeExpr(t *testing.T) {
+	src := `def run() -> bool:
+    return 9 in {1..3, 8..<10}
+`
+
+	result := parseAndAnalyzeInterpreterTest(t, "interpreter_membership_range.elisa", src)
+	execResult, err := interpreter.Execute(result, interpreter.Options{Entry: "run"})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if got := execResult.Return.String(); got != "true" {
+		t.Fatalf("expected membership range result true, got %s", got)
+	}
+}

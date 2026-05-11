@@ -205,6 +205,21 @@ func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
 			a.errorf(elem.Pos(), "membership candidate lists do not support spread elements")
 			continue
 		}
+		if rangeExpr, ok := elem.(*ast.MembershipRangeExpr); ok {
+			itemType := a.analyzeMembershipRangeExpr(rangeExpr, left)
+			if elemType == nil {
+				elemType = itemType
+				continue
+			}
+			merged := MergeTypes(elemType, itemType)
+			if IsInvalidType(merged) {
+				merged = left
+			}
+			if !IsInvalidType(merged) {
+				elemType = merged
+			}
+			continue
+		}
 		itemType := a.analyzeValueExpr(elem, left)
 		if !typesComparableForEquality(left, itemType) {
 			a.errorf(elem.Pos(), "cannot compare %s against membership candidate %s", left, itemType)
@@ -228,6 +243,30 @@ func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
 	}
 	a.recordAnalyzedExprType(list, &ArrayType{Elem: elemType, Size: strconv.Itoa(len(list.Elems)), HasConstSize: true, ConstSize: int64(len(list.Elems))})
 	return resultType
+}
+func (a *Analyzer) analyzeMembershipRangeExpr(expr *ast.MembershipRangeExpr, left Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	startType := a.analyzeValueExpr(expr.Start, left)
+	endType := a.analyzeValueExpr(expr.End, left)
+	if !IsIntegralStorageType(left) || !IsIntegralStorageType(startType) || !IsIntegralStorageType(endType) {
+		a.errorf(expr.Pos(), "membership ranges require integer-compatible bounds compatible with %s", left)
+		return invalidType
+	}
+	if !typesComparableForEquality(left, startType) {
+		a.errorf(expr.Start.Pos(), "cannot compare %s against membership range start %s", left, startType)
+	}
+	if !typesComparableForEquality(left, endType) {
+		a.errorf(expr.End.Pos(), "cannot compare %s against membership range end %s", left, endType)
+	}
+	a.consumeAffineValueExpr(expr.Start, startType, "move into membership range start")
+	a.consumeAffineValueExpr(expr.End, endType, "move into membership range end")
+	merged := MergeTypes(startType, endType)
+	if IsInvalidType(merged) {
+		return left
+	}
+	return merged
 }
 func (a *Analyzer) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr, bool) {
 	if list, ok := expr.(*ast.ListLitExpr); ok {
