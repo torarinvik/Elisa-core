@@ -6,7 +6,7 @@ include "./heap.elisa"
 const PACKED_STORE_MIN_ROWS_PER_REGION: usize = 64
 @inline(always)
 def packed_store_region_data(r: heap Region&) -> heap u8&:
-    return (r.cast[heap u8&] + sizeof(Region)).cast[heap u8&]
+    return (r.cast[heap u8&] + size_of(Region)).cast[heap u8&]
 def packed_store_region_table(state: mutable PackedStoreState&) -> mutable darray[heap Region&?]&:
     return state.regions.ref[darray[heap Region&?]&]
 def packed_store_index_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
@@ -59,8 +59,8 @@ def packed_store_ensure_prefix_columns(a: mutable Arena&, state: mutable PackedS
         while new_capacity < needed_rows:
             new_capacity <- new_capacity * 2
 
-        old_size: usize = state.prefix_column_capacity * sizeof(uintptr)
-        new_size: usize = new_capacity * sizeof(uintptr)
+        old_size: usize = state.prefix_column_capacity * size_of(uintptr)
+        new_size: usize = new_capacity * size_of(uintptr)
         assert columns.items != null
         column_ptrs: uintptr& = columns.items
         for i in 0..<state.prefix_words:
@@ -92,8 +92,8 @@ def packed_store_ensure_side_columns(a: mutable Arena&, state: mutable PackedSto
         while new_capacity < needed_rows:
             new_capacity <- new_capacity * 2
 
-        old_size: usize = state.side_column_capacity * sizeof(uintptr)
-        new_size: usize = new_capacity * sizeof(uintptr)
+        old_size: usize = state.side_column_capacity * size_of(uintptr)
+        new_size: usize = new_capacity * size_of(uintptr)
         assert columns.items != null
         column_ptrs: uintptr& = columns.items
         for i in 0..<state.side_words:
@@ -126,8 +126,8 @@ def packed_store_lookup_region(state: mutable PackedStoreState&, global_index: u
     return null if global_index >= state.regions.count else state.regions.items[global_index]
 def ctx_packed_store_state_new(a: mutable Arena&, row_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
-        state: heap PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[heap PackedStoreState&]
-        row_words: usize = (row_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+        state: heap PackedStoreState& = arena_alloc(a, size_of(PackedStoreState)).cast[heap PackedStoreState&]
+        row_words: usize = (row_bytes + size_of(uintptr) - 1) / size_of(uintptr)
         preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
         hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
 
@@ -284,8 +284,8 @@ def ctx_packed_store_alloc_fixed_result(a: mutable Arena&, state_bits: mutable v
         assert state.alloc_region != null
 
         data_base: heap u8& = packed_store_region_data(state.alloc_region)
-        offset_bytes: uintptr = (state.alloc_region.count * sizeof(uintptr)).uintptr()
-        ptr: heap void& = (data_base + state.alloc_region.count * sizeof(uintptr)).cast[heap void&]
+        offset_bytes: uintptr = (state.alloc_region.count * size_of(uintptr)).uintptr()
+        ptr: heap void& = (data_base + state.alloc_region.count * size_of(uintptr)).cast[heap void&]
         state.alloc_region.count <- state.alloc_region.count + size
         state.decode_region <- state.alloc_region
         state.decode_region_index <- state.alloc_region_index
@@ -294,7 +294,7 @@ def ctx_packed_store_alloc_fixed_result(a: mutable Arena&, state_bits: mutable v
             a.end as & <- state.alloc_region
             a.end_index <- state.alloc_region_index
 
-        offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
+        offset_words: uintptr = offset_bytes / size_of(uintptr).uintptr()
         handle: uintptr = (state.alloc_region_index.uintptr() << 32.uintptr()) | ((offset_words + 1.uintptr()) << 1.uintptr())
         global_index: u32 = state.handles.count.u32()
         needed_rows: usize = state.handles.count + 1
@@ -310,7 +310,7 @@ def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bi
 
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
         owner_tag: uintptr = state_bits.cast[u8&].uintptr()
-        size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+        size: usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
 
         if size > state.row_words:
             state.row_words <- size
@@ -327,8 +327,8 @@ def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bi
         assert state.alloc_region != null
 
         data_base: heap u8& = packed_store_region_data(state.alloc_region)
-        offset_bytes: uintptr = (state.alloc_region.count * sizeof(uintptr)).uintptr()
-        ptr: heap void& = (data_base + state.alloc_region.count * sizeof(uintptr)).cast[heap void&]
+        offset_bytes: uintptr = (state.alloc_region.count * size_of(uintptr)).uintptr()
+        ptr: heap void& = (data_base + state.alloc_region.count * size_of(uintptr)).cast[heap void&]
         state.alloc_region.count <- state.alloc_region.count + size
         state.decode_region <- state.alloc_region
         state.decode_region_index <- state.alloc_region_index
@@ -337,7 +337,7 @@ def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bi
             a.end as & <- state.alloc_region
             a.end_index <- state.alloc_region_index
 
-        offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
+        offset_words: uintptr = offset_bytes / size_of(uintptr).uintptr()
         handle: uintptr = (state.alloc_region_index.uintptr() << 32.uintptr()) | ((offset_words + 1.uintptr()) << 1.uintptr())
         global_index: u32 = state.handles.count.u32()
         needed_rows: usize = state.handles.count + 1

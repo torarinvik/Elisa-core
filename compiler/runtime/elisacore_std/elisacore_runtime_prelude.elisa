@@ -105,7 +105,7 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 				return
 			entry <- entry.next
 
-		new_entry: heap StringLenCacheEntry& = alloc_perm(sizeof(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
+		new_entry: heap StringLenCacheEntry& = alloc_perm(size_of(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
 		new_entry.next <- string_len_cache[bucket]
 		new_entry.ptr <- ptr.cast[u8&]
 		new_entry.len <- len
@@ -176,7 +176,7 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 			entry <- entry.next
 
 		new_entry: mutable heap SmallStringCacheEntry& = alloc_perm(
-			(sizeof(SmallStringCacheEntry) + len + 1).i64()
+			(size_of(SmallStringCacheEntry) + len + 1).i64()
 		).cast[heap SmallStringCacheEntry&]
 
 		new_entry.next <- small_string_cache[bucket]
@@ -237,7 +237,7 @@ def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
 		src: u8& = initial if initial != null else ""
 		len: usize = runtime_strlen(src)
 
-		builder: heap StringBuilder& = alloc_perm(sizeof(StringBuilder).i64()).cast[heap StringBuilder&]
+		builder: heap StringBuilder& = alloc_perm(size_of(StringBuilder).i64()).cast[heap StringBuilder&]
 		builder.len <- len.i64()
 		builder.cap <- string_builder_next_cap(len.i64() + 1)
 		builder.data <- alloc_perm(builder.cap).cast[heap u8&]

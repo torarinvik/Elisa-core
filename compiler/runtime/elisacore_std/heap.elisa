@@ -78,7 +78,7 @@ def fixed_buffer_alloc_align(a: mutable FixedBufferAllocator&, size_bytes: usize
     return result
 
 def fixed_buffer_alloc(a: mutable FixedBufferAllocator&, size_bytes: usize) -> mutable void&?:
-    return fixed_buffer_alloc_align(a, size_bytes, sizeof(uintptr))
+    return fixed_buffer_alloc_align(a, size_bytes, size_of(uintptr))
 
 def fixed_buffer_alloc_align_or_panic(a: mutable FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> mutable void&:
     can Abort.Panic:
@@ -124,9 +124,9 @@ def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T]:
 
 def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
     can Memory.Allocate, Abort.Panic:
-        item_size: mutable usize = sizeof(T)
-        if item_size < sizeof(MemoryPoolFreeNode):
-            item_size <- sizeof(MemoryPoolFreeNode)
+        item_size: mutable usize = size_of(T)
+        if item_size < size_of(MemoryPoolFreeNode):
+            item_size <- size_of(MemoryPoolFreeNode)
 
         for i in 0..<count:
             raw: heap void& = arena_alloc(pool.arena.ref[Arena&], item_size)
@@ -143,9 +143,9 @@ def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T&:
             item[0] <- zeroed
             return item
 
-        item_size: mutable usize = sizeof(T)
-        if item_size < sizeof(MemoryPoolFreeNode):
-            item_size <- sizeof(MemoryPoolFreeNode)
+        item_size: mutable usize = size_of(T)
+        if item_size < size_of(MemoryPoolFreeNode):
+            item_size <- size_of(MemoryPoolFreeNode)
 
         raw: heap void& = arena_alloc(pool.arena.ref[Arena&], item_size)
         item: heap T& = raw.cast[heap T&]

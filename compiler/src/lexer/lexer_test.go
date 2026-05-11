@@ -79,3 +79,27 @@ func TestTokenizeRecordsTokenSpans(t *testing.T) {
 		t.Fatal("expected identifier token to record a non-empty span")
 	}
 }
+
+func TestTokenizeLayoutIntrospectionAliases(t *testing.T) {
+	l := New("layout_aliases.elisa", []byte("size_of(Header) align_of(Header) offset_of(Header, count)\n"))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lexer errors: %v", errs)
+	}
+	want := []TokenKind{TOKEN_SIZEOF, TOKEN_ALIGNOF, TOKEN_OFFSETOF}
+	gotIndex := 0
+	for _, tok := range tokens {
+		if tok.Kind == TOKEN_SIZEOF || tok.Kind == TOKEN_ALIGNOF || tok.Kind == TOKEN_OFFSETOF {
+			if gotIndex >= len(want) {
+				t.Fatalf("unexpected extra layout token %v", tok)
+			}
+			if tok.Kind != want[gotIndex] {
+				t.Fatalf("layout token %d mismatch: got %v want %v", gotIndex, tok.Kind, want[gotIndex])
+			}
+			gotIndex++
+		}
+	}
+	if gotIndex != len(want) {
+		t.Fatalf("expected %d layout introspection tokens, got %d from %v", len(want), gotIndex, tokens)
+	}
+}

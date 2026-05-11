@@ -480,7 +480,7 @@ def arena_da_append_many[T](a: Arena&, da: darray[T, shape_in]&, new_items: T&, 
 
 def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
     # implementation creates a typed runtime-backed non-owning view
-    return DynArrayView(null, 0, sizeof(T))
+    return DynArrayView(null, 0, size_of(T))
 ```
 
 So the public runtime-facing layer carries logical shape transitions, while the lower-level implementation stays close to the original low-level representation.

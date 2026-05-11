@@ -98,7 +98,7 @@ def ctx_concurrency_alloc(size: usize) -> mutable heap void&:
 		return ptr
 
 def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
-	raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyBox[T])) can Memory.Allocate, Abort.Panic
+	raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyBox[T])) can Memory.Allocate, Abort.Panic
 	box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
 	box.value <- value
 	return box
@@ -136,7 +136,7 @@ def detach_raw(thread: Thread[void&?, Joinable]):
 
 def pool_new(threads: usize) -> ThreadPool:
 	can Pool.Create, Memory.Allocate, Abort.Panic:
-		raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyPoolState))
+		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyPoolState))
 		state: heap ConcurrencyPoolState& = raw.cast[heap ConcurrencyPoolState&]
 		state.worker_count <- threads
 		out: ThreadPool = zeroed
@@ -175,7 +175,7 @@ def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending]):
 	can Memory.Allocate, Abort.Panic:
 		handle: uintptr = task.handle
 		_ = move task
-		raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyRawTaskNode))
+		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
 		node: heap ConcurrencyRawTaskNode& = raw.cast[heap ConcurrencyRawTaskNode&]
 		node.handle <- handle
 		if group.handle == null:
@@ -219,7 +219,7 @@ def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R effects[P], a
 		arg_box: heap ConcurrencyBox[A]& = ctx_concurrency_box_new(arg)
 		result_seed: R = zeroed
 		result_box: heap ConcurrencyBox[R]& = ctx_concurrency_box_new(result_seed)
-		raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyWorkStart1))
+		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyWorkStart1))
 		state: heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]
 		state.fn_bits <- fn as uintptr
 		state.arg_bits <- arg_box.cast[void&]
@@ -281,7 +281,7 @@ def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
 	can Memory.Allocate, Abort.Panic:
 		if state_bits == null:
 			return
-		raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyTaskGroupNode))
+		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyTaskGroupNode))
 		node: heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]
 		if group.cleanup == null:
 			node.next <- null

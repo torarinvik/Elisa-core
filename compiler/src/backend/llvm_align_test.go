@@ -94,7 +94,7 @@ func TestGenerateLLVMIRLowersLayoutIntrospectionBuiltins(t *testing.T) {
     payload: u64
 
 def layout_total() -> usize:
-    return sizeof(Header) + alignof(Header) + offsetof(Header, count) + offsetof(Header, payload)
+    return size_of(Header) + align_of(Header) + offset_of(Header, count) + offset_of(Header, payload)
 `)
 	g, err := compileLLVMModule(result, OptimizationLevel0, DefaultPackedLoweringProfile())
 	if err != nil {

@@ -51,8 +51,8 @@ def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out
             out[0] <- json_parser_document_null()
             return 0
 
-        internal_words: usize = (sizeof(JsonParserDocumentInternal) + sizeof(uintptr) - 1) / sizeof(uintptr)
-        source_words: usize = (source_len + 1 + sizeof(uintptr) - 1) / sizeof(uintptr)
+        internal_words: usize = (size_of(JsonParserDocumentInternal) + size_of(uintptr) - 1) / size_of(uintptr)
+        source_words: usize = (source_len + 1 + size_of(uintptr) - 1) / size_of(uintptr)
 
         first_region: heap Region& = new_region(json_ast_scratch_capacity(source_len) + internal_words + source_words)
         first_region.count <- internal_words

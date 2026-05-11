@@ -122,8 +122,8 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
         while needed > new_capacity:
             new_capacity <- new_capacity * 2
 
-        old_size: usize = da.capacity * sizeof(T)
-        new_size: usize = new_capacity * sizeof(T)
+        old_size: usize = da.capacity * size_of(T)
+        new_size: usize = new_capacity * size_of(T)
 
         if da.items == null:
             da.items as & <- arena_alloc(a, new_size).cast[T&]
@@ -139,7 +139,7 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
         return da
 
 def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
-    elem_size: usize = sizeof(T)
+    elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if da.items == null or da.count == 0
 
     lo: mutable usize = start if start < da.count else da.count
@@ -219,7 +219,7 @@ def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_
     can Memory.Allocate, Abort.Panic:
         zeroed return if view.len == 0
 
-        items: T& = arena_alloc(a, view.len * sizeof(T)).cast[T&]
+        items: T& = arena_alloc(a, view.len * size_of(T)).cast[T&]
         assert view.data != null
         arena_memcpy(items.cast[mutable void&], view.data.cast[void&], view.len * view.elem_size)
 
@@ -231,7 +231,7 @@ def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_
 
 
 def darray_view[T](da: darray[T]) -> dview[T]:
-    elem_size: usize = sizeof(T)
+    elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if da.items == null or da.count == 0
     return DynArrayView(da.items.cast[void&], da.count, elem_size)
 
@@ -323,7 +323,7 @@ def push[T](builder: mutable DArrayBuilder[T]&, item: T):
 
 
 def darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]:
-    elem_size: usize = sizeof(T)
+    elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if builder.items.items == null or builder.items.count == 0
     return DynArrayView(builder.items.items.cast[void&], builder.items.count, elem_size)
 
@@ -487,7 +487,7 @@ def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
 
 
 def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
-    elem_size: usize = sizeof(T)
+    elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if vec.len == 0
     if vec.is_spilled:
         assert vec.overflow.items != null
@@ -625,8 +625,8 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
             while needed > new_capacity:
                 new_capacity <- new_capacity * 2
 
-            old_size: usize = da.capacity * sizeof(T)
-            new_size: usize = new_capacity * sizeof(T)
+            old_size: usize = da.capacity * size_of(T)
+            new_size: usize = new_capacity * size_of(T)
 
             if da.items == null:
                 da.items as & <- arena_alloc(a, new_size).cast[T&]
@@ -645,7 +645,7 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
         arena_memcpy(
             (da.items + da.count).cast[mutable void&],
             new_items.cast[void&],
-            new_items_count * sizeof(T)
+            new_items_count * size_of(T)
         )
 
         da.count <- da.count + new_items_count
@@ -686,7 +686,7 @@ def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
     return DictProbeResult(m.count, false)
 
 def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
-    view: dview[DictBucket[K, T]] = DynArrayView(items.cast[void&], capacity, sizeof(DictBucket[K, T]))
+    view: dview[DictBucket[K, T]] = DynArrayView(items.cast[void&], capacity, size_of(DictBucket[K, T]))
     arena_da_fill(view, zeroed)
 
 def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
@@ -697,7 +697,7 @@ def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, 
         capacity: usize = arena_dict_next_capacity(initial_capacity)
         out return if capacity == 0
 
-        items: mutable DictBucket[K, T]& = arena_alloc(a, capacity * sizeof(DictBucket[K, T])).cast[DictBucket[K, T]&]
+        items: mutable DictBucket[K, T]& = arena_alloc(a, capacity * size_of(DictBucket[K, T])).cast[DictBucket[K, T]&]
         arena_dict_zero_buckets(items, capacity)
 
         out.items as & <- items
@@ -714,7 +714,7 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
             return
 
         owner: mutable Arena& = m.arena if m.arena != null else a
-        new_items: DictBucket[K, T]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[K, T])).cast[DictBucket[K, T]&]
+        new_items: DictBucket[K, T]& = arena_alloc(owner, target_capacity * size_of(DictBucket[K, T])).cast[DictBucket[K, T]&]
         arena_dict_zero_buckets(new_items, target_capacity)
 
         if m.items != null and m.count > 0:

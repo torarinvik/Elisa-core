@@ -586,16 +586,17 @@ struct Header layout c:
     count: u32
     payload: u64
 
-header_size: usize = sizeof(Header)
-header_align: usize = alignof(Header)
-count_offset: usize = offsetof(Header, count)
+header_size: usize = size_of(Header)
+header_align: usize = align_of(Header)
+count_offset: usize = offset_of(Header, count)
 ```
 
 Current rules:
 
-- `sizeof(T)`, `alignof(T)`, and `offsetof(T, field)` return `usize`
+- `size_of(T)`, `align_of(T)`, and `offset_of(T, field)` return `usize`
 - results are computed from the backend target data layout
-- `offsetof` currently accepts a direct field name on a lowered struct-like type
+- `offset_of` currently accepts a direct field name on a lowered struct-like type
+- legacy spellings `sizeof`, `alignof`, and `offsetof` are still accepted for compatibility, but new code should use the underscore forms
 - prefer these builtins in runtime, FFI, packed-layout, and backend test code instead of duplicating ABI constants by hand
 
 ## Grammar recovery policies

@@ -192,7 +192,7 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
             assert offset_words < state.alloc_region.capacity
 
             data_base: heap u8& = packed_store_region_data(state.alloc_region)
-            row_tag: u32& = (data_base + offset_words * sizeof(uintptr)).cast[u32&]
+            row_tag: u32& = (data_base + offset_words * size_of(uintptr)).cast[u32&]
             return row_tag[0]
 
         if state.decode_region != null and state.decode_region_index == region_index:
@@ -200,7 +200,7 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
             assert offset_words < state.decode_region.capacity
 
             data_base: heap u8& = packed_store_region_data(state.decode_region)
-            row_tag: u32& = (data_base + offset_words * sizeof(uintptr)).cast[u32&]
+            row_tag: u32& = (data_base + offset_words * size_of(uintptr)).cast[u32&]
             return row_tag[0]
 
         indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
@@ -212,7 +212,7 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
             state.decode_region_index <- region_index
 
             data_base: heap u8& = packed_store_region_data(indexed_region)
-            row_tag: u32& = (data_base + offset_words * sizeof(uintptr)).cast[u32&]
+            row_tag: u32& = (data_base + offset_words * size_of(uintptr)).cast[u32&]
             return row_tag[0]
 
     r: mutable heap Region&? = a.begin
@@ -257,7 +257,7 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
                 state.decode_region_index <- region_index
 
                 data_base: heap u8& = packed_store_region_data(owner_cursor)
-                row_tag: u32& = (data_base + offset_words * sizeof(uintptr)).cast[u32&]
+                row_tag: u32& = (data_base + offset_words * size_of(uintptr)).cast[u32&]
                 return row_tag[0]
 
     while i < region_index and r != null:
@@ -274,7 +274,7 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
         state.decode_region_index <- region_index
 
     data_base: heap u8& = packed_store_region_data(r)
-    row_tag: u32& = (data_base + offset_words * sizeof(uintptr)).cast[u32&]
+    row_tag: u32& = (data_base + offset_words * size_of(uintptr)).cast[u32&]
     return row_tag[0]
 def ctx_packed_store_read_index_tag(state_bits: mutable void&, index: u32) -> u32:
     assert state_bits != null
@@ -301,7 +301,7 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
                 assert offset_words + word_offset < state.alloc_region.capacity
 
                 data_base: heap u8& = packed_store_region_data(state.alloc_region)
-                row_words: uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[uintptr&]
+                row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
                 return row_words[word_offset]
 
             if state.decode_region != null and state.decode_region_index == region_index:
@@ -309,7 +309,7 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
                 assert offset_words + word_offset < state.decode_region.capacity
 
                 data_base: heap u8& = packed_store_region_data(state.decode_region)
-                row_words: uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[uintptr&]
+                row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
                 return row_words[word_offset]
 
             indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
@@ -321,7 +321,7 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
                 state.decode_region_index <- region_index
 
                 data_base: heap u8& = packed_store_region_data(indexed_region)
-                row_words: uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[uintptr&]
+                row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
                 return row_words[word_offset]
 
         r: mutable heap Region&? = a.begin
@@ -366,7 +366,7 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
                     state.decode_region_index <- region_index
 
                     data_base: heap u8& = packed_store_region_data(owner_cursor)
-                    row_words: uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[uintptr&]
+                    row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
                     return row_words[word_offset]
 
         while i < region_index and r != null:
@@ -383,7 +383,7 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
             state.decode_region_index <- region_index
 
         data_base: heap u8& = packed_store_region_data(r)
-        row_words: uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[uintptr&]
+        row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
         return row_words[word_offset]
 @inline(always)
 def ctx_packed_store_read_index_word(a: mutable Arena&, index: u32, state_bits: mutable void&, word_offset: usize) -> uintptr:

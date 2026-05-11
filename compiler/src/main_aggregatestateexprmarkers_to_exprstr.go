@@ -500,11 +500,11 @@ func exprStr(e ast.Expr) string {
 		}
 		return line + ": ..."
 	case *ast.SizeofExpr:
-		return fmt.Sprintf("sizeof(%s)", typeStr(n.Type))
+		return fmt.Sprintf("size_of(%s)", typeStr(n.Type))
 	case *ast.AlignofExpr:
-		return fmt.Sprintf("alignof(%s)", typeStr(n.Type))
+		return fmt.Sprintf("align_of(%s)", typeStr(n.Type))
 	case *ast.OffsetofExpr:
-		return fmt.Sprintf("offsetof(%s, %s)", typeStr(n.Type), n.Field)
+		return fmt.Sprintf("offset_of(%s, %s)", typeStr(n.Type), n.Field)
 	case *ast.TernaryExpr:
 		return fmt.Sprintf("(%s if %s else %s)", exprStr(n.Value), exprStr(n.Cond), exprStr(n.Alt))
 	case *ast.AddrOfExpr:
