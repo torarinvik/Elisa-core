@@ -2322,6 +2322,20 @@ sugar for `struct Expr[region owner]:`, and `Expr[scratch]` / `Expr[owner]`
 specialize that owner to a named region, region parameter, or visible `Arena`
 value.
 
+When the struct also has type parameters, keep the type parameters in brackets
+and put the owner-region sugar after them.
+
+```elisa
+struct Box[T] in owner:
+    value: T
+    next: owner Box[T, owner]&?
+
+box: Box[i64, scratch] = Box{
+    value: 42,
+    next: null
+}
+```
+
 Projection queries can also filter with a pattern and use the pattern payload
 bindings in the projected value:
 

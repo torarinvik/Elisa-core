@@ -215,11 +215,17 @@ struct Expr in owner:
     kind: ExprKind
     left: owner Expr&?
     right: owner Expr&?
+
+struct Box[T] in owner:
+    value: T
+    next: owner Box[T, owner]&?
 ```
 
 **Syntax meaning:**
 Declares a struct with an owner-region parameter using sugar for
-`struct Expr[region owner]: ...`.
+`struct Expr[region owner]: ...`. If the struct also has ordinary type
+parameters, keep those in brackets and put the owner-region sugar after them:
+`struct Box[T] in owner:`.
 
 The owner argument can be a named `region`, a region parameter, or a visible
 `Arena` / non-null `Arena&` value:
