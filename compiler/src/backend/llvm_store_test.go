@@ -185,6 +185,28 @@ def build() -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersRegionOwnedStructWithArenaValueArgument(t *testing.T) {
+	src := `struct Expr in owner:
+    next: owner Expr&?
+
+def build(owner: Arena) -> i64:
+    head: Expr[owner] = Expr{
+        next: null
+    }
+    if head.next == null:
+        return 1
+    return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_region_owner_arena_value.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@build") {
+		t.Fatalf("expected LLVM output for build, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersStoreRowsIteration(t *testing.T) {
 	src := `store PendingGotoStore:
     name_key: usize

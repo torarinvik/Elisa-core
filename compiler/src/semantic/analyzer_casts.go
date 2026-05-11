@@ -108,8 +108,13 @@ func (a *Analyzer) regionQualifierDefined(name string) bool {
 		return false
 	}
 	if a.currentScope != nil {
-		if sym, ok := a.currentScope.Lookup(name); ok && sym.Kind == SymbolRegion {
-			return true
+		if sym, ok := a.currentScope.Lookup(name); ok {
+			if sym.Kind == SymbolRegion {
+				return true
+			}
+			if (sym.Kind == SymbolLocal || sym.Kind == SymbolParam) && IsArenaValueOrRefType(sym.Type) {
+				return true
+			}
 		}
 	}
 	return a.lookupRegionParam(name)

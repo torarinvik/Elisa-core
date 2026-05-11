@@ -112,7 +112,7 @@ func denseKeySourceEnumType(t Type) (*EnumType, bool) {
 	}
 	return nil, false
 }
-func isArenaValueOrRefType(t Type) bool {
+func IsArenaValueOrRefType(t Type) bool {
 	if t == nil {
 		return false
 	}
@@ -126,6 +126,10 @@ func isArenaValueOrRefType(t Type) bool {
 	}
 	structType, ok := StripAggregateStateType(refType.Elem).(*StructType)
 	return ok && structType != nil && structType.Name == "Arena"
+}
+
+func isArenaValueOrRefType(t Type) bool {
+	return IsArenaValueOrRefType(t)
 }
 func (a *Analyzer) resolveFrozenPackedStoreRoot(expr ast.Expr) (*Symbol, *PackedEnumStoreType, bool) {
 	root, _, storeType, ok := a.resolveFrozenPackedStoreRootPathWithSeen(expr, map[*Symbol]bool{})

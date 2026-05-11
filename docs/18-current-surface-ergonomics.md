@@ -2317,6 +2317,11 @@ comprehensions. Fixed array literals remain pure values:
 values: int[3] = [1, 2, 3]
 ```
 
+Region-owned structs use the same owner vocabulary. `struct Expr in owner:` is
+sugar for `struct Expr[region owner]:`, and `Expr[scratch]` / `Expr[owner]`
+specialize that owner to a named region, region parameter, or visible `Arena`
+value.
+
 Projection queries can also filter with a pattern and use the pattern payload
 bindings in the projected value:
 

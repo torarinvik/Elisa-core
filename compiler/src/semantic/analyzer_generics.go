@@ -218,7 +218,7 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 		if a.regionQualifierDefined(named.Name) {
 			return &RegionValueType{Name: named.Name}
 		}
-		a.errorf(expr.Pos(), "generic argument %q for region parameter %q must name a visible region or region parameter", named.Name, param.Name)
+		a.errorf(expr.Pos(), "generic argument %q for region parameter %q must name a visible region, region parameter, or Arena value", named.Name, param.Name)
 		return invalidType
 	default:
 		resolved := a.resolveType(expr)

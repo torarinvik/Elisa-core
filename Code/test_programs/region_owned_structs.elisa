@@ -8,14 +8,19 @@ struct Box[T, region owner]:
 
 def main() -> i64:
     region scratch(4096)
+    arena: Arena = zeroed
     expr: Expr[scratch] = Expr{
         value: 7,
+        next: null
+    }
+    expr_from_arena: Expr[arena] = Expr{
+        value: 11,
         next: null
     }
     box: Box[i64, scratch] = Box{
         value: 35,
         next: null
     }
-    if expr.next == null and box.next == null:
-        return expr.value + box.value
+    if expr.next == null and expr_from_arena.next == null and box.next == null:
+        return expr.value + expr_from_arena.value + box.value
     return 0

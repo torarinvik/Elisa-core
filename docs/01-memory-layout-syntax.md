@@ -221,6 +221,18 @@ struct Expr in owner:
 Declares a struct with an owner-region parameter using sugar for
 `struct Expr[region owner]: ...`.
 
+The owner argument can be a named `region`, a region parameter, or a visible
+`Arena` / non-null `Arena&` value:
+
+```elisa
+def make(owner: Arena) -> Expr[owner]:
+    return Expr{
+        kind: ExprKind.Leaf,
+        left: null,
+        right: null
+    }
+```
+
 ---
 
 ## 14. `layout ... in Region`

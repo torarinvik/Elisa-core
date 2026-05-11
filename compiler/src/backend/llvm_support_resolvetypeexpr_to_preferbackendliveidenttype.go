@@ -280,10 +280,10 @@ func (s *functionState) resolveGenericArgForParam(expr ast.TypeExpr, param ast.G
 				}
 			}
 		}
-		if binding, ok := s.lookupBinding(named.Name); ok && binding.typ != nil && binding.typ.String() == "Arena" {
+		if binding, ok := s.lookupBinding(named.Name); ok && semantic.IsArenaValueOrRefType(binding.typ) {
 			return &semantic.RegionValueType{Name: named.Name}, nil
 		}
-		return nil, fmt.Errorf("generic argument %q for region parameter %q must name a visible region or region parameter", named.Name, param.Name)
+		return nil, fmt.Errorf("generic argument %q for region parameter %q must name a visible region, region parameter, or Arena value", named.Name, param.Name)
 	default:
 		return s.resolveTypeExpr(expr)
 	}
