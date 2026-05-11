@@ -243,7 +243,7 @@ def build(owner: Arena) -> void:
 }
 
 func TestAnalyzeStructRegionOwnerWithTypeParams(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_type_param.elisa", `struct Box[T, region owner]:
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_type_param.elisa", `struct Box[T] in owner:
 	value: T
 	next: owner Box[T, owner]&?
 

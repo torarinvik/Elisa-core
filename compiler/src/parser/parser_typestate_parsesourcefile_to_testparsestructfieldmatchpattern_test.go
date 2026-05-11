@@ -179,7 +179,7 @@ func TestFormatStructRegionOwnerFormsRoundTrips(t *testing.T) {
 	file, errs := parseSourceFile(t, `struct Expr[region owner]:
 	left: owner Expr&?
 
-struct Box[T, region owner]:
+struct Box[T] in owner:
 	value: T
 	next: owner Box[T, owner]&?
 
@@ -193,7 +193,7 @@ layout soa struct SymbolRows in owner:
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"struct Expr[region owner]:",
-		"struct Box[T, region owner]:",
+		"struct Box[T] in owner:",
 		"layout soa struct SymbolRows in owner:",
 		"next: owner Box[T, owner]&?",
 	} {

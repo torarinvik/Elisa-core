@@ -2,7 +2,7 @@ struct Expr in owner:
     value: i64
     next: owner Expr&?
 
-struct Box[T, region owner]:
+struct Box[T] in owner:
     value: T
     next: owner Box[T, owner]&?
 
