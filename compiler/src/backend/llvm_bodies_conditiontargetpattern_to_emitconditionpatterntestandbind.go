@@ -671,6 +671,17 @@ func (s *functionState) collectMatchPatternBindings(pattern ast.MatchPattern, ex
 			return fmt.Errorf("condition binding %q has inconsistent types %s and %s", p.Name, prev.String(), expected.String())
 		}
 		out[p.Name] = expected
+	case *ast.MatchOrPattern:
+		bindings, err := s.collectOrMatchPatternBindings(p, expected)
+		if err != nil {
+			return err
+		}
+		for name, typ := range bindings {
+			if prev, ok := out[name]; ok && !semantic.SameType(prev, typ) {
+				return fmt.Errorf("condition binding %q has inconsistent types %s and %s", name, prev.String(), typ.String())
+			}
+			out[name] = typ
+		}
 	case *ast.MatchStructPattern:
 		if _, ok, err := countMatchPatternExpectedLen(p); ok || err != nil {
 			return err
@@ -740,6 +751,44 @@ func (s *functionState) collectMatchPatternBindings(pattern ast.MatchPattern, ex
 	}
 	return nil
 }
+
+func (s *functionState) collectOrMatchPatternBindings(pattern *ast.MatchOrPattern, expected semantic.Type) (map[string]semantic.Type, error) {
+	if pattern == nil {
+		return nil, nil
+	}
+	var baseline map[string]semantic.Type
+	for i, option := range pattern.Options {
+		current := map[string]semantic.Type{}
+		if err := s.collectMatchPatternBindings(option, expected, current); err != nil {
+			return nil, err
+		}
+		if i == 0 {
+			baseline = current
+			continue
+		}
+		if !sameBackendPatternBindingTypeMap(baseline, current) {
+			return baseline, fmt.Errorf("or-pattern alternatives must bind the same names with compatible types")
+		}
+	}
+	if baseline == nil {
+		baseline = map[string]semantic.Type{}
+	}
+	return baseline, nil
+}
+
+func sameBackendPatternBindingTypeMap(left, right map[string]semantic.Type) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for name, leftType := range left {
+		rightType, ok := right[name]
+		if !ok || !semantic.SameType(leftType, rightType) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualType semantic.Type, actualExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
 	if pattern == nil || actualType == nil {
 		C.LLVMBuildBr(s.builder, successBB)

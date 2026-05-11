@@ -162,7 +162,24 @@ def is_named_leaf(expr: Expr) -> bool:
             return false
 ```
 
-OR-pattern alternatives cannot bind names yet; use separate top-level arms when each alternative needs payload bindings.
+OR-pattern alternatives may bind names when every alternative binds the same names with compatible types.
+
+```elisa
+enum Token:
+    Ident(value: i64)
+    Keyword(value: i64)
+    Other
+
+enum Expr:
+    Leaf(kind: Token)
+
+def leaf_value(expr: Expr) -> i64:
+    match expr:
+        Expr.Leaf(Token.Ident(value) | Token.Keyword(value)):
+            return value
+        _:
+            return 0
+```
 
 Legacy `return?` can still be used as a guarded early return with an ordinary boolean or pattern condition. Pattern bindings from the condition are available in the returned expression.
 

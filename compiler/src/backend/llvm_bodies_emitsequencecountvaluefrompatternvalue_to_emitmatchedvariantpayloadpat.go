@@ -177,12 +177,18 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if handled, err := s.emitPredicateMatchPatternTest(p.Name, actualValue, actualType, successBB, failureBB); handled || err != nil {
 			return decodedActualValue, packedPayloadValueCache{}, err
 		}
-		alloca, err := s.createEntryAlloca(p.Name, actualType)
-		if err != nil {
-			return nil, packedPayloadValueCache{}, err
+		if p.Name != "" && p.Name != "_" {
+			if existing, ok := s.lookupBinding(p.Name); ok && existing.ptr != nil && semantic.SameType(existing.typ, actualType) {
+				C.LLVMBuildStore(s.builder, actualValue, existing.ptr)
+			} else {
+				alloca, err := s.createEntryAlloca(p.Name, actualType)
+				if err != nil {
+					return nil, packedPayloadValueCache{}, err
+				}
+				C.LLVMBuildStore(s.builder, actualValue, alloca)
+				s.defineBinding(p.Name, valueBinding{ptr: alloca, typ: actualType})
+			}
 		}
-		C.LLVMBuildStore(s.builder, actualValue, alloca)
-		s.defineBinding(p.Name, valueBinding{ptr: alloca, typ: actualType})
 		if enumType, ok := actualType.(*semantic.EnumType); ok && enumType.Packed && decodedActualValue != nil {
 			s.bindPackedEnumStorage(p.Name, enumType, decodedActualValue)
 		}
@@ -205,6 +211,20 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if len(p.Options) == 0 {
 			C.LLVMBuildBr(s.builder, failureBB)
 			return decodedActualValue, packedPayloadValueCache{}, nil
+		}
+		bindings, err := s.collectOrMatchPatternBindings(p, actualType)
+		if err != nil {
+			return nil, packedPayloadValueCache{}, err
+		}
+		for name, typ := range bindings {
+			if _, ok := s.lookupBinding(name); ok {
+				continue
+			}
+			alloca, err := s.createEntryAlloca(name+".or", typ)
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			s.defineBinding(name, valueBinding{ptr: alloca, typ: typ, mutable: false})
 		}
 		for i, option := range p.Options {
 			nextFailure := failureBB

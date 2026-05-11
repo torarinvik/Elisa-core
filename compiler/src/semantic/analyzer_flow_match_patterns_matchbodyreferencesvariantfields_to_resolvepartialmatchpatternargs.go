@@ -298,9 +298,10 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 	case *ast.MatchWildcardPattern:
 		return
 	case *ast.MatchOrPattern:
-		for _, option := range p.Options {
-			a.analyzeNestedMatchPattern(option, expected, valueExpr, scope)
+		if _, ok := a.collectOrPatternBindingTypes(p, expected); !ok || len(p.Options) == 0 {
+			return
 		}
+		a.analyzeNestedMatchPattern(p.Options[0], expected, valueExpr, scope)
 	case *ast.MatchBindPattern:
 		if a.analyzePredicateMatchPattern(p, expected, valueExpr) {
 			return

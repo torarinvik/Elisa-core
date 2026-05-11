@@ -61,6 +61,30 @@ def build(value: i64, width: i64, extra: i64) -> i64:
 	}
 }
 
+func TestAnalyzeBindingOrPatternRequiresSameBindings(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_binding_or_pattern.elisa", `enum Token:
+    Ident(value: i64)
+    Keyword(width: i64)
+
+enum Expr:
+    Leaf(kind: Token)
+
+def score(expr: Expr) -> i64:
+    match expr:
+        Expr.Leaf(Token.Ident(value) | Token.Keyword(width)):
+            return 0
+        _:
+            return 0
+`)
+	errs := result.Errors()
+	if len(errs) == 0 {
+		t.Fatalf("expected semantic error for mismatched or-pattern bindings")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "or-pattern alternatives must bind the same names") {
+		t.Fatalf("expected or-pattern binding diagnostic, got %v", errs)
+	}
+}
+
 func TestAnalyzeSignatureParamPackExpandsIntoFunctionBody(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_signature_pack.elisa", `bundle Pair explicit:
     left: i64

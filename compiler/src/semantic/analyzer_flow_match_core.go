@@ -173,6 +173,11 @@ func (a *Analyzer) bindExpectPatternLocals(scope *Scope, pattern ast.MatchPatter
 			}
 			a.bindExpectPatternLocals(scope, elem, elemType, indexExpr)
 		}
+	case *ast.MatchOrPattern:
+		if _, ok := a.collectOrPatternBindingTypes(p, expected); !ok || len(p.Options) == 0 {
+			return
+		}
+		a.bindExpectPatternLocals(scope, p.Options[0], expected, valueExpr)
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
 		case *EnumType:

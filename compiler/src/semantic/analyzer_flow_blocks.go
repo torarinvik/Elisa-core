@@ -207,8 +207,18 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 			a.collectConditionStructPatternBindingTypes(elem, elemType, out)
 		}
 	case *ast.MatchOrPattern:
-		for _, option := range p.Options {
-			a.collectConditionStructPatternBindingTypes(option, expected, out)
+		bindings, ok := a.collectOrPatternBindingTypes(p, expected)
+		if !ok {
+			return
+		}
+		for name, typ := range bindings {
+			if prev, exists := out[name]; exists {
+				if !SameType(prev, typ) {
+					a.errorf(p.Pos(), "condition binding %q has inconsistent types %s and %s", name, prev, typ)
+				}
+				continue
+			}
+			out[name] = typ
 		}
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
@@ -238,6 +248,42 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 			}
 		}
 	}
+}
+
+func (a *Analyzer) collectOrPatternBindingTypes(pattern *ast.MatchOrPattern, expected Type) (map[string]Type, bool) {
+	if pattern == nil {
+		return nil, true
+	}
+	var baseline map[string]Type
+	for i, option := range pattern.Options {
+		current := map[string]Type{}
+		a.collectConditionStructPatternBindingTypes(option, expected, current)
+		if i == 0 {
+			baseline = current
+			continue
+		}
+		if !samePatternBindingTypeMap(baseline, current) {
+			a.errorf(option.Pos(), "or-pattern alternatives must bind the same names with compatible types")
+			return baseline, false
+		}
+	}
+	if baseline == nil {
+		baseline = map[string]Type{}
+	}
+	return baseline, true
+}
+
+func samePatternBindingTypeMap(left, right map[string]Type) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for name, leftType := range left {
+		rightType, ok := right[name]
+		if !ok || !SameType(leftType, rightType) {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) map[string]Type {
@@ -611,9 +657,10 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 			a.bindConditionStructPatternLocals(scope, elem, elemType, indexExpr)
 		}
 	case *ast.MatchOrPattern:
-		for _, option := range p.Options {
-			a.bindConditionStructPatternLocals(scope, option, expected, valueExpr)
+		if _, ok := a.collectOrPatternBindingTypes(p, expected); !ok || len(p.Options) == 0 {
+			return
 		}
+		a.bindConditionStructPatternLocals(scope, p.Options[0], expected, valueExpr)
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
 		case *EnumType:

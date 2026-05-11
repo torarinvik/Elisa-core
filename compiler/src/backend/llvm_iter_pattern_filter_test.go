@@ -79,3 +79,32 @@ def score(expr: Expr) -> i64:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersBindingNestedOrPattern(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_binding_nested_or_pattern.elisa", `
+enum Token:
+    Ident(value: i64)
+    Keyword(value: i64)
+    Other
+
+enum Expr:
+    Leaf(kind: Token)
+    Missing
+
+def score(expr: Expr) -> i64:
+    match expr:
+        Expr.Leaf(Token.Ident(value) | Token.Keyword(value)):
+            return value
+        _:
+            return 0
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	for _, check := range []string{"match.or.next", "value.or", "define i64 @score("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected binding nested or-pattern IR to contain %q, got:\n%s", check, output)
+		}
+	}
+}

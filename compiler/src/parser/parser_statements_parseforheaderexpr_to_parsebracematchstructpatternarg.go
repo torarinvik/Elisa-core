@@ -411,9 +411,6 @@ func (p *Parser) parseNestedOrMatchPattern() ast.MatchPattern {
 		options = append(options, p.parseNestedMatchPattern())
 	}
 	orPattern := &ast.MatchOrPattern{Position: pattern.Pos(), Options: options}
-	if matchPatternContainsBindNames(orPattern) {
-		p.errorAt(orPattern.Position, "or-pattern alternatives cannot bind names yet")
-	}
 	return orPattern
 }
 func (p *Parser) parseMatchPatternNoOr() ast.MatchPattern {
