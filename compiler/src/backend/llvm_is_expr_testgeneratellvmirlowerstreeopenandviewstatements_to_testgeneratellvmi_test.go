@@ -122,6 +122,36 @@ def make_int(value: i64) -> Lua.Expr:
 	}
 }
 
+func TestGenerateLLVMIRUsesExplicitPermStoreForImplicitTreeStoreCalls(t *testing.T) {
+	src := `tree Lua:
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+
+def make_local(owner: mutable Arena&, value: i64) -> Lua.Expr:
+	in owner:
+		return Lua.Expr.Int(value: value)
+
+def make_persistent(owner: mutable Arena&, value: i64) -> Lua.Expr:
+	in perm:
+		return make_local(owner, value)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_implicit_store_perm_precedence.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@Lua__perm_tree_store") {
+		t.Fatalf("expected perm tree store global in lowering, got:\n%s", output)
+	}
+	if !strings.Contains(output, "call i32 @make_local(") || !strings.Contains(output, "%tree.perm.store.value") {
+		t.Fatalf("expected make_persistent to pass perm store value to make_local, got:\n%s", output)
+	}
+	if strings.Contains(output, "active_tree_store") {
+		t.Fatalf("expected dense implicit store calls to avoid active_tree_store, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRMaterializesCategoryUnionRootOnlyForRootType(t *testing.T) {
 	src := `tree Lua:
 	common:

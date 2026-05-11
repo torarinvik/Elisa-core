@@ -138,7 +138,7 @@ func (s *functionState) resolveTreeFoldRootInfo(actualType semantic.Type, rootEx
 	}
 	return treeFoldRootInfo{}, fmt.Errorf("fold root expects a tree category, tree member, or Family.Node type, got %s", rootType.String())
 }
-func (s *functionState) collectTreeFoldCaptures(expr *ast.FoldExpr) []treeFoldCapture {
+func (s *functionState) collectTreeFoldCaptures(expr *ast.FoldExpr, family *semantic.TreeType) []treeFoldCapture {
 	if s == nil || s.g == nil || s.g.result == nil || expr == nil {
 		return nil
 	}
@@ -164,12 +164,35 @@ func (s *functionState) collectTreeFoldCaptures(expr *ast.FoldExpr) []treeFoldCa
 				out = append(out, treeFoldCapture{name: treeRewriteOwnerStoreCaptureName, binding: capture})
 				seen[treeRewriteOwnerStoreCaptureName] = true
 			}
-		} else if s.treeAllocOwner.arenaRef != nil && !seen[treeRewriteOwnerArenaCaptureName] {
-			arenaRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["Arena"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-			capture, err := s.spillTreeFoldCaptureValue(treeRewriteOwnerArenaCaptureName, s.treeAllocOwner.arenaRef, arenaRefType)
-			if err == nil {
-				out = append(out, treeFoldCapture{name: treeRewriteOwnerArenaCaptureName, binding: capture})
-				seen[treeRewriteOwnerArenaCaptureName] = true
+		}
+		if family != nil && !seen[treeRewriteOwnerStoreCaptureName] {
+			if owner, ok := s.lookupTreeAllocOwnerForFamily(family); ok && (owner.storeValue != nil || owner.storePtr != nil) {
+				storeValue, storeType, err := s.ensureTreeOwnerStoreValue(owner, family)
+				if err == nil && storeValue != nil && storeType != nil {
+					capture, err := s.spillTreeFoldCaptureValue(treeRewriteOwnerStoreCaptureName, storeValue, storeType)
+					if err == nil {
+						out = append(out, treeFoldCapture{name: treeRewriteOwnerStoreCaptureName, binding: capture})
+						seen[treeRewriteOwnerStoreCaptureName] = true
+					}
+				}
+			}
+		}
+		if !seen[treeRewriteOwnerStoreCaptureName] && (s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.arenaRefPtr != nil) && !seen[treeRewriteOwnerArenaCaptureName] {
+			arenaRef := s.treeAllocOwner.arenaRef
+			if arenaRef == nil {
+				var err error
+				arenaRef, err = s.treeOwnerArenaRefValue(s.treeAllocOwner, "fold.rewrite.owner.arena")
+				if err != nil {
+					arenaRef = nil
+				}
+			}
+			if arenaRef != nil {
+				arenaRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["Arena"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+				capture, err := s.spillTreeFoldCaptureValue(treeRewriteOwnerArenaCaptureName, arenaRef, arenaRefType)
+				if err == nil {
+					out = append(out, treeFoldCapture{name: treeRewriteOwnerArenaCaptureName, binding: capture})
+					seen[treeRewriteOwnerArenaCaptureName] = true
+				}
 			}
 		}
 	}
@@ -324,8 +347,12 @@ func (s *functionState) emitTreeFoldImplicitRewriteDefault(helper *treeFoldHelpe
 	if err != nil {
 		return nil, err
 	}
-	value, _, err := s.emitTreeRewriteDefaultValue(&treeRewriteDefaultContext{memberType: memberType, nodeValue: nodeValue, childViewValue: childViewValue}, semantic.TreeRewriteResultTypeForValue(memberType))
-	return value, err
+	defaultResultType := semantic.TreeRewriteResultTypeForValue(memberType)
+	value, _, err := s.emitTreeRewriteDefaultValue(&treeRewriteDefaultContext{memberType: memberType, nodeValue: nodeValue, childViewValue: childViewValue, childResultType: helper.childResultsElemType()}, defaultResultType)
+	if err != nil {
+		return nil, err
+	}
+	return s.coerceValue(value, defaultResultType, helper.resultType)
 }
 func (s *functionState) emitTreeFoldImplicitRewriteDefaultSwitch(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, tagValue C.LLVMValueRef, covered map[string]bool, mergeBB C.LLVMBasicBlockRef, incomingValues *[]C.LLVMValueRef, incomingBlocks *[]C.LLVMBasicBlockRef, name string) error {
 	if helper == nil || !helper.hasImplicitRewriteDefault() {
@@ -353,7 +380,14 @@ func (s *functionState) emitTreeFoldImplicitRewriteDefaultSwitch(helper *treeFol
 		}
 		C.LLVMAddCase(switchInst, tagConst, bodyBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
-		value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, nodeValue, member, name+".default")
+		memberNodeValue := nodeValue
+		if helper.root.kind == treeFoldRootFamily && helper.root.family != nil {
+			memberNodeValue, err = s.emitTreeRootDispatchMemberValue(nodeValue, helper.root.family, member, name+".default.member")
+			if err != nil {
+				return err
+			}
+		}
+		value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, memberNodeValue, member, name+".default")
 		if err != nil {
 			return err
 		}
@@ -472,6 +506,10 @@ func (s *functionState) emitTreeFoldExactStructuralChildNodeValue(nodeValue C.LL
 			}
 			return nil, fmt.Errorf("fold child %s is not assignable to root %s in %s", resolvedType.String(), rootType.String(), caller)
 		}
+		matchValue, err = s.coerceValue(matchValue, resolvedType, rootType)
+		if err != nil {
+			return nil, err
+		}
 		incomingValues = append(incomingValues, matchValue)
 		incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
 		C.LLVMBuildBr(s.builder, resultBB)
@@ -557,12 +595,16 @@ func (s *functionState) emitTreeFoldChildResultsView(helper *treeFoldHelperInfo,
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, elemSizeValue, 2, cStringFree(name+".view.elem_size"))
 	return viewValue, nil
 }
-func (s *functionState) emitTreeFoldChildResultAtIndex(childViewValue C.LLVMValueRef, resultType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	resultLLVMType, err := s.g.lowerType(resultType)
+func (s *functionState) emitTreeFoldChildResultAtIndex(childViewValue C.LLVMValueRef, sourceType semantic.Type, resultType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if sourceType == nil {
+		sourceType = resultType
+	}
+	sourceLLVMType, err := s.g.lowerType(sourceType)
 	if err != nil {
 		return nil, err
 	}
 	viewData := C.LLVMBuildExtractValue(s.builder, childViewValue, 0, cStringFree(name+".data"))
-	elemPtr := C.LLVMBuildGEP2(s.builder, resultLLVMType, viewData, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".ptr"))
-	return C.LLVMBuildLoad2(s.builder, resultLLVMType, elemPtr, cStringFree(name+".value")), nil
+	elemPtr := C.LLVMBuildGEP2(s.builder, sourceLLVMType, viewData, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".ptr"))
+	value := C.LLVMBuildLoad2(s.builder, sourceLLVMType, elemPtr, cStringFree(name+".value"))
+	return s.coerceValue(value, sourceType, resultType)
 }

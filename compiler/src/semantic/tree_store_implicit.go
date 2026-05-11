@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"sort"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -44,6 +45,9 @@ func treeStoreTypeForImplicitContext(t Type) (*TreeStoreType, bool) {
 
 func (a *Analyzer) recordImplicitTreeStoreUse(storeType *TreeStoreType) {
 	if a == nil || a.currentFuncType == nil || storeType == nil || storeType.Family == nil {
+		return
+	}
+	if a.currentTreeAllocOwner.Kind == treeAllocOwnerStore || a.currentTreeAllocOwner.Kind == treeAllocOwnerPerm {
 		return
 	}
 	if a.currentFunctionUsedTreeStores == nil {
@@ -119,6 +123,46 @@ func treeStoreImplicitArgExpr(storeType *TreeStoreType) ast.Expr {
 	return &ast.Ident{Name: TreeStoreImplicitParamName(storeType.Family)}
 }
 
+func (a *Analyzer) recoverImplicitTreeStoreOwnerArg(expr *ast.CallExpr, fnType *FuncType, explicitCount int) (ast.Expr, bool) {
+	if a == nil || expr == nil || fnType == nil {
+		return nil, false
+	}
+	if a.currentTreeAllocOwner.Kind == treeAllocOwnerStore || a.currentTreeAllocOwner.Kind == treeAllocOwnerPerm {
+		return nil, false
+	}
+	args := expr.Args
+	if expr.ResolvedArgsValid && expr.ResolvedCommonArgs == nil {
+		args = expr.ResolvedArgs
+	}
+	if explicitCount > len(fnType.Params) {
+		explicitCount = len(fnType.Params)
+	}
+	if explicitCount > len(args) {
+		explicitCount = len(args)
+	}
+	for i := 0; i < explicitCount; i++ {
+		if a.typeCanCreateTreeStore(fnType.Params[i]) {
+			return args[i], true
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) typeCanCreateTreeStore(t Type) bool {
+	if a == nil || t == nil {
+		return false
+	}
+	arenaType := a.namedTypes["Arena"]
+	if arenaType == nil {
+		return false
+	}
+	if SameType(t, arenaType) {
+		return true
+	}
+	refType, ok := t.(*RefType)
+	return ok && refType != nil && SameType(refType.Elem, arenaType)
+}
+
 func funcTypeHasImplicitParam(fnType *FuncType, name string) bool {
 	if fnType == nil || name == "" {
 		return false
@@ -138,7 +182,7 @@ func appendInferredTreeStoreParams(fnType *FuncType, stores map[string]*TreeStor
 		}
 	}
 	exposedFamilies := treeFamiliesExposedByFunctionBoundary(fnType)
-	if len(exposedFamilies) == 0 {
+	if len(exposedFamilies) == 0 && len(stores) == 0 {
 		return
 	}
 	candidates := make(map[string]*TreeStoreType, len(stores)+len(exposedFamilies))
@@ -159,12 +203,61 @@ func appendInferredTreeStoreParams(fnType *FuncType, stores map[string]*TreeStor
 			continue
 		}
 		name := TreeStoreImplicitParamName(storeType.Family)
-		if funcTypeHasImplicitParam(fnType, name) {
+		if funcTypeHasImplicitParam(fnType, name) || funcTypeHasTreeStoreParamForFamily(fnType, storeType.Family) {
 			continue
 		}
 		fnType.Params = append(fnType.Params, storeType)
 		fnType.ImplicitParamNames = append(fnType.ImplicitParamNames, name)
 	}
+}
+
+func AppendBoundaryTreeStoreParams(fnType *FuncType) {
+	appendInferredTreeStoreParams(fnType, nil)
+}
+
+func AppendSpecializedBoundaryTreeStoreParams(fnType *FuncType) {
+	appendInferredReturnTreeStoreParams(fnType)
+}
+
+func appendInferredReturnTreeStoreParams(fnType *FuncType) {
+	if fnType == nil || funcTypeSkipsReturnExposedTreeStores(fnType) {
+		return
+	}
+	exposedFamilies := map[string]*TreeStoreType{}
+	collectTreeFamiliesInType(fnType.Return, exposedFamilies, map[*StructType]bool{}, map[string]bool{})
+	if len(exposedFamilies) == 0 {
+		return
+	}
+	names := make([]string, 0, len(exposedFamilies))
+	for name := range exposedFamilies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, familyName := range names {
+		storeType := exposedFamilies[familyName]
+		if storeType == nil || storeType.Family == nil {
+			continue
+		}
+		name := TreeStoreImplicitParamName(storeType.Family)
+		if funcTypeHasImplicitParam(fnType, name) || funcTypeHasTreeStoreParamForFamily(fnType, storeType.Family) {
+			continue
+		}
+		fnType.Params = append(fnType.Params, storeType)
+		fnType.ImplicitParamNames = append(fnType.ImplicitParamNames, name)
+	}
+}
+
+func funcTypeHasTreeStoreParamForFamily(fnType *FuncType, family *TreeType) bool {
+	if fnType == nil || family == nil {
+		return false
+	}
+	for _, param := range fnType.Params {
+		storeType, ok := param.(*TreeStoreType)
+		if ok && storeType != nil && storeType.Family == family {
+			return true
+		}
+	}
+	return false
 }
 
 func treeFamiliesExposedByFunctionBoundary(fnType *FuncType) map[string]*TreeStoreType {
@@ -182,8 +275,17 @@ func treeFamiliesExposedByFunctionBoundary(fnType *FuncType) map[string]*TreeSto
 	for i := 0; i < explicitCount; i++ {
 		collectTreeFamiliesInType(fnType.Params[i], out, map[*StructType]bool{}, map[string]bool{})
 	}
-	collectTreeFamiliesInType(fnType.Return, out, map[*StructType]bool{}, map[string]bool{})
+	if !funcTypeSkipsReturnExposedTreeStores(fnType) {
+		collectTreeFamiliesInType(fnType.Return, out, map[*StructType]bool{}, map[string]bool{})
+	}
 	return out
+}
+
+func funcTypeSkipsReturnExposedTreeStores(fnType *FuncType) bool {
+	if fnType == nil {
+		return false
+	}
+	return fnType.Name == "__cast__" || strings.HasSuffix(fnType.Name, ".__cast__")
 }
 
 func collectTreeFamiliesInType(t Type, out map[string]*TreeStoreType, seenStructs map[*StructType]bool, seenTrees map[string]bool) {
@@ -192,7 +294,7 @@ func collectTreeFamiliesInType(t Type, out map[string]*TreeStoreType, seenStruct
 	}
 	switch tt := t.(type) {
 	case *RefType:
-		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
+		collectTreeFamiliesInRefElem(tt.Elem, out, seenStructs, seenTrees)
 	case *ErrorUnionType:
 		collectTreeFamiliesInType(tt.Value, out, seenStructs, seenTrees)
 	case *OptionalType:
@@ -295,6 +397,18 @@ func collectTreeFamiliesInType(t Type, out map[string]*TreeStoreType, seenStruct
 		if tt.Family != nil && tt.Family.Layout == TreeLayoutCategoryUnion {
 			out[tt.Family.Name] = tt
 		}
+	}
+}
+
+func collectTreeFamiliesInRefElem(t Type, out map[string]*TreeStoreType, seenStructs map[*StructType]bool, seenTrees map[string]bool) {
+	if t == nil {
+		return
+	}
+	switch StripAggregateStateType(t).(type) {
+	case *TreeNodeType, *TreeCategoryType, *TreeVariantViewType, *TreeBlockType, *TreeStructType, *TreeStoreType:
+		collectTreeFamiliesInType(t, out, seenStructs, seenTrees)
+	case *ArrayType, *DArrayType, *ViewType, *DArrayViewType, *TupleType, *DictType, *DictEntryType, *GenericInstanceType, *AggregateStateType, *StructType, *EnumType, *PackedVariantViewType:
+		collectTreeFamiliesInType(t, out, seenStructs, seenTrees)
 	}
 }
 

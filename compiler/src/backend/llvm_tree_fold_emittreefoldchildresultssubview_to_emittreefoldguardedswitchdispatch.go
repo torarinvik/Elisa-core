@@ -14,19 +14,19 @@ import (
 	"fmt"
 )
 
-func (s *functionState) emitTreeFoldChildResultsSubview(childViewValue C.LLVMValueRef, resultType semantic.Type, offsetValue C.LLVMValueRef, countValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
-	viewType := &semantic.DArrayViewType{Elem: resultType, SurfaceName: "dview"}
+func (s *functionState) emitTreeFoldChildResultsSubview(childViewValue C.LLVMValueRef, sourceType semantic.Type, offsetValue C.LLVMValueRef, countValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	viewType := &semantic.DArrayViewType{Elem: sourceType, SurfaceName: "dview"}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {
 		return nil, nil, err
 	}
-	resultLLVMType, err := s.g.lowerType(resultType)
+	sourceLLVMType, err := s.g.lowerType(sourceType)
 	if err != nil {
 		return nil, nil, err
 	}
 	viewData := C.LLVMBuildExtractValue(s.builder, childViewValue, 0, cStringFree(name+".data"))
 	viewElemSize := C.LLVMBuildExtractValue(s.builder, childViewValue, 2, cStringFree(name+".elem_size"))
-	subData := C.LLVMBuildGEP2(s.builder, resultLLVMType, viewData, llvmValueSlicePtr([]C.LLVMValueRef{offsetValue}), 1, cStringFree(name+".sub.data"))
+	subData := C.LLVMBuildGEP2(s.builder, sourceLLVMType, viewData, llvmValueSlicePtr([]C.LLVMValueRef{offsetValue}), 1, cStringFree(name+".sub.data"))
 	subView := C.LLVMGetUndef(viewLLVMType)
 	subView = C.LLVMBuildInsertValue(s.builder, subView, subData, 0, cStringFree(name+".sub.view.data"))
 	subView = C.LLVMBuildInsertValue(s.builder, subView, countValue, 1, cStringFree(name+".sub.view.len"))
@@ -101,7 +101,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 					C.LLVMBuildCondBr(s.builder, presentValue, presentBB, absentBB)
 
 					C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
-					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, childResultType, offsetValue, name+"."+childBinding.Name)
+					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, helper.childResultsElemType(), childResultType, offsetValue, name+"."+childBinding.Name)
 					if err != nil {
 						return err
 					}
@@ -127,7 +127,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 						return err
 					}
 				} else {
-					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, childResultType, offsetValue, name+"."+childBinding.Name)
+					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, helper.childResultsElemType(), childResultType, offsetValue, name+"."+childBinding.Name)
 					if err != nil {
 						return err
 					}
@@ -139,18 +139,6 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 			}
 			offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, childCount, cStringFree(name+"."+childBinding.Name+".offset.next"))
 		case ast.EnumPayloadRelationChildren:
-			childResultType := helper.resultType
-			if helper.rewrite {
-				if bindingType, ok := semantic.TreeRewriteChildBindingType(childBinding.Type, childBinding.Relation); ok {
-					if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
-						if viewType, ok := optionalBinding.Value.(*semantic.DArrayViewType); ok {
-							childResultType = viewType.Elem
-						}
-					} else if viewType, ok := bindingType.(*semantic.DArrayViewType); ok {
-						childResultType = viewType.Elem
-					}
-				}
-			}
 			fieldValue, _, err := s.emitTreeMemberFieldValueAtHandle(nodeValue, family, memberType, childBinding.Name, name+"."+childBinding.Name)
 			if err != nil {
 				return err
@@ -160,7 +148,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 				return err
 			}
 			if wanted {
-				subViewValue, subViewType, err := s.emitTreeFoldChildResultsSubview(childViewValue, childResultType, offsetValue, countValue, name+"."+childBinding.Name)
+				subViewValue, subViewType, err := s.emitTreeFoldChildResultsSubview(childViewValue, helper.childResultsElemType(), offsetValue, countValue, name+"."+childBinding.Name)
 				if err != nil {
 					return err
 				}
@@ -228,14 +216,18 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 	savedRewriteDefault := s.treeRewriteDefault
 	if helper.rewrite {
 		if _, exact := semantic.TreeExactTag(memberType); exact {
-			s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: armNodeValue, childViewValue: childViewValue}
+			s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: armNodeValue, childViewValue: childViewValue, childResultType: helper.childResultsElemType()}
 		} else {
 			s.treeRewriteDefault = nil
 		}
 	}
-	armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.armResultType(memberType, arm))
+	armResultType := helper.armResultType(memberType, arm)
+	armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, armResultType)
 	s.treeRewriteDefault = savedRewriteDefault
 	s.popScope()
+	if err == nil && reachable && helper != nil && armValue != nil {
+		armValue, err = s.coerceValue(armValue, armResultType, helper.resultType)
+	}
 	return armValue, reachable, err
 }
 func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, arms []ast.VisitArm, failUnreachable bool, name string) (C.LLVMValueRef, bool, error) {
@@ -311,18 +303,26 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 		savedRewriteDefault := s.treeRewriteDefault
 		if helper.rewrite {
 			if _, exact := semantic.TreeExactTag(memberType); exact {
-				s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: armNodeValue, childViewValue: childViewValue}
+				s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: armNodeValue, childViewValue: childViewValue, childResultType: helper.childResultsElemType()}
 			} else {
 				s.treeRewriteDefault = nil
 			}
 		}
-		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.armResultType(memberType, arm))
+		armResultType := helper.armResultType(memberType, arm)
+		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, armResultType)
 		s.treeRewriteDefault = savedRewriteDefault
 		if err != nil {
 			s.popScope()
 			return nil, false, err
 		}
 		if reachable && !s.currentBlockTerminated() {
+			if helper != nil && armValue != nil {
+				armValue, err = s.coerceValue(armValue, armResultType, helper.resultType)
+				if err != nil {
+					s.popScope()
+					return nil, false, err
+				}
+			}
 			inBlock := C.LLVMGetInsertBlock(s.builder)
 			incomingValues = append(incomingValues, armValue)
 			incomingBlocks = append(incomingBlocks, inBlock)

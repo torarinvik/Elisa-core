@@ -35,10 +35,12 @@ extern ctx_string_slice(value: u8&, start: i64, end: i64) -> u8&
 def probe_keyword_hit(text: cstr) -> bool:
 	return text == "program"
 
-def probe_first_scalar(owner: mutable Arena&) -> i64:
-	in owner:
-		values: darray[i64] = [11, 22]
-		return values[0]
+def probe_first_scalar() -> i64:
+	can Memory.Allocate:
+		region scratch(4096)
+		in scratch:
+			values: darray[i64] = [11, 22]
+			return values[0]
 
 @test
 def keyword_compare_test() -> void:
@@ -47,9 +49,8 @@ def keyword_compare_test() -> void:
 
 @test
 def scalar_array_index_test() -> void:
-	can Abort.Panic:
-		region scratch(4096)
-		assert_eq(probe_first_scalar(scratch.ref[mutable Arena&]), 11)
+	can Abort.Panic, Memory.Allocate:
+		assert_eq(probe_first_scalar(), 11)
 
 @test
 def string_view_empty_slice_test() -> void:

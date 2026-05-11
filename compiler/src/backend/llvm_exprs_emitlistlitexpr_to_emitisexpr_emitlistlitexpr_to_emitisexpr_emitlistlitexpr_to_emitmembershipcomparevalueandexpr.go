@@ -114,7 +114,14 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 		return zero, darrayType, nil
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
+		return nil, nil, fmt.Errorf("darray literal requires an active in <arena>: scope")
+	}
+	arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.literal.owner.arena")
+	if err != nil {
+		return nil, nil, err
+	}
+	if arenaRef == nil {
 		return nil, nil, fmt.Errorf("darray literal requires an active in <arena>: scope")
 	}
 	llvmType, err := s.g.lowerType(darrayType)
@@ -150,7 +157,7 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 	if err != nil {
 		return nil, nil, err
 	}
-	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{owner.arenaRef, byteCount}, "darray.literal.alloc")
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaRef, byteCount}, "darray.literal.alloc")
 	indexLLVMType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, nil, err

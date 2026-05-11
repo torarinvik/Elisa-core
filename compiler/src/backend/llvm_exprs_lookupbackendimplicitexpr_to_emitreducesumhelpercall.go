@@ -135,6 +135,10 @@ func (s *functionState) recoverImplicitCallArgs(expr *ast.CallExpr, funcType *se
 			paramIndex := explicitCount + i
 			if paramIndex < len(funcType.Params) {
 				if storeType, isTreeStore := funcType.Params[paramIndex].(*semantic.TreeStoreType); isTreeStore && storeType != nil {
+					if ownerArg, ok := s.recoverImplicitTreeStoreOwnerArg(expr, funcType, storeType); ok {
+						resolved = append(resolved, ownerArg)
+						continue
+					}
 					resolved = append(resolved, &ast.Ident{Name: semantic.TreeStoreImplicitParamName(storeType.Family)})
 					continue
 				}
@@ -145,6 +149,48 @@ func (s *functionState) recoverImplicitCallArgs(expr *ast.CallExpr, funcType *se
 	}
 	return resolved, true
 }
+
+func (s *functionState) recoverImplicitTreeStoreOwnerArg(expr *ast.CallExpr, funcType *semantic.FuncType, storeType *semantic.TreeStoreType) (ast.Expr, bool) {
+	if s == nil || expr == nil || funcType == nil || storeType == nil {
+		return nil, false
+	}
+	if owner, ok := s.lookupTreeAllocOwnerForFamily(storeType.Family); ok && (owner.isPerm || owner.storePtr != nil || owner.storeValue != nil) {
+		return nil, false
+	}
+	args := expr.Args
+	if expr.ResolvedArgsValid && expr.ResolvedCommonArgs == nil {
+		args = expr.ResolvedArgs
+	}
+	explicitCount := backendExplicitParamCount(funcType, nil)
+	if explicitCount > len(funcType.Params) {
+		explicitCount = len(funcType.Params)
+	}
+	if explicitCount > len(args) {
+		explicitCount = len(args)
+	}
+	for i := 0; i < explicitCount; i++ {
+		if backendTypeCanCreateTreeStore(funcType.Params[i], s.g.result.NamedTypes) {
+			return args[i], true
+		}
+	}
+	return nil, false
+}
+
+func backendTypeCanCreateTreeStore(t semantic.Type, namedTypes map[string]semantic.Type) bool {
+	arenaType := semantic.Type(nil)
+	if namedTypes != nil {
+		arenaType = namedTypes["Arena"]
+	}
+	if arenaType == nil || t == nil {
+		return false
+	}
+	if semantic.SameType(t, arenaType) {
+		return true
+	}
+	refType, ok := t.(*semantic.RefType)
+	return ok && refType != nil && semantic.SameType(refType.Elem, arenaType)
+}
+
 func backendExplicitMoveOperand(expr ast.Expr) (ast.Expr, bool) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
@@ -354,7 +400,15 @@ func (s *functionState) emitChildrenHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	if resultType == nil {
 		return nil, nil, true, fmt.Errorf("children result is missing a semantic type")
 	}
-	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
+	carrierSourceType := sourceType
+	if treeSourceType, ok := semantic.TreeChildrenSourceType(resultType); ok && treeSourceType != nil {
+		carrierSourceType = treeSourceType
+	}
+	sourceExpr := expr.Args[0]
+	if castExpr, ok := sourceExpr.(*ast.CastExpr); ok && !semantic.SameType(sourceType, carrierSourceType) {
+		sourceExpr = castExpr.Operand
+	}
+	sourceValue, _, err := s.emitExpr(sourceExpr, carrierSourceType)
 	if err != nil {
 		return nil, nil, true, err
 	}

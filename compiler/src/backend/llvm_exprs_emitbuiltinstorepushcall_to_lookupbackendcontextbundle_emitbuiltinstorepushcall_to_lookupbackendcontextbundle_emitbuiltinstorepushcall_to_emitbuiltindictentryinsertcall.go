@@ -94,8 +94,15 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 		return nil, nil, true, fmt.Errorf("store push expects %d arguments, got %d", len(storeType.StoreFieldOrder), len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("store push requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "store.push.owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
 	}
 	storePtr, loweredStoreType, err := s.emitBuiltinStoreReceiverPtr(fieldExpr.Object, receiverRefType)
 	if err != nil {
@@ -170,8 +177,15 @@ func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (C.LLVMV
 		return nil, nil, true, fmt.Errorf("store reserve expects 1 argument, got %d", len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("store reserve requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "store.reserve.owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
 	}
 	storePtr, loweredStoreType, err := s.emitBuiltinStoreReceiverPtr(fieldExpr.Object, receiverRefType)
 	if err != nil {
@@ -532,8 +546,15 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 		return nil, nil, true, fmt.Errorf("dict entry insert expects 1 argument, got %d", len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("dict entry insert requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "dict.entry.insert.owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
 	}
 	var entryPtr C.LLVMValueRef
 	var err error

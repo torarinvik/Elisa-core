@@ -305,6 +305,22 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 			}
 		}
 	}
+	if actualNode, ok := semantic.StripAggregateStateType(actual).(*semantic.TreeNodeType); ok && actualNode != nil && actualNode.Family != nil && treeFamilyLayoutPlan(actualNode.Family).isCategoryUnion() {
+		switch expectedTree := semantic.StripAggregateStateType(expected).(type) {
+		case *semantic.TreeCategoryType:
+			if expectedTree != nil && expectedTree.Family == actualNode.Family {
+				return s.emitTreeRootUnionCategoryHandleForTarget(value, actualNode.Family, expectedTree, "tree.root.project")
+			}
+		case *semantic.TreeBlockType:
+			if expectedTree != nil && expectedTree.Family == actualNode.Family {
+				return s.emitTreeRootUnionExactHandleForTarget(value, actualNode.Family, expectedTree, "tree.root.project")
+			}
+		case *semantic.TreeStructType:
+			if expectedTree != nil && expectedTree.Family == actualNode.Family {
+				return s.emitTreeRootUnionExactHandleForTarget(value, actualNode.Family, expectedTree, "tree.root.project")
+			}
+		}
+	}
 	actualLLVM, err := s.g.lowerType(actual)
 	if err != nil {
 		return nil, err
@@ -333,6 +349,93 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 	}
 	return value, nil
 }
+
+func (s *functionState) emitTreeRootUnionCategoryHandleForTarget(rootValue C.LLVMValueRef, family *semantic.TreeType, category *semantic.TreeCategoryType, name string) (C.LLVMValueRef, error) {
+	if family == nil || category == nil || category.Family != family {
+		return nil, fmt.Errorf("tree root projection has mismatched category metadata")
+	}
+	stateValue, err := s.emitTreeCategoryUnionContextStateValue(family, name)
+	if err != nil {
+		return nil, err
+	}
+	tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, name)
+	if err != nil {
+		return nil, err
+	}
+	rowIndex, err := s.emitTreeHandleIndexValue(rootValue, name+".index")
+	if err != nil {
+		return nil, err
+	}
+	kindValue, err := s.emitTreeRootUnionKindValueAtIndex(tablePtr, family, rowIndex, name)
+	if err != nil {
+		return nil, err
+	}
+	u32Type, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".result"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail"))
+	switchInst := C.LLVMBuildSwitch(s.builder, kindValue, failBB, C.unsigned(len(category.Variants)))
+	incomingValues := make([]C.LLVMValueRef, 0, len(category.Variants))
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(category.Variants))
+	for _, variant := range category.Variants {
+		caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".case"))
+		C.LLVMAddCase(switchInst, C.LLVMConstInt(C.LLVMTypeOf(kindValue), C.ulonglong(variant.Tag), 0), caseBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
+		payloadValue, _, err := s.emitTreeRootUnionPayloadForHandle(rootValue, family, name)
+		if err != nil {
+			return nil, err
+		}
+		handleValue := C.LLVMBuildExtractValue(s.builder, payloadValue, 1, cStringFree(name+".handle"))
+		incomingValues = append(incomingValues, handleValue)
+		incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+		C.LLVMBuildBr(s.builder, resultBB)
+	}
+	if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
+		return nil, err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, resultBB)
+	phi := C.LLVMBuildPhi(s.builder, u32Type, cStringFree(name+".phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, nil
+}
+
+func (s *functionState) emitTreeRootUnionExactHandleForTarget(rootValue C.LLVMValueRef, family *semantic.TreeType, expected semantic.Type, name string) (C.LLVMValueRef, error) {
+	if family == nil || expected == nil {
+		return nil, fmt.Errorf("tree root projection has missing exact metadata")
+	}
+	tag, ok := treeExactMemberTag(expected)
+	if !ok {
+		return nil, fmt.Errorf("tree root projection target %s has no exact tag", treeExactMemberSurfaceName(expected))
+	}
+	stateValue, err := s.emitTreeCategoryUnionContextStateValue(family, name)
+	if err != nil {
+		return nil, err
+	}
+	tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, name)
+	if err != nil {
+		return nil, err
+	}
+	rowIndex, err := s.emitTreeHandleIndexValue(rootValue, name+".index")
+	if err != nil {
+		return nil, err
+	}
+	kindValue, err := s.emitTreeRootUnionKindValueAtIndex(tablePtr, family, rowIndex, name)
+	if err != nil {
+		return nil, err
+	}
+	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail"))
+	condValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), kindValue, C.LLVMConstInt(C.LLVMTypeOf(kindValue), C.ulonglong(tag), 0), cStringFree(name+".matches"))
+	C.LLVMBuildCondBr(s.builder, condValue, successBB, failBB)
+	if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
+		return nil, err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	return rootValue, nil
+}
+
 func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.ErrorSetType, expected *semantic.ErrorSetType) (C.LLVMValueRef, error) {
 	if actual == nil || expected == nil {
 		return nil, fmt.Errorf("missing error set for code remap")

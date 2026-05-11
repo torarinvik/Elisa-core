@@ -154,8 +154,15 @@ func (s *functionState) emitSequenceRewriteAppend(outPtr C.LLVMValueRef, outType
 		return fmt.Errorf("missing sequence rewrite output")
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return fmt.Errorf("sequence rewrite requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, name+".owner.arena")
+		if err != nil {
+			return err
+		}
+		owner.arenaRef = arenaRef
 	}
 	countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(outPtr, outType)
 	if err != nil {

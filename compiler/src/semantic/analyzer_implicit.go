@@ -187,6 +187,10 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 			if fallback, found := a.lookupSameNameImplicitExpr(name, working); found {
 				argExpr = fallback
 			} else if storeType, isTreeStore := expectedType.(*TreeStoreType); isTreeStore && storeType != nil {
+				if ownerArg, found := a.recoverImplicitTreeStoreOwnerArg(expr, ft, explicitCount); found {
+					resolved = append(resolved, ownerArg)
+					continue
+				}
 				a.recordImplicitTreeStoreUse(storeType)
 				argExpr = treeStoreImplicitArgExpr(storeType)
 				a.exprTypes[argExpr] = expectedType

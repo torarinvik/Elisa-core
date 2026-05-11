@@ -61,7 +61,7 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 	for _, param := range base.Params {
 		params = append(params, substituteType(param, typeBindings, impls))
 	}
-	return &semantic.FuncType{
+	specialized := &semantic.FuncType{
 		Name:                      base.Name,
 		TypeParams:                nil,
 		RefStorageParams:          nil,
@@ -87,6 +87,8 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		SinkParams:                append([]bool(nil), base.SinkParams...),
 		SinkParamsKnown:           base.SinkParamsKnown,
 	}
+	semantic.AppendSpecializedBoundaryTreeStoreParams(specialized)
+	return specialized
 }
 
 func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes []semantic.Type, resultType semantic.Type) map[string]semantic.Type {

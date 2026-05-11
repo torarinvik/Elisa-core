@@ -245,7 +245,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 				break
 			}
 		}
-		if err == nil {
+		if err == nil && !treeExactMemberLayoutPlan(tt).isCategoryUnion() {
 			_, err = g.ensureTreeExactTableType(tt)
 		}
 	case *semantic.TreeStructType:
@@ -262,7 +262,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 				break
 			}
 		}
-		if err == nil {
+		if err == nil && !treeExactMemberLayoutPlan(tt).isCategoryUnion() {
 			_, err = g.ensureTreeExactTableType(tt)
 		}
 	case *semantic.PackedEnumStoreType:

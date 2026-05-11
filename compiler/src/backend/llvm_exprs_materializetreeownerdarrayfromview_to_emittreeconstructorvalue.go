@@ -119,17 +119,23 @@ func (s *functionState) materializeTreeOwnerDArrayFromView(viewValue C.LLVMValue
 	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
 	})
-	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
-	if err != nil {
-		return nil, err
+	if !treeRewriteSequenceNeedsElementCoerce(viewType.Elem, resultType.Elem) {
+		memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+		if err != nil {
+			return nil, err
+		}
+		memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+		if err != nil {
+			return nil, err
+		}
+		memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, byteCount}, name+".memcpy")
+		s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+		s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+	} else {
+		if err := s.emitTreeOwnerDArrayCoerceCopy(allocPtr, viewData, viewLen, viewType.Elem, resultType.Elem, name+".coerce"); err != nil {
+			return nil, err
+		}
 	}
-	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
-	if err != nil {
-		return nil, err
-	}
-	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, byteCount}, name+".memcpy")
-	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
-	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
 	materialized := C.LLVMGetUndef(llvmResultType)
 	materialized = C.LLVMBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree(name+".items"))
 	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 1, cStringFree(name+".count"))
@@ -144,6 +150,66 @@ func (s *functionState) materializeTreeOwnerDArrayFromView(viewValue C.LLVMValue
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
 	return phi, nil
 }
+
+func treeRewriteSequenceNeedsElementCoerce(sourceElemType semantic.Type, destElemType semantic.Type) bool {
+	if semantic.SameType(sourceElemType, destElemType) {
+		return false
+	}
+	sourceNode, ok := semantic.StripAggregateStateType(sourceElemType).(*semantic.TreeNodeType)
+	return ok && sourceNode != nil && sourceNode.Family != nil && treeFamilyLayoutPlan(sourceNode.Family).isCategoryUnion()
+}
+
+func (s *functionState) emitTreeOwnerDArrayCoerceCopy(destPtr C.LLVMValueRef, sourcePtr C.LLVMValueRef, countValue C.LLVMValueRef, sourceElemType semantic.Type, destElemType semantic.Type, name string) error {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	sourceLLVMType, err := s.g.lowerType(sourceElemType)
+	if err != nil {
+		return err
+	}
+	destLLVMType, err := s.g.lowerType(destElemType)
+	if err != nil {
+		return err
+	}
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	indexAlloca, err := s.createEntryAlloca(name+".index", usizeType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, zero, indexAlloca)
+	loopBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".loop"))
+	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".body"))
+	endBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".end"))
+	C.LLVMBuildBr(s.builder, loopBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopBB)
+	indexValue, err := s.loadValue(indexAlloca, usizeType, name+".index.load")
+	if err != nil {
+		return err
+	}
+	condValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree(name+".cond"))
+	C.LLVMBuildCondBr(s.builder, condValue, bodyBB, endBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	sourceElemPtr := C.LLVMBuildGEP2(s.builder, sourceLLVMType, sourcePtr, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".src.ptr"))
+	sourceValue := C.LLVMBuildLoad2(s.builder, sourceLLVMType, sourceElemPtr, cStringFree(name+".src"))
+	destValue, err := s.coerceValue(sourceValue, sourceElemType, destElemType)
+	if err != nil {
+		return err
+	}
+	destElemPtr := C.LLVMBuildGEP2(s.builder, destLLVMType, destPtr, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".dst.ptr"))
+	C.LLVMBuildStore(s.builder, destValue, destElemPtr)
+	nextValue := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree(name+".next"))
+	C.LLVMBuildStore(s.builder, nextValue, indexAlloca)
+	C.LLVMBuildBr(s.builder, loopBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, endBB)
+	return nil
+}
+
 func (s *functionState) emitTupleExpr(expr *ast.TupleExpr) (C.LLVMValueRef, semantic.Type, error) {
 	tupleType, ok := semantic.StripAggregateStateType(s.exprType(expr)).(*semantic.TupleType)
 	if !ok || tupleType == nil {
@@ -443,6 +509,13 @@ func (s *functionState) emitTreeCategoryAlloc(treeType *semantic.TreeCategoryTyp
 			}
 			owner.arenaRef = arenaRef
 		}
+		if owner.arenaRef == nil && owner.arenaRefPtr != nil {
+			arenaRef, err := s.treeOwnerArenaRefValue(owner, "tree.constructor.owner.arena")
+			if err != nil {
+				return nil, err
+			}
+			owner.arenaRef = arenaRef
+		}
 		if owner.arenaRef == nil {
 			return nil, fmt.Errorf("missing Arena owner for tree constructor")
 		}
@@ -492,6 +565,15 @@ func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeTyp
 	resolvedOwner := treeAllocOwnerBinding{}
 	if owner != nil {
 		resolvedOwner = *owner
+		if (resolvedOwner.arenaRef != nil || resolvedOwner.arenaRefPtr != nil) && resolvedOwner.storeValue == nil && resolvedOwner.storePtr == nil && treeCategoryLayoutPlan(treeType).isCategoryUnion() {
+			arenaRef := resolvedOwner.arenaRef
+			arenaRefPtr := resolvedOwner.arenaRefPtr
+			if implicitOwner, ok := s.lookupImplicitTreeStoreOwnerForFamily(treeType.Family); ok {
+				resolvedOwner = implicitOwner
+				resolvedOwner.arenaRef = arenaRef
+				resolvedOwner.arenaRefPtr = arenaRefPtr
+			}
+		}
 	} else {
 		activeOwner, ok := s.lookupTreeAllocOwnerForFamily(treeType.Family)
 		if !ok {

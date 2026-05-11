@@ -291,6 +291,15 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 	resolvedOwner := treeAllocOwnerBinding{}
 	if owner != nil {
 		resolvedOwner = *owner
+		if (resolvedOwner.arenaRef != nil || resolvedOwner.arenaRefPtr != nil) && resolvedOwner.storeValue == nil && resolvedOwner.storePtr == nil && treeExactMemberLayoutPlan(memberType).isCategoryUnion() {
+			arenaRef := resolvedOwner.arenaRef
+			arenaRefPtr := resolvedOwner.arenaRefPtr
+			if implicitOwner, ok := s.lookupImplicitTreeStoreOwnerForFamily(family); ok {
+				resolvedOwner = implicitOwner
+				resolvedOwner.arenaRef = arenaRef
+				resolvedOwner.arenaRefPtr = arenaRefPtr
+			}
+		}
 	} else {
 		activeOwner, ok := s.lookupTreeAllocOwnerForFamily(family)
 		if !ok {
@@ -344,11 +353,7 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 		if err := s.emitTreeCategoryUnionTableSetCount(slot.tablePtr, viewType.Category, slot.neededCount, "tree.update"); err != nil {
 			return nil, nil, err
 		}
-		keyValue, err := s.buildTreeHandleKey(tag, slot.rowIndex, "tree.update")
-		if err != nil {
-			return nil, nil, err
-		}
-		handleValue, err = s.buildTreeHandleValue(family, stateValue, keyValue, "tree.update")
+		handleValue, err = s.buildTreeHandleValue(family, stateValue, slot.rowIndex, "tree.update")
 		if err != nil {
 			return nil, nil, err
 		}

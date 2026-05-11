@@ -148,7 +148,7 @@ func (s *functionState) emitFoldExpr(expr *ast.FoldExpr) (C.LLVMValueRef, semant
 	if err != nil {
 		return nil, nil, err
 	}
-	captures := s.collectTreeFoldCaptures(expr)
+	captures := s.collectTreeFoldCaptures(expr, root.family)
 	envValue, envStruct, err := s.buildTreeFoldEnv(captures, "fold")
 	if err != nil {
 		return nil, nil, err

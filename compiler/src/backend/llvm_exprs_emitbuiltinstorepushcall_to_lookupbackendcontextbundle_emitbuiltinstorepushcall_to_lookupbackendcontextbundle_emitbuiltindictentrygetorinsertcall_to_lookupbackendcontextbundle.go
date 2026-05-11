@@ -94,8 +94,15 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 		return nil, nil, true, fmt.Errorf("dict entry get_or_insert expects 1 argument, got %d", len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("dict entry get_or_insert requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "dict.entry.get_or_insert.owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
 	}
 	var entryPtr C.LLVMValueRef
 	var err error
@@ -213,6 +220,21 @@ func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType
 			return s.emitMovedValue(operand, expected)
 		}
 		return s.emitMovedValue(arg, expected)
+	}
+	if expectedRef, ok := expected.(*semantic.RefType); ok && expectedRef != nil {
+		actual := s.exprType(arg)
+		if actual != nil && !semantic.AssignableTo(expected, actual) && semantic.AssignableTo(expectedRef.Elem, actual) {
+			ptr, valueType, err := s.emitValueAddress(arg)
+			if err == nil {
+				return ptr, &semantic.RefType{
+					Elem:            valueType,
+					Mutable:         expectedRef.Mutable,
+					State:           semantic.RefStateNonNull,
+					Storage:         expectedRef.Storage,
+					ExplicitStorage: expectedRef.ExplicitStorage,
+				}, nil
+			}
+		}
 	}
 	return s.emitExpr(arg, expected)
 }

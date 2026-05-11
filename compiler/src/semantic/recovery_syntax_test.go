@@ -84,3 +84,9 @@ def score(maybe: Expr?) -> i64:
 			2
 `)
 }
+
+func TestAnalyzeParenthesizedIndexCanUseOptionalElseRecovery(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "parenthesized_index_optional_else.elisa", `def read(xs: darray[u8&?], i: usize) -> u8&:
+	return (xs[i]) else ""
+`)
+}

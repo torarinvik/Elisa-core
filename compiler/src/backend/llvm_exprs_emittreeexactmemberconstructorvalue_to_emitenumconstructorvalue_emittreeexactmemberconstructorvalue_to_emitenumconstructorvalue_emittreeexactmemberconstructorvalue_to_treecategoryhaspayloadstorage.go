@@ -95,6 +95,15 @@ func (s *functionState) emitTreeExactMemberConstructorValue(callExpr *ast.CallEx
 	resolvedOwner := treeAllocOwnerBinding{}
 	if owner != nil {
 		resolvedOwner = *owner
+		if (resolvedOwner.arenaRef != nil || resolvedOwner.arenaRefPtr != nil) && resolvedOwner.storeValue == nil && resolvedOwner.storePtr == nil && treeExactMemberLayoutPlan(memberType).isCategoryUnion() {
+			arenaRef := resolvedOwner.arenaRef
+			arenaRefPtr := resolvedOwner.arenaRefPtr
+			if implicitOwner, ok := s.lookupImplicitTreeStoreOwnerForFamily(family); ok {
+				resolvedOwner = implicitOwner
+				resolvedOwner.arenaRef = arenaRef
+				resolvedOwner.arenaRefPtr = arenaRefPtr
+			}
+		}
 	} else {
 		activeOwner, ok := s.lookupTreeAllocOwnerForFamily(family)
 		if !ok {

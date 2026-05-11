@@ -385,7 +385,7 @@ func (s *functionState) emitCloneTreeValue(sourceValue C.LLVMValueRef, sourceTyp
 		return nil, err
 	}
 	helperExpr := &ast.FoldExpr{Keyword: "rewrite", RewriteDefault: true}
-	captures := s.collectTreeFoldCaptures(helperExpr)
+	captures := s.collectTreeFoldCaptures(helperExpr, root.family)
 	envValue, envStruct, err := s.buildTreeFoldEnv(captures, name+".tree.clone")
 	if err != nil {
 		return nil, err

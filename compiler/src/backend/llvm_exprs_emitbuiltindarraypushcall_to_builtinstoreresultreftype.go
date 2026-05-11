@@ -97,8 +97,15 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 		return nil, nil, true, fmt.Errorf("darray push expects 1 argument, got %d", len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray push requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.push.owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
 	}
 	darrayPtr, resultType, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
 	if err != nil {
@@ -153,8 +160,15 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 		return nil, nil, true, fmt.Errorf("darray extend expects 1 argument, got %d", len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray extend requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.extend.owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
 	}
 	darrayPtr, resultType, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
 	if err != nil {
@@ -320,8 +334,15 @@ func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVM
 		return nil, nil, true, fmt.Errorf("darray reserve expects 1 argument, got %d", len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
-	if !ok || owner.arenaRef == nil {
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray reserve requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.reserve.owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
 	}
 	darrayPtr, resultType, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
 	if err != nil {

@@ -23,6 +23,11 @@ This note documents the current LLVM backend contract for Elisa `tree` values. I
 - Dense `category_union` code should prefer explicit stores:
   `store = Tree.Store(owner)` followed by `in store:` around constructors, reads, visits, folds, rewrites, clones, and attributes.
 - `in owner:` remains valid for short-lived local construction/read scopes, but values that escape the scope should also carry an explicit store somewhere in the surrounding data model.
+- Functions that accept dense tree handles and read them receive hidden tree-store context parameters when the semantic pass can infer the matching store from the call site.
+- Implicit store parameters are threaded from explicit `in store:` / `in owner:` scopes, `perm` store scopes, and payload types that carry tree handles through structs or enum variants.
+- Functions that already have an active tree store in scope, such as an explicit `Tree.Store[...]` parameter or a local `in store:` block, use that explicit context and do not receive a duplicate hidden store parameter for the same family.
+- Plain arena/region scopes can allocate destination nodes, but they do not identify the source table for an incoming dense handle. Reads of incoming handles inside `in owner:` / `in region:` still receive hidden tree-store context.
+- If multiple stores could satisfy the same tree family, the call site must keep enough explicit context for deterministic inference; the backend must not fall back to a global active store.
 - Tree fields are value reads over handle-lowered storage.
 - Tree fields are not stable lvalues in v1.
 - Assignment, address-taking, mutable reference binding, and by-reference mutation of tree fields must be rejected.

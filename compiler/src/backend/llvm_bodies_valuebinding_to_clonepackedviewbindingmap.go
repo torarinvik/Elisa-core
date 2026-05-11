@@ -131,16 +131,18 @@ type packedStoreBinding struct {
 	typ   *semantic.PackedEnumStoreType
 }
 type treeAllocOwnerBinding struct {
-	isPerm     bool
-	arenaRef   C.LLVMValueRef
-	storePtr   C.LLVMValueRef
-	storeValue C.LLVMValueRef
-	storeType  *semantic.TreeStoreType
+	isPerm      bool
+	arenaRef    C.LLVMValueRef
+	arenaRefPtr C.LLVMValueRef
+	storePtr    C.LLVMValueRef
+	storeValue  C.LLVMValueRef
+	storeType   *semantic.TreeStoreType
 }
 type treeRewriteDefaultContext struct {
-	memberType     semantic.Type
-	nodeValue      C.LLVMValueRef
-	childViewValue C.LLVMValueRef
+	memberType      semantic.Type
+	nodeValue       C.LLVMValueRef
+	childViewValue  C.LLVMValueRef
+	childResultType semantic.Type
 }
 type treeImplicitStoreCacheKey struct {
 	family *semantic.TreeType

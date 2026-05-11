@@ -519,10 +519,10 @@ func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semant
 	if s != nil && s.g != nil && s.g.result != nil && s.g.result.CastHooks != nil {
 		if sym, ok := s.g.result.CastHooks[expr]; ok && sym != nil {
 			fnType, ok := sym.Type.(*semantic.FuncType)
-			if !ok || fnType == nil || len(fnType.Params) != 1 {
+			if !ok || fnType == nil || len(fnType.Params) == 0 {
 				return nil, nil, fmt.Errorf("invalid semantic cast hook for %T", expr)
 			}
-			arg, _, err := s.emitExpr(expr.Operand, fnType.Params[0])
+			args, err := s.emitCastHookArgs(fmt.Sprintf("%T", expr), expr.Operand, fnType)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -534,7 +534,7 @@ func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semant
 			if err != nil {
 				return nil, nil, err
 			}
-			call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arg}, "casthook")
+			call := s.buildCall(llvmFnType, callee, args, "casthook")
 			return call, fnType.Return, nil
 		}
 	}
