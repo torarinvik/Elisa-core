@@ -949,14 +949,14 @@ grammar PascalTypeDeclGrammar over Token using ParserState:
 
 Current rules:
 
-- support declarations accepted between productions include `token`, `channel`, `tokenset`, `grammar alias`, `grammar type`, `grammarfn`, `recovery`, and `infix table`
+- support declarations accepted between productions include `token`, `channel`, `tokenset`, `grammar alias`, `grammar type`, `recovery`, and `infix table`
 - grammar environment wiring such as `cursor`, `alloc`, `token_kind`, `current`, `advance`, `expect`, and `record_error` still belongs at the top of the grammar block before productions
 - support declarations remain grammar-scoped regardless of where they appear, so a later alias can be referenced by an earlier production after lowering sees the complete grammar block
 - formatting preserves the declaration order you wrote; it does not hoist colocated helpers back to the top
 
-## Grammar functions
+## Grammar Constructors
 
-Grammar functions are compile-time grammar-term templates. They let a grammar name a reusable parser shape and pass grammar terms or token-set references into it.
+Grammar constructors are compile-time grammar-term templates. They let a grammar name a reusable parser shape and pass grammar terms or token-set references into it.
 
 ```elisa
 grammar PascalListGrammar over Token using ParserState:
@@ -1028,8 +1028,9 @@ grammar PascalStmtGrammar over Token using ParserState uses RecoveryGrammar:
 
 Current rules:
 
-- `grammarfn Name(param, ...):` declares a grammar-scoped compile-time template
-- `grammarfn Name[T](item: grammar -> T, stop: tokenset) -> grammar -> darray[T]:` is the typed signature form
+- `grammar type Name(param, ...):` declares a grammar-scoped compile-time template
+- `grammar type Name[T](item: grammar -> T, stop: tokenset) -> grammar -> darray[T]:` is the typed signature form
+- `grammarfn` remains accepted as compatibility input for older examples, but new code should use `grammar type`
 - parameters can declare grammar-term defaults, as in `sep: grammar = .COMMA`
 - expression parameters use `expr` in the signature and are passed with `expr(...)` at the call site
 - the body is ordinary grammar syntax; one term expands as that term, multiple terms expand as a `seq`
@@ -1535,7 +1536,7 @@ Current header declarations:
 - `channel name` in a grammar header declares a generated mutable channel shared by every production in that grammar
 - `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
 - `channel name` at the top of a production body declares a production-local channel, which is preferred for helper tuple/struct results
-- `grammar type Name[...]` declares a reusable higher-order grammar combinator with the same expansion model as `grammarfn`, but with a clearer “grammar constructor” intent
+- `grammar type Name[...]` declares a reusable higher-order grammar combinator; this is the canonical replacement for older `grammarfn` declarations
 - `grammar alias name = term`, `grammar alias name(params...) = term`, and their block forms give compile-time grammar terms reusable names, so call sites can say `args = call_args`, `args = expr_items(stop: RParenSync)`, or `statements = block_statement_items` while keeping the lower-level `separated_by(...)` or recovery shape available in the header
 - `infix table Name(result):` hoists a reusable named-precedence ladder into grammar header scope so productions can say `result = infix(Name)` instead of inlining every level
 - if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from matching channel names
@@ -1823,10 +1824,10 @@ maybe_name = .IDENT?
 Current list-family terms:
 
 - `term?` succeeds with an optional result
-- `optional term` and `optional(term)` remain accepted for compatibility, but the formatter emits postfix `?`
+- `term?` is the canonical optional grammar spelling; `optional term` and `optional(term)` remain accepted for compatibility, but the formatter emits postfix `?`
 - `repeat term until(...)` parses zero or more items and returns the collected list
 - `[term] while token in tokens != [stop1, stop2]` is the canonical flattening form for zero or more list-producing items
-- `flatrepeat term until(...)` remains accepted for compatibility, but the preferred surface is the bracket `while` form
+- bracket `while` forms are the canonical flattening repeat spelling; `flatrepeat term until(...)` remains accepted for compatibility
 - `separated term by sep until(...)` is the canonical separated-list form
 - `list term separated by sep until(...)` and function-style `separated(term, sep, until(...))` remain accepted, but the formatter emits `separated term by sep until(...)`
 - `delimited(open, body, close, MessageKey)` parses `open`, returns `body`, and requires `close`
