@@ -267,6 +267,21 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		p.expect(lexer.TOKEN_RBRACKET)
 		return &ast.ListLitExpr{Position: pos, Elems: elems}
+	case lexer.TOKEN_LBRACE:
+		pos := p.cur().Pos
+		p.advance()
+		elems := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
+		if p.peek() != lexer.TOKEN_RBRACE {
+			elems = append(elems, p.parseExpr())
+			for p.match(lexer.TOKEN_COMMA) {
+				if p.peek() == lexer.TOKEN_RBRACE {
+					break
+				}
+				elems = append(elems, p.parseExpr())
+			}
+		}
+		p.expect(lexer.TOKEN_RBRACE)
+		return &ast.ListLitExpr{Position: pos, Elems: elems, Brace: true}
 	case lexer.TOKEN_SIZEOF:
 		pos := p.cur().Pos
 		p.advance()

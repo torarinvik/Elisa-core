@@ -37,6 +37,44 @@ func TestAnalyzeMembershipExprUsesBoolAndArrayLiteralType(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBraceMembershipExprUsesBoolAndArrayLiteralType(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_expr.elisa", `def keep(value: i64) -> bool:
+    return value in {1, 2, 3}
+`)
+
+	decl := result.File.Decls[0].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	inExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected membership binary expr, got %T", ret.Value)
+	}
+	if got := result.ExprTypes[inExpr].String(); got != "bool" {
+		t.Fatalf("expected membership expr type bool, got %s", got)
+	}
+	list, ok := inExpr.Right.(*ast.ListLitExpr)
+	if !ok || !list.Brace {
+		t.Fatalf("expected brace membership rhs literal, got %T %#v", inExpr.Right, inExpr.Right)
+	}
+	arrayType, ok := result.ExprTypes[list].(*ArrayType)
+	if !ok || arrayType == nil {
+		t.Fatalf("expected membership rhs list type, got %T %#v", result.ExprTypes[list], result.ExprTypes[list])
+	}
+	if builtin, ok := arrayType.Elem.(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected membership rhs element type i64, got %#v", arrayType.Elem)
+	}
+}
+
+func TestAnalyzeRejectsStandaloneBraceMembershipSetLiteral(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "standalone_brace_membership_literal.elisa", `def keep() -> i64:
+    return {1, 2, 3}
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "brace membership set literals are only valid on the right-hand side of `in`") {
+		t.Fatalf("expected standalone brace membership diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeMembershipAllowsEmptyListLiteral(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "membership_empty.elisa", `def keep(value: i64) -> bool:
     return value in []

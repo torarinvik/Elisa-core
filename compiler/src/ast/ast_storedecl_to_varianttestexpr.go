@@ -504,6 +504,7 @@ type SliceExpr struct {
 type ListLitExpr struct {
 	Position lexer.Pos
 	Elems    []Expr
+	Brace    bool
 }
 type ListComprehensionExpr struct {
 	Position  lexer.Pos

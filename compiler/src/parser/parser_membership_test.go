@@ -33,6 +33,33 @@ func TestParseMembershipExprUsesComparisonPrecedence(t *testing.T) {
 	}
 }
 
+func TestParseBraceMembershipExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: i64, other: bool) -> bool:\n    return value in {1, 2, 3} and other\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	andExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || andExpr.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected top-level and expr, got %#v", ret.Value)
+	}
+	inExpr, ok := andExpr.Left.(*ast.BinaryExpr)
+	if !ok || inExpr.Op != lexer.TOKEN_IN {
+		t.Fatalf("expected left side membership expr, got %#v", andExpr.Left)
+	}
+	list, ok := inExpr.Right.(*ast.ListLitExpr)
+	if !ok || len(list.Elems) != 3 || !list.Brace {
+		t.Fatalf("expected three-element brace membership literal, got %#v", inExpr.Right)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "value in {1, 2, 3}") {
+		t.Fatalf("expected brace membership to unparse, got:\n%s", formatted)
+	}
+}
+
 func TestParseTokenSetDecl(t *testing.T) {
 	file, errs := parseSourceFile(t, "tokenset ExprStart = [TokenKind.IF, TokenKind.LET]\n")
 	if len(errs) != 0 {
@@ -183,6 +210,25 @@ func TestParseIfMembershipConditionUsesNormalIfPath(t *testing.T) {
 	inExpr, ok := ifStmt.Cond.(*ast.BinaryExpr)
 	if !ok || inExpr.Op != lexer.TOKEN_IN {
 		t.Fatalf("expected membership condition, got %#v", ifStmt.Cond)
+	}
+}
+
+func TestParseIfBraceMembershipConditionUsesNormalIfPath(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: i64) -> bool:\n    if value in {1, 2, 3}:\n        return true\n    return false\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected normal if stmt, got %T", decl.Body[0])
+	}
+	inExpr, ok := ifStmt.Cond.(*ast.BinaryExpr)
+	if !ok || inExpr.Op != lexer.TOKEN_IN {
+		t.Fatalf("expected membership condition, got %#v", ifStmt.Cond)
+	}
+	if list, ok := inExpr.Right.(*ast.ListLitExpr); !ok || !list.Brace {
+		t.Fatalf("expected brace membership literal, got %#v", inExpr.Right)
 	}
 }
 

@@ -140,6 +140,9 @@ func formatExpr(expr ast.Expr) string {
 		for _, elem := range n.Elems {
 			parts = append(parts, formatExpr(elem))
 		}
+		if n.Brace {
+			return "{" + strings.Join(parts, ", ") + "}"
+		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	case *ast.ListComprehensionExpr:
 		line := "[" + formatExpr(n.Value) + " for " + n.Name + " in " + formatExpr(n.Source)

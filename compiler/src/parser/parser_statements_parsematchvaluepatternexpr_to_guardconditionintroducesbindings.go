@@ -399,7 +399,7 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 	}
 	headStart := p.pos
 	head := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
-	if p.peek() == lexer.TOKEN_IN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET {
+	if p.peek() == lexer.TOKEN_IN && p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACE) {
 		p.pos = headStart
 		cond := p.withAsCastDisabled(p.parseExpr)
 		p.expect(lexer.TOKEN_COLON)

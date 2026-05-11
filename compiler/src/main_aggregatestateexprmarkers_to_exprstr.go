@@ -396,6 +396,9 @@ func exprStr(e ast.Expr) string {
 		for _, elem := range n.Elems {
 			elems = append(elems, exprStr(elem))
 		}
+		if n.Brace {
+			return fmt.Sprintf("{%s}", strings.Join(elems, ", "))
+		}
 		return fmt.Sprintf("[%s]", strings.Join(elems, ", "))
 	case *ast.BinaryExpr:
 		return fmt.Sprintf("(%s %s %s)", exprStr(n.Left), lexer.TokenName(n.Op), exprStr(n.Right))

@@ -449,6 +449,11 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 	if expr == nil {
 		return invalidType
 	}
+	if expr.Brace {
+		a.errorf(expr.Pos(), "brace membership set literals are only valid on the right-hand side of `in`")
+		a.exprTypes[expr] = invalidType
+		return invalidType
+	}
 	expectedArray, useExpectedArray := contextualArrayLiteralType(expected)
 	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
 	if len(expr.Elems) == 0 {
