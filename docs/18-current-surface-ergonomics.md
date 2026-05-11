@@ -448,7 +448,14 @@ for index, item in items.enumerate() where item.kind == TokenKind.IDENT:
     result.push(item.name_id)
 ```
 
-Prefer this inline `where` clause when the predicate is local to the loop. Keep `source.where(predicate)` for reusable named predicates and expression-level view composition.
+Prefer this inline `where` clause when the predicate is local to the loop. For expression-level boolean queries, use the same regular filter shape:
+
+```elisa
+return any item in items where item.kind == TokenKind.IDENT
+return all value in values where is_enabled(value)
+```
+
+Keep `source.where(predicate)` for reusable view composition that feeds another view helper.
 
 ## Proof-carrying view helpers
 
@@ -460,7 +467,7 @@ def sum_selected(values: dview[i32]) -> i32:
     return source.where(keep_positive).reduce_sum(identity)
 
 def check(values: bool[8]) -> bool:
-    return values.where(is_enabled).all()
+    return all value in values where is_enabled(value)
 
 def chunks(values: dview[i32]) -> ChunksExactView[i32]:
     return values.readonly().chunks_exact(4)

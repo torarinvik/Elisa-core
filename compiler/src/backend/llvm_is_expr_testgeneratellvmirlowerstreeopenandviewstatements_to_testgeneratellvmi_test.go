@@ -573,24 +573,24 @@ func TestGenerateLLVMIRLowersInlineWhereAfterEnumerateLoops(t *testing.T) {
 	}
 }
 
-func TestGenerateLLVMIRLowersBoolAggregatesOverWhereViews(t *testing.T) {
+func TestGenerateLLVMIRLowersBoolAggregatesWithRegularWhereFilters(t *testing.T) {
 	src := `def keep_true(value: bool) -> bool:
 	return value
 
 def has_selected_truth(values: bool[4]) -> bool:
-	return values.where(keep_true).any()
+	return any value in values where keep_true(value)
 
 def all_selected_truth(values: bool[4]) -> bool:
-	return all(values.where(keep_true))
+	return all value in values where keep_true(value)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_bool_aggregates_over_where.elisa", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_bool_aggregates_regular_where.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i1 @has_selected_truth(", "define i1 @all_selected_truth(", "where.predicate", "where.filter.body", "any.short_circuit", "all.short_circuit"} {
+	for _, check := range []string{"define i1 @has_selected_truth(", "define i1 @all_selected_truth(", "query.result", "iter.filter.body", "call i1 @keep_true"} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected bool aggregate over where lowering to include %q, got:\n%s", check, output)
+			t.Fatalf("expected bool aggregate with regular where lowering to include %q, got:\n%s", check, output)
 		}
 	}
 }
