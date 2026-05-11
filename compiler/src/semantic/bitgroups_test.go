@@ -163,6 +163,28 @@ struct Plain:
 	}
 }
 
+func TestAnalyzeLayoutIntrospectionChecksOffsetFields(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "layout_introspection_missing_field.elisa", `struct Header layout c:
+	tag: u8
+	count: u32
+
+def read() -> usize:
+	return offset_of(Header, missing)
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `struct "Header" has no field "missing"`) {
+		t.Fatalf("expected missing offset_of field diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func TestAnalyzeLayoutIntrospectionRejectsNonStructOffsetBase(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "layout_introspection_non_struct.elisa", `def read() -> usize:
+	return offset_of(i64, count)
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `field access requires struct type`) {
+		t.Fatalf("expected non-struct offset_of diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func TestAnalyzeBitGroupRejectsDuplicateMember(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "bitgroup_duplicate.elisa", `struct Header:
 	flags: bitset:

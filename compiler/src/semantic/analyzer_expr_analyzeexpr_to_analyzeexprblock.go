@@ -474,7 +474,8 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.namedTypes["usize"]
 		return
 	case *ast.OffsetofExpr:
-		a.resolveType(n.Type)
+		t := a.resolveType(n.Type)
+		a.lookupField(t, n.Field, n.Pos())
 		result = a.namedTypes["usize"]
 		return
 	case *ast.TernaryExpr:
