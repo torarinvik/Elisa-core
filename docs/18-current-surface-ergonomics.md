@@ -38,6 +38,31 @@ Current rules:
 - `expr is Variant as alias` binds `alias` as a narrowed variant view in the truthy branch
 - ordinary `match` arms remain exhaustive for named payload patterns, so `match value: Type.Variant(field: x): ...` must still name every payload field
 
+## Grouped `is` alternatives
+
+Use `|` after `is` when a value can match any of several variants or enum members. Short checks stay inline.
+
+```elisa
+def is_additive(op: TokenKind) -> bool:
+    return op is .PLUS | .MINUS
+```
+
+For longer variant families, wrap the alternatives in parentheses and put one alternative per line. This is the preferred shape for long declaration-family or AST-kind classifiers.
+
+```elisa
+def has_routine_body(decl: Pascal.Decl) -> bool:
+    return decl is (
+        Pascal.Decl.ProcedureDecl
+        | Pascal.Decl.ProcedureQualifiedDecl
+        | Pascal.Decl.ProcedureGenericDecl
+        | Pascal.Decl.FunctionDecl
+        | Pascal.Decl.FunctionQualifiedDecl
+        | Pascal.Decl.FunctionGenericDecl
+    )
+```
+
+The formatter preserves compact alternatives when they are short and rewrites longer groups into the parenthesized vertical form.
+
 ## Optional AST payloads
 
 Optional value types can be used directly in structs and tree payloads, which is preferable to paired `has_*` booleans plus dummy sentinel values.
