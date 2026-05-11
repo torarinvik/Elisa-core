@@ -152,6 +152,13 @@ def is_small(value: i64) -> bool:
     return value in {1, 2, 3}
 ```
 
+Use `not in` for direct negated membership. It is equivalent to `not (value in {...})`, but keeps membership checks readable when the candidate set is the center of the expression.
+
+```elisa
+def is_large(value: i64) -> bool:
+    return value not in {1, 2, 3}
+```
+
 When the left-hand side has a const enum type, candidates may use shorthand enum members. The shorthand is resolved from the left-hand side type, so repeated enum qualifiers are unnecessary.
 
 ```elisa

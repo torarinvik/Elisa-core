@@ -380,8 +380,16 @@ func (p *Parser) parseComparison() ast.Expr {
 	for p.peek() == lexer.TOKEN_EQEQ || p.peek() == lexer.TOKEN_BANGEQ ||
 		p.peek() == lexer.TOKEN_LT || p.peek() == lexer.TOKEN_GT ||
 		p.peek() == lexer.TOKEN_LTEQ || p.peek() == lexer.TOKEN_GTEQ ||
-		p.peek() == lexer.TOKEN_IS || p.membershipLiteralAhead() {
+		p.peek() == lexer.TOKEN_IS || p.membershipLiteralAhead() || p.notInMembershipAhead() {
 		pos := p.cur().Pos
+		if p.notInMembershipAhead() {
+			p.advance()
+			inToken := p.advance()
+			right := p.parseAs()
+			membership := &ast.BinaryExpr{Position: inToken.Pos, Op: lexer.TOKEN_IN, Left: left, Right: right}
+			left = &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: membership}
+			continue
+		}
 		op := p.advance()
 		var right ast.Expr
 		if op.Kind == lexer.TOKEN_IS {
@@ -395,6 +403,9 @@ func (p *Parser) parseComparison() ast.Expr {
 }
 func (p *Parser) membershipLiteralAhead() bool {
 	return p.allowInMembership && p.peek() == lexer.TOKEN_IN
+}
+func (p *Parser) notInMembershipAhead() bool {
+	return p.allowInMembership && p.peek() == lexer.TOKEN_NOT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IN
 }
 func (p *Parser) parseAs() ast.Expr {
 	left := p.parseBitwiseOr()

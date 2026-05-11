@@ -64,6 +64,29 @@ func TestAnalyzeBraceMembershipExprUsesBoolAndArrayLiteralType(t *testing.T) {
 	}
 }
 
+func TestAnalyzeNotInMembershipExprUsesBool(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "not_in_membership_expr.elisa", `def keep(value: i64) -> bool:
+    return value not in {1, 2, 3}
+`)
+
+	decl := result.File.Decls[0].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	notExpr, ok := ret.Value.(*ast.UnaryExpr)
+	if !ok {
+		t.Fatalf("expected not-in to parse as unary not expr, got %T", ret.Value)
+	}
+	if got := result.ExprTypes[notExpr].String(); got != "bool" {
+		t.Fatalf("expected not-in expr type bool, got %s", got)
+	}
+	inExpr, ok := notExpr.Operand.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected not-in operand to be membership binary expr, got %T", notExpr.Operand)
+	}
+	if got := result.ExprTypes[inExpr].String(); got != "bool" {
+		t.Fatalf("expected membership operand type bool, got %s", got)
+	}
+}
+
 func TestAnalyzeBraceMembershipInfersShorthandMembers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_shorthand.elisa", `const enum TokenKind of u32:
     IF

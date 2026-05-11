@@ -60,6 +60,37 @@ func TestParseBraceMembershipExpr(t *testing.T) {
 	}
 }
 
+func TestParseNotInMembershipExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: i64, other: bool) -> bool:\n    return value not in {1, 2, 3} and other\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	andExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || andExpr.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected top-level and expr, got %#v", ret.Value)
+	}
+	notExpr, ok := andExpr.Left.(*ast.UnaryExpr)
+	if !ok || notExpr.Op != lexer.TOKEN_NOT {
+		t.Fatalf("expected left side not expr, got %#v", andExpr.Left)
+	}
+	inExpr, ok := notExpr.Operand.(*ast.BinaryExpr)
+	if !ok || inExpr.Op != lexer.TOKEN_IN {
+		t.Fatalf("expected not-in to lower to membership operand, got %#v", notExpr.Operand)
+	}
+	list, ok := inExpr.Right.(*ast.ListLitExpr)
+	if !ok || len(list.Elems) != 3 || !list.Brace {
+		t.Fatalf("expected three-element brace membership literal, got %#v", inExpr.Right)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "value not in {1, 2, 3}") {
+		t.Fatalf("expected not-in membership to unparse, got:\n%s", formatted)
+	}
+}
+
 func TestParseBraceMembershipShorthandMembers(t *testing.T) {
 	file, errs := parseSourceFile(t, "const enum TokenKind of u32:\n    IF\n    LET\n    IDENT\n\ndef keep(kind: TokenKind) -> bool:\n    return kind in {.IF, .LET}\n")
 	if len(errs) != 0 {

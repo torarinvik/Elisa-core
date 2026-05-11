@@ -41,6 +41,23 @@ func TestGenerateLLVMIRLowersBraceMembershipExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersNotInMembershipExpr(t *testing.T) {
+	src := `def keep(value: i64) -> bool:
+    return value not in {1, 2, 3}
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_not_in_membership.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @keep(i64 ", "membership.next.0", "membership.result", "nottmp"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected not-in membership lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersBraceMembershipShorthandMembers(t *testing.T) {
 	src := `const enum TokenKind of u32:
     IF

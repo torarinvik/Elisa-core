@@ -46,6 +46,11 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return "(" + formatExpr(n.Left) + " " + lexer.TokenName(n.Op) + " " + formatExpr(n.Right) + ")"
 	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_NOT {
+			if membership, ok := n.Operand.(*ast.BinaryExpr); ok && membership != nil && membership.Op == lexer.TOKEN_IN {
+				return formatExpr(membership.Left) + " not in " + formatExpr(membership.Right)
+			}
+		}
 		op := lexer.TokenName(n.Op)
 		if op == "not" {
 			return "(not " + formatExpr(n.Operand) + ")"
