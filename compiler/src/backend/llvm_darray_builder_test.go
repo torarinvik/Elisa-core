@@ -76,6 +76,26 @@ func TestGenerateLLVMIRLowersListComprehensionExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersRangeListComprehensionExpr(t *testing.T) {
+	src := `def build(owner: Arena, count: usize) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        xs = [index for index in 1..<count]
+        return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_range_list_comprehension.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "for.cond") {
+		t.Fatalf("expected range list comprehension to lower through range loop blocks, got:\n%s", output)
+	}
+	if !strings.Contains(output, "darray.push.slot") {
+		t.Fatalf("expected range list comprehension to push elements, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersQueryExprFamily(t *testing.T) {
 	src := `def has_positive(items: darray[i64]) -> bool:
     return any item in items where item > 0

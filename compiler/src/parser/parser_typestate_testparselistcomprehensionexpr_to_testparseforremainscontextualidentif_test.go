@@ -2,6 +2,7 @@ package parser
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/unparse"
 	"strings"
 	"testing"
@@ -50,6 +51,30 @@ func TestParseListComprehensionExpr(t *testing.T) {
 		t.Fatalf("expected comprehension filter binary expr, got %T", comp.Filter)
 	}
 }
+
+func TestParseListComprehensionExprOverRange(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(count: usize) -> void:\n    values = [index for index in 1..<count]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	comp, ok := decl.Value.(*ast.ListComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected list comprehension expr, got %T", decl.Value)
+	}
+	if comp.RangeEnd == nil || comp.RangeOp != lexer.TOKEN_RANGE_LT {
+		t.Fatalf("expected exclusive range comprehension, got op=%s end=%T", lexer.TokenName(comp.RangeOp), comp.RangeEnd)
+	}
+	formatted := unparse.FormatStmt(fn.Body[0])
+	if !strings.Contains(formatted, "[index for index in 1 ..< count]") {
+		t.Fatalf("expected formatter to preserve range comprehension syntax, got:\n%s", formatted)
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt as Lua.Node).node\n")
 	if len(errs) != 0 {

@@ -532,18 +532,46 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		a.errorf(expr.Pos(), "list comprehension requires an active in <arena>: scope")
 	}
 	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
-	sourceType := a.analyzeExpr(expr.Source)
-	info, ok := a.resolveIterLoopSourceInfo(expr.Source, sourceType)
-	if !ok {
-		a.errorf(expr.Source.Pos(), "list comprehension currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, source.enumerate(), children(node), or a projected tree attribute sequence, got %s", sourceType)
-		info.ItemType = invalidType
-	}
-	if a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
-		a.errorf(expr.Pos(), "list comprehension value iteration does not support affine element type %s; use an explicit loop with ref binding", info.ItemType)
-	}
+	var itemType Type
 	loopScope := NewScope(a.currentScope)
-	pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
-	a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
+	if expr.RangeEnd != nil {
+		startType := a.analyzeExpr(expr.Source)
+		endType := a.analyzeExpr(expr.RangeEnd)
+		itemType = CommonNumericType(startType, endType)
+		if !IsIntegralType(itemType) {
+			a.errorf(expr.Pos(), "list comprehension range requires integral bounds, got %s and %s", startType, endType)
+			itemType = invalidType
+		}
+		if expr.RangeStep != nil {
+			stepType := a.analyzeExpr(expr.RangeStep)
+			itemType = CommonNumericType(itemType, stepType)
+			if !IsIntegralType(stepType) || !IsIntegralType(itemType) {
+				a.errorf(expr.RangeStep.Pos(), "list comprehension range step must be integral, got %s", stepType)
+				itemType = invalidType
+			}
+			if value, ok := a.evalConstExpr(expr.RangeStep); ok && value.Kind == ConstInt && value.Int == 0 {
+				a.errorf(expr.RangeStep.Pos(), "list comprehension range step cannot be zero")
+			}
+		}
+		if expr.RangeOp != lexer.TOKEN_RANGE && expr.RangeOp != lexer.TOKEN_RANGE_LT && expr.RangeOp != lexer.TOKEN_RANGE_GT {
+			a.errorf(expr.Pos(), "list comprehension uses unsupported range operator %s", lexer.TokenName(expr.RangeOp))
+		}
+		loopSym := &Symbol{Name: expr.Name, Kind: SymbolLocal, Type: itemType, Node: expr, Mutable: false}
+		a.defineLocalInScope(loopScope, loopSym, expr.Pos())
+	} else {
+		sourceType := a.analyzeExpr(expr.Source)
+		info, ok := a.resolveIterLoopSourceInfo(expr.Source, sourceType)
+		if !ok {
+			a.errorf(expr.Source.Pos(), "list comprehension currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, source.enumerate(), children(node), or a projected tree attribute sequence, got %s", sourceType)
+			info.ItemType = invalidType
+		}
+		if a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
+			a.errorf(expr.Pos(), "list comprehension value iteration does not support affine element type %s; use an explicit loop with ref binding", info.ItemType)
+		}
+		itemType = info.ItemType
+		pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
+		a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
+	}
 	if expr.Filter != nil {
 		condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
 		if !IsBoolType(condType) {
@@ -556,22 +584,22 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	}
 	savedScope := a.currentScope
 	a.currentScope = loopScope
-	itemType := a.analyzeValueExpr(expr.Value, expectedElem)
+	valueType := a.analyzeValueExpr(expr.Value, expectedElem)
 	a.currentScope = savedScope
 	if useExpectedDArray {
-		if !AssignableTo(expectedDArray.Elem, itemType) {
-			a.errorf(expr.Value.Pos(), "list comprehension element expects %s, got %s", expectedDArray.Elem, itemType)
+		if !AssignableTo(expectedDArray.Elem, valueType) {
+			a.errorf(expr.Value.Pos(), "list comprehension element expects %s, got %s", expectedDArray.Elem, valueType)
 		}
 		a.consumeAffineValueExpr(expr.Value, expectedDArray.Elem, "move into list comprehension element")
 		a.exprTypes[expr] = expectedDArray
 		return expectedDArray
 	}
-	if itemType == nil || IsInvalidType(itemType) {
+	if valueType == nil || IsInvalidType(valueType) {
 		a.exprTypes[expr] = invalidType
 		return invalidType
 	}
-	a.consumeAffineValueExpr(expr.Value, itemType, "move into list comprehension element")
-	result := &DArrayType{Elem: itemType, Shape: &WildcardShape{}, SurfaceName: "darray"}
+	a.consumeAffineValueExpr(expr.Value, valueType, "move into list comprehension element")
+	result := &DArrayType{Elem: valueType, Shape: &WildcardShape{}, SurfaceName: "darray"}
 	a.exprTypes[expr] = result
 	return result
 }

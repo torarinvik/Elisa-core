@@ -506,11 +506,14 @@ type ListLitExpr struct {
 	Elems    []Expr
 }
 type ListComprehensionExpr struct {
-	Position lexer.Pos
-	Value    Expr
-	Name     string
-	Source   Expr
-	Filter   Expr
+	Position  lexer.Pos
+	Value     Expr
+	Name      string
+	Source    Expr
+	RangeEnd  Expr
+	RangeStep Expr
+	RangeOp   lexer.TokenKind
+	Filter    Expr
 }
 type QueryExprKind int
 

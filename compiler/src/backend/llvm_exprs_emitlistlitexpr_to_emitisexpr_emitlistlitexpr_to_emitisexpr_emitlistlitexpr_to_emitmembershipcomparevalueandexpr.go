@@ -199,18 +199,36 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 		},
 		Args: []ast.Expr{expr.Value},
 	}
+	body := []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: pushCall}}
+	var loopStmt ast.Stmt
+	if expr.RangeEnd != nil {
+		loopStmt = &ast.ForStmt{
+			Position: expr.Position,
+			Name:     expr.Name,
+			Start:    expr.Source,
+			End:      expr.RangeEnd,
+			Step:     expr.RangeStep,
+			Op:       expr.RangeOp,
+			Body:     body,
+		}
+		if expr.Filter != nil {
+			loopStmt.(*ast.ForStmt).Body = []ast.Stmt{&ast.IfStmt{Position: expr.Position, Cond: expr.Filter, Then: body}}
+		}
+	} else {
+		loopStmt = &ast.IterForStmt{
+			Position: expr.Position,
+			Pattern:  &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
+			Mode:     ast.IterBindValue,
+			Source:   expr.Source,
+			Filter:   expr.Filter,
+			Body:     body,
+		}
+	}
 	block := &ast.ExprBlock{
 		Position: expr.Position,
 		Stmts: []ast.Stmt{
 			&ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: resultInit},
-			&ast.IterForStmt{
-				Position: expr.Position,
-				Pattern:  &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
-				Mode:     ast.IterBindValue,
-				Source:   expr.Source,
-				Filter:   expr.Filter,
-				Body:     []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: pushCall}},
-			},
+			loopStmt,
 		},
 		Value: resultIdent,
 	}

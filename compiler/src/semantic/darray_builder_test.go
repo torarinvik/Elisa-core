@@ -157,6 +157,39 @@ func TestAnalyzeListComprehensionExpr(t *testing.T) {
 	}
 }
 
+func TestAnalyzeListComprehensionExprOverRange(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_list_comprehension_range.elisa", `def build(owner: Arena, count: usize) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        xs = [index for index in 1..<count]
+        return xs.count
+`)
+
+	var build *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "build" {
+			build = fn
+			break
+		}
+	}
+	if build == nil {
+		t.Fatal("expected build function declaration")
+	}
+	inStmt := build.Body[1].(*ast.InStoreStmt)
+	varDecl := inStmt.Body[0].(*ast.VarDeclStmt)
+	comp, ok := varDecl.Value.(*ast.ListComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected list comprehension initializer, got %T", varDecl.Value)
+	}
+	compType, ok := result.ExprTypes[comp].(*DArrayType)
+	if !ok || compType == nil {
+		t.Fatalf("expected range list comprehension to resolve to darray type, got %T %#v", result.ExprTypes[comp], result.ExprTypes[comp])
+	}
+	if builtin, ok := compType.Elem.(*BuiltinType); !ok || builtin.Name != "usize" {
+		t.Fatalf("expected darray element type usize, got %#v", compType.Elem)
+	}
+}
+
 func TestAnalyzeQueryExprFamily(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "query_expr_family.elisa", `def has_positive(items: darray[i64]) -> bool:
     return any item in items where item > 0

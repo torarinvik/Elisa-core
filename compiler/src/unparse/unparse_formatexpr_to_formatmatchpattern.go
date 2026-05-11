@@ -143,6 +143,12 @@ func formatExpr(expr ast.Expr) string {
 		return "[" + strings.Join(parts, ", ") + "]"
 	case *ast.ListComprehensionExpr:
 		line := "[" + formatExpr(n.Value) + " for " + n.Name + " in " + formatExpr(n.Source)
+		if n.RangeEnd != nil {
+			line += " " + lexer.TokenName(n.RangeOp) + " " + formatExpr(n.RangeEnd)
+			if n.RangeStep != nil {
+				line += " .. " + formatExpr(n.RangeStep)
+			}
+		}
 		if n.Filter != nil {
 			line += " if " + formatExpr(n.Filter)
 		}

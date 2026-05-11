@@ -275,6 +275,12 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		for _, elem := range n.Elems {
 			c.collectExpr(elem)
 		}
+	case *ast.ListComprehensionExpr:
+		c.collectExpr(n.Value)
+		c.collectExpr(n.Source)
+		c.collectExpr(n.RangeEnd)
+		c.collectExpr(n.RangeStep)
+		c.collectExpr(n.Filter)
 	case *ast.ParenExpr:
 		c.collectExpr(n.Inner)
 	case *ast.RaiseExpr:
