@@ -720,7 +720,7 @@ Current rules:
 - `size_of(T)`, `align_of(T)`, and `offset_of(T, field)` return `usize`
 - results are computed from the backend target data layout
 - `offset_of` currently accepts a direct field name on a lowered struct-like type
-- legacy spellings `sizeof`, `alignof`, and `offsetof` are still accepted for compatibility, but new code should use the underscore forms
+- legacy spellings `sizeof`, `alignof`, and `offsetof` are still accepted with deprecation diagnostics, but new code should use the underscore forms
 - prefer these builtins in runtime, FFI, packed-layout, and backend test code instead of duplicating ABI constants by hand
 
 ## Grammar recovery policies

@@ -293,27 +293,45 @@ func (p *Parser) parsePrimary() ast.Expr {
 		return &ast.ListLitExpr{Position: pos, Elems: elems, Brace: true}
 	case lexer.TOKEN_SIZEOF:
 		pos := p.cur().Pos
+		syntax := p.cur().Text
 		p.advance()
 		p.expect(lexer.TOKEN_LPAREN)
 		typ := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_RPAREN)
-		return &ast.SizeofExpr{Position: pos, Type: typ}
+		expr := &ast.SizeofExpr{Position: pos, Type: typ}
+		if syntax == "sizeof" {
+			expr.DeprecatedSyntax = "sizeof"
+			expr.DeprecatedReplacement = "size_of"
+		}
+		return expr
 	case lexer.TOKEN_ALIGNOF:
 		pos := p.cur().Pos
+		syntax := p.cur().Text
 		p.advance()
 		p.expect(lexer.TOKEN_LPAREN)
 		typ := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_RPAREN)
-		return &ast.AlignofExpr{Position: pos, Type: typ}
+		expr := &ast.AlignofExpr{Position: pos, Type: typ}
+		if syntax == "alignof" {
+			expr.DeprecatedSyntax = "alignof"
+			expr.DeprecatedReplacement = "align_of"
+		}
+		return expr
 	case lexer.TOKEN_OFFSETOF:
 		pos := p.cur().Pos
+		syntax := p.cur().Text
 		p.advance()
 		p.expect(lexer.TOKEN_LPAREN)
 		typ := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_COMMA)
 		field := p.expect(lexer.TOKEN_IDENT)
 		p.expect(lexer.TOKEN_RPAREN)
-		return &ast.OffsetofExpr{Position: pos, Type: typ, Field: field.Text}
+		expr := &ast.OffsetofExpr{Position: pos, Type: typ, Field: field.Text}
+		if syntax == "offsetof" {
+			expr.DeprecatedSyntax = "offsetof"
+			expr.DeprecatedReplacement = "offset_of"
+		}
+		return expr
 	case lexer.TOKEN_TRY:
 		pos := p.cur().Pos
 		p.advance()

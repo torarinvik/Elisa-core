@@ -180,8 +180,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
-	return DynArrayView(null, 0, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
+	return DynArrayView(null, 0, size_of(T))
 
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
 	_ = start

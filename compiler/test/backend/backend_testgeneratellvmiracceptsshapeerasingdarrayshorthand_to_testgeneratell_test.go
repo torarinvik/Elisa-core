@@ -82,10 +82,10 @@ func TestGenerateLLVMIRUsesABISizeofForPaddedStructs(t *testing.T) {
     value: i32
 
 def padded_size() -> usize:
-    return sizeof(Padded)
+    return size_of(Padded)
 
 def array_view_size() -> usize:
-	return sizeof(view[i32])
+	return size_of(view[i32])
 `
 	result := parseAndAnalyze(t, "backend_sizeof.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)

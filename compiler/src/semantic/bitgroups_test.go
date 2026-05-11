@@ -176,6 +176,26 @@ def read() -> usize:
 	}
 }
 
+func TestAnalyzeDeprecatedLegacyLayoutIntrospectionNames(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "layout_introspection_legacy_names.elisa", `struct Header layout c:
+	tag: u8
+	count: u32
+
+def read() -> usize:
+	return sizeof(Header) + alignof(Header) + offsetof(Header, count)
+`)
+	warnings := strings.Join(result.Deprecations(), "\n")
+	for _, check := range []string{
+		"`sizeof` is deprecated; use `size_of`",
+		"`alignof` is deprecated; use `align_of`",
+		"`offsetof` is deprecated; use `offset_of`",
+	} {
+		if !strings.Contains(warnings, check) {
+			t.Fatalf("expected warning %q, got:\n%s", check, warnings)
+		}
+	}
+}
+
 func TestAnalyzeLayoutIntrospectionRejectsNonStructOffsetBase(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "layout_introspection_non_struct.elisa", `def read() -> usize:
 	return offset_of(i64, count)

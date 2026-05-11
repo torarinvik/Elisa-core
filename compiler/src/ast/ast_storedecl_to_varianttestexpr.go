@@ -574,17 +574,23 @@ type LambdaExpr struct {
 	BodyExpr            Expr
 }
 type SizeofExpr struct {
-	Position lexer.Pos
-	Type     TypeExpr
+	Position              lexer.Pos
+	Type                  TypeExpr
+	DeprecatedSyntax      string
+	DeprecatedReplacement string
 }
 type AlignofExpr struct {
-	Position lexer.Pos
-	Type     TypeExpr
+	Position              lexer.Pos
+	Type                  TypeExpr
+	DeprecatedSyntax      string
+	DeprecatedReplacement string
 }
 type OffsetofExpr struct {
-	Position lexer.Pos
-	Type     TypeExpr
-	Field    string
+	Position              lexer.Pos
+	Type                  TypeExpr
+	Field                 string
+	DeprecatedSyntax      string
+	DeprecatedReplacement string
 }
 type TernaryExpr struct {
 	Position lexer.Pos
