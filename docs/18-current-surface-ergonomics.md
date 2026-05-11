@@ -2215,6 +2215,8 @@ the literal:
 ```elisa
 values: darray[int] = [1, 2, 3] in owner
 mapped: darray[int] = [value + 1 for value in values if value > 0] in owner
+prepended: darray[int] = [first, ...rest] in owner
+combined: darray[int] = [...left, ...right] in owner
 ```
 
 The direct owner form is only for arena-backed dynamic array literals and

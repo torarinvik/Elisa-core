@@ -200,7 +200,11 @@ func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
 	}
 
 	var elemType Type
-	for _, elem := range list.Elems {
+	for i, elem := range list.Elems {
+		if i < len(list.Spreads) && list.Spreads[i] {
+			a.errorf(elem.Pos(), "membership candidate lists do not support spread elements")
+			continue
+		}
 		itemType := a.analyzeValueExpr(elem, left)
 		if !typesComparableForEquality(left, itemType) {
 			a.errorf(elem.Pos(), "cannot compare %s against membership candidate %s", left, itemType)

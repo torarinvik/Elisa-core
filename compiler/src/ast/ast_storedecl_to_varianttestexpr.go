@@ -504,6 +504,7 @@ type SliceExpr struct {
 type ListLitExpr struct {
 	Position lexer.Pos
 	Elems    []Expr
+	Spreads  []bool
 	Brace    bool
 	Owner    Expr
 }

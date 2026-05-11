@@ -252,17 +252,22 @@ func (p *Parser) parsePrimary() ast.Expr {
 		pos := p.cur().Pos
 		p.advance()
 		elems := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+		spreads := make([]bool, 0, cap(elems))
 		if p.peek() != lexer.TOKEN_RBRACKET {
+			firstSpread := p.match(lexer.TOKEN_ELLIPSIS)
 			first := p.parseExpr()
-			if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
+			if !firstSpread && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
 				return p.parseListComprehensionFromFirst(pos, first)
 			}
 			elems = append(elems, first)
+			spreads = append(spreads, firstSpread)
 			for p.match(lexer.TOKEN_COMMA) {
 				if p.peek() == lexer.TOKEN_RBRACKET {
 					break
 				}
+				spread := p.match(lexer.TOKEN_ELLIPSIS)
 				elems = append(elems, p.parseExpr())
+				spreads = append(spreads, spread)
 			}
 		}
 		p.expect(lexer.TOKEN_RBRACKET)
@@ -270,7 +275,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if p.match(lexer.TOKEN_IN) {
 			owner = p.withInMembershipDisabled(p.parseExpr)
 		}
-		return &ast.ListLitExpr{Position: pos, Elems: elems, Owner: owner}
+		return &ast.ListLitExpr{Position: pos, Elems: elems, Spreads: spreads, Owner: owner}
 	case lexer.TOKEN_LBRACE:
 		pos := p.cur().Pos
 		p.advance()

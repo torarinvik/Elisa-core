@@ -456,6 +456,13 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 	}
 	expectedArray, useExpectedArray := contextualArrayLiteralType(expected)
 	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
+	hasSpread := false
+	for _, spread := range expr.Spreads {
+		if spread {
+			hasSpread = true
+			break
+		}
+	}
 	if expr.Owner != nil {
 		owner, _, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
 		if !ok || owner.Kind != treeAllocOwnerArena {
@@ -485,14 +492,30 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 	var elemType Type
 	if useExpectedArray {
 		elemType = expectedArray.Elem
+		if hasSpread {
+			a.errorf(expr.Pos(), "array literals do not support spread elements; use an expected darray type")
+		}
 		if expectedArray.HasConstSize && expectedArray.ConstSize != int64(len(expr.Elems)) {
 			a.errorf(expr.Pos(), "array literal expects %d elements, got %d", expectedArray.ConstSize, len(expr.Elems))
 		}
 	} else if useExpectedDArray {
 		elemType = expectedDArray.Elem
+	} else if hasSpread {
+		a.errorf(expr.Pos(), "spread list literal requires an expected darray type")
 	}
 
-	for _, elem := range expr.Elems {
+	for i, elem := range expr.Elems {
+		spread := i < len(expr.Spreads) && expr.Spreads[i]
+		if spread {
+			sourceType := a.analyzeValueExpr(elem, nil)
+			if !useExpectedDArray {
+				continue
+			}
+			if !builtinDArrayExtendSourceCompatible(expectedDArray.Elem, sourceType) {
+				a.errorf(elem.Pos(), "spread darray literal element expects a compatible darray, dview, or array source of %s, got %s", expectedDArray.Elem, sourceType)
+			}
+			continue
+		}
 		itemType := a.analyzeValueExpr(elem, elemType)
 		if useExpectedArray {
 			if !AssignableTo(expectedArray.Elem, itemType) {

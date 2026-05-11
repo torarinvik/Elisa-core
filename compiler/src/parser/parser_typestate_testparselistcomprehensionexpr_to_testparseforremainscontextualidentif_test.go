@@ -101,6 +101,29 @@ func TestParseListComprehensionExprWithExplicitOwner(t *testing.T) {
 	}
 }
 
+func TestParseListLiteralSpreadElements(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(owner: Arena, first: i64, rest: darray[i64]) -> void:\n    alloc: mutable Arena& = (&owner).cast[mutable Arena&]\n    values = [first, ...rest] in alloc\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	decl, ok := fn.Body[1].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[1])
+	}
+	lit, ok := decl.Value.(*ast.ListLitExpr)
+	if !ok {
+		t.Fatalf("expected list literal expr, got %T", decl.Value)
+	}
+	if len(lit.Elems) != 2 || len(lit.Spreads) != 2 || lit.Spreads[0] || !lit.Spreads[1] {
+		t.Fatalf("expected second list literal element to be spread, got %#v", lit.Spreads)
+	}
+	formatted := unparse.FormatStmt(fn.Body[1])
+	if !strings.Contains(formatted, "[first, ...rest] in alloc") {
+		t.Fatalf("expected formatter to preserve spread literal syntax, got:\n%s", formatted)
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt as Lua.Node).node\n")
 	if len(errs) != 0 {

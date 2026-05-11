@@ -69,6 +69,25 @@ func TestGenerateLLVMIRLowersDArrayLiteralWithExplicitOwner(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersDArrayLiteralWithSpreadElements(t *testing.T) {
+	src := `def build(owner: Arena, first: i64, rest: darray[i64]) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    xs: darray[i64] = [first, ...rest] in alloc
+    return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_literal_spread.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "darray.push.slot") {
+		t.Fatalf("expected scalar spread-literal element to lower through darray push, got:\n%s", output)
+	}
+	if !strings.Contains(output, "darray.extend.memcpy") {
+		t.Fatalf("expected spread darray element to lower through darray extend, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersListComprehensionExpr(t *testing.T) {
 	src := `def build(owner: Arena, items: darray[i64]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

@@ -82,9 +82,19 @@ import (
 )
 
 func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	hasSpread := false
+	for _, spread := range expr.Spreads {
+		if spread {
+			hasSpread = true
+			break
+		}
+	}
 	if arrayType, ok, err := s.listLiteralTargetArrayType(expr, expected); err != nil {
 		return nil, nil, err
 	} else if ok {
+		if hasSpread {
+			return nil, nil, fmt.Errorf("array literal spread requires a darray target")
+		}
 		if arrayType.HasConstSize && arrayType.ConstSize != int64(len(expr.Elems)) {
 			return nil, nil, fmt.Errorf("array literal resolved to %s but has %d elements", arrayType.String(), len(expr.Elems))
 		}
@@ -105,6 +115,9 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 	darrayType, err := s.listLiteralTargetDArrayType(expr, expected)
 	if err != nil {
 		return nil, nil, err
+	}
+	if hasSpread {
+		return s.emitSpreadListLitExpr(expr, darrayType)
 	}
 	if len(expr.Elems) == 0 {
 		zero, err := s.zeroValue(darrayType)
@@ -187,6 +200,44 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 	current = C.LLVMBuildInsertValue(s.builder, current, countValue, 1, cStringFree("darray.literal.count"))
 	current = C.LLVMBuildInsertValue(s.builder, current, countValue, 2, cStringFree("darray.literal.capacity"))
 	return current, darrayType, nil
+}
+func (s *functionState) emitSpreadListLitExpr(expr *ast.ListLitExpr, darrayType *semantic.DArrayType) (C.LLVMValueRef, semantic.Type, error) {
+	resultName := s.g.nextSyntheticName("list.spread.result.")
+	resultInit := &ast.ListLitExpr{Position: expr.Position}
+	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		s.g.result.ExprTypes[resultInit] = darrayType
+	}
+	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
+	body := make([]ast.Stmt, 0, len(expr.Elems))
+	for i, elem := range expr.Elems {
+		methodName := "push"
+		if i < len(expr.Spreads) && expr.Spreads[i] {
+			methodName = "extend"
+		}
+		call := &ast.CallExpr{
+			Position: elem.Pos(),
+			Func: &ast.FieldExpr{
+				Position: expr.Position,
+				Object:   resultIdent,
+				Field:    methodName,
+			},
+			Args: []ast.Expr{elem},
+		}
+		body = append(body, &ast.ExprStmt{Position: elem.Pos(), Expr: call})
+	}
+	var stmts []ast.Stmt
+	stmts = append(stmts, &ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: resultInit})
+	if expr.Owner != nil {
+		stmts = append(stmts, &ast.InStoreStmt{Position: expr.Position, Store: expr.Owner, Body: body})
+	} else {
+		stmts = append(stmts, body...)
+	}
+	block := &ast.ExprBlock{
+		Position: expr.Position,
+		Stmts:    stmts,
+		Value:    resultIdent,
+	}
+	return s.emitExprBlock(block, darrayType)
 }
 func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExpr) (C.LLVMValueRef, semantic.Type, error) {
 	resultType, ok := s.exprType(expr).(*semantic.DArrayType)

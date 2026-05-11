@@ -131,6 +131,42 @@ func TestAnalyzeDArrayLiteralWithExplicitOwner(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDArrayLiteralWithSpreadElements(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_spread.elisa", `def build(owner: Arena, first: i64, rest: darray[i64]) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    xs: darray[i64] = [first, ...rest] in alloc
+    return xs.count
+`)
+
+	var lit *ast.ListLitExpr
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			varDecl := fn.Body[1].(*ast.VarDeclStmt)
+			lit = varDecl.Value.(*ast.ListLitExpr)
+		}
+	}
+	if lit == nil {
+		t.Fatal("expected spread list literal")
+	}
+	if len(lit.Spreads) != 2 || !lit.Spreads[1] {
+		t.Fatalf("expected second list literal element to be spread, got %#v", lit.Spreads)
+	}
+	if _, ok := result.ExprTypes[lit].(*DArrayType); !ok {
+		t.Fatalf("expected spread list literal to resolve to darray type, got %T", result.ExprTypes[lit])
+	}
+}
+
+func TestAnalyzeRejectsSpreadInArrayLiteral(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "array_literal_spread_rejected.elisa", `def build(rest: i64[2]) -> void:
+    xs: i64[3] = [0, ...rest]
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `array literals do not support spread elements`) {
+		t.Fatalf("expected array spread diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsDArrayPushOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_push_requires_scope.elisa", `def build() -> void:
     xs: mutable darray[i64] = []

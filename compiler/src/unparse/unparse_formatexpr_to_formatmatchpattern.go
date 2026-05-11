@@ -137,8 +137,12 @@ func formatExpr(expr ast.Expr) string {
 		return formatExpr(n.Object) + "[" + formatExpr(n.Start) + ":" + formatExpr(n.End) + "]"
 	case *ast.ListLitExpr:
 		parts := make([]string, 0, len(n.Elems))
-		for _, elem := range n.Elems {
-			parts = append(parts, formatExpr(elem))
+		for i, elem := range n.Elems {
+			prefix := ""
+			if i < len(n.Spreads) && n.Spreads[i] {
+				prefix = "..."
+			}
+			parts = append(parts, prefix+formatExpr(elem))
 		}
 		if n.Brace {
 			return "{" + strings.Join(parts, ", ") + "}"
