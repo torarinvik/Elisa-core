@@ -608,132 +608,13 @@ func staticStaticIfStmtAlwaysTerminates(then []ast.Stmt, elifs []ast.StaticElifC
 }
 
 func (a *Analyzer) validateStaticFunctionRecursion(fn *ast.FuncDecl) {
-	a.validateStaticRecursionInStmts(fn, fn.Body)
-}
-
-func (a *Analyzer) validateStaticRecursionInStmts(fn *ast.FuncDecl, stmts []ast.Stmt) {
-	for _, stmt := range stmts {
-		a.validateStaticRecursionInStmt(fn, stmt)
-	}
-}
-
-func (a *Analyzer) validateStaticRecursionInStmt(fn *ast.FuncDecl, stmt ast.Stmt) {
-	switch n := stmt.(type) {
-	case *ast.ReturnStmt:
-		a.validateStaticRecursionInExpr(fn, n.Value)
-	case *ast.VarDeclStmt:
-		a.validateStaticRecursionInExpr(fn, n.Value)
-	case *ast.AssignStmt:
-		a.validateStaticRecursionInExpr(fn, n.Target)
-		a.validateStaticRecursionInExpr(fn, n.Value)
-	case *ast.AugAssignStmt:
-		a.validateStaticRecursionInExpr(fn, n.Target)
-		a.validateStaticRecursionInExpr(fn, n.Value)
-	case *ast.ExprStmt:
-		a.validateStaticRecursionInExpr(fn, n.Expr)
-	case *ast.StaticAssertStmt:
-		a.validateStaticRecursionInExpr(fn, n.Cond)
-		a.validateStaticRecursionInExpr(fn, n.Message)
-	case *ast.StaticErrorStmt:
-		a.validateStaticRecursionInExpr(fn, n.Message)
-	case *ast.IfStmt:
-		a.validateStaticRecursionInExpr(fn, n.Cond)
-		a.validateStaticRecursionInStmts(fn, n.Then)
-		for _, elif := range n.Elifs {
-			a.validateStaticRecursionInExpr(fn, elif.Cond)
-			a.validateStaticRecursionInStmts(fn, elif.Body)
+	a.walkStaticStmts(fn.Body, func(expr ast.Expr) bool {
+		call, ok := expr.(*ast.CallExpr)
+		if ok {
+			a.validateStaticRecursiveCall(fn, call)
 		}
-		a.validateStaticRecursionInStmts(fn, n.Else)
-	case *ast.StaticIfStmt:
-		a.validateStaticRecursionInExpr(fn, n.Cond)
-		a.validateStaticRecursionInStmts(fn, n.Then)
-		for _, elif := range n.Elifs {
-			a.validateStaticRecursionInExpr(fn, elif.Cond)
-			a.validateStaticRecursionInStmts(fn, elif.Body)
-		}
-		a.validateStaticRecursionInStmts(fn, n.Else)
-	case *ast.StaticBlockStmt:
-		a.validateStaticRecursionInStmts(fn, n.Body)
-	case *ast.WhileStmt:
-		a.validateStaticRecursionInExpr(fn, n.Cond)
-		a.validateStaticRecursionInStmts(fn, n.Body)
-	case *ast.ForStmt:
-		a.validateStaticRecursionInExpr(fn, n.Start)
-		a.validateStaticRecursionInExpr(fn, n.End)
-		a.validateStaticRecursionInExpr(fn, n.Step)
-		a.validateStaticRecursionInStmts(fn, n.Body)
-	}
-}
-
-func (a *Analyzer) validateStaticRecursionInExpr(fn *ast.FuncDecl, expr ast.Expr) {
-	if expr == nil {
-		return
-	}
-	switch n := expr.(type) {
-	case *ast.BinaryExpr:
-		a.validateStaticRecursionInExpr(fn, n.Left)
-		a.validateStaticRecursionInExpr(fn, n.Right)
-	case *ast.UnaryExpr:
-		a.validateStaticRecursionInExpr(fn, n.Operand)
-	case *ast.MoveExpr:
-		a.validateStaticRecursionInExpr(fn, n.Operand)
-	case *ast.ParenExpr:
-		a.validateStaticRecursionInExpr(fn, n.Inner)
-	case *ast.CastExpr:
-		a.validateStaticRecursionInExpr(fn, n.Operand)
-	case *ast.TernaryExpr:
-		a.validateStaticRecursionInExpr(fn, n.Value)
-		a.validateStaticRecursionInExpr(fn, n.Cond)
-		a.validateStaticRecursionInExpr(fn, n.Alt)
-	case *ast.FieldExpr:
-		a.validateStaticRecursionInExpr(fn, n.Object)
-	case *ast.IndexExpr:
-		a.validateStaticRecursionInExpr(fn, n.Object)
-		a.validateStaticRecursionInExpr(fn, n.Index)
-		a.validateStaticRecursionInExpr(fn, n.Fallback)
-	case *ast.SliceExpr:
-		a.validateStaticRecursionInExpr(fn, n.Object)
-		a.validateStaticRecursionInExpr(fn, n.Start)
-		a.validateStaticRecursionInExpr(fn, n.End)
-	case *ast.ListLitExpr:
-		for _, elem := range n.Elems {
-			a.validateStaticRecursionInExpr(fn, elem)
-		}
-	case *ast.MembershipRangeExpr:
-		a.validateStaticRecursionInExpr(fn, n.Start)
-		a.validateStaticRecursionInExpr(fn, n.End)
-	case *ast.TupleExpr:
-		for _, elem := range n.Elems {
-			a.validateStaticRecursionInExpr(fn, elem)
-		}
-	case *ast.CallExpr:
-		a.validateStaticRecursiveCall(fn, n)
-		a.validateStaticRecursionInExpr(fn, n.Func)
-		args := n.Args
-		if n.ResolvedArgsValid {
-			args = n.ResolvedArgs
-		}
-		for _, arg := range args {
-			a.validateStaticRecursionInExpr(fn, arg)
-		}
-	case *ast.StructLitExpr:
-		args := n.Args
-		if n.ResolvedArgsValid {
-			args = n.ResolvedArgs
-		}
-		for _, arg := range args {
-			a.validateStaticRecursionInExpr(fn, arg)
-		}
-	case *ast.RecordUpdateExpr:
-		a.validateStaticRecursionInExpr(fn, n.Base)
-		args := n.Args
-		if n.ResolvedArgsValid {
-			args = n.ResolvedArgs
-		}
-		for _, arg := range args {
-			a.validateStaticRecursionInExpr(fn, arg)
-		}
-	}
+		return false
+	})
 }
 
 func (a *Analyzer) validateStaticRecursiveCall(fn *ast.FuncDecl, call *ast.CallExpr) {
@@ -789,110 +670,143 @@ func (a *Analyzer) staticFunctionEventuallyCalls(fn *ast.FuncDecl, targetName st
 		return false
 	}
 	seen[fn] = true
-	return a.staticStmtsEventuallyCall(fn.Body, targetName, seen)
+	return a.walkStaticStmts(fn.Body, func(expr ast.Expr) bool {
+		call, ok := expr.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		ident, ok := call.Func.(*ast.Ident)
+		if !ok {
+			return false
+		}
+		if ident.Name == targetName {
+			return true
+		}
+		callee := a.staticFunctionDeclByName(ident.Name)
+		return callee != nil && a.staticFunctionEventuallyCalls(callee, targetName, seen)
+	})
 }
 
-func (a *Analyzer) staticStmtsEventuallyCall(stmts []ast.Stmt, targetName string, seen map[*ast.FuncDecl]bool) bool {
+func (a *Analyzer) walkStaticStmts(stmts []ast.Stmt, visitExpr func(ast.Expr) bool) bool {
 	for _, stmt := range stmts {
-		if a.staticStmtEventuallyCalls(stmt, targetName, seen) {
+		if a.walkStaticStmt(stmt, visitExpr) {
 			return true
 		}
 	}
 	return false
 }
 
-func (a *Analyzer) staticStmtEventuallyCalls(stmt ast.Stmt, targetName string, seen map[*ast.FuncDecl]bool) bool {
+func (a *Analyzer) walkStaticStmt(stmt ast.Stmt, visitExpr func(ast.Expr) bool) bool {
 	switch n := stmt.(type) {
 	case *ast.ReturnStmt:
-		return a.staticExprEventuallyCalls(n.Value, targetName, seen)
+		return a.walkStaticExpr(n.Value, visitExpr)
 	case *ast.VarDeclStmt:
-		return a.staticExprEventuallyCalls(n.Value, targetName, seen)
+		return a.walkStaticExpr(n.Value, visitExpr)
 	case *ast.AssignStmt:
-		return a.staticExprEventuallyCalls(n.Target, targetName, seen) || a.staticExprEventuallyCalls(n.Value, targetName, seen)
+		return a.walkStaticExpr(n.Target, visitExpr) || a.walkStaticExpr(n.Value, visitExpr)
 	case *ast.AugAssignStmt:
-		return a.staticExprEventuallyCalls(n.Target, targetName, seen) || a.staticExprEventuallyCalls(n.Value, targetName, seen)
+		return a.walkStaticExpr(n.Target, visitExpr) || a.walkStaticExpr(n.Value, visitExpr)
+	case *ast.AsRefAssignStmt:
+		return a.walkStaticExpr(n.Target, visitExpr) || a.walkStaticExpr(n.Value, visitExpr)
 	case *ast.ExprStmt:
-		return a.staticExprEventuallyCalls(n.Expr, targetName, seen)
+		return a.walkStaticExpr(n.Expr, visitExpr)
 	case *ast.StaticAssertStmt:
-		return a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticExprEventuallyCalls(n.Message, targetName, seen)
+		return a.walkStaticExpr(n.Cond, visitExpr) || a.walkStaticExpr(n.Message, visitExpr)
 	case *ast.StaticErrorStmt:
-		return a.staticExprEventuallyCalls(n.Message, targetName, seen)
+		return a.walkStaticExpr(n.Message, visitExpr)
 	case *ast.IfStmt:
-		if a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticStmtsEventuallyCall(n.Then, targetName, seen) || a.staticStmtsEventuallyCall(n.Else, targetName, seen) {
+		if a.walkStaticExpr(n.Cond, visitExpr) || a.walkStaticStmts(n.Then, visitExpr) || a.walkStaticStmts(n.Else, visitExpr) {
 			return true
 		}
 		for _, elif := range n.Elifs {
-			if a.staticExprEventuallyCalls(elif.Cond, targetName, seen) || a.staticStmtsEventuallyCall(elif.Body, targetName, seen) {
+			if a.walkStaticExpr(elif.Cond, visitExpr) || a.walkStaticStmts(elif.Body, visitExpr) {
 				return true
 			}
 		}
 	case *ast.StaticIfStmt:
-		if a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticStmtsEventuallyCall(n.Then, targetName, seen) || a.staticStmtsEventuallyCall(n.Else, targetName, seen) {
+		if a.walkStaticExpr(n.Cond, visitExpr) || a.walkStaticStmts(n.Then, visitExpr) || a.walkStaticStmts(n.Else, visitExpr) {
 			return true
 		}
 		for _, elif := range n.Elifs {
-			if a.staticExprEventuallyCalls(elif.Cond, targetName, seen) || a.staticStmtsEventuallyCall(elif.Body, targetName, seen) {
+			if a.walkStaticExpr(elif.Cond, visitExpr) || a.walkStaticStmts(elif.Body, visitExpr) {
 				return true
 			}
 		}
 	case *ast.StaticBlockStmt:
-		return a.staticStmtsEventuallyCall(n.Body, targetName, seen)
+		return a.walkStaticStmts(n.Body, visitExpr)
 	case *ast.WhileStmt:
-		return a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticStmtsEventuallyCall(n.Body, targetName, seen)
+		return a.walkStaticExpr(n.Cond, visitExpr) || a.walkStaticStmts(n.Body, visitExpr)
 	case *ast.ForStmt:
-		return a.staticExprEventuallyCalls(n.Start, targetName, seen) || a.staticExprEventuallyCalls(n.End, targetName, seen) || a.staticExprEventuallyCalls(n.Step, targetName, seen) || a.staticStmtsEventuallyCall(n.Body, targetName, seen)
+		return a.walkStaticExpr(n.Start, visitExpr) || a.walkStaticExpr(n.End, visitExpr) || a.walkStaticExpr(n.Step, visitExpr) || a.walkStaticStmts(n.Body, visitExpr)
+	case *ast.IterForStmt:
+		return a.walkStaticExpr(n.Source, visitExpr) || a.walkStaticExpr(n.WhereFilter, visitExpr) || a.walkStaticExpr(n.Filter, visitExpr) || a.walkStaticStmts(n.Body, visitExpr)
+	case *ast.MatchStmt:
+		if a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Store, visitExpr) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			if a.walkStaticStmts(arm.Body, visitExpr) {
+				return true
+			}
+		}
+	case *ast.InStoreStmt:
+		return a.walkStaticExpr(n.Store, visitExpr) || a.walkStaticStmts(n.Body, visitExpr)
+	case *ast.CanStmt:
+		return a.walkStaticStmts(n.Body, visitExpr)
+	case *ast.WithStmt:
+		for _, arg := range n.Args {
+			if a.walkStaticExpr(arg.Value, visitExpr) {
+				return true
+			}
+		}
+		return a.walkStaticStmts(n.Body, visitExpr)
 	}
 	return false
 }
 
-func (a *Analyzer) staticExprEventuallyCalls(expr ast.Expr, targetName string, seen map[*ast.FuncDecl]bool) bool {
+func (a *Analyzer) walkStaticExpr(expr ast.Expr, visitExpr func(ast.Expr) bool) bool {
 	if expr == nil {
 		return false
 	}
+	if visitExpr != nil && visitExpr(expr) {
+		return true
+	}
 	switch n := expr.(type) {
 	case *ast.BinaryExpr:
-		return a.staticExprEventuallyCalls(n.Left, targetName, seen) || a.staticExprEventuallyCalls(n.Right, targetName, seen)
+		return a.walkStaticExpr(n.Left, visitExpr) || a.walkStaticExpr(n.Right, visitExpr)
 	case *ast.UnaryExpr:
-		return a.staticExprEventuallyCalls(n.Operand, targetName, seen)
+		return a.walkStaticExpr(n.Operand, visitExpr)
 	case *ast.MoveExpr:
-		return a.staticExprEventuallyCalls(n.Operand, targetName, seen)
+		return a.walkStaticExpr(n.Operand, visitExpr)
 	case *ast.ParenExpr:
-		return a.staticExprEventuallyCalls(n.Inner, targetName, seen)
+		return a.walkStaticExpr(n.Inner, visitExpr)
 	case *ast.CastExpr:
-		return a.staticExprEventuallyCalls(n.Operand, targetName, seen)
+		return a.walkStaticExpr(n.Operand, visitExpr)
 	case *ast.TernaryExpr:
-		return a.staticExprEventuallyCalls(n.Value, targetName, seen) || a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticExprEventuallyCalls(n.Alt, targetName, seen)
+		return a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Cond, visitExpr) || a.walkStaticExpr(n.Alt, visitExpr)
 	case *ast.FieldExpr:
-		return a.staticExprEventuallyCalls(n.Object, targetName, seen)
+		return a.walkStaticExpr(n.Object, visitExpr)
 	case *ast.IndexExpr:
-		return a.staticExprEventuallyCalls(n.Object, targetName, seen) || a.staticExprEventuallyCalls(n.Index, targetName, seen) || a.staticExprEventuallyCalls(n.Fallback, targetName, seen)
+		return a.walkStaticExpr(n.Object, visitExpr) || a.walkStaticExpr(n.Index, visitExpr) || a.walkStaticExpr(n.Fallback, visitExpr)
 	case *ast.SliceExpr:
-		return a.staticExprEventuallyCalls(n.Object, targetName, seen) || a.staticExprEventuallyCalls(n.Start, targetName, seen) || a.staticExprEventuallyCalls(n.End, targetName, seen)
+		return a.walkStaticExpr(n.Object, visitExpr) || a.walkStaticExpr(n.Start, visitExpr) || a.walkStaticExpr(n.End, visitExpr)
 	case *ast.ListLitExpr:
 		for _, elem := range n.Elems {
-			if a.staticExprEventuallyCalls(elem, targetName, seen) {
+			if a.walkStaticExpr(elem, visitExpr) {
 				return true
 			}
 		}
+		return a.walkStaticExpr(n.Owner, visitExpr)
 	case *ast.MembershipRangeExpr:
-		return a.staticExprEventuallyCalls(n.Start, targetName, seen) || a.staticExprEventuallyCalls(n.End, targetName, seen)
+		return a.walkStaticExpr(n.Start, visitExpr) || a.walkStaticExpr(n.End, visitExpr)
 	case *ast.TupleExpr:
 		for _, elem := range n.Elems {
-			if a.staticExprEventuallyCalls(elem, targetName, seen) {
+			if a.walkStaticExpr(elem, visitExpr) {
 				return true
 			}
 		}
 	case *ast.CallExpr:
-		ident, ok := n.Func.(*ast.Ident)
-		if ok {
-			if ident.Name == targetName {
-				return true
-			}
-			if callee := a.staticFunctionDeclByName(ident.Name); callee != nil && a.staticFunctionEventuallyCalls(callee, targetName, seen) {
-				return true
-			}
-		}
-		if a.staticExprEventuallyCalls(n.Func, targetName, seen) {
+		if a.walkStaticExpr(n.Func, visitExpr) || a.walkStaticExpr(n.SafeReceiver, visitExpr) {
 			return true
 		}
 		args := n.Args
@@ -900,8 +814,27 @@ func (a *Analyzer) staticExprEventuallyCalls(expr ast.Expr, targetName string, s
 			args = n.ResolvedArgs
 		}
 		for _, arg := range args {
-			if a.staticExprEventuallyCalls(arg, targetName, seen) {
+			if a.walkStaticExpr(arg, visitExpr) {
 				return true
+			}
+		}
+		for _, pack := range n.ParamPacks {
+			for _, arg := range pack.Args {
+				if a.walkStaticExpr(arg.Value, visitExpr) {
+					return true
+				}
+			}
+		}
+		for _, arg := range n.WithArgs {
+			if a.walkStaticExpr(arg.Value, visitExpr) {
+				return true
+			}
+		}
+		for _, bundle := range n.WithBundles {
+			for _, arg := range bundle.Args {
+				if a.walkStaticExpr(arg.Value, visitExpr) {
+					return true
+				}
 			}
 		}
 	case *ast.StructLitExpr:
@@ -910,12 +843,17 @@ func (a *Analyzer) staticExprEventuallyCalls(expr ast.Expr, targetName string, s
 			args = n.ResolvedArgs
 		}
 		for _, arg := range args {
-			if a.staticExprEventuallyCalls(arg, targetName, seen) {
+			if a.walkStaticExpr(arg, visitExpr) {
+				return true
+			}
+		}
+		for _, spread := range n.Spreads {
+			if a.walkStaticExpr(spread, visitExpr) {
 				return true
 			}
 		}
 	case *ast.RecordUpdateExpr:
-		if a.staticExprEventuallyCalls(n.Base, targetName, seen) {
+		if a.walkStaticExpr(n.Base, visitExpr) {
 			return true
 		}
 		args := n.Args
@@ -923,10 +861,22 @@ func (a *Analyzer) staticExprEventuallyCalls(expr ast.Expr, targetName string, s
 			args = n.ResolvedArgs
 		}
 		for _, arg := range args {
-			if a.staticExprEventuallyCalls(arg, targetName, seen) {
+			if a.walkStaticExpr(arg, visitExpr) {
 				return true
 			}
 		}
+	case *ast.ListComprehensionExpr:
+		return a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Source, visitExpr) || a.walkStaticExpr(n.RangeEnd, visitExpr) || a.walkStaticExpr(n.RangeStep, visitExpr) || a.walkStaticExpr(n.Filter, visitExpr) || a.walkStaticExpr(n.Owner, visitExpr)
+	case *ast.QueryExpr:
+		return a.walkStaticExpr(n.Source, visitExpr) || a.walkStaticExpr(n.Filter, visitExpr) || a.walkStaticExpr(n.Projection, visitExpr) || a.walkStaticExpr(n.Owner, visitExpr)
+	case *ast.CascadeExpr:
+		return a.walkStaticExpr(n.Target, visitExpr) || a.walkStaticExpr(n.Value, visitExpr)
+	case *ast.LambdaExpr:
+		return a.walkStaticStmts(n.Body, visitExpr) || a.walkStaticExpr(n.BodyExpr, visitExpr)
+	case *ast.AddrOfExpr:
+		return a.walkStaticExpr(n.Operand, visitExpr)
+	case *ast.SpecializeExpr:
+		return a.walkStaticExpr(n.Operand, visitExpr)
 	}
 	return false
 }
