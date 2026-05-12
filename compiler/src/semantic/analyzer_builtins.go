@@ -129,6 +129,10 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "source", typ: namedTypeExpr("S", false), mutable: false},
 		{name: "predicate", typ: &ast.FuncTypeExpr{Params: []ast.TypeExpr{namedTypeExpr("T", false)}, Return: namedTypeExpr("bool", false)}, mutable: false},
 	})
+	a.registerBuiltinStructType("TreeKindFilteredView", []string{"S", "T"}, false, []builtinFieldSpec{
+		{name: "source", typ: namedTypeExpr("S", false), mutable: false},
+		{name: "tag", typ: namedTypeExpr("u32", false), mutable: false},
+	})
 	a.registerBuiltinStructType("ChunksExactView", []string{"T"}, false, []builtinFieldSpec{
 		{name: "source", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
 		{name: "chunk_size", typ: namedTypeExpr("usize", false), mutable: false},

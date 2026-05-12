@@ -15,6 +15,8 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 		return a.analyzeEnumerateHelperCall(expr), true
 	case "where":
 		return a.analyzeWhereHelperCall(expr), true
+	case "where_kind":
+		return a.analyzeWhereKindHelperCall(expr), true
 	case "readonly":
 		return a.analyzeReadonlyHelperCall(expr), true
 	case "split_at":
@@ -257,6 +259,38 @@ func (a *Analyzer) analyzeWhereHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	return &GenericInstanceType{Name: "FilteredView", Base: base, Args: []Type{sourceType, info.ItemType}}
+}
+
+func (a *Analyzer) analyzeWhereKindHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 2 {
+		a.errorf(expr.Pos(), "where_kind expects 2 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	sourceType := a.analyzeExpr(expr.Args[0])
+	rowsType, ok := sourceType.(*FrozenTreeRowsViewType)
+	if !ok || rowsType == nil || rowsType.Category == nil {
+		a.errorf(expr.Args[0].Pos(), "where_kind expects a frozen tree row view, got %s", sourceType)
+		return invalidType
+	}
+	kindType, ok := TreeKindType(rowsType.Category)
+	if !ok || kindType == nil {
+		a.errorf(expr.Args[0].Pos(), "where_kind source category %s has no kind type", rowsType.Category.Name)
+		return invalidType
+	}
+	tagType := a.analyzeValueExpr(expr.Args[1], kindType)
+	if !AssignableTo(kindType, tagType) {
+		a.errorf(expr.Args[1].Pos(), "where_kind expects %s, got %s", kindType, tagType)
+		return invalidType
+	}
+	base, ok := a.namedTypes["TreeKindFilteredView"].(*StructType)
+	if !ok || base == nil {
+		a.errorf(expr.Pos(), "missing builtin TreeKindFilteredView carrier type")
+		return invalidType
+	}
+	return &GenericInstanceType{Name: "TreeKindFilteredView", Base: base, Args: []Type{sourceType, rowsType.Category}}
 }
 
 type treeChildrenSourceKind int

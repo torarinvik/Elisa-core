@@ -712,10 +712,11 @@ Tree declarations have explicit data-layout controls. The default dense category
 
 ```elisa
 int_count: usize = count node in frozen.Expr where node.kind == .Int
+fast_int_count: usize = count node in frozen.Expr.where_kind(.Int)
 span_sum: i64 = reduce_sum(frozen.Expr.column("span"), add_i64)
 ```
 
-The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helper forms remain compatibility spellings, but row-view queries are the idiomatic surface. The design goal is that a tree can be tuned for recursive traversal, vectorized passes, or parallel chunk processing by changing layout metadata rather than rewriting the compiler frontend.
+Use `where_kind` for hot kind-only filters; it lowers to a direct tag comparison instead of a predicate function call. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helper forms remain compatibility spellings, but row-view queries are the idiomatic surface. The design goal is that a tree can be tuned for recursive traversal, vectorized passes, or parallel chunk processing by changing layout metadata rather than rewriting the compiler frontend.
 
 Use `NameId` for compact storage in ASTs and symbol tables. Prefer `name_id.valid()`, `name_id.invalid()`, and `name_id.text(names)` for ordinary checks. For hot keyword/builtin checks, intern the expected words once and compare ids with `name_table_eq(name_id, cached_id)` rather than repeatedly comparing text. Use `name_id in {cached_a, cached_b, cached_c}` instead of long `or` chains when checking a small fixed set of cached ids. Use `InternedName` as a short-lived view when code needs to carry both the table and id together; it can be explicitly cast back to `NameId`.
 

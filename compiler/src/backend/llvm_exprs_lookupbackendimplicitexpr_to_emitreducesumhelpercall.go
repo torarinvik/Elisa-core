@@ -211,6 +211,8 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 		return s.emitEnumerateHelperCall(expr)
 	case "where":
 		return s.emitWhereHelperCall(expr)
+	case "where_kind":
+		return s.emitWhereKindHelperCall(expr)
 	case "readonly":
 		return s.emitReadonlyHelperCall(expr)
 	case "split_at":
@@ -383,6 +385,40 @@ func (s *functionState) emitWhereHelperCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	resultValue := C.LLVMGetUndef(resultLLVMType)
 	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, sourceValue, 0, cStringFree("where.source.insert"))
 	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, predicateValue, 1, cStringFree("where.predicate.insert"))
+	return resultValue, resultType, true, nil
+}
+
+func (s *functionState) emitWhereKindHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 2 {
+		return nil, nil, true, fmt.Errorf("where_kind expects 2 arguments, got %d", len(expr.Args))
+	}
+	sourceType := s.exprType(expr.Args[0])
+	if sourceType == nil {
+		return nil, nil, true, fmt.Errorf("where_kind source is missing a semantic type")
+	}
+	resultType := s.exprType(expr)
+	if resultType == nil {
+		return nil, nil, true, fmt.Errorf("where_kind result is missing a semantic type")
+	}
+	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	tagValue, tagType, err := s.emitExpr(expr.Args[1], s.exprType(expr.Args[1]))
+	if err != nil {
+		return nil, nil, true, err
+	}
+	tagValue, err = s.coerceValue(tagValue, tagType, s.g.result.NamedTypes["u32"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultValue := C.LLVMGetUndef(resultLLVMType)
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, sourceValue, 0, cStringFree("where_kind.source.insert"))
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, tagValue, 1, cStringFree("where_kind.tag.insert"))
 	return resultValue, resultType, true, nil
 }
 

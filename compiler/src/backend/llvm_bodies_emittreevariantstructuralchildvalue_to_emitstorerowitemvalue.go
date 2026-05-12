@@ -615,6 +615,9 @@ func iterLoopItemTypeBackend(t semantic.Type) (semantic.Type, bool) {
 		if itemType, ok := semantic.TreeAttributeSequenceItemType(tt); ok {
 			return itemType, true
 		}
+		if itemType, ok := semantic.TreeKindFilteredViewItemType(tt); ok {
+			return itemType, true
+		}
 		if itemType, ok := semantic.ChunksExactViewItemType(tt); ok {
 			return itemType, true
 		}

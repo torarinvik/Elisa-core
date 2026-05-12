@@ -86,6 +86,30 @@ func FilteredViewPredicateType(item Type) *FuncType {
 	return &FuncType{Name: "func", Params: []Type{item}, Return: &BuiltinType{Name: "bool"}}
 }
 
+func TreeKindFilteredViewInstance(t Type) (*GenericInstanceType, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi == nil || gi.Name != "TreeKindFilteredView" || len(gi.Args) != 2 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func TreeKindFilteredViewSourceType(t Type) (Type, bool) {
+	gi, ok := TreeKindFilteredViewInstance(t)
+	if !ok {
+		return nil, false
+	}
+	return gi.Args[0], true
+}
+
+func TreeKindFilteredViewItemType(t Type) (Type, bool) {
+	gi, ok := TreeKindFilteredViewInstance(t)
+	if !ok {
+		return nil, false
+	}
+	return gi.Args[1], true
+}
+
 func StoreRowsViewInstance(t Type) (*StoreRowsViewType, bool) {
 	rowsType, ok := t.(*StoreRowsViewType)
 	return rowsType, ok && rowsType != nil && rowsType.Store != nil
