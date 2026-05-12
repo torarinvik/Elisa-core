@@ -44,6 +44,7 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 				if n.Static {
 					a.staticContextDepth++
 					a.analyzeFunc(n)
+					a.validateStaticFunctionTotality(n)
 					a.staticContextDepth--
 				} else {
 					a.analyzeFunc(n)

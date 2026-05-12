@@ -134,3 +134,51 @@ def keep() -> void:
 	static assert sum_to(4) == 10
 `)
 }
+
+func TestAnalyzeStaticFunctionSupportsNamedAndDefaultArgs(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_named_defaults.elisa", `static def answer(step: i64, base: i64 = 40) -> i64:
+	return base + step
+
+def keep() -> void:
+	static assert answer(step: 2) == 42
+	static assert answer(base: 41, step: 1) == 42
+`)
+}
+
+func TestAnalyzeStaticFunctionRequiresReturnOnAllPaths(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_requires_return.elisa", `static def maybe(flag: bool) -> i64:
+	if flag:
+		return 1
+
+def keep() -> void:
+	static assert maybe(true) == 1
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `static function "maybe" must return on all paths`) {
+		t.Fatalf("expected static totality diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func TestAnalyzeStaticFunctionRejectsNonDecreasingRecursion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_rejects_partial_recursion.elisa", `static def loop(n: i64) -> i64:
+	if n == 0:
+		return 0
+	return loop(n)
+
+def keep() -> void:
+	static assert loop(1) == 0
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `recursive static call to "loop" must decrease`) {
+		t.Fatalf("expected static recursion diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func TestAnalyzeStaticFunctionAcceptsDecreasingRecursion(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_total_recursion.elisa", `static def countdown(n: i64) -> i64:
+	if n == 0:
+		return 0
+	return countdown(n - 1)
+
+def keep() -> void:
+	static assert countdown(4) == 0
+`)
+}

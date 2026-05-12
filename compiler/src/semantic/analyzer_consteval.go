@@ -308,7 +308,7 @@ func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool)
 		return ConstValue{}, false
 	}
 	ident, ok := expr.Func.(*ast.Ident)
-	if !ok || len(expr.ArgNames) != 0 || len(expr.ParamPacks) != 0 || len(expr.ArgItemOrder) != 0 || expr.HasArgForward {
+	if !ok {
 		return ConstValue{}, false
 	}
 	sym, _, ok := a.lookupVisibleGlobal(ident.Name)
@@ -320,11 +320,18 @@ func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool)
 		return ConstValue{}, false
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
-	if !ok || decl == nil || len(decl.Params) != len(expr.Args) {
+	if !ok || decl == nil {
+		return ConstValue{}, false
+	}
+	args := expr.Args
+	if expr.ResolvedArgsValid {
+		args = expr.ResolvedArgs
+	}
+	if len(decl.Params) != len(args) {
 		return ConstValue{}, false
 	}
 	scope := make(map[string]ConstValue, len(decl.Params))
-	for i, arg := range expr.Args {
+	for i, arg := range args {
 		value, ok := a.evalConstExpr(arg)
 		if !ok {
 			return ConstValue{}, false
@@ -534,6 +541,246 @@ func staticForLoopContinue(op lexer.TokenKind, current int64, end int64, ascendi
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) validateStaticFunctionTotality(fn *ast.FuncDecl) {
+	if fn == nil || !fn.Static {
+		return
+	}
+	if !staticStmtBlockAlwaysTerminates(fn.Body) {
+		a.errorf(fn.Pos(), "static function %q must return on all paths", fn.Name)
+	}
+	a.validateStaticFunctionRecursion(fn)
+}
+
+func staticStmtBlockAlwaysTerminates(stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		if staticStmtAlwaysTerminates(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func staticStmtAlwaysTerminates(stmt ast.Stmt) bool {
+	switch n := stmt.(type) {
+	case *ast.ReturnStmt, *ast.StaticErrorStmt, *ast.PanicStmt:
+		return true
+	case *ast.StaticBlockStmt:
+		return staticStmtBlockAlwaysTerminates(n.Body)
+	case *ast.IfStmt:
+		return staticIfStmtAlwaysTerminates(n.Then, n.Elifs, n.Else)
+	case *ast.StaticIfStmt:
+		return staticStaticIfStmtAlwaysTerminates(n.Then, n.Elifs, n.Else)
+	default:
+		return false
+	}
+}
+
+func staticIfStmtAlwaysTerminates(then []ast.Stmt, elifs []ast.ElifClause, elseStmts []ast.Stmt) bool {
+	if len(elseStmts) == 0 {
+		return false
+	}
+	if !staticStmtBlockAlwaysTerminates(then) || !staticStmtBlockAlwaysTerminates(elseStmts) {
+		return false
+	}
+	for _, elif := range elifs {
+		if !staticStmtBlockAlwaysTerminates(elif.Body) {
+			return false
+		}
+	}
+	return true
+}
+
+func staticStaticIfStmtAlwaysTerminates(then []ast.Stmt, elifs []ast.StaticElifClause, elseStmts []ast.Stmt) bool {
+	if len(elseStmts) == 0 {
+		return false
+	}
+	if !staticStmtBlockAlwaysTerminates(then) || !staticStmtBlockAlwaysTerminates(elseStmts) {
+		return false
+	}
+	for _, elif := range elifs {
+		if !staticStmtBlockAlwaysTerminates(elif.Body) {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) validateStaticFunctionRecursion(fn *ast.FuncDecl) {
+	a.validateStaticRecursionInStmts(fn, fn.Body)
+}
+
+func (a *Analyzer) validateStaticRecursionInStmts(fn *ast.FuncDecl, stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		a.validateStaticRecursionInStmt(fn, stmt)
+	}
+}
+
+func (a *Analyzer) validateStaticRecursionInStmt(fn *ast.FuncDecl, stmt ast.Stmt) {
+	switch n := stmt.(type) {
+	case *ast.ReturnStmt:
+		a.validateStaticRecursionInExpr(fn, n.Value)
+	case *ast.VarDeclStmt:
+		a.validateStaticRecursionInExpr(fn, n.Value)
+	case *ast.AssignStmt:
+		a.validateStaticRecursionInExpr(fn, n.Target)
+		a.validateStaticRecursionInExpr(fn, n.Value)
+	case *ast.AugAssignStmt:
+		a.validateStaticRecursionInExpr(fn, n.Target)
+		a.validateStaticRecursionInExpr(fn, n.Value)
+	case *ast.ExprStmt:
+		a.validateStaticRecursionInExpr(fn, n.Expr)
+	case *ast.StaticAssertStmt:
+		a.validateStaticRecursionInExpr(fn, n.Cond)
+		a.validateStaticRecursionInExpr(fn, n.Message)
+	case *ast.StaticErrorStmt:
+		a.validateStaticRecursionInExpr(fn, n.Message)
+	case *ast.IfStmt:
+		a.validateStaticRecursionInExpr(fn, n.Cond)
+		a.validateStaticRecursionInStmts(fn, n.Then)
+		for _, elif := range n.Elifs {
+			a.validateStaticRecursionInExpr(fn, elif.Cond)
+			a.validateStaticRecursionInStmts(fn, elif.Body)
+		}
+		a.validateStaticRecursionInStmts(fn, n.Else)
+	case *ast.StaticIfStmt:
+		a.validateStaticRecursionInExpr(fn, n.Cond)
+		a.validateStaticRecursionInStmts(fn, n.Then)
+		for _, elif := range n.Elifs {
+			a.validateStaticRecursionInExpr(fn, elif.Cond)
+			a.validateStaticRecursionInStmts(fn, elif.Body)
+		}
+		a.validateStaticRecursionInStmts(fn, n.Else)
+	case *ast.StaticBlockStmt:
+		a.validateStaticRecursionInStmts(fn, n.Body)
+	case *ast.WhileStmt:
+		a.validateStaticRecursionInExpr(fn, n.Cond)
+		a.validateStaticRecursionInStmts(fn, n.Body)
+	case *ast.ForStmt:
+		a.validateStaticRecursionInExpr(fn, n.Start)
+		a.validateStaticRecursionInExpr(fn, n.End)
+		a.validateStaticRecursionInExpr(fn, n.Step)
+		a.validateStaticRecursionInStmts(fn, n.Body)
+	}
+}
+
+func (a *Analyzer) validateStaticRecursionInExpr(fn *ast.FuncDecl, expr ast.Expr) {
+	if expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.BinaryExpr:
+		a.validateStaticRecursionInExpr(fn, n.Left)
+		a.validateStaticRecursionInExpr(fn, n.Right)
+	case *ast.UnaryExpr:
+		a.validateStaticRecursionInExpr(fn, n.Operand)
+	case *ast.MoveExpr:
+		a.validateStaticRecursionInExpr(fn, n.Operand)
+	case *ast.ParenExpr:
+		a.validateStaticRecursionInExpr(fn, n.Inner)
+	case *ast.CastExpr:
+		a.validateStaticRecursionInExpr(fn, n.Operand)
+	case *ast.TernaryExpr:
+		a.validateStaticRecursionInExpr(fn, n.Value)
+		a.validateStaticRecursionInExpr(fn, n.Cond)
+		a.validateStaticRecursionInExpr(fn, n.Alt)
+	case *ast.FieldExpr:
+		a.validateStaticRecursionInExpr(fn, n.Object)
+	case *ast.IndexExpr:
+		a.validateStaticRecursionInExpr(fn, n.Object)
+		a.validateStaticRecursionInExpr(fn, n.Index)
+		a.validateStaticRecursionInExpr(fn, n.Fallback)
+	case *ast.SliceExpr:
+		a.validateStaticRecursionInExpr(fn, n.Object)
+		a.validateStaticRecursionInExpr(fn, n.Start)
+		a.validateStaticRecursionInExpr(fn, n.End)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			a.validateStaticRecursionInExpr(fn, elem)
+		}
+	case *ast.MembershipRangeExpr:
+		a.validateStaticRecursionInExpr(fn, n.Start)
+		a.validateStaticRecursionInExpr(fn, n.End)
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			a.validateStaticRecursionInExpr(fn, elem)
+		}
+	case *ast.CallExpr:
+		a.validateStaticRecursiveCall(fn, n)
+		a.validateStaticRecursionInExpr(fn, n.Func)
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		for _, arg := range args {
+			a.validateStaticRecursionInExpr(fn, arg)
+		}
+	case *ast.StructLitExpr:
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		for _, arg := range args {
+			a.validateStaticRecursionInExpr(fn, arg)
+		}
+	case *ast.RecordUpdateExpr:
+		a.validateStaticRecursionInExpr(fn, n.Base)
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		for _, arg := range args {
+			a.validateStaticRecursionInExpr(fn, arg)
+		}
+	}
+}
+
+func (a *Analyzer) validateStaticRecursiveCall(fn *ast.FuncDecl, call *ast.CallExpr) {
+	if fn == nil || call == nil {
+		return
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok || ident.Name != fn.Name {
+		return
+	}
+	if staticRecursiveCallHasDecreasingArg(fn, call) {
+		return
+	}
+	a.errorf(call.Pos(), "recursive static call to %q must decrease a parameter using parameter - positive_constant", fn.Name)
+}
+
+func staticRecursiveCallHasDecreasingArg(fn *ast.FuncDecl, call *ast.CallExpr) bool {
+	args := call.Args
+	if call.ResolvedArgsValid {
+		args = call.ResolvedArgs
+	}
+	if len(args) != len(fn.Params) {
+		return false
+	}
+	for index, param := range fn.Params {
+		if staticExprIsPositiveDecrementOfParam(args[index], param.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func staticExprIsPositiveDecrementOfParam(expr ast.Expr, paramName string) bool {
+	binary, ok := expr.(*ast.BinaryExpr)
+	if !ok || binary.Op != lexer.TOKEN_MINUS {
+		return false
+	}
+	ident, ok := binary.Left.(*ast.Ident)
+	if !ok || ident.Name != paramName {
+		return false
+	}
+	lit, ok := binary.Right.(*ast.IntLit)
+	if !ok {
+		return false
+	}
+	value, ok := ParseIntLiteral(lit)
+	return ok && value > 0
 }
 
 func (a *Analyzer) setConstEvalValue(name string, value ConstValue) {

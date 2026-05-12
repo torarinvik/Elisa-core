@@ -382,7 +382,7 @@ func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.Con
 		return semantic.ConstValue{}, false
 	}
 	ident, ok := expr.Func.(*ast.Ident)
-	if !ok || len(expr.ArgNames) != 0 || len(expr.ParamPacks) != 0 || len(expr.ArgItemOrder) != 0 || expr.HasArgForward {
+	if !ok {
 		return semantic.ConstValue{}, false
 	}
 	sym, ok := g.lookupStaticFunctionSymbol(ident.Name)
@@ -394,11 +394,18 @@ func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.Con
 		return semantic.ConstValue{}, false
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
-	if !ok || decl == nil || len(decl.Params) != len(expr.Args) {
+	if !ok || decl == nil {
+		return semantic.ConstValue{}, false
+	}
+	args := expr.Args
+	if expr.ResolvedArgsValid {
+		args = expr.ResolvedArgs
+	}
+	if len(decl.Params) != len(args) {
 		return semantic.ConstValue{}, false
 	}
 	scope := make(map[string]semantic.ConstValue, len(decl.Params))
-	for i, arg := range expr.Args {
+	for i, arg := range args {
 		value, ok := g.evalConstExpr(arg)
 		if !ok {
 			return semantic.ConstValue{}, false
