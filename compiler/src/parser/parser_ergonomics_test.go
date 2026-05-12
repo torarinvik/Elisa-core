@@ -613,3 +613,36 @@ def keep() -> i64:
 		t.Fatalf("expected static answer function, got %#v", decl)
 	}
 }
+
+func TestParseStaticFunctionNestedContextualStaticStmts(t *testing.T) {
+	file, errs := parseSourceFile(t, `static def answer(flag: bool) -> i64:
+    assert flag, "flag must be true"
+    if flag:
+        return 42
+    else:
+        error("inactive")
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected static function decl, got %T", file.Decls[0])
+	}
+	if len(decl.Body) != 2 {
+		t.Fatalf("expected 2 body statements, got %d", len(decl.Body))
+	}
+	if _, ok := decl.Body[0].(*ast.StaticAssertStmt); !ok {
+		t.Fatalf("expected first statement to parse as static assert, got %T", decl.Body[0])
+	}
+	ifStmt, ok := decl.Body[1].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected second statement to parse as if, got %T", decl.Body[1])
+	}
+	if len(ifStmt.Else) != 1 {
+		t.Fatalf("expected single else statement, got %d", len(ifStmt.Else))
+	}
+	if _, ok := ifStmt.Else[0].(*ast.StaticErrorStmt); !ok {
+		t.Fatalf("expected else branch to parse contextual static error, got %T", ifStmt.Else[0])
+	}
+}
