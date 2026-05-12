@@ -66,13 +66,13 @@ func (a *Analyzer) analyzeColumnHelperCall(expr *ast.CallExpr) Type {
 		}
 		return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "dview"}
 	}
-	if rowsType.Category.Layout != TreeLayoutSOA {
-		a.errorf(expr.Args[0].Pos(), "column requires @layout(soa) on category %s", rowsType.Category.Name)
-	}
 	field, ok := rowsType.Category.Common[fieldName]
 	if !ok {
 		a.errorf(expr.Args[1].Pos(), "column currently supports common fields only; category %s has no common field %q", rowsType.Category.Name, fieldName)
 		return invalidType
+	}
+	if rowsType.Category.Layout != TreeLayoutSOA && !treeCategoryHasFieldIndex(rowsType.Category, fieldName) {
+		a.errorf(expr.Args[0].Pos(), "column(%q) requires @layout(soa) or @index(%s) on category %s", fieldName, fieldName, rowsType.Category.Name)
 	}
 	return &DArrayViewType{Elem: field.Type, SurfaceName: "dview"}
 }
@@ -167,6 +167,18 @@ func treeCategoryHasKindIndex(category *TreeCategoryType) bool {
 	}
 	for _, index := range category.Indexes {
 		if index.Kind {
+			return true
+		}
+	}
+	return false
+}
+
+func treeCategoryHasFieldIndex(category *TreeCategoryType, fieldName string) bool {
+	if category == nil {
+		return false
+	}
+	for _, index := range category.Indexes {
+		if !index.Kind && index.Name == fieldName {
 			return true
 		}
 	}

@@ -450,7 +450,7 @@ func frozenTreeRowFieldEqualityOperand(category *semantic.TreeCategoryType, item
 	if !ok || fieldInfo.Type == nil {
 		return frozenTreeRowFieldEqualityFilter{}, false
 	}
-	if field.Field != "kind" && category.Layout != semantic.TreeLayoutSOA {
+	if field.Field != "kind" && !frozenTreeRowFieldHasFastColumn(category, field.Field) {
 		return frozenTreeRowFieldEqualityFilter{}, false
 	}
 	return frozenTreeRowFieldEqualityFilter{
@@ -459,6 +459,21 @@ func frozenTreeRowFieldEqualityOperand(category *semantic.TreeCategoryType, item
 		fieldType: fieldInfo.Type,
 		target:    target,
 	}, true
+}
+
+func frozenTreeRowFieldHasFastColumn(category *semantic.TreeCategoryType, fieldName string) bool {
+	if category == nil {
+		return false
+	}
+	if category.Layout == semantic.TreeLayoutSOA {
+		return true
+	}
+	for _, index := range category.Indexes {
+		if !index.Kind && index.Name == fieldName {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *functionState) emitFrozenTreeRowFieldEqualityFilter(rowValue C.LLVMValueRef, filter frozenTreeRowFieldEqualityFilter, name string) (C.LLVMValueRef, error) {

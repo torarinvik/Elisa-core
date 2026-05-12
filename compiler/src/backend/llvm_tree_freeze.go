@@ -60,7 +60,7 @@ func (s *functionState) emitTreeStoreFreezeLayout(storeValue C.LLVMValueRef, sto
 			}
 		}
 		if plan.requestsIndexes() {
-			if err := s.emitTreeFreezeCategoryIndexPointers(stateValue, category, tagColumn, name+"."+sanitizeIdentifier(category.Name)); err != nil {
+			if err := s.emitTreeFreezeCategoryIndexPointers(arenaRef, stateValue, family, category, tagColumn, name+"."+sanitizeIdentifier(category.Name)); err != nil {
 				return err
 			}
 		}
@@ -235,7 +235,7 @@ func (s *functionState) emitTreeFreezePopulateCommonFieldColumn(dest C.LLVMValue
 	return nil
 }
 
-func (s *functionState) emitTreeFreezeCategoryIndexPointers(stateValue C.LLVMValueRef, category *semantic.TreeCategoryType, tagColumn C.LLVMValueRef, name string) error {
+func (s *functionState) emitTreeFreezeCategoryIndexPointers(arenaRef C.LLVMValueRef, stateValue C.LLVMValueRef, family *semantic.TreeType, category *semantic.TreeCategoryType, tagColumn C.LLVMValueRef, name string) error {
 	indexesPtr, err := s.emitTreeCategoryFrozenIndexesPtr(stateValue, category, name+".indexes")
 	if err != nil {
 		return err
@@ -245,11 +245,24 @@ func (s *functionState) emitTreeFreezeCategoryIndexPointers(stateValue C.LLVMVal
 		return err
 	}
 	nullPtr := C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0))
+	tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, family, category, name+".indexes")
+	if err != nil {
+		return err
+	}
+	countValue, err := s.emitTreeCategoryUnionTableCountValue(tablePtr, category, name+".indexes")
+	if err != nil {
+		return err
+	}
 	plan := treeCategoryLayoutPlan(category)
 	for i, index := range plan.indexes {
 		value := nullPtr
 		if index.Kind {
 			value = tagColumn
+		} else if field, ok := category.Common[index.Name]; ok {
+			value, err = s.emitTreeFreezeCategoryCommonFieldColumn(arenaRef, tablePtr, countValue, category, index.Name, field, name+".index."+sanitizeIdentifier(index.Name))
+			if err != nil {
+				return err
+			}
 		}
 		fieldPtr := C.LLVMBuildStructGEP2(s.builder, indexesType, indexesPtr, C.unsigned(i), cStringFree(name+".indexes.field.ptr"))
 		C.LLVMBuildStore(s.builder, value, fieldPtr)
@@ -545,20 +558,40 @@ func (s *functionState) emitTreeFrozenFieldColumnPointer(stateValue C.LLVMValueR
 	if category == nil {
 		return nil, fmt.Errorf("missing tree field column category")
 	}
-	columnsPtr, err := s.emitTreeCategoryFrozenColumnsPtr(stateValue, category, name+".columns")
-	if err != nil {
-		return nil, err
+	ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
+	plan := treeCategoryLayoutPlan(category)
+	if plan.isSoA() {
+		columnsPtr, err := s.emitTreeCategoryFrozenColumnsPtr(stateValue, category, name+".columns")
+		if err != nil {
+			return nil, err
+		}
+		columnsType, err := s.g.ensureTreeCategoryFrozenColumnsType(category)
+		if err != nil {
+			return nil, err
+		}
+		columnIndex := treeCategorySoAColumnIndex(category, fieldName)
+		if columnIndex < 0 {
+			return nil, fmt.Errorf("tree category %s has no frozen column %q", category.Name, fieldName)
+		}
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, columnsType, columnsPtr, C.unsigned(columnIndex+1), cStringFree(name+".columns.field.ptr"))
+		return C.LLVMBuildLoad2(s.builder, ptrType, fieldPtr, cStringFree(name+".columns.field")), nil
 	}
-	columnsType, err := s.g.ensureTreeCategoryFrozenColumnsType(category)
-	if err != nil {
-		return nil, err
+	for i, index := range plan.indexes {
+		if index.Kind || index.Name != fieldName {
+			continue
+		}
+		indexesPtr, err := s.emitTreeCategoryFrozenIndexesPtr(stateValue, category, name+".indexes")
+		if err != nil {
+			return nil, err
+		}
+		indexesType, err := s.g.ensureTreeCategoryFrozenIndexesType(category)
+		if err != nil {
+			return nil, err
+		}
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, indexesType, indexesPtr, C.unsigned(i), cStringFree(name+".indexes.field.ptr"))
+		return C.LLVMBuildLoad2(s.builder, ptrType, fieldPtr, cStringFree(name+".indexes.field")), nil
 	}
-	columnIndex := treeCategorySoAColumnIndex(category, fieldName)
-	if columnIndex < 0 {
-		return nil, fmt.Errorf("tree category %s has no frozen column %q", category.Name, fieldName)
-	}
-	fieldPtr := C.LLVMBuildStructGEP2(s.builder, columnsType, columnsPtr, C.unsigned(columnIndex+1), cStringFree(name+".columns.field.ptr"))
-	return C.LLVMBuildLoad2(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), fieldPtr, cStringFree(name+".columns.field")), nil
+	return nil, fmt.Errorf("tree category %s has no frozen column or index for %q", category.Name, fieldName)
 }
 
 func treeCategorySoAColumnIndex(category *semantic.TreeCategoryType, fieldName string) int {

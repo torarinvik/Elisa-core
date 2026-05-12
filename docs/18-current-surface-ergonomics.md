@@ -708,7 +708,7 @@ Use `Flags[T]` for typed sets of const-enum values that grow or flow through API
 
 Use `Builder[T] in owner` when constructing arena-owned dynamic arrays. The declaration creates a mutable builder from the owner while keeping the owner relationship visible at the declaration site. `Builder[T]` is the idiomatic surface name for the arena-backed dynamic-array builder; it lowers through the same `DArrayBuilder[T]` runtime storage and helper methods. `owner.builder()` remains available when an expression form is clearer.
 
-Tree declarations have explicit data-layout controls. The default dense category layout keeps source handles compact and store-relative, while `@layout(aos)` and `@layout(soa)` let hot categories declare whether they prefer row locality or frozen column scans. Use `@hot`, `@cold`, `@index(kind)`, and `@index(field_name)` as declarative tuning metadata; the source-level tree construction and pattern APIs stay the same. After `freeze(move store)`, use category row views for scan-oriented work: `frozen.Expr` is iterable and yields category-local handles with the frozen store as implicit context, `frozen.Expr.column("kind")` returns the frozen tag column, and `frozen.Expr.column("span")` returns a common-field column for SoA categories.
+Tree declarations have explicit data-layout controls. The default dense category layout keeps source handles compact and store-relative, while `@layout(aos)` and `@layout(soa)` let hot categories declare whether they prefer row locality or frozen column scans. Use `@hot`, `@cold`, `@index(kind)`, and `@index(field_name)` as declarative tuning metadata; the source-level tree construction and pattern APIs stay the same. After `freeze(move store)`, use category row views for scan-oriented work: `frozen.Expr` is iterable and yields category-local handles with the frozen store as implicit context, `frozen.Expr.column("kind")` returns the frozen tag column, and `frozen.Expr.column("span")` returns a common-field column for SoA categories or categories with `@index(span)`.
 
 ```elisa
 int_count: usize = count node in frozen.Expr where node.kind == .Int
@@ -719,6 +719,19 @@ span_sum: i64 = reduce_sum(frozen.Expr.column("span"), add_i64)
 ```
 
 Use ordinary query `where` clauses for row filters. Inside a frozen row-view query, common fields can be used directly in the filter; hot equality predicates over frozen SoA rows, such as `where span == target` or `where kind == .Int and span == target`, lower to direct tag/column comparisons instead of predicate function calls. `where_kind` remains available for explicit kind-only filters. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helper forms remain compatibility spellings, but row-view queries are the idiomatic surface. The design goal is that a tree can be tuned for recursive traversal, vectorized passes, or parallel chunk processing by changing layout metadata rather than rewriting the compiler frontend.
+
+`@index(field_name)` is useful when a category should stay AoS for traversal but one common field still needs fast frozen scans:
+
+```elisa
+tree Pascal:
+    common:
+        name_id: NameId
+    @index(name_id)
+    node Decl:
+        Function(...)
+
+matches: usize = count decl in frozen.Decl where name_id == target
+```
 
 Use `NameId` for compact storage in ASTs and symbol tables. Prefer `name_id.valid()`, `name_id.invalid()`, and `name_id.text(names)` for ordinary checks. For hot keyword/builtin checks, intern the expected words once and compare ids with `name_table_eq(name_id, cached_id)` rather than repeatedly comparing text. Use `name_id in {cached_a, cached_b, cached_c}` instead of long `or` chains when checking a small fixed set of cached ids. Use `InternedName` as a short-lived view when code needs to carry both the table and id together; it can be explicitly cast back to `NameId`.
 

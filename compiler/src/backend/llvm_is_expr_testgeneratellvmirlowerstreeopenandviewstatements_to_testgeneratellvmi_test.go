@@ -318,6 +318,48 @@ def build(owner: Arena) -> usize:
 	}
 }
 
+func TestGenerateLLVMIRLowersFrozenTreeIndexedCommonFieldColumnView(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	@index(span)
+	node Expr:
+		Int(value: i64)
+		Add(left: Lua.Expr, right: Lua.Expr)
+
+def add_i64(value: i64) -> i64:
+	return value
+
+def build(owner: Arena) -> i64:
+	store = Lua.Store(owner)
+	in store:
+		left = Lua.Expr.Int(span: 10, value: 1)
+		right = Lua.Expr.Int(span: 20, value: 2)
+		_ = Lua.Expr.Add(span: 30, left: left, right: right)
+	frozen = freeze(move store)
+	spans: dview[i64] = frozen.Expr.column("span")
+	return reduce_sum(spans, add_i64)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_indexed_common_field_column_view.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"%Lua_Expr__TreeFrozenIndexes = type { ptr }",
+		"tree.freeze.Lua_Expr.index.span.alloc",
+		"tree.freeze.Lua_Expr.indexes.field.ptr",
+		"tree.column.indexes.field",
+		"tree.column.view.data",
+		"reduce_sum.src.ptr",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected indexed common field column lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersFrozenTreeWhereKindRowViewQuery(t *testing.T) {
 	src := `@layout(soa)
 tree Lua:
@@ -469,6 +511,44 @@ def build(owner: Arena, target: i64) -> Lua.Expr?:
 	}
 	if strings.Contains(output, "where.predicate") {
 		t.Fatalf("expected first field query lowering to avoid predicate calls, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersIndexedFrozenTreeFieldWhereQuery(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	@index(span)
+	node Expr:
+		Int(value: i64)
+		Add(left: Lua.Expr, right: Lua.Expr)
+
+def build(owner: Arena, target: i64) -> usize:
+	store = Lua.Store(owner)
+	in store:
+		left = Lua.Expr.Int(span: 10, value: 1)
+		right = Lua.Expr.Int(span: target, value: 2)
+		_ = Lua.Expr.Add(span: target, left: left, right: right)
+	frozen = freeze(move store)
+	return count node in frozen.Expr where span == target
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_frozen_tree_indexed_field_query.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"tree.freeze.Lua_Expr.index.span.alloc",
+		"iter.filter.field.indexes.field",
+		"iter.filter.field.cmp",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected indexed frozen tree field query lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "where.predicate") {
+		t.Fatalf("expected indexed field query lowering to avoid predicate calls, got:\n%s", output)
 	}
 }
 
