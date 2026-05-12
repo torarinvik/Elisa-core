@@ -1,0 +1,10 @@
+static def checksum() -> i64:
+    items: mutable darray[i64] = []
+    items.push(4)
+    chunk: i64[2] = [9, 12]
+    items.extend(chunk)
+    return items.count + items[0] + items[2]
+
+def main() -> i64:
+    static assert checksum() == 19
+    return 0

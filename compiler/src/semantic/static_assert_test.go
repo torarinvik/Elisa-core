@@ -270,6 +270,18 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionCanBuildDArrayWithExtendAndCount(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_darray_extend_count.elisa", `static def score() -> i64:
+	items: mutable darray[i64] = []
+	chunk: i64[3] = [4, 9, 12]
+	items.extend(chunk)
+	return items.count + items[2]
+
+def keep() -> void:
+	static assert score() == 15
+`)
+}
+
 func TestAnalyzeStaticFunctionRequiresReturnOnAllPaths(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_requires_return.elisa", `static def maybe(flag: bool) -> i64:
 	if flag:

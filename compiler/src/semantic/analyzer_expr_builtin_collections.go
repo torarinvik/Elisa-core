@@ -91,7 +91,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray extend requires a mutable darray receiver")
 	}
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 		a.errorf(expr.Pos(), "darray extend requires an active in <arena>: scope")
 	}
 	sourceType := a.analyzeValueExpr(expr.Args[0], nil)

@@ -360,6 +360,21 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIREvaluatesStaticDArrayExtendAndCount(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_darray_extend_count.elisa", `static def score() -> i64:
+    items: mutable darray[i64] = []
+    chunk: i64[3] = [4, 9, 12]
+    items.extend(chunk)
+    return items.count + items[2]
+
+def keep() -> void:
+    static assert score() == 15
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIREvaluatesStaticVoidFunctionFallthrough(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_def_void_fallthrough.elisa", `static def note() -> void:
     value: i64 = 42

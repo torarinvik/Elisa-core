@@ -249,6 +249,9 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		}
 		return semantic.ConstValue{}, false
 	case *ast.FieldExpr:
+		if value, ok := evalBackendConstAggregateFieldExpr(n, lookup, call); ok {
+			return value, true
+		}
 		ident, ok := n.Object.(*ast.Ident)
 		if !ok || lookup == nil {
 			return semantic.ConstValue{}, false
@@ -413,6 +416,23 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 	default:
 		return semantic.ConstValue{}, false
 	}
+}
+
+func evalBackendConstAggregateFieldExpr(expr *ast.FieldExpr, lookup func(string) (semantic.ConstValue, bool), call func(*ast.CallExpr) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
+	if expr == nil || expr.Object == nil {
+		return semantic.ConstValue{}, false
+	}
+	object, ok := evalConstExprWithLookup(expr.Object, lookup, call)
+	if !ok {
+		return semantic.ConstValue{}, false
+	}
+	switch expr.Field {
+	case "count":
+		if object.Kind == semantic.ConstList || object.Kind == semantic.ConstTuple {
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: int64(len(object.Elems))}, true
+		}
+	}
+	return semantic.ConstValue{}, false
 }
 
 func lookupConstEvalValue(lookup func(string) (semantic.ConstValue, bool), name string) (semantic.ConstValue, bool) {

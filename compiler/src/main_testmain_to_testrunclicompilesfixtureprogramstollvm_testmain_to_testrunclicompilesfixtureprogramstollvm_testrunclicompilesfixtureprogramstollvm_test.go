@@ -252,6 +252,14 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "static_builders",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "static_builders.elisa"),
+			checks: []string{
+				"define i64 @main()",
+				"ret i64 0",
+			},
+		},
+		{
 			name: "frontend_lexer",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa"),
 			checks: []string{
