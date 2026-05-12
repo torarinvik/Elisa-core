@@ -117,14 +117,23 @@ def frontend_sv_is_6(view: sview, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64
 def frontend_sv_is_7(view: sview, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64, g: i64) -> bool:
     return view.len == 7 and view.data[0].i64() == a and view.data[1].i64() == b and view.data[2].i64() == c and view.data[3].i64() == d and view.data[4].i64() == e and view.data[5].i64() == f and view.data[6].i64() == g
 @inline(always)
+def frontend_sv_is_text(view: sview, text: cstr) -> bool:
+    false return if view.len != text.len
+    bytes: u8& = text.cast[u8&]
+    index: mutable usize = 0
+    while index < view.len:
+        false return if view.data[index] != bytes[index]
+        index <- index + 1
+    return true
+@inline(always)
 def frontend_valid_suffix(view: sview) -> bool:
     first: i64 = frontend_sv_first_char(view)
     if first == FRONTEND_CH_u:
-        return frontend_sv_is_1(view, FRONTEND_CH_u) or frontend_sv_is_2(view, FRONTEND_CH_u, 56) or frontend_sv_is_3(view, FRONTEND_CH_u, 49, 54) or frontend_sv_is_3(view, FRONTEND_CH_u, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_u, 54, 52) or frontend_sv_is_5(view, FRONTEND_CH_u, 115, 105, 122, 101)
+        return any suffix in ["u", "u8", "u16", "u32", "u64", "usize"] where frontend_sv_is_text(view, suffix)
     if first == FRONTEND_CH_i:
-        return frontend_sv_is_2(view, FRONTEND_CH_i, 56) or frontend_sv_is_3(view, FRONTEND_CH_i, 49, 54) or frontend_sv_is_3(view, FRONTEND_CH_i, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_i, 54, 52) or frontend_sv_is_5(view, FRONTEND_CH_i, 115, 105, 122, 101)
+        return any suffix in ["i8", "i16", "i32", "i64", "isize"] where frontend_sv_is_text(view, suffix)
     if first == FRONTEND_CH_f:
-        return frontend_sv_is_3(view, FRONTEND_CH_f, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_f, 54, 52)
+        return any suffix in ["f32", "f64"] where frontend_sv_is_text(view, suffix)
     return false
 @inline(always)
 def frontend_try_read_type_suffix(lexer: mutable FrontendLexer&) -> sview:
