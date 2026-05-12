@@ -126,3 +126,28 @@ def build() -> i64:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersTypeNamedConstructorDefaults(t *testing.T) {
+	src := `struct Pair:
+    left: i64
+    right: i64 = 7
+
+def Pair(left: i64, right: i64 = 9) -> Pair:
+    return Pair{left: left, right: right}
+
+def build() -> i64:
+    from_ctor: Pair = Pair(3)
+    from_literal: Pair = Pair{left: 4}
+    return from_ctor.right + from_literal.right
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_type_named_constructor_defaults.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, want := range []string{"@Pair", "i64 9", "i64 7"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected type-named constructor/default lowering to include %q, got:\n%s", want, output)
+		}
+	}
+}
