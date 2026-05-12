@@ -645,7 +645,11 @@ func (a *Analyzer) validateStaticFunctionTotality(fn *ast.FuncDecl) {
 		return
 	}
 	if !a.staticFunctionReturnsVoid(fn) && !staticStmtBlockAlwaysTerminates(fn.Body) {
-		a.errorf(fn.Pos(), "static function %q must return on all paths", fn.Name)
+		if pos, detail, ok := staticStmtBlockTerminationIssue(fn.Body); ok {
+			a.errorf(pos, "static function %q must return on all paths: %s", fn.Name, detail)
+		} else {
+			a.errorf(fn.Pos(), "static function %q must return on all paths", fn.Name)
+		}
 	}
 	a.validateStaticFunctionRecursion(fn)
 }
@@ -668,6 +672,22 @@ func staticStmtBlockAlwaysTerminates(stmts []ast.Stmt) bool {
 	return false
 }
 
+func staticStmtBlockTerminationIssue(stmts []ast.Stmt) (lexer.Pos, string, bool) {
+	if len(stmts) == 0 {
+		return lexer.Pos{}, "the function body can fall through", true
+	}
+	for _, stmt := range stmts {
+		if staticStmtAlwaysTerminates(stmt) {
+			return lexer.Pos{}, "", false
+		}
+		if pos, detail, ok := staticStmtTerminationIssue(stmt); ok {
+			return pos, detail, true
+		}
+	}
+	last := stmts[len(stmts)-1]
+	return last.Pos(), "control can fall through after this statement", true
+}
+
 func staticStmtAlwaysTerminates(stmt ast.Stmt) bool {
 	switch n := stmt.(type) {
 	case *ast.ReturnStmt, *ast.StaticErrorStmt:
@@ -683,6 +703,79 @@ func staticStmtAlwaysTerminates(stmt ast.Stmt) bool {
 	default:
 		return false
 	}
+}
+
+func staticStmtTerminationIssue(stmt ast.Stmt) (lexer.Pos, string, bool) {
+	switch n := stmt.(type) {
+	case *ast.IfStmt:
+		if len(n.Else) == 0 {
+			return n.Pos(), "this if statement has no else branch", true
+		}
+		if !staticStmtBlockAlwaysTerminates(n.Then) {
+			if pos, detail, ok := staticStmtBlockTerminationIssue(n.Then); ok {
+				return pos, "the then branch does not terminate: " + detail, true
+			}
+			return n.Pos(), "the then branch does not terminate", true
+		}
+		for _, elif := range n.Elifs {
+			if !staticStmtBlockAlwaysTerminates(elif.Body) {
+				if pos, detail, ok := staticStmtBlockTerminationIssue(elif.Body); ok {
+					return pos, "an elif branch does not terminate: " + detail, true
+				}
+				return elif.Position, "an elif branch does not terminate", true
+			}
+		}
+		if !staticStmtBlockAlwaysTerminates(n.Else) {
+			if pos, detail, ok := staticStmtBlockTerminationIssue(n.Else); ok {
+				return pos, "the else branch does not terminate: " + detail, true
+			}
+			return n.Pos(), "the else branch does not terminate", true
+		}
+	case *ast.StaticIfStmt:
+		if len(n.Else) == 0 {
+			return n.Pos(), "this static if statement has no else branch", true
+		}
+		if !staticStmtBlockAlwaysTerminates(n.Then) {
+			if pos, detail, ok := staticStmtBlockTerminationIssue(n.Then); ok {
+				return pos, "the then branch does not terminate: " + detail, true
+			}
+			return n.Pos(), "the then branch does not terminate", true
+		}
+		for _, elif := range n.Elifs {
+			if !staticStmtBlockAlwaysTerminates(elif.Body) {
+				if pos, detail, ok := staticStmtBlockTerminationIssue(elif.Body); ok {
+					return pos, "a static elif branch does not terminate: " + detail, true
+				}
+				return elif.Position, "a static elif branch does not terminate", true
+			}
+		}
+		if !staticStmtBlockAlwaysTerminates(n.Else) {
+			if pos, detail, ok := staticStmtBlockTerminationIssue(n.Else); ok {
+				return pos, "the else branch does not terminate: " + detail, true
+			}
+			return n.Pos(), "the else branch does not terminate", true
+		}
+	case *ast.MatchStmt:
+		hasCatchAll := false
+		for _, arm := range n.Arms {
+			switch arm.Pattern.(type) {
+			case *ast.MatchWildcardPattern, *ast.MatchBindPattern:
+				hasCatchAll = true
+			}
+			if !staticStmtBlockAlwaysTerminates(arm.Body) {
+				if pos, detail, ok := staticStmtBlockTerminationIssue(arm.Body); ok {
+					return pos, "a match arm does not terminate: " + detail, true
+				}
+				return arm.Position, "a match arm does not terminate", true
+			}
+		}
+		if !hasCatchAll {
+			return n.Pos(), "this match statement has no catch-all arm", true
+		}
+	case *ast.StaticBlockStmt:
+		return staticStmtBlockTerminationIssue(n.Body)
+	}
+	return stmt.Pos(), "this statement can fall through", true
 }
 
 func staticMatchStmtAlwaysTerminates(stmt *ast.MatchStmt) bool {

@@ -224,8 +224,34 @@ func TestAnalyzeStaticFunctionRequiresReturnOnAllPaths(t *testing.T) {
 def keep() -> void:
 	static assert maybe(true) == 1
 `)
-	if !strings.Contains(strings.Join(result.Errors(), "\n"), `static function "maybe" must return on all paths`) {
+	errors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errors, `static function "maybe" must return on all paths`) {
 		t.Fatalf("expected static totality diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+	if !strings.Contains(errors, `this if statement has no else branch`) {
+		t.Fatalf("expected missing-else detail, got:\n%s", errors)
+	}
+}
+
+func TestAnalyzeStaticFunctionReportsMissingCatchAllInMatch(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_match_missing_catchall.elisa", `const enum Op of i32:
+	ADD = 1
+	SUB = 2
+
+static def classify(op: Op) -> i64:
+	match op:
+		Op.ADD:
+			return 1
+
+def keep() -> void:
+	static assert classify(Op.ADD) == 1
+`)
+	errors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errors, `static function "classify" must return on all paths`) {
+		t.Fatalf("expected static totality diagnostic, got:\n%s", errors)
+	}
+	if !strings.Contains(errors, `this match statement has no catch-all arm`) {
+		t.Fatalf("expected missing catch-all detail, got:\n%s", errors)
 	}
 }
 
