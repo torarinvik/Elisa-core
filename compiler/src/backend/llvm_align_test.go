@@ -238,6 +238,23 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIREvaluatesStaticLoops(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_loops.elisa", `static def sum_to(limit: i64) -> i64:
+    total: mutable i64 = 0
+    for i in 0..<limit:
+        total <- total + i
+    while total < 10:
+        total <- total + 1
+    return total
+
+def keep() -> void:
+    static assert sum_to(4) == 10
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRRejectsStaticAssertWithLayoutIntrospection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
     tag: u8

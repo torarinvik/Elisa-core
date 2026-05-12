@@ -10,6 +10,8 @@ import (
 	"elisacore/src/lexer"
 )
 
+const staticEvalLoopIterationLimit = 100000
+
 func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {
 	arr := &ArrayType{Elem: a.resolveType(expr.Elem), Size: a.exprSummary(expr.Size)}
 	value, ok := a.evalConstExpr(expr.Size)
@@ -426,6 +428,30 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 			if !ok || returned {
 				return value, returned, ok
 			}
+		case *ast.WhileStmt:
+			for i := 0; i < staticEvalLoopIterationLimit; i++ {
+				cond, ok := a.evalConstBoolExpr(n.Cond)
+				if !ok {
+					a.errorf(n.Pos(), "static while condition must evaluate to a compile-time bool")
+					return ConstValue{}, false, false
+				}
+				if !cond {
+					break
+				}
+				value, returned, ok := a.evalStaticStmtBlock(n.Body, allowReturn)
+				if !ok || returned {
+					return value, returned, ok
+				}
+				if i == staticEvalLoopIterationLimit-1 {
+					a.errorf(n.Pos(), "static while exceeded %d iterations", staticEvalLoopIterationLimit)
+					return ConstValue{}, false, false
+				}
+			}
+		case *ast.ForStmt:
+			value, returned, ok := a.evalStaticForStmt(n, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
+			}
 		case *ast.PassStmt:
 		case *ast.ExprStmt:
 			if _, ok := a.evalConstExpr(n.Expr); !ok {
@@ -438,6 +464,76 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 		}
 	}
 	return ConstValue{}, false, true
+}
+
+func (a *Analyzer) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (ConstValue, bool, bool) {
+	start, ok := a.evalConstExpr(stmt.Start)
+	if !ok || start.Kind != ConstInt {
+		a.errorf(stmt.Pos(), "static for start must evaluate to a compile-time integer")
+		return ConstValue{}, false, false
+	}
+	end, ok := a.evalConstExpr(stmt.End)
+	if !ok || end.Kind != ConstInt {
+		a.errorf(stmt.Pos(), "static for end must evaluate to a compile-time integer")
+		return ConstValue{}, false, false
+	}
+	step := int64(1)
+	if stmt.Step != nil {
+		stepValue, ok := a.evalConstExpr(stmt.Step)
+		if !ok || stepValue.Kind != ConstInt {
+			a.errorf(stmt.Pos(), "static for step must evaluate to a compile-time integer")
+			return ConstValue{}, false, false
+		}
+		step = stepValue.Int
+		if step < 0 {
+			step = -step
+		}
+	}
+	if step == 0 {
+		a.errorf(stmt.Pos(), "static for step must not be zero")
+		return ConstValue{}, false, false
+	}
+	ascending := start.Int <= end.Int
+	if stmt.Op == lexer.TOKEN_RANGE_LT {
+		ascending = true
+	} else if stmt.Op == lexer.TOKEN_RANGE_GT {
+		ascending = false
+	}
+	current := start.Int
+	for i := 0; i < staticEvalLoopIterationLimit; i++ {
+		if !staticForLoopContinue(stmt.Op, current, end.Int, ascending) {
+			return ConstValue{}, false, true
+		}
+		a.constEvalScopes = append(a.constEvalScopes, map[string]ConstValue{stmt.Name: ConstValue{Kind: ConstInt, Int: current}})
+		value, returned, ok := a.evalStaticStmtBlock(stmt.Body, allowReturn)
+		a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+		if !ok || returned {
+			return value, returned, ok
+		}
+		if ascending {
+			current += step
+		} else {
+			current -= step
+		}
+	}
+	a.errorf(stmt.Pos(), "static for exceeded %d iterations", staticEvalLoopIterationLimit)
+	return ConstValue{}, false, false
+}
+
+func staticForLoopContinue(op lexer.TokenKind, current int64, end int64, ascending bool) bool {
+	switch op {
+	case lexer.TOKEN_RANGE:
+		if ascending {
+			return current <= end
+		}
+		return current >= end
+	case lexer.TOKEN_RANGE_LT:
+		return current < end
+	case lexer.TOKEN_RANGE_GT:
+		return current > end
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) setConstEvalValue(name string, value ConstValue) {

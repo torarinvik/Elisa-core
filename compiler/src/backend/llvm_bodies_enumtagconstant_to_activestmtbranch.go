@@ -12,9 +12,12 @@ import "C"
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
 )
+
+const backendStaticEvalLoopIterationLimit = 100000
 
 func (s *functionState) enumTagConstant(tag uint32) (C.LLVMValueRef, error) {
 	tagType, err := s.g.lowerBuiltin("u32")
@@ -160,6 +163,28 @@ func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) 
 			if !ok || returned {
 				return value, returned, ok
 			}
+		case *ast.WhileStmt:
+			for i := 0; i < backendStaticEvalLoopIterationLimit; i++ {
+				cond, ok := s.evalConstExpr(n.Cond)
+				if !ok || cond.Kind != semantic.ConstBool {
+					return semantic.ConstValue{}, false, false
+				}
+				if !cond.Bool {
+					break
+				}
+				value, returned, ok := s.evalStaticStmtBlock(n.Body, allowReturn)
+				if !ok || returned {
+					return value, returned, ok
+				}
+				if i == backendStaticEvalLoopIterationLimit-1 {
+					return semantic.ConstValue{}, false, false
+				}
+			}
+		case *ast.ForStmt:
+			value, returned, ok := s.evalStaticForStmt(n, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
+			}
 		case *ast.PassStmt:
 		case *ast.ExprStmt:
 			if _, ok := s.evalConstExpr(n.Expr); !ok {
@@ -170,6 +195,71 @@ func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) 
 		}
 	}
 	return semantic.ConstValue{}, false, true
+}
+
+func (s *functionState) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (semantic.ConstValue, bool, bool) {
+	start, ok := s.evalConstExpr(stmt.Start)
+	if !ok || start.Kind != semantic.ConstInt {
+		return semantic.ConstValue{}, false, false
+	}
+	end, ok := s.evalConstExpr(stmt.End)
+	if !ok || end.Kind != semantic.ConstInt {
+		return semantic.ConstValue{}, false, false
+	}
+	step := int64(1)
+	if stmt.Step != nil {
+		stepValue, ok := s.evalConstExpr(stmt.Step)
+		if !ok || stepValue.Kind != semantic.ConstInt {
+			return semantic.ConstValue{}, false, false
+		}
+		step = stepValue.Int
+		if step < 0 {
+			step = -step
+		}
+	}
+	if step == 0 {
+		return semantic.ConstValue{}, false, false
+	}
+	ascending := start.Int <= end.Int
+	if stmt.Op == lexer.TOKEN_RANGE_LT {
+		ascending = true
+	} else if stmt.Op == lexer.TOKEN_RANGE_GT {
+		ascending = false
+	}
+	current := start.Int
+	for i := 0; i < backendStaticEvalLoopIterationLimit; i++ {
+		if !backendStaticForLoopContinue(stmt.Op, current, end.Int, ascending) {
+			return semantic.ConstValue{}, false, true
+		}
+		s.g.constEvalScopes = append(s.g.constEvalScopes, map[string]semantic.ConstValue{stmt.Name: semantic.ConstValue{Kind: semantic.ConstInt, Int: current}})
+		value, returned, ok := s.evalStaticStmtBlock(stmt.Body, allowReturn)
+		s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+		if !ok || returned {
+			return value, returned, ok
+		}
+		if ascending {
+			current += step
+		} else {
+			current -= step
+		}
+	}
+	return semantic.ConstValue{}, false, false
+}
+
+func backendStaticForLoopContinue(op lexer.TokenKind, current int64, end int64, ascending bool) bool {
+	switch op {
+	case lexer.TOKEN_RANGE:
+		if ascending {
+			return current <= end
+		}
+		return current >= end
+	case lexer.TOKEN_RANGE_LT:
+		return current < end
+	case lexer.TOKEN_RANGE_GT:
+		return current > end
+	default:
+		return false
+	}
 }
 
 func (g *llvmGenerator) checkStaticAssertDecl(decl *ast.StaticAssertDecl) error {

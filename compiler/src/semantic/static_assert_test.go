@@ -120,3 +120,17 @@ def keep() -> void:
 		assert local == 42
 `)
 }
+
+func TestAnalyzeStaticFunctionCanUseBoundedLoops(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_loops.elisa", `static def sum_to(limit: i64) -> i64:
+	total: mutable i64 = 0
+	for i in 0..<limit:
+		total <- total + i
+	while total < 10:
+		total <- total + 1
+	return total
+
+def keep() -> void:
+	static assert sum_to(4) == 10
+`)
+}
