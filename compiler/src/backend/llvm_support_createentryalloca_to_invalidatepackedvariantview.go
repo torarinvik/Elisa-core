@@ -168,6 +168,11 @@ func (s *functionState) lookupTreeAllocOwnerForFamily(family *semantic.TreeType)
 	if s != nil && s.treeAllocOwner.isPerm {
 		return s.treeAllocOwner, true
 	}
+	if owner, ok := s.lookupTreeAllocOwner(); ok && owner.storeType != nil && (owner.storeValue != nil || owner.storePtr != nil) {
+		if owner.storeType.Family == family || (owner.storeType.Family != nil && family != nil && owner.storeType.Family.Name == family.Name) {
+			return owner, true
+		}
+	}
 	if owner, ok := s.lookupImplicitTreeStoreOwnerForFamily(family); ok {
 		if owner.arenaRef == nil && owner.arenaRefPtr == nil {
 			if active, activeOK := s.lookupTreeAllocOwner(); activeOK && active.storeValue == nil && active.storePtr == nil {
