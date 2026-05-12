@@ -542,6 +542,13 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return fmt.Errorf("static error should not reach LLVM lowering")
 	case *ast.StaticAssertStmt:
 		return s.emitStaticAssert(n)
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			if err := s.emitStaticAssert(&ast.StaticAssertStmt{Position: item.Position, Cond: item.Cond, Message: item.Message}); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *ast.StaticBlockStmt:
 		return s.emitStaticBlock(n.Body)
 	default:

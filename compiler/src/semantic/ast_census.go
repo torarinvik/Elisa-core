@@ -62,6 +62,13 @@ func (c *analyzerASTCensus) countDecl(decl ast.Decl) {
 		if n.Message != nil {
 			c.countExpr(n.Message)
 		}
+	case *ast.StaticAssertBlockDecl:
+		for _, item := range n.Assertions {
+			c.countExpr(item.Cond)
+			if item.Message != nil {
+				c.countExpr(item.Message)
+			}
+		}
 	}
 }
 
@@ -178,6 +185,13 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Cond)
 		if n.Message != nil {
 			c.countExpr(n.Message)
+		}
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			c.countExpr(item.Cond)
+			if item.Message != nil {
+				c.countExpr(item.Message)
+			}
 		}
 	case *ast.StaticBlockStmt:
 		c.countStmts(n.Body)

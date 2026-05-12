@@ -256,6 +256,15 @@ type StaticAssertDecl struct {
 	Cond     Expr
 	Message  Expr
 }
+type StaticAssertItem struct {
+	Position lexer.Pos
+	Cond     Expr
+	Message  Expr
+}
+type StaticAssertBlockDecl struct {
+	Position   lexer.Pos
+	Assertions []StaticAssertItem
+}
 type StaticElifDecl struct {
 	Position lexer.Pos
 	Cond     Expr

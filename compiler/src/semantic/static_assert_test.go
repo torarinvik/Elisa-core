@@ -19,12 +19,37 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticAssertBlockAcceptsTrueConstants(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_assert_block_true.elisa", `static assert:
+	5 > 3
+	8 > 4
+
+def keep() -> void:
+	static assert:
+		true
+		13 > 8
+`)
+}
+
 func TestAnalyzeStaticAssertRejectsFalseConstant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_assert_false.elisa", `def keep() -> void:
 	static assert 5 < 3, "math broke"
 `)
 	if !strings.Contains(strings.Join(result.Errors(), "\n"), "static assert failed: math broke") {
 		t.Fatalf("expected static assert failure diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func TestAnalyzeStaticAssertBlockRejectsFalseConstant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_assert_block_false.elisa", `static assert:
+	5 > 3
+	5 < 3, "block math broke"
+
+def keep() -> void:
+	pass
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "static assert failed: block math broke") {
+		t.Fatalf("expected static assert block failure diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
 	}
 }
 
@@ -186,6 +211,37 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticReflectionCanReadVariantsAndFields(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_reflection_variants_fields.elisa", `enum Maybe:
+	None
+	Some(value: i64)
+
+struct Pair:
+	left: i64
+	right: bool
+
+static def score() -> i64:
+	variant_count: mutable i64 = 0
+	payload_count: mutable i64 = 0
+	for variant in variants(Maybe):
+		variant_count <- variant_count + 1
+		if variant.has_field("value"):
+			payload_count <- payload_count + 1
+	field_count: mutable i64 = 0
+	for field in fields(Pair) where field.name != "right":
+		field_count <- field_count + 1
+	first_payload = variant.name for first variant in variants(Maybe) where variant.has_field("value")
+	if (first_payload else "") == "Some":
+		return variant_count * 10 + payload_count * 5 + field_count + 1
+	return 0
+
+def keep() -> void:
+	static assert variants(Maybe).count == 2
+	static assert fields(Pair).count == 2
+	static assert score() == 27
+`)
+}
+
 func TestAnalyzeStaticFunctionSupportsNamedAndDefaultArgs(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_named_defaults.elisa", `static def answer(step: i64, base: i64 = 40) -> i64:
 	return base + step
@@ -292,10 +348,12 @@ func TestAnalyzeStaticFunctionCanUseConstQueries(t *testing.T) {
 	assert (count item in items where item > 8) == 2
 	selected = item for each item in items where item > 8
 	assert selected.count == 2
-	return selected[0] + selected[1]
+	first_large = first item in items where item > 8
+	missing = first item in items where item > 20
+	return selected[0] + selected[1] + (first_large else 0) + (missing else 5)
 
 def keep() -> void:
-	static assert score() == 21
+	static assert score() == 35
 `)
 }
 

@@ -166,6 +166,13 @@ func stmtReferencesVariantFields(stmt ast.Stmt, name string) bool {
 		return exprReferencesVariantFields(n.Message, name)
 	case *ast.StaticAssertStmt:
 		return exprReferencesVariantFields(n.Cond, name) || (n.Message != nil && exprReferencesVariantFields(n.Message, name))
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			if exprReferencesVariantFields(item.Cond, name) || (item.Message != nil && exprReferencesVariantFields(item.Message, name)) {
+				return true
+			}
+		}
+		return false
 	case *ast.StaticBlockStmt:
 		return staticBlockReferencesVariantFields(n.Body, name)
 	case *ast.DiscardStmt:

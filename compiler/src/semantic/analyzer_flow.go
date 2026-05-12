@@ -446,6 +446,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.StaticAssertStmt:
 		a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			a.analyzeStaticAssert(item.Position, item.Cond, item.Message)
+		}
 	case *ast.StaticBlockStmt:
 		a.analyzeStaticOnlyStmts(n.Body)
 	case *ast.DiscardStmt:

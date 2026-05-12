@@ -143,6 +143,13 @@ func (a *Analyzer) validateDeferStmtBodyStmt(stmt ast.Stmt) {
 		if n.Message != nil {
 			a.validateDeferStmtBodyExpr(n.Message)
 		}
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			a.validateDeferStmtBodyExpr(item.Cond)
+			if item.Message != nil {
+				a.validateDeferStmtBodyExpr(item.Message)
+			}
+		}
 	case *ast.StaticBlockStmt:
 		a.validateDeferStmtBody(n.Body)
 	case *ast.DiscardStmt:

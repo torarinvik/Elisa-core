@@ -205,6 +205,13 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if n.Message != nil {
 			c.collectExpr(n.Message)
 		}
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			c.collectExpr(item.Cond)
+			if item.Message != nil {
+				c.collectExpr(item.Message)
+			}
+		}
 	case *ast.StaticBlockStmt:
 		c.collectStmts(n.Body)
 	case *ast.DiscardStmt:

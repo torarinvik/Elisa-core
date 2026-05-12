@@ -115,6 +115,16 @@ func (t *ConstValueType) String() string {
 		return "<const tuple>"
 	case ConstList:
 		return "<const list>"
+	case ConstRecord:
+		return "<const record>"
+	case ConstOptional:
+		if !t.Value.Some {
+			return "<const none>"
+		}
+		if t.Value.Value == nil {
+			return "<const optional>"
+		}
+		return "<const some>"
 	default:
 		return "<const>"
 	}

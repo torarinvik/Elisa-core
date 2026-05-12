@@ -646,3 +646,36 @@ func TestParseStaticFunctionNestedContextualStaticStmts(t *testing.T) {
 		t.Fatalf("expected else branch to parse contextual static error, got %T", ifStmt.Else[0])
 	}
 }
+
+func TestParseStaticAssertBlocks(t *testing.T) {
+	file, errs := parseSourceFile(t, `static assert:
+    5 > 3
+    8 > 4, "math still works"
+
+def keep() -> void:
+    static assert:
+        true
+        13 > 8
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	top, ok := file.Decls[0].(*ast.StaticAssertBlockDecl)
+	if !ok {
+		t.Fatalf("expected top-level static assert block, got %T", file.Decls[0])
+	}
+	if len(top.Assertions) != 2 {
+		t.Fatalf("expected 2 top-level assertions, got %d", len(top.Assertions))
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	stmt, ok := decl.Body[0].(*ast.StaticAssertBlockStmt)
+	if !ok {
+		t.Fatalf("expected function static assert block, got %T", decl.Body[0])
+	}
+	if len(stmt.Assertions) != 2 {
+		t.Fatalf("expected 2 statement assertions, got %d", len(stmt.Assertions))
+	}
+}

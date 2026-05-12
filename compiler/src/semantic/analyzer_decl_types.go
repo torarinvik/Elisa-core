@@ -63,6 +63,13 @@ func (a *Analyzer) expandActiveDecls(decls []ast.Decl) []ast.Decl {
 			out = append(out, decl)
 			continue
 		}
+		if n, ok := decl.(*ast.StaticAssertBlockDecl); ok {
+			for _, item := range n.Assertions {
+				a.analyzeStaticAssert(item.Position, item.Cond, item.Message)
+			}
+			out = append(out, decl)
+			continue
+		}
 		out = append(out, decl)
 	}
 	return out

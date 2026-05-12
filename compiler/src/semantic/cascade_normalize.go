@@ -42,6 +42,11 @@ func normalizeCascadeDecls(decls []ast.Decl) {
 		case *ast.StaticAssertDecl:
 			n.Cond = normalizeCascadeExpr(n.Cond, nil, false)
 			n.Message = normalizeCascadeExpr(n.Message, nil, false)
+		case *ast.StaticAssertBlockDecl:
+			for i := range n.Assertions {
+				n.Assertions[i].Cond = normalizeCascadeExpr(n.Assertions[i].Cond, nil, false)
+				n.Assertions[i].Message = normalizeCascadeExpr(n.Assertions[i].Message, nil, false)
+			}
 		case *ast.ImplDecl:
 			for _, member := range n.Members {
 				if fn, ok := member.(*ast.FuncDecl); ok && fn != nil {

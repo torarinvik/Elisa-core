@@ -23,6 +23,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	case builtinDictMethodRewriteInvalid:
 		return invalidType
 	}
+	if resultType, ok := a.analyzeConstReflectionCall(expr); ok {
+		return resultType
+	}
 	if resultType, ok := a.analyzeBuiltinDictEntryCall(expr); ok {
 		return resultType
 	}

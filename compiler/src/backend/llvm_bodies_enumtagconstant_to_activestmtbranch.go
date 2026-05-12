@@ -121,6 +121,12 @@ func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) 
 			if err := s.emitStaticAssert(n); err != nil {
 				return semantic.ConstValue{}, false, false
 			}
+		case *ast.StaticAssertBlockStmt:
+			for _, item := range n.Assertions {
+				if err := s.emitStaticAssert(&ast.StaticAssertStmt{Position: item.Position, Cond: item.Cond, Message: item.Message}); err != nil {
+					return semantic.ConstValue{}, false, false
+				}
+			}
 		case *ast.StaticErrorStmt:
 			return semantic.ConstValue{}, false, false
 		case *ast.StaticIfStmt:
@@ -182,6 +188,11 @@ func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) 
 			}
 		case *ast.ForStmt:
 			value, returned, ok := s.evalStaticForStmt(n, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
+			}
+		case *ast.IterForStmt:
+			value, returned, ok := s.evalStaticIterForStmt(n, allowReturn)
 			if !ok || returned {
 				return value, returned, ok
 			}
@@ -402,6 +413,58 @@ func (s *functionState) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (
 	return semantic.ConstValue{}, false, false
 }
 
+func (s *functionState) evalStaticIterForStmt(stmt *ast.IterForStmt, allowReturn bool) (semantic.ConstValue, bool, bool) {
+	if stmt == nil || stmt.Mode != ast.IterBindValue || stmt.PatternFilter != nil {
+		return semantic.ConstValue{}, false, false
+	}
+	bind, ok := stmt.Pattern.(*ast.MoveBindNamePattern)
+	if !ok || bind == nil {
+		return semantic.ConstValue{}, false, false
+	}
+	source, ok := s.evalConstExpr(stmt.Source)
+	if !ok || (source.Kind != semantic.ConstList && source.Kind != semantic.ConstTuple) {
+		return semantic.ConstValue{}, false, false
+	}
+	elems := source.Elems
+	for i := 0; i < len(elems); i++ {
+		item := elems[i]
+		if stmt.Reverse {
+			item = elems[len(elems)-1-i]
+		}
+		scope := map[string]semantic.ConstValue{}
+		if bind.Name != "" && bind.Name != "_" {
+			scope[bind.Name] = cloneBackendConstValue(item)
+		}
+		s.g.constEvalScopes = append(s.g.constEvalScopes, scope)
+		include := true
+		if stmt.WhereFilter != nil {
+			filter, ok := s.evalConstExpr(stmt.WhereFilter)
+			if !ok || filter.Kind != semantic.ConstBool {
+				s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+				return semantic.ConstValue{}, false, false
+			}
+			include = include && filter.Bool
+		}
+		if stmt.Filter != nil {
+			filter, ok := s.evalConstExpr(stmt.Filter)
+			if !ok || filter.Kind != semantic.ConstBool {
+				s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+				return semantic.ConstValue{}, false, false
+			}
+			include = include && filter.Bool
+		}
+		if include {
+			value, returned, ok := s.evalStaticStmtBlock(stmt.Body, allowReturn)
+			if !ok || returned {
+				s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+				return value, returned, ok
+			}
+		}
+		s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+	}
+	return semantic.ConstValue{}, false, true
+}
+
 func backendStaticForLoopContinue(op lexer.TokenKind, current int64, end int64, ascending bool) bool {
 	switch op {
 	case lexer.TOKEN_RANGE:
@@ -425,4 +488,14 @@ func (g *llvmGenerator) checkStaticAssertDecl(decl *ast.StaticAssertDecl) error 
 		Cond:     decl.Cond,
 		Message:  decl.Message,
 	})
+}
+
+func (g *llvmGenerator) checkStaticAssertBlockDecl(decl *ast.StaticAssertBlockDecl) error {
+	state := &functionState{g: g}
+	for _, item := range decl.Assertions {
+		if err := state.emitStaticAssert(&ast.StaticAssertStmt{Position: item.Position, Cond: item.Cond, Message: item.Message}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

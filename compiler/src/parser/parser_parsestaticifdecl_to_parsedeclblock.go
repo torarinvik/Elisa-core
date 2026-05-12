@@ -13,6 +13,10 @@ func (p *Parser) parseStaticDecl() ast.Decl {
 	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "assert" {
 		p.advance()
+		if p.match(lexer.TOKEN_COLON) {
+			p.expectNewline()
+			return &ast.StaticAssertBlockDecl{Position: pos, Assertions: p.parseStaticAssertItemBlock()}
+		}
 		cond := p.parseExpr()
 		var msg ast.Expr
 		if p.match(lexer.TOKEN_COMMA) {
@@ -54,6 +58,27 @@ func (p *Parser) parseStaticDecl() ast.Decl {
 	}
 
 	return &ast.StaticIfDecl{Position: pos, Cond: cond, Then: thenBlock, Elifs: elifs, Else: elseBlock}
+}
+
+func (p *Parser) parseStaticAssertItemBlock() []ast.StaticAssertItem {
+	p.expect(lexer.TOKEN_INDENT)
+	items := make([]ast.StaticAssertItem, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		pos := p.cur().Pos
+		cond := p.parseExpr()
+		var msg ast.Expr
+		if p.match(lexer.TOKEN_COMMA) {
+			msg = p.parseExpr()
+		}
+		p.expectNewline()
+		items = append(items, ast.StaticAssertItem{Position: pos, Cond: cond, Message: msg})
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return items
 }
 func (p *Parser) parseDeclBlock() []ast.Decl {
 	p.expect(lexer.TOKEN_INDENT)

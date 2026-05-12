@@ -1,3 +1,11 @@
+enum StaticMaybe:
+    None
+    Some(value: i64)
+
+struct StaticPair:
+    left: i64
+    right: bool
+
 static def checksum() -> i64:
     items: mutable darray[i64] = []
     items.push(4)
@@ -8,8 +16,14 @@ static def checksum() -> i64:
     assert (count item in items where item > 8) == 2
     selected = item for each item in items where item > 8
     assert selected.count == 2
-    return items.count + selected[0] + selected[1]
+    first_selected = first item in selected where item > 10
+    missing = first item in selected where item > 100
+    reflected_payloads = count variant in variants(StaticMaybe) where variant.has_field("value")
+    reflected_fields = count field in fields(StaticPair) where field.name != "left"
+    return items.count + selected[0] + (first_selected else 0) + (missing else 2) + reflected_payloads + reflected_fields
 
 def main() -> i64:
-    static assert checksum() == 24
+    static assert variants(StaticMaybe).count == 2
+    static assert fields(StaticPair).count == 2
+    static assert checksum() == 28
     return 0

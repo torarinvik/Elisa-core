@@ -331,13 +331,25 @@ func SameType(a, b Type) bool {
 }
 
 func sameConstValue(a ConstValue, b ConstValue) bool {
-	if a.Kind != b.Kind || a.Int != b.Int || a.Float != b.Float || a.Bool != b.Bool || a.String != b.String || len(a.Elems) != len(b.Elems) {
+	if a.Kind != b.Kind || a.Int != b.Int || a.Float != b.Float || a.Bool != b.Bool || a.String != b.String || a.Some != b.Some || len(a.Elems) != len(b.Elems) || len(a.Fields) != len(b.Fields) {
 		return false
 	}
 	for i := range a.Elems {
 		if !sameConstValue(a.Elems[i], b.Elems[i]) {
 			return false
 		}
+	}
+	for name, aField := range a.Fields {
+		bField, ok := b.Fields[name]
+		if !ok || !sameConstValue(aField, bField) {
+			return false
+		}
+	}
+	if a.Value == nil || b.Value == nil {
+		return a.Value == nil && b.Value == nil
+	}
+	if !sameConstValue(*a.Value, *b.Value) {
+		return false
 	}
 	return true
 }

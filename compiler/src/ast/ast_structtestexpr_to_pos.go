@@ -438,6 +438,10 @@ type StaticAssertStmt struct {
 	Cond     Expr
 	Message  Expr
 }
+type StaticAssertBlockStmt struct {
+	Position   lexer.Pos
+	Assertions []StaticAssertItem
+}
 type StaticBlockStmt struct {
 	Position lexer.Pos
 	Body     []Stmt

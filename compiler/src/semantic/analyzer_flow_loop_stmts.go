@@ -147,6 +147,15 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 	facts, hasFacts := a.exprFacts[sourceExpr]
 	readOnly := hasFacts && facts.ReadOnly
 	switch tt := sourceType.(type) {
+	case *ConstValueType:
+		if tt.Value.Kind != ConstList && tt.Value.Kind != ConstTuple {
+			return iterLoopSourceInfo{}, false
+		}
+		itemValue := ConstValue{Kind: ConstUnknown}
+		if len(tt.Value.Elems) != 0 {
+			itemValue = tt.Value.Elems[0]
+		}
+		return iterLoopSourceInfo{ItemType: &ConstValueType{Value: itemValue}}, true
 	case *ArrayType:
 		if isStringArrayType(tt) {
 			return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true

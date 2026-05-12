@@ -291,6 +291,8 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			return a.evalConstExpr(n.Value)
 		}
 		return a.evalConstExpr(n.Alt)
+	case *ast.UnwrapElseExpr:
+		return a.evalConstUnwrapElseExpr(n)
 	case *ast.TupleExpr:
 		elems := make([]ConstValue, 0, len(n.Elems))
 		for _, elem := range n.Elems {
@@ -322,6 +324,9 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	case *ast.QueryExpr:
 		return a.evalConstQueryExpr(n)
 	case *ast.CallExpr:
+		if value, ok := a.evalConstReflectionCall(n); ok {
+			return value, true
+		}
 		return a.evalStaticFunctionCall(n)
 	default:
 		return ConstValue{}, false
@@ -395,6 +400,17 @@ func (a *Analyzer) evalConstQueryExpr(expr *ast.QueryExpr) (ConstValue, bool) {
 			}
 		}
 		return ConstValue{Kind: ConstInt, Int: total}, true
+	case ast.QueryExprFirst:
+		for _, elem := range source.Elems {
+			include, value, ok := a.evalConstQueryProjectedValue(expr, elem)
+			if !ok {
+				return ConstValue{}, false
+			}
+			if include {
+				return constOptionalFromFirstProjection(value), true
+			}
+		}
+		return ConstValue{Kind: ConstOptional}, true
 	case ast.QueryExprEach:
 		if expr.Projection == nil {
 			return ConstValue{}, false
@@ -429,6 +445,14 @@ func (a *Analyzer) evalConstQueryFilter(expr *ast.QueryExpr, item ConstValue) (b
 		return false, false
 	}
 	return result.Bool, true
+}
+
+func (a *Analyzer) evalConstQueryProjectedValue(expr *ast.QueryExpr, item ConstValue) (bool, ConstValue, bool) {
+	if expr.Projection == nil {
+		include, ok := a.evalConstQueryFilter(expr, item)
+		return include, item, ok
+	}
+	return a.evalConstQueryProjection(expr, item)
 }
 
 func (a *Analyzer) evalConstQueryProjection(expr *ast.QueryExpr, item ConstValue) (bool, ConstValue, bool) {
@@ -466,8 +490,34 @@ func (a *Analyzer) evalConstAggregateFieldExpr(expr *ast.FieldExpr) (ConstValue,
 		if object.Kind == ConstList || object.Kind == ConstTuple {
 			return ConstValue{Kind: ConstInt, Int: int64(len(object.Elems))}, true
 		}
+	default:
+		if value, ok := ConstReflectionRecordField(object, expr.Field); ok {
+			return value, true
+		}
 	}
 	return ConstValue{}, false
+}
+
+func (a *Analyzer) evalConstReflectionCall(expr *ast.CallExpr) (ConstValue, bool) {
+	if expr == nil {
+		return ConstValue{}, false
+	}
+	if fieldExpr, ok := expr.Func.(*ast.FieldExpr); ok && fieldExpr != nil && fieldExpr.Field == "has_field" && len(expr.Args) == 1 && expr.NamedArgCount() == 0 {
+		object, objectOK := a.evalConstExpr(fieldExpr.Object)
+		fieldName, fieldOK := a.evalConstExpr(expr.Args[0])
+		if !objectOK || !fieldOK || fieldName.Kind != ConstString {
+			return ConstValue{}, false
+		}
+		return ConstReflectionRecordHasField(object, fieldName.String)
+	}
+	name, _ := QualifiedNameExpr(expr.Func)
+	if name != "variants" && name != "fields" {
+		return ConstValue{}, false
+	}
+	return ConstReflectionCallValue(name, expr.Args, func(typeName string) (Type, bool) {
+		t, _, ok := a.lookupVisibleType(typeName)
+		return t, ok
+	})
 }
 
 func (a *Analyzer) lookupConstEvalValue(name string) (ConstValue, bool) {
@@ -477,6 +527,30 @@ func (a *Analyzer) lookupConstEvalValue(name string) (ConstValue, bool) {
 		}
 	}
 	return ConstValue{}, false
+}
+
+func (a *Analyzer) evalConstUnwrapElseExpr(expr *ast.UnwrapElseExpr) (ConstValue, bool) {
+	if expr == nil {
+		return ConstValue{}, false
+	}
+	value, ok := a.evalConstExpr(expr.Value)
+	if !ok || value.Kind != ConstOptional {
+		return ConstValue{}, false
+	}
+	if value.Some {
+		if value.Value == nil {
+			return ConstValue{}, false
+		}
+		return cloneConstValue(*value.Value), true
+	}
+	recovery := expr.Recovery
+	if recovery == nil && expr.Fallback != nil {
+		recovery = &ast.RecoveryClause{Position: expr.Fallback.Pos(), Kind: ast.RecoveryValue, Value: expr.Fallback}
+	}
+	if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
+		return ConstValue{}, false
+	}
+	return a.evalConstExpr(recovery.Value)
 }
 
 func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool) {
@@ -573,6 +647,13 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 				a.reportStaticAssertFailure(n.Pos(), n.Message)
 				return ConstValue{}, false, false
 			}
+		case *ast.StaticAssertBlockStmt:
+			for _, item := range n.Assertions {
+				if cond, ok := a.evalConstBoolExpr(item.Cond); ok && !cond {
+					a.reportStaticAssertFailure(item.Position, item.Message)
+					return ConstValue{}, false, false
+				}
+			}
 		case *ast.StaticErrorStmt:
 			if msg, ok := a.evalConstStringExpr(n.Message); ok {
 				a.errorf(n.Pos(), "static error: %s", msg)
@@ -639,6 +720,11 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 			}
 		case *ast.ForStmt:
 			value, returned, ok := a.evalStaticForStmt(n, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
+			}
+		case *ast.IterForStmt:
+			value, returned, ok := a.evalStaticIterForStmt(n, allowReturn)
 			if !ok || returned {
 				return value, returned, ok
 			}
@@ -867,6 +953,70 @@ func (a *Analyzer) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (Const
 	}
 	a.errorf(stmt.Pos(), "static for exceeded %d iterations", staticEvalLoopIterationLimit)
 	return ConstValue{}, false, false
+}
+
+func (a *Analyzer) evalStaticIterForStmt(stmt *ast.IterForStmt, allowReturn bool) (ConstValue, bool, bool) {
+	if stmt == nil {
+		return ConstValue{}, false, false
+	}
+	if stmt.Mode != ast.IterBindValue {
+		a.errorf(stmt.Pos(), "static iterable for currently supports value binding only")
+		return ConstValue{}, false, false
+	}
+	if stmt.PatternFilter != nil {
+		a.errorf(stmt.Pos(), "static iterable for does not support pattern filters yet")
+		return ConstValue{}, false, false
+	}
+	bind, ok := stmt.Pattern.(*ast.MoveBindNamePattern)
+	if !ok || bind == nil {
+		a.errorf(stmt.Pos(), "static iterable for currently supports name bindings only")
+		return ConstValue{}, false, false
+	}
+	source, ok := a.evalConstExpr(stmt.Source)
+	if !ok || (source.Kind != ConstList && source.Kind != ConstTuple) {
+		a.errorf(stmt.Pos(), "static iterable for source must evaluate to a compile-time list or tuple")
+		return ConstValue{}, false, false
+	}
+	elems := source.Elems
+	for i := 0; i < len(elems); i++ {
+		item := elems[i]
+		if stmt.Reverse {
+			item = elems[len(elems)-1-i]
+		}
+		scope := map[string]ConstValue{}
+		if bind.Name != "" && bind.Name != "_" {
+			scope[bind.Name] = cloneConstValue(item)
+		}
+		a.constEvalScopes = append(a.constEvalScopes, scope)
+		include := true
+		if stmt.WhereFilter != nil {
+			filter, ok := a.evalConstExpr(stmt.WhereFilter)
+			if !ok || filter.Kind != ConstBool {
+				a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+				a.errorf(stmt.WhereFilter.Pos(), "static iterable for where filter must evaluate to a compile-time bool")
+				return ConstValue{}, false, false
+			}
+			include = include && filter.Bool
+		}
+		if stmt.Filter != nil {
+			filter, ok := a.evalConstExpr(stmt.Filter)
+			if !ok || filter.Kind != ConstBool {
+				a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+				a.errorf(stmt.Filter.Pos(), "static iterable for filter must evaluate to a compile-time bool")
+				return ConstValue{}, false, false
+			}
+			include = include && filter.Bool
+		}
+		if include {
+			value, returned, ok := a.evalStaticStmtBlock(stmt.Body, allowReturn)
+			if !ok || returned {
+				a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+				return value, returned, ok
+			}
+		}
+		a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+	}
+	return ConstValue{}, false, true
 }
 
 func staticForLoopContinue(op lexer.TokenKind, current int64, end int64, ascending bool) bool {
@@ -1183,6 +1333,13 @@ func (a *Analyzer) walkStaticStmt(stmt ast.Stmt, visitExpr func(ast.Expr) bool) 
 		return a.walkStaticExpr(n.Expr, visitExpr)
 	case *ast.StaticAssertStmt:
 		return a.walkStaticExpr(n.Cond, visitExpr) || a.walkStaticExpr(n.Message, visitExpr)
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			if a.walkStaticExpr(item.Cond, visitExpr) || a.walkStaticExpr(item.Message, visitExpr) {
+				return true
+			}
+		}
+		return false
 	case *ast.StaticErrorStmt:
 		return a.walkStaticExpr(n.Message, visitExpr)
 	case *ast.IfStmt:
@@ -1654,14 +1811,19 @@ func staticReverseComparisonOp(op lexer.TokenKind) lexer.TokenKind {
 }
 
 func cloneConstValue(value ConstValue) ConstValue {
-	cloned := value
-	if len(value.Elems) != 0 {
-		cloned.Elems = make([]ConstValue, len(value.Elems))
-		for i, elem := range value.Elems {
-			cloned.Elems[i] = cloneConstValue(elem)
-		}
+	return CloneConstValue(value)
+}
+
+func constOptionalSome(value ConstValue) ConstValue {
+	cloned := cloneConstValue(value)
+	return ConstValue{Kind: ConstOptional, Some: true, Value: &cloned}
+}
+
+func constOptionalFromFirstProjection(value ConstValue) ConstValue {
+	if value.Kind == ConstOptional {
+		return cloneConstValue(value)
 	}
-	return cloned
+	return constOptionalSome(value)
 }
 
 func (a *Analyzer) setConstEvalValue(name string, value ConstValue) {

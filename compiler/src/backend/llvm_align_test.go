@@ -134,12 +134,50 @@ func TestGenerateLLVMIRChecksStaticAssertWithLayoutIntrospection(t *testing.T) {
     payload: u64
 
 def keep() -> void:
-    static assert size_of[Header]() == 16
-    static assert align_of[Header] == 8
-    static assert offset_of[Header](.payload) == 8
+    static assert:
+        size_of[Header]() == 16
+        align_of[Header] == 8
+        offset_of[Header](.payload) == 8
 `)
 	if _, err := GenerateLLVMIR(result); err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
+func TestGenerateLLVMIRFoldsStaticReflection(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_reflection.elisa", `enum Maybe:
+    None
+    Some(value: i64)
+
+struct Pair:
+    left: i64
+    right: bool
+
+static def score() -> i64:
+    total: mutable i64 = 0
+    for variant in variants(Maybe):
+        total <- total + variant.field_count
+        if variant.has_field("value"):
+            total <- total + variant.tag
+    for field in fields(Pair) where field.name != "left":
+        total <- total + field.index
+    return total
+
+def folded() -> i64:
+    static assert:
+        variants(Maybe).count == 2
+        fields(Pair).count == 2
+        score() == 3
+    return 3
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel0, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	if !strings.Contains(output, "ret i64 3") {
+		t.Fatalf("expected folded static reflection result, got IR:\n%s", output)
 	}
 }
 
@@ -385,10 +423,12 @@ func TestGenerateLLVMIREvaluatesStaticConstQueries(t *testing.T) {
     assert (count item in items where item > 8) == 2
     selected = item for each item in items where item > 8
     assert selected.count == 2
-    return selected[0] + selected[1]
+    first_large = first item in items where item > 8
+    missing = first item in items where item > 20
+    return selected[0] + selected[1] + (first_large else 0) + (missing else 5)
 
 def keep() -> void:
-    static assert score() == 21
+    static assert score() == 35
 `)
 	if _, err := GenerateLLVMIR(result); err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

@@ -102,6 +102,8 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 		return &ast.StaticIfDecl{Position: n.Position, Cond: n.Cond, Then: interfaceDeclList(n.Then), Elifs: elifs, Else: interfaceDeclList(n.Else)}
 	case *ast.StaticAssertDecl:
 		return nil
+	case *ast.StaticAssertBlockDecl:
+		return nil
 	default:
 		return decl
 	}

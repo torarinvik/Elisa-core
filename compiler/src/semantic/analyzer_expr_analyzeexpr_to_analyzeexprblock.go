@@ -106,6 +106,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = rewriteDefaultType
 			return
 		}
+		if n.Name == "variants" || n.Name == "fields" {
+			result = &FuncType{Name: n.Name, Return: &ConstValueType{Value: ConstValue{Kind: ConstUnknown}}}
+			return
+		}
 		a.errorf(n.Pos(), "%s", UndefinedIdentifierMessage(n.Name))
 		result = invalidType
 		return

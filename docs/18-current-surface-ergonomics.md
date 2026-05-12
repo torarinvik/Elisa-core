@@ -779,6 +779,10 @@ Use `static assert` when an invariant must be checked while compiling. Constant-
 static assert size_of[Header]() == 16, "Header ABI changed"
 static assert offset_of[Header](.payload) == 8
 
+static assert:
+    fields(Header).count == 2
+    offset_of[Header](.payload) == 8
+
 def keep() -> void:
     static assert 5 > 3
 
@@ -791,13 +795,47 @@ def keep() -> void:
 Current rules:
 
 - `static assert` is valid at top level and inside statement blocks
+- `static assert:` groups assertion conditions in an indented block; each line is checked as an independent static assertion and may optionally use `condition, "message"`
 - `static:` blocks group static-only statements inside runtime functions; inside the block, `assert`, `if` / `elif` / `else`, and `error(...)` are static by context
-- `static def` declares a compile-time-only function; inside its body, plain `assert ...` and `error(...)` are static by context, and static assertions or static expression statements may call simple static functions with compile-time locals, assignments, conditionals, `match` over compile-time literal values, bounded loops, named arguments, defaults, constant tuple/list literals and aggregate locals with constant indexing, simple compile-time `darray` builders via `push` and `extend`, compile-time aggregate `.count`, compile-time `any` / `all` / `count` / `each` queries over const-built lists, and direct structurally decreasing recursion, while runtime calls are rejected
+- `static def` declares a compile-time-only function; inside its body, plain `assert ...` and `error(...)` are static by context, and static assertions or static expression statements may call simple static functions with compile-time locals, assignments, conditionals, `match` over compile-time literal values, bounded loops, iterable loops over const lists, named arguments, defaults, constant tuple/list literals and aggregate locals with constant indexing, simple compile-time `darray` builders via `push` and `extend`, compile-time aggregate `.count`, static reflection through `variants(T)` / `fields(T)`, compile-time `any` / `all` / `first` / `count` / `each` queries over const-built lists, optional fallback with `else`, and direct structurally decreasing recursion, while runtime calls are rejected
 - non-void static functions must return on all paths; `void` static functions may terminate by falling through; direct recursive static calls must visibly decrease a parameter with `parameter - positive_compile_time_integer` and have a visible lower-bound base case such as `if n <= 0: return ...`, `return base if n <= 0 else recurse`, or `if n > 0: recurse else return ...` for signed counters, with analogous `n == 0` / `n != 0` forms for unsigned counters; indirect recursive static cycles are rejected for now, and the evaluator reports a call-depth limit if a compile-time computation grows too large
 - the condition must type-check as `bool`
 - if the condition is a semantic compile-time constant, a false value is reported before backend lowering
 - target-aware layout intrinsics are accepted in static assertions and checked during backend lowering
 - the optional message must be a compile-time string to appear in the diagnostic
+
+## Static Reflection
+
+Static code can inspect declaration shapes without hand-maintained parallel tables. Use `variants(T)` for const enums, enums, and tree categories, and `fields(T)` for structs and record-like tree members.
+
+```elisa
+enum Maybe:
+    None
+    Some(value: i64)
+
+struct Pair:
+    left: i64
+    right: bool
+
+static def payload_variants() -> i64:
+    total: mutable i64 = 0
+    for variant in variants(Maybe):
+        if variant.has_field("value"):
+            total <- total + 1
+    return total
+
+static assert variants(Maybe).count == 2
+static assert fields(Pair).count == 2
+static assert payload_variants() == 1
+```
+
+Current rules:
+
+- `variants(T)` returns a compile-time list of records with `name`, `index`, `tag`, `field_count`, and `fields`
+- each entry in `variant.fields` and `fields(T)` has `name`, `index`, and `mutable`
+- `variant.has_field("name")` is available in static expressions
+- reflected lists can be used by static `for` loops and compile-time query expressions such as `first`, `any`, and `count`
+- the first slice is static-only; runtime reflection values are not emitted
 
 ## Grammar recovery policies
 

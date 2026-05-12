@@ -237,6 +237,13 @@ func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
 		return exprReadsMatchedValueField(name, n.Message)
 	case *ast.StaticAssertStmt:
 		return exprReadsMatchedValueField(name, n.Cond) || (n.Message != nil && exprReadsMatchedValueField(name, n.Message))
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			if exprReadsMatchedValueField(name, item.Cond) || (item.Message != nil && exprReadsMatchedValueField(name, item.Message)) {
+				return true
+			}
+		}
+		return false
 	case *ast.StaticBlockStmt:
 		return stmtsReadMatchedValueField(name, n.Body)
 	case *ast.DiscardStmt:

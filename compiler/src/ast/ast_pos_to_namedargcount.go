@@ -24,8 +24,11 @@ func (n *ExportGlobalDecl) Pos() lexer.Pos {
 }
 func (n *StaticIfDecl) Pos() lexer.Pos     { return n.Position }
 func (n *StaticAssertDecl) Pos() lexer.Pos { return n.Position }
-func (n *NamedType) Pos() lexer.Pos        { return n.Position }
-func (n *RefType) Pos() lexer.Pos          { return n.Position }
+func (n *StaticAssertBlockDecl) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *NamedType) Pos() lexer.Pos { return n.Position }
+func (n *RefType) Pos() lexer.Pos   { return n.Position }
 func (n *RefStateLiteralTypeExpr) Pos() lexer.Pos {
 	return n.Position
 }
@@ -162,6 +165,7 @@ func (n *ExprStmt) Pos() lexer.Pos                  { return n.Position }
 func (n *StaticIfStmt) Pos() lexer.Pos              { return n.Position }
 func (n *StaticErrorStmt) Pos() lexer.Pos           { return n.Position }
 func (n *StaticAssertStmt) Pos() lexer.Pos          { return n.Position }
+func (n *StaticAssertBlockStmt) Pos() lexer.Pos     { return n.Position }
 func (n *StaticBlockStmt) Pos() lexer.Pos           { return n.Position }
 func (n *DiscardStmt) Pos() lexer.Pos               { return n.Position }
 func (n *RegionStmt) Pos() lexer.Pos                { return n.Position }
@@ -242,6 +246,7 @@ func (*ExportFuncDecl) nodeTag()                    {}
 func (*ExportGlobalDecl) nodeTag()                  {}
 func (*StaticIfDecl) nodeTag()                      {}
 func (*StaticAssertDecl) nodeTag()                  {}
+func (*StaticAssertBlockDecl) nodeTag()             {}
 func (*NamedType) nodeTag()                         {}
 func (*RefType) nodeTag()                           {}
 func (*RefStateLiteralTypeExpr) nodeTag()           {}
@@ -355,6 +360,7 @@ func (*ExprStmt) nodeTag()                          {}
 func (*StaticIfStmt) nodeTag()                      {}
 func (*StaticErrorStmt) nodeTag()                   {}
 func (*StaticAssertStmt) nodeTag()                  {}
+func (*StaticAssertBlockStmt) nodeTag()             {}
 func (*StaticBlockStmt) nodeTag()                   {}
 func (*DiscardStmt) nodeTag()                       {}
 func (*RegionStmt) nodeTag()                        {}
@@ -395,6 +401,7 @@ func (*ExportFuncDecl) declTag()                    {}
 func (*ExportGlobalDecl) declTag()                  {}
 func (*StaticIfDecl) declTag()                      {}
 func (*StaticAssertDecl) declTag()                  {}
+func (*StaticAssertBlockDecl) declTag()             {}
 func (*TypeAliasDecl) nodeTag()                     {}
 func (*TreeCategoryDecl) treeMemberDeclTag()        {}
 func (*TreeBlockDecl) treeMemberDeclTag()           {}
@@ -547,6 +554,7 @@ func (*ExprStmt) stmtTag()                          {}
 func (*StaticIfStmt) stmtTag()                      {}
 func (*StaticErrorStmt) stmtTag()                   {}
 func (*StaticAssertStmt) stmtTag()                  {}
+func (*StaticAssertBlockStmt) stmtTag()             {}
 func (*StaticBlockStmt) stmtTag()                   {}
 func (*DiscardStmt) stmtTag()                       {}
 func (*RegionStmt) stmtTag()                        {}

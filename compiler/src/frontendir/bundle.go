@@ -88,6 +88,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.ExportGlobalDecl{})
 		gob.Register(&ast.StaticIfDecl{})
 		gob.Register(&ast.StaticAssertDecl{})
+		gob.Register(&ast.StaticAssertBlockDecl{})
 
 		// Type expressions.
 		gob.Register(&ast.NamedType{})
@@ -232,6 +233,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.StaticIfStmt{})
 		gob.Register(&ast.StaticErrorStmt{})
 		gob.Register(&ast.StaticAssertStmt{})
+		gob.Register(&ast.StaticAssertBlockStmt{})
 		gob.Register(&ast.StaticBlockStmt{})
 		gob.Register(&ast.DiscardStmt{})
 		gob.Register(&ast.RegionStmt{})

@@ -236,6 +236,10 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "assert" {
 		p.advance()
+		if p.match(lexer.TOKEN_COLON) {
+			p.expectNewline()
+			return &ast.StaticAssertBlockStmt{Position: pos, Assertions: p.parseStaticAssertItemBlock()}
+		}
 		cond := p.parseExpr()
 		var msg ast.Expr
 		if p.match(lexer.TOKEN_COMMA) {
@@ -321,6 +325,10 @@ func (p *Parser) parseStaticOnlyStmt() ast.Stmt {
 	case lexer.TOKEN_IDENT:
 		if p.cur().Text == "assert" {
 			p.advance()
+			if p.match(lexer.TOKEN_COLON) {
+				p.expectNewline()
+				return &ast.StaticAssertBlockStmt{Position: pos, Assertions: p.parseStaticAssertItemBlock()}
+			}
 			cond := p.parseExpr()
 			var msg ast.Expr
 			if p.match(lexer.TOKEN_COMMA) {

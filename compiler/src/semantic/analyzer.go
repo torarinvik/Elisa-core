@@ -16,6 +16,8 @@ const (
 	ConstString
 	ConstTuple
 	ConstList
+	ConstRecord
+	ConstOptional
 )
 
 const (
@@ -31,6 +33,9 @@ type ConstValue struct {
 	Bool   bool
 	String string
 	Elems  []ConstValue
+	Fields map[string]ConstValue
+	Some   bool
+	Value  *ConstValue
 }
 
 type ShapeTransformSpec struct {

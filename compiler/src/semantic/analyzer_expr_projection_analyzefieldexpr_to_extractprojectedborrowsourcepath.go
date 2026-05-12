@@ -10,6 +10,23 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		return a.analyzeSafeFieldExpr(expr)
 	}
 	objType := a.analyzeExpr(expr.Object)
+	if constType, ok := objType.(*ConstValueType); ok && constType != nil {
+		if expr.Field == "count" && (constType.Value.Kind == ConstList || constType.Value.Kind == ConstTuple) {
+			result := a.namedTypes["usize"]
+			a.exprTypes[expr] = result
+			return result
+		}
+		if expr.Field == "has_field" && constType.Value.Kind == ConstRecord {
+			result := &FuncType{Name: "has_field", Params: []Type{&RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}}, Return: a.namedTypes["bool"]}
+			a.exprTypes[expr] = result
+			return result
+		}
+		if value, ok := ConstReflectionRecordField(constType.Value, expr.Field); ok {
+			result := ConstValueStaticType(a.namedTypes, value)
+			a.exprTypes[expr] = result
+			return result
+		}
+	}
 	if viewType, ok := a.lookupRefinedPackedVariantView(expr.Object); ok {
 		if field, ok := viewType.Field(expr.Field); ok {
 			field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)

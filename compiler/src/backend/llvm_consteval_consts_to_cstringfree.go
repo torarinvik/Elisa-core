@@ -184,6 +184,8 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 			return s.evalConstExpr(n.Value)
 		}
 		return s.evalConstExpr(n.Alt)
+	case *ast.UnwrapElseExpr:
+		return s.evalConstUnwrapElseExpr(n)
 	case *ast.QueryExpr:
 		return s.evalConstQueryExpr(n)
 	}
@@ -201,6 +203,9 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 	return evalConstExprWithLookup(expr, s.g.constValue, s.g.evalStaticFunctionCall)
 }
 func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
+	if unwrapExpr, ok := expr.(*ast.UnwrapElseExpr); ok {
+		return g.evalConstUnwrapElseExpr(unwrapExpr)
+	}
 	if queryExpr, ok := expr.(*ast.QueryExpr); ok {
 		return g.evalConstQueryExpr(queryExpr)
 	}
@@ -217,6 +222,59 @@ func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 	}
 	return evalConstExprWithLookup(expr, g.constValue, g.evalStaticFunctionCall)
 }
+
+func (s *functionState) evalConstUnwrapElseExpr(expr *ast.UnwrapElseExpr) (semantic.ConstValue, bool) {
+	if expr == nil {
+		return semantic.ConstValue{}, false
+	}
+	value, ok := s.evalConstExpr(expr.Value)
+	if !ok || value.Kind != semantic.ConstOptional {
+		return semantic.ConstValue{}, false
+	}
+	if value.Some {
+		if value.Value == nil {
+			return semantic.ConstValue{}, false
+		}
+		return cloneBackendConstValue(*value.Value), true
+	}
+	recovery := backendConstRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
+	if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
+		return semantic.ConstValue{}, false
+	}
+	return s.evalConstExpr(recovery.Value)
+}
+
+func (g *llvmGenerator) evalConstUnwrapElseExpr(expr *ast.UnwrapElseExpr) (semantic.ConstValue, bool) {
+	if expr == nil {
+		return semantic.ConstValue{}, false
+	}
+	value, ok := g.evalConstExpr(expr.Value)
+	if !ok || value.Kind != semantic.ConstOptional {
+		return semantic.ConstValue{}, false
+	}
+	if value.Some {
+		if value.Value == nil {
+			return semantic.ConstValue{}, false
+		}
+		return cloneBackendConstValue(*value.Value), true
+	}
+	recovery := backendConstRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
+	if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
+		return semantic.ConstValue{}, false
+	}
+	return g.evalConstExpr(recovery.Value)
+}
+
+func backendConstRecoveryClauseForExpr(recovery *ast.RecoveryClause, fallback ast.Expr, pos lexer.Pos) *ast.RecoveryClause {
+	if recovery != nil {
+		return recovery
+	}
+	if fallback == nil {
+		return nil
+	}
+	return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryValue, Value: fallback}
+}
+
 func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstValue, bool), call func(*ast.CallExpr) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:
@@ -368,6 +426,22 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			return evalConstExprWithLookup(n.Value, lookup, call)
 		}
 		return evalConstExprWithLookup(n.Alt, lookup, call)
+	case *ast.UnwrapElseExpr:
+		value, ok := evalConstExprWithLookup(n.Value, lookup, call)
+		if !ok || value.Kind != semantic.ConstOptional {
+			return semantic.ConstValue{}, false
+		}
+		if value.Some {
+			if value.Value == nil {
+				return semantic.ConstValue{}, false
+			}
+			return cloneBackendConstValue(*value.Value), true
+		}
+		recovery := backendConstRecoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
+		if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
+			return semantic.ConstValue{}, false
+		}
+		return evalConstExprWithLookup(recovery.Value, lookup, call)
 	case *ast.TupleExpr:
 		elems := make([]semantic.ConstValue, 0, len(n.Elems))
 		for _, elem := range n.Elems {
@@ -436,6 +510,10 @@ func evalBackendConstAggregateFieldExpr(expr *ast.FieldExpr, lookup func(string)
 		if object.Kind == semantic.ConstList || object.Kind == semantic.ConstTuple {
 			return semantic.ConstValue{Kind: semantic.ConstInt, Int: int64(len(object.Elems))}, true
 		}
+	default:
+		if value, ok := semantic.ConstReflectionRecordField(object, expr.Field); ok {
+			return value, true
+		}
 	}
 	return semantic.ConstValue{}, false
 }
@@ -483,6 +561,17 @@ func (s *functionState) evalConstQueryExpr(expr *ast.QueryExpr) (semantic.ConstV
 			}
 		}
 		return semantic.ConstValue{Kind: semantic.ConstInt, Int: total}, true
+	case ast.QueryExprFirst:
+		for _, elem := range source.Elems {
+			include, value, ok := s.evalConstQueryProjectedValue(expr, elem)
+			if !ok {
+				return semantic.ConstValue{}, false
+			}
+			if include {
+				return backendConstOptionalFromFirstProjection(value), true
+			}
+		}
+		return semantic.ConstValue{Kind: semantic.ConstOptional}, true
 	case ast.QueryExprEach:
 		if expr.Projection == nil {
 			return semantic.ConstValue{}, false
@@ -514,6 +603,14 @@ func (s *functionState) evalConstQueryFilter(expr *ast.QueryExpr, item semantic.
 		return false, false
 	}
 	return result.Bool, true
+}
+
+func (s *functionState) evalConstQueryProjectedValue(expr *ast.QueryExpr, item semantic.ConstValue) (bool, semantic.ConstValue, bool) {
+	if expr.Projection == nil {
+		include, ok := s.evalConstQueryFilter(expr, item)
+		return include, item, ok
+	}
+	return s.evalConstQueryProjection(expr, item)
 }
 
 func (s *functionState) evalConstQueryProjection(expr *ast.QueryExpr, item semantic.ConstValue) (bool, semantic.ConstValue, bool) {
@@ -581,6 +678,17 @@ func (g *llvmGenerator) evalConstQueryExpr(expr *ast.QueryExpr) (semantic.ConstV
 			}
 		}
 		return semantic.ConstValue{Kind: semantic.ConstInt, Int: total}, true
+	case ast.QueryExprFirst:
+		for _, elem := range source.Elems {
+			include, value, ok := g.evalConstQueryProjectedValue(expr, elem)
+			if !ok {
+				return semantic.ConstValue{}, false
+			}
+			if include {
+				return backendConstOptionalFromFirstProjection(value), true
+			}
+		}
+		return semantic.ConstValue{Kind: semantic.ConstOptional}, true
 	case ast.QueryExprEach:
 		if expr.Projection == nil {
 			return semantic.ConstValue{}, false
@@ -612,6 +720,14 @@ func (g *llvmGenerator) evalConstQueryFilter(expr *ast.QueryExpr, item semantic.
 		return false, false
 	}
 	return result.Bool, true
+}
+
+func (g *llvmGenerator) evalConstQueryProjectedValue(expr *ast.QueryExpr, item semantic.ConstValue) (bool, semantic.ConstValue, bool) {
+	if expr.Projection == nil {
+		include, ok := g.evalConstQueryFilter(expr, item)
+		return include, item, ok
+	}
+	return g.evalConstQueryProjection(expr, item)
 }
 
 func (g *llvmGenerator) evalConstQueryProjection(expr *ast.QueryExpr, item semantic.ConstValue) (bool, semantic.ConstValue, bool) {
@@ -646,6 +762,9 @@ func lookupConstEvalValue(lookup func(string) (semantic.ConstValue, bool), name 
 func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.ConstValue, bool) {
 	if expr == nil || g == nil || g.staticCallDepth >= semantic.StaticEvalCallDepthLimit {
 		return semantic.ConstValue{}, false
+	}
+	if value, ok := g.evalConstReflectionCall(expr); ok {
+		return value, true
 	}
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok {
@@ -693,6 +812,47 @@ func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.Con
 	return value, ok
 }
 
+func (g *llvmGenerator) evalConstReflectionCall(expr *ast.CallExpr) (semantic.ConstValue, bool) {
+	if expr == nil || g == nil || g.result == nil {
+		return semantic.ConstValue{}, false
+	}
+	if fieldExpr, ok := expr.Func.(*ast.FieldExpr); ok && fieldExpr != nil && fieldExpr.Field == "has_field" && len(expr.Args) == 1 && expr.NamedArgCount() == 0 {
+		object, objectOK := g.evalConstExpr(fieldExpr.Object)
+		fieldName, fieldOK := g.evalConstExpr(expr.Args[0])
+		if !objectOK || !fieldOK || fieldName.Kind != semantic.ConstString {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.ConstReflectionRecordHasField(object, fieldName.String)
+	}
+	name, _ := semantic.QualifiedNameExpr(expr.Func)
+	if name != "variants" && name != "fields" {
+		return semantic.ConstValue{}, false
+	}
+	return semantic.ConstReflectionCallValue(name, expr.Args, func(typeName string) (semantic.Type, bool) {
+		return g.lookupConstReflectionType(typeName)
+	})
+}
+
+func (g *llvmGenerator) lookupConstReflectionType(typeName string) (semantic.Type, bool) {
+	if g == nil || g.result == nil || typeName == "" {
+		return nil, false
+	}
+	if t, ok := g.result.NamedTypes[typeName]; ok {
+		return t, true
+	}
+	var matched semantic.Type
+	suffix := "." + typeName
+	for name, t := range g.result.NamedTypes {
+		if strings.HasSuffix(name, suffix) {
+			if matched != nil {
+				return nil, false
+			}
+			matched = t
+		}
+	}
+	return matched, matched != nil
+}
+
 func (g *llvmGenerator) lookupStaticFunctionSymbol(name string) (*semantic.Symbol, bool) {
 	if g == nil || g.result == nil || g.result.GlobalScope == nil {
 		return nil, false
@@ -714,14 +874,19 @@ func (g *llvmGenerator) lookupStaticFunctionSymbol(name string) (*semantic.Symbo
 }
 
 func cloneBackendConstValue(value semantic.ConstValue) semantic.ConstValue {
-	cloned := value
-	if len(value.Elems) != 0 {
-		cloned.Elems = make([]semantic.ConstValue, len(value.Elems))
-		for i, elem := range value.Elems {
-			cloned.Elems[i] = cloneBackendConstValue(elem)
-		}
+	return semantic.CloneConstValue(value)
+}
+
+func backendConstOptionalSome(value semantic.ConstValue) semantic.ConstValue {
+	cloned := cloneBackendConstValue(value)
+	return semantic.ConstValue{Kind: semantic.ConstOptional, Some: true, Value: &cloned}
+}
+
+func backendConstOptionalFromFirstProjection(value semantic.ConstValue) semantic.ConstValue {
+	if value.Kind == semantic.ConstOptional {
+		return cloneBackendConstValue(value)
 	}
-	return cloned
+	return backendConstOptionalSome(value)
 }
 
 func (g *llvmGenerator) setConstEvalValue(name string, value semantic.ConstValue) {

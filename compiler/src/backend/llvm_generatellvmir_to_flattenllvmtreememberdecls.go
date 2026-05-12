@@ -324,6 +324,8 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		return nil
 	case *ast.StaticAssertDecl:
 		return g.checkStaticAssertDecl(n)
+	case *ast.StaticAssertBlockDecl:
+		return g.checkStaticAssertBlockDecl(n)
 	case *ast.PermissionDecl:
 		return nil
 	case *ast.ParamsDecl:
@@ -452,7 +454,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 			}
 		}
 		return nil
-	case *ast.ExternTypeDecl, *ast.StaticIfDecl, *ast.AttributeDecl, *ast.StaticAssertDecl:
+	case *ast.ExternTypeDecl, *ast.StaticIfDecl, *ast.AttributeDecl, *ast.StaticAssertDecl, *ast.StaticAssertBlockDecl:
 		return nil
 	case *ast.PermissionDecl:
 		return nil
