@@ -581,7 +581,7 @@ func staticStmtBlockAlwaysTerminates(stmts []ast.Stmt) bool {
 
 func staticStmtAlwaysTerminates(stmt ast.Stmt) bool {
 	switch n := stmt.(type) {
-	case *ast.ReturnStmt, *ast.StaticErrorStmt, *ast.PanicStmt:
+	case *ast.ReturnStmt, *ast.StaticErrorStmt:
 		return true
 	case *ast.StaticBlockStmt:
 		return staticStmtBlockAlwaysTerminates(n.Body)

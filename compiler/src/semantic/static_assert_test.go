@@ -117,6 +117,18 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionRejectsPanicAsReturnProof(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_panic_not_return_proof.elisa", `static def answer() -> i64:
+	panic("boom")
+
+def keep() -> void:
+	pass
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `static function "answer" must return on all paths`) {
+		t.Fatalf("expected static return diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func TestAnalyzeStaticFunctionCanUseLocalsAndCompileTimeIf(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_locals.elisa", `static def answer(step: i64) -> i64:
 	value: mutable i64 = step + 40
