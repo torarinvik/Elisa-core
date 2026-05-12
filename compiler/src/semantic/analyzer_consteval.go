@@ -106,32 +106,13 @@ func (a *Analyzer) analyzeStaticAssert(pos lexer.Pos, cond ast.Expr, message ast
 }
 
 func (a *Analyzer) analyzeStaticOnlyStmts(stmts []ast.Stmt) {
-	for _, stmt := range stmts {
-		switch n := stmt.(type) {
-		case *ast.StaticAssertStmt:
-			a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
-		case *ast.StaticErrorStmt:
-			if msg, ok := a.evalConstStringExpr(n.Message); ok {
-				a.errorf(n.Pos(), "static error: %s", msg)
-			} else {
-				a.errorf(n.Pos(), "static error triggered")
-			}
-		case *ast.StaticBlockStmt:
-			a.analyzeStaticOnlyStmts(n.Body)
-		case *ast.StaticIfStmt:
-			a.analyzeStaticOnlyStmts(a.activeStmtBranch(n))
-		case *ast.PassStmt:
-			// Useful as a placeholder in generated or partially-filled static blocks.
-		case *ast.ExprStmt:
-			a.staticContextDepth++
-			_, ok := a.evalConstExpr(n.Expr)
-			a.staticContextDepth--
-			if !ok {
-				a.errorf(stmt.Pos(), "static expression statement must evaluate at compile time")
-			}
-		default:
-			a.errorf(stmt.Pos(), "static block only allows static assert, static error, nested static blocks, static if, and static expression statements")
-		}
+	a.staticContextDepth++
+	a.constEvalScopes = append(a.constEvalScopes, map[string]ConstValue{})
+	_, _, ok := a.evalStaticStmtBlock(stmts, false)
+	a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+	a.staticContextDepth--
+	if !ok {
+		return
 	}
 }
 
@@ -350,41 +331,140 @@ func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool)
 	}
 	a.staticCallDepth++
 	a.constEvalScopes = append(a.constEvalScopes, scope)
-	value, ok := a.evalStaticFunctionBody(decl.Body)
+	value, returned, ok := a.evalStaticStmtBlock(decl.Body, true)
 	a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
 	a.staticCallDepth--
+	if !returned {
+		return ConstValue{}, false
+	}
 	return value, ok
 }
 
-func (a *Analyzer) evalStaticFunctionBody(stmts []ast.Stmt) (ConstValue, bool) {
+func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (ConstValue, bool, bool) {
 	for _, stmt := range stmts {
 		switch n := stmt.(type) {
 		case *ast.ReturnStmt:
-			return a.evalConstExpr(n.Value)
+			if !allowReturn {
+				a.errorf(n.Pos(), "return is not allowed in a static block")
+				return ConstValue{}, false, false
+			}
+			value, ok := a.evalConstExpr(n.Value)
+			return value, true, ok
+		case *ast.VarDeclStmt:
+			if n.Value == nil {
+				a.errorf(n.Pos(), "static local %q must have a compile-time initializer", n.Name)
+				return ConstValue{}, false, false
+			}
+			value, ok := a.evalConstExpr(n.Value)
+			if !ok {
+				a.errorf(n.Pos(), "static local %q initializer must evaluate at compile time", n.Name)
+				return ConstValue{}, false, false
+			}
+			a.setConstEvalValue(n.Name, value)
+		case *ast.AssignStmt:
+			ident, ok := n.Target.(*ast.Ident)
+			if !ok {
+				a.errorf(n.Pos(), "static assignment target must be a local name")
+				return ConstValue{}, false, false
+			}
+			value, ok := a.evalConstExpr(n.Value)
+			if !ok {
+				a.errorf(n.Pos(), "static assignment value must evaluate at compile time")
+				return ConstValue{}, false, false
+			}
+			if !a.updateConstEvalValue(ident.Name, value) {
+				a.errorf(n.Pos(), "unknown static local %q", ident.Name)
+				return ConstValue{}, false, false
+			}
 		case *ast.StaticAssertStmt:
-			if cond, ok := a.evalConstBoolExpr(n.Cond); !ok || !cond {
-				return ConstValue{}, false
+			if cond, ok := a.evalConstBoolExpr(n.Cond); ok && !cond {
+				a.reportStaticAssertFailure(n.Pos(), n.Message)
+				return ConstValue{}, false, false
 			}
 		case *ast.StaticErrorStmt:
-			return ConstValue{}, false
+			if msg, ok := a.evalConstStringExpr(n.Message); ok {
+				a.errorf(n.Pos(), "static error: %s", msg)
+			} else {
+				a.errorf(n.Pos(), "static error triggered")
+			}
+			return ConstValue{}, false, false
 		case *ast.StaticIfStmt:
-			if value, ok := a.evalStaticFunctionBody(a.activeStmtBranch(n)); ok {
-				return value, true
+			value, returned, ok := a.evalStaticStmtBlock(a.activeStmtBranch(n), allowReturn)
+			if !ok || returned {
+				return value, returned, ok
 			}
 		case *ast.StaticBlockStmt:
-			if value, ok := a.evalStaticFunctionBody(n.Body); ok {
-				return value, true
+			a.constEvalScopes = append(a.constEvalScopes, map[string]ConstValue{})
+			value, returned, ok := a.evalStaticStmtBlock(n.Body, allowReturn)
+			a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+			if !ok || returned {
+				return value, returned, ok
+			}
+		case *ast.IfStmt:
+			cond, ok := a.evalConstBoolExpr(n.Cond)
+			if !ok {
+				a.errorf(n.Pos(), "static if condition must evaluate to a compile-time bool")
+				return ConstValue{}, false, false
+			}
+			branch := n.Else
+			if cond {
+				branch = n.Then
+			} else {
+				for _, elif := range n.Elifs {
+					elifCond, ok := a.evalConstBoolExpr(elif.Cond)
+					if !ok {
+						a.errorf(elif.Position, "static elif condition must evaluate to a compile-time bool")
+						return ConstValue{}, false, false
+					}
+					if elifCond {
+						branch = elif.Body
+						break
+					}
+				}
+			}
+			value, returned, ok := a.evalStaticStmtBlock(branch, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
 			}
 		case *ast.PassStmt:
 		case *ast.ExprStmt:
 			if _, ok := a.evalConstExpr(n.Expr); !ok {
-				return ConstValue{}, false
+				a.errorf(n.Pos(), "static expression statement must evaluate at compile time")
+				return ConstValue{}, false, false
 			}
 		default:
-			return ConstValue{}, false
+			a.errorf(stmt.Pos(), "static block only allows compile-time assertions, errors, local bindings, assignments, conditionals, returns, nested static blocks, and expression statements")
+			return ConstValue{}, false, false
 		}
 	}
-	return ConstValue{}, false
+	return ConstValue{}, false, true
+}
+
+func (a *Analyzer) setConstEvalValue(name string, value ConstValue) {
+	if len(a.constEvalScopes) == 0 {
+		a.constEvalScopes = append(a.constEvalScopes, map[string]ConstValue{})
+	}
+	a.constEvalScopes[len(a.constEvalScopes)-1][name] = value
+}
+
+func (a *Analyzer) updateConstEvalValue(name string, value ConstValue) bool {
+	for i := len(a.constEvalScopes) - 1; i >= 0; i-- {
+		if _, ok := a.constEvalScopes[i][name]; ok {
+			a.constEvalScopes[i][name] = value
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) reportStaticAssertFailure(pos lexer.Pos, message ast.Expr) {
+	if message != nil {
+		if msg, ok := a.evalConstStringExpr(message); ok {
+			a.errorf(pos, "static assert failed: %s", msg)
+			return
+		}
+	}
+	a.errorf(pos, "static assert failed")
 }
 
 func (a *Analyzer) evalConstEquality(left, right ConstValue, equal bool) (ConstValue, bool) {

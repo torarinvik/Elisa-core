@@ -220,6 +220,24 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIREvaluatesStaticLocalsAndIf(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_locals.elisa", `static def answer(step: i64) -> i64:
+    value: mutable i64 = step + 40
+    if value == 42:
+        return value
+    return 0
+
+def keep() -> void:
+    static assert answer(2) == 42
+    static:
+        local: i64 = answer(2)
+        assert local == 42
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRRejectsStaticAssertWithLayoutIntrospection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
     tag: u8

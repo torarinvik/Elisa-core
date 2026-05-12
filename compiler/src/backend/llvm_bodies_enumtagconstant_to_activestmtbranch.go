@@ -75,36 +75,101 @@ func (s *functionState) emitStaticAssert(stmt *ast.StaticAssertStmt) error {
 }
 
 func (s *functionState) emitStaticBlock(stmts []ast.Stmt) error {
+	s.g.constEvalScopes = append(s.g.constEvalScopes, map[string]semantic.ConstValue{})
+	_, returned, ok := s.evalStaticStmtBlock(stmts, false)
+	s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+	if !ok {
+		return fmt.Errorf("static block statement must evaluate at compile time")
+	}
+	if returned {
+		return fmt.Errorf("return is not allowed in a static block")
+	}
+	return nil
+}
+
+func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (semantic.ConstValue, bool, bool) {
 	for _, stmt := range stmts {
 		switch n := stmt.(type) {
+		case *ast.ReturnStmt:
+			if !allowReturn {
+				return semantic.ConstValue{}, false, false
+			}
+			value, ok := s.evalConstExpr(n.Value)
+			return value, true, ok
+		case *ast.VarDeclStmt:
+			if n.Value == nil {
+				return semantic.ConstValue{}, false, false
+			}
+			value, ok := s.evalConstExpr(n.Value)
+			if !ok {
+				return semantic.ConstValue{}, false, false
+			}
+			s.g.setConstEvalValue(n.Name, value)
+		case *ast.AssignStmt:
+			ident, ok := n.Target.(*ast.Ident)
+			if !ok {
+				return semantic.ConstValue{}, false, false
+			}
+			value, ok := s.evalConstExpr(n.Value)
+			if !ok || !s.g.updateConstEvalValue(ident.Name, value) {
+				return semantic.ConstValue{}, false, false
+			}
 		case *ast.StaticAssertStmt:
 			if err := s.emitStaticAssert(n); err != nil {
-				return err
+				return semantic.ConstValue{}, false, false
 			}
-		case *ast.StaticBlockStmt:
-			if err := s.emitStaticBlock(n.Body); err != nil {
-				return err
-			}
+		case *ast.StaticErrorStmt:
+			return semantic.ConstValue{}, false, false
 		case *ast.StaticIfStmt:
 			branch, err := s.activeStmtBranch(n)
 			if err != nil {
-				return err
+				return semantic.ConstValue{}, false, false
 			}
-			if err := s.emitStaticBlock(branch); err != nil {
-				return err
+			value, returned, ok := s.evalStaticStmtBlock(branch, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
+			}
+		case *ast.StaticBlockStmt:
+			s.g.constEvalScopes = append(s.g.constEvalScopes, map[string]semantic.ConstValue{})
+			value, returned, ok := s.evalStaticStmtBlock(n.Body, allowReturn)
+			s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+			if !ok || returned {
+				return value, returned, ok
+			}
+		case *ast.IfStmt:
+			cond, ok := s.evalConstExpr(n.Cond)
+			if !ok || cond.Kind != semantic.ConstBool {
+				return semantic.ConstValue{}, false, false
+			}
+			branch := n.Else
+			if cond.Bool {
+				branch = n.Then
+			} else {
+				for _, elif := range n.Elifs {
+					elifCond, ok := s.evalConstExpr(elif.Cond)
+					if !ok || elifCond.Kind != semantic.ConstBool {
+						return semantic.ConstValue{}, false, false
+					}
+					if elifCond.Bool {
+						branch = elif.Body
+						break
+					}
+				}
+			}
+			value, returned, ok := s.evalStaticStmtBlock(branch, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
 			}
 		case *ast.PassStmt:
-		case *ast.StaticErrorStmt:
-			return fmt.Errorf("static error should not reach LLVM lowering")
 		case *ast.ExprStmt:
 			if _, ok := s.evalConstExpr(n.Expr); !ok {
-				return fmt.Errorf("static expression statement must evaluate at compile time")
+				return semantic.ConstValue{}, false, false
 			}
 		default:
-			return fmt.Errorf("static block only allows static assert, static error, nested static blocks, static if, and static expression statements")
+			return semantic.ConstValue{}, false, false
 		}
 	}
-	return nil
+	return semantic.ConstValue{}, false, true
 }
 
 func (g *llvmGenerator) checkStaticAssertDecl(decl *ast.StaticAssertDecl) error {

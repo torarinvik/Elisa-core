@@ -63,10 +63,13 @@ func TestAnalyzeStaticBlockAcceptsStaticOnlyStatements(t *testing.T) {
 
 func TestAnalyzeStaticBlockRejectsRuntimeStatements(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_block_runtime_stmt.elisa", `def keep() -> void:
+	pass
+
+def run() -> void:
 	static:
-		value: i64 = 1
+		keep()
 `)
-	if !strings.Contains(strings.Join(result.Errors(), "\n"), "static block only allows static assert") {
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "static expression statement must evaluate at compile time") {
 		t.Fatalf("expected static-only block diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
 	}
 }
@@ -100,5 +103,20 @@ def keep() -> void:
 	static answer(2)
 	static:
 		answer(2)
+`)
+}
+
+func TestAnalyzeStaticFunctionCanUseLocalsAndCompileTimeIf(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_locals.elisa", `static def answer(step: i64) -> i64:
+	value: mutable i64 = step + 40
+	if value == 42:
+		return value
+	return 0
+
+def keep() -> void:
+	static assert answer(2) == 42
+	static:
+		local: i64 = answer(2)
+		assert local == 42
 `)
 }

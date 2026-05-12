@@ -407,9 +407,13 @@ func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.Con
 	}
 	g.staticCallDepth++
 	g.constEvalScopes = append(g.constEvalScopes, scope)
-	value, ok := g.evalStaticFunctionBody(decl.Body)
+	state := &functionState{g: g}
+	value, returned, ok := state.evalStaticStmtBlock(decl.Body, true)
 	g.constEvalScopes = g.constEvalScopes[:len(g.constEvalScopes)-1]
 	g.staticCallDepth--
+	if !returned {
+		return semantic.ConstValue{}, false
+	}
 	return value, ok
 }
 
@@ -433,40 +437,21 @@ func (g *llvmGenerator) lookupStaticFunctionSymbol(name string) (*semantic.Symbo
 	return matched, matched != nil
 }
 
-func (g *llvmGenerator) evalStaticFunctionBody(stmts []ast.Stmt) (semantic.ConstValue, bool) {
-	for _, stmt := range stmts {
-		switch n := stmt.(type) {
-		case *ast.ReturnStmt:
-			return g.evalConstExpr(n.Value)
-		case *ast.StaticAssertStmt:
-			if cond, ok := g.evalConstExpr(n.Cond); !ok || cond.Kind != semantic.ConstBool || !cond.Bool {
-				return semantic.ConstValue{}, false
-			}
-		case *ast.StaticErrorStmt:
-			return semantic.ConstValue{}, false
-		case *ast.StaticIfStmt:
-			state := &functionState{g: g}
-			branch, err := state.activeStmtBranch(n)
-			if err != nil {
-				return semantic.ConstValue{}, false
-			}
-			if value, ok := g.evalStaticFunctionBody(branch); ok {
-				return value, true
-			}
-		case *ast.StaticBlockStmt:
-			if value, ok := g.evalStaticFunctionBody(n.Body); ok {
-				return value, true
-			}
-		case *ast.PassStmt:
-		case *ast.ExprStmt:
-			if _, ok := g.evalConstExpr(n.Expr); !ok {
-				return semantic.ConstValue{}, false
-			}
-		default:
-			return semantic.ConstValue{}, false
+func (g *llvmGenerator) setConstEvalValue(name string, value semantic.ConstValue) {
+	if len(g.constEvalScopes) == 0 {
+		g.constEvalScopes = append(g.constEvalScopes, map[string]semantic.ConstValue{})
+	}
+	g.constEvalScopes[len(g.constEvalScopes)-1][name] = value
+}
+
+func (g *llvmGenerator) updateConstEvalValue(name string, value semantic.ConstValue) bool {
+	for i := len(g.constEvalScopes) - 1; i >= 0; i-- {
+		if _, ok := g.constEvalScopes[i][name]; ok {
+			g.constEvalScopes[i][name] = value
+			return true
 		}
 	}
-	return semantic.ConstValue{}, false
+	return false
 }
 func evalConstEquality(left, right semantic.ConstValue, equal bool) (semantic.ConstValue, bool) {
 	matched := false
