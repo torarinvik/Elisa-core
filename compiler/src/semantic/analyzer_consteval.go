@@ -646,7 +646,7 @@ func (a *Analyzer) validateStaticRecursiveCall(fn *ast.FuncDecl, call *ast.CallE
 		a.validateStaticIndirectRecursiveCall(fn, call, ident.Name)
 		return
 	}
-	if paramName, ok := staticRecursiveCallDecreasingParam(fn, call); ok {
+	if paramName, ok := a.staticRecursiveCallDecreasingParam(fn, call); ok {
 		if a.staticFunctionHasBaseCaseForParam(fn, paramName) {
 			return
 		}
@@ -902,7 +902,7 @@ func (a *Analyzer) walkStaticExpr(expr ast.Expr, visitExpr func(ast.Expr) bool) 
 	return false
 }
 
-func staticRecursiveCallDecreasingParam(fn *ast.FuncDecl, call *ast.CallExpr) (string, bool) {
+func (a *Analyzer) staticRecursiveCallDecreasingParam(fn *ast.FuncDecl, call *ast.CallExpr) (string, bool) {
 	args := call.Args
 	if call.ResolvedArgsValid {
 		args = call.ResolvedArgs
@@ -911,14 +911,14 @@ func staticRecursiveCallDecreasingParam(fn *ast.FuncDecl, call *ast.CallExpr) (s
 		return "", false
 	}
 	for index, param := range fn.Params {
-		if staticExprIsPositiveDecrementOfParam(args[index], param.Name) {
+		if a.staticExprIsPositiveDecrementOfParam(args[index], param.Name) {
 			return param.Name, true
 		}
 	}
 	return "", false
 }
 
-func staticExprIsPositiveDecrementOfParam(expr ast.Expr, paramName string) bool {
+func (a *Analyzer) staticExprIsPositiveDecrementOfParam(expr ast.Expr, paramName string) bool {
 	binary, ok := expr.(*ast.BinaryExpr)
 	if !ok || binary.Op != lexer.TOKEN_MINUS {
 		return false
@@ -927,19 +927,23 @@ func staticExprIsPositiveDecrementOfParam(expr ast.Expr, paramName string) bool 
 	if !ok || ident.Name != paramName {
 		return false
 	}
-	lit, ok := binary.Right.(*ast.IntLit)
-	if !ok {
-		return false
-	}
-	value, ok := ParseIntLiteral(lit)
+	value, ok := a.evalStaticProofIntegerExpr(binary.Right)
 	return ok && value > 0
+}
+
+func (a *Analyzer) evalStaticProofIntegerExpr(expr ast.Expr) (int64, bool) {
+	value, ok := a.evalConstExpr(expr)
+	if !ok || value.Kind != ConstInt {
+		return 0, false
+	}
+	return value.Int, true
 }
 
 func (a *Analyzer) staticFunctionHasBaseCaseForParam(fn *ast.FuncDecl, paramName string) bool {
 	if fn == nil {
 		return false
 	}
-	return staticStmtsContainBaseCaseForParam(fn.Body, paramName, a.staticFunctionParamIsUnsigned(fn, paramName))
+	return a.staticStmtsContainBaseCaseForParam(fn.Body, paramName, a.staticFunctionParamIsUnsigned(fn, paramName))
 }
 
 func (a *Analyzer) staticFunctionParamIsUnsigned(fn *ast.FuncDecl, paramName string) bool {
@@ -977,24 +981,24 @@ func (a *Analyzer) staticFunctionParamIsUnsigned(fn *ast.FuncDecl, paramName str
 	}
 }
 
-func staticStmtsContainBaseCaseForParam(stmts []ast.Stmt, paramName string, allowZeroEquality bool) bool {
+func (a *Analyzer) staticStmtsContainBaseCaseForParam(stmts []ast.Stmt, paramName string, allowZeroEquality bool) bool {
 	for index, stmt := range stmts {
-		if staticStmtContainsBaseCaseForParam(stmt, paramName, allowZeroEquality) {
+		if a.staticStmtContainsBaseCaseForParam(stmt, paramName, allowZeroEquality) {
 			return true
 		}
-		if staticStmtContainsFallthroughBaseCaseForParam(stmt, stmts[index+1:], paramName, allowZeroEquality) {
+		if a.staticStmtContainsFallthroughBaseCaseForParam(stmt, stmts[index+1:], paramName, allowZeroEquality) {
 			return true
 		}
 	}
 	return false
 }
 
-func staticStmtContainsFallthroughBaseCaseForParam(stmt ast.Stmt, following []ast.Stmt, paramName string, allowZeroEquality bool) bool {
+func (a *Analyzer) staticStmtContainsFallthroughBaseCaseForParam(stmt ast.Stmt, following []ast.Stmt, paramName string, allowZeroEquality bool) bool {
 	switch n := stmt.(type) {
 	case *ast.IfStmt:
-		return staticIfContainsBaseCaseForParam(n.Cond, n.Then, appendStaticStmtLists(n.Else, following), paramName, allowZeroEquality)
+		return a.staticIfContainsBaseCaseForParam(n.Cond, n.Then, appendStaticStmtLists(n.Else, following), paramName, allowZeroEquality)
 	case *ast.StaticIfStmt:
-		return staticIfContainsBaseCaseForParam(n.Cond, n.Then, appendStaticStmtLists(n.Else, following), paramName, allowZeroEquality)
+		return a.staticIfContainsBaseCaseForParam(n.Cond, n.Then, appendStaticStmtLists(n.Else, following), paramName, allowZeroEquality)
 	default:
 		return false
 	}
@@ -1013,31 +1017,31 @@ func appendStaticStmtLists(first []ast.Stmt, second []ast.Stmt) []ast.Stmt {
 	return combined
 }
 
-func staticStmtContainsBaseCaseForParam(stmt ast.Stmt, paramName string, allowZeroEquality bool) bool {
+func (a *Analyzer) staticStmtContainsBaseCaseForParam(stmt ast.Stmt, paramName string, allowZeroEquality bool) bool {
 	switch n := stmt.(type) {
 	case *ast.IfStmt:
-		return staticIfContainsBaseCaseForParam(n.Cond, n.Then, n.Else, paramName, allowZeroEquality) || staticStmtsContainBaseCaseForParam(n.Then, paramName, allowZeroEquality) || staticStmtsContainBaseCaseForParam(n.Else, paramName, allowZeroEquality)
+		return a.staticIfContainsBaseCaseForParam(n.Cond, n.Then, n.Else, paramName, allowZeroEquality) || a.staticStmtsContainBaseCaseForParam(n.Then, paramName, allowZeroEquality) || a.staticStmtsContainBaseCaseForParam(n.Else, paramName, allowZeroEquality)
 	case *ast.StaticIfStmt:
-		return staticIfContainsBaseCaseForParam(n.Cond, n.Then, n.Else, paramName, allowZeroEquality) || staticStmtsContainBaseCaseForParam(n.Then, paramName, allowZeroEquality) || staticStmtsContainBaseCaseForParam(n.Else, paramName, allowZeroEquality)
+		return a.staticIfContainsBaseCaseForParam(n.Cond, n.Then, n.Else, paramName, allowZeroEquality) || a.staticStmtsContainBaseCaseForParam(n.Then, paramName, allowZeroEquality) || a.staticStmtsContainBaseCaseForParam(n.Else, paramName, allowZeroEquality)
 	case *ast.StaticBlockStmt:
-		return staticStmtsContainBaseCaseForParam(n.Body, paramName, allowZeroEquality)
+		return a.staticStmtsContainBaseCaseForParam(n.Body, paramName, allowZeroEquality)
 	default:
 		return false
 	}
 }
 
-func staticIfContainsBaseCaseForParam(cond ast.Expr, then []ast.Stmt, elseStmts []ast.Stmt, paramName string, allowZeroEquality bool) bool {
+func (a *Analyzer) staticIfContainsBaseCaseForParam(cond ast.Expr, then []ast.Stmt, elseStmts []ast.Stmt, paramName string, allowZeroEquality bool) bool {
 	comparison, ok := cond.(*ast.BinaryExpr)
 	if !ok {
 		return false
 	}
 	leftParam, leftOK := staticExprIdentName(comparison.Left)
-	rightValue, rightOK := staticExprIntegerLiteral(comparison.Right)
+	rightValue, rightOK := a.evalStaticProofIntegerExpr(comparison.Right)
 	if leftOK && rightOK && leftParam == paramName {
 		return staticComparisonBranchTerminates(comparison.Op, rightValue, then, elseStmts, allowZeroEquality)
 	}
 	rightParam, rightParamOK := staticExprIdentName(comparison.Right)
-	leftValue, leftValueOK := staticExprIntegerLiteral(comparison.Left)
+	leftValue, leftValueOK := a.evalStaticProofIntegerExpr(comparison.Left)
 	if rightParamOK && leftValueOK && rightParam == paramName {
 		return staticComparisonBranchTerminates(staticReverseComparisonOp(comparison.Op), leftValue, then, elseStmts, allowZeroEquality)
 	}
@@ -1057,14 +1061,6 @@ func staticExprIdentName(expr ast.Expr) (string, bool) {
 		return "", false
 	}
 	return ident.Name, true
-}
-
-func staticExprIntegerLiteral(expr ast.Expr) (int64, bool) {
-	lit, ok := expr.(*ast.IntLit)
-	if !ok {
-		return 0, false
-	}
-	return ParseIntLiteral(lit)
 }
 
 func staticParamComparisonTerminatesOnThen(op lexer.TokenKind, value int64, allowZeroEquality bool) bool {

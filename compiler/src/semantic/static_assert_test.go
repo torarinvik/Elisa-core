@@ -194,6 +194,20 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionAcceptsConstStepAndBound(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_const_step_bound.elisa", `const Step: i64 = 2
+const Bound: i64 = 0
+
+static def countdown(n: i64) -> i64:
+	if n <= Bound:
+		return 0
+	return countdown(n - Step)
+
+def keep() -> void:
+	static assert countdown(6) == 0
+`)
+}
+
 func TestAnalyzeStaticFunctionAcceptsInvertedDecreasingRecursion(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_inverted_total_recursion.elisa", `static def countdown(n: i64) -> i64:
 	if n > 0:
