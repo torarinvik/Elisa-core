@@ -771,6 +771,23 @@ Current rules:
 - legacy spellings `sizeof`, `alignof`, and `offsetof` are still accepted with deprecation diagnostics, but new code should use the underscore forms
 - prefer these builtins in runtime, FFI, packed-layout, and backend test code instead of duplicating ABI constants by hand
 
+## Static Assertions
+
+Use `static assert` when an invariant must be checked while compiling. Constant-only assertions are checked by semantic analysis; target-layout assertions are checked by the backend so they use the selected target data layout.
+
+```elisa
+static assert 5 > 3
+static assert size_of[Header]() == 16, "Header ABI changed"
+static assert offset_of[Header](.payload) == 8
+```
+
+Current rules:
+
+- the condition must type-check as `bool`
+- if the condition is a semantic compile-time constant, a false value is reported before backend lowering
+- target-aware layout intrinsics are accepted in static assertions and checked during backend lowering
+- the optional message must be a compile-time string to appear in the diagnostic
+
 ## Grammar recovery policies
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.

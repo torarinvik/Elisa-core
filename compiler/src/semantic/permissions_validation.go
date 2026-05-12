@@ -196,6 +196,11 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		}
 	case *ast.StaticErrorStmt:
 		a.validatePermissionExpr(n.Message, granted)
+	case *ast.StaticAssertStmt:
+		a.validatePermissionExpr(n.Cond, granted)
+		if n.Message != nil {
+			a.validatePermissionExpr(n.Message, granted)
+		}
 	case *ast.DiscardStmt:
 		a.validatePermissionExpr(n.Value, granted)
 	}

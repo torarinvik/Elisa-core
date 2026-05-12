@@ -200,6 +200,11 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		}
 	case *ast.StaticErrorStmt:
 		c.collectExpr(n.Message)
+	case *ast.StaticAssertStmt:
+		c.collectExpr(n.Cond)
+		if n.Message != nil {
+			c.collectExpr(n.Message)
+		}
 	case *ast.DiscardStmt:
 		c.collectExpr(n.Value)
 	case *ast.RegionStmt:

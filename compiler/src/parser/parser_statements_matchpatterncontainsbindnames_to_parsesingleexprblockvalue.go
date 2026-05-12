@@ -230,6 +230,16 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 		p.expectNewline()
 		return &ast.StaticErrorStmt{Position: pos, Message: msg}
 	}
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "assert" {
+		p.advance()
+		cond := p.parseExpr()
+		var msg ast.Expr
+		if p.match(lexer.TOKEN_COMMA) {
+			msg = p.parseExpr()
+		}
+		p.expectNewline()
+		return &ast.StaticAssertStmt{Position: pos, Cond: cond, Message: msg}
+	}
 
 	p.expect(lexer.TOKEN_IF)
 	cond := p.parseExpr()

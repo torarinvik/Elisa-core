@@ -179,6 +179,11 @@ func (c *parallelForCaptureCollector) collectStmt(stmt ast.Stmt, locals map[stri
 		}
 	case *ast.StaticErrorStmt:
 		c.collectExpr(n.Message, locals)
+	case *ast.StaticAssertStmt:
+		c.collectExpr(n.Cond, locals)
+		if n.Message != nil {
+			c.collectExpr(n.Message, locals)
+		}
 	case *ast.DiscardStmt:
 		c.collectExpr(n.Value, locals)
 	case *ast.RegionStmt:

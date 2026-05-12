@@ -540,6 +540,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitStaticIf(n)
 	case *ast.StaticErrorStmt:
 		return fmt.Errorf("static error should not reach LLVM lowering")
+	case *ast.StaticAssertStmt:
+		return s.emitStaticAssert(n)
 	default:
 		return fmt.Errorf("unsupported statement %T", stmt)
 	}

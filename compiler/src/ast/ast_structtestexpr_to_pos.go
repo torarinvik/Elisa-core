@@ -433,6 +433,11 @@ type StaticErrorStmt struct {
 	Position lexer.Pos
 	Message  Expr
 }
+type StaticAssertStmt struct {
+	Position lexer.Pos
+	Cond     Expr
+	Message  Expr
+}
 type DiscardStmt struct {
 	Position lexer.Pos
 	Value    Expr

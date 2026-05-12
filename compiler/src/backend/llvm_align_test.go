@@ -127,6 +127,37 @@ def layout_total() -> usize:
 	}
 }
 
+func TestGenerateLLVMIRChecksStaticAssertWithLayoutIntrospection(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection.elisa", `struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+def keep() -> void:
+    static assert size_of[Header]() == 16
+    static assert align_of[Header] == 8
+    static assert offset_of[Header](.payload) == 8
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
+func TestGenerateLLVMIRRejectsStaticAssertWithLayoutIntrospection(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+def keep() -> void:
+    static assert size_of[Header]() == 12, "Header ABI changed"
+`)
+	_, err := GenerateLLVMIR(result)
+	if err == nil || !strings.Contains(err.Error(), "static assert failed: Header ABI changed") {
+		t.Fatalf("expected backend static assert failure, got: %v", err)
+	}
+}
+
 func TestGenerateCHeaderRendersAlignedStructAndGlobal(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "header_align.elisa", `@align(64)
 struct Counter layout c:

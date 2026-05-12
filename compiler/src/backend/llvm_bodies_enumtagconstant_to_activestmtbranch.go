@@ -12,6 +12,7 @@ import "C"
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/semantic"
 	"fmt"
 )
 
@@ -55,4 +56,20 @@ func (s *functionState) activeStmtBranch(stmt *ast.StaticIfStmt) ([]ast.Stmt, er
 		}
 	}
 	return stmt.Else, nil
+}
+
+func (s *functionState) emitStaticAssert(stmt *ast.StaticAssertStmt) error {
+	selected, ok := s.evalConstBoolExpr(stmt.Cond)
+	if !ok {
+		return fmt.Errorf("static assert condition must be a compile-time bool")
+	}
+	if selected {
+		return nil
+	}
+	if stmt.Message != nil {
+		if value, ok := s.evalConstExpr(stmt.Message); ok && value.Kind == semantic.ConstString {
+			return fmt.Errorf("static assert failed: %s", value.String)
+		}
+	}
+	return fmt.Errorf("static assert failed")
 }

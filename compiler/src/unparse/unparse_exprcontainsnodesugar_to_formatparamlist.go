@@ -337,6 +337,12 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 	case *ast.StaticErrorStmt:
 		f.writePrefixedMultiline(level, "", "static error("+formatExpr(n.Message)+")")
+	case *ast.StaticAssertStmt:
+		if n.Message != nil {
+			f.writePrefixedMultiline(level, "", "static assert "+formatExpr(n.Cond)+", "+formatExpr(n.Message))
+		} else {
+			f.writePrefixedMultiline(level, "", "static assert "+formatExpr(n.Cond))
+		}
 	case *ast.DiscardStmt:
 		f.writePrefixedMultiline(level, "", "_ = "+formatExpr(n.Value))
 	case *ast.RegionStmt:

@@ -60,7 +60,7 @@ func (s *functionState) evalConstIntExpr(expr ast.Expr) (int64, error) {
 	return value.Int, nil
 }
 func (s *functionState) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
-	value, ok := evalConstExprWithLookup(expr, s.g.constValue)
+	value, ok := s.evalConstExpr(expr)
 	if !ok || value.Kind != semantic.ConstBool {
 		return false, false
 	}
@@ -73,6 +73,117 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 				return value.Value, true
 			}
 		}
+	}
+	switch n := expr.(type) {
+	case *ast.SizeofExpr:
+		t, err := s.resolveTypeExpr(n.Type)
+		if err != nil {
+			return semantic.ConstValue{}, false
+		}
+		size, err := s.sizeOfType(t)
+		if err != nil || size > math.MaxInt64 {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.ConstValue{Kind: semantic.ConstInt, Int: int64(size)}, true
+	case *ast.AlignofExpr:
+		t, err := s.resolveTypeExpr(n.Type)
+		if err != nil {
+			return semantic.ConstValue{}, false
+		}
+		alignment, err := s.g.abiAlignmentOfType(t)
+		if err != nil || alignment > math.MaxInt64 {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.ConstValue{Kind: semantic.ConstInt, Int: int64(alignment)}, true
+	case *ast.OffsetofExpr:
+		t, err := s.resolveTypeExpr(n.Type)
+		if err != nil {
+			return semantic.ConstValue{}, false
+		}
+		_, fieldIndex, containerType, _, err := s.g.fieldInfo(t, n.Field)
+		if err != nil {
+			return semantic.ConstValue{}, false
+		}
+		containerLLVMType, err := s.g.lowerType(containerType)
+		if err != nil {
+			return semantic.ConstValue{}, false
+		}
+		offset, err := s.g.abiOffsetOfLLVMElement(containerLLVMType, fieldIndex)
+		if err != nil || offset > math.MaxInt64 {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.ConstValue{Kind: semantic.ConstInt, Int: int64(offset)}, true
+	case *ast.ParenExpr:
+		return s.evalConstExpr(n.Inner)
+	case *ast.MoveExpr:
+		return s.evalConstExpr(n.Operand)
+	case *ast.UnaryExpr:
+		operand, ok := s.evalConstExpr(n.Operand)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		switch n.Op {
+		case lexer.TOKEN_NOT:
+			if operand.Kind != semantic.ConstBool {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: !operand.Bool}, true
+		case lexer.TOKEN_MINUS:
+			switch operand.Kind {
+			case semantic.ConstInt:
+				return semantic.ConstValue{Kind: semantic.ConstInt, Int: -operand.Int}, true
+			case semantic.ConstFloat:
+				return semantic.ConstValue{Kind: semantic.ConstFloat, Float: -operand.Float}, true
+			default:
+				return semantic.ConstValue{}, false
+			}
+		case lexer.TOKEN_TILDE:
+			if operand.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: ^operand.Int}, true
+		default:
+			return semantic.ConstValue{}, false
+		}
+	case *ast.BinaryExpr:
+		left, ok := s.evalConstExpr(n.Left)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		right, ok := s.evalConstExpr(n.Right)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			if left.Kind != semantic.ConstBool || right.Kind != semantic.ConstBool {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Bool && right.Bool}, true
+		case lexer.TOKEN_OR:
+			if left.Kind != semantic.ConstBool || right.Kind != semantic.ConstBool {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Bool || right.Bool}, true
+		case lexer.TOKEN_EQEQ:
+			return evalConstEquality(left, right, true)
+		case lexer.TOKEN_BANGEQ:
+			return evalConstEquality(left, right, false)
+		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
+			lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+			return evalBackendConstNumericBinary(n.Op, left, right)
+		default:
+			return semantic.ConstValue{}, false
+		}
+	case *ast.TernaryExpr:
+		cond, ok := s.evalConstExpr(n.Cond)
+		if !ok || cond.Kind != semantic.ConstBool {
+			return semantic.ConstValue{}, false
+		}
+		if cond.Bool {
+			return s.evalConstExpr(n.Value)
+		}
+		return s.evalConstExpr(n.Alt)
 	}
 	if castExpr, ok := expr.(*ast.CastExpr); ok {
 		operand, ok := s.evalConstExpr(castExpr.Operand)
