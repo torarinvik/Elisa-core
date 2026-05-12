@@ -224,7 +224,7 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 
 	if p.match(lexer.TOKEN_COLON) {
 		p.expectNewline()
-		return &ast.StaticBlockStmt{Position: pos, Body: p.parseBlock()}
+		return &ast.StaticBlockStmt{Position: pos, Body: p.parseStaticOnlyBlock()}
 	}
 	if p.peek() == lexer.TOKEN_ERROR {
 		p.advance()
@@ -278,6 +278,87 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 
 	return &ast.StaticIfStmt{Position: pos, Cond: cond, Then: thenBlock, Elifs: elifs, Else: elseBlock}
 }
+
+func (p *Parser) parseStaticOnlyBlock() []ast.Stmt {
+	p.expect(lexer.TOKEN_INDENT)
+	stmts := make([]ast.Stmt, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		stmt := p.parseStaticOnlyStmt()
+		if stmt != nil {
+			stmts = append(stmts, stmt)
+		}
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return stmts
+}
+
+func (p *Parser) parseStaticOnlyStmt() ast.Stmt {
+	pos := p.cur().Pos
+	switch p.peek() {
+	case lexer.TOKEN_STATIC:
+		return p.parseStaticStmt()
+	case lexer.TOKEN_IF:
+		return p.parseStaticOnlyIfStmt()
+	case lexer.TOKEN_ERROR:
+		p.advance()
+		p.expect(lexer.TOKEN_LPAREN)
+		msg := p.parseExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+		p.expectNewline()
+		return &ast.StaticErrorStmt{Position: pos, Message: msg}
+	case lexer.TOKEN_PASS:
+		return p.parsePass()
+	case lexer.TOKEN_IDENT:
+		if p.cur().Text == "assert" {
+			p.advance()
+			cond := p.parseExpr()
+			var msg ast.Expr
+			if p.match(lexer.TOKEN_COMMA) {
+				msg = p.parseExpr()
+			}
+			p.expectNewline()
+			return &ast.StaticAssertStmt{Position: pos, Cond: cond, Message: msg}
+		}
+	}
+	return p.parseStmt()
+}
+
+func (p *Parser) parseStaticOnlyIfStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IF)
+	cond := p.parseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	thenBlock := p.parseStaticOnlyBlock()
+
+	var elifs []ast.StaticElifClause
+	var elseBlock []ast.Stmt
+
+	for p.skipNewlines(); p.peek() == lexer.TOKEN_ELIF || p.peek() == lexer.TOKEN_ELSE; p.skipNewlines() {
+		if p.peek() == lexer.TOKEN_ELIF {
+			elifPos := p.cur().Pos
+			p.advance()
+			elifCond := p.parseExpr()
+			p.expect(lexer.TOKEN_COLON)
+			p.expectNewline()
+			elifBody := p.parseStaticOnlyBlock()
+			elifs = append(elifs, ast.StaticElifClause{Position: elifPos, Cond: elifCond, Body: elifBody})
+			continue
+		}
+		p.expect(lexer.TOKEN_ELSE)
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		elseBlock = p.parseStaticOnlyBlock()
+		break
+	}
+
+	return &ast.StaticIfStmt{Position: pos, Cond: cond, Then: thenBlock, Elifs: elifs, Else: elseBlock}
+}
+
 func (p *Parser) parseMoveBindPattern() ast.MoveBindPattern {
 	if p.peek() == lexer.TOKEN_LBRACE {
 		return p.parseMoveBindStructBracePattern(p.cur().Pos, "")

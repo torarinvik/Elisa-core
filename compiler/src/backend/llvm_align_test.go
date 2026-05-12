@@ -151,9 +151,9 @@ func TestGenerateLLVMIRChecksStaticBlockWithLayoutIntrospection(t *testing.T) {
 
 def keep() -> void:
     static:
-        static assert size_of[Header]() == 16
-        static if true:
-            static assert offset_of[Header](.payload) == 8
+        assert size_of[Header]() == 16
+        if true:
+            assert offset_of[Header](.payload) == 8
 `)
 	if _, err := GenerateLLVMIR(result); err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)

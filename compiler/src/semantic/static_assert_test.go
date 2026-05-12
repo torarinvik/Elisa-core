@@ -51,11 +51,13 @@ func TestAnalyzeStaticAssertRequiresBoolCondition(t *testing.T) {
 func TestAnalyzeStaticBlockAcceptsStaticOnlyStatements(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_block_ok.elisa", `def keep() -> void:
 	static:
-		static assert 5 > 3
-		static if true:
-			static assert 8 > 4
-		static else:
-			static assert false, "inactive"
+		assert 5 > 3
+		if true:
+			assert 8 > 4
+		else:
+			assert false, "inactive"
+		static:
+			assert true
 `)
 }
 
