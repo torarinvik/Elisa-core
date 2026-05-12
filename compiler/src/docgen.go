@@ -129,6 +129,9 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 		fmt.Fprintf(b, "- then declarations: %d\n", len(n.Then))
 		fmt.Fprintf(b, "- elif declarations: %d\n", len(n.Elifs))
 		fmt.Fprintf(b, "- else declarations: %d\n", len(n.Else))
+	case *ast.StaticAssertDecl:
+		fmt.Fprintf(b, "%s Static assertion\n\n", headingPrefix)
+		fmt.Fprintf(b, "- condition: `%s`\n", unparse.FormatExpr(n.Cond))
 	default:
 		fmt.Fprintf(b, "%s Declaration\n\n", headingPrefix)
 		fmt.Fprintf(b, "- surface: `%s`\n", declarationHeadline(unparse.FormatDecl(decl)))

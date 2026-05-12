@@ -42,6 +42,8 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.FuncDecl:
 				a.analyzeFunctionAnnotations(n)
 				a.analyzeFunc(n)
+			case *ast.StaticAssertDecl:
+				a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
 			case *ast.AttributeDecl:
 				a.analyzeAttributeDecl(n)
 			case *ast.InterfaceDecl:

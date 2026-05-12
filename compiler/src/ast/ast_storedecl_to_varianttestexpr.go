@@ -250,6 +250,11 @@ type StaticIfDecl struct {
 	Elifs    []StaticElifDecl
 	Else     []Decl
 }
+type StaticAssertDecl struct {
+	Position lexer.Pos
+	Cond     Expr
+	Message  Expr
+}
 type StaticElifDecl struct {
 	Position lexer.Pos
 	Cond     Expr

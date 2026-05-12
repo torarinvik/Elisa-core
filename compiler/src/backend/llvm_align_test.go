@@ -143,6 +143,24 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIRChecksTopLevelStaticAssertWithLayoutIntrospection(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_top_level_static_assert_layout_introspection.elisa", `struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+static assert size_of[Header]() == 16
+static assert align_of[Header] == 8
+static assert offset_of[Header](.payload) == 8
+
+def keep() -> void:
+    pass
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRRejectsStaticAssertWithLayoutIntrospection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
     tag: u8
@@ -155,6 +173,23 @@ def keep() -> void:
 	_, err := GenerateLLVMIR(result)
 	if err == nil || !strings.Contains(err.Error(), "static assert failed: Header ABI changed") {
 		t.Fatalf("expected backend static assert failure, got: %v", err)
+	}
+}
+
+func TestGenerateLLVMIRRejectsTopLevelStaticAssertWithLayoutIntrospection(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_top_level_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+static assert size_of[Header]() == 12, "Header ABI changed"
+
+def keep() -> void:
+    pass
+`)
+	_, err := GenerateLLVMIR(result)
+	if err == nil || !strings.Contains(err.Error(), "static assert failed: Header ABI changed") {
+		t.Fatalf("expected backend top-level static assert failure, got: %v", err)
 	}
 }
 

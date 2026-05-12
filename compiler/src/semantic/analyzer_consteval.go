@@ -81,6 +81,28 @@ func (a *Analyzer) evalConstStringExpr(expr ast.Expr) (string, bool) {
 	return value.String, true
 }
 
+func (a *Analyzer) analyzeStaticAssert(pos lexer.Pos, cond ast.Expr, message ast.Expr) {
+	condType := a.analyzeCondExpr(cond)
+	if !IsBoolType(condType) {
+		a.errorf(pos, "static assert condition must be bool, got %s", condType)
+		return
+	}
+	if message != nil {
+		a.analyzeExpr(message)
+	}
+	if cond, ok := a.evalConstBoolExpr(cond); ok && !cond {
+		if message != nil {
+			if msg, msgOK := a.evalConstStringExpr(message); msgOK {
+				a.errorf(pos, "static assert failed: %s", msg)
+			} else {
+				a.errorf(pos, "static assert failed")
+			}
+		} else {
+			a.errorf(pos, "static assert failed")
+		}
+	}
+}
+
 func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:

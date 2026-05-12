@@ -171,6 +171,8 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, then := range n.Then {
 			printDecl(w, then, level+1)
 		}
+	case *ast.StaticAssertDecl:
+		fmt.Fprintf(w, "%sstatic assert %s\n", prefix, exprStr(n.Cond))
 	}
 }
 func printTreeMember(w io.Writer, member ast.TreeMemberDecl, level int) {

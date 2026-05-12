@@ -87,6 +87,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.ExportFuncDecl{})
 		gob.Register(&ast.ExportGlobalDecl{})
 		gob.Register(&ast.StaticIfDecl{})
+		gob.Register(&ast.StaticAssertDecl{})
 
 		// Type expressions.
 		gob.Register(&ast.NamedType{})

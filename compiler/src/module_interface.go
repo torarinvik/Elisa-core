@@ -94,6 +94,8 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			elifs = append(elifs, ast.StaticElifDecl{Position: elif.Position, Cond: elif.Cond, Body: interfaceDeclList(elif.Body)})
 		}
 		return &ast.StaticIfDecl{Position: n.Position, Cond: n.Cond, Then: interfaceDeclList(n.Then), Elifs: elifs, Else: interfaceDeclList(n.Else)}
+	case *ast.StaticAssertDecl:
+		return nil
 	default:
 		return decl
 	}

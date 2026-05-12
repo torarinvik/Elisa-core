@@ -22,9 +22,10 @@ func (n *ExportFuncDecl) Pos() lexer.Pos   { return n.Position }
 func (n *ExportGlobalDecl) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *StaticIfDecl) Pos() lexer.Pos { return n.Position }
-func (n *NamedType) Pos() lexer.Pos    { return n.Position }
-func (n *RefType) Pos() lexer.Pos      { return n.Position }
+func (n *StaticIfDecl) Pos() lexer.Pos     { return n.Position }
+func (n *StaticAssertDecl) Pos() lexer.Pos { return n.Position }
+func (n *NamedType) Pos() lexer.Pos        { return n.Position }
+func (n *RefType) Pos() lexer.Pos          { return n.Position }
 func (n *RefStateLiteralTypeExpr) Pos() lexer.Pos {
 	return n.Position
 }
@@ -239,6 +240,7 @@ func (*ExportTypeDecl) nodeTag()                    {}
 func (*ExportFuncDecl) nodeTag()                    {}
 func (*ExportGlobalDecl) nodeTag()                  {}
 func (*StaticIfDecl) nodeTag()                      {}
+func (*StaticAssertDecl) nodeTag()                  {}
 func (*NamedType) nodeTag()                         {}
 func (*RefType) nodeTag()                           {}
 func (*RefStateLiteralTypeExpr) nodeTag()           {}
@@ -390,6 +392,7 @@ func (*ExportTypeDecl) declTag()                    {}
 func (*ExportFuncDecl) declTag()                    {}
 func (*ExportGlobalDecl) declTag()                  {}
 func (*StaticIfDecl) declTag()                      {}
+func (*StaticAssertDecl) declTag()                  {}
 func (*TypeAliasDecl) nodeTag()                     {}
 func (*TreeCategoryDecl) treeMemberDeclTag()        {}
 func (*TreeBlockDecl) treeMemberDeclTag()           {}

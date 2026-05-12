@@ -5,9 +5,19 @@ import (
 	"elisacore/src/lexer"
 )
 
-func (p *Parser) parseStaticIfDecl() *ast.StaticIfDecl {
+func (p *Parser) parseStaticDecl() ast.Decl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_STATIC)
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "assert" {
+		p.advance()
+		cond := p.parseExpr()
+		var msg ast.Expr
+		if p.match(lexer.TOKEN_COMMA) {
+			msg = p.parseExpr()
+		}
+		p.expectNewline()
+		return &ast.StaticAssertDecl{Position: pos, Cond: cond, Message: msg}
+	}
 	p.expect(lexer.TOKEN_IF)
 	cond := p.parseExpr()
 	p.expect(lexer.TOKEN_COLON)

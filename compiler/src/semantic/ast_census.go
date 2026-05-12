@@ -57,6 +57,11 @@ func (c *analyzerASTCensus) countDecl(decl ast.Decl) {
 			c.countDecls(clause.Body)
 		}
 		c.countDecls(n.Else)
+	case *ast.StaticAssertDecl:
+		c.countExpr(n.Cond)
+		if n.Message != nil {
+			c.countExpr(n.Message)
+		}
 	}
 }
 

@@ -310,7 +310,7 @@ func (p *Parser) parseDecl() ast.Decl {
 	case lexer.TOKEN_EXPORT:
 		return p.parseExportDecl()
 	case lexer.TOKEN_STATIC:
-		return p.parseStaticIfDecl()
+		return p.parseStaticDecl()
 	default:
 		p.errorf("unexpected token %s at top level", p.cur())
 		p.advance()

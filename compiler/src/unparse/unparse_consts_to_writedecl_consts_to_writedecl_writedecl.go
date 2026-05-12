@@ -480,5 +480,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				f.writeDecl(level+1, nested)
 			}
 		}
+	case *ast.StaticAssertDecl:
+		if n.Message != nil {
+			f.writePrefixedMultiline(level, "", "static assert "+formatExpr(n.Cond)+", "+formatExpr(n.Message))
+		} else {
+			f.writePrefixedMultiline(level, "", "static assert "+formatExpr(n.Cond))
+		}
 	}
 }

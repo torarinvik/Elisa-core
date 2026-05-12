@@ -39,6 +39,9 @@ func normalizeCascadeDecls(decls []ast.Decl) {
 				normalizeCascadeDecls(n.Elifs[i].Body)
 			}
 			normalizeCascadeDecls(n.Else)
+		case *ast.StaticAssertDecl:
+			n.Cond = normalizeCascadeExpr(n.Cond, nil, false)
+			n.Message = normalizeCascadeExpr(n.Message, nil, false)
 		case *ast.ImplDecl:
 			for _, member := range n.Members {
 				if fn, ok := member.(*ast.FuncDecl); ok && fn != nil {

@@ -441,25 +441,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "static error triggered")
 		}
 	case *ast.StaticAssertStmt:
-		condType := a.analyzeCondExpr(n.Cond)
-		if !IsBoolType(condType) {
-			a.errorf(n.Pos(), "static assert condition must be bool, got %s", condType)
-			return
-		}
-		if n.Message != nil {
-			a.analyzeExpr(n.Message)
-		}
-		if cond, ok := a.evalConstBoolExpr(n.Cond); ok && !cond {
-			if n.Message != nil {
-				if msg, msgOK := a.evalConstStringExpr(n.Message); msgOK {
-					a.errorf(n.Pos(), "static assert failed: %s", msg)
-				} else {
-					a.errorf(n.Pos(), "static assert failed")
-				}
-			} else {
-				a.errorf(n.Pos(), "static assert failed")
-			}
-		}
+		a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
 	case *ast.DiscardStmt:
 		valueType := a.analyzeExpr(n.Value)
 		a.consumeAffineValueExpr(n.Value, valueType, "discard")

@@ -73,3 +73,12 @@ func (s *functionState) emitStaticAssert(stmt *ast.StaticAssertStmt) error {
 	}
 	return fmt.Errorf("static assert failed")
 }
+
+func (g *llvmGenerator) checkStaticAssertDecl(decl *ast.StaticAssertDecl) error {
+	state := &functionState{g: g}
+	return state.emitStaticAssert(&ast.StaticAssertStmt{
+		Position: decl.Position,
+		Cond:     decl.Cond,
+		Message:  decl.Message,
+	})
+}
