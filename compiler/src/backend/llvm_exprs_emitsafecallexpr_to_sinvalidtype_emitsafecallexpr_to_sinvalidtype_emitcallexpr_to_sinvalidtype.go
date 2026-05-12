@@ -93,6 +93,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 			return nil, nil, fmt.Errorf("freeze expects 1 argument, got %d", len(expr.Args))
 		}
 		frozenType := s.exprType(expr)
+		if frozenStore, ok := frozenType.(*semantic.TreeStoreType); ok && semantic.IsFrozenTreeStoreType(frozenStore) {
+			return s.emitTreeStoreFreezeCall(expr.Args[0], frozenStore)
+		}
 		return s.emitExpr(expr.Args[0], frozenType)
 	}
 	if value, actualType, handled, err := s.emitDenseKeyHelperCall(expr); handled {

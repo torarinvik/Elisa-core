@@ -73,6 +73,15 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: callName + ".len"}
 		}
 		facts.Exclusive = false
+	case "tree_tags":
+		facts.ReadOnly = true
+		facts.Contiguous = true
+		facts.UnitStride = true
+		facts.Exclusive = false
+		if callName := optimizationExprString(call); callName != "" {
+			facts.base = callName
+			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: callName + ".len"}
+		}
 	case "arena_da_view", "ctx_string_view", "sview", "string_view":
 		if baseExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(baseExpr)

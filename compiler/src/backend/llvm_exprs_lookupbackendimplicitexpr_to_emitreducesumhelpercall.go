@@ -219,6 +219,8 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 		return s.emitChunksExactHelperCall(expr)
 	case "reduce_sum":
 		return s.emitReduceSumHelperCall(expr)
+	case "tree_tags":
+		return s.emitTreeTagsHelperCall(expr)
 	case "zip_map":
 		return s.emitZipMapHelperCall(expr)
 	default:

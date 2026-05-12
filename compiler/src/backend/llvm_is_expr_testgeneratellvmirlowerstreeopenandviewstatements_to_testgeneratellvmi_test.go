@@ -190,9 +190,52 @@ def build(owner: Arena) -> i64:
 		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
 		"%Lua_Expr__TreeFrozenColumns = type { ptr, ptr }",
 		"%Lua_Expr__TreeFrozenIndexes = type { ptr, ptr }",
+		"tree.freeze.Lua_Expr.tags.alloc",
+		"tree.freeze.Lua_Expr.tags.memcpy",
+		"tree.freeze.Lua_Expr.columns.tags.ptr",
+		"tree.freeze.Lua_Expr.indexes.field.ptr",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree store freeze lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersTreeTagsFrozenColumnView(t *testing.T) {
+	src := `@layout(soa)
+tree Lua:
+	@index(kind)
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Add(left: Lua.Expr, right: Lua.Expr)
+
+def tag_score(tag: u32) -> i64:
+	return tag.i64()
+
+def build(owner: Arena) -> i64:
+	store = Lua.Store(owner)
+	in store:
+		left = Lua.Expr.Int(value: 1)
+		right = Lua.Expr.Int(value: 2)
+		_ = Lua.Expr.Add(left: left, right: right)
+	frozen = freeze(move store)
+	tags: dview[u32] = tree_tags(frozen, "Expr")
+	return reduce_sum(tags, tag_score)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_tags_column_view.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"tree.tags.columns.tags",
+		"tree.tags.view.data",
+		"tree.tags.view.len",
+		"reduce_sum.src.ptr",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree_tags lowering to contain %q, got:\n%s", check, output)
 		}
 	}
 }

@@ -344,6 +344,41 @@ func treeFamilyCategoryIndex(treeType *semantic.TreeType, category *semantic.Tre
 	return -1, false
 }
 
+func treeCategoryFrozenColumnsStateIndex(treeType *semantic.TreeType, category *semantic.TreeCategoryType) (int, bool) {
+	return treeCategoryFrozenStateIndex(treeType, category, true)
+}
+
+func treeCategoryFrozenIndexesStateIndex(treeType *semantic.TreeType, category *semantic.TreeCategoryType) (int, bool) {
+	return treeCategoryFrozenStateIndex(treeType, category, false)
+}
+
+func treeCategoryFrozenStateIndex(treeType *semantic.TreeType, category *semantic.TreeCategoryType, wantColumns bool) (int, bool) {
+	if treeType == nil || category == nil {
+		return -1, false
+	}
+	categories := treeFamilyCategoryMembersInDeclOrder(treeType)
+	index := len(categories) + 1
+	for _, candidate := range categories {
+		if candidate == nil {
+			continue
+		}
+		plan := treeCategoryLayoutPlan(candidate)
+		if plan.isSoA() {
+			if candidate == category && wantColumns {
+				return index, true
+			}
+			index++
+		}
+		if plan.requestsIndexes() {
+			if candidate == category && !wantColumns {
+				return index, true
+			}
+			index++
+		}
+	}
+	return -1, false
+}
+
 func treeFamilyDirectRootMembersInDeclOrder(treeType *semantic.TreeType) []semantic.Type {
 	if treeType == nil || treeType.Decl == nil {
 		return nil
@@ -1177,6 +1212,36 @@ func (s *functionState) emitTreeCategoryUnionTablePtr(stateValue C.LLVMValueRef,
 		return nil, err
 	}
 	return C.LLVMBuildStructGEP2(s.builder, stateType, stateValue, C.unsigned(index+1), cStringFree(name+".category.table")), nil
+}
+
+func (s *functionState) emitTreeCategoryFrozenColumnsPtr(stateValue C.LLVMValueRef, category *semantic.TreeCategoryType, name string) (C.LLVMValueRef, error) {
+	if category == nil || category.Family == nil {
+		return nil, fmt.Errorf("missing tree category frozen columns metadata")
+	}
+	index, ok := treeCategoryFrozenColumnsStateIndex(category.Family, category)
+	if !ok {
+		return nil, fmt.Errorf("tree category %s has no frozen columns in family %s", category.Name, category.Family.Name)
+	}
+	stateType, err := s.g.ensureTreeStoreStateType(category.Family)
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildStructGEP2(s.builder, stateType, stateValue, C.unsigned(index), cStringFree(name+".ptr")), nil
+}
+
+func (s *functionState) emitTreeCategoryFrozenIndexesPtr(stateValue C.LLVMValueRef, category *semantic.TreeCategoryType, name string) (C.LLVMValueRef, error) {
+	if category == nil || category.Family == nil {
+		return nil, fmt.Errorf("missing tree category frozen index metadata")
+	}
+	index, ok := treeCategoryFrozenIndexesStateIndex(category.Family, category)
+	if !ok {
+		return nil, fmt.Errorf("tree category %s has no frozen indexes in family %s", category.Name, category.Family.Name)
+	}
+	stateType, err := s.g.ensureTreeStoreStateType(category.Family)
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildStructGEP2(s.builder, stateType, stateValue, C.unsigned(index), cStringFree(name+".ptr")), nil
 }
 
 type treeExactTableAccess struct {

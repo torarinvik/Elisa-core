@@ -23,11 +23,62 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 		return a.analyzeChunksExactHelperCall(expr), true
 	case "reduce_sum":
 		return a.analyzeReduceSumHelperCall(expr), true
+	case "tree_tags":
+		return a.analyzeTreeTagsHelperCall(expr), true
 	case "zip_map":
 		return a.analyzeZipMapHelperCall(expr), true
 	default:
 		return nil, false
 	}
+}
+
+func (a *Analyzer) analyzeTreeTagsHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 2 {
+		a.errorf(expr.Pos(), "tree_tags expects 2 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	storeType, ok := a.analyzeExpr(expr.Args[0]).(*TreeStoreType)
+	if !ok || storeType == nil || storeType.Family == nil {
+		actual := a.exprTypes[expr.Args[0]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[0].Pos(), "tree_tags expects a frozen tree store, got %s", actual)
+		return invalidType
+	}
+	if !IsFrozenTreeStoreType(storeType) {
+		a.errorf(expr.Args[0].Pos(), "tree_tags expects a frozen tree store, got %s", storeType)
+	}
+	categoryName, ok := a.evalConstStringExpr(expr.Args[1])
+	if !ok {
+		a.errorf(expr.Args[1].Pos(), "tree_tags category argument must be a compile-time string")
+		return invalidType
+	}
+	member, ok := storeType.Family.Member(categoryName)
+	category, _ := member.(*TreeCategoryType)
+	if !ok || category == nil {
+		a.errorf(expr.Args[1].Pos(), "tree family %s has no category %q", storeType.Family.Name, categoryName)
+		return invalidType
+	}
+	if category.Layout != TreeLayoutSOA && !treeCategoryHasKindIndex(category) {
+		a.errorf(expr.Args[1].Pos(), "tree_tags requires @layout(soa) or @index(kind) on category %s", category.Name)
+	}
+	return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "dview"}
+}
+
+func treeCategoryHasKindIndex(category *TreeCategoryType) bool {
+	if category == nil {
+		return false
+	}
+	for _, index := range category.Indexes {
+		if index.Kind {
+			return true
+		}
+	}
+	return false
 }
 func (a *Analyzer) analyzeIterableBoolAggregateHelperCall(expr *ast.CallExpr, helperName string) Type {
 	if len(expr.Args) != 1 {
