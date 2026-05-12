@@ -486,6 +486,51 @@ func (s *functionState) emitFrozenTreeRowFieldEqualityFilter(rowValue C.LLVMValu
 	return filterBool, nil
 }
 
+func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, sourceType semantic.Type, rowValue C.LLVMValueRef, filter ast.Expr, passBB C.LLVMBasicBlockRef, failBB C.LLVMBasicBlockRef, name string) error {
+	if filter == nil {
+		C.LLVMBuildBr(s.builder, passBB)
+		return nil
+	}
+	if binary, ok := filter.(*ast.BinaryExpr); ok && binary != nil {
+		switch binary.Op {
+		case lexer.TOKEN_AND:
+			rightBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".and.rhs"))
+			if err := s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Left, rightBB, failBB, name+".and.left"); err != nil {
+				return err
+			}
+			C.LLVMPositionBuilderAtEnd(s.builder, rightBB)
+			return s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Right, passBB, failBB, name+".and.right")
+		case lexer.TOKEN_OR:
+			rightBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".or.rhs"))
+			if err := s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Left, passBB, rightBB, name+".or.left"); err != nil {
+				return err
+			}
+			C.LLVMPositionBuilderAtEnd(s.builder, rightBB)
+			return s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Right, passBB, failBB, name+".or.right")
+		}
+	}
+	if rowValue != nil {
+		if rowFilter, ok := frozenTreeRowFieldEqualityFilterFor(pattern, sourceType, filter); ok {
+			filterBool, err := s.emitFrozenTreeRowFieldEqualityFilter(rowValue, rowFilter, name+".field")
+			if err != nil {
+				return err
+			}
+			C.LLVMBuildCondBr(s.builder, filterBool, passBB, failBB)
+			return nil
+		}
+	}
+	filterValue, filterType, err := s.emitExpr(filter, nil)
+	if err != nil {
+		return err
+	}
+	filterBool, err := s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildCondBr(s.builder, filterBool, passBB, failBB)
+	return nil
+}
+
 func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	sourceType := s.exprType(stmt.Source)
 	if sourceType == nil {
@@ -603,47 +648,19 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	if stmt.WhereFilter != nil {
-		var filterBool C.LLVMValueRef
-		if rowFilter, ok := frozenTreeRowFieldEqualityFilterFor(stmt.Pattern, iterSourceType, stmt.WhereFilter); ok && boundItemValue != nil {
-			filterBool, err = s.emitFrozenTreeRowFieldEqualityFilter(boundItemValue, rowFilter, "iter.where.tree.field")
-		} else {
-			var filterValue C.LLVMValueRef
-			var filterType semantic.Type
-			filterValue, filterType, err = s.emitExpr(stmt.WhereFilter, nil)
-			if err != nil {
-				s.popScope()
-				return err
-			}
-			filterBool, err = s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
-		}
-		if err != nil {
+		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.where.filter.body"))
+		if err := s.emitIterFilterBranch(stmt.Pattern, iterSourceType, boundItemValue, stmt.WhereFilter, filterBodyBB, stepBB, "iter.where.filter"); err != nil {
 			s.popScope()
 			return err
 		}
-		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.where.filter.body"))
-		C.LLVMBuildCondBr(s.builder, filterBool, filterBodyBB, stepBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	if stmt.Filter != nil {
-		var filterBool C.LLVMValueRef
-		if rowFilter, ok := frozenTreeRowFieldEqualityFilterFor(stmt.Pattern, iterSourceType, stmt.Filter); ok && boundItemValue != nil {
-			filterBool, err = s.emitFrozenTreeRowFieldEqualityFilter(boundItemValue, rowFilter, "iter.filter.tree.field")
-		} else {
-			var filterValue C.LLVMValueRef
-			var filterType semantic.Type
-			filterValue, filterType, err = s.emitExpr(stmt.Filter, nil)
-			if err != nil {
-				s.popScope()
-				return err
-			}
-			filterBool, err = s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
-		}
-		if err != nil {
+		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.filter.body"))
+		if err := s.emitIterFilterBranch(stmt.Pattern, iterSourceType, boundItemValue, stmt.Filter, filterBodyBB, stepBB, "iter.filter"); err != nil {
 			s.popScope()
 			return err
 		}
-		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.filter.body"))
-		C.LLVMBuildCondBr(s.builder, filterBool, filterBodyBB, stepBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	if err := s.emitBlock(stmt.Body, true); err != nil {
