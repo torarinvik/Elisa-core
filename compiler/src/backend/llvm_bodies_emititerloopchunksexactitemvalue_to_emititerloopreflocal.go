@@ -56,6 +56,8 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 		return lenValue, nil
 	case *semantic.StoreRowsViewType:
 		return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
+	case *semantic.FrozenTreeRowsViewType:
+		return s.emitFrozenTreeRowsCount(sourceAlloca, tt, sourceName)
 	case *semantic.DStrType:
 		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
 		if err != nil {
@@ -346,6 +348,8 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 		return value, elemType, err
 	case *semantic.StoreRowsViewType:
 		return s.emitStoreRowItemValue(sourceAlloca, sourceType, indexValue, sourceName)
+	case *semantic.FrozenTreeRowsViewType:
+		return s.emitFrozenTreeRowsItemValue(sourceAlloca, tt, indexValue, sourceName)
 	case *semantic.DStrType, *semantic.SViewType:
 		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
 		if err != nil {

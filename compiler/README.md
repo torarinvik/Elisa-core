@@ -353,11 +353,12 @@ Frozen tree stores also expose category row views for column-oriented scans:
 
 ```text
 frozen: Expr.Store[Frozen] = freeze(move store)
+lit_count: usize = count node in frozen.Expr where node.kind == .Lit
 tags: dview[u32] = frozen.Expr.column("kind")
 spans: dview[i64] = frozen.Expr.column("span")
 ```
 
-`column("kind")` requires `@layout(soa)` or `@index(kind)` on the category. Common-field columns require `@layout(soa)` so the frozen store can publish a contiguous scalar column. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helpers still exist for compatibility, but `frozen.Expr.column(...)` is the canonical query-style surface.
+Iterating `frozen.Expr` yields category-local handles and uses the row view's store as the implicit tree context, so ordinary field reads like `node.kind` and `node.span` work without a manual `in frozen:` wrapper. `column("kind")` requires `@layout(soa)` or `@index(kind)` on the category. Common-field columns require `@layout(soa)` so the frozen store can publish a contiguous scalar column. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helpers still exist for compatibility, but `frozen.Expr` queries and `frozen.Expr.column(...)` are the canonical query-style surface.
 
 ## Benchmark scaffolding
 

@@ -283,6 +283,41 @@ def build(owner: Arena) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersFrozenTreeCategoryRowViewQuery(t *testing.T) {
+	src := `@layout(soa)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Add(left: Lua.Expr, right: Lua.Expr)
+
+def build(owner: Arena) -> usize:
+	store = Lua.Store(owner)
+	in store:
+		left = Lua.Expr.Int(span: 10, value: 1)
+		right = Lua.Expr.Int(span: 20, value: 2)
+		_ = Lua.Expr.Add(span: 30, left: left, right: right)
+	frozen = freeze(move store)
+	return count node in frozen.Expr where node.kind == .Int and node.span > 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_frozen_tree_rows_query.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"tree.rows.state",
+		"tree.field",
+		"query.result",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected frozen tree row-view query lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesExplicitPermStoreForImplicitTreeStoreCalls(t *testing.T) {
 	src := `tree Lua:
 	@role(expr)

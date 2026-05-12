@@ -604,7 +604,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		sourceType := a.analyzeExpr(expr.Source)
 		info, ok := a.resolveIterLoopSourceInfo(expr.Source, sourceType)
 		if !ok {
-			a.errorf(expr.Source.Pos(), "list comprehension currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, source.enumerate(), children(node), or a projected tree attribute sequence, got %s", sourceType)
+			a.errorf(expr.Source.Pos(), "list comprehension currently requires an array, dynamic array, view, store.rows(), frozen tree row view, string-like iterable, ChunksExactView, source.enumerate(), children(node), or a projected tree attribute sequence, got %s", sourceType)
 			info.ItemType = invalidType
 		}
 		if a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {

@@ -436,6 +436,40 @@ func (s *functionState) emitColumnHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	return s.buildTreeFrozenColumnDView(dataPtr, countValue, resultType, "tree.column")
 }
 
+func (s *functionState) emitFrozenTreeRowsCount(sourceAlloca C.LLVMValueRef, rowsType *semantic.FrozenTreeRowsViewType, sourceName string) (C.LLVMValueRef, error) {
+	if rowsType == nil || rowsType.Store == nil || rowsType.Store.Family == nil || rowsType.Category == nil {
+		return nil, fmt.Errorf("frozen tree rows count requires category metadata")
+	}
+	rowsValue, err := s.loadValue(sourceAlloca, rowsType, sourceName+".tree.rows")
+	if err != nil {
+		return nil, err
+	}
+	s.bindImplicitTreeStoreValue(rowsType.Store, rowsValue)
+	stateValue := s.emitTreeStoreStateValueNamed(rowsValue, sourceName+".tree.rows.state")
+	tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, rowsType.Store.Family, rowsType.Category, sourceName+".tree.rows")
+	if err != nil {
+		return nil, err
+	}
+	return s.emitTreeCategoryUnionTableCountValue(tablePtr, rowsType.Category, sourceName+".tree.rows")
+}
+
+func (s *functionState) emitFrozenTreeRowsItemValue(sourceAlloca C.LLVMValueRef, rowsType *semantic.FrozenTreeRowsViewType, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
+	if rowsType == nil || rowsType.Store == nil || rowsType.Store.Family == nil || rowsType.Category == nil {
+		return nil, nil, fmt.Errorf("frozen tree rows item requires category metadata")
+	}
+	rowsValue, err := s.loadValue(sourceAlloca, rowsType, sourceName+".tree.rows")
+	if err != nil {
+		return nil, nil, err
+	}
+	s.bindImplicitTreeStoreValue(rowsType.Store, rowsValue)
+	u32Type := s.g.result.NamedTypes["u32"]
+	value, err := s.coerceValue(indexValue, s.g.result.NamedTypes["usize"], u32Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, rowsType.Category, nil
+}
+
 func treeCategoryByName(family *semantic.TreeType, name string) (*semantic.TreeCategoryType, bool) {
 	if family == nil {
 		return nil, false

@@ -603,6 +603,11 @@ func iterLoopItemTypeBackend(t semantic.Type) (semantic.Type, bool) {
 		return tt.Elem, true
 	case *semantic.StoreRowsViewType:
 		return &semantic.StoreRowViewType{Store: tt.Store}, true
+	case *semantic.FrozenTreeRowsViewType:
+		if tt.Category == nil {
+			return nil, false
+		}
+		return tt.Category, true
 	case *semantic.GenericInstanceType:
 		if itemType, ok := semantic.TreeChildrenItemType(tt); ok {
 			return itemType, true
