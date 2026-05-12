@@ -510,11 +510,28 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			typ := p.parseTypeExpr()
 
 			var value ast.Expr
+			var owner ast.Expr
+			if p.peek() == lexer.TOKEN_IN {
+				p.advance()
+				owner = p.withAsCastDisabled(p.parseExpr)
+				value = &ast.CallExpr{
+					Position: owner.Pos(),
+					Func: &ast.FieldExpr{
+						Position: owner.Pos(),
+						Object:   owner,
+						Field:    "builder",
+					},
+				}
+				mutable = true
+			}
 			if p.match(lexer.TOKEN_ASSIGN) {
+				if owner != nil {
+					p.errorf("builder owner declarations cannot also use an initializer")
+				}
 				value = p.parseValueExprAllowTuple()
 			}
 			p.expectNewlineAfterValueExpr(value)
-			return &ast.VarDeclStmt{Position: pos, Name: name, Mutable: mutable, Type: typ, Value: value}
+			return &ast.VarDeclStmt{Position: pos, Name: name, Mutable: mutable, Type: typ, Value: value, Owner: owner}
 		}
 	}
 

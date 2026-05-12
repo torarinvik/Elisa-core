@@ -320,7 +320,11 @@ func cloneDefaultArgStmt(stmt ast.Stmt) ast.Stmt {
 		if n.Value != nil && value == nil {
 			return nil
 		}
-		return &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Mutable: n.Mutable, Type: n.Type, Value: value}
+		owner := cloneDefaultArgExpr(n.Owner)
+		if n.Owner != nil && owner == nil {
+			return nil
+		}
+		return &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Mutable: n.Mutable, Type: n.Type, Value: value, Owner: owner}
 	case *ast.LocalParamsStmt:
 		params := append([]ast.ParamDecl(nil), n.Params...)
 		for i := range params {

@@ -124,10 +124,15 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			return
 		}
 		line := n.Name + ": "
-		if n.Mutable {
+		if n.Mutable && n.Owner == nil {
 			line += "mutable "
 		}
 		line += formatTypeExpr(n.Type)
+		if n.Owner != nil {
+			line += " in " + formatExpr(n.Owner)
+			f.writePrefixedMultiline(level, "", line)
+			return
+		}
 		if n.Value != nil {
 			line += " = " + formatExpr(n.Value)
 		}

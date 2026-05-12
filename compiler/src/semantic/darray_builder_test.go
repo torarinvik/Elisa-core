@@ -100,6 +100,43 @@ def build() -> usize:
 	}
 }
 
+func TestAnalyzeBuilderAliasResolvesToDArrayBuilder(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "builder_alias.elisa", `struct LocalBuilder[T]:
+    value: T
+
+struct DArrayBuilder[T]:
+    value: T
+
+def builder(owner: Arena&) -> DArrayBuilder[i64]:
+    _ = owner
+    return DArrayBuilder[i64]{value: 11}
+
+def build(owner: Arena) -> i64:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    items: Builder[i64] in alloc
+    return items.value
+`)
+
+	var decl *ast.VarDeclStmt
+	for _, node := range result.File.Decls {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Name != "build" {
+			continue
+		}
+		decl, _ = fn.Body[1].(*ast.VarDeclStmt)
+	}
+	if decl == nil {
+		t.Fatal("expected builder declaration")
+	}
+	typ, ok := result.ExprTypes[decl.Value].(*GenericInstanceType)
+	if !ok || typ.Name != "DArrayBuilder" {
+		t.Fatalf("expected Builder[T] to resolve through DArrayBuilder[T], got %T %#v", result.ExprTypes[decl.Value], result.ExprTypes[decl.Value])
+	}
+	if builtin, ok := typ.Args[0].(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected builder element type i64, got %#v", typ.Args[0])
+	}
+}
+
 func TestAnalyzeDArrayLiteralWithExplicitOwner(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_explicit_owner.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

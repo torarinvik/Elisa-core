@@ -240,6 +240,7 @@ type VarDeclStmt struct {
 	Mutable  bool
 	Type     TypeExpr
 	Value    Expr
+	Owner    Expr
 }
 type LocalParamsStmt struct {
 	Position              lexer.Pos

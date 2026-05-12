@@ -161,7 +161,13 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if t, ok, err := s.resolveDynamicShapeType(n); ok || err != nil {
 			return t, err
 		}
-		base, ok := s.g.result.NamedTypes[n.Name]
+		lookupName := n.Name
+		if n.Name == "Builder" {
+			if _, ok := s.g.result.NamedTypes["DArrayBuilder"]; ok {
+				lookupName = "DArrayBuilder"
+			}
+		}
+		base, ok := s.g.result.NamedTypes[lookupName]
 		if !ok {
 			return nil, fmt.Errorf("unknown type %q", n.Name)
 		}
@@ -192,7 +198,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 				}
 				args = append(args, resolved)
 			}
-			return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}), nil
+			return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: lookupName, Base: base, Args: args}), nil
 		}
 		if _, ok := base.(*semantic.OpaqueType); ok && len(n.Args) != 0 {
 			return nil, fmt.Errorf("type %q expects 0 type arguments, got %d", n.Name, len(n.Args))
@@ -205,7 +211,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			}
 			args = append(args, resolved)
 		}
-		return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}), nil
+		return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: lookupName, Base: base, Args: args}), nil
 	case *ast.GenericValueArgTypeExpr:
 		value, err := s.evalConstIntExpr(n.Value)
 		if err != nil {

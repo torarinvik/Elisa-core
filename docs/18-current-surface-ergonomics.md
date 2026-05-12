@@ -663,7 +663,7 @@ params.push(param)
 ```
 
 ```elisa
-builder: mutable DArrayBuilder[Pascal.Decl] = owner.builder()
+builder: Builder[Pascal.Decl] in owner
 builder.push(decl)
 decls: darray[Pascal.Decl] = builder.finish()
 
@@ -706,7 +706,9 @@ symbols.flags[id].add(PascalSymbolFlag.Routine)
 
 Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
 
-Use `owner.builder()` when constructing arena-owned dynamic arrays. The expected builder type supplies the element type, which keeps parser and semantic builders close to the data they are assembling.
+Use `Builder[T] in owner` when constructing arena-owned dynamic arrays. The declaration creates a mutable builder from the owner while keeping the owner relationship visible at the declaration site. `Builder[T]` is the idiomatic surface name for the arena-backed dynamic-array builder; it lowers through the same `DArrayBuilder[T]` runtime storage and helper methods. `owner.builder()` remains available when an expression form is clearer.
+
+Tree declarations are intentionally moving toward explicit data-layout controls. The default dense category layout keeps source handles compact and store-relative, while future layout knobs should remain orthogonal and declarative: choose row grouping (`category_union`, per-variant rows, or flat root rows), payload shape (AoS for traversal, SoA columns for scans/SIMD), field hotness, and freeze-time indexes without changing the source tree API. The design goal is that a tree can be tuned for recursive traversal, vectorized passes, or parallel chunk processing by changing layout metadata rather than rewriting the compiler frontend.
 
 Use `NameId` for compact storage in ASTs and symbol tables. Prefer `name_id.valid()`, `name_id.invalid()`, and `name_id.text(names)` for ordinary checks. For hot keyword/builtin checks, intern the expected words once and compare ids with `name_table_eq(name_id, cached_id)` rather than repeatedly comparing text. Use `name_id in {cached_a, cached_b, cached_c}` instead of long `or` chains when checking a small fixed set of cached ids. Use `InternedName` as a short-lived view when code needs to carry both the table and id together; it can be explicitly cast back to `NameId`.
 

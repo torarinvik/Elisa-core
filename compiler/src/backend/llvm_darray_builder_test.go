@@ -31,6 +31,32 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugar(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersBuilderAlias(t *testing.T) {
+	src := `struct DArrayBuilder[T]:
+    value: T
+
+def builder(owner: Arena&) -> DArrayBuilder[i64]:
+    _ = owner
+    return DArrayBuilder[i64]{value: 12}
+
+def build(owner: Arena) -> i64:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    items: Builder[i64] in alloc
+    return items.value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_builder_alias.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "DArrayBuilder") {
+		t.Fatalf("expected Builder alias to lower through DArrayBuilder runtime storage, got:\n%s", output)
+	}
+	if !strings.Contains(output, "call %DArrayBuilder__i64 @builder") {
+		t.Fatalf("expected Builder alias local to use DArrayBuilder values, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

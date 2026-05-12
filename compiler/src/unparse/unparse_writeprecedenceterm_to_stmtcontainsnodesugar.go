@@ -390,10 +390,14 @@ func formatInlineCanStmt(stmt ast.Stmt, permissions []ast.PermissionRef) (string
 			return n.Name + " = " + wrapExpr(n.Value), true
 		}
 		line := n.Name + ": "
-		if n.Mutable {
+		if n.Mutable && n.Owner == nil {
 			line += "mutable "
 		}
 		line += formatTypeExpr(n.Type)
+		if n.Owner != nil {
+			line += " in " + wrapExpr(n.Owner)
+			return line, true
+		}
 		line += " = " + wrapExpr(n.Value)
 		return line, true
 	case *ast.TupleBindStmt:

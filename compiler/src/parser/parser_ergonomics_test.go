@@ -727,3 +727,35 @@ func TestParseRejectsEmitOutsideStaticGenerate(t *testing.T) {
 		t.Fatalf("expected unexpected-token diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+func TestParseBuilderOwnerDeclarationSugar(t *testing.T) {
+	file, errs := parseSourceFile(t, "def build(owner: mutable Arena&) -> void:\n    items: Builder[i64] in owner\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	if !decl.Mutable {
+		t.Fatal("expected builder owner declaration to be mutable")
+	}
+	if ident, ok := decl.Owner.(*ast.Ident); !ok || ident.Name != "owner" {
+		t.Fatalf("expected owner ident, got %T %#v", decl.Owner, decl.Owner)
+	}
+	call, ok := decl.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected builder owner declaration to synthesize builder call, got %T", decl.Value)
+	}
+	if field, ok := call.Func.(*ast.FieldExpr); !ok || field.Field != "builder" {
+		t.Fatalf("expected synthesized owner.builder call, got %T %#v", call.Func, call.Func)
+	}
+	formatted := unparse.FormatStmt(fn.Body[0])
+	if formatted != "items: Builder[i64] in owner" {
+		t.Fatalf("expected formatter to preserve builder owner sugar, got %q", formatted)
+	}
+}

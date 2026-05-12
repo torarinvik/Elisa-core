@@ -174,7 +174,14 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		a.maybeRejectRuntimeCarrierTypeUse(n.Pos(), n.Name)
 		args := make([]Type, 0, len(n.Args))
-		base, _, ok := a.lookupVisibleType(n.Name)
+		surfaceName := n.Name
+		lookupName := n.Name
+		if n.Name == "Builder" {
+			if _, _, ok := a.lookupVisibleType("DArrayBuilder"); ok {
+				lookupName = "DArrayBuilder"
+			}
+		}
+		base, _, ok := a.lookupVisibleType(lookupName)
 		if !ok {
 			a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
 			return invalidType
@@ -209,13 +216,13 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 					return invalidType
 				}
 			}
-			return DefaultAggregateStateType(&GenericInstanceType{Name: n.Name, Base: base, Args: args})
+			return DefaultAggregateStateType(&GenericInstanceType{Name: lookupName, Base: base, Args: args})
 		case *OpaqueType:
 			if len(n.Args) != 0 {
 				a.errorf(n.Pos(), "type %q expects 0 type arguments, got %d", n.Name, len(n.Args))
 				return invalidType
 			}
-			return &GenericInstanceType{Name: n.Name, Base: base, Args: args}
+			return &GenericInstanceType{Name: surfaceName, Base: base, Args: args}
 		default:
 			a.errorf(n.Pos(), "type %q cannot be used with generic arguments", n.Name)
 			return invalidType
