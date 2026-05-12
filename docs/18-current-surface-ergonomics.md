@@ -792,7 +792,7 @@ Current rules:
 
 - `static assert` is valid at top level and inside statement blocks
 - `static:` blocks group static-only statements inside runtime functions; inside the block, `assert`, `if` / `elif` / `else`, and `error(...)` are static by context
-- `static def` declares a compile-time-only function; static assertions may call simple static functions that return compile-time values, while runtime calls are rejected
+- `static def` declares a compile-time-only function; static assertions and static expression statements may call simple static functions that return compile-time values, while runtime calls are rejected
 - the condition must type-check as `bool`
 - if the condition is a semantic compile-time constant, a false value is reported before backend lowering
 - target-aware layout intrinsics are accepted in static assertions and checked during backend lowering

@@ -245,6 +245,12 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 		return &ast.StaticAssertStmt{Position: pos, Cond: cond, Message: msg}
 	}
 
+	if p.peek() != lexer.TOKEN_IF {
+		expr := p.parseExpr()
+		p.expectNewlineAfterValueExpr(expr)
+		return &ast.StaticBlockStmt{Position: pos, Body: []ast.Stmt{&ast.ExprStmt{Position: pos, Expr: expr}}}
+	}
+
 	p.expect(lexer.TOKEN_IF)
 	cond := p.parseExpr()
 	p.expect(lexer.TOKEN_COLON)

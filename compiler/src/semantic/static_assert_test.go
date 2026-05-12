@@ -91,3 +91,14 @@ def keep() -> void:
 	static assert answer(2) == 42
 `)
 }
+
+func TestAnalyzeStaticExpressionStatementCanCallStaticFunction(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_static_stmt.elisa", `static def answer(step: i64) -> i64:
+	return step + 40
+
+def keep() -> void:
+	static answer(2)
+	static:
+		answer(2)
+`)
+}

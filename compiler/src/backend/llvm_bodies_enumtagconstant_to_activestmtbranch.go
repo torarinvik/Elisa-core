@@ -96,8 +96,12 @@ func (s *functionState) emitStaticBlock(stmts []ast.Stmt) error {
 		case *ast.PassStmt:
 		case *ast.StaticErrorStmt:
 			return fmt.Errorf("static error should not reach LLVM lowering")
+		case *ast.ExprStmt:
+			if _, ok := s.evalConstExpr(n.Expr); !ok {
+				return fmt.Errorf("static expression statement must evaluate at compile time")
+			}
 		default:
-			return fmt.Errorf("static block only allows static assert, static error, nested static blocks, and static if")
+			return fmt.Errorf("static block only allows static assert, static error, nested static blocks, static if, and static expression statements")
 		}
 	}
 	return nil

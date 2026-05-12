@@ -458,6 +458,10 @@ func (g *llvmGenerator) evalStaticFunctionBody(stmts []ast.Stmt) (semantic.Const
 				return value, true
 			}
 		case *ast.PassStmt:
+		case *ast.ExprStmt:
+			if _, ok := g.evalConstExpr(n.Expr); !ok {
+				return semantic.ConstValue{}, false
+			}
 		default:
 			return semantic.ConstValue{}, false
 		}

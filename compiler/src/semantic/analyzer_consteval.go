@@ -122,8 +122,15 @@ func (a *Analyzer) analyzeStaticOnlyStmts(stmts []ast.Stmt) {
 			a.analyzeStaticOnlyStmts(a.activeStmtBranch(n))
 		case *ast.PassStmt:
 			// Useful as a placeholder in generated or partially-filled static blocks.
+		case *ast.ExprStmt:
+			a.staticContextDepth++
+			_, ok := a.evalConstExpr(n.Expr)
+			a.staticContextDepth--
+			if !ok {
+				a.errorf(stmt.Pos(), "static expression statement must evaluate at compile time")
+			}
 		default:
-			a.errorf(stmt.Pos(), "static block only allows static assert, static error, nested static blocks, and static if")
+			a.errorf(stmt.Pos(), "static block only allows static assert, static error, nested static blocks, static if, and static expression statements")
 		}
 	}
 }
@@ -369,6 +376,10 @@ func (a *Analyzer) evalStaticFunctionBody(stmts []ast.Stmt) (ConstValue, bool) {
 				return value, true
 			}
 		case *ast.PassStmt:
+		case *ast.ExprStmt:
+			if _, ok := a.evalConstExpr(n.Expr); !ok {
+				return ConstValue{}, false
+			}
 		default:
 			return ConstValue{}, false
 		}
