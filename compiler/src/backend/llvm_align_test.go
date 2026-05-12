@@ -194,6 +194,18 @@ def keep() -> i64:
 	}
 }
 
+func TestGenerateLLVMIRChecksStaticAssertCallingStaticFunction(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_assert.elisa", `static def answer(step: i64) -> i64:
+    return step + 40
+
+def keep() -> void:
+    static assert answer(2) == 42
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRRejectsStaticAssertWithLayoutIntrospection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
     tag: u8

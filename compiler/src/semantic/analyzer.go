@@ -108,6 +108,9 @@ type Analyzer struct {
 	refStorageParamScopes             []map[string]Type
 	refStateParamScopes               []map[string]Type
 	constParamScopes                  []map[string]Type
+	constEvalScopes                   []map[string]ConstValue
+	staticContextDepth                int
+	staticCallDepth                   int
 	shapeParamScopes                  []map[string]Shape
 	regionParamScopes                 []map[string]bool
 	permissionParamScopes             []map[string]bool

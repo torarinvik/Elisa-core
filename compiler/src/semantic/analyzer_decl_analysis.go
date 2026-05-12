@@ -41,7 +41,13 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 				}
 			case *ast.FuncDecl:
 				a.analyzeFunctionAnnotations(n)
-				a.analyzeFunc(n)
+				if n.Static {
+					a.staticContextDepth++
+					a.analyzeFunc(n)
+					a.staticContextDepth--
+				} else {
+					a.analyzeFunc(n)
+				}
 			case *ast.StaticAssertDecl:
 				a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
 			case *ast.AttributeDecl:

@@ -191,7 +191,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	if expr == nil || ft == nil {
 		return invalidType
 	}
-	if ft.Static {
+	if ft.Static && a.staticContextDepth == 0 {
 		a.errorf(expr.Pos(), "static function %q can only be called from a static context", ft.Name)
 		return invalidType
 	}

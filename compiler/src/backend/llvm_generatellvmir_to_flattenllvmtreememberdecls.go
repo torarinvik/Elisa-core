@@ -93,6 +93,8 @@ type llvmGenerator struct {
 	treeAttributeHelpers      map[*semantic.TreeAttribute]*treeAttributeHelperInfo
 	functions                 map[string]C.LLVMValueRef
 	globals                   map[string]C.LLVMValueRef
+	constEvalScopes           []map[string]semantic.ConstValue
+	staticCallDepth           int
 	noteTypeInProgress        map[typeMemoKey]bool
 	noteTypeDone              map[typeMemoKey]bool
 	cachedVoidRefType         *semantic.RefType

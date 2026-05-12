@@ -82,3 +82,12 @@ def keep() -> i64:
 		t.Fatalf("expected static function runtime-call diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
 	}
 }
+
+func TestAnalyzeStaticAssertCanCallStaticFunction(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_static_assert.elisa", `static def answer(step: i64) -> i64:
+	return step + 40
+
+def keep() -> void:
+	static assert answer(2) == 42
+`)
+}

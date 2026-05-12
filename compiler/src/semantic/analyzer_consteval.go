@@ -82,6 +82,8 @@ func (a *Analyzer) evalConstStringExpr(expr ast.Expr) (string, bool) {
 }
 
 func (a *Analyzer) analyzeStaticAssert(pos lexer.Pos, cond ast.Expr, message ast.Expr) {
+	a.staticContextDepth++
+	defer func() { a.staticContextDepth-- }()
 	condType := a.analyzeCondExpr(cond)
 	if !IsBoolType(condType) {
 		a.errorf(pos, "static assert condition must be bool, got %s", condType)
@@ -151,6 +153,9 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		}
 		return ConstValue{Kind: ConstInt, Int: value}, true
 	case *ast.Ident:
+		if value, ok := a.lookupConstEvalValue(n.Name); ok {
+			return value, true
+		}
 		if t, ok := a.lookupConstParam(n.Name); ok {
 			if valueType, ok := t.(*ConstValueType); ok && valueType != nil {
 				return valueType.Value, true
@@ -292,9 +297,83 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			return a.evalConstExpr(n.Value)
 		}
 		return a.evalConstExpr(n.Alt)
+	case *ast.CallExpr:
+		return a.evalStaticFunctionCall(n)
 	default:
 		return ConstValue{}, false
 	}
+}
+
+func (a *Analyzer) lookupConstEvalValue(name string) (ConstValue, bool) {
+	for i := len(a.constEvalScopes) - 1; i >= 0; i-- {
+		if value, ok := a.constEvalScopes[i][name]; ok {
+			return value, true
+		}
+	}
+	return ConstValue{}, false
+}
+
+func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool) {
+	if expr == nil || a.staticCallDepth > 64 {
+		return ConstValue{}, false
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || len(expr.ArgNames) != 0 || len(expr.ParamPacks) != 0 || len(expr.ArgItemOrder) != 0 || expr.HasArgForward {
+		return ConstValue{}, false
+	}
+	sym, _, ok := a.lookupVisibleGlobal(ident.Name)
+	if !ok || sym == nil {
+		return ConstValue{}, false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || !fnType.Static {
+		return ConstValue{}, false
+	}
+	decl, ok := sym.Node.(*ast.FuncDecl)
+	if !ok || decl == nil || len(decl.Params) != len(expr.Args) {
+		return ConstValue{}, false
+	}
+	scope := make(map[string]ConstValue, len(decl.Params))
+	for i, arg := range expr.Args {
+		value, ok := a.evalConstExpr(arg)
+		if !ok {
+			return ConstValue{}, false
+		}
+		scope[decl.Params[i].Name] = value
+	}
+	a.staticCallDepth++
+	a.constEvalScopes = append(a.constEvalScopes, scope)
+	value, ok := a.evalStaticFunctionBody(decl.Body)
+	a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+	a.staticCallDepth--
+	return value, ok
+}
+
+func (a *Analyzer) evalStaticFunctionBody(stmts []ast.Stmt) (ConstValue, bool) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.ReturnStmt:
+			return a.evalConstExpr(n.Value)
+		case *ast.StaticAssertStmt:
+			if cond, ok := a.evalConstBoolExpr(n.Cond); !ok || !cond {
+				return ConstValue{}, false
+			}
+		case *ast.StaticErrorStmt:
+			return ConstValue{}, false
+		case *ast.StaticIfStmt:
+			if value, ok := a.evalStaticFunctionBody(a.activeStmtBranch(n)); ok {
+				return value, true
+			}
+		case *ast.StaticBlockStmt:
+			if value, ok := a.evalStaticFunctionBody(n.Body); ok {
+				return value, true
+			}
+		case *ast.PassStmt:
+		default:
+			return ConstValue{}, false
+		}
+	}
+	return ConstValue{}, false
 }
 
 func (a *Analyzer) evalConstEquality(left, right ConstValue, equal bool) (ConstValue, bool) {

@@ -318,6 +318,15 @@ func (g *llvmGenerator) exprType(expr ast.Expr) semantic.Type {
 	return nil
 }
 func (g *llvmGenerator) constValue(name string) (semantic.ConstValue, bool) {
+	if strings.HasPrefix(name, "$consteval.") {
+		localName := strings.TrimPrefix(name, "$consteval.")
+		for i := len(g.constEvalScopes) - 1; i >= 0; i-- {
+			if value, ok := g.constEvalScopes[i][localName]; ok {
+				return value, true
+			}
+		}
+		return semantic.ConstValue{}, false
+	}
 	if g.result == nil {
 		return semantic.ConstValue{}, false
 	}

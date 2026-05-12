@@ -196,7 +196,7 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 		}
 		return semantic.CastConstValue(operand, targetType)
 	}
-	return evalConstExprWithLookup(expr, s.g.constValue)
+	return evalConstExprWithLookup(expr, s.g.constValue, s.g.evalStaticFunctionCall)
 }
 func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
 	if castExpr, ok := expr.(*ast.CastExpr); ok {
@@ -210,9 +210,9 @@ func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 		}
 		return semantic.CastConstValue(operand, targetType)
 	}
-	return evalConstExprWithLookup(expr, g.constValue)
+	return evalConstExprWithLookup(expr, g.constValue, g.evalStaticFunctionCall)
 }
-func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
+func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstValue, bool), call func(*ast.CallExpr) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:
 		value, err := strconv.ParseInt(n.Value, 0, 64)
@@ -238,6 +238,11 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		return semantic.ConstValue{Kind: semantic.ConstInt, Int: value}, true
 	case *ast.Ident:
 		if lookup != nil {
+			if value, ok := lookupConstEvalValue(lookup, n.Name); ok {
+				return value, true
+			}
+		}
+		if lookup != nil {
 			if value, ok := lookup(n.Name); ok {
 				return value, true
 			}
@@ -250,13 +255,13 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		}
 		return lookup(ident.Name + "." + n.Field)
 	case *ast.ParenExpr:
-		return evalConstExprWithLookup(n.Inner, lookup)
+		return evalConstExprWithLookup(n.Inner, lookup, call)
 	case *ast.CastExpr:
-		return evalConstExprWithLookup(n.Operand, lookup)
+		return evalConstExprWithLookup(n.Operand, lookup, call)
 	case *ast.MoveExpr:
-		return evalConstExprWithLookup(n.Operand, lookup)
+		return evalConstExprWithLookup(n.Operand, lookup, call)
 	case *ast.UnaryExpr:
-		operand, ok := evalConstExprWithLookup(n.Operand, lookup)
+		operand, ok := evalConstExprWithLookup(n.Operand, lookup, call)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
@@ -284,11 +289,11 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			return semantic.ConstValue{}, false
 		}
 	case *ast.BinaryExpr:
-		left, ok := evalConstExprWithLookup(n.Left, lookup)
+		left, ok := evalConstExprWithLookup(n.Left, lookup, call)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
-		right, ok := evalConstExprWithLookup(n.Right, lookup)
+		right, ok := evalConstExprWithLookup(n.Right, lookup, call)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
@@ -347,17 +352,117 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			return semantic.ConstValue{}, false
 		}
 	case *ast.TernaryExpr:
-		condValue, ok := evalConstExprWithLookup(n.Cond, lookup)
+		condValue, ok := evalConstExprWithLookup(n.Cond, lookup, call)
 		if !ok || condValue.Kind != semantic.ConstBool {
 			return semantic.ConstValue{}, false
 		}
 		if condValue.Bool {
-			return evalConstExprWithLookup(n.Value, lookup)
+			return evalConstExprWithLookup(n.Value, lookup, call)
 		}
-		return evalConstExprWithLookup(n.Alt, lookup)
+		return evalConstExprWithLookup(n.Alt, lookup, call)
+	case *ast.CallExpr:
+		if call == nil {
+			return semantic.ConstValue{}, false
+		}
+		return call(n)
 	default:
 		return semantic.ConstValue{}, false
 	}
+}
+
+func lookupConstEvalValue(lookup func(string) (semantic.ConstValue, bool), name string) (semantic.ConstValue, bool) {
+	if lookup == nil {
+		return semantic.ConstValue{}, false
+	}
+	return lookup("$consteval." + name)
+}
+
+func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.ConstValue, bool) {
+	if expr == nil || g == nil || g.staticCallDepth > 64 {
+		return semantic.ConstValue{}, false
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || len(expr.ArgNames) != 0 || len(expr.ParamPacks) != 0 || len(expr.ArgItemOrder) != 0 || expr.HasArgForward {
+		return semantic.ConstValue{}, false
+	}
+	sym, ok := g.lookupStaticFunctionSymbol(ident.Name)
+	if !ok || sym == nil {
+		return semantic.ConstValue{}, false
+	}
+	fnType, ok := sym.Type.(*semantic.FuncType)
+	if !ok || fnType == nil || !fnType.Static {
+		return semantic.ConstValue{}, false
+	}
+	decl, ok := sym.Node.(*ast.FuncDecl)
+	if !ok || decl == nil || len(decl.Params) != len(expr.Args) {
+		return semantic.ConstValue{}, false
+	}
+	scope := make(map[string]semantic.ConstValue, len(decl.Params))
+	for i, arg := range expr.Args {
+		value, ok := g.evalConstExpr(arg)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		scope[decl.Params[i].Name] = value
+	}
+	g.staticCallDepth++
+	g.constEvalScopes = append(g.constEvalScopes, scope)
+	value, ok := g.evalStaticFunctionBody(decl.Body)
+	g.constEvalScopes = g.constEvalScopes[:len(g.constEvalScopes)-1]
+	g.staticCallDepth--
+	return value, ok
+}
+
+func (g *llvmGenerator) lookupStaticFunctionSymbol(name string) (*semantic.Symbol, bool) {
+	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+		return nil, false
+	}
+	if sym, ok := g.result.GlobalScope.Lookup(name); ok {
+		return sym, true
+	}
+	var matched *semantic.Symbol
+	suffix := "." + name
+	for symbolName, sym := range g.result.GlobalScope.Symbols {
+		if strings.HasSuffix(symbolName, suffix) {
+			if matched != nil {
+				return nil, false
+			}
+			matched = sym
+		}
+	}
+	return matched, matched != nil
+}
+
+func (g *llvmGenerator) evalStaticFunctionBody(stmts []ast.Stmt) (semantic.ConstValue, bool) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.ReturnStmt:
+			return g.evalConstExpr(n.Value)
+		case *ast.StaticAssertStmt:
+			if cond, ok := g.evalConstExpr(n.Cond); !ok || cond.Kind != semantic.ConstBool || !cond.Bool {
+				return semantic.ConstValue{}, false
+			}
+		case *ast.StaticErrorStmt:
+			return semantic.ConstValue{}, false
+		case *ast.StaticIfStmt:
+			state := &functionState{g: g}
+			branch, err := state.activeStmtBranch(n)
+			if err != nil {
+				return semantic.ConstValue{}, false
+			}
+			if value, ok := g.evalStaticFunctionBody(branch); ok {
+				return value, true
+			}
+		case *ast.StaticBlockStmt:
+			if value, ok := g.evalStaticFunctionBody(n.Body); ok {
+				return value, true
+			}
+		case *ast.PassStmt:
+		default:
+			return semantic.ConstValue{}, false
+		}
+	}
+	return semantic.ConstValue{}, false
 }
 func evalConstEquality(left, right semantic.ConstValue, equal bool) (semantic.ConstValue, bool) {
 	matched := false
