@@ -41,6 +41,9 @@ func interfaceDeclList(decls []ast.Decl) []ast.Decl {
 func interfaceizeDecl(decl ast.Decl) ast.Decl {
 	switch n := decl.(type) {
 	case *ast.FuncDecl:
+		if n.Static {
+			return nil
+		}
 		return &ast.ExternFuncDecl{
 			Position:         n.Position,
 			Annotations:      append([]ast.Annotation(nil), n.Annotations...),
@@ -78,6 +81,9 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			case *ast.ImplAssociatedTypeDecl:
 				members = append(members, &ast.ImplAssociatedTypeDecl{Position: m.Position, Name: m.Name, Type: m.Type})
 			case *ast.FuncDecl:
+				if m.Static {
+					continue
+				}
 				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Effects: append([]ast.SignatureEffectItem(nil), m.Effects...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType})
 			case *ast.ExternFuncDecl:
 				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Effects: append([]ast.SignatureEffectItem(nil), m.Effects...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})

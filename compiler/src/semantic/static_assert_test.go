@@ -70,3 +70,15 @@ func TestAnalyzeStaticBlockRejectsRuntimeStatements(t *testing.T) {
 		t.Fatalf("expected static-only block diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
 	}
 }
+
+func TestAnalyzeRejectsRuntimeCallToStaticFunction(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_runtime_call.elisa", `static def answer() -> i64:
+	return 42
+
+def keep() -> i64:
+	return answer()
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `static function "answer" can only be called from a static context`) {
+		t.Fatalf("expected static function runtime-call diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}

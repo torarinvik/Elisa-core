@@ -264,6 +264,10 @@ func (p *Parser) parseEnsuresClausesAfterKeyword() []ast.EnsuresClause {
 	return clauses
 }
 func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast.FuncDecl {
+	return p.parseFuncDeclWithAnnotationsAndStatic(annotations, false)
+}
+
+func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotation, isStatic bool) *ast.FuncDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_DEF)
 	name := p.expect(lexer.TOKEN_IDENT).Text
@@ -321,7 +325,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 }
 func (p *Parser) parseParamList(allowDefault bool) []ast.ParamDecl {
 	params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))

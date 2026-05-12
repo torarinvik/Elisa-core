@@ -156,6 +156,7 @@ type ParamSigItem struct {
 type FuncDecl struct {
 	Position          lexer.Pos
 	Annotations       []Annotation
+	Static            bool
 	Override          bool
 	Name              string
 	TypeParams        []string

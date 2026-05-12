@@ -594,3 +594,22 @@ def total(items: array[Row, 2]) -> int:
 		t.Fatalf("expected formatted output to preserve filtered brace loop, got:\n%s", formatted)
 	}
 }
+
+func TestParseStaticFunctionDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, `static def answer() -> i64:
+    return 42
+
+def keep() -> i64:
+    return 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected static function decl, got %T", file.Decls[0])
+	}
+	if !decl.Static || decl.Name != "answer" {
+		t.Fatalf("expected static answer function, got %#v", decl)
+	}
+}

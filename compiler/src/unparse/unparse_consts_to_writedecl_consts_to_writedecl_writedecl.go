@@ -439,7 +439,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.FuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, false))
+		header := formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, false)
+		if n.Static {
+			header = "static " + header
+		}
+		f.writeLine(level, header)
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}

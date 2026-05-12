@@ -59,6 +59,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
+				fnType.Static = n.Static
 				initLookupName, constructorSugar := a.constructorDeclInitHookName(scoped.Namespace, n, fnType)
 				symbolName := qualifiedName
 				switch n.Name {

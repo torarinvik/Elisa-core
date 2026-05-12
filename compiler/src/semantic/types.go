@@ -524,6 +524,7 @@ type FuncType struct {
 	Permissions                  []string
 	ShapeParams                  []string
 	FreshReturnShapeParams       []string
+	Static                       bool
 	InlineMode                   FuncInlineMode
 	HasInlineMode                bool
 	HasNoRecurse                 bool

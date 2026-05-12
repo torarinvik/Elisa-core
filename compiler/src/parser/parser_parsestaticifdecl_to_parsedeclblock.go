@@ -8,6 +8,9 @@ import (
 func (p *Parser) parseStaticDecl() ast.Decl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_STATIC)
+	if p.peek() == lexer.TOKEN_DEF {
+		return p.parseFuncDeclWithAnnotationsAndStatic(nil, true)
+	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "assert" {
 		p.advance()
 		cond := p.parseExpr()

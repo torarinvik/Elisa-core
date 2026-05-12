@@ -191,6 +191,10 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	if expr == nil || ft == nil {
 		return invalidType
 	}
+	if ft.Static {
+		a.errorf(expr.Pos(), "static function %q can only be called from a static context", ft.Name)
+		return invalidType
+	}
 	explicitParamCount := funcTypeExplicitParamCount(ft)
 	if !ft.Variadic && len(orderedArgs) != explicitParamCount {
 		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(orderedArgs))

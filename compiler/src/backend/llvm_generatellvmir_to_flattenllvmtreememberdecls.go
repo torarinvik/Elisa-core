@@ -257,6 +257,9 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		_, err := g.ensureNamedStructType(n.Name)
 		return err
 	case *ast.FuncDecl, *ast.ExternFuncDecl:
+		if fnDecl, ok := decl.(*ast.FuncDecl); ok && fnDecl.Static {
+			return nil
+		}
 		if fnDecl, ok := decl.(*ast.FuncDecl); ok && len(fnDecl.GenericParams) > 0 {
 			return nil
 		}
@@ -382,6 +385,9 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 	case *ast.TreeDecl:
 		return g.emitTreeDecl(n)
 	case *ast.FuncDecl:
+		if n.Static {
+			return nil
+		}
 		if len(n.GenericParams) > 0 {
 			return nil
 		}

@@ -178,6 +178,22 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIRSkipsStaticFunctionDecls(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "static_def_skip.elisa", `static def answer() -> i64:
+    return 42
+
+def keep() -> i64:
+    return 0
+`)
+	ir, err := GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	if strings.Contains(ir, "@answer") {
+		t.Fatalf("expected static function to be compile-time-only, got IR:\n%s", ir)
+	}
+}
+
 func TestGenerateLLVMIRRejectsStaticAssertWithLayoutIntrospection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
     tag: u8
