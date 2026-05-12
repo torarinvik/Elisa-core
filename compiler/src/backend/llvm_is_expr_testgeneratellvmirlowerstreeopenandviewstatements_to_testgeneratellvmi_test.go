@@ -552,6 +552,45 @@ def build(owner: Arena, target: i64) -> usize:
 	}
 }
 
+func TestGenerateLLVMIRLowersIndexedFrozenTreePayloadFieldWhereQuery(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	@index(name_index)
+	node Expr:
+		Int(value: i64)
+		Name(name_index: u32)
+		Field(base: Lua.Expr, name_index: u32)
+
+def build(owner: Arena, target: u32) -> usize:
+	store = Lua.Store(owner)
+	in store:
+		base = Lua.Expr.Int(span: 1, value: 7)
+		_ = Lua.Expr.Name(span: 2, name_index: target)
+		_ = Lua.Expr.Field(span: 3, base: base, name_index: target)
+	frozen = freeze(move store)
+	return count node in frozen.Expr where kind == .Name and name_index == target
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_frozen_tree_indexed_payload_field_query.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"tree.freeze.Lua_Expr.index.name_index.alloc",
+		"tree.freeze.Lua_Expr.index.name_index.Name",
+		"tree.freeze.Lua_Expr.index.name_index.Field",
+		"iter.filter.and.rhs",
+		"iter.filter.and.right.field.indexes.field",
+		"iter.filter.and.right.field.cmp",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected indexed frozen tree payload query lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesExplicitPermStoreForImplicitTreeStoreCalls(t *testing.T) {
 	src := `tree Lua:
 	@role(expr)

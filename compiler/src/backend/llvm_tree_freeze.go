@@ -198,6 +198,16 @@ func (s *functionState) emitTreeFreezePopulateCommonFieldColumn(dest C.LLVMValue
 	C.LLVMBuildCondBr(s.builder, hasMore, bodyBB, endBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	field, ok := semantic.TreeCategorySurfaceFieldInfo(category, fieldName)
+	if !ok {
+		return fmt.Errorf("tree category %s has no field %s", category.Name, fieldName)
+	}
+	zeroValue, err := s.zeroValue(field.Type)
+	if err != nil {
+		return err
+	}
+	destPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dest, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".dest.ptr"))
+	C.LLVMBuildStore(s.builder, zeroValue, destPtr)
 	tagValue, err := s.emitTreeCategoryUnionKindValueAtIndex(tablePtr, category, indexValue, name)
 	if err != nil {
 		return err
@@ -207,6 +217,11 @@ func (s *functionState) emitTreeFreezePopulateCommonFieldColumn(dest C.LLVMValue
 		if variant == nil {
 			continue
 		}
+		memberType := category.VariantViewType(variant)
+		fieldIndex, _, err := treeExactFieldIndex(memberType, fieldName)
+		if err != nil {
+			continue
+		}
 		caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+"."+sanitizeIdentifier(variant.Name)))
 		C.LLVMAddCase(switchInst, C.LLVMConstInt(C.LLVMTypeOf(tagValue), C.ulonglong(variant.Tag), 0), caseBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
@@ -214,13 +229,7 @@ func (s *functionState) emitTreeFreezePopulateCommonFieldColumn(dest C.LLVMValue
 		if err != nil {
 			return err
 		}
-		memberType := category.VariantViewType(variant)
-		fieldIndex, _, err := treeExactFieldIndex(memberType, fieldName)
-		if err != nil {
-			return err
-		}
 		fieldValue := C.LLVMBuildExtractValue(s.builder, payloadValue, C.unsigned(fieldIndex), cStringFree(name+".field"))
-		destPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dest, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".dest.ptr"))
 		C.LLVMBuildStore(s.builder, fieldValue, destPtr)
 		C.LLVMBuildBr(s.builder, nextBB)
 	}
@@ -258,7 +267,7 @@ func (s *functionState) emitTreeFreezeCategoryIndexPointers(arenaRef C.LLVMValue
 		value := nullPtr
 		if index.Kind {
 			value = tagColumn
-		} else if field, ok := category.Common[index.Name]; ok {
+		} else if field, ok := semantic.TreeCategorySurfaceFieldInfo(category, index.Name); ok {
 			value, err = s.emitTreeFreezeCategoryCommonFieldColumn(arenaRef, tablePtr, countValue, category, index.Name, field, name+".index."+sanitizeIdentifier(index.Name))
 			if err != nil {
 				return err

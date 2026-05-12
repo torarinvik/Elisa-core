@@ -154,11 +154,32 @@ func TreeCategorySurfaceFieldInfo(categoryType *TreeCategoryType, fieldName stri
 		return TreeKindFieldInfo(categoryType)
 	}
 	field, ok := categoryType.Common[fieldName]
-	if !ok {
+	if ok {
+		relation := TreeFieldStructuralRelation(categoryType.Family, field.Type)
+		return treeSurfaceSequenceField(field, relation), true
+	}
+	var found Field
+	foundAny := false
+	for _, variant := range categoryType.Variants {
+		if variant == nil {
+			continue
+		}
+		index, ok := variant.PayloadIndex(fieldName)
+		if !ok || index >= len(variant.Payload) {
+			continue
+		}
+		current := Field{Name: fieldName, Type: variant.Payload[index]}
+		if foundAny && !SameType(found.Type, current.Type) {
+			return Field{}, false
+		}
+		found = current
+		foundAny = true
+	}
+	if !foundAny {
 		return Field{}, false
 	}
-	relation := TreeFieldStructuralRelation(categoryType.Family, field.Type)
-	return treeSurfaceSequenceField(field, relation), true
+	relation := TreeFieldStructuralRelation(categoryType.Family, found.Type)
+	return treeSurfaceSequenceField(found, relation), true
 }
 
 func TreeExactSurfaceFieldInfo(member Type, fieldName string) (Field, bool) {

@@ -377,6 +377,9 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			var incomingBlocks []C.LLVMBasicBlockRef
 			for _, variant := range tt.Variants {
 				memberType := tt.VariantViewType(variant)
+				if _, ok := semantic.TreeVariantSurfaceFieldInfo(memberType, expr.Field); !ok {
+					continue
+				}
 				caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.case"))
 				tagConst, err := s.enumTagConstant(variant.Tag)
 				if err != nil {
@@ -403,6 +406,9 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				incomingValues = append(incomingValues, surfaceValue)
 				incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
 				C.LLVMBuildBr(s.builder, resultBB)
+			}
+			if len(incomingValues) == 0 {
+				return nil, nil, true, fmt.Errorf("%s has no field %s", tt.String(), expr.Field)
 			}
 			if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
 				return nil, nil, true, err
