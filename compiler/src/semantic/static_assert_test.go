@@ -282,6 +282,23 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionCanUseConstQueries(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_const_queries.elisa", `static def score() -> i64:
+	items: mutable darray[i64] = []
+	chunk: i64[3] = [4, 9, 12]
+	items.extend(chunk)
+	assert any item in items where item == 9
+	assert all item in items where item > 0
+	assert (count item in items where item > 8) == 2
+	selected = item for each item in items where item > 8
+	assert selected.count == 2
+	return selected[0] + selected[1]
+
+def keep() -> void:
+	static assert score() == 21
+`)
+}
+
 func TestAnalyzeStaticFunctionRequiresReturnOnAllPaths(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_requires_return.elisa", `static def maybe(flag: bool) -> i64:
 	if flag:

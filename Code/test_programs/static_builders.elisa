@@ -3,8 +3,13 @@ static def checksum() -> i64:
     items.push(4)
     chunk: i64[2] = [9, 12]
     items.extend(chunk)
-    return items.count + items[0] + items[2]
+    assert any item in items where item == 9
+    assert all item in items where item > 0
+    assert (count item in items where item > 8) == 2
+    selected = item for each item in items where item > 8
+    assert selected.count == 2
+    return items.count + selected[0] + selected[1]
 
 def main() -> i64:
-    static assert checksum() == 19
+    static assert checksum() == 24
     return 0

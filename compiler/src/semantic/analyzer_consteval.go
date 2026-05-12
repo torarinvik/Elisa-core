@@ -319,6 +319,8 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		return ConstValue{Kind: ConstList, Elems: elems}, true
 	case *ast.IndexExpr:
 		return a.evalConstIndexExpr(n)
+	case *ast.QueryExpr:
+		return a.evalConstQueryExpr(n)
 	case *ast.CallExpr:
 		return a.evalStaticFunctionCall(n)
 	default:
@@ -348,6 +350,107 @@ func (a *Analyzer) evalConstIndexExpr(expr *ast.IndexExpr) (ConstValue, bool) {
 		return a.evalConstExpr(expr.Fallback)
 	}
 	return ConstValue{}, false
+}
+
+func (a *Analyzer) evalConstQueryExpr(expr *ast.QueryExpr) (ConstValue, bool) {
+	if expr == nil || expr.PatternFilter != nil {
+		return ConstValue{}, false
+	}
+	source, ok := a.evalConstExpr(expr.Source)
+	if !ok || (source.Kind != ConstList && source.Kind != ConstTuple) {
+		return ConstValue{}, false
+	}
+	switch expr.Kind {
+	case ast.QueryExprAny:
+		for _, elem := range source.Elems {
+			match, ok := a.evalConstQueryFilter(expr, elem)
+			if !ok {
+				return ConstValue{}, false
+			}
+			if match {
+				return ConstValue{Kind: ConstBool, Bool: true}, true
+			}
+		}
+		return ConstValue{Kind: ConstBool, Bool: false}, true
+	case ast.QueryExprAll:
+		for _, elem := range source.Elems {
+			match, ok := a.evalConstQueryFilter(expr, elem)
+			if !ok {
+				return ConstValue{}, false
+			}
+			if !match {
+				return ConstValue{Kind: ConstBool, Bool: false}, true
+			}
+		}
+		return ConstValue{Kind: ConstBool, Bool: true}, true
+	case ast.QueryExprCount:
+		total := int64(0)
+		for _, elem := range source.Elems {
+			match, ok := a.evalConstQueryFilter(expr, elem)
+			if !ok {
+				return ConstValue{}, false
+			}
+			if match {
+				total++
+			}
+		}
+		return ConstValue{Kind: ConstInt, Int: total}, true
+	case ast.QueryExprEach:
+		if expr.Projection == nil {
+			return ConstValue{}, false
+		}
+		elems := make([]ConstValue, 0, len(source.Elems))
+		for _, elem := range source.Elems {
+			include, value, ok := a.evalConstQueryProjection(expr, elem)
+			if !ok {
+				return ConstValue{}, false
+			}
+			if include {
+				elems = append(elems, cloneConstValue(value))
+			}
+		}
+		return ConstValue{Kind: ConstList, Elems: elems}, true
+	default:
+		return ConstValue{}, false
+	}
+}
+
+func (a *Analyzer) evalConstQueryFilter(expr *ast.QueryExpr, item ConstValue) (bool, bool) {
+	if expr == nil {
+		return false, false
+	}
+	result, ok := a.evalConstQueryInItemScope(expr, item, func() (ConstValue, bool) {
+		if expr.Filter == nil {
+			return ConstValue{Kind: ConstBool, Bool: true}, true
+		}
+		return a.evalConstExpr(expr.Filter)
+	})
+	if !ok || result.Kind != ConstBool {
+		return false, false
+	}
+	return result.Bool, true
+}
+
+func (a *Analyzer) evalConstQueryProjection(expr *ast.QueryExpr, item ConstValue) (bool, ConstValue, bool) {
+	include, ok := a.evalConstQueryFilter(expr, item)
+	if !ok || !include {
+		return include, ConstValue{}, ok
+	}
+	value, ok := a.evalConstQueryInItemScope(expr, item, func() (ConstValue, bool) {
+		return a.evalConstExpr(expr.Projection)
+	})
+	return true, value, ok
+}
+
+func (a *Analyzer) evalConstQueryInItemScope(expr *ast.QueryExpr, item ConstValue, eval func() (ConstValue, bool)) (ConstValue, bool) {
+	scope := map[string]ConstValue{}
+	if expr != nil && expr.Name != "" && expr.Name != "_" {
+		scope[expr.Name] = cloneConstValue(item)
+	}
+	a.constEvalScopes = append(a.constEvalScopes, scope)
+	value, ok := eval()
+	a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+	return value, ok
 }
 
 func (a *Analyzer) evalConstAggregateFieldExpr(expr *ast.FieldExpr) (ConstValue, bool) {

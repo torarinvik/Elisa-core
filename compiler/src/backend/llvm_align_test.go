@@ -375,6 +375,26 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIREvaluatesStaticConstQueries(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_const_queries.elisa", `static def score() -> i64:
+    items: mutable darray[i64] = []
+    chunk: i64[3] = [4, 9, 12]
+    items.extend(chunk)
+    assert any item in items where item == 9
+    assert all item in items where item > 0
+    assert (count item in items where item > 8) == 2
+    selected = item for each item in items where item > 8
+    assert selected.count == 2
+    return selected[0] + selected[1]
+
+def keep() -> void:
+    static assert score() == 21
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIREvaluatesStaticVoidFunctionFallthrough(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_def_void_fallthrough.elisa", `static def note() -> void:
     value: i64 = 42

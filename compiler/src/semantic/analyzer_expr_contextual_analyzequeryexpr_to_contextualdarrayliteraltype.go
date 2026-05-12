@@ -59,7 +59,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 			result = &OptionalType{Value: info.ItemType}
 		}
 	case ast.QueryExprEach:
-		if expr.Owner == nil && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		if expr.Owner == nil && a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 			a.errorf(expr.Pos(), "each query expression requires an active in <arena>: scope")
 		}
 		if expr.Projection == nil {
