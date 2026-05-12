@@ -183,6 +183,28 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionAcceptsInvertedDecreasingRecursion(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_inverted_total_recursion.elisa", `static def countdown(n: i64) -> i64:
+	if n > 0:
+		return countdown(n - 1)
+	return 0
+
+def keep() -> void:
+	static assert countdown(4) == 0
+`)
+}
+
+func TestAnalyzeStaticFunctionAcceptsInvertedUnsignedZeroBaseCase(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_inverted_unsigned_zero_base.elisa", `static def countdown(n: u64) -> u64:
+	if n != 0:
+		return countdown(n - 1)
+	return 0
+
+def keep() -> void:
+	static assert countdown(4) == 0
+`)
+}
+
 func TestAnalyzeStaticFunctionRejectsDecreasingRecursionWithoutTotalBaseCase(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_rejects_decreasing_without_total_base.elisa", `static def countdown(n: i64) -> i64:
 	if n == 0:
