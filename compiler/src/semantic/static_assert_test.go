@@ -343,8 +343,12 @@ func TestAnalyzeStaticFunctionRejectsDecreasingRecursionWithoutTotalBaseCase(t *
 def keep() -> void:
 	static assert countdown(4) == 0
 `)
-	if !strings.Contains(strings.Join(result.Errors(), "\n"), `must have a visible terminating base case`) {
-		t.Fatalf("expected static base-case diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	errors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errors, "uses `== 0` as the only visible base case") {
+		t.Fatalf("expected weak signed zero-base diagnostic, got:\n%s", errors)
+	}
+	if !strings.Contains(errors, "`n <= 0`") {
+		t.Fatalf("expected signed lower-bound suggestion, got:\n%s", errors)
 	}
 }
 

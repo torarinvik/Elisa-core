@@ -851,6 +851,10 @@ func (a *Analyzer) validateStaticRecursiveCall(fn *ast.FuncDecl, call *ast.CallE
 		if a.staticFunctionHasBaseCaseForParam(fn, paramName) {
 			return
 		}
+		if !a.staticFunctionParamIsUnsigned(fn, paramName) && a.staticFunctionHasWeakSignedZeroBaseCaseForParam(fn, paramName) {
+			a.errorf(call.Pos(), "recursive static call to %q uses `== 0` as the only visible base case for signed parameter %q; use a lower-bound check such as `%s <= 0`", fn.Name, paramName, paramName)
+			return
+		}
 		a.errorf(call.Pos(), "recursive static call to %q must have a visible terminating base case for parameter %q", fn.Name, paramName)
 		return
 	}
@@ -1147,6 +1151,13 @@ func (a *Analyzer) staticFunctionHasBaseCaseForParam(fn *ast.FuncDecl, paramName
 	return a.staticStmtsContainBaseCaseForParam(fn.Body, paramName, a.staticFunctionParamIsUnsigned(fn, paramName))
 }
 
+func (a *Analyzer) staticFunctionHasWeakSignedZeroBaseCaseForParam(fn *ast.FuncDecl, paramName string) bool {
+	if fn == nil {
+		return false
+	}
+	return a.staticStmtsContainWeakSignedZeroBaseCaseForParam(fn.Body, paramName)
+}
+
 func (a *Analyzer) staticFunctionParamIsUnsigned(fn *ast.FuncDecl, paramName string) bool {
 	paramIndex := -1
 	for index, param := range fn.Params {
@@ -1194,12 +1205,35 @@ func (a *Analyzer) staticStmtsContainBaseCaseForParam(stmts []ast.Stmt, paramNam
 	return false
 }
 
+func (a *Analyzer) staticStmtsContainWeakSignedZeroBaseCaseForParam(stmts []ast.Stmt, paramName string) bool {
+	for index, stmt := range stmts {
+		if a.staticStmtContainsWeakSignedZeroBaseCaseForParam(stmt, paramName) {
+			return true
+		}
+		if a.staticStmtContainsFallthroughWeakSignedZeroBaseCaseForParam(stmt, stmts[index+1:], paramName) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Analyzer) staticStmtContainsFallthroughBaseCaseForParam(stmt ast.Stmt, following []ast.Stmt, paramName string, allowZeroEquality bool) bool {
 	switch n := stmt.(type) {
 	case *ast.IfStmt:
 		return a.staticIfContainsBaseCaseForParam(n.Cond, n.Then, appendStaticStmtLists(n.Else, following), paramName, allowZeroEquality)
 	case *ast.StaticIfStmt:
 		return a.staticIfContainsBaseCaseForParam(n.Cond, n.Then, appendStaticStmtLists(n.Else, following), paramName, allowZeroEquality)
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) staticStmtContainsFallthroughWeakSignedZeroBaseCaseForParam(stmt ast.Stmt, following []ast.Stmt, paramName string) bool {
+	switch n := stmt.(type) {
+	case *ast.IfStmt:
+		return a.staticIfContainsWeakSignedZeroBaseCaseForParam(n.Cond, n.Then, appendStaticStmtLists(n.Else, following), paramName)
+	case *ast.StaticIfStmt:
+		return a.staticIfContainsWeakSignedZeroBaseCaseForParam(n.Cond, n.Then, appendStaticStmtLists(n.Else, following), paramName)
 	default:
 		return false
 	}
@@ -1233,6 +1267,21 @@ func (a *Analyzer) staticStmtContainsBaseCaseForParam(stmt ast.Stmt, paramName s
 	}
 }
 
+func (a *Analyzer) staticStmtContainsWeakSignedZeroBaseCaseForParam(stmt ast.Stmt, paramName string) bool {
+	switch n := stmt.(type) {
+	case *ast.ReturnStmt:
+		return a.staticReturnExprContainsWeakSignedZeroBaseCaseForParam(n.Value, paramName)
+	case *ast.IfStmt:
+		return a.staticIfContainsWeakSignedZeroBaseCaseForParam(n.Cond, n.Then, n.Else, paramName) || a.staticStmtsContainWeakSignedZeroBaseCaseForParam(n.Then, paramName) || a.staticStmtsContainWeakSignedZeroBaseCaseForParam(n.Else, paramName)
+	case *ast.StaticIfStmt:
+		return a.staticIfContainsWeakSignedZeroBaseCaseForParam(n.Cond, n.Then, n.Else, paramName) || a.staticStmtsContainWeakSignedZeroBaseCaseForParam(n.Then, paramName) || a.staticStmtsContainWeakSignedZeroBaseCaseForParam(n.Else, paramName)
+	case *ast.StaticBlockStmt:
+		return a.staticStmtsContainWeakSignedZeroBaseCaseForParam(n.Body, paramName)
+	default:
+		return false
+	}
+}
+
 func (a *Analyzer) staticReturnExprContainsBaseCaseForParam(expr ast.Expr, paramName string, allowZeroEquality bool) bool {
 	ternary, ok := expr.(*ast.TernaryExpr)
 	if !ok {
@@ -1241,6 +1290,16 @@ func (a *Analyzer) staticReturnExprContainsBaseCaseForParam(expr ast.Expr, param
 	then := []ast.Stmt{&ast.ReturnStmt{Position: ternary.Value.Pos(), Value: ternary.Value}}
 	alt := []ast.Stmt{&ast.ReturnStmt{Position: ternary.Alt.Pos(), Value: ternary.Alt}}
 	return a.staticIfContainsBaseCaseForParam(ternary.Cond, then, alt, paramName, allowZeroEquality)
+}
+
+func (a *Analyzer) staticReturnExprContainsWeakSignedZeroBaseCaseForParam(expr ast.Expr, paramName string) bool {
+	ternary, ok := expr.(*ast.TernaryExpr)
+	if !ok {
+		return false
+	}
+	then := []ast.Stmt{&ast.ReturnStmt{Position: ternary.Value.Pos(), Value: ternary.Value}}
+	alt := []ast.Stmt{&ast.ReturnStmt{Position: ternary.Alt.Pos(), Value: ternary.Alt}}
+	return a.staticIfContainsWeakSignedZeroBaseCaseForParam(ternary.Cond, then, alt, paramName)
 }
 
 func (a *Analyzer) staticIfContainsBaseCaseForParam(cond ast.Expr, then []ast.Stmt, elseStmts []ast.Stmt, paramName string, allowZeroEquality bool) bool {
@@ -1261,11 +1320,43 @@ func (a *Analyzer) staticIfContainsBaseCaseForParam(cond ast.Expr, then []ast.St
 	return false
 }
 
+func (a *Analyzer) staticIfContainsWeakSignedZeroBaseCaseForParam(cond ast.Expr, then []ast.Stmt, elseStmts []ast.Stmt, paramName string) bool {
+	comparison, ok := cond.(*ast.BinaryExpr)
+	if !ok {
+		return false
+	}
+	leftParam, leftOK := staticExprIdentName(comparison.Left)
+	rightValue, rightOK := a.evalStaticProofIntegerExpr(comparison.Right)
+	if leftOK && rightOK && leftParam == paramName {
+		return staticWeakSignedZeroComparisonBranchTerminates(comparison.Op, rightValue, then, elseStmts)
+	}
+	rightParam, rightParamOK := staticExprIdentName(comparison.Right)
+	leftValue, leftValueOK := a.evalStaticProofIntegerExpr(comparison.Left)
+	if rightParamOK && leftValueOK && rightParam == paramName {
+		return staticWeakSignedZeroComparisonBranchTerminates(staticReverseComparisonOp(comparison.Op), leftValue, then, elseStmts)
+	}
+	return false
+}
+
 func staticComparisonBranchTerminates(op lexer.TokenKind, value int64, then []ast.Stmt, elseStmts []ast.Stmt, allowZeroEquality bool) bool {
 	if staticParamComparisonTerminatesOnThen(op, value, allowZeroEquality) && staticStmtBlockAlwaysTerminates(then) {
 		return true
 	}
 	return staticParamComparisonTerminatesOnElse(op, value, allowZeroEquality) && staticStmtBlockAlwaysTerminates(elseStmts)
+}
+
+func staticWeakSignedZeroComparisonBranchTerminates(op lexer.TokenKind, value int64, then []ast.Stmt, elseStmts []ast.Stmt) bool {
+	if value != 0 {
+		return false
+	}
+	switch op {
+	case lexer.TOKEN_EQEQ:
+		return staticStmtBlockAlwaysTerminates(then)
+	case lexer.TOKEN_BANGEQ:
+		return staticStmtBlockAlwaysTerminates(elseStmts)
+	default:
+		return false
+	}
 }
 
 func staticExprIdentName(expr ast.Expr) (string, bool) {
