@@ -13,13 +13,39 @@ func (p *Parser) parseBlock() []ast.Stmt {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		stmt := p.parseStmt()
+		stmt := p.parseContextualStmt()
 		if stmt != nil {
 			stmts = append(stmts, stmt)
 		}
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	return stmts
+}
+func (p *Parser) parseContextualStmt() ast.Stmt {
+	if p.staticFunctionDepth > 0 {
+		pos := p.cur().Pos
+		switch p.peek() {
+		case lexer.TOKEN_ERROR:
+			p.advance()
+			p.expect(lexer.TOKEN_LPAREN)
+			msg := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			p.expectNewline()
+			return &ast.StaticErrorStmt{Position: pos, Message: msg}
+		case lexer.TOKEN_IDENT:
+			if p.cur().Text == "assert" {
+				p.advance()
+				cond := p.parseExpr()
+				var msg ast.Expr
+				if p.match(lexer.TOKEN_COMMA) {
+					msg = p.parseExpr()
+				}
+				p.expectNewline()
+				return &ast.StaticAssertStmt{Position: pos, Cond: cond, Message: msg}
+			}
+		}
+	}
+	return p.parseStmt()
 }
 func (p *Parser) parseStmt() ast.Stmt {
 	if p.peek() == lexer.TOKEN_IDENT {

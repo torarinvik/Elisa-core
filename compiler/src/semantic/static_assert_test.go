@@ -134,7 +134,7 @@ func TestAnalyzeStaticErrorCountsAsTerminatingBranch(t *testing.T) {
 	if flag:
 		return 42
 	else:
-		static error("inactive")
+		error("inactive")
 
 def keep() -> void:
 	static assert answer(true) == 42

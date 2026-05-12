@@ -302,48 +302,6 @@ func (p *Parser) parseStaticOnlyBlock() []ast.Stmt {
 	return stmts
 }
 
-func (p *Parser) parseStaticFunctionBlock() []ast.Stmt {
-	p.expect(lexer.TOKEN_INDENT)
-	stmts := make([]ast.Stmt, 0, p.estimateIndentedItemCount())
-	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
-		p.skipNewlines()
-		if p.peek() == lexer.TOKEN_DEDENT {
-			break
-		}
-		stmt := p.parseStaticFunctionStmt()
-		if stmt != nil {
-			stmts = append(stmts, stmt)
-		}
-	}
-	p.expect(lexer.TOKEN_DEDENT)
-	return stmts
-}
-
-func (p *Parser) parseStaticFunctionStmt() ast.Stmt {
-	pos := p.cur().Pos
-	switch p.peek() {
-	case lexer.TOKEN_ERROR:
-		p.advance()
-		p.expect(lexer.TOKEN_LPAREN)
-		msg := p.parseExpr()
-		p.expect(lexer.TOKEN_RPAREN)
-		p.expectNewline()
-		return &ast.StaticErrorStmt{Position: pos, Message: msg}
-	case lexer.TOKEN_IDENT:
-		if p.cur().Text == "assert" {
-			p.advance()
-			cond := p.parseExpr()
-			var msg ast.Expr
-			if p.match(lexer.TOKEN_COMMA) {
-				msg = p.parseExpr()
-			}
-			p.expectNewline()
-			return &ast.StaticAssertStmt{Position: pos, Cond: cond, Message: msg}
-		}
-	}
-	return p.parseStmt()
-}
-
 func (p *Parser) parseStaticOnlyStmt() ast.Stmt {
 	pos := p.cur().Pos
 	switch p.peek() {

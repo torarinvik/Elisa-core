@@ -8,14 +8,15 @@ import (
 )
 
 type Parser struct {
-	tokens            []lexer.Token
-	pos               int
-	errors            []string
-	poolScopes        []string
-	allowAsCast       bool
-	allowInMembership bool
-	allowTernary      bool
-	allowWhereExpr    bool
+	tokens              []lexer.Token
+	pos                 int
+	errors              []string
+	poolScopes          []string
+	allowAsCast         bool
+	allowInMembership   bool
+	allowTernary        bool
+	allowWhereExpr      bool
+	staticFunctionDepth int
 }
 
 func New(tokens []lexer.Token) *Parser {
@@ -103,6 +104,13 @@ func (p *Parser) withWhereExprDisabled(parse func() ast.Expr) ast.Expr {
 	p.allowWhereExpr = false
 	defer func() {
 		p.allowWhereExpr = saved
+	}()
+	return parse()
+}
+func (p *Parser) withStaticFunctionBody(parse func() []ast.Stmt) []ast.Stmt {
+	p.staticFunctionDepth++
+	defer func() {
+		p.staticFunctionDepth--
 	}()
 	return parse()
 }

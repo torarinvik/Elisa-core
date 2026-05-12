@@ -326,7 +326,7 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 
 	var body []ast.Stmt
 	if isStatic {
-		body = p.parseStaticFunctionBlock()
+		body = p.withStaticFunctionBody(p.parseBlock)
 	} else {
 		body = p.parseBlock()
 	}
