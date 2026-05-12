@@ -756,11 +756,16 @@ struct Header layout c:
 header_size: usize = size_of(Header)
 header_align: usize = align_of(Header)
 count_offset: usize = offset_of(Header, count)
+
+same_size: usize = size_of[Header]()
+same_align: usize = align_of[Header]
+same_offset: usize = offset_of[Header](.count)
 ```
 
 Current rules:
 
 - `size_of(T)`, `align_of(T)`, and `offset_of(T, field)` return `usize`
+- `size_of[T]()`, `align_of[T]`, and `offset_of[T](.field)` are the generic-style spellings and are preferred in new code
 - results are computed from the backend target data layout
 - `offset_of` currently accepts a direct field name on a lowered struct-like type
 - legacy spellings `sizeof`, `alignof`, and `offsetof` are still accepted with deprecation diagnostics, but new code should use the underscore forms

@@ -295,9 +295,10 @@ func (p *Parser) parsePrimary() ast.Expr {
 		pos := p.cur().Pos
 		syntax := p.cur().Text
 		p.advance()
-		p.expect(lexer.TOKEN_LPAREN)
-		typ := p.parseTypeExpr()
-		p.expect(lexer.TOKEN_RPAREN)
+		typ := p.parseLayoutIntrospectionTypeArg()
+		if p.match(lexer.TOKEN_LPAREN) {
+			p.expect(lexer.TOKEN_RPAREN)
+		}
 		expr := &ast.SizeofExpr{Position: pos, Type: typ}
 		if syntax == "sizeof" {
 			expr.DeprecatedSyntax = "sizeof"
@@ -308,9 +309,10 @@ func (p *Parser) parsePrimary() ast.Expr {
 		pos := p.cur().Pos
 		syntax := p.cur().Text
 		p.advance()
-		p.expect(lexer.TOKEN_LPAREN)
-		typ := p.parseTypeExpr()
-		p.expect(lexer.TOKEN_RPAREN)
+		typ := p.parseLayoutIntrospectionTypeArg()
+		if p.match(lexer.TOKEN_LPAREN) {
+			p.expect(lexer.TOKEN_RPAREN)
+		}
 		expr := &ast.AlignofExpr{Position: pos, Type: typ}
 		if syntax == "alignof" {
 			expr.DeprecatedSyntax = "alignof"
@@ -321,11 +323,21 @@ func (p *Parser) parsePrimary() ast.Expr {
 		pos := p.cur().Pos
 		syntax := p.cur().Text
 		p.advance()
-		p.expect(lexer.TOKEN_LPAREN)
-		typ := p.parseTypeExpr()
-		p.expect(lexer.TOKEN_COMMA)
-		field := p.expect(lexer.TOKEN_IDENT)
-		p.expect(lexer.TOKEN_RPAREN)
+		var typ ast.TypeExpr
+		var field lexer.Token
+		if p.match(lexer.TOKEN_LBRACKET) {
+			typ = p.parseTypeExpr()
+			p.expect(lexer.TOKEN_RBRACKET)
+			p.expect(lexer.TOKEN_LPAREN)
+			field = p.parseLayoutIntrospectionFieldArg()
+			p.expect(lexer.TOKEN_RPAREN)
+		} else {
+			p.expect(lexer.TOKEN_LPAREN)
+			typ = p.parseTypeExpr()
+			p.expect(lexer.TOKEN_COMMA)
+			field = p.parseLayoutIntrospectionFieldArg()
+			p.expect(lexer.TOKEN_RPAREN)
+		}
 		expr := &ast.OffsetofExpr{Position: pos, Type: typ, Field: field.Text}
 		if syntax == "offsetof" {
 			expr.DeprecatedSyntax = "offsetof"
@@ -431,6 +443,30 @@ func (p *Parser) parsePrimary() ast.Expr {
 		tok := p.advance()
 		return &ast.Ident{Position: tok.Pos, Name: "<error>"}
 	}
+}
+
+func (p *Parser) parseLayoutIntrospectionTypeArg() ast.TypeExpr {
+	if p.match(lexer.TOKEN_LBRACKET) {
+		typ := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return typ
+	}
+	p.expect(lexer.TOKEN_LPAREN)
+	typ := p.parseTypeExpr()
+	p.expect(lexer.TOKEN_RPAREN)
+	return typ
+}
+
+func (p *Parser) parseLayoutIntrospectionFieldArg() lexer.Token {
+	if p.peek() == lexer.TOKEN_RPAREN {
+		p.errorf("expected field name")
+		return lexer.Token{}
+	}
+	if p.match(lexer.TOKEN_DOT) {
+		// Dot-prefixed field names make offset_of[T](.field) read like
+		// a field selector without requiring a value expression.
+	}
+	return p.expect(lexer.TOKEN_IDENT)
 }
 
 func (p *Parser) parseBraceMembershipCandidateExpr() ast.Expr {
