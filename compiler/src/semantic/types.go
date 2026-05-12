@@ -409,6 +409,8 @@ type StructDerivedState struct {
 
 type StructType struct {
 	Name             string
+	Namespace        string
+	Usings           []string
 	TypeParams       []string
 	RefStorageParams []string
 	RefStateParams   []string

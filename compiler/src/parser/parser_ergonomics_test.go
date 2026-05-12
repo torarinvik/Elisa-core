@@ -15,7 +15,7 @@ func TestParseExplicitArgErgonomicsAndDestructuring(t *testing.T) {
 
 struct PairRow:
     first: i64
-    second: i64
+    second: i64 = 0
 
 def add(use Pair) -> i64:
     return left + right
@@ -36,6 +36,10 @@ def build(left: i64, width: i64, pair: PairRow, rows: darray[PairRow]) -> i64:
 	}
 	if paramsDecl.Name != "Pair" || len(paramsDecl.Params) != 2 || paramsDecl.Params[1].DefaultValue == nil {
 		t.Fatalf("expected Pair explicit bundle declaration with a defaulted field, got %#v", paramsDecl)
+	}
+	pairRow, ok := file.Decls[1].(*ast.StructDecl)
+	if !ok || len(pairRow.Fields) != 2 || pairRow.Fields[1].DefaultValue == nil {
+		t.Fatalf("expected PairRow struct field default, got %#v", file.Decls[1])
 	}
 	addDecl, ok := file.Decls[2].(*ast.FuncDecl)
 	if !ok {
@@ -677,5 +681,49 @@ def keep() -> void:
 	}
 	if len(stmt.Assertions) != 2 {
 		t.Fatalf("expected 2 statement assertions, got %d", len(stmt.Assertions))
+	}
+}
+
+func TestParseStaticGenerateDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, `enum Expr:
+    Int(value: i64)
+    Bool(value: bool)
+
+static generate:
+    for variant in variants(Expr):
+        emit def is_${variant.name}(expr: Expr) -> bool:
+            return expr is Expr.${variant.name}
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	gen, ok := file.Decls[1].(*ast.StaticGenerateDecl)
+	if !ok {
+		t.Fatalf("expected static generate decl, got %T", file.Decls[1])
+	}
+	if len(gen.Body) != 1 {
+		t.Fatalf("expected one generate statement, got %d", len(gen.Body))
+	}
+	loop, ok := gen.Body[0].(*ast.StaticGenerateForDecl)
+	if !ok {
+		t.Fatalf("expected generate for statement, got %T", gen.Body[0])
+	}
+	if len(loop.Body) != 1 {
+		t.Fatalf("expected one loop body statement, got %d", len(loop.Body))
+	}
+	if _, ok := loop.Body[0].(*ast.StaticGenerateEmitDecl); !ok {
+		t.Fatalf("expected emit statement, got %T", loop.Body[0])
+	}
+}
+
+func TestParseRejectsEmitOutsideStaticGenerate(t *testing.T) {
+	_, errs := parseSourceFile(t, `emit def leaked() -> bool:
+    return true
+`)
+	if len(errs) == 0 {
+		t.Fatalf("expected parser error for emit outside static generate")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "unexpected token") {
+		t.Fatalf("expected unexpected-token diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

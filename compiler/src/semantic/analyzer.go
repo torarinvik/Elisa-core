@@ -390,6 +390,33 @@ func Analyze(file *ast.File) *Result {
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
 	a.populateTreeMembers(activeDecls)
+	generatedDecls := make(map[ast.Decl]bool)
+	expandedDecls := a.expandActiveAndGeneratedDecls(activeFile.Decls, generatedDecls)
+	if len(generatedDecls) != 0 {
+		activeFile = &ast.File{Filename: activeFile.Filename, Decls: expandedDecls}
+		if loweredFile != nil {
+			loweredFile = activeFile
+		}
+		activeDecls = a.flattenScopedDecls(activeFile.Decls, "", nil)
+		generatedScopedDecls := make([]scopedDecl, 0, len(generatedDecls))
+		for _, scoped := range activeDecls {
+			if generatedDecls[scoped.Decl] {
+				generatedScopedDecls = append(generatedScopedDecls, scoped)
+			}
+		}
+		a.collectConstValues(generatedScopedDecls)
+		a.collectPermissionDecls(generatedScopedDecls)
+		a.collectNamedTypes(generatedScopedDecls)
+		a.collectTypeAliases(generatedScopedDecls)
+		a.collectEffectAliases(generatedScopedDecls)
+		a.collectContextBundles(generatedScopedDecls)
+		a.collectParamPacks(generatedScopedDecls)
+		a.collectStaticInterfaces(generatedScopedDecls)
+		a.populateConstEnumMembers(generatedScopedDecls)
+		a.populateStructFields(generatedScopedDecls)
+		a.populateEnumVariants(generatedScopedDecls)
+		a.populateTreeMembers(generatedScopedDecls)
+	}
 	a.collectTreeAttributes(activeDecls)
 	a.synthesizeDerivedImplMembers(activeDecls)
 	a.warnOnAvoidableStructPadding(activeDecls)

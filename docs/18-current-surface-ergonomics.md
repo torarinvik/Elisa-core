@@ -837,6 +837,32 @@ Current rules:
 - reflected lists can be used by static `for` loops and compile-time query expressions such as `first`, `any`, and `count`
 - the first slice is static-only; runtime reflection values are not emitted
 
+## Static Declaration Generation
+
+`static generate:` executes a declaration-level static block and splices emitted declarations into the surrounding declaration list.
+
+```elisa
+enum Expr:
+    Int(value: i64)
+    Bool(value: bool)
+
+static generate:
+    for variant in variants(Expr):
+        emit def is_${variant.name}(expr: Expr) -> bool:
+            return expr is Expr.${variant.name}
+
+def keep(expr: Expr) -> bool:
+    return is_Int(expr) or is_Bool(expr)
+```
+
+Current rules:
+
+- `static generate:` is declaration-level only
+- `emit` is only valid inside `static generate:`
+- `${expr}` may appear inside generated identifiers or member paths; the expression must evaluate to a compile-time string, integer, or reflection record with a `name`
+- generated declarations are parsed as normal Elisa declarations and then use the normal semantic and backend paths
+- generated declarations are inserted where the generator appears, so ordinary declaration visibility and duplicate-name diagnostics apply
+
 ## Grammar recovery policies
 
 Grammars can name reusable recovery policies once and apply them on productions or individual terms.
@@ -1322,12 +1348,12 @@ Brace forms now work consistently across destructuring, literal construction, `i
 ```elisa
 struct Row:
     left: int
-    right: int
-    flag: bool
+    right: int = 0
+    flag: bool = false
 
 def run(row: Row, flag: bool) -> int:
     let {left: first, right} = row
-    built: Row = Row{left: first, right, flag}
+    built: Row = Row{left: first}
     rebuilt: Row = Row{...built, left: current}
     next: Row = built{flag, right = first}
 
@@ -1345,6 +1371,8 @@ Current rules:
 - `let Type{field}` is the typed version when the surface should name the expected struct explicitly
 - `field` inside a brace literal or brace pattern is field punning sugar for “use the same name on both sides”
 - `field: alias` renames the bound local or supplied expression source
+- struct fields may declare defaults with `field: Type = expr`; omitted named fields and omitted trailing positional fields are filled from those defaults
+- default expressions are cloned and checked at each literal site, while `Type{...base, field: expr}` keeps omitted fields from the spread base instead of overwriting them with defaults
 - `Type{...base, field: expr}` starts a brace struct literal from an existing value and overrides named fields; this is useful for default packs and small immutable updates
 - local `args name:` blocks declare compile-time named argument packs; spread them with `Type{...name}` to split large constructor or struct-literal argument lists into reusable groups
 - spreading two local argument packs that provide the same field is a diagnostic; write an explicit named field after the spreads when you intentionally want to override one value

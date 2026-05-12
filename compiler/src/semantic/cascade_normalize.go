@@ -26,6 +26,7 @@ func normalizeCascadeDecls(decls []ast.Decl) {
 		case *ast.GlobalDecl:
 			n.Value = normalizeCascadeExpr(n.Value, nil, false)
 		case *ast.StructDecl:
+			normalizeCascadeFields(n.Fields)
 			for i := range n.DerivedStates {
 				n.DerivedStates[i].Condition = normalizeCascadeExpr(n.DerivedStates[i].Condition, nil, false)
 			}
@@ -47,6 +48,8 @@ func normalizeCascadeDecls(decls []ast.Decl) {
 				n.Assertions[i].Cond = normalizeCascadeExpr(n.Assertions[i].Cond, nil, false)
 				n.Assertions[i].Message = normalizeCascadeExpr(n.Assertions[i].Message, nil, false)
 			}
+		case *ast.StaticGenerateDecl:
+			normalizeCascadeStaticGenerateStmts(n.Body)
 		case *ast.ImplDecl:
 			for _, member := range n.Members {
 				if fn, ok := member.(*ast.FuncDecl); ok && fn != nil {
@@ -73,9 +76,34 @@ func normalizeCascadeDecls(decls []ast.Decl) {
 	}
 }
 
+func normalizeCascadeStaticGenerateStmts(stmts []ast.StaticGenerateStmt) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.StaticGenerateForDecl:
+			n.Source = normalizeCascadeExpr(n.Source, nil, false)
+			n.Filter = normalizeCascadeExpr(n.Filter, nil, false)
+			normalizeCascadeStaticGenerateStmts(n.Body)
+		case *ast.StaticGenerateIfDecl:
+			n.Cond = normalizeCascadeExpr(n.Cond, nil, false)
+			normalizeCascadeStaticGenerateStmts(n.Then)
+			for i := range n.Elifs {
+				n.Elifs[i].Cond = normalizeCascadeExpr(n.Elifs[i].Cond, nil, false)
+				normalizeCascadeStaticGenerateStmts(n.Elifs[i].Body)
+			}
+			normalizeCascadeStaticGenerateStmts(n.Else)
+		}
+	}
+}
+
 func normalizeCascadeParams(params []ast.ParamDecl) {
 	for i := range params {
 		params[i].DefaultValue = normalizeCascadeExpr(params[i].DefaultValue, nil, false)
+	}
+}
+
+func normalizeCascadeFields(fields []ast.FieldDecl) {
+	for i := range fields {
+		fields[i].DefaultValue = normalizeCascadeExpr(fields[i].DefaultValue, nil, false)
 	}
 }
 

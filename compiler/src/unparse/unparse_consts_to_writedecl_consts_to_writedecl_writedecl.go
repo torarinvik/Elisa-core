@@ -2,6 +2,7 @@ package unparse
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"strconv"
 	"strings"
 )
@@ -499,5 +500,58 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				f.writePrefixedMultiline(level+1, "", formatExpr(item.Cond))
 			}
 		}
+	case *ast.StaticGenerateDecl:
+		f.writeLine(level, "static generate:")
+		for _, stmt := range n.Body {
+			f.writeStaticGenerateStmt(level+1, stmt)
+		}
 	}
+}
+
+func (f *formatter) writeStaticGenerateStmt(level int, stmt ast.StaticGenerateStmt) {
+	switch n := stmt.(type) {
+	case *ast.StaticGenerateEmitDecl:
+		f.writeLine(level, "emit "+formatStaticGenerateTokens(n.Tokens))
+	case *ast.StaticGenerateForDecl:
+		header := "for " + n.Name + " in " + formatExpr(n.Source)
+		if n.Filter != nil {
+			header += " where " + formatExpr(n.Filter)
+		}
+		f.writeLine(level, header+":")
+		for _, inner := range n.Body {
+			f.writeStaticGenerateStmt(level+1, inner)
+		}
+	case *ast.StaticGenerateIfDecl:
+		f.writeLine(level, "if "+formatExpr(n.Cond)+":")
+		for _, inner := range n.Then {
+			f.writeStaticGenerateStmt(level+1, inner)
+		}
+		for _, elif := range n.Elifs {
+			f.writeLine(level, "elif "+formatExpr(elif.Cond)+":")
+			for _, inner := range elif.Body {
+				f.writeStaticGenerateStmt(level+1, inner)
+			}
+		}
+		if len(n.Else) != 0 {
+			f.writeLine(level, "else:")
+			for _, inner := range n.Else {
+				f.writeStaticGenerateStmt(level+1, inner)
+			}
+		}
+	}
+}
+
+func formatStaticGenerateTokens(tokens []lexer.Token) string {
+	parts := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		if tok.Kind == lexer.TOKEN_NEWLINE || tok.Kind == lexer.TOKEN_INDENT || tok.Kind == lexer.TOKEN_DEDENT {
+			continue
+		}
+		if tok.Text != "" {
+			parts = append(parts, tok.Text)
+		} else {
+			parts = append(parts, lexer.TokenName(tok.Kind))
+		}
+	}
+	return strings.Join(parts, " ")
 }

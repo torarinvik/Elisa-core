@@ -103,3 +103,26 @@ def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i6
 		t.Fatalf("expected args-pack struct spread to lower to field inserts, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRLowersStructFieldDefaults(t *testing.T) {
+	src := `struct Accessors:
+    read_name_id: i64? = null
+    write_name_id: i64? = null
+    default_enabled: bool = false
+    count: i64 = 7
+
+def build() -> i64:
+    next: Accessors = Accessors{count: 9}
+    return next.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_field_defaults.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, want := range []string{"%Accessors = type", "zeroinitializer", "i64 9", "count"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected struct field default lowering to include %q, got:\n%s", want, output)
+		}
+	}
+}

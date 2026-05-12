@@ -605,9 +605,13 @@ func (p *Parser) parseFieldDecl() ast.FieldDecl {
 	}
 
 	typ := p.parseTypeExpr()
+	var defaultValue ast.Expr
+	if p.match(lexer.TOKEN_ASSIGN) {
+		defaultValue = p.parseExpr()
+	}
 	p.expectNewline()
 
-	return ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Mutable: mutable, IsTail: isTail, Type: typ}
+	return ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Mutable: mutable, IsTail: isTail, Type: typ, DefaultValue: defaultValue}
 }
 
 func (p *Parser) parseBitGroupDecl() *ast.BitGroupDecl {

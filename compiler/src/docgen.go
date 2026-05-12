@@ -135,6 +135,9 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 	case *ast.StaticAssertBlockDecl:
 		fmt.Fprintf(b, "%s Static assertion block\n\n", headingPrefix)
 		fmt.Fprintf(b, "- assertions: %d\n", len(n.Assertions))
+	case *ast.StaticGenerateDecl:
+		fmt.Fprintf(b, "%s Static declaration generator\n\n", headingPrefix)
+		fmt.Fprintf(b, "- statements: %d\n", len(n.Body))
 	default:
 		fmt.Fprintf(b, "%s Declaration\n\n", headingPrefix)
 		fmt.Fprintf(b, "- surface: `%s`\n", declarationHeadline(unparse.FormatDecl(decl)))

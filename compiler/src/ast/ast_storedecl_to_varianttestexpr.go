@@ -35,13 +35,14 @@ type DerivedStateDecl struct {
 	Condition Expr
 }
 type FieldDecl struct {
-	Position    lexer.Pos
-	Annotations []Annotation
-	Name        string
-	Mutable     bool
-	IsTail      bool
-	Type        TypeExpr
-	BitGroup    *BitGroupDecl
+	Position     lexer.Pos
+	Annotations  []Annotation
+	Name         string
+	Mutable      bool
+	IsTail       bool
+	Type         TypeExpr
+	DefaultValue Expr
+	BitGroup     *BitGroupDecl
 }
 type BitGroupKind int
 
@@ -264,6 +265,37 @@ type StaticAssertItem struct {
 type StaticAssertBlockDecl struct {
 	Position   lexer.Pos
 	Assertions []StaticAssertItem
+}
+type StaticGenerateDecl struct {
+	Position lexer.Pos
+	Body     []StaticGenerateStmt
+}
+type StaticGenerateStmt interface {
+	Node
+	staticGenerateStmtTag()
+}
+type StaticGenerateEmitDecl struct {
+	Position lexer.Pos
+	Tokens   []lexer.Token
+}
+type StaticGenerateForDecl struct {
+	Position lexer.Pos
+	Name     string
+	Source   Expr
+	Filter   Expr
+	Body     []StaticGenerateStmt
+}
+type StaticGenerateIfDecl struct {
+	Position lexer.Pos
+	Cond     Expr
+	Then     []StaticGenerateStmt
+	Elifs    []StaticGenerateElifDecl
+	Else     []StaticGenerateStmt
+}
+type StaticGenerateElifDecl struct {
+	Position lexer.Pos
+	Cond     Expr
+	Body     []StaticGenerateStmt
 }
 type StaticElifDecl struct {
 	Position lexer.Pos

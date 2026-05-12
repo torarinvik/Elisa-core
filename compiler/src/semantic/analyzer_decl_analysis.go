@@ -55,6 +55,7 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 				for _, item := range n.Assertions {
 					a.analyzeStaticAssert(item.Position, item.Cond, item.Message)
 				}
+			case *ast.StaticGenerateDecl:
 			case *ast.AttributeDecl:
 				a.analyzeAttributeDecl(n)
 			case *ast.InterfaceDecl:

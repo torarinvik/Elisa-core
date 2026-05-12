@@ -104,6 +104,8 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 		return nil
 	case *ast.StaticAssertBlockDecl:
 		return nil
+	case *ast.StaticGenerateDecl:
+		return nil
 	default:
 		return decl
 	}

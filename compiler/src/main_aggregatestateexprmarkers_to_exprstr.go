@@ -178,6 +178,8 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, item := range n.Assertions {
 			fmt.Fprintf(w, "%s    %s\n", prefix, exprStr(item.Cond))
 		}
+	case *ast.StaticGenerateDecl:
+		fmt.Fprintf(w, "%sstatic generate: (%d statement(s))\n", prefix, len(n.Body))
 	}
 }
 func printTreeMember(w io.Writer, member ast.TreeMemberDecl, level int) {

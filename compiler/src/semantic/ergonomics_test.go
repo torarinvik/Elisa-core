@@ -207,6 +207,67 @@ def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i6
 	}
 }
 
+func TestAnalyzeStructFieldDefaultsFillMissingNamedFields(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_struct_field_defaults_named.elisa", `struct Accessors:
+    read_name_id: i64? = null
+    write_name_id: i64? = null
+    default_enabled: bool = false
+    count: i64 = 7
+
+def build() -> Accessors:
+    return Accessors{count: 9}
+`)
+	buildSym, _ := result.GlobalScope.Lookup("build")
+	buildDecl := buildSym.Node.(*ast.FuncDecl)
+	ret := buildDecl.Body[len(buildDecl.Body)-1].(*ast.ReturnStmt)
+	lit := ret.Value.(*ast.StructLitExpr)
+	if !lit.ResolvedArgsValid || len(lit.ResolvedArgs) != 4 {
+		t.Fatalf("expected defaults to resolve all fields, got %#v", lit.ResolvedArgs)
+	}
+	if _, ok := lit.ResolvedArgs[0].(*ast.NullLit); !ok {
+		t.Fatalf("expected read_name_id default null, got %T", lit.ResolvedArgs[0])
+	}
+	if boolLit, ok := lit.ResolvedArgs[2].(*ast.BoolLit); !ok || boolLit.Value {
+		t.Fatalf("expected default_enabled default false, got %T %#v", lit.ResolvedArgs[2], lit.ResolvedArgs[2])
+	}
+	if intLit, ok := lit.ResolvedArgs[3].(*ast.IntLit); !ok || intLit.Value != "9" {
+		t.Fatalf("expected explicit count 9, got %T %#v", lit.ResolvedArgs[3], lit.ResolvedArgs[3])
+	}
+}
+
+func TestAnalyzeStructFieldDefaultsFillTrailingPositionalFields(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_struct_field_defaults_positional.elisa", `struct Pair:
+    left: i64
+    right: i64 = 5
+
+def build() -> Pair:
+    return Pair(3)
+`)
+	buildSym, _ := result.GlobalScope.Lookup("build")
+	buildDecl := buildSym.Node.(*ast.FuncDecl)
+	ret := buildDecl.Body[len(buildDecl.Body)-1].(*ast.ReturnStmt)
+	lit := ret.Value.(*ast.StructLitExpr)
+	if !lit.ResolvedArgsValid || len(lit.ResolvedArgs) != 2 {
+		t.Fatalf("expected positional default to resolve both fields, got %#v", lit.ResolvedArgs)
+	}
+	if intLit, ok := lit.ResolvedArgs[1].(*ast.IntLit); !ok || intLit.Value != "5" {
+		t.Fatalf("expected right default 5, got %T %#v", lit.ResolvedArgs[1], lit.ResolvedArgs[1])
+	}
+}
+
+func TestAnalyzeStructFieldDefaultTypeMismatch(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_struct_field_default_mismatch.elisa", `struct Bad:
+    flag: bool = 7
+
+def build() -> Bad:
+    return Bad{}
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `default value for struct field "flag" expects bool, got int`) {
+		t.Fatalf("expected struct field default type diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsStructLiteralArgsPackFieldConflict(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_struct_literal_args_pack_conflict.elisa", `struct Accessors:
     read_name_id: i64?

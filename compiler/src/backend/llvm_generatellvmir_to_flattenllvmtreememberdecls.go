@@ -454,7 +454,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 			}
 		}
 		return nil
-	case *ast.ExternTypeDecl, *ast.StaticIfDecl, *ast.AttributeDecl, *ast.StaticAssertDecl, *ast.StaticAssertBlockDecl:
+	case *ast.ExternTypeDecl, *ast.StaticIfDecl, *ast.AttributeDecl, *ast.StaticAssertDecl, *ast.StaticAssertBlockDecl, *ast.StaticGenerateDecl:
 		return nil
 	case *ast.PermissionDecl:
 		return nil

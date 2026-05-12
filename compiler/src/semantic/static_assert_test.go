@@ -242,6 +242,54 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticGenerateMakesDeclarationsVisible(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_generate_visible.elisa", `enum Expr:
+	Int(value: i64)
+	Bool(value: bool)
+
+static generate:
+	for variant in variants(Expr):
+		emit def is_${variant.name}(expr: Expr) -> bool:
+			return expr is Expr.${variant.name}
+
+def keep(expr: Expr) -> bool:
+	return is_Int(expr) or is_Bool(expr)
+`)
+}
+
+func TestAnalyzeStaticGenerateRejectsNonConstInterpolation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_generate_bad_interp.elisa", `enum Expr:
+	Int(value: i64)
+
+def runtime_name() -> i64:
+	return 1
+
+static generate:
+	emit def is_${runtime_name()}(expr: Expr) -> bool:
+		return true
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "static generate interpolation must evaluate at compile time") {
+		t.Fatalf("expected static generate interpolation diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func TestAnalyzeStaticGenerateRejectsDuplicateGeneratedName(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_generate_duplicate.elisa", `enum Expr:
+	Int(value: i64)
+
+def is_Int(expr: Expr) -> bool:
+	return false
+
+static generate:
+	for variant in variants(Expr):
+		emit def is_${variant.name}(expr: Expr) -> bool:
+			return expr is Expr.${variant.name}
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "duplicate declaration \"is_Int\"") {
+		t.Fatalf("expected duplicate generated name diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func TestAnalyzeStaticFunctionSupportsNamedAndDefaultArgs(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_named_defaults.elisa", `static def answer(step: i64, base: i64 = 40) -> i64:
 	return base + step

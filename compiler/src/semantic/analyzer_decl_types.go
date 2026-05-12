@@ -135,6 +135,8 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				storeDecl := synthesizedStoreDeclFromStruct(n)
 				st := &StructType{
 					Name:             qualifiedName,
+					Namespace:        scoped.Namespace,
+					Usings:           append([]string(nil), scoped.Usings...),
 					TypeParams:       append([]string(nil), n.TypeParams...),
 					RefStorageParams: append([]string(nil), n.RefStorageParams...),
 					RefStateParams:   append([]string(nil), n.RefStateParams...),
@@ -175,6 +177,8 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				}
 				st := &StructType{
 					Name:            qualifiedName,
+					Namespace:       scoped.Namespace,
+					Usings:          append([]string(nil), scoped.Usings...),
 					Fields:          map[string]Field{},
 					Decl:            &ast.StructDecl{Position: n.Position, Annotations: append([]ast.Annotation(nil), n.Annotations...), Name: n.Name, ReprC: true, Fields: storeFields},
 					StoreDecl:       n,

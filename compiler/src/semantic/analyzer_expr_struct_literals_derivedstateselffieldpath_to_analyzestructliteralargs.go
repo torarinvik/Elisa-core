@@ -129,8 +129,23 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			if len(expr.Spreads) != 0 {
 				continue
 			}
-			a.errorf(expr.Pos(), "struct literal %q is missing field %q", expr.Name, fieldDecl.Name)
-			ok = false
+			field, exists := base.Fields[fieldDecl.Name]
+			if !exists {
+				a.errorf(expr.Pos(), "struct literal %q is missing field %q", expr.Name, fieldDecl.Name)
+				ok = false
+				continue
+			}
+			expected := field.Type
+			if len(bindings) > 0 {
+				expected = a.substituteType(expected, bindings, nil, regionBindings, nil)
+			}
+			defaultExpr, defaultOK := a.analyzeStructFieldDefaultExpr(base, fieldDecl, expected)
+			if !defaultOK {
+				a.errorf(expr.Pos(), "struct literal %q is missing field %q", expr.Name, fieldDecl.Name)
+				ok = false
+				continue
+			}
+			ordered[i] = defaultExpr
 		}
 		if ok {
 			expr.ResolvedArgsValid = true
@@ -147,9 +162,39 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		a.errorf(expr.Pos(), "struct literal spread requires named field overrides")
 	}
 	expr.ResolvedArgsValid = true
-	expr.ResolvedArgs = expr.Args
-	if len(expr.Args) != len(base.Decl.Fields) {
+	if len(expr.Args) > len(base.Decl.Fields) {
+		expr.ResolvedArgs = expr.Args
 		a.errorf(expr.Pos(), "struct literal %q expects %d arguments, got %d", expr.Name, len(base.Decl.Fields), len(expr.Args))
+	} else if len(expr.Args) < len(base.Decl.Fields) {
+		ordered := make([]ast.Expr, len(base.Decl.Fields))
+		copy(ordered, expr.Args)
+		ok := true
+		for i := len(expr.Args); i < len(base.Decl.Fields); i++ {
+			fieldDecl := base.Decl.Fields[i]
+			field, exists := base.Fields[fieldDecl.Name]
+			if !exists {
+				ok = false
+				continue
+			}
+			expected := field.Type
+			if len(bindings) > 0 {
+				expected = a.substituteType(expected, bindings, nil, regionBindings, nil)
+			}
+			defaultExpr, defaultOK := a.analyzeStructFieldDefaultExpr(base, fieldDecl, expected)
+			if !defaultOK {
+				ok = false
+				break
+			}
+			ordered[i] = defaultExpr
+		}
+		if ok {
+			expr.ResolvedArgs = ordered
+		} else {
+			expr.ResolvedArgs = expr.Args
+			a.errorf(expr.Pos(), "struct literal %q expects %d arguments, got %d", expr.Name, len(base.Decl.Fields), len(expr.Args))
+		}
+	} else {
+		expr.ResolvedArgs = expr.Args
 	}
 	limit := len(expr.Args)
 	if len(base.Decl.Fields) < limit {
@@ -176,4 +221,49 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 	for i := limit; i < len(expr.Args); i++ {
 		a.analyzeExpr(expr.Args[i])
 	}
+}
+
+func (a *Analyzer) analyzeStructFieldDefaultExpr(base *StructType, field ast.FieldDecl, expected Type) (ast.Expr, bool) {
+	if field.DefaultValue == nil {
+		return nil, false
+	}
+	defaultExpr := cloneDefaultArgExpr(field.DefaultValue)
+	if defaultExpr == nil {
+		a.errorf(field.Position, "default value for struct field %q uses unsupported syntax in v1", field.Name)
+		return nil, false
+	}
+	analyze := func() bool {
+		savedScope := a.currentScope
+		savedReturn := a.currentReturn
+		savedFuncDecl := a.currentFuncDecl
+		savedFuncType := a.currentFuncType
+		savedImplicitScopes := a.currentImplicitScopes
+		a.currentScope = NewScope(a.globalScope)
+		a.currentReturn = nil
+		a.currentFuncDecl = nil
+		a.currentFuncType = nil
+		a.currentImplicitScopes = nil
+		var actual Type = invalidType
+		defaultExpr, actual = a.analyzeCallLikeValueExpr(defaultExpr, expected)
+		a.currentScope = savedScope
+		a.currentReturn = savedReturn
+		a.currentFuncDecl = savedFuncDecl
+		a.currentFuncType = savedFuncType
+		a.currentImplicitScopes = savedImplicitScopes
+		if !AssignableTo(expected, actual) {
+			a.errorf(field.DefaultValue.Pos(), "default value for struct field %q expects %s, got %s", field.Name, expected, actual)
+			a.reportShapeMismatchNotes(field.DefaultValue.Pos(), expected, actual)
+			return false
+		}
+		return true
+	}
+	ok := false
+	if base != nil && (base.Namespace != "" || len(base.Usings) != 0) {
+		a.withResolutionContext(base.Namespace, base.Usings, func() {
+			ok = analyze()
+		})
+	} else {
+		ok = analyze()
+	}
+	return defaultExpr, ok
 }

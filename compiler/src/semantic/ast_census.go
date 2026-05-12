@@ -37,6 +37,13 @@ func (c *analyzerASTCensus) countDecl(decl ast.Decl) {
 		for _, param := range n.Params {
 			c.countExpr(param.DefaultValue)
 		}
+	case *ast.StructDecl:
+		for _, field := range n.Fields {
+			c.countExpr(field.DefaultValue)
+		}
+		for _, state := range n.DerivedStates {
+			c.countExpr(state.Condition)
+		}
 	case *ast.NamespaceDecl:
 		c.countDecls(n.Decls)
 	case *ast.GlobalDecl:
@@ -68,6 +75,29 @@ func (c *analyzerASTCensus) countDecl(decl ast.Decl) {
 			if item.Message != nil {
 				c.countExpr(item.Message)
 			}
+		}
+	case *ast.StaticGenerateDecl:
+		c.countStaticGenerateStmts(n.Body)
+	}
+}
+
+func (c *analyzerASTCensus) countStaticGenerateStmts(stmts []ast.StaticGenerateStmt) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.StaticGenerateForDecl:
+			c.countExpr(n.Source)
+			if n.Filter != nil {
+				c.countExpr(n.Filter)
+			}
+			c.countStaticGenerateStmts(n.Body)
+		case *ast.StaticGenerateIfDecl:
+			c.countExpr(n.Cond)
+			c.countStaticGenerateStmts(n.Then)
+			for _, elif := range n.Elifs {
+				c.countExpr(elif.Cond)
+				c.countStaticGenerateStmts(elif.Body)
+			}
+			c.countStaticGenerateStmts(n.Else)
 		}
 	}
 }

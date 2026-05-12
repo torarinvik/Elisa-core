@@ -1,0 +1,11 @@
+enum StaticGenerateExpr:
+    Int(value: i64)
+    Bool(value: bool)
+
+static generate:
+    for variant in variants(StaticGenerateExpr):
+        emit def static_generate_expr_is_${variant.name}(expr: StaticGenerateExpr) -> bool:
+            return expr is StaticGenerateExpr.${variant.name}
+
+def static_generate_score(expr: StaticGenerateExpr) -> i64:
+    return 1 if static_generate_expr_is_Int(expr) else 2

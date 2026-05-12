@@ -338,6 +338,9 @@ func (f *formatter) writeField(level int, field ast.FieldDecl) {
 		line += "tail "
 	}
 	line += formatTypeExpr(field.Type)
+	if field.DefaultValue != nil {
+		line += " = " + formatExpr(field.DefaultValue)
+	}
 	f.writeLine(level, line)
 }
 func formatExprWithSurfacePermissions(expr ast.Expr, permissions []ast.PermissionRef) string {

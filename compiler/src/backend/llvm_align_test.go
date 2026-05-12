@@ -181,6 +181,28 @@ def folded() -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersStaticGeneratedFunctions(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_generate.elisa", `enum Expr:
+    Int(value: i64)
+    Bool(value: bool)
+
+static generate:
+    for variant in variants(Expr):
+        emit def is_${variant.name}(expr: Expr) -> bool:
+            return expr is Expr.${variant.name}
+
+def folded(expr: Expr) -> bool:
+    return is_Int(expr) or is_Bool(expr)
+`)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@is_Int") || !strings.Contains(output, "@is_Bool") {
+		t.Fatalf("expected generated functions in IR, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRChecksStaticBlockWithLayoutIntrospection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_block_layout_introspection.elisa", `struct Header layout c:
     tag: u8
