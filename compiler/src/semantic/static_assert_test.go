@@ -182,3 +182,34 @@ def keep() -> void:
 	static assert countdown(4) == 0
 `)
 }
+
+func TestAnalyzeStaticFunctionRejectsIndirectRecursion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_rejects_indirect_recursion.elisa", `static def odd(n: i64) -> bool:
+	if n == 0:
+		return false
+	return even(n - 1)
+
+static def even(n: i64) -> bool:
+	if n == 0:
+		return true
+	return odd(n - 1)
+
+def keep() -> void:
+	static assert even(4)
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `indirect recursive static call cycle`) {
+		t.Fatalf("expected indirect static recursion diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func TestAnalyzeStaticFunctionAcceptsAcyclicStaticCall(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_acyclic_call.elisa", `static def base() -> i64:
+	return 40
+
+static def answer(step: i64) -> i64:
+	return base() + step
+
+def keep() -> void:
+	static assert answer(2) == 42
+`)
+}

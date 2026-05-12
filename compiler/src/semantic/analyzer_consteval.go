@@ -741,13 +741,194 @@ func (a *Analyzer) validateStaticRecursiveCall(fn *ast.FuncDecl, call *ast.CallE
 		return
 	}
 	ident, ok := call.Func.(*ast.Ident)
-	if !ok || ident.Name != fn.Name {
+	if !ok {
+		return
+	}
+	if ident.Name != fn.Name {
+		a.validateStaticIndirectRecursiveCall(fn, call, ident.Name)
 		return
 	}
 	if staticRecursiveCallHasDecreasingArg(fn, call) {
 		return
 	}
 	a.errorf(call.Pos(), "recursive static call to %q must decrease a parameter using parameter - positive_constant", fn.Name)
+}
+
+func (a *Analyzer) validateStaticIndirectRecursiveCall(fn *ast.FuncDecl, call *ast.CallExpr, calleeName string) {
+	callee := a.staticFunctionDeclByName(calleeName)
+	if callee == nil || callee == fn {
+		return
+	}
+	if !a.staticFunctionEventuallyCalls(callee, fn.Name, map[*ast.FuncDecl]bool{}) {
+		return
+	}
+	a.errorf(call.Pos(), "indirect recursive static call cycle involving %q and %q is not supported; use direct structurally decreasing recursion", fn.Name, callee.Name)
+}
+
+func (a *Analyzer) staticFunctionDeclByName(name string) *ast.FuncDecl {
+	sym, _, ok := a.lookupVisibleGlobal(name)
+	if !ok || sym == nil {
+		return nil
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || !fnType.Static {
+		return nil
+	}
+	decl, ok := sym.Node.(*ast.FuncDecl)
+	if !ok || decl == nil || !decl.Static {
+		return nil
+	}
+	return decl
+}
+
+func (a *Analyzer) staticFunctionEventuallyCalls(fn *ast.FuncDecl, targetName string, seen map[*ast.FuncDecl]bool) bool {
+	if fn == nil {
+		return false
+	}
+	if seen[fn] {
+		return false
+	}
+	seen[fn] = true
+	return a.staticStmtsEventuallyCall(fn.Body, targetName, seen)
+}
+
+func (a *Analyzer) staticStmtsEventuallyCall(stmts []ast.Stmt, targetName string, seen map[*ast.FuncDecl]bool) bool {
+	for _, stmt := range stmts {
+		if a.staticStmtEventuallyCalls(stmt, targetName, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) staticStmtEventuallyCalls(stmt ast.Stmt, targetName string, seen map[*ast.FuncDecl]bool) bool {
+	switch n := stmt.(type) {
+	case *ast.ReturnStmt:
+		return a.staticExprEventuallyCalls(n.Value, targetName, seen)
+	case *ast.VarDeclStmt:
+		return a.staticExprEventuallyCalls(n.Value, targetName, seen)
+	case *ast.AssignStmt:
+		return a.staticExprEventuallyCalls(n.Target, targetName, seen) || a.staticExprEventuallyCalls(n.Value, targetName, seen)
+	case *ast.AugAssignStmt:
+		return a.staticExprEventuallyCalls(n.Target, targetName, seen) || a.staticExprEventuallyCalls(n.Value, targetName, seen)
+	case *ast.ExprStmt:
+		return a.staticExprEventuallyCalls(n.Expr, targetName, seen)
+	case *ast.StaticAssertStmt:
+		return a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticExprEventuallyCalls(n.Message, targetName, seen)
+	case *ast.StaticErrorStmt:
+		return a.staticExprEventuallyCalls(n.Message, targetName, seen)
+	case *ast.IfStmt:
+		if a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticStmtsEventuallyCall(n.Then, targetName, seen) || a.staticStmtsEventuallyCall(n.Else, targetName, seen) {
+			return true
+		}
+		for _, elif := range n.Elifs {
+			if a.staticExprEventuallyCalls(elif.Cond, targetName, seen) || a.staticStmtsEventuallyCall(elif.Body, targetName, seen) {
+				return true
+			}
+		}
+	case *ast.StaticIfStmt:
+		if a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticStmtsEventuallyCall(n.Then, targetName, seen) || a.staticStmtsEventuallyCall(n.Else, targetName, seen) {
+			return true
+		}
+		for _, elif := range n.Elifs {
+			if a.staticExprEventuallyCalls(elif.Cond, targetName, seen) || a.staticStmtsEventuallyCall(elif.Body, targetName, seen) {
+				return true
+			}
+		}
+	case *ast.StaticBlockStmt:
+		return a.staticStmtsEventuallyCall(n.Body, targetName, seen)
+	case *ast.WhileStmt:
+		return a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticStmtsEventuallyCall(n.Body, targetName, seen)
+	case *ast.ForStmt:
+		return a.staticExprEventuallyCalls(n.Start, targetName, seen) || a.staticExprEventuallyCalls(n.End, targetName, seen) || a.staticExprEventuallyCalls(n.Step, targetName, seen) || a.staticStmtsEventuallyCall(n.Body, targetName, seen)
+	}
+	return false
+}
+
+func (a *Analyzer) staticExprEventuallyCalls(expr ast.Expr, targetName string, seen map[*ast.FuncDecl]bool) bool {
+	if expr == nil {
+		return false
+	}
+	switch n := expr.(type) {
+	case *ast.BinaryExpr:
+		return a.staticExprEventuallyCalls(n.Left, targetName, seen) || a.staticExprEventuallyCalls(n.Right, targetName, seen)
+	case *ast.UnaryExpr:
+		return a.staticExprEventuallyCalls(n.Operand, targetName, seen)
+	case *ast.MoveExpr:
+		return a.staticExprEventuallyCalls(n.Operand, targetName, seen)
+	case *ast.ParenExpr:
+		return a.staticExprEventuallyCalls(n.Inner, targetName, seen)
+	case *ast.CastExpr:
+		return a.staticExprEventuallyCalls(n.Operand, targetName, seen)
+	case *ast.TernaryExpr:
+		return a.staticExprEventuallyCalls(n.Value, targetName, seen) || a.staticExprEventuallyCalls(n.Cond, targetName, seen) || a.staticExprEventuallyCalls(n.Alt, targetName, seen)
+	case *ast.FieldExpr:
+		return a.staticExprEventuallyCalls(n.Object, targetName, seen)
+	case *ast.IndexExpr:
+		return a.staticExprEventuallyCalls(n.Object, targetName, seen) || a.staticExprEventuallyCalls(n.Index, targetName, seen) || a.staticExprEventuallyCalls(n.Fallback, targetName, seen)
+	case *ast.SliceExpr:
+		return a.staticExprEventuallyCalls(n.Object, targetName, seen) || a.staticExprEventuallyCalls(n.Start, targetName, seen) || a.staticExprEventuallyCalls(n.End, targetName, seen)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			if a.staticExprEventuallyCalls(elem, targetName, seen) {
+				return true
+			}
+		}
+	case *ast.MembershipRangeExpr:
+		return a.staticExprEventuallyCalls(n.Start, targetName, seen) || a.staticExprEventuallyCalls(n.End, targetName, seen)
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			if a.staticExprEventuallyCalls(elem, targetName, seen) {
+				return true
+			}
+		}
+	case *ast.CallExpr:
+		ident, ok := n.Func.(*ast.Ident)
+		if ok {
+			if ident.Name == targetName {
+				return true
+			}
+			if callee := a.staticFunctionDeclByName(ident.Name); callee != nil && a.staticFunctionEventuallyCalls(callee, targetName, seen) {
+				return true
+			}
+		}
+		if a.staticExprEventuallyCalls(n.Func, targetName, seen) {
+			return true
+		}
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		for _, arg := range args {
+			if a.staticExprEventuallyCalls(arg, targetName, seen) {
+				return true
+			}
+		}
+	case *ast.StructLitExpr:
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		for _, arg := range args {
+			if a.staticExprEventuallyCalls(arg, targetName, seen) {
+				return true
+			}
+		}
+	case *ast.RecordUpdateExpr:
+		if a.staticExprEventuallyCalls(n.Base, targetName, seen) {
+			return true
+		}
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		for _, arg := range args {
+			if a.staticExprEventuallyCalls(arg, targetName, seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func staticRecursiveCallHasDecreasingArg(fn *ast.FuncDecl, call *ast.CallExpr) bool {
