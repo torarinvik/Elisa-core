@@ -174,7 +174,7 @@ def keep() -> void:
 
 func TestAnalyzeStaticFunctionAcceptsDecreasingRecursion(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_total_recursion.elisa", `static def countdown(n: i64) -> i64:
-	if n == 0:
+	if n <= 0:
 		return 0
 	return countdown(n - 1)
 
@@ -183,14 +183,28 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionRejectsDecreasingRecursionWithoutTotalBaseCase(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_rejects_decreasing_without_total_base.elisa", `static def countdown(n: i64) -> i64:
+	if n == 0:
+		return 0
+	return countdown(n - 1)
+
+def keep() -> void:
+	static assert countdown(4) == 0
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `must have a visible terminating base case`) {
+		t.Fatalf("expected static base-case diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func TestAnalyzeStaticFunctionRejectsIndirectRecursion(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_rejects_indirect_recursion.elisa", `static def odd(n: i64) -> bool:
-	if n == 0:
+	if n <= 0:
 		return false
 	return even(n - 1)
 
 static def even(n: i64) -> bool:
-	if n == 0:
+	if n <= 0:
 		return true
 	return odd(n - 1)
 

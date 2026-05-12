@@ -793,7 +793,7 @@ Current rules:
 - `static assert` is valid at top level and inside statement blocks
 - `static:` blocks group static-only statements inside runtime functions; inside the block, `assert`, `if` / `elif` / `else`, and `error(...)` are static by context
 - `static def` declares a compile-time-only function; static assertions and static expression statements may call simple static functions with compile-time locals, assignments, conditionals, bounded loops, named arguments, defaults, and direct structurally decreasing recursion, while runtime calls are rejected
-- static functions must return on all paths; direct recursive static calls must visibly decrease a parameter with `parameter - positive_constant`, indirect recursive static cycles are rejected for now, and the evaluator still keeps a depth limit as a backstop
+- static functions must return on all paths; direct recursive static calls must visibly decrease a parameter with `parameter - positive_constant` and have a visible lower-bound base case such as `if n <= 0: return ...`; indirect recursive static cycles are rejected for now, and the evaluator still keeps a depth limit as a backstop
 - the condition must type-check as `bool`
 - if the condition is a semantic compile-time constant, a false value is reported before backend lowering
 - target-aware layout intrinsics are accepted in static assertions and checked during backend lowering

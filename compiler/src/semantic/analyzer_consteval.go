@@ -629,7 +629,11 @@ func (a *Analyzer) validateStaticRecursiveCall(fn *ast.FuncDecl, call *ast.CallE
 		a.validateStaticIndirectRecursiveCall(fn, call, ident.Name)
 		return
 	}
-	if staticRecursiveCallHasDecreasingArg(fn, call) {
+	if paramName, ok := staticRecursiveCallDecreasingParam(fn, call); ok {
+		if staticFunctionHasBaseCaseForParam(fn, paramName) {
+			return
+		}
+		a.errorf(call.Pos(), "recursive static call to %q must have a visible terminating base case for parameter %q", fn.Name, paramName)
 		return
 	}
 	a.errorf(call.Pos(), "recursive static call to %q must decrease a parameter using parameter - positive_constant", fn.Name)
@@ -881,20 +885,20 @@ func (a *Analyzer) walkStaticExpr(expr ast.Expr, visitExpr func(ast.Expr) bool) 
 	return false
 }
 
-func staticRecursiveCallHasDecreasingArg(fn *ast.FuncDecl, call *ast.CallExpr) bool {
+func staticRecursiveCallDecreasingParam(fn *ast.FuncDecl, call *ast.CallExpr) (string, bool) {
 	args := call.Args
 	if call.ResolvedArgsValid {
 		args = call.ResolvedArgs
 	}
 	if len(args) != len(fn.Params) {
-		return false
+		return "", false
 	}
 	for index, param := range fn.Params {
 		if staticExprIsPositiveDecrementOfParam(args[index], param.Name) {
-			return true
+			return param.Name, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func staticExprIsPositiveDecrementOfParam(expr ast.Expr, paramName string) bool {
@@ -912,6 +916,95 @@ func staticExprIsPositiveDecrementOfParam(expr ast.Expr, paramName string) bool 
 	}
 	value, ok := ParseIntLiteral(lit)
 	return ok && value > 0
+}
+
+func staticFunctionHasBaseCaseForParam(fn *ast.FuncDecl, paramName string) bool {
+	if fn == nil {
+		return false
+	}
+	return staticStmtsContainBaseCaseForParam(fn.Body, paramName)
+}
+
+func staticStmtsContainBaseCaseForParam(stmts []ast.Stmt, paramName string) bool {
+	for _, stmt := range stmts {
+		if staticStmtContainsBaseCaseForParam(stmt, paramName) {
+			return true
+		}
+	}
+	return false
+}
+
+func staticStmtContainsBaseCaseForParam(stmt ast.Stmt, paramName string) bool {
+	switch n := stmt.(type) {
+	case *ast.IfStmt:
+		return staticIfContainsBaseCaseForParam(n.Cond, n.Then, n.Else, paramName) || staticStmtsContainBaseCaseForParam(n.Then, paramName) || staticStmtsContainBaseCaseForParam(n.Else, paramName)
+	case *ast.StaticIfStmt:
+		return staticIfContainsBaseCaseForParam(n.Cond, n.Then, n.Else, paramName) || staticStmtsContainBaseCaseForParam(n.Then, paramName) || staticStmtsContainBaseCaseForParam(n.Else, paramName)
+	case *ast.StaticBlockStmt:
+		return staticStmtsContainBaseCaseForParam(n.Body, paramName)
+	default:
+		return false
+	}
+}
+
+func staticIfContainsBaseCaseForParam(cond ast.Expr, then []ast.Stmt, elseStmts []ast.Stmt, paramName string) bool {
+	comparison, ok := cond.(*ast.BinaryExpr)
+	if !ok {
+		return false
+	}
+	leftParam, leftOK := staticExprIdentName(comparison.Left)
+	rightValue, rightOK := staticExprIntegerLiteral(comparison.Right)
+	if leftOK && rightOK && leftParam == paramName {
+		return staticParamComparisonTerminatesOnThen(comparison.Op, rightValue) && staticStmtBlockAlwaysTerminates(then)
+	}
+	rightParam, rightParamOK := staticExprIdentName(comparison.Right)
+	leftValue, leftValueOK := staticExprIntegerLiteral(comparison.Left)
+	if rightParamOK && leftValueOK && rightParam == paramName {
+		return staticParamComparisonTerminatesOnThen(staticReverseComparisonOp(comparison.Op), leftValue) && staticStmtBlockAlwaysTerminates(then)
+	}
+	return false
+}
+
+func staticExprIdentName(expr ast.Expr) (string, bool) {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	return ident.Name, true
+}
+
+func staticExprIntegerLiteral(expr ast.Expr) (int64, bool) {
+	lit, ok := expr.(*ast.IntLit)
+	if !ok {
+		return 0, false
+	}
+	return ParseIntLiteral(lit)
+}
+
+func staticParamComparisonTerminatesOnThen(op lexer.TokenKind, value int64) bool {
+	switch op {
+	case lexer.TOKEN_LTEQ:
+		return value >= 0
+	case lexer.TOKEN_LT:
+		return value > 0
+	default:
+		return false
+	}
+}
+
+func staticReverseComparisonOp(op lexer.TokenKind) lexer.TokenKind {
+	switch op {
+	case lexer.TOKEN_LT:
+		return lexer.TOKEN_GT
+	case lexer.TOKEN_GT:
+		return lexer.TOKEN_LT
+	case lexer.TOKEN_LTEQ:
+		return lexer.TOKEN_GTEQ
+	case lexer.TOKEN_GTEQ:
+		return lexer.TOKEN_LTEQ
+	default:
+		return op
+	}
 }
 
 func (a *Analyzer) setConstEvalValue(name string, value ConstValue) {
