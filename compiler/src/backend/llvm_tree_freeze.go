@@ -55,7 +55,7 @@ func (s *functionState) emitTreeStoreFreezeLayout(storeValue C.LLVMValueRef, sto
 			return err
 		}
 		if plan.isSoA() {
-			if err := s.emitTreeFreezeCategoryColumnPointers(stateValue, category, tagColumn, name+"."+sanitizeIdentifier(category.Name)); err != nil {
+			if err := s.emitTreeFreezeCategoryColumnPointers(arenaRef, stateValue, family, category, tagColumn, name+"."+sanitizeIdentifier(category.Name)); err != nil {
 				return err
 			}
 		}
@@ -103,7 +103,7 @@ func (s *functionState) emitTreeFreezeCategoryTagColumn(arenaRef C.LLVMValueRef,
 	return dest, nil
 }
 
-func (s *functionState) emitTreeFreezeCategoryColumnPointers(stateValue C.LLVMValueRef, category *semantic.TreeCategoryType, tagColumn C.LLVMValueRef, name string) error {
+func (s *functionState) emitTreeFreezeCategoryColumnPointers(arenaRef C.LLVMValueRef, stateValue C.LLVMValueRef, family *semantic.TreeType, category *semantic.TreeCategoryType, tagColumn C.LLVMValueRef, name string) error {
 	columnsPtr, err := s.emitTreeCategoryFrozenColumnsPtr(stateValue, category, name+".columns")
 	if err != nil {
 		return err
@@ -114,11 +114,108 @@ func (s *functionState) emitTreeFreezeCategoryColumnPointers(stateValue C.LLVMVa
 	}
 	tagPtr := C.LLVMBuildStructGEP2(s.builder, columnsType, columnsPtr, 0, cStringFree(name+".columns.tags.ptr"))
 	C.LLVMBuildStore(s.builder, tagColumn, tagPtr)
-	nullPtr := C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0))
-	for i := range treeCategorySoAColumnNames(category) {
-		fieldPtr := C.LLVMBuildStructGEP2(s.builder, columnsType, columnsPtr, C.unsigned(i+1), cStringFree(name+".columns.field.ptr"))
-		C.LLVMBuildStore(s.builder, nullPtr, fieldPtr)
+	tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, family, category, name+".columns")
+	if err != nil {
+		return err
 	}
+	countValue, err := s.emitTreeCategoryUnionTableCountValue(tablePtr, category, name+".columns")
+	if err != nil {
+		return err
+	}
+	nullPtr := C.LLVMConstPointerNull(C.LLVMPointerTypeInContext(s.g.context, 0))
+	for i, column := range treeCategorySoAColumnNames(category) {
+		value := nullPtr
+		if field, ok := category.Common[column]; ok {
+			columnValue, err := s.emitTreeFreezeCategoryCommonFieldColumn(arenaRef, tablePtr, countValue, category, column, field, name+"."+sanitizeIdentifier(column))
+			if err != nil {
+				return err
+			}
+			value = columnValue
+		}
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, columnsType, columnsPtr, C.unsigned(i+1), cStringFree(name+".columns.field.ptr"))
+		C.LLVMBuildStore(s.builder, value, fieldPtr)
+	}
+	return nil
+}
+
+func (s *functionState) emitTreeFreezeCategoryCommonFieldColumn(arenaRef C.LLVMValueRef, tablePtr C.LLVMValueRef, countValue C.LLVMValueRef, category *semantic.TreeCategoryType, fieldName string, field semantic.Field, name string) (C.LLVMValueRef, error) {
+	elemLLVMType, err := s.g.lowerType(field.Type)
+	if err != nil {
+		return nil, err
+	}
+	elemSize, err := s.g.abiSizeOfLLVMType(elemLLVMType)
+	if err != nil {
+		return nil, err
+	}
+	bytes, err := s.emitTreeFreezeByteCount(countValue, elemSize, name)
+	if err != nil {
+		return nil, err
+	}
+	dest, err := s.emitTreeFreezeArenaAlloc(arenaRef, bytes, name)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.emitTreeFreezePopulateCommonFieldColumn(dest, elemLLVMType, tablePtr, countValue, category, fieldName, name); err != nil {
+		return nil, err
+	}
+	return dest, nil
+}
+
+func (s *functionState) emitTreeFreezePopulateCommonFieldColumn(dest C.LLVMValueRef, elemLLVMType C.LLVMTypeRef, tablePtr C.LLVMValueRef, countValue C.LLVMValueRef, category *semantic.TreeCategoryType, fieldName string, name string) error {
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return err
+	}
+	zero := C.LLVMConstInt(usizeType, 0, 0)
+	one := C.LLVMConstInt(usizeType, 1, 0)
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	condBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".cond"))
+	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".body"))
+	nextBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".next"))
+	endBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".end"))
+	C.LLVMBuildBr(s.builder, condBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, condBB)
+	indexValue := C.LLVMBuildPhi(s.builder, usizeType, cStringFree(name+".index"))
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr([]C.LLVMValueRef{zero}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{entryBlock}), 1)
+	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree(name+".has_more"))
+	C.LLVMBuildCondBr(s.builder, hasMore, bodyBB, endBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	tagValue, err := s.emitTreeCategoryUnionKindValueAtIndex(tablePtr, category, indexValue, name)
+	if err != nil {
+		return err
+	}
+	switchInst := C.LLVMBuildSwitch(s.builder, tagValue, nextBB, C.unsigned(len(category.Variants)))
+	for _, variant := range category.Variants {
+		if variant == nil {
+			continue
+		}
+		caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+"."+sanitizeIdentifier(variant.Name)))
+		C.LLVMAddCase(switchInst, C.LLVMConstInt(C.LLVMTypeOf(tagValue), C.ulonglong(variant.Tag), 0), caseBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
+		payloadValue, _, err := s.emitTreeCategoryUnionPayloadValueAtIndex(tablePtr, category, variant, indexValue, name+"."+sanitizeIdentifier(variant.Name))
+		if err != nil {
+			return err
+		}
+		memberType := category.VariantViewType(variant)
+		fieldIndex, _, err := treeExactFieldIndex(memberType, fieldName)
+		if err != nil {
+			return err
+		}
+		fieldValue := C.LLVMBuildExtractValue(s.builder, payloadValue, C.unsigned(fieldIndex), cStringFree(name+".field"))
+		destPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dest, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".dest.ptr"))
+		C.LLVMBuildStore(s.builder, fieldValue, destPtr)
+		C.LLVMBuildBr(s.builder, nextBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree(name+".index.next"))
+	nextBlock := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, condBB)
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr([]C.LLVMValueRef{nextIndex}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{nextBlock}), 1)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, endBB)
 	return nil
 }
 
@@ -232,6 +329,56 @@ func (s *functionState) emitTreeTagsHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	return s.buildTreeFrozenColumnDView(dataPtr, countValue, resultType, "tree.tags")
 }
 
+func (s *functionState) emitTreeColumnHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 3 {
+		return nil, nil, true, fmt.Errorf("tree_column expects 3 arguments, got %d", len(expr.Args))
+	}
+	storeType, ok := s.exprType(expr.Args[0]).(*semantic.TreeStoreType)
+	if !ok || storeType == nil || storeType.Family == nil {
+		return nil, nil, true, fmt.Errorf("tree_column expects a frozen tree store")
+	}
+	if !semantic.IsFrozenTreeStoreType(storeType) {
+		return nil, nil, true, fmt.Errorf("tree_column expects a frozen tree store, got %s", storeType)
+	}
+	categoryName, ok := s.staticCStringLiteral(expr.Args[1])
+	if !ok {
+		return nil, nil, true, fmt.Errorf("tree_column category argument must be a compile-time string")
+	}
+	fieldName, ok := s.staticCStringLiteral(expr.Args[2])
+	if !ok {
+		return nil, nil, true, fmt.Errorf("tree_column field argument must be a compile-time string")
+	}
+	category, ok := treeCategoryByName(storeType.Family, categoryName)
+	if !ok {
+		return nil, nil, true, fmt.Errorf("tree family %s has no category %q", storeType.Family.Name, categoryName)
+	}
+	if _, ok := category.Common[fieldName]; !ok {
+		return nil, nil, true, fmt.Errorf("tree_column currently supports common fields only; category %s has no common field %q", category.Name, fieldName)
+	}
+	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
+	if !ok || resultType == nil {
+		return nil, nil, true, fmt.Errorf("tree_column result type is missing dview metadata")
+	}
+	storeValue, _, err := s.emitExpr(expr.Args[0], storeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.column.state")
+	tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, storeType.Family, category, "tree.column")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	countValue, err := s.emitTreeCategoryUnionTableCountValue(tablePtr, category, "tree.column")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dataPtr, err := s.emitTreeFrozenFieldColumnPointer(stateValue, category, fieldName, "tree.column")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return s.buildTreeFrozenColumnDView(dataPtr, countValue, resultType, "tree.column")
+}
+
 func treeCategoryByName(family *semantic.TreeType, name string) (*semantic.TreeCategoryType, bool) {
 	if family == nil {
 		return nil, false
@@ -277,6 +424,35 @@ func (s *functionState) emitTreeFrozenTagColumnPointer(stateValue C.LLVMValueRef
 		}
 	}
 	return nil, fmt.Errorf("tree_tags requires @layout(soa) or @index(kind) on category %s", category.Name)
+}
+
+func (s *functionState) emitTreeFrozenFieldColumnPointer(stateValue C.LLVMValueRef, category *semantic.TreeCategoryType, fieldName string, name string) (C.LLVMValueRef, error) {
+	if category == nil {
+		return nil, fmt.Errorf("missing tree field column category")
+	}
+	columnsPtr, err := s.emitTreeCategoryFrozenColumnsPtr(stateValue, category, name+".columns")
+	if err != nil {
+		return nil, err
+	}
+	columnsType, err := s.g.ensureTreeCategoryFrozenColumnsType(category)
+	if err != nil {
+		return nil, err
+	}
+	columnIndex := treeCategorySoAColumnIndex(category, fieldName)
+	if columnIndex < 0 {
+		return nil, fmt.Errorf("tree category %s has no frozen column %q", category.Name, fieldName)
+	}
+	fieldPtr := C.LLVMBuildStructGEP2(s.builder, columnsType, columnsPtr, C.unsigned(columnIndex+1), cStringFree(name+".columns.field.ptr"))
+	return C.LLVMBuildLoad2(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), fieldPtr, cStringFree(name+".columns.field")), nil
+}
+
+func treeCategorySoAColumnIndex(category *semantic.TreeCategoryType, fieldName string) int {
+	for i, name := range treeCategorySoAColumnNames(category) {
+		if name == fieldName {
+			return i
+		}
+	}
+	return -1
 }
 
 func (s *functionState) buildTreeFrozenColumnDView(dataPtr C.LLVMValueRef, countValue C.LLVMValueRef, viewType *semantic.DArrayViewType, name string) (C.LLVMValueRef, semantic.Type, bool, error) {

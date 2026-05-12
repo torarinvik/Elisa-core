@@ -221,6 +221,8 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 		return s.emitReduceSumHelperCall(expr)
 	case "tree_tags":
 		return s.emitTreeTagsHelperCall(expr)
+	case "tree_column":
+		return s.emitTreeColumnHelperCall(expr)
 	case "zip_map":
 		return s.emitZipMapHelperCall(expr)
 	default:

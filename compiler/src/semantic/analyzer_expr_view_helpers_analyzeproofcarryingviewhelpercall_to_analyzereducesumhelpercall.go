@@ -25,11 +25,60 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 		return a.analyzeReduceSumHelperCall(expr), true
 	case "tree_tags":
 		return a.analyzeTreeTagsHelperCall(expr), true
+	case "tree_column":
+		return a.analyzeTreeColumnHelperCall(expr), true
 	case "zip_map":
 		return a.analyzeZipMapHelperCall(expr), true
 	default:
 		return nil, false
 	}
+}
+
+func (a *Analyzer) analyzeTreeColumnHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 3 {
+		a.errorf(expr.Pos(), "tree_column expects 3 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	storeType, ok := a.analyzeExpr(expr.Args[0]).(*TreeStoreType)
+	if !ok || storeType == nil || storeType.Family == nil {
+		actual := a.exprTypes[expr.Args[0]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[0].Pos(), "tree_column expects a frozen tree store, got %s", actual)
+		return invalidType
+	}
+	if !IsFrozenTreeStoreType(storeType) {
+		a.errorf(expr.Args[0].Pos(), "tree_column expects a frozen tree store, got %s", storeType)
+	}
+	categoryName, ok := a.evalConstStringExpr(expr.Args[1])
+	if !ok {
+		a.errorf(expr.Args[1].Pos(), "tree_column category argument must be a compile-time string")
+		return invalidType
+	}
+	fieldName, ok := a.evalConstStringExpr(expr.Args[2])
+	if !ok {
+		a.errorf(expr.Args[2].Pos(), "tree_column field argument must be a compile-time string")
+		return invalidType
+	}
+	member, ok := storeType.Family.Member(categoryName)
+	category, _ := member.(*TreeCategoryType)
+	if !ok || category == nil {
+		a.errorf(expr.Args[1].Pos(), "tree family %s has no category %q", storeType.Family.Name, categoryName)
+		return invalidType
+	}
+	if category.Layout != TreeLayoutSOA {
+		a.errorf(expr.Args[1].Pos(), "tree_column requires @layout(soa) on category %s", category.Name)
+	}
+	field, ok := category.Common[fieldName]
+	if !ok {
+		a.errorf(expr.Args[2].Pos(), "tree_column currently supports common fields only; category %s has no common field %q", category.Name, fieldName)
+		return invalidType
+	}
+	return &DArrayViewType{Elem: field.Type, SurfaceName: "dview"}
 }
 
 func (a *Analyzer) analyzeTreeTagsHelperCall(expr *ast.CallExpr) Type {

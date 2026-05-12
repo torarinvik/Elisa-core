@@ -25,8 +25,10 @@ This note documents the current LLVM backend contract for Elisa `tree` values. I
 
 - Tree allocation requires an active tree owner: `perm`, a tree store, an `Arena` value, or an `Arena` reference.
 - `freeze(move store)` accepts local tree stores and produces the matching frozen tree store type. Frozen store values preserve handle identity through the existing rebase/fact model.
-- For dense `@layout(soa)` categories, freeze publishes a frozen tag column. `@index(kind)` points at that same tag column. Field-index metadata is preserved, but field-column extraction and field-index population are still the next lowering slice.
-- `tree_tags(frozen, "Category")` returns a readonly contiguous `dview[u32]` over the frozen category tag column. It is the first SIMD-friendly query primitive and is intended to compose with `reduce_sum`, `chunks_exact`, `any`, `all`, and later `where_kind`.
+- For dense `@layout(soa)` categories, freeze publishes a frozen tag column and frozen common-field columns. `@index(kind)` points at the tag column. Variant-only payload field indexes are preserved as metadata, but payload-column extraction and field-index population are still a later slice because they need missing-value semantics for variants that do not carry the field.
+- `tree_tags(frozen, "Category")` returns a readonly contiguous `dview[u32]` over the frozen category tag column.
+- `tree_column(frozen, "Category", "field")` returns a readonly contiguous `dview[T]` over a frozen common-field column. V1 intentionally supports common fields only.
+- These column views are SIMD-friendly query primitives and are intended to compose with `reduce_sum`, `chunks_exact`, `any`, `all`, and later `where_kind`.
 - Dense `category_union` code should prefer explicit stores:
   `store = Tree.Store(owner)` followed by `in store:` around constructors, reads, visits, folds, rewrites, clones, and attributes.
 - `in owner:` remains valid for short-lived local construction/read scopes, but values that escape the scope should also carry an explicit store somewhere in the surrounding data model.
