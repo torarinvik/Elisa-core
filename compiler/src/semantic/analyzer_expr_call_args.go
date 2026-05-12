@@ -414,7 +414,7 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 func proofCarryingViewReceiverHelper(name string) bool {
 	switch name {
 	case "where", "enumerate",
-		"any", "all",
+		"any", "all", "column",
 		"readonly", "split_at", "chunks_exact", "reduce_sum":
 		return true
 	default:

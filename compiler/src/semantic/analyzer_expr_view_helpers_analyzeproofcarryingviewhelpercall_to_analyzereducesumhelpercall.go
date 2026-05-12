@@ -27,11 +27,52 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 		return a.analyzeTreeTagsHelperCall(expr), true
 	case "tree_column":
 		return a.analyzeTreeColumnHelperCall(expr), true
+	case "column":
+		return a.analyzeColumnHelperCall(expr), true
 	case "zip_map":
 		return a.analyzeZipMapHelperCall(expr), true
 	default:
 		return nil, false
 	}
+}
+
+func (a *Analyzer) analyzeColumnHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 2 {
+		a.errorf(expr.Pos(), "column expects 2 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	rowsType, ok := a.analyzeExpr(expr.Args[0]).(*FrozenTreeRowsViewType)
+	if !ok || rowsType == nil || rowsType.Category == nil {
+		actual := a.exprTypes[expr.Args[0]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[0].Pos(), "column expects a frozen tree row view, got %s", actual)
+		return invalidType
+	}
+	fieldName, ok := a.evalConstStringExpr(expr.Args[1])
+	if !ok {
+		a.errorf(expr.Args[1].Pos(), "column field argument must be a compile-time string")
+		return invalidType
+	}
+	if fieldName == "kind" {
+		if rowsType.Category.Layout != TreeLayoutSOA && !treeCategoryHasKindIndex(rowsType.Category) {
+			a.errorf(expr.Args[1].Pos(), "column(\"kind\") requires @layout(soa) or @index(kind) on category %s", rowsType.Category.Name)
+		}
+		return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "dview"}
+	}
+	if rowsType.Category.Layout != TreeLayoutSOA {
+		a.errorf(expr.Args[0].Pos(), "column requires @layout(soa) on category %s", rowsType.Category.Name)
+	}
+	field, ok := rowsType.Category.Common[fieldName]
+	if !ok {
+		a.errorf(expr.Args[1].Pos(), "column currently supports common fields only; category %s has no common field %q", rowsType.Category.Name, fieldName)
+		return invalidType
+	}
+	return &DArrayViewType{Elem: field.Type, SurfaceName: "dview"}
 }
 
 func (a *Analyzer) analyzeTreeColumnHelperCall(expr *ast.CallExpr) Type {

@@ -210,6 +210,9 @@ func SameType(a, b Type) bool {
 	case *TreeStoreType:
 		tb, ok := b.(*TreeStoreType)
 		return ok && ta.Name == tb.Name && SameType(ta.State, tb.State)
+	case *FrozenTreeRowsViewType:
+		tb, ok := b.(*FrozenTreeRowsViewType)
+		return ok && ta.Category != nil && tb.Category != nil && ta.Category.Name == tb.Category.Name && SameType(ta.Store, tb.Store)
 	case *PackedVariantViewType:
 		tb, ok := b.(*PackedVariantViewType)
 		return ok && SameType(ta.Enum, tb.Enum) && ta.Variant != nil && tb.Variant != nil && ta.Variant.Name == tb.Variant.Name

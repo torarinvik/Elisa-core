@@ -154,6 +154,11 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return g.lowerPackedEnumStoreType(tt)
 	case *semantic.TreeStoreType:
 		return g.lowerTreeStoreType(tt)
+	case *semantic.FrozenTreeRowsViewType:
+		if tt == nil || tt.Store == nil {
+			return nil, fmt.Errorf("missing frozen tree row view metadata")
+		}
+		return g.lowerTreeStoreType(tt.Store)
 	case *semantic.PackedVariantViewType:
 		return g.ensurePackedVariantViewCarrierType(tt)
 	case *semantic.TreeVariantViewType:

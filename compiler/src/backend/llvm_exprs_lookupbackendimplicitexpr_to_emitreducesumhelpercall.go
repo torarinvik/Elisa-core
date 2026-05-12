@@ -223,6 +223,8 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 		return s.emitTreeTagsHelperCall(expr)
 	case "tree_column":
 		return s.emitTreeColumnHelperCall(expr)
+	case "column":
+		return s.emitColumnHelperCall(expr)
 	case "zip_map":
 		return s.emitZipMapHelperCall(expr)
 	default:

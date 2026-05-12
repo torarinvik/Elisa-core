@@ -297,6 +297,11 @@ type TreeStoreType struct {
 	State  Type
 }
 
+type FrozenTreeRowsViewType struct {
+	Store    *TreeStoreType
+	Category *TreeCategoryType
+}
+
 type TreeLayout int
 
 const (

@@ -68,6 +68,22 @@ func (s *functionState) emitTreeStoreFreezeLayout(storeValue C.LLVMValueRef, sto
 	return nil
 }
 
+func (s *functionState) emitFrozenTreeRowsFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	rowsType, ok := s.exprType(expr).(*semantic.FrozenTreeRowsViewType)
+	if !ok || rowsType == nil {
+		return nil, nil, false, nil
+	}
+	storeType, ok := s.exprType(expr.Object).(*semantic.TreeStoreType)
+	if !ok || storeType == nil || !semantic.IsFrozenTreeStoreType(storeType) {
+		return nil, nil, true, fmt.Errorf("frozen tree row view expects a frozen tree store receiver")
+	}
+	storeValue, _, err := s.emitExpr(expr.Object, storeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return storeValue, rowsType, true, nil
+}
+
 func (s *functionState) emitTreeFreezeCategoryTagColumn(arenaRef C.LLVMValueRef, stateValue C.LLVMValueRef, family *semantic.TreeType, category *semantic.TreeCategoryType, name string) (C.LLVMValueRef, error) {
 	tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, family, category, name)
 	if err != nil {
@@ -373,6 +389,47 @@ func (s *functionState) emitTreeColumnHelperCall(expr *ast.CallExpr) (C.LLVMValu
 		return nil, nil, true, err
 	}
 	dataPtr, err := s.emitTreeFrozenFieldColumnPointer(stateValue, category, fieldName, "tree.column")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return s.buildTreeFrozenColumnDView(dataPtr, countValue, resultType, "tree.column")
+}
+
+func (s *functionState) emitColumnHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 2 {
+		return nil, nil, true, fmt.Errorf("column expects 2 arguments, got %d", len(expr.Args))
+	}
+	rowsType, ok := s.exprType(expr.Args[0]).(*semantic.FrozenTreeRowsViewType)
+	if !ok || rowsType == nil || rowsType.Store == nil || rowsType.Category == nil {
+		return nil, nil, true, fmt.Errorf("column expects a frozen tree row view")
+	}
+	fieldName, ok := s.staticCStringLiteral(expr.Args[1])
+	if !ok {
+		return nil, nil, true, fmt.Errorf("column field argument must be a compile-time string")
+	}
+	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
+	if !ok || resultType == nil {
+		return nil, nil, true, fmt.Errorf("column result type is missing dview metadata")
+	}
+	rowsValue, _, err := s.emitExpr(expr.Args[0], rowsType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	stateValue := s.emitTreeStoreStateValueNamed(rowsValue, "tree.column.state")
+	tablePtr, err := s.emitTreeCategoryUnionTablePtr(stateValue, rowsType.Store.Family, rowsType.Category, "tree.column")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	countValue, err := s.emitTreeCategoryUnionTableCountValue(tablePtr, rowsType.Category, "tree.column")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	var dataPtr C.LLVMValueRef
+	if fieldName == "kind" {
+		dataPtr, err = s.emitTreeFrozenTagColumnPointer(stateValue, rowsType.Category, "tree.column")
+	} else {
+		dataPtr, err = s.emitTreeFrozenFieldColumnPointer(stateValue, rowsType.Category, fieldName, "tree.column")
+	}
 	if err != nil {
 		return nil, nil, true, err
 	}

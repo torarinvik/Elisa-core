@@ -220,7 +220,7 @@ def build(owner: Arena) -> i64:
 		right = Lua.Expr.Int(value: 2)
 		_ = Lua.Expr.Add(left: left, right: right)
 	frozen = freeze(move store)
-	tags: dview[u32] = tree_tags(frozen, "Expr")
+	tags: dview[u32] = frozen.Expr.column("kind")
 	return reduce_sum(tags, tag_score)
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_tags_column_view.elisa", src)
@@ -229,13 +229,13 @@ def build(owner: Arena) -> i64:
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 	for _, check := range []string{
-		"tree.tags.columns.tags",
-		"tree.tags.view.data",
-		"tree.tags.view.len",
+		"tree.column.columns.tags",
+		"tree.column.view.data",
+		"tree.column.view.len",
 		"reduce_sum.src.ptr",
 	} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected tree_tags lowering to contain %q, got:\n%s", check, output)
+			t.Fatalf("expected canonical frozen tree column lowering to contain %q, got:\n%s", check, output)
 		}
 	}
 }
@@ -260,7 +260,7 @@ def build(owner: Arena) -> i64:
 		right = Lua.Expr.Int(span: 20, value: 2)
 		_ = Lua.Expr.Add(span: 30, left: left, right: right)
 	frozen = freeze(move store)
-	spans: dview[i64] = tree_column(frozen, "Expr", "span")
+	spans: dview[i64] = frozen.Expr.column("span")
 	return reduce_sum(spans, add_i64)
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_common_field_column_view.elisa", src)

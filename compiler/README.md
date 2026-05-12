@@ -349,6 +349,16 @@ Current dense frozen-node-table rules:
 - `table[key]` is writable, while `table.values` is a dense `dview[T]` with frozen packed-store provenance and exact extent tracking.
 - Canonical packed lowering keeps the key path zero-cost under `index-soa`, while legacy row/word-handle overrides lower through the existing dense-index encode/decode helpers.
 
+Frozen tree stores also expose category row views for column-oriented scans:
+
+```text
+frozen: Expr.Store[Frozen] = freeze(move store)
+tags: dview[u32] = frozen.Expr.column("kind")
+spans: dview[i64] = frozen.Expr.column("span")
+```
+
+`column("kind")` requires `@layout(soa)` or `@index(kind)` on the category. Common-field columns require `@layout(soa)` so the frozen store can publish a contiguous scalar column. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helpers still exist for compatibility, but `frozen.Expr.column(...)` is the canonical query-style surface.
+
 ## Benchmark scaffolding
 
 There is now a synthetic JSON benchmark scaffold under `test/benchmarks/json_bench_test.go`.

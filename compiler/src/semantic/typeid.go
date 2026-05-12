@@ -235,6 +235,12 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.State, active, nextCycleID) {
 			return false
 		}
+	case *FrozenTreeRowsViewType:
+		appendKeyTag(b, "frozen-tree-rows")
+		if tt == nil || tt.Category == nil {
+			return false
+		}
+		appendKeyString(b, tt.Category.Name)
 	case *PackedVariantViewType:
 		if tt == nil || tt.Enum == nil || tt.Variant == nil {
 			return false
