@@ -117,6 +117,10 @@ func IsLocalTreeStoreType(t Type) bool {
 	return TreeStoreStateName(t) == "Local"
 }
 
+func IsFrozenTreeStoreType(t Type) bool {
+	return TreeStoreStateName(t) == "Frozen"
+}
+
 func PermissionRefString(ref ast.PermissionRef) string {
 	if ref.Member != "" {
 		return ref.Name + "." + ref.Member

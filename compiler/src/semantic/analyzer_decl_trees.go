@@ -25,7 +25,7 @@ func (a *Analyzer) registerTreeMemberTypes(treeQualifiedName string, treeType *T
 		switch m := member.(type) {
 		case *ast.TreeCategoryDecl:
 			layout, layoutExplicit := a.treeCategoryLayout(m, inheritedLayout)
-			categoryType := &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Layout: layout, LayoutExplicit: layoutExplicit, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
+			categoryType := &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Layout: layout, LayoutExplicit: layoutExplicit, Indexes: a.treeIndexSpecs("tree node", m.Name, m.Annotations), Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
 			if parentName := treeCategoryParentMemberName(m.Name); parentName != "" {
 				parent, _ := treeType.Member(parentName)
 				categoryType.Parent, _ = parent.(*TreeCategoryType)
@@ -80,10 +80,11 @@ func (a *Analyzer) populateTreeMembers(decls []scopedDecl) {
 					continue
 				}
 				treeType.Common[commonDecl.Name] = Field{
-					Name:    commonDecl.Name,
-					Type:    a.resolveType(commonDecl.Type),
-					Mutable: commonDecl.Mutable,
-					IsTail:  commonDecl.IsTail,
+					Name:     commonDecl.Name,
+					Type:     a.resolveType(commonDecl.Type),
+					Mutable:  commonDecl.Mutable,
+					IsTail:   commonDecl.IsTail,
+					TreeTemp: a.treeFieldTemperature("common field", commonDecl.Name, commonDecl.Annotations),
 				}
 			}
 			a.populateTreeNodeKindType(treeType)
@@ -419,12 +420,63 @@ func (a *Analyzer) resolveTreeLayoutAnnotations(ownerKind string, ownerName stri
 		}
 		normalized, ok := normalizeTreeLayoutAnnotationArg(annotation.Args[0])
 		if !ok {
-			a.errorf(annotation.Position, "@layout on %s %q uses unsupported layout %q (expected per_variant_rows or category_union)", ownerKind, ownerName, annotation.Args[0])
+			a.errorf(annotation.Position, "@layout on %s %q uses unsupported layout %q (expected per_variant_rows, category_union, aos, or soa)", ownerKind, ownerName, annotation.Args[0])
 			continue
 		}
 		layout = normalized
 	}
 	return layout, seenLayout
+}
+
+func (a *Analyzer) treeIndexSpecs(ownerKind string, ownerName string, annotations []ast.Annotation) []TreeIndexSpec {
+	indexes := []TreeIndexSpec{}
+	seen := map[string]lexer.Pos{}
+	for _, annotation := range annotations {
+		if annotation.Name != "index" {
+			continue
+		}
+		if len(annotation.Args) != 1 {
+			a.errorf(annotation.Position, "@index on %s %q expects exactly one argument", ownerKind, ownerName)
+			continue
+		}
+		name := strings.TrimSpace(annotation.Args[0])
+		if name == "" {
+			a.errorf(annotation.Position, "@index on %s %q expects a non-empty field name or kind", ownerKind, ownerName)
+			continue
+		}
+		key := strings.ToLower(name)
+		if first, ok := seen[key]; ok {
+			a.errorf(annotation.Position, "duplicate @index(%s) on %s %q (first seen at %s:%d:%d)", name, ownerKind, ownerName, first.File, first.Line, first.Col)
+			continue
+		}
+		seen[key] = annotation.Position
+		indexes = append(indexes, TreeIndexSpec{Name: name, Kind: key == "kind"})
+	}
+	return indexes
+}
+
+func (a *Analyzer) treeFieldTemperature(ownerKind string, fieldName string, annotations []ast.Annotation) TreeFieldTemperature {
+	mode := TreeFieldTemperatureDefault
+	var first lexer.Pos
+	seen := false
+	for _, annotation := range annotations {
+		next, ok := treeFieldTemperatureForAnnotationName(annotation.Name)
+		if !ok {
+			continue
+		}
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@%s on %s %q does not take arguments", annotation.Name, ownerKind, fieldName)
+			continue
+		}
+		if seen {
+			a.errorf(annotation.Position, "duplicate tree field temperature annotation on %s %q (first seen at %s:%d:%d)", ownerKind, fieldName, first.File, first.Line, first.Col)
+			continue
+		}
+		seen = true
+		first = annotation.Position
+		mode = next
+	}
+	return mode
 }
 
 func (a *Analyzer) populateTreeBlockDecl(treeType *TreeType, blockDecl *ast.TreeBlockDecl) {
@@ -442,7 +494,7 @@ func (a *Analyzer) populateTreeBlockDecl(treeType *TreeType, blockDecl *ast.Tree
 			a.errorf(field.Position, "duplicate field %q in tree block %q", field.Name, block.Name)
 			continue
 		}
-		block.Fields[field.Name] = Field{Name: field.Name, Type: a.resolveType(field.Type), Mutable: field.Mutable, IsTail: field.IsTail}
+		block.Fields[field.Name] = Field{Name: field.Name, Type: a.resolveType(field.Type), Mutable: field.Mutable, IsTail: field.IsTail, TreeTemp: a.treeFieldTemperature("tree block field", field.Name, field.Annotations)}
 	}
 }
 
@@ -461,6 +513,6 @@ func (a *Analyzer) populateTreeStructDecl(treeType *TreeType, structDecl *ast.Tr
 			a.errorf(field.Position, "duplicate field %q in tree struct %q", field.Name, memberStruct.Name)
 			continue
 		}
-		memberStruct.Fields[field.Name] = Field{Name: field.Name, Type: a.resolveType(field.Type), Mutable: field.Mutable, IsTail: field.IsTail}
+		memberStruct.Fields[field.Name] = Field{Name: field.Name, Type: a.resolveType(field.Type), Mutable: field.Mutable, IsTail: field.IsTail, TreeTemp: a.treeFieldTemperature("tree struct field", field.Name, field.Annotations)}
 	}
 }

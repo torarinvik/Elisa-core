@@ -67,12 +67,27 @@ func normalizePackedFieldStorageAnnotationArg(value string) (PackedFieldStorageM
 
 func normalizeTreeLayoutAnnotationArg(value string) (TreeLayout, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "per_variant_rows", "per-variant-rows", "pervariantrows", "variant_rows", "variant-rows", "aos":
+	case "per_variant_rows", "per-variant-rows", "pervariantrows", "variant_rows", "variant-rows":
 		return TreeLayoutPerVariantRows, true
 	case "category_union", "category-union", "categoryunion", "union", "dense_category", "dense-category", "default":
 		return TreeLayoutCategoryUnion, true
+	case "aos", "array_of_structs", "array-of-structs", "rows":
+		return TreeLayoutAOS, true
+	case "soa", "struct_of_arrays", "struct-of-arrays", "columns":
+		return TreeLayoutSOA, true
 	default:
 		return DefaultTreeLayout(), false
+	}
+}
+
+func treeFieldTemperatureForAnnotationName(name string) (TreeFieldTemperature, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "hot":
+		return TreeFieldTemperatureHot, true
+	case "cold":
+		return TreeFieldTemperatureCold, true
+	default:
+		return TreeFieldTemperatureDefault, false
 	}
 }
 

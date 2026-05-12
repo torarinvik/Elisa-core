@@ -122,6 +122,81 @@ def make_int(value: i64) -> Lua.Expr:
 	}
 }
 
+func TestGenerateLLVMIRAcceptsAoSAndSoATreeLayoutsAsDenseHandles(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		layout string
+	}{
+		{name: "aos", layout: "aos"},
+		{name: "soa", layout: "soa"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := `tree Lua:
+	@layout(` + tc.layout + `)
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+
+def make_int(value: i64) -> Lua.Expr:
+	in perm:
+		return Lua.Expr.Int(value: value)
+`
+			result := parseAndAnalyzeBackendTest(t, "backend_tree_"+tc.name+"_dense_layout.elisa", src)
+			output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+			if err != nil {
+				t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+			}
+			for _, check := range []string{
+				"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+				"define i32 @make_int",
+				"tree.category.kind.ptr",
+			} {
+				if !strings.Contains(output, check) {
+					t.Fatalf("expected %s tree layout to use dense table lowering and contain %q, got:\n%s", tc.layout, check, output)
+				}
+			}
+			if strings.Contains(output, "%Lua__TreeHandle = type") || strings.Contains(output, "active_tree_store") {
+				t.Fatalf("expected %s layout to keep dense i32 handles without active-store globals, got:\n%s", tc.layout, output)
+			}
+		})
+	}
+}
+
+func TestGenerateLLVMIRLowersTreeStoreFreezeAsFrozenStoreValue(t *testing.T) {
+	src := `@layout(soa)
+tree Lua:
+	@index(kind)
+	@role(expr)
+	@index(value)
+	node Expr:
+		Int(value: i64)
+
+def build(owner: Arena) -> i64:
+	store = Lua.Store(owner)
+	in store:
+		_ = Lua.Expr.Int(value: 7)
+	frozen = freeze(move store)
+	_ = frozen
+	return 7
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_store_freeze.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"define i64 @build",
+		"ret i64 7",
+		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"%Lua_Expr__TreeFrozenColumns = type { ptr, ptr }",
+		"%Lua_Expr__TreeFrozenIndexes = type { ptr, ptr }",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree store freeze lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesExplicitPermStoreForImplicitTreeStoreCalls(t *testing.T) {
 	src := `tree Lua:
 	@role(expr)

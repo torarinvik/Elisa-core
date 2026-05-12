@@ -516,6 +516,9 @@ func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl) error {
 				if _, err := g.ensureTreeCategoryUnionTableType(tt); err != nil {
 					return err
 				}
+				if err := g.ensureTreeCategoryFrozenLayoutTypes(tt); err != nil {
+					return err
+				}
 			default:
 				return unsupportedTreeLayoutError(plan.name, plan.layout)
 			}
@@ -572,6 +575,9 @@ func (g *llvmGenerator) emitTreeDecl(decl *ast.TreeDecl) error {
 					return err
 				}
 				if _, err := g.ensureTreeCategoryUnionTableType(tt); err != nil {
+					return err
+				}
+				if err := g.ensureTreeCategoryFrozenLayoutTypes(tt); err != nil {
 					return err
 				}
 			default:

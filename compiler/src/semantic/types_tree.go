@@ -10,9 +10,17 @@ func (layout TreeLayout) String() string {
 		return "per_variant_rows"
 	case TreeLayoutCategoryUnion:
 		return "category_union"
+	case TreeLayoutAOS:
+		return "aos"
+	case TreeLayoutSOA:
+		return "soa"
 	default:
 		return "unknown"
 	}
+}
+
+func (layout TreeLayout) IsDenseCategoryLayout() bool {
+	return layout == TreeLayoutCategoryUnion || layout == TreeLayoutAOS || layout == TreeLayoutSOA
 }
 
 func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {

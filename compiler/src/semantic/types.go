@@ -302,7 +302,22 @@ type TreeLayout int
 const (
 	TreeLayoutPerVariantRows TreeLayout = iota
 	TreeLayoutCategoryUnion
+	TreeLayoutAOS
+	TreeLayoutSOA
 )
+
+type TreeFieldTemperature int
+
+const (
+	TreeFieldTemperatureDefault TreeFieldTemperature = iota
+	TreeFieldTemperatureHot
+	TreeFieldTemperatureCold
+)
+
+type TreeIndexSpec struct {
+	Name string
+	Kind bool
+}
 
 type PackedVariantViewType struct {
 	Enum    *EnumType
@@ -324,6 +339,7 @@ type TreeType struct {
 	Name           string
 	Layout         TreeLayout
 	LayoutExplicit bool
+	Indexes        []TreeIndexSpec
 	Common         map[string]Field
 	MemberTypes    map[string]Type
 	NodeType       *TreeNodeType
@@ -338,6 +354,7 @@ type TreeCategoryType struct {
 	Role           string
 	Layout         TreeLayout
 	LayoutExplicit bool
+	Indexes        []TreeIndexSpec
 	KindType       *ConstEnumType
 	Common         map[string]Field
 	Variants       []*EnumVariant
@@ -400,6 +417,7 @@ type Field struct {
 	Mutable       bool
 	IsTail        bool
 	PackedStorage PackedFieldStorageMode
+	TreeTemp      TreeFieldTemperature
 }
 
 type StructDerivedState struct {

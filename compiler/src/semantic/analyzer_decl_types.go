@@ -227,7 +227,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					return
 				}
 				layout, layoutExplicit := a.treeDeclLayout(n)
-				treeType := &TreeType{Name: qualifiedName, Layout: layout, LayoutExplicit: layoutExplicit, Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
+				treeType := &TreeType{Name: qualifiedName, Layout: layout, LayoutExplicit: layoutExplicit, Indexes: a.treeIndexSpecs("tree", n.Name, n.Annotations), Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
 				a.namedTypes[qualifiedName] = treeType
 				nodeQualifiedName := treeMemberTypeName(qualifiedName, "Node")
 				if _, exists := a.namedTypes[nodeQualifiedName]; exists {

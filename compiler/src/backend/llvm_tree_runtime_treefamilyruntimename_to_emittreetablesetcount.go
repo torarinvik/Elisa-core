@@ -11,6 +11,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"sort"
 )
 
 func treeFamilyRuntimeName(treeType *semantic.TreeType) string {
@@ -151,22 +152,23 @@ func treeExactMemberLayout(memberType semantic.Type) semantic.TreeLayout {
 }
 
 type treeLayoutPlan struct {
-	name   string
-	layout semantic.TreeLayout
+	name    string
+	layout  semantic.TreeLayout
+	indexes []semantic.TreeIndexSpec
 }
 
 func treeFamilyLayoutPlan(treeType *semantic.TreeType) treeLayoutPlan {
 	if treeType == nil {
 		return treeLayoutPlan{name: "<missing tree>", layout: semantic.DefaultTreeLayout()}
 	}
-	return treeLayoutPlan{name: treeType.Name, layout: treeType.Layout}
+	return treeLayoutPlan{name: treeType.Name, layout: treeType.Layout, indexes: treeType.Indexes}
 }
 
 func treeCategoryLayoutPlan(category *semantic.TreeCategoryType) treeLayoutPlan {
 	if category == nil {
 		return treeLayoutPlan{name: "<missing category>", layout: semantic.DefaultTreeLayout()}
 	}
-	return treeLayoutPlan{name: category.Name, layout: category.Layout}
+	return treeLayoutPlan{name: category.Name, layout: category.Layout, indexes: category.Indexes}
 }
 
 func treeExactMemberLayoutPlan(memberType semantic.Type) treeLayoutPlan {
@@ -178,7 +180,119 @@ func (plan treeLayoutPlan) isPerVariantRows() bool {
 }
 
 func (plan treeLayoutPlan) isCategoryUnion() bool {
-	return plan.layout == semantic.TreeLayoutCategoryUnion
+	return plan.layout.IsDenseCategoryLayout()
+}
+
+func (plan treeLayoutPlan) isSoA() bool {
+	return plan.layout == semantic.TreeLayoutSOA
+}
+
+func (plan treeLayoutPlan) isAoS() bool {
+	return plan.layout == semantic.TreeLayoutAOS || plan.layout == semantic.TreeLayoutCategoryUnion
+}
+
+func (plan treeLayoutPlan) requestsIndexes() bool {
+	return len(plan.indexes) != 0
+}
+
+func treeFrozenColumnsTypeName(category *semantic.TreeCategoryType) string {
+	if category == nil {
+		return "TreeFrozenColumns"
+	}
+	return sanitizeIdentifier(category.Name) + "__TreeFrozenColumns"
+}
+
+func treeFrozenIndexesTypeName(category *semantic.TreeCategoryType) string {
+	if category == nil {
+		return "TreeFrozenIndexes"
+	}
+	return sanitizeIdentifier(category.Name) + "__TreeFrozenIndexes"
+}
+
+func (g *llvmGenerator) ensureTreeCategoryFrozenLayoutTypes(category *semantic.TreeCategoryType) error {
+	if category == nil {
+		return fmt.Errorf("missing tree category metadata")
+	}
+	plan := treeCategoryLayoutPlan(category)
+	if plan.isSoA() {
+		if _, err := g.ensureTreeCategoryFrozenColumnsType(category); err != nil {
+			return err
+		}
+	}
+	if plan.requestsIndexes() {
+		if _, err := g.ensureTreeCategoryFrozenIndexesType(category); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *llvmGenerator) ensureTreeCategoryFrozenColumnsType(category *semantic.TreeCategoryType) (C.LLVMTypeRef, error) {
+	name := treeFrozenColumnsTypeName(category)
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	columns := treeCategorySoAColumnNames(category)
+	fields := make([]C.LLVMTypeRef, 0, len(columns)+1)
+	fields = append(fields, C.LLVMPointerTypeInContext(g.context, 0))
+	for range columns {
+		fields = append(fields, C.LLVMPointerTypeInContext(g.context, 0))
+	}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
+func (g *llvmGenerator) ensureTreeCategoryFrozenIndexesType(category *semantic.TreeCategoryType) (C.LLVMTypeRef, error) {
+	name := treeFrozenIndexesTypeName(category)
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	plan := treeCategoryLayoutPlan(category)
+	fields := make([]C.LLVMTypeRef, 0, len(plan.indexes))
+	for range plan.indexes {
+		fields = append(fields, C.LLVMPointerTypeInContext(g.context, 0))
+	}
+	if len(fields) == 0 {
+		fields = append(fields, C.LLVMInt8TypeInContext(g.context))
+	}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
+func treeCategorySoAColumnNames(category *semantic.TreeCategoryType) []string {
+	if category == nil {
+		return nil
+	}
+	names := map[string]bool{}
+	for name := range category.Common {
+		names[name] = true
+	}
+	for _, variant := range category.Variants {
+		if variant == nil {
+			continue
+		}
+		for _, name := range variant.PayloadNames {
+			if name != "" {
+				names[name] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (plan treeLayoutPlan) requirePerVariantRows() error {
@@ -568,6 +682,23 @@ func (g *llvmGenerator) ensureTreeStoreStateType(treeType *semantic.TreeType) (C
 				return nil, err
 			}
 			fields = append(fields, tableType)
+		}
+		for _, category := range categories {
+			categoryPlan := treeCategoryLayoutPlan(category)
+			if categoryPlan.isSoA() {
+				columnsType, err := g.ensureTreeCategoryFrozenColumnsType(category)
+				if err != nil {
+					return nil, err
+				}
+				fields = append(fields, columnsType)
+			}
+			if categoryPlan.requestsIndexes() {
+				indexType, err := g.ensureTreeCategoryFrozenIndexesType(category)
+				if err != nil {
+					return nil, err
+				}
+				fields = append(fields, indexType)
+			}
 		}
 	default:
 		return nil, unsupportedTreeLayoutError(plan.name, plan.layout)

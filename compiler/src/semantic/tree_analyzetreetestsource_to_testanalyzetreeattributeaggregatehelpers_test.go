@@ -145,8 +145,12 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 
 func TestAnalyzeTreeLayoutAnnotations(t *testing.T) {
 	result := analyzeTreeTestSource(t, "tree_layout_annotations.elisa", `@layout(category_union)
+@index(kind)
 tree Lua:
     @role(expr)
+    @layout(soa)
+    @index(kind)
+    @index(span)
     node Expr:
         Nil
         Binary(left: Expr, right: Expr)
@@ -164,19 +168,25 @@ tree Lua:
 	if family.Layout != TreeLayoutCategoryUnion || !family.LayoutExplicit {
 		t.Fatalf("expected explicit category_union tree layout, got %s explicit=%v", family.Layout, family.LayoutExplicit)
 	}
+	if len(family.Indexes) != 1 || !family.Indexes[0].Kind {
+		t.Fatalf("expected tree kind index metadata, got %#v", family.Indexes)
+	}
 	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
 	if !ok {
 		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
 	}
-	if exprType.Layout != TreeLayoutCategoryUnion || exprType.LayoutExplicit {
-		t.Fatalf("expected Expr to inherit category_union layout, got %s explicit=%v", exprType.Layout, exprType.LayoutExplicit)
+	if exprType.Layout != TreeLayoutSOA || !exprType.LayoutExplicit {
+		t.Fatalf("expected Expr explicit soa layout, got %s explicit=%v", exprType.Layout, exprType.LayoutExplicit)
+	}
+	if len(exprType.Indexes) != 2 || !exprType.Indexes[0].Kind || exprType.Indexes[1].Name != "span" {
+		t.Fatalf("expected Expr index metadata, got %#v", exprType.Indexes)
 	}
 	atomType, ok := result.NamedTypes["Lua.Expr.Atom"].(*TreeCategoryType)
 	if !ok {
 		t.Fatalf("expected Lua.Expr.Atom tree category type, got %T", result.NamedTypes["Lua.Expr.Atom"])
 	}
-	if atomType.Layout != TreeLayoutCategoryUnion || atomType.LayoutExplicit {
-		t.Fatalf("expected nested Atom to inherit Expr category_union layout, got %s explicit=%v", atomType.Layout, atomType.LayoutExplicit)
+	if atomType.Layout != TreeLayoutSOA || atomType.LayoutExplicit {
+		t.Fatalf("expected nested Atom to inherit Expr soa layout, got %s explicit=%v", atomType.Layout, atomType.LayoutExplicit)
 	}
 	stmtType, ok := result.NamedTypes["Lua.Stmt"].(*TreeCategoryType)
 	if !ok {
@@ -228,6 +238,77 @@ tree Bad:
 	}
 	if !strings.Contains(all, `duplicate @layout annotation on tree node "Broken"`) {
 		t.Fatalf("expected duplicate node @layout diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeTreeFieldTemperatureAndIndexDiagnostics(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_layout_field_temperature.elisa", `tree Lua:
+    common:
+        @hot
+        span: i64
+    @layout(aos)
+    node Expr:
+        Nil
+    struct Row:
+        @cold
+        payload: i64
+`)
+	family := result.NamedTypes["Lua"].(*TreeType)
+	if got := family.Common["span"].TreeTemp; got != TreeFieldTemperatureHot {
+		t.Fatalf("expected common span to be hot, got %#v", got)
+	}
+	exprType := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
+	if exprType.Layout != TreeLayoutAOS {
+		t.Fatalf("expected aos category layout, got %s", exprType.Layout)
+	}
+	rowType := result.NamedTypes["Lua.Row"].(*TreeStructType)
+	if got := rowType.Fields["payload"].TreeTemp; got != TreeFieldTemperatureCold {
+		t.Fatalf("expected tree struct payload to be cold, got %#v", got)
+	}
+
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "tree_layout_index_bad.elisa", `@index(kind)
+@index(kind)
+tree Bad:
+    @index()
+    node Expr:
+        Nil
+    struct Row:
+        @hot(foo)
+        value: i64
+`)
+	all := strings.Join(bad.Errors(), "\n")
+	for _, want := range []string{
+		`duplicate @index(kind) on tree "Bad"`,
+		`@index on tree node "Expr" expects exactly one argument`,
+		`@hot on tree struct field "value" does not take arguments`,
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("expected diagnostic %q, got:\n%s", want, all)
+		}
+	}
+}
+
+func TestAnalyzeFreezeAcceptsLocalTreeStores(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_freeze_store.elisa", `tree Lua:
+    node Expr:
+        Int(value: i64)
+
+def build(owner: Arena) -> Lua.Store[Frozen]:
+    store = Lua.Store(owner)
+    frozen: Lua.Store[Frozen] = freeze(move store)
+    return frozen
+`)
+
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "tree_freeze_requires_move.elisa", `tree Lua:
+    node Expr:
+        Int(value: i64)
+
+def build(owner: Arena) -> Lua.Store[Frozen]:
+    store = Lua.Store(owner)
+    return freeze(store)
+`)
+	if all := strings.Join(bad.Errors(), "\n"); !strings.Contains(all, "local tree store") || !strings.Contains(all, "must be moved explicitly before freeze") {
+		t.Fatalf("expected tree store move diagnostic, got:\n%s", all)
 	}
 }
 func TestAnalyzeInfersTreePayloadRelations(t *testing.T) {
