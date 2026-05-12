@@ -208,6 +208,20 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionReportsCallDepthLimit(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_depth_limit.elisa", `static def countdown(n: u64) -> u64:
+	if n == 0:
+		return 0
+	return countdown(n - 1)
+
+def keep() -> void:
+	static assert countdown(70) == 0
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `static function evaluation exceeded 64 calls`) {
+		t.Fatalf("expected static call depth diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func TestAnalyzeStaticFunctionRejectsIndirectRecursion(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_rejects_indirect_recursion.elisa", `static def odd(n: i64) -> bool:
 	if n <= 0:

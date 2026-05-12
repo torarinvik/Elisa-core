@@ -10,6 +10,7 @@ import (
 	"elisacore/src/lexer"
 )
 
+const StaticEvalCallDepthLimit = 64
 const staticEvalLoopIterationLimit = 100000
 
 func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {
@@ -304,7 +305,11 @@ func (a *Analyzer) lookupConstEvalValue(name string) (ConstValue, bool) {
 }
 
 func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool) {
-	if expr == nil || a.staticCallDepth > 64 {
+	if expr == nil {
+		return ConstValue{}, false
+	}
+	if a.staticCallDepth >= StaticEvalCallDepthLimit {
+		a.errorf(expr.Pos(), "static function evaluation exceeded %d calls", StaticEvalCallDepthLimit)
 		return ConstValue{}, false
 	}
 	ident, ok := expr.Func.(*ast.Ident)

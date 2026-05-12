@@ -378,7 +378,7 @@ func lookupConstEvalValue(lookup func(string) (semantic.ConstValue, bool), name 
 }
 
 func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.ConstValue, bool) {
-	if expr == nil || g == nil || g.staticCallDepth > 64 {
+	if expr == nil || g == nil || g.staticCallDepth >= semantic.StaticEvalCallDepthLimit {
 		return semantic.ConstValue{}, false
 	}
 	ident, ok := expr.Func.(*ast.Ident)
