@@ -129,6 +129,34 @@ def keep() -> void:
 	}
 }
 
+func TestAnalyzeStaticErrorCountsAsTerminatingBranch(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_static_error_terminates_branch.elisa", `static def answer(flag: bool) -> i64:
+	if flag:
+		return 42
+	else:
+		static error("inactive")
+
+def keep() -> void:
+	static assert answer(true) == 42
+`)
+}
+
+func TestAnalyzeStaticFunctionReportsActiveStaticError(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_reports_active_static_error.elisa", `static def answer() -> i64:
+	error("boom")
+
+def keep() -> void:
+	static assert answer() == 42
+`)
+	errors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errors, `static error: boom`) {
+		t.Fatalf("expected static error diagnostic, got:\n%s", errors)
+	}
+	if strings.Contains(errors, `must return on all paths`) {
+		t.Fatalf("did not expect return-path diagnostic when static error terminates, got:\n%s", errors)
+	}
+}
+
 func TestAnalyzeStaticFunctionCanUseLocalsAndCompileTimeIf(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_locals.elisa", `static def answer(step: i64) -> i64:
 	value: mutable i64 = step + 40

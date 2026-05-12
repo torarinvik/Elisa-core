@@ -324,7 +324,12 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 
-	body := p.parseBlock()
+	var body []ast.Stmt
+	if isStatic {
+		body = p.parseStaticFunctionBlock()
+	} else {
+		body = p.parseBlock()
+	}
 	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 }
 func (p *Parser) parseParamList(allowDefault bool) []ast.ParamDecl {

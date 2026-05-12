@@ -435,6 +435,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.analyzeStmt(stmt)
 		}
 	case *ast.StaticErrorStmt:
+		if a.currentFuncDecl != nil && a.currentFuncDecl.Static {
+			a.analyzeExpr(n.Message)
+			return
+		}
 		if msg, ok := a.evalConstStringExpr(n.Message); ok {
 			a.errorf(n.Pos(), "static error: %s", msg)
 		} else {
