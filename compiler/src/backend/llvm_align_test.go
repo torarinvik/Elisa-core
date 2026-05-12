@@ -329,6 +329,37 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIREvaluatesStaticDArrayPush(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_darray_push.elisa", `static def score() -> i64:
+    items: mutable darray[i64] = []
+    items.push(4)
+    items.push(9)
+    return items[0] + items[1]
+
+def keep() -> void:
+    static assert score() == 13
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
+func TestGenerateLLVMIREvaluatesStaticDArrayPushValueSemantics(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_darray_push_value_semantics.elisa", `static def score() -> i64:
+    left: mutable darray[i64] = []
+    left.push(4)
+    right: mutable darray[i64] = left
+    right.push(9)
+    return left[0] + right[1]
+
+def keep() -> void:
+    static assert score() == 13
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIREvaluatesStaticVoidFunctionFallthrough(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_def_void_fallthrough.elisa", `static def note() -> void:
     value: i64 = 42

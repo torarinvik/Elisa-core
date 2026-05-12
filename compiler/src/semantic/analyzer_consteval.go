@@ -526,7 +526,7 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 			}
 		case *ast.PassStmt:
 		case *ast.ExprStmt:
-			if _, ok := a.evalConstExpr(n.Expr); !ok {
+			if ok := a.evalStaticExprStmt(n.Expr); !ok {
 				a.errorf(n.Pos(), "static expression statement must evaluate at compile time")
 				return ConstValue{}, false, false
 			}
@@ -536,6 +536,44 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 		}
 	}
 	return ConstValue{}, false, true
+}
+
+func (a *Analyzer) evalStaticExprStmt(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	if a.evalStaticDArrayPushExpr(expr) {
+		return true
+	}
+	_, ok := a.evalConstExpr(expr)
+	return ok
+}
+
+func (a *Analyzer) evalStaticDArrayPushExpr(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "push" {
+		return false
+	}
+	ident, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok || ident == nil || len(call.Args) != 1 || call.NamedArgCount() != 0 {
+		return false
+	}
+	current, scopeIndex, ok := a.constEvalValueScope(ident.Name)
+	if !ok || current.Kind != ConstList {
+		return false
+	}
+	value, ok := a.evalConstExpr(call.Args[0])
+	if !ok {
+		return false
+	}
+	updated := cloneConstValue(current)
+	updated.Elems = append(updated.Elems, cloneConstValue(value))
+	a.constEvalScopes[scopeIndex][ident.Name] = updated
+	return true
 }
 
 func (a *Analyzer) evalStaticMatchStmt(stmt *ast.MatchStmt, allowReturn bool) (ConstValue, bool, bool) {
@@ -1460,21 +1498,41 @@ func staticReverseComparisonOp(op lexer.TokenKind) lexer.TokenKind {
 	}
 }
 
+func cloneConstValue(value ConstValue) ConstValue {
+	cloned := value
+	if len(value.Elems) != 0 {
+		cloned.Elems = make([]ConstValue, len(value.Elems))
+		for i, elem := range value.Elems {
+			cloned.Elems[i] = cloneConstValue(elem)
+		}
+	}
+	return cloned
+}
+
 func (a *Analyzer) setConstEvalValue(name string, value ConstValue) {
 	if len(a.constEvalScopes) == 0 {
 		a.constEvalScopes = append(a.constEvalScopes, map[string]ConstValue{})
 	}
-	a.constEvalScopes[len(a.constEvalScopes)-1][name] = value
+	a.constEvalScopes[len(a.constEvalScopes)-1][name] = cloneConstValue(value)
 }
 
 func (a *Analyzer) updateConstEvalValue(name string, value ConstValue) bool {
 	for i := len(a.constEvalScopes) - 1; i >= 0; i-- {
 		if _, ok := a.constEvalScopes[i][name]; ok {
-			a.constEvalScopes[i][name] = value
+			a.constEvalScopes[i][name] = cloneConstValue(value)
 			return true
 		}
 	}
 	return false
+}
+
+func (a *Analyzer) constEvalValueScope(name string) (ConstValue, int, bool) {
+	for i := len(a.constEvalScopes) - 1; i >= 0; i-- {
+		if value, ok := a.constEvalScopes[i][name]; ok {
+			return value, i, true
+		}
+	}
+	return ConstValue{}, -1, false
 }
 
 func (a *Analyzer) reportStaticAssertFailure(pos lexer.Pos, message ast.Expr) {

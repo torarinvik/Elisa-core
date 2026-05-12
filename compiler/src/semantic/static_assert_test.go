@@ -245,6 +245,31 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionCanBuildDArrayWithPush(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_darray_push.elisa", `static def score() -> i64:
+	items: mutable darray[i64] = []
+	items.push(4)
+	items.push(9)
+	return items[0] + items[1]
+
+def keep() -> void:
+	static assert score() == 13
+`)
+}
+
+func TestAnalyzeStaticFunctionDArrayPushUsesValueSemantics(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_darray_push_value_semantics.elisa", `static def score() -> i64:
+	left: mutable darray[i64] = []
+	left.push(4)
+	right: mutable darray[i64] = left
+	right.push(9)
+	return left[0] + right[1]
+
+def keep() -> void:
+	static assert score() == 13
+`)
+}
+
 func TestAnalyzeStaticFunctionRequiresReturnOnAllPaths(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_requires_return.elisa", `static def maybe(flag: bool) -> i64:
 	if flag:

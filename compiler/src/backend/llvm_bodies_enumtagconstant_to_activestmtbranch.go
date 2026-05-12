@@ -192,7 +192,7 @@ func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) 
 			}
 		case *ast.PassStmt:
 		case *ast.ExprStmt:
-			if _, ok := s.evalConstExpr(n.Expr); !ok {
+			if ok := s.evalStaticExprStmt(n.Expr); !ok {
 				return semantic.ConstValue{}, false, false
 			}
 		default:
@@ -200,6 +200,44 @@ func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) 
 		}
 	}
 	return semantic.ConstValue{}, false, true
+}
+
+func (s *functionState) evalStaticExprStmt(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	if s.evalStaticDArrayPushExpr(expr) {
+		return true
+	}
+	_, ok := s.evalConstExpr(expr)
+	return ok
+}
+
+func (s *functionState) evalStaticDArrayPushExpr(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "push" {
+		return false
+	}
+	ident, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok || ident == nil || len(call.Args) != 1 || call.NamedArgCount() != 0 {
+		return false
+	}
+	current, scopeIndex, ok := s.g.constEvalValueScope(ident.Name)
+	if !ok || current.Kind != semantic.ConstList {
+		return false
+	}
+	value, ok := s.evalConstExpr(call.Args[0])
+	if !ok {
+		return false
+	}
+	updated := cloneBackendConstValue(current)
+	updated.Elems = append(updated.Elems, cloneBackendConstValue(value))
+	s.g.constEvalScopes[scopeIndex][ident.Name] = updated
+	return true
 }
 
 func (s *functionState) evalStaticMatchStmt(stmt *ast.MatchStmt, allowReturn bool) (semantic.ConstValue, bool, bool) {

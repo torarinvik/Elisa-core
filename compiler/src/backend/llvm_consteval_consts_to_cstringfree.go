@@ -492,21 +492,41 @@ func (g *llvmGenerator) lookupStaticFunctionSymbol(name string) (*semantic.Symbo
 	return matched, matched != nil
 }
 
+func cloneBackendConstValue(value semantic.ConstValue) semantic.ConstValue {
+	cloned := value
+	if len(value.Elems) != 0 {
+		cloned.Elems = make([]semantic.ConstValue, len(value.Elems))
+		for i, elem := range value.Elems {
+			cloned.Elems[i] = cloneBackendConstValue(elem)
+		}
+	}
+	return cloned
+}
+
 func (g *llvmGenerator) setConstEvalValue(name string, value semantic.ConstValue) {
 	if len(g.constEvalScopes) == 0 {
 		g.constEvalScopes = append(g.constEvalScopes, map[string]semantic.ConstValue{})
 	}
-	g.constEvalScopes[len(g.constEvalScopes)-1][name] = value
+	g.constEvalScopes[len(g.constEvalScopes)-1][name] = cloneBackendConstValue(value)
 }
 
 func (g *llvmGenerator) updateConstEvalValue(name string, value semantic.ConstValue) bool {
 	for i := len(g.constEvalScopes) - 1; i >= 0; i-- {
 		if _, ok := g.constEvalScopes[i][name]; ok {
-			g.constEvalScopes[i][name] = value
+			g.constEvalScopes[i][name] = cloneBackendConstValue(value)
 			return true
 		}
 	}
 	return false
+}
+
+func (g *llvmGenerator) constEvalValueScope(name string) (semantic.ConstValue, int, bool) {
+	for i := len(g.constEvalScopes) - 1; i >= 0; i-- {
+		if value, ok := g.constEvalScopes[i][name]; ok {
+			return value, i, true
+		}
+	}
+	return semantic.ConstValue{}, -1, false
 }
 func evalConstEquality(left, right semantic.ConstValue, equal bool) (semantic.ConstValue, bool) {
 	matched := false

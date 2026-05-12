@@ -34,7 +34,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray push requires a mutable darray receiver")
 	}
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
 	}
 	argType := a.analyzeValueExpr(expr.Args[0], darrayType.Elem)
