@@ -47,3 +47,24 @@ func TestAnalyzeStaticAssertRequiresBoolCondition(t *testing.T) {
 		t.Fatalf("expected static assert bool diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
 	}
 }
+
+func TestAnalyzeStaticBlockAcceptsStaticOnlyStatements(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_block_ok.elisa", `def keep() -> void:
+	static:
+		static assert 5 > 3
+		static if true:
+			static assert 8 > 4
+		static else:
+			static assert false, "inactive"
+`)
+}
+
+func TestAnalyzeStaticBlockRejectsRuntimeStatements(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_block_runtime_stmt.elisa", `def keep() -> void:
+	static:
+		value: i64 = 1
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "static block only allows static assert") {
+		t.Fatalf("expected static-only block diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}

@@ -143,6 +143,23 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIRChecksStaticBlockWithLayoutIntrospection(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_block_layout_introspection.elisa", `struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+def keep() -> void:
+    static:
+        static assert size_of[Header]() == 16
+        static if true:
+            static assert offset_of[Header](.payload) == 8
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRChecksTopLevelStaticAssertWithLayoutIntrospection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_top_level_static_assert_layout_introspection.elisa", `struct Header layout c:
     tag: u8

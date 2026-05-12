@@ -103,6 +103,29 @@ func (a *Analyzer) analyzeStaticAssert(pos lexer.Pos, cond ast.Expr, message ast
 	}
 }
 
+func (a *Analyzer) analyzeStaticOnlyStmts(stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.StaticAssertStmt:
+			a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
+		case *ast.StaticErrorStmt:
+			if msg, ok := a.evalConstStringExpr(n.Message); ok {
+				a.errorf(n.Pos(), "static error: %s", msg)
+			} else {
+				a.errorf(n.Pos(), "static error triggered")
+			}
+		case *ast.StaticBlockStmt:
+			a.analyzeStaticOnlyStmts(n.Body)
+		case *ast.StaticIfStmt:
+			a.analyzeStaticOnlyStmts(a.activeStmtBranch(n))
+		case *ast.PassStmt:
+			// Useful as a placeholder in generated or partially-filled static blocks.
+		default:
+			a.errorf(stmt.Pos(), "static block only allows static assert, static error, nested static blocks, and static if")
+		}
+	}
+}
+
 func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:

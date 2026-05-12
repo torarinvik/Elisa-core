@@ -162,6 +162,7 @@ func (n *ExprStmt) Pos() lexer.Pos                  { return n.Position }
 func (n *StaticIfStmt) Pos() lexer.Pos              { return n.Position }
 func (n *StaticErrorStmt) Pos() lexer.Pos           { return n.Position }
 func (n *StaticAssertStmt) Pos() lexer.Pos          { return n.Position }
+func (n *StaticBlockStmt) Pos() lexer.Pos           { return n.Position }
 func (n *DiscardStmt) Pos() lexer.Pos               { return n.Position }
 func (n *RegionStmt) Pos() lexer.Pos                { return n.Position }
 func (n *DestroyStmt) Pos() lexer.Pos               { return n.Position }
@@ -354,6 +355,7 @@ func (*ExprStmt) nodeTag()                          {}
 func (*StaticIfStmt) nodeTag()                      {}
 func (*StaticErrorStmt) nodeTag()                   {}
 func (*StaticAssertStmt) nodeTag()                  {}
+func (*StaticBlockStmt) nodeTag()                   {}
 func (*DiscardStmt) nodeTag()                       {}
 func (*RegionStmt) nodeTag()                        {}
 func (*DestroyStmt) nodeTag()                       {}
@@ -545,6 +547,7 @@ func (*ExprStmt) stmtTag()                          {}
 func (*StaticIfStmt) stmtTag()                      {}
 func (*StaticErrorStmt) stmtTag()                   {}
 func (*StaticAssertStmt) stmtTag()                  {}
+func (*StaticBlockStmt) stmtTag()                   {}
 func (*DiscardStmt) stmtTag()                       {}
 func (*RegionStmt) stmtTag()                        {}
 func (*DestroyStmt) stmtTag()                       {}

@@ -442,6 +442,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.StaticAssertStmt:
 		a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
+	case *ast.StaticBlockStmt:
+		a.analyzeStaticOnlyStmts(n.Body)
 	case *ast.DiscardStmt:
 		valueType := a.analyzeExpr(n.Value)
 		a.consumeAffineValueExpr(n.Value, valueType, "discard")

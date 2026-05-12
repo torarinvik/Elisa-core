@@ -179,6 +179,8 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		if n.Message != nil {
 			c.countExpr(n.Message)
 		}
+	case *ast.StaticBlockStmt:
+		c.countStmts(n.Body)
 	case *ast.DiscardStmt:
 		c.countExpr(n.Value)
 	case *ast.RegionStmt:

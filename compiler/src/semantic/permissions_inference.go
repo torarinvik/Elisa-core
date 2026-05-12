@@ -205,6 +205,8 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if n.Message != nil {
 			c.collectExpr(n.Message)
 		}
+	case *ast.StaticBlockStmt:
+		c.collectStmts(n.Body)
 	case *ast.DiscardStmt:
 		c.collectExpr(n.Value)
 	case *ast.RegionStmt:

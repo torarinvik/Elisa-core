@@ -343,6 +343,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		} else {
 			f.writePrefixedMultiline(level, "", "static assert "+formatExpr(n.Cond))
 		}
+	case *ast.StaticBlockStmt:
+		f.writeLine(level, "static:")
+		for _, stmt := range n.Body {
+			f.writeStmt(level+1, stmt)
+		}
 	case *ast.DiscardStmt:
 		f.writePrefixedMultiline(level, "", "_ = "+formatExpr(n.Value))
 	case *ast.RegionStmt:

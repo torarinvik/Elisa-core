@@ -175,6 +175,10 @@ func (c *deferCaptureCollector) collectStmt(stmt ast.Stmt, locals map[string]boo
 		if n.Message != nil {
 			c.collectExpr(n.Message, locals)
 		}
+	case *ast.StaticBlockStmt:
+		for _, inner := range n.Body {
+			c.collectStmt(inner, cloneParallelForLocals(locals))
+		}
 	case *ast.DiscardStmt:
 		c.collectExpr(n.Value, locals)
 	case *ast.RegionStmt:

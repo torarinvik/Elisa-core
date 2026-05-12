@@ -74,6 +74,35 @@ func (s *functionState) emitStaticAssert(stmt *ast.StaticAssertStmt) error {
 	return fmt.Errorf("static assert failed")
 }
 
+func (s *functionState) emitStaticBlock(stmts []ast.Stmt) error {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.StaticAssertStmt:
+			if err := s.emitStaticAssert(n); err != nil {
+				return err
+			}
+		case *ast.StaticBlockStmt:
+			if err := s.emitStaticBlock(n.Body); err != nil {
+				return err
+			}
+		case *ast.StaticIfStmt:
+			branch, err := s.activeStmtBranch(n)
+			if err != nil {
+				return err
+			}
+			if err := s.emitStaticBlock(branch); err != nil {
+				return err
+			}
+		case *ast.PassStmt:
+		case *ast.StaticErrorStmt:
+			return fmt.Errorf("static error should not reach LLVM lowering")
+		default:
+			return fmt.Errorf("static block only allows static assert, static error, nested static blocks, and static if")
+		}
+	}
+	return nil
+}
+
 func (g *llvmGenerator) checkStaticAssertDecl(decl *ast.StaticAssertDecl) error {
 	state := &functionState{g: g}
 	return state.emitStaticAssert(&ast.StaticAssertStmt{

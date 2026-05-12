@@ -237,6 +237,8 @@ func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
 		return exprReadsMatchedValueField(name, n.Message)
 	case *ast.StaticAssertStmt:
 		return exprReadsMatchedValueField(name, n.Cond) || (n.Message != nil && exprReadsMatchedValueField(name, n.Message))
+	case *ast.StaticBlockStmt:
+		return stmtsReadMatchedValueField(name, n.Body)
 	case *ast.DiscardStmt:
 		return exprReadsMatchedValueField(name, n.Value)
 	default:

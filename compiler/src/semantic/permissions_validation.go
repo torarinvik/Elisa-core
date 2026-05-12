@@ -201,6 +201,10 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Message != nil {
 			a.validatePermissionExpr(n.Message, granted)
 		}
+	case *ast.StaticBlockStmt:
+		for _, inner := range n.Body {
+			a.validatePermissionStmt(inner, granted)
+		}
 	case *ast.DiscardStmt:
 		a.validatePermissionExpr(n.Value, granted)
 	}

@@ -781,11 +781,17 @@ static assert offset_of[Header](.payload) == 8
 
 def keep() -> void:
     static assert 5 > 3
+
+    static:
+        static assert align_of[Header] == 8
+        static if size_of[Header]() == 16:
+            static assert offset_of[Header](.payload) == 8
 ```
 
 Current rules:
 
 - `static assert` is valid at top level and inside statement blocks
+- `static:` blocks group static-only statements inside runtime functions
 - the condition must type-check as `bool`
 - if the condition is a semantic compile-time constant, a false value is reported before backend lowering
 - target-aware layout intrinsics are accepted in static assertions and checked during backend lowering

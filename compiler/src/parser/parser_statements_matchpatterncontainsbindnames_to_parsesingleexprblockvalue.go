@@ -222,6 +222,10 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_STATIC)
 
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		return &ast.StaticBlockStmt{Position: pos, Body: p.parseBlock()}
+	}
 	if p.peek() == lexer.TOKEN_ERROR {
 		p.advance()
 		p.expect(lexer.TOKEN_LPAREN)

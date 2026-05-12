@@ -232,6 +232,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.StaticIfStmt{})
 		gob.Register(&ast.StaticErrorStmt{})
 		gob.Register(&ast.StaticAssertStmt{})
+		gob.Register(&ast.StaticBlockStmt{})
 		gob.Register(&ast.DiscardStmt{})
 		gob.Register(&ast.RegionStmt{})
 		gob.Register(&ast.DestroyStmt{})
