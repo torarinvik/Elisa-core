@@ -467,6 +467,11 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 			if !ok || returned {
 				return value, returned, ok
 			}
+		case *ast.MatchStmt:
+			value, returned, ok := a.evalStaticMatchStmt(n, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
+			}
 		case *ast.PassStmt:
 		case *ast.ExprStmt:
 			if _, ok := a.evalConstExpr(n.Expr); !ok {
@@ -479,6 +484,90 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 		}
 	}
 	return ConstValue{}, false, true
+}
+
+func (a *Analyzer) evalStaticMatchStmt(stmt *ast.MatchStmt, allowReturn bool) (ConstValue, bool, bool) {
+	if stmt.Store != nil {
+		a.errorf(stmt.Store.Pos(), "static match does not support in-store clauses")
+		return ConstValue{}, false, false
+	}
+	value, ok := a.evalConstExpr(stmt.Value)
+	if !ok {
+		a.errorf(stmt.Value.Pos(), "static match value must evaluate at compile time")
+		return ConstValue{}, false, false
+	}
+	for _, arm := range stmt.Arms {
+		matched, bindings, ok := a.evalStaticMatchPattern(arm.Pattern, value)
+		if !ok {
+			a.errorf(arm.Pattern.Pos(), "static match only supports compile-time literal patterns, `_`, name binds, and `|` patterns")
+			return ConstValue{}, false, false
+		}
+		if !matched {
+			continue
+		}
+		scope := map[string]ConstValue{}
+		for name, bindingValue := range bindings {
+			scope[name] = bindingValue
+		}
+		a.constEvalScopes = append(a.constEvalScopes, scope)
+		result, returned, ok := a.evalStaticStmtBlock(arm.Body, allowReturn)
+		a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+		return result, returned, ok
+	}
+	return ConstValue{}, false, true
+}
+
+func (a *Analyzer) evalStaticMatchPattern(pattern ast.MatchPattern, value ConstValue) (bool, map[string]ConstValue, bool) {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return true, nil, true
+	case *ast.MatchBindPattern:
+		if p.Name == "" || p.Name == "_" {
+			return true, nil, true
+		}
+		return true, map[string]ConstValue{p.Name: value}, true
+	case *ast.MatchLiteralPattern:
+		patternValue, ok := a.evalConstExpr(p.Value)
+		if !ok {
+			return false, nil, false
+		}
+		equal, ok := a.evalConstEquality(value, patternValue, true)
+		if !ok || equal.Kind != ConstBool {
+			return false, nil, false
+		}
+		return equal.Bool, nil, true
+	case *ast.MatchStringLiteralPattern:
+		if value.Kind != ConstString {
+			return false, nil, true
+		}
+		return value.String == p.Value, nil, true
+	case *ast.MatchVariantPattern:
+		if len(p.Args) != 0 {
+			return false, nil, false
+		}
+		patternValue, ok := a.lookupVisibleConst(p.EnumName + "." + p.Variant)
+		if !ok {
+			return false, nil, false
+		}
+		equal, ok := a.evalConstEquality(value, patternValue, true)
+		if !ok || equal.Kind != ConstBool {
+			return false, nil, false
+		}
+		return equal.Bool, nil, true
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			matched, bindings, ok := a.evalStaticMatchPattern(option, value)
+			if !ok {
+				return false, nil, false
+			}
+			if matched {
+				return true, bindings, true
+			}
+		}
+		return false, nil, true
+	default:
+		return false, nil, false
+	}
 }
 
 func (a *Analyzer) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (ConstValue, bool, bool) {
@@ -589,9 +678,28 @@ func staticStmtAlwaysTerminates(stmt ast.Stmt) bool {
 		return staticIfStmtAlwaysTerminates(n.Then, n.Elifs, n.Else)
 	case *ast.StaticIfStmt:
 		return staticStaticIfStmtAlwaysTerminates(n.Then, n.Elifs, n.Else)
+	case *ast.MatchStmt:
+		return staticMatchStmtAlwaysTerminates(n)
 	default:
 		return false
 	}
+}
+
+func staticMatchStmtAlwaysTerminates(stmt *ast.MatchStmt) bool {
+	if stmt == nil || len(stmt.Arms) == 0 {
+		return false
+	}
+	hasWildcard := false
+	for _, arm := range stmt.Arms {
+		switch arm.Pattern.(type) {
+		case *ast.MatchWildcardPattern, *ast.MatchBindPattern:
+			hasWildcard = true
+		}
+		if !staticStmtBlockAlwaysTerminates(arm.Body) {
+			return false
+		}
+	}
+	return hasWildcard
 }
 
 func staticIfStmtAlwaysTerminates(then []ast.Stmt, elifs []ast.ElifClause, elseStmts []ast.Stmt) bool {

@@ -185,6 +185,11 @@ func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) 
 			if !ok || returned {
 				return value, returned, ok
 			}
+		case *ast.MatchStmt:
+			value, returned, ok := s.evalStaticMatchStmt(n, allowReturn)
+			if !ok || returned {
+				return value, returned, ok
+			}
 		case *ast.PassStmt:
 		case *ast.ExprStmt:
 			if _, ok := s.evalConstExpr(n.Expr); !ok {
@@ -195,6 +200,87 @@ func (s *functionState) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) 
 		}
 	}
 	return semantic.ConstValue{}, false, true
+}
+
+func (s *functionState) evalStaticMatchStmt(stmt *ast.MatchStmt, allowReturn bool) (semantic.ConstValue, bool, bool) {
+	if stmt.Store != nil {
+		return semantic.ConstValue{}, false, false
+	}
+	value, ok := s.evalConstExpr(stmt.Value)
+	if !ok {
+		return semantic.ConstValue{}, false, false
+	}
+	for _, arm := range stmt.Arms {
+		matched, bindings, ok := s.evalStaticMatchPattern(arm.Pattern, value)
+		if !ok {
+			return semantic.ConstValue{}, false, false
+		}
+		if !matched {
+			continue
+		}
+		scope := map[string]semantic.ConstValue{}
+		for name, bindingValue := range bindings {
+			scope[name] = bindingValue
+		}
+		s.g.constEvalScopes = append(s.g.constEvalScopes, scope)
+		result, returned, ok := s.evalStaticStmtBlock(arm.Body, allowReturn)
+		s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+		return result, returned, ok
+	}
+	return semantic.ConstValue{}, false, true
+}
+
+func (s *functionState) evalStaticMatchPattern(pattern ast.MatchPattern, value semantic.ConstValue) (bool, map[string]semantic.ConstValue, bool) {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return true, nil, true
+	case *ast.MatchBindPattern:
+		if p.Name == "" || p.Name == "_" {
+			return true, nil, true
+		}
+		return true, map[string]semantic.ConstValue{p.Name: value}, true
+	case *ast.MatchLiteralPattern:
+		patternValue, ok := s.evalConstExpr(p.Value)
+		if !ok {
+			return false, nil, false
+		}
+		equal, ok := evalConstEquality(value, patternValue, true)
+		if !ok || equal.Kind != semantic.ConstBool {
+			return false, nil, false
+		}
+		return equal.Bool, nil, true
+	case *ast.MatchStringLiteralPattern:
+		if value.Kind != semantic.ConstString {
+			return false, nil, true
+		}
+		return value.String == p.Value, nil, true
+	case *ast.MatchVariantPattern:
+		if len(p.Args) != 0 {
+			return false, nil, false
+		}
+		patternValue, ok := s.g.constValue(p.EnumName + "." + p.Variant)
+		if !ok {
+			return false, nil, false
+		}
+		equal, ok := evalConstEquality(value, patternValue, true)
+		if !ok || equal.Kind != semantic.ConstBool {
+			return false, nil, false
+		}
+		return equal.Bool, nil, true
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			matched, bindings, ok := s.evalStaticMatchPattern(option, value)
+			if !ok {
+				return false, nil, false
+			}
+			if matched {
+				return true, bindings, true
+			}
+		}
+		return false, nil, true
+	default:
+		return false, nil, false
+	}
 }
 
 func (s *functionState) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (semantic.ConstValue, bool, bool) {

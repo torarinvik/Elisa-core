@@ -196,6 +196,26 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionCanUseMatch(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_match.elisa", `const enum Op of i32:
+	ADD = 1
+	SUB = 2
+	MUL = 3
+
+static def classify(op: Op) -> i64:
+	match op:
+		Op.ADD | Op.SUB:
+			return 1
+		_:
+			return 3
+
+def keep() -> void:
+	static assert classify(Op.ADD) == 1
+	static assert classify(Op.SUB) == 1
+	static assert classify(Op.MUL) == 3
+`)
+}
+
 func TestAnalyzeStaticFunctionRequiresReturnOnAllPaths(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_requires_return.elisa", `static def maybe(flag: bool) -> i64:
 	if flag:

@@ -268,6 +268,29 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIREvaluatesStaticMatch(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_match.elisa", `const enum Op of i32:
+    ADD = 1
+    SUB = 2
+    MUL = 3
+
+static def classify(op: Op) -> i64:
+    match op:
+        Op.ADD | Op.SUB:
+            return 1
+        _:
+            return 3
+
+def keep() -> void:
+    static assert classify(Op.ADD) == 1
+    static assert classify(Op.SUB) == 1
+    static assert classify(Op.MUL) == 3
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIREvaluatesStaticVoidFunctionFallthrough(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_def_void_fallthrough.elisa", `static def note() -> void:
     value: i64 = 42
