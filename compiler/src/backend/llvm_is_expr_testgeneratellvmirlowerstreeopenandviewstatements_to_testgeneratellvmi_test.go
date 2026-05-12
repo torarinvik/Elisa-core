@@ -621,6 +621,42 @@ def make_persistent(owner: mutable Arena&, value: i64) -> Lua.Expr:
 	}
 }
 
+func TestGenerateLLVMIRPrefersExplicitLocalStoreOverImplicitTreeStore(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	@index(name_index)
+	node Expr:
+		Int(value: i64)
+		Name(name_index: u32)
+		Field(base: Lua.Expr, name_index: u32)
+
+def count_names(owner: Arena, target: u32) -> usize:
+	store = Lua.Store(owner)
+	in store:
+		base = Lua.Expr.Int(span: 1, value: 7)
+		_ = Lua.Expr.Name(span: 2, name_index: target)
+		_ = Lua.Expr.Field(span: 3, base: base, name_index: target)
+	frozen = freeze(move store)
+	return count node in frozen.Expr where name_index == target
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_explicit_store_precedence.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "define i64 @count_names(%Arena %0, i32 %1, %Lua__TreeStore %2)") {
+		t.Fatalf("expected count_names to carry inferred tree store context for compatibility, got:\n%s", output)
+	}
+	if strings.Contains(output, "extractvalue %Lua__TreeStore %2") {
+		t.Fatalf("expected explicit local store to win over inferred tree store argument, got:\n%s", output)
+	}
+	if !strings.Contains(output, "tree.freeze.Lua_Expr.index.name_index.alloc") || !strings.Contains(output, "iter.filter.field.indexes.field") {
+		t.Fatalf("expected indexed payload query to use frozen field index, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRMaterializesCategoryUnionRootOnlyForRootType(t *testing.T) {
 	src := `tree Lua:
 	common:

@@ -25,9 +25,12 @@ This note documents the current LLVM backend contract for Elisa `tree` values. I
 
 - Tree allocation requires an active tree owner: `perm`, a tree store, an `Arena` value, or an `Arena` reference.
 - `freeze(move store)` accepts local tree stores and produces the matching frozen tree store type. Frozen store values preserve handle identity through the existing rebase/fact model.
-- For dense `@layout(soa)` categories, freeze publishes a frozen tag column and frozen common-field columns. `@index(kind)` points at the tag column. Variant-only payload field indexes are preserved as metadata, but payload-column extraction and field-index population are still a later slice because they need missing-value semantics for variants that do not carry the field.
+- For dense `@layout(soa)` categories, freeze publishes a frozen tag column and frozen common-field columns. `@index(kind)` points at the tag column.
+- `@index(field_name)` also materializes a frozen field column for dense AoS categories that should keep row-local payloads but still need one fast scalar scan path.
+- Payload-field indexes are supported when every variant that carries the field uses the same field type. Rows whose variant does not carry the field are zero-filled, so unguarded equality scans can match default-zero values accidentally.
+- Guard payload-field scans by `kind` when querying a specific variant, for example `count expr in frozen.Expr where kind == .Name and name_index == target`. If a query intentionally wants “any payload field with this name across all variants that carry it,” an unguarded scan is valid as long as `target` cannot be confused with the zero fill value or the caller accepts that semantics.
 - `tree_tags(frozen, "Category")` returns a readonly contiguous `dview[u32]` over the frozen category tag column.
-- `tree_column(frozen, "Category", "field")` returns a readonly contiguous `dview[T]` over a frozen common-field column. V1 intentionally supports common fields only.
+- `tree_column(frozen, "Category", "field")` returns a readonly contiguous `dview[T]` over a frozen common-field or indexed payload-field column.
 - These column views are SIMD-friendly query primitives and are intended to compose with `reduce_sum`, `chunks_exact`, `any`, `all`, and later `where_kind`.
 - Dense `category_union` code should prefer explicit stores:
   `store = Tree.Store(owner)` followed by `in store:` around constructors, reads, visits, folds, rewrites, clones, and attributes.
