@@ -197,6 +197,17 @@ def keep() -> void:
 	}
 }
 
+func TestAnalyzeStaticFunctionAcceptsUnsignedZeroBaseCase(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_unsigned_zero_base.elisa", `static def countdown(n: u64) -> u64:
+	if n == 0:
+		return 0
+	return countdown(n - 1)
+
+def keep() -> void:
+	static assert countdown(4) == 0
+`)
+}
+
 func TestAnalyzeStaticFunctionRejectsIndirectRecursion(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_rejects_indirect_recursion.elisa", `static def odd(n: i64) -> bool:
 	if n <= 0:
