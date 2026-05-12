@@ -1019,6 +1019,8 @@ func appendStaticStmtLists(first []ast.Stmt, second []ast.Stmt) []ast.Stmt {
 
 func (a *Analyzer) staticStmtContainsBaseCaseForParam(stmt ast.Stmt, paramName string, allowZeroEquality bool) bool {
 	switch n := stmt.(type) {
+	case *ast.ReturnStmt:
+		return a.staticReturnExprContainsBaseCaseForParam(n.Value, paramName, allowZeroEquality)
 	case *ast.IfStmt:
 		return a.staticIfContainsBaseCaseForParam(n.Cond, n.Then, n.Else, paramName, allowZeroEquality) || a.staticStmtsContainBaseCaseForParam(n.Then, paramName, allowZeroEquality) || a.staticStmtsContainBaseCaseForParam(n.Else, paramName, allowZeroEquality)
 	case *ast.StaticIfStmt:
@@ -1028,6 +1030,16 @@ func (a *Analyzer) staticStmtContainsBaseCaseForParam(stmt ast.Stmt, paramName s
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) staticReturnExprContainsBaseCaseForParam(expr ast.Expr, paramName string, allowZeroEquality bool) bool {
+	ternary, ok := expr.(*ast.TernaryExpr)
+	if !ok {
+		return false
+	}
+	then := []ast.Stmt{&ast.ReturnStmt{Position: ternary.Value.Pos(), Value: ternary.Value}}
+	alt := []ast.Stmt{&ast.ReturnStmt{Position: ternary.Alt.Pos(), Value: ternary.Alt}}
+	return a.staticIfContainsBaseCaseForParam(ternary.Cond, then, alt, paramName, allowZeroEquality)
 }
 
 func (a *Analyzer) staticIfContainsBaseCaseForParam(cond ast.Expr, then []ast.Stmt, elseStmts []ast.Stmt, paramName string, allowZeroEquality bool) bool {

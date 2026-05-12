@@ -208,6 +208,24 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionAcceptsTernaryBaseCase(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_ternary_base.elisa", `static def countdown(n: i64) -> i64:
+	return 0 if n <= 0 else countdown(n - 1)
+
+def keep() -> void:
+	static assert countdown(4) == 0
+`)
+}
+
+func TestAnalyzeStaticFunctionAcceptsInvertedTernaryBaseCase(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_inverted_ternary_base.elisa", `static def countdown(n: i64) -> i64:
+	return countdown(n - 1) if n > 0 else 0
+
+def keep() -> void:
+	static assert countdown(4) == 0
+`)
+}
+
 func TestAnalyzeStaticFunctionAcceptsInvertedDecreasingRecursion(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_accepts_inverted_total_recursion.elisa", `static def countdown(n: i64) -> i64:
 	if n > 0:
