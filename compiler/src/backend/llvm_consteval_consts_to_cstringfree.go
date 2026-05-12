@@ -360,6 +360,51 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			return evalConstExprWithLookup(n.Value, lookup, call)
 		}
 		return evalConstExprWithLookup(n.Alt, lookup, call)
+	case *ast.TupleExpr:
+		elems := make([]semantic.ConstValue, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			value, ok := evalConstExprWithLookup(elem, lookup, call)
+			if !ok {
+				return semantic.ConstValue{}, false
+			}
+			elems = append(elems, value)
+		}
+		return semantic.ConstValue{Kind: semantic.ConstTuple, Elems: elems}, true
+	case *ast.ListLitExpr:
+		if n.Owner != nil {
+			return semantic.ConstValue{}, false
+		}
+		elems := make([]semantic.ConstValue, 0, len(n.Elems))
+		for i, elem := range n.Elems {
+			if i < len(n.Spreads) && n.Spreads[i] {
+				return semantic.ConstValue{}, false
+			}
+			value, ok := evalConstExprWithLookup(elem, lookup, call)
+			if !ok {
+				return semantic.ConstValue{}, false
+			}
+			elems = append(elems, value)
+		}
+		return semantic.ConstValue{Kind: semantic.ConstList, Elems: elems}, true
+	case *ast.IndexExpr:
+		object, ok := evalConstExprWithLookup(n.Object, lookup, call)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		index, ok := evalConstExprWithLookup(n.Index, lookup, call)
+		if !ok || index.Kind != semantic.ConstInt {
+			return semantic.ConstValue{}, false
+		}
+		if index.Int >= 0 {
+			slot := int(index.Int)
+			if slot < len(object.Elems) && (object.Kind == semantic.ConstTuple || object.Kind == semantic.ConstList) {
+				return object.Elems[slot], true
+			}
+		}
+		if n.Fallback != nil {
+			return evalConstExprWithLookup(n.Fallback, lookup, call)
+		}
+		return semantic.ConstValue{}, false
 	case *ast.CallExpr:
 		if call == nil {
 			return semantic.ConstValue{}, false

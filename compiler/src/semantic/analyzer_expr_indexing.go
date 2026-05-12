@@ -88,6 +88,12 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if view, ok := objType.(*DArrayViewType); ok {
 		return finish(view.Elem)
 	}
+	if tuple, ok := StripAggregateStateType(objType).(*TupleType); ok {
+		if fieldType, ok := a.tupleIndexResultType(tuple, expr.Index); ok {
+			return finish(fieldType)
+		}
+		return finish(invalidType)
+	}
 	if itemType, ok := ChunksExactViewItemType(objType); ok {
 		return finish(itemType)
 	}
@@ -123,6 +129,12 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
 			return finish(view.Elem)
 		}
+		if tuple, ok := StripAggregateStateType(ref.Elem).(*TupleType); ok {
+			if fieldType, ok := a.tupleIndexResultType(tuple, expr.Index); ok {
+				return finish(fieldType)
+			}
+			return finish(invalidType)
+		}
 		if itemType, ok := ChunksExactViewItemType(ref.Elem); ok {
 			return finish(itemType)
 		}
@@ -139,6 +151,22 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	}
 	a.errorf(expr.Pos(), "indexing requires string, array, view, packed store, or reference type, got %s", objType)
 	return finish(invalidType)
+}
+
+func (a *Analyzer) tupleIndexResultType(tuple *TupleType, indexExpr ast.Expr) (Type, bool) {
+	if tuple == nil {
+		return nil, false
+	}
+	value, ok := a.evalConstExpr(indexExpr)
+	if !ok || value.Kind != ConstInt {
+		a.errorf(indexExpr.Pos(), "tuple index must be a compile-time integer")
+		return invalidType, false
+	}
+	if value.Int < 0 || value.Int >= int64(len(tuple.Fields)) {
+		a.errorf(indexExpr.Pos(), "constant tuple index %d out of bounds for %s", value.Int, tuple)
+		return invalidType, false
+	}
+	return tuple.Fields[value.Int].Type, true
 }
 
 func safeIndexFallbackOperandType(t Type) bool {

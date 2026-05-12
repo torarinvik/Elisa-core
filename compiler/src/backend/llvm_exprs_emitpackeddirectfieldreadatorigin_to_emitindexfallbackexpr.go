@@ -534,6 +534,9 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	if expr != nil && expr.Fallback != nil {
 		return s.emitIndexFallbackExpr(expr)
 	}
+	if value, actualType, handled, err := s.emitTupleIndexExpr(expr); handled {
+		return value, actualType, err
+	}
 	if flagType, ok := semantic.FlagsInstanceType(s.exprType(expr.Object)); ok {
 		return s.emitFlagsIndexExpr(expr, flagType)
 	}
@@ -559,6 +562,28 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	value, err := s.loadValue(ptr, elemType, "idx")
 	return value, elemType, err
 }
+
+func (s *functionState) emitTupleIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	tupleType, ok := semantic.StripAggregateStateType(s.exprType(expr.Object)).(*semantic.TupleType)
+	if !ok || tupleType == nil {
+		return nil, nil, false, nil
+	}
+	indexValue, ok := s.evalConstExpr(expr.Index)
+	if !ok || indexValue.Kind != semantic.ConstInt {
+		return nil, nil, true, fmt.Errorf("tuple index requires a compile-time integer")
+	}
+	if indexValue.Int < 0 || indexValue.Int >= int64(len(tupleType.Fields)) {
+		return nil, nil, true, fmt.Errorf("constant tuple index %d out of bounds for %s", indexValue.Int, tupleType.String())
+	}
+	tupleValue, _, err := s.emitExpr(expr.Object, nil)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	fieldType := tupleType.Fields[indexValue.Int].Type
+	value := C.LLVMBuildExtractValue(s.builder, tupleValue, C.unsigned(indexValue.Int), cStringFree("tuple.idx"))
+	return value, fieldType, true, nil
+}
+
 func (s *functionState) emitIndexFallbackExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil || expr.Fallback == nil {
 		return nil, nil, fmt.Errorf("missing safe index fallback expression")

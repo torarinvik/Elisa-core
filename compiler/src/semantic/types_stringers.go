@@ -111,6 +111,10 @@ func (t *ConstValueType) String() string {
 		return "false"
 	case ConstString:
 		return fmt.Sprintf("%q", t.Value.String)
+	case ConstTuple:
+		return "<const tuple>"
+	case ConstList:
+		return "<const list>"
 	default:
 		return "<const>"
 	}

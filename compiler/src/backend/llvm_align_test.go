@@ -291,6 +291,44 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIREvaluatesStaticConstAggregates(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_const_aggregates.elisa", `static def score() -> i64:
+    return (4, 9)[1] + ([3, 5, 7][2])
+
+def keep() -> void:
+    static assert score() == 16
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
+func TestGenerateLLVMIREvaluatesStaticConstIndexFallback(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_const_index_fallback.elisa", `static def read_or_default() -> i64:
+    return [3, 5, 7][9] else 11
+
+def keep() -> void:
+    static assert read_or_default() == 11
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
+func TestGenerateLLVMIREvaluatesStaticConstAggregateLocals(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_const_aggregate_locals.elisa", `static def score() -> i64:
+    pair = 4, 9
+    items = [3, 5, 7]
+    return pair[1] + items[2]
+
+def keep() -> void:
+    static assert score() == 16
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIREvaluatesStaticVoidFunctionFallthrough(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_def_void_fallthrough.elisa", `static def note() -> void:
     value: i64 = 42

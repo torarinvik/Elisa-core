@@ -288,11 +288,63 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			return a.evalConstExpr(n.Value)
 		}
 		return a.evalConstExpr(n.Alt)
+	case *ast.TupleExpr:
+		elems := make([]ConstValue, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			value, ok := a.evalConstExpr(elem)
+			if !ok {
+				return ConstValue{}, false
+			}
+			elems = append(elems, value)
+		}
+		return ConstValue{Kind: ConstTuple, Elems: elems}, true
+	case *ast.ListLitExpr:
+		if n.Owner != nil {
+			return ConstValue{}, false
+		}
+		elems := make([]ConstValue, 0, len(n.Elems))
+		for i, elem := range n.Elems {
+			if i < len(n.Spreads) && n.Spreads[i] {
+				return ConstValue{}, false
+			}
+			value, ok := a.evalConstExpr(elem)
+			if !ok {
+				return ConstValue{}, false
+			}
+			elems = append(elems, value)
+		}
+		return ConstValue{Kind: ConstList, Elems: elems}, true
+	case *ast.IndexExpr:
+		return a.evalConstIndexExpr(n)
 	case *ast.CallExpr:
 		return a.evalStaticFunctionCall(n)
 	default:
 		return ConstValue{}, false
 	}
+}
+
+func (a *Analyzer) evalConstIndexExpr(expr *ast.IndexExpr) (ConstValue, bool) {
+	if expr == nil {
+		return ConstValue{}, false
+	}
+	object, ok := a.evalConstExpr(expr.Object)
+	if !ok {
+		return ConstValue{}, false
+	}
+	index, ok := a.evalConstExpr(expr.Index)
+	if !ok || index.Kind != ConstInt {
+		return ConstValue{}, false
+	}
+	if index.Int >= 0 {
+		slot := int(index.Int)
+		if slot < len(object.Elems) && (object.Kind == ConstTuple || object.Kind == ConstList) {
+			return object.Elems[slot], true
+		}
+	}
+	if expr.Fallback != nil {
+		return a.evalConstExpr(expr.Fallback)
+	}
+	return ConstValue{}, false
 }
 
 func (a *Analyzer) lookupConstEvalValue(name string) (ConstValue, bool) {

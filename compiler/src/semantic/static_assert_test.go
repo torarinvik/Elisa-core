@@ -216,6 +216,35 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticFunctionCanUseConstTuplesAndLists(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_const_aggregates.elisa", `static def score() -> i64:
+	return (4, 9)[1] + ([3, 5, 7][2])
+
+def keep() -> void:
+	static assert score() == 16
+`)
+}
+
+func TestAnalyzeStaticFunctionConstIndexFallback(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_const_index_fallback.elisa", `static def read_or_default() -> i64:
+	return [3, 5, 7][9] else 11
+
+def keep() -> void:
+	static assert read_or_default() == 11
+`)
+}
+
+func TestAnalyzeStaticFunctionCanIndexConstAggregateLocals(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_const_aggregate_locals.elisa", `static def score() -> i64:
+	pair = 4, 9
+	items = [3, 5, 7]
+	return pair[1] + items[2]
+
+def keep() -> void:
+	static assert score() == 16
+`)
+}
+
 func TestAnalyzeStaticFunctionRequiresReturnOnAllPaths(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_def_requires_return.elisa", `static def maybe(flag: bool) -> i64:
 	if flag:

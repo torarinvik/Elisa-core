@@ -14,6 +14,8 @@ const (
 	ConstFloat
 	ConstBool
 	ConstString
+	ConstTuple
+	ConstList
 )
 
 const (
@@ -28,6 +30,7 @@ type ConstValue struct {
 	Float  float64
 	Bool   bool
 	String string
+	Elems  []ConstValue
 }
 
 type ShapeTransformSpec struct {

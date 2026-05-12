@@ -120,7 +120,7 @@ func SameType(a, b Type) bool {
 		return ok && ta.Name == tb.Name && SameType(ta.ValueType, tb.ValueType)
 	case *ConstValueType:
 		tb, ok := b.(*ConstValueType)
-		return ok && ta.Value == tb.Value
+		return ok && sameConstValue(ta.Value, tb.Value)
 	case *AssociatedTypeProjection:
 		tb, ok := b.(*AssociatedTypeProjection)
 		return ok && ta.InterfaceName == tb.InterfaceName && ta.Name == tb.Name && SameType(ta.Receiver, tb.Receiver)
@@ -328,4 +328,16 @@ func SameType(a, b Type) bool {
 	default:
 		return false
 	}
+}
+
+func sameConstValue(a ConstValue, b ConstValue) bool {
+	if a.Kind != b.Kind || a.Int != b.Int || a.Float != b.Float || a.Bool != b.Bool || a.String != b.String || len(a.Elems) != len(b.Elems) {
+		return false
+	}
+	for i := range a.Elems {
+		if !sameConstValue(a.Elems[i], b.Elems[i]) {
+			return false
+		}
+	}
+	return true
 }
