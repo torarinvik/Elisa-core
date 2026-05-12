@@ -321,6 +321,38 @@ func TestParseIfBraceMembershipConditionUsesNormalIfPath(t *testing.T) {
 	}
 }
 
+func TestParseIfNotInBraceMembershipConditionUsesNormalIfPath(t *testing.T) {
+	file, errs := parseSourceFile(t, `const enum TokenKind of u32:
+    READ
+    READLN
+    WRITE
+
+def keep(kind: TokenKind) -> bool:
+    if kind not in {.READ, .READLN}:
+        return true
+    return false
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected normal if stmt, got %T", decl.Body[0])
+	}
+	notExpr, ok := ifStmt.Cond.(*ast.UnaryExpr)
+	if !ok || notExpr.Op != lexer.TOKEN_NOT {
+		t.Fatalf("expected not-in condition to parse as unary not, got %#v", ifStmt.Cond)
+	}
+	inExpr, ok := notExpr.Operand.(*ast.BinaryExpr)
+	if !ok || inExpr.Op != lexer.TOKEN_IN {
+		t.Fatalf("expected not-in operand to be membership condition, got %#v", notExpr.Operand)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "kind not in {.READ, .READLN}") {
+		t.Fatalf("expected not-in shorthand membership to unparse, got:\n%s", formatted)
+	}
+}
+
 func TestParseIfMembershipConditionAllowsNamedRightHandSide(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(value: i64, xs: i64[2]) -> bool:\n    if value in xs:\n        return true\n    return false\n")
 	if len(errs) != 0 {

@@ -410,6 +410,14 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 		body := p.parseBlock()
 		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
 	}
+	if p.notInMembershipAhead() {
+		p.pos = headStart
+		cond := p.withAsCastDisabled(p.parseExpr)
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		body := p.parseBlock()
+		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
+	}
 	if p.match(lexer.TOKEN_AS) {
 		if hint != ast.BranchHintNone {
 			if isElif {
