@@ -349,6 +349,9 @@ func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool)
 	a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
 	a.staticCallDepth--
 	if !returned {
+		if isVoidType(fnType.Return) {
+			return ConstValue{Kind: ConstUnknown}, true
+		}
 		return ConstValue{}, false
 	}
 	return value, ok
@@ -552,10 +555,19 @@ func (a *Analyzer) validateStaticFunctionTotality(fn *ast.FuncDecl) {
 	if fn == nil || !fn.Static {
 		return
 	}
-	if !staticStmtBlockAlwaysTerminates(fn.Body) {
+	if !a.staticFunctionReturnsVoid(fn) && !staticStmtBlockAlwaysTerminates(fn.Body) {
 		a.errorf(fn.Pos(), "static function %q must return on all paths", fn.Name)
 	}
 	a.validateStaticFunctionRecursion(fn)
+}
+
+func (a *Analyzer) staticFunctionReturnsVoid(fn *ast.FuncDecl) bool {
+	sym, ok := a.symbolForFuncDecl(fn)
+	if !ok || sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	return ok && fnType != nil && isVoidType(fnType.Return)
 }
 
 func staticStmtBlockAlwaysTerminates(stmts []ast.Stmt) bool {

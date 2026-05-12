@@ -268,6 +268,20 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIREvaluatesStaticVoidFunctionFallthrough(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_static_def_void_fallthrough.elisa", `static def note() -> void:
+    value: i64 = 42
+
+def keep() -> void:
+    static note()
+    static:
+        note()
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRRejectsStaticAssertWithLayoutIntrospection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
     tag: u8

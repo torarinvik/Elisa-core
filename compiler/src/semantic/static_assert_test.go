@@ -106,6 +106,17 @@ def keep() -> void:
 `)
 }
 
+func TestAnalyzeStaticVoidFunctionMayFallThrough(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_void_fallthrough.elisa", `static def note() -> void:
+	value: i64 = 42
+
+def keep() -> void:
+	static note()
+	static:
+		note()
+`)
+}
+
 func TestAnalyzeStaticFunctionCanUseLocalsAndCompileTimeIf(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_locals.elisa", `static def answer(step: i64) -> i64:
 	value: mutable i64 = step + 40

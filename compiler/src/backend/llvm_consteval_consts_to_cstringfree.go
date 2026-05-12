@@ -419,6 +419,9 @@ func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.Con
 	g.constEvalScopes = g.constEvalScopes[:len(g.constEvalScopes)-1]
 	g.staticCallDepth--
 	if !returned {
+		if isVoidType(fnType.Return) {
+			return semantic.ConstValue{Kind: semantic.ConstUnknown}, true
+		}
 		return semantic.ConstValue{}, false
 	}
 	return value, ok
