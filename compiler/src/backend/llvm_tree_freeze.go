@@ -470,6 +470,30 @@ func (s *functionState) emitFrozenTreeRowsItemValue(sourceAlloca C.LLVMValueRef,
 	return value, rowsType.Category, nil
 }
 
+func (s *functionState) emitTreeFrozenColumnFieldFilterValue(rowValue C.LLVMValueRef, category *semantic.TreeCategoryType, fieldName string, fieldType semantic.Type, name string) (C.LLVMValueRef, error) {
+	if category == nil || category.Family == nil || fieldName == "" || fieldType == nil {
+		return nil, fmt.Errorf("tree row filter requires tree field metadata")
+	}
+	stateValue, err := s.emitTreeCategoryUnionContextStateValue(category.Family, name)
+	if err != nil {
+		return nil, err
+	}
+	dataPtr, err := s.emitTreeFrozenFieldColumnPointer(stateValue, category, fieldName, name)
+	if err != nil {
+		return nil, err
+	}
+	elemLLVMType, err := s.g.lowerType(fieldType)
+	if err != nil {
+		return nil, err
+	}
+	rowIndex, err := s.emitTreeHandleIndexValue(rowValue, name+".index")
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr([]C.LLVMValueRef{rowIndex}), C.unsigned(1), cStringFree(name+".field.ptr"))
+	return s.loadValue(ptr, fieldType, name+".field")
+}
+
 func treeCategoryByName(family *semantic.TreeType, name string) (*semantic.TreeCategoryType, bool) {
 	if family == nil {
 		return nil, false

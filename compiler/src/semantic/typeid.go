@@ -241,6 +241,9 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 			return false
 		}
 		appendKeyString(b, tt.Category.Name)
+		if !appendTypeIDKey(b, tt.Store, active, nextCycleID) {
+			return false
+		}
 	case *PackedVariantViewType:
 		if tt == nil || tt.Enum == nil || tt.Variant == nil {
 			return false

@@ -12,6 +12,7 @@ import "C"
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
 )
@@ -392,6 +393,99 @@ func (s *functionState) applyIterViewTransforms(sourceName string, indexValue C.
 	}
 	return currentValue, currentType, nil
 }
+
+func (s *functionState) emitEqualityCompare(left C.LLVMValueRef, leftType semantic.Type, right C.LLVMValueRef, rightType semantic.Type, name string) (C.LLVMValueRef, error) {
+	rightValue, err := s.coerceValue(right, rightType, leftType)
+	if err != nil {
+		return nil, err
+	}
+	if isFloatType(leftType) {
+		return C.LLVMBuildFCmp(s.builder, C.LLVMRealPredicate(C.LLVMRealOEQ), left, rightValue, cStringFree(name)), nil
+	}
+	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), left, rightValue, cStringFree(name)), nil
+}
+
+type frozenTreeRowFieldEqualityFilter struct {
+	category  *semantic.TreeCategoryType
+	fieldName string
+	fieldType semantic.Type
+	target    ast.Expr
+	negate    bool
+}
+
+func frozenTreeRowFieldEqualityFilterFor(pattern ast.MoveBindPattern, sourceType semantic.Type, filter ast.Expr) (frozenTreeRowFieldEqualityFilter, bool) {
+	binary, ok := filter.(*ast.BinaryExpr)
+	if !ok || binary == nil || (binary.Op != lexer.TOKEN_EQEQ && binary.Op != lexer.TOKEN_BANGEQ) {
+		return frozenTreeRowFieldEqualityFilter{}, false
+	}
+	namePattern, ok := pattern.(*ast.MoveBindNamePattern)
+	if !ok || namePattern == nil || namePattern.Name == "_" {
+		return frozenTreeRowFieldEqualityFilter{}, false
+	}
+	rowsType, ok := semantic.StripAggregateStateType(sourceType).(*semantic.FrozenTreeRowsViewType)
+	if !ok || rowsType == nil || rowsType.Category == nil {
+		return frozenTreeRowFieldEqualityFilter{}, false
+	}
+	if result, ok := frozenTreeRowFieldEqualityOperand(rowsType.Category, namePattern.Name, binary.Left, binary.Right); ok {
+		result.negate = binary.Op == lexer.TOKEN_BANGEQ
+		return result, true
+	}
+	if result, ok := frozenTreeRowFieldEqualityOperand(rowsType.Category, namePattern.Name, binary.Right, binary.Left); ok {
+		result.negate = binary.Op == lexer.TOKEN_BANGEQ
+		return result, true
+	}
+	return frozenTreeRowFieldEqualityFilter{}, false
+}
+
+func frozenTreeRowFieldEqualityOperand(category *semantic.TreeCategoryType, itemName string, fieldExpr ast.Expr, target ast.Expr) (frozenTreeRowFieldEqualityFilter, bool) {
+	field, ok := fieldExpr.(*ast.FieldExpr)
+	if !ok || field == nil || field.Safe {
+		return frozenTreeRowFieldEqualityFilter{}, false
+	}
+	ident, ok := field.Object.(*ast.Ident)
+	if !ok || ident == nil || ident.Name != itemName {
+		return frozenTreeRowFieldEqualityFilter{}, false
+	}
+	fieldInfo, ok := semantic.TreeCategorySurfaceFieldInfo(category, field.Field)
+	if !ok || fieldInfo.Type == nil {
+		return frozenTreeRowFieldEqualityFilter{}, false
+	}
+	if field.Field != "kind" && category.Layout != semantic.TreeLayoutSOA {
+		return frozenTreeRowFieldEqualityFilter{}, false
+	}
+	return frozenTreeRowFieldEqualityFilter{
+		category:  category,
+		fieldName: field.Field,
+		fieldType: fieldInfo.Type,
+		target:    target,
+	}, true
+}
+
+func (s *functionState) emitFrozenTreeRowFieldEqualityFilter(rowValue C.LLVMValueRef, filter frozenTreeRowFieldEqualityFilter, name string) (C.LLVMValueRef, error) {
+	var fieldValue C.LLVMValueRef
+	var err error
+	if filter.fieldName == "kind" {
+		fieldValue, err = s.extractTreeCategoryTagValue(rowValue, filter.category)
+	} else {
+		fieldValue, err = s.emitTreeFrozenColumnFieldFilterValue(rowValue, filter.category, filter.fieldName, filter.fieldType, name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	targetValue, targetType, err := s.emitExpr(filter.target, filter.fieldType)
+	if err != nil {
+		return nil, err
+	}
+	filterBool, err := s.emitEqualityCompare(fieldValue, filter.fieldType, targetValue, targetType, name+".cmp")
+	if err != nil {
+		return nil, err
+	}
+	if filter.negate {
+		filterBool = C.LLVMBuildNot(s.builder, filterBool, cStringFree(name+".not"))
+	}
+	return filterBool, nil
+}
+
 func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	sourceType := s.exprType(stmt.Source)
 	if sourceType == nil {
@@ -509,12 +603,19 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	if stmt.WhereFilter != nil {
-		filterValue, filterType, err := s.emitExpr(stmt.WhereFilter, nil)
-		if err != nil {
-			s.popScope()
-			return err
+		var filterBool C.LLVMValueRef
+		if rowFilter, ok := frozenTreeRowFieldEqualityFilterFor(stmt.Pattern, iterSourceType, stmt.WhereFilter); ok && boundItemValue != nil {
+			filterBool, err = s.emitFrozenTreeRowFieldEqualityFilter(boundItemValue, rowFilter, "iter.where.tree.field")
+		} else {
+			var filterValue C.LLVMValueRef
+			var filterType semantic.Type
+			filterValue, filterType, err = s.emitExpr(stmt.WhereFilter, nil)
+			if err != nil {
+				s.popScope()
+				return err
+			}
+			filterBool, err = s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
 		}
-		filterBool, err := s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
 		if err != nil {
 			s.popScope()
 			return err
@@ -524,12 +625,19 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	if stmt.Filter != nil {
-		filterValue, filterType, err := s.emitExpr(stmt.Filter, nil)
-		if err != nil {
-			s.popScope()
-			return err
+		var filterBool C.LLVMValueRef
+		if rowFilter, ok := frozenTreeRowFieldEqualityFilterFor(stmt.Pattern, iterSourceType, stmt.Filter); ok && boundItemValue != nil {
+			filterBool, err = s.emitFrozenTreeRowFieldEqualityFilter(boundItemValue, rowFilter, "iter.filter.tree.field")
+		} else {
+			var filterValue C.LLVMValueRef
+			var filterType semantic.Type
+			filterValue, filterType, err = s.emitExpr(stmt.Filter, nil)
+			if err != nil {
+				s.popScope()
+				return err
+			}
+			filterBool, err = s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
 		}
-		filterBool, err := s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
 		if err != nil {
 			s.popScope()
 			return err

@@ -344,6 +344,8 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		}
 		a.analyzeNestedMatchPattern(stmt.PatternFilter, info.ItemType, valueExpr, loopScope)
 	}
+	stmt.WhereFilter = a.rewriteFrozenTreeRowFieldFilterShorthand(loopScope, stmt.Pattern, sourceType, stmt.WhereFilter)
+	stmt.Filter = a.rewriteFrozenTreeRowFieldFilterShorthand(loopScope, stmt.Pattern, sourceType, stmt.Filter)
 	if stmt.WhereFilter != nil {
 		condType := a.analyzeCondExprInScope(stmt.WhereFilter, loopScope)
 		if !IsBoolType(condType) {
@@ -379,6 +381,62 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+}
+
+func (a *Analyzer) rewriteFrozenTreeRowFieldFilterShorthand(scope *Scope, pattern ast.MoveBindPattern, sourceType Type, expr ast.Expr) ast.Expr {
+	if expr == nil || scope == nil {
+		return expr
+	}
+	namePattern, ok := pattern.(*ast.MoveBindNamePattern)
+	if !ok || namePattern == nil || namePattern.Name == "_" {
+		return expr
+	}
+	rowsType, ok := StripAggregateStateType(sourceType).(*FrozenTreeRowsViewType)
+	if !ok || rowsType == nil || rowsType.Category == nil {
+		return expr
+	}
+	var rewrite func(ast.Expr) ast.Expr
+	rewrite = func(current ast.Expr) ast.Expr {
+		switch n := current.(type) {
+		case *ast.Ident:
+			if n == nil || n.Name == namePattern.Name {
+				return current
+			}
+			if _, exists := scope.Lookup(n.Name); exists {
+				return current
+			}
+			if _, ok := TreeCategorySurfaceFieldInfo(rowsType.Category, n.Name); !ok {
+				return current
+			}
+			return &ast.FieldExpr{
+				Position: n.Position,
+				Object:   &ast.Ident{Position: namePattern.Pos(), Name: namePattern.Name},
+				Field:    n.Name,
+			}
+		case *ast.BinaryExpr:
+			if n == nil {
+				return current
+			}
+			n.Left = rewrite(n.Left)
+			n.Right = rewrite(n.Right)
+			return n
+		case *ast.UnaryExpr:
+			if n == nil {
+				return current
+			}
+			n.Operand = rewrite(n.Operand)
+			return n
+		case *ast.ParenExpr:
+			if n == nil {
+				return current
+			}
+			n.Inner = rewrite(n.Inner)
+			return n
+		default:
+			return current
+		}
+	}
+	return rewrite(expr)
 }
 
 func (a *Analyzer) analyzeLetDestructureStmt(stmt *ast.LetDestructureStmt) {

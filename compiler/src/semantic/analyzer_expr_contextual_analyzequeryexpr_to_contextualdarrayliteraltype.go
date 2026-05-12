@@ -34,6 +34,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 		}
 		a.analyzeNestedMatchPattern(expr.PatternFilter, info.ItemType, valueExpr, loopScope)
 	}
+	expr.Filter = a.rewriteFrozenTreeRowFieldFilterShorthand(loopScope, pattern, sourceType, expr.Filter)
 	if expr.Filter != nil {
 		condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
 		if !IsBoolType(condType) {
