@@ -216,6 +216,15 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 					return invalidType
 				}
 			}
+			if lookupName == "Flags" && len(args) == 1 {
+				flagArg := StripAggregateStateType(args[0])
+				if _, ok := flagArg.(*TypeParamType); !ok {
+					if _, ok := flagArg.(*ConstEnumType); !ok {
+						a.errorf(n.Pos(), "Flags[T] expects a const enum type argument, got %s", args[0])
+						return invalidType
+					}
+				}
+			}
 			return DefaultAggregateStateType(&GenericInstanceType{Name: lookupName, Base: base, Args: args})
 		case *OpaqueType:
 			if len(n.Args) != 0 {

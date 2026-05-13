@@ -670,7 +670,7 @@ if directives[RoutineDirective.External]:
 ```
 
 ```elisa
-params: mutable InlineVec[PascalParamSpec, 8] = inline_vec.new()
+params: mutable InlineVec[PascalParamSpec, 8] = inlinevec.new(owner)
 params.push(param)
 ```
 
@@ -716,7 +716,9 @@ id: RowId[PascalSymbols] = symbols.push(...)
 symbols.flags[id].add(PascalSymbolFlag.Routine)
 ```
 
-Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
+Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Generic helpers may mention `Flags[T]` before `T` is specialized, but concrete instantiations must use a `const enum` element type. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
+
+Use `InlineVec[T, N]` for tiny hot lists where most values fit inline but occasional spill to an arena-owned `darray` is acceptable. Parser and semantic scratch lists such as params, labels, directives, and duplicate-detection sets are the intended shape.
 
 Use `Builder[T] in owner` when constructing arena-owned dynamic arrays. The declaration creates a mutable builder from the owner while keeping the owner relationship visible at the declaration site. `Builder[T]` is the idiomatic surface name for the arena-backed dynamic-array builder; it lowers through the same `DArrayBuilder[T]` runtime storage and helper methods. `owner.builder()` remains available when an expression form is clearer.
 
