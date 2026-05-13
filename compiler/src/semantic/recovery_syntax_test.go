@@ -36,6 +36,27 @@ def handle_locally(flag: bool) -> i64:
 `)
 }
 
+func TestAnalyzeTryElseRecoveryActions(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "try_else_recovery_actions.elisa", `
+error FileError:
+	NotFound
+
+extern read_value(flag: bool) -> i64 error[FileError]
+extern write_value(value: i64) -> void error[FileError]
+
+def fallback_return(flag: bool) -> i64:
+	value: i64 = try read_value(flag) else return 7
+	return value
+
+def fallback_raise(flag: bool) -> i64 error[FileError]:
+	value: i64 = try read_value(flag) else raise FileError.NotFound
+	return value
+
+def fallback_void(flag: bool) -> void:
+	try write_value(1) else void
+`)
+}
+
 func TestAnalyzeRejectsBareTryWithoutErrorUnionReturn(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "bare_try_requires_error_return.elisa", `
 error FileError:

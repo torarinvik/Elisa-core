@@ -139,7 +139,12 @@ def load_with_log(path: Path) -> Buffer:
     return try read_file(path) else err:
         log_error(err)
         return Buffer.Empty
+
+def write_best_effort(value: Buffer) -> void:
+    try write_file(value) else void
 ```
+
+The same recovery actions are available for handled error unions: `try fallible() else return fallback`, `try fallible() else raise Error.Tag`, and `try fallible_void() else void`.
 
 `return?`, `match?`, and `try? ... default` remain accepted as migration syntax, but they are deprecated in favor of the unified `else` forms.
 
