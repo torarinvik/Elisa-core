@@ -61,6 +61,31 @@ func BenchmarkGenerateLLVMIRTreeCategoryUnion(b *testing.B) {
 	benchmarkGenerateLLVMIRTreeLayout(b, "tree_category_union_bench.elisa", treeBenchmarkSource(""))
 }
 
+func BenchmarkGenerateLLVMIRFrozenTreeRowQueries(b *testing.B) {
+	src := `@layout(soa)
+tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Name(name_index: i64)
+		Add(left: Lua.Expr, right: Lua.Expr)
+
+def query(owner: Arena, target: i64) -> usize:
+	store = Lua.Store(owner)
+	in store:
+		left = Lua.Expr.Int(span: target, value: 1)
+		right = Lua.Expr.Name(span: target, name_index: 2)
+		_ = Lua.Expr.Add(span: target, left: left, right: right)
+	frozen = freeze(move store)
+	ints: usize = count node in frozen.Expr.where_kind(.Int) where node.span == target
+	names: usize = count node in frozen.Expr where kind == .Name and name_index == target
+	return ints + names
+`
+	benchmarkGenerateLLVMIRTreeLayout(b, "tree_frozen_row_queries_bench.elisa", src)
+}
+
 func benchmarkGenerateLLVMIRTreeLayout(b *testing.B, filename string, src string) {
 	result := parseAndAnalyzeBackendBenchmarkSource(b, filename, src)
 	b.ReportAllocs()
