@@ -68,3 +68,59 @@ func TestRuntimeCollectionsInterfaceMatchesImplementation(t *testing.T) {
 		t.Fatalf("expected checked-in collections interface to analyze warning-free, got:\n%s", stderr.String())
 	}
 }
+
+func TestRuntimeBuildersInterfaceMatchesImplementation(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	implPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "builders.elisa")
+	ifacePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "builders.elisai")
+
+	wantBytes, err := os.ReadFile(ifacePath)
+	if err != nil {
+		t.Fatalf("expected checked-in builders interface: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "iface", implPath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected builders interface generation to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected warning-free builders interface generation, got:\n%s", stderr.String())
+	}
+	if got, want := stdout.String(), string(wantBytes); got != want {
+		t.Fatalf("checked-in builders.elisai is stale; regenerate with `go run ./src -emit interface -o runtime/elisacore_std/builders.elisai runtime/elisacore_std/builders.elisa`")
+	}
+
+	source := string(wantBytes)
+	for _, check := range []string{
+		"struct DArrayBuilder[T]:",
+		"extern builder[T](owner: mutable Arena&) -> DArrayBuilder[T]",
+		"extern push[T](builder: mutable DArrayBuilder[T]&, item: T)",
+		"extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]",
+	} {
+		if !strings.Contains(source, check) {
+			t.Fatalf("expected builders interface to contain %q", check)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"-emit", "ast", ifacePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected checked-in builders interface to parse, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected checked-in builders interface to parse warning-free, got:\n%s", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"-emit", "semantic", ifacePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected checked-in builders interface to analyze, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected checked-in builders interface to analyze warning-free, got:\n%s", stderr.String())
+	}
+}

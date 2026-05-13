@@ -53,6 +53,34 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	return fnValue, specializedType, nil
 }
 
+func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl, base *semantic.FuncType, typeBindings map[string]semantic.Type) (C.LLVMValueRef, *semantic.FuncType, error) {
+	if decl == nil || base == nil {
+		return nil, nil, fmt.Errorf("generic extern specialization requires a function declaration and type")
+	}
+	params := funcGenericParams(base)
+	orderedArgs := make([]semantic.Type, 0, len(params))
+	for _, param := range params {
+		name := param.Name
+		bound, ok := typeBindings[name]
+		if !ok {
+			return nil, nil, fmt.Errorf("missing specialization binding for type parameter %s in extern %s", name, decl.Name)
+		}
+		orderedArgs = append(orderedArgs, bound)
+	}
+	specializationBase := decl.Name
+	if base.Name != "" {
+		specializationBase = base.Name
+	}
+	specializedName := mangleGenericType(specializationBase, orderedArgs)
+	specializedType := g.specializedFuncTypes[specializedName]
+	if specializedType == nil {
+		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
+		g.specializedFuncTypes[specializedName] = specializedType
+	}
+	value, err := g.ensureFunctionDeclared(specializedName, specializedType)
+	return value, specializedType, err
+}
+
 func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semantic.Type, impls map[string]*semantic.StaticImpl) *semantic.FuncType {
 	if base == nil {
 		return nil

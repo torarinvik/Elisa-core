@@ -1,0 +1,18 @@
+struct DArrayBuilder[T]:
+    owner: mutable Arena&?
+    items: mutable darray[T]
+
+extern darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
+
+@ufcs_only
+extern builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
+
+extern darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T)
+
+@ufcs_only
+extern push[T](builder: mutable DArrayBuilder[T]&, item: T)
+
+extern darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]
+
+@ufcs_only
+extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]

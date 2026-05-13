@@ -149,6 +149,15 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
 				return value, specialized, err
 			}
+			if decl, ok := sym.Node.(*ast.ExternFuncDecl); ok && len(decl.GenericParams) > 0 {
+				argTypes := make([]semantic.Type, 0, len(expr.Args))
+				for _, arg := range expr.Args {
+					argTypes = append(argTypes, s.exprType(arg))
+				}
+				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes, s.exprType(expr))
+				value, specialized, err := s.g.ensureSpecializedExternFunction(decl, fnType, bindings)
+				return value, specialized, err
+			}
 			specialized := s.specializeFunctionType(fnType)
 			value, err := s.g.ensureFunctionDeclared(ident.Name, specialized)
 			return value, specialized, err

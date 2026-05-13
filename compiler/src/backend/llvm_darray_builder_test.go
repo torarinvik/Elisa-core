@@ -57,6 +57,30 @@ def build(owner: Arena) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesGenericExternUFCSBuilderPush(t *testing.T) {
+	src := `struct DArrayBuilder[T]:
+    count: usize
+
+@ufcs_only
+extern push[T](builder: mutable DArrayBuilder[T]&, item: T) -> void
+
+def build() -> void:
+    items: mutable DArrayBuilder[i64] = zeroed
+    items.push(7)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_generic_extern_ufcs_builder_push.elisa", src)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if !strings.Contains(output, "call void @ovl__push") || !strings.Contains(output, "__i64(ptr %items, i64 7)") {
+		t.Fatalf("expected generic extern UFCS call to use a specialized i64 symbol, got:\n%s", output)
+	}
+	if strings.Contains(output, "DArrayBuilder_T__push(ptr %items, i64 7)") {
+		t.Fatalf("expected generic extern UFCS call to avoid unspecialized T ABI, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

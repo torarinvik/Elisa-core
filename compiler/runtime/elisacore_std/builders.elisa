@@ -1,0 +1,31 @@
+struct DArrayBuilder[T]:
+    owner: mutable Arena&?
+    items: mutable darray[T]
+
+def darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
+    result: mutable DArrayBuilder[T] = zeroed
+    result.owner as & <- owner
+    return result
+
+@ufcs_only
+def builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
+    return darray_builder[T](owner)
+
+def darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        assert builder.owner != null
+        owner: mutable Arena& = builder.owner
+        in owner:
+            builder.items.push(item)
+
+@ufcs_only
+def push[T](builder: mutable DArrayBuilder[T]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        darray_builder_push[T](builder, item)
+
+def darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
+    return builder.items
+
+@ufcs_only
+def finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
+    return darray_builder_finish[T](builder)
