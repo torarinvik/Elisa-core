@@ -268,6 +268,51 @@ def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
 	}
 }
 
+func TestGenerateLLVMIRLowersSubjectIsEachProjectionQueryPatternFilter(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return value for each item in items where item is Expr.Int(value)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_subject_is_each_projection_query_pattern.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"iter.pattern.filter.body", "match.tag", "darray.push"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected subject-is pattern-filter projection query IR to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersEnumerateWhereSubjectPatternFilter(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def sum_positive_after_index(items: darray[Expr]) -> i64:
+    total: mutable i64 = 0
+    for index, item in (items.enumerate() where index, item is Expr.Int(value): value > index):
+        total <- total + index
+    return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_enumerate_where_subject_pattern_filter.elisa", src)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	for _, check := range []string{"match.expr", "match.tag", "icmp sgt", "define i64 @sum_positive_after_index"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected enumerate subject pattern filter IR to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersEachProjectionQueryPatternFilterGuard(t *testing.T) {
 	src := `enum Expr:
     Int(value: i64)

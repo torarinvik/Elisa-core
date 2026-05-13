@@ -32,3 +32,28 @@ def keep(kind: TokenKind) -> bool:
 		t.Fatalf("expected is operand type bool, got %s", got)
 	}
 }
+
+func TestAnalyzeBracketedIsPatternUsesBool(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "bracketed_is_pattern.elisa", `const enum TokenKind of u32:
+    LT
+    LTEQ
+    GT
+
+def keep(kind: TokenKind) -> bool:
+    return kind is [.LT | .LTEQ | .GT]
+`)
+
+	decl := result.File.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	isExpr, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected is expression, got %T", ret.Value)
+	}
+	if got := result.ExprTypes[isExpr].String(); got != "bool" {
+		t.Fatalf("expected is expression type bool, got %s", got)
+	}
+	pattern, ok := isExpr.Right.(*ast.IsPatternExpr)
+	if !ok || !pattern.Brackets {
+		t.Fatalf("expected bracketed is-pattern RHS, got %T %#v", isExpr.Right, isExpr.Right)
+	}
+}

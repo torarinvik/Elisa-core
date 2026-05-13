@@ -21,6 +21,36 @@ def fallback_value(maybe: i64?, flag: bool) -> i64:
 `)
 }
 
+func TestAnalyzeBareTryPropagatesAndTryElseHandlesLocally(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "try_propagates_try_else_handles.elisa", `
+error FileError:
+	NotFound
+
+extern read_value(flag: bool) -> i64 error[FileError]
+
+def propagate(flag: bool) -> i64 error[FileError]:
+	return try read_value(flag)
+
+def handle_locally(flag: bool) -> i64:
+	return try read_value(flag) else 7
+`)
+}
+
+func TestAnalyzeRejectsBareTryWithoutErrorUnionReturn(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "bare_try_requires_error_return.elisa", `
+error FileError:
+	NotFound
+
+extern read_value(flag: bool) -> i64 error[FileError]
+
+def bad(flag: bool) -> i64:
+	return try read_value(flag)
+`)
+	if got := strings.Join(result.Errors(), "\n"); !strings.Contains(got, "try without else requires the current function to return an error union") {
+		t.Fatalf("expected bare try propagation diagnostic, got:\n%s", got)
+	}
+}
+
 func TestAnalyzeRejectsElseVoidInValueContext(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "else_void_value_context.elisa", `
 def bad(maybe: i64?) -> i64:

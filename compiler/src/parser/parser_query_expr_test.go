@@ -101,6 +101,77 @@ func TestParseProjectionQueryPatternFilter(t *testing.T) {
 	}
 }
 
+func TestParseQuerySubjectIsPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Missing\n\ndef keep(items: darray[Expr]) -> bool:\n    return any item in items where item is Expr.Int(value): value > 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok {
+		t.Fatalf("expected query expr, got %T", ret.Value)
+	}
+	if query.PatternFilter == nil || query.Filter == nil {
+		t.Fatalf("expected subject-is guarded pattern filter query, got filter=%T pattern=%T", query.Filter, query.PatternFilter)
+	}
+	pattern, ok := query.PatternFilter.(*ast.MatchVariantPattern)
+	if !ok || pattern.EnumName != "Expr" || pattern.Variant != "Int" {
+		t.Fatalf("unexpected pattern filter: %T %#v", query.PatternFilter, query.PatternFilter)
+	}
+}
+
+func TestParseQueryTupleSubjectIsPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Missing\n\ndef keep(items: darray[Expr]) -> bool:\n    return any index, item in items.enumerate() where item is Expr.Int(value): value > index\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok {
+		t.Fatalf("expected query expr, got %T", ret.Value)
+	}
+	pattern, ok := query.Pattern.(*ast.MoveBindTuplePattern)
+	if !ok || len(pattern.Args) != 2 || pattern.Args[0].Name != "index" || pattern.Args[1].Name != "item" {
+		t.Fatalf("expected tuple query binder, got %T %#v", query.Pattern, query.Pattern)
+	}
+	if query.PatternFilterSubject != "item" {
+		t.Fatalf("expected pattern filter subject item, got %q", query.PatternFilterSubject)
+	}
+	if query.PatternFilter == nil || query.Filter == nil {
+		t.Fatalf("expected guarded pattern filter, got filter=%T pattern=%T", query.Filter, query.PatternFilter)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return any index, item in items.enumerate() where item is Expr.Int(value): (value > index)") {
+		t.Fatalf("expected formatter to preserve tuple subject query, got:\n%s", formatted)
+	}
+}
+
+func TestParseWhereViewSubjectIsPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Missing\n\ndef keep(items: darray[Expr]) -> bool:\n    return any((items where item is Expr.Int(value): value > 0))\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected aggregate call expr, got %T", ret.Value)
+	}
+	paren, ok := call.Args[0].(*ast.ParenExpr)
+	if !ok {
+		t.Fatalf("expected parenthesized where view arg, got %T", call.Args[0])
+	}
+	whereCall, ok := paren.Inner.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected where view call source, got %T", paren.Inner)
+	}
+	if fn, ok := whereCall.Func.(*ast.Ident); !ok || fn.Name != "where" {
+		t.Fatalf("expected where call, got %T %#v", whereCall.Func, whereCall.Func)
+	}
+}
+
 func TestParseProjectionQueryPatternFilterGuard(t *testing.T) {
 	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Missing\n\ndef keep(items: darray[Expr]) -> darray[i64]:\n    return value for each item in items where Expr.Int(value): value > 0\n")
 	if len(errs) != 0 {
@@ -194,6 +265,29 @@ func TestParseExpressionWhereViewWithEnumerateBinders(t *testing.T) {
 	formatted := unparse.FormatDecl(decl)
 	if !strings.Contains(formatted, "items.enumerate() where index, value: ((index > 0) and (value > 2))") {
 		t.Fatalf("expected formatted enumerate where predicate, got:\n%s", formatted)
+	}
+}
+
+func TestParseExpressionWhereViewWithEnumerateSubjectPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    None\n\ndef keep(items: darray[Expr]) -> bool:\n    return any((items.enumerate() where index, item is Expr.Int(value): value > index))\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	call := ret.Value.(*ast.CallExpr)
+	paren := call.Args[0].(*ast.ParenExpr)
+	whereCall := paren.Inner.(*ast.CallExpr)
+	lambda, ok := whereCall.Args[1].(*ast.LambdaExpr)
+	if !ok || len(lambda.Params) != 1 || lambda.Params[0].Name != "__where_item" {
+		t.Fatalf("expected rewritten enumerate tuple lambda, got %T %#v", whereCall.Args[1], whereCall.Args[1])
+	}
+	if _, ok := lambda.BodyExpr.(*ast.MatchExpr); !ok {
+		t.Fatalf("expected guarded tuple subject pattern to lower to match expr, got %T", lambda.BodyExpr)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "items.enumerate() where index, value is Expr.Int(value): (value > index)") {
+		t.Fatalf("expected formatted enumerate subject pattern, got:\n%s", formatted)
 	}
 }
 

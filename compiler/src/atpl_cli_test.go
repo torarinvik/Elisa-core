@@ -38,7 +38,12 @@ func buildATPLCLI(t *testing.T) string {
 			atplCLIBuildErr = fmt.Errorf("build_atpl_cli.sh failed: %w\n%s", err, string(output))
 			return
 		}
-		atplCLIBinary = strings.TrimSpace(string(output))
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				atplCLIBinary = line
+			}
+		}
 		if atplCLIBinary == "" {
 			atplCLIBinary = filepath.Join(repoRoot, "compiler", "bin", "atpl")
 		}

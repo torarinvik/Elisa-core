@@ -185,11 +185,12 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return line
 	case *ast.QueryExpr:
+		binder := formatQueryBindPattern(n.Name, n.Pattern)
 		if n.Kind == ast.QueryExprFirst && n.Projection != nil {
-			return formatExpr(n.Projection) + " for first " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter) + formatQueryOwner(n.Owner)
+			return formatExpr(n.Projection) + " for first " + binder + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter, n.PatternFilterSubject) + formatQueryOwner(n.Owner)
 		}
 		if n.Kind == ast.QueryExprEach && n.Projection != nil {
-			return formatExpr(n.Projection) + " for each " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter) + formatQueryOwner(n.Owner)
+			return formatExpr(n.Projection) + " for each " + binder + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter, n.PatternFilterSubject) + formatQueryOwner(n.Owner)
 		}
 		keyword := "any"
 		switch n.Kind {
@@ -204,7 +205,7 @@ func formatExpr(expr ast.Expr) string {
 		case ast.QueryExprEach:
 			keyword = "each"
 		}
-		return keyword + " " + n.Name + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter) + formatQueryOwner(n.Owner)
+		return keyword + " " + binder + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter, n.PatternFilterSubject) + formatQueryOwner(n.Owner)
 	case *ast.CastExpr:
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
 			if target, ok := formatPostfixShorthandCastTarget(n.Target); ok {
@@ -302,9 +303,16 @@ func formatExpr(expr ast.Expr) string {
 		}
 		inline := strings.Join(parts, " | ")
 		if len(inline) <= 96 && len(parts) <= 3 {
+			if n.Brackets {
+				return "[" + inline + "]"
+			}
 			return inline
 		}
-		lines := []string{"("}
+		open, close := "(", ")"
+		if n.Brackets {
+			open, close = "[", "]"
+		}
+		lines := []string{open}
 		for index, part := range parts {
 			prefix := "    "
 			if index > 0 {
@@ -312,7 +320,7 @@ func formatExpr(expr ast.Expr) string {
 			}
 			lines = append(lines, prefix+part)
 		}
-		lines = append(lines, ")")
+		lines = append(lines, close)
 		return strings.Join(lines, "\n")
 	case *ast.IsAliasExpr:
 		if n.Target == nil {
@@ -381,12 +389,23 @@ func formatExpr(expr ast.Expr) string {
 	}
 }
 
-func formatQueryFilter(filter ast.Expr, pattern ast.MatchPattern) string {
+func formatQueryBindPattern(name string, pattern ast.MoveBindPattern) string {
+	if pattern == nil {
+		return name
+	}
+	return formatMoveBindPattern(pattern)
+}
+
+func formatQueryFilter(filter ast.Expr, pattern ast.MatchPattern, subject string) string {
 	if pattern != nil {
-		if filter != nil {
-			return " where " + formatMatchPattern(pattern) + ": " + formatExpr(filter)
+		prefix := ""
+		if subject != "" {
+			prefix = subject + " is "
 		}
-		return " where " + formatMatchPattern(pattern)
+		if filter != nil {
+			return " where " + prefix + formatMatchPattern(pattern) + ": " + formatExpr(filter)
+		}
+		return " where " + prefix + formatMatchPattern(pattern)
 	}
 	if filter == nil {
 		return ""
@@ -444,6 +463,13 @@ func formatWhereViewExpr(expr *ast.CallExpr) (string, bool) {
 		text := formatExpr(expr.Args[0]) + " where " + formatMatchPattern(pattern)
 		if filter != nil {
 			text += ": " + formatExpr(filter)
+		}
+		return text, true
+	}
+	if pattern, filter, ok := whereTupleSubjectPatternPredicate(lambda.BodyExpr, paramName); ok {
+		text := formatExpr(expr.Args[0]) + " where index, value is " + formatMatchPattern(pattern)
+		if filter != nil {
+			text += ": " + formatWhereTuplePredicateExpr(filter, paramName)
 		}
 		return text, true
 	}
@@ -523,6 +549,80 @@ func matchWherePatternPredicate(expr ast.Expr, paramName string) (ast.MatchPatte
 	default:
 		return nil, nil, false
 	}
+}
+
+func whereTupleSubjectPatternPredicate(expr ast.Expr, paramName string) (ast.MatchPattern, ast.Expr, bool) {
+	if pattern, ok := directWhereTupleSubjectPatternPredicate(expr, paramName); ok {
+		return pattern, nil, true
+	}
+	if pattern, filter, ok := matchWhereTupleSubjectPatternPredicate(expr, paramName); ok {
+		return pattern, filter, true
+	}
+	return nil, nil, false
+}
+
+func directWhereTupleSubjectPatternPredicate(expr ast.Expr, paramName string) (ast.MatchPattern, bool) {
+	binary, ok := expr.(*ast.BinaryExpr)
+	if !ok || binary == nil || binary.Op != lexer.TOKEN_IS {
+		return nil, false
+	}
+	if !isWhereTupleValueField(binary.Left, paramName) {
+		return nil, false
+	}
+	switch target := binary.Right.(type) {
+	case *ast.VariantTestExpr:
+		if target.Pattern != nil {
+			return target.Pattern, true
+		}
+	case *ast.StructTestExpr:
+		if target.Pattern != nil {
+			return target.Pattern, true
+		}
+	}
+	return nil, false
+}
+
+func matchWhereTupleSubjectPatternPredicate(expr ast.Expr, paramName string) (ast.MatchPattern, ast.Expr, bool) {
+	matchExpr, ok := expr.(*ast.MatchExpr)
+	if !ok || matchExpr == nil || len(matchExpr.Arms) != 2 || matchExpr.Store != nil {
+		return nil, nil, false
+	}
+	if !isWhereTupleValueField(matchExpr.Value, paramName) {
+		return nil, nil, false
+	}
+	if _, ok := matchExpr.Arms[1].Pattern.(*ast.MatchWildcardPattern); !ok {
+		return nil, nil, false
+	}
+	if len(matchExpr.Arms[0].Body) != 1 || len(matchExpr.Arms[1].Body) != 1 {
+		return nil, nil, false
+	}
+	filterStmt, ok := matchExpr.Arms[0].Body[0].(*ast.ExprStmt)
+	if !ok || filterStmt == nil {
+		return nil, nil, false
+	}
+	fallbackStmt, ok := matchExpr.Arms[1].Body[0].(*ast.ExprStmt)
+	if !ok || fallbackStmt == nil {
+		return nil, nil, false
+	}
+	fallback, ok := fallbackStmt.Expr.(*ast.BoolLit)
+	if !ok || fallback == nil || fallback.Value {
+		return nil, nil, false
+	}
+	switch matchExpr.Arms[0].Pattern.(type) {
+	case *ast.MatchVariantPattern, *ast.MatchStructPattern:
+		return matchExpr.Arms[0].Pattern, filterStmt.Expr, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func isWhereTupleValueField(expr ast.Expr, paramName string) bool {
+	field, ok := expr.(*ast.FieldExpr)
+	if !ok || field == nil || field.Field != "value" {
+		return false
+	}
+	ident, ok := field.Object.(*ast.Ident)
+	return ok && ident != nil && ident.Name == paramName
 }
 
 func formatWhereTuplePredicateExpr(expr ast.Expr, tupleName string) string {

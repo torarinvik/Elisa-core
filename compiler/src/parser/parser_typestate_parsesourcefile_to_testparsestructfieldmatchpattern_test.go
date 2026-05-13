@@ -790,6 +790,34 @@ func TestParseIsConditionWithAlternativeTargets(t *testing.T) {
 		}
 	}
 }
+func TestParseIsConditionWithBracketedAlternativeTargets(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    LT = 1\n    LTEQ = 2\n    GT = 3\n\ndef is_rel(kind: Tok) -> bool:\n    return kind is [.LT | .LTEQ | .GT]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || cond.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected is-expression return, got %T %#v", ret.Value, ret.Value)
+	}
+	alts, ok := cond.Right.(*ast.IsPatternExpr)
+	if !ok {
+		t.Fatalf("expected bracketed is-pattern RHS, got %T", cond.Right)
+	}
+	if !alts.Brackets {
+		t.Fatalf("expected bracketed is-pattern form, got %#v", alts)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "kind is [.LT | .LTEQ | .GT]") {
+		t.Fatalf("expected bracketed is-pattern to unparse, got:\n%s", formatted)
+	}
+}
 func TestParseIsConditionWithQualifiedAlternativeTargets(t *testing.T) {
 	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Bool(value: bool)\n    Char(value: i64)\n\ndef is_scalar(value: Expr) -> bool:\n    return value is Expr.Int | Expr.Bool | Expr.Char\n")
 	if len(errs) != 0 {
@@ -810,6 +838,34 @@ func TestParseIsConditionWithQualifiedAlternativeTargets(t *testing.T) {
 	alts, ok := cond.Right.(*ast.IsPatternExpr)
 	if !ok || len(alts.Targets) != 3 {
 		t.Fatalf("expected three qualified alternatives, got %T %#v", cond.Right, cond.Right)
+	}
+}
+func TestParseIsConditionWithBracketedQualifiedAlternativeTargets(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Bool(value: bool)\n    Char(value: i64)\n\ndef is_scalar(value: Expr) -> bool:\n    return value is [Expr.Int | Expr.Bool | Expr.Char]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || cond.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected is-expression return, got %T %#v", ret.Value, ret.Value)
+	}
+	alts, ok := cond.Right.(*ast.IsPatternExpr)
+	if !ok || len(alts.Targets) != 3 {
+		t.Fatalf("expected three bracketed qualified alternatives, got %T %#v", cond.Right, cond.Right)
+	}
+	if !alts.Brackets {
+		t.Fatalf("expected bracketed qualified alternatives, got %#v", alts)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "value is [Expr.Int | Expr.Bool | Expr.Char]") {
+		t.Fatalf("expected bracketed qualified is-pattern to unparse, got:\n%s", formatted)
 	}
 }
 func TestParseIsConditionWithGroupedMultilineAlternativeTargets(t *testing.T) {

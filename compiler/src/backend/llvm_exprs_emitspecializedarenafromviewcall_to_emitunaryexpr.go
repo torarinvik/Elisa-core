@@ -570,6 +570,15 @@ func (s *functionState) emitLogicalExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, s
 	return phi, s.g.result.NamedTypes["bool"], nil
 }
 func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || expr.Operand == nil {
+		pos := lexer.Pos{}
+		op := lexer.TokenKind(0)
+		if expr != nil {
+			pos = expr.Pos()
+			op = expr.Op
+		}
+		return nil, nil, fmt.Errorf("cannot emit unary expression %s with nil operand at %s", lexer.TokenName(op), pos)
+	}
 	operandType := s.exprType(expr.Operand)
 	value, _, err := s.emitExpr(expr.Operand, operandType)
 	if err != nil {

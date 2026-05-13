@@ -141,15 +141,24 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	default:
 		p.errorAt(pos, "unknown query expression %q", kindText)
 	}
-	name := p.expect(lexer.TOKEN_IDENT).Text
+	name, pattern := p.parseQueryBindPattern()
 	p.expect(lexer.TOKEN_IN)
 	source := p.withInMembershipDisabled(func() ast.Expr {
 		return p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	})
 	p.expectIdentText("where")
 	var patternFilter ast.MatchPattern
+	var patternFilterSubject string
 	var filter ast.Expr
-	if p.peekWhereViewPatternFilter() {
+	if subject, ok := p.peekQueryWhereSubjectPattern(name, pattern); ok {
+		patternFilterSubject = subject
+		p.expect(lexer.TOKEN_IDENT)
+		p.expect(lexer.TOKEN_IS)
+		patternFilter = p.parseMatchPattern()
+		if p.match(lexer.TOKEN_COLON) {
+			filter = p.parseExpr()
+		}
+	} else if p.peekWhereViewPatternFilter() {
 		patternFilter = p.parseMatchPattern()
 		if p.match(lexer.TOKEN_COLON) {
 			filter = p.parseExpr()
@@ -161,7 +170,7 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	if p.match(lexer.TOKEN_WITH) {
 		owner = p.withInMembershipDisabled(p.parseExpr)
 	}
-	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Source: source, Filter: filter, PatternFilter: patternFilter, Owner: owner}
+	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Pattern: pattern, Source: source, Filter: filter, PatternFilter: patternFilter, PatternFilterSubject: patternFilterSubject, Owner: owner}
 }
 func (p *Parser) looksLikeQueryExpr() bool {
 	if p.peek() != lexer.TOKEN_IDENT || p.pos+3 >= len(p.tokens) {
@@ -172,7 +181,18 @@ func (p *Parser) looksLikeQueryExpr() bool {
 	default:
 		return false
 	}
-	return p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_IN
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	index := p.pos + 2
+	for index < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_COMMA {
+		index++
+		if index >= len(p.tokens) || p.tokens[index].Kind != lexer.TOKEN_IDENT {
+			return false
+		}
+		index++
+	}
+	return index < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_IN
 }
 func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos

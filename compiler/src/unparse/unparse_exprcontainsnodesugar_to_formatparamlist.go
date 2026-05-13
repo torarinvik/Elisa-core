@@ -237,7 +237,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			line += " where " + formatExpr(wherePredicate)
 		}
 		if n.PatternFilter != nil {
-			line += " where " + formatMatchPattern(n.PatternFilter)
+			line += " where "
+			if n.PatternFilterSubject != "" {
+				line += n.PatternFilterSubject + " is "
+			}
+			line += formatMatchPattern(n.PatternFilter)
 			if n.WhereFilter != nil {
 				line += ": " + formatExpr(n.WhereFilter)
 			}

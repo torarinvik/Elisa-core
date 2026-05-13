@@ -304,13 +304,42 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 	var init ast.Expr
 	var body []ast.Stmt
 	filter := expr.Filter
+	patternFilter := expr.PatternFilter
 	switch expr.Kind {
 	case ast.QueryExprAny:
 		init = &ast.BoolLit{Position: expr.Position, Value: false}
 		body = []ast.Stmt{&ast.AssignStmt{Position: expr.Position, Target: resultIdent, Value: &ast.BoolLit{Position: expr.Position, Value: true}}}
 	case ast.QueryExprAll:
 		init = &ast.BoolLit{Position: expr.Position, Value: true}
-		filter = &ast.UnaryExpr{Position: expr.Position, Op: lexer.TOKEN_NOT, Operand: expr.Filter}
+		if expr.PatternFilter != nil {
+			itemName := expr.Name
+			if expr.PatternFilterSubject != "" {
+				itemName = expr.PatternFilterSubject
+			}
+			item := &ast.Ident{Position: expr.Position, Name: itemName}
+			failValue := ast.Expr(&ast.BoolLit{Position: expr.Position, Value: false})
+			if expr.Filter != nil {
+				failValue = &ast.UnaryExpr{Position: expr.Filter.Pos(), Op: lexer.TOKEN_NOT, Operand: expr.Filter}
+			}
+			wildcardValue := &ast.BoolLit{Position: expr.PatternFilter.Pos(), Value: true}
+			filter = &ast.MatchExpr{
+				Position: expr.PatternFilter.Pos(),
+				Value:    item,
+				Arms: []ast.MatchArm{
+					{Position: expr.PatternFilter.Pos(), Pattern: expr.PatternFilter, Body: []ast.Stmt{&ast.ExprStmt{Position: failValue.Pos(), Expr: failValue}}},
+					{Position: expr.PatternFilter.Pos(), Pattern: &ast.MatchWildcardPattern{Position: expr.PatternFilter.Pos()}, Body: []ast.Stmt{&ast.ExprStmt{Position: expr.PatternFilter.Pos(), Expr: wildcardValue}}},
+				},
+			}
+			patternFilter = nil
+			if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+				boolType := s.g.result.NamedTypes["bool"]
+				s.g.result.ExprTypes[failValue] = boolType
+				s.g.result.ExprTypes[wildcardValue] = boolType
+				s.g.result.ExprTypes[filter] = boolType
+			}
+		} else if expr.Filter != nil {
+			filter = &ast.UnaryExpr{Position: expr.Position, Op: lexer.TOKEN_NOT, Operand: expr.Filter}
+		}
 		body = []ast.Stmt{&ast.AssignStmt{Position: expr.Position, Target: resultIdent, Value: &ast.BoolLit{Position: expr.Position, Value: false}}}
 	case ast.QueryExprCount:
 		init = &ast.IntLit{Position: expr.Position, Value: "0", Suffix: "usize"}
@@ -363,14 +392,19 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
 		s.g.result.ExprTypes[init] = resultType
 	}
+	pattern := ast.MoveBindPattern(&ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name})
+	if expr.Pattern != nil {
+		pattern = expr.Pattern
+	}
 	loopStmt := ast.Stmt(&ast.IterForStmt{
-		Position:      expr.Position,
-		Pattern:       &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
-		Mode:          ast.IterBindValue,
-		Source:        expr.Source,
-		PatternFilter: expr.PatternFilter,
-		Filter:        filter,
-		Body:          body,
+		Position:             expr.Position,
+		Pattern:              pattern,
+		Mode:                 ast.IterBindValue,
+		Source:               expr.Source,
+		PatternFilter:        patternFilter,
+		PatternFilterSubject: expr.PatternFilterSubject,
+		Filter:               filter,
+		Body:                 body,
 	})
 	if expr.Owner != nil {
 		loopStmt = &ast.InStoreStmt{Position: expr.Position, Store: expr.Owner, Body: []ast.Stmt{loopStmt}}

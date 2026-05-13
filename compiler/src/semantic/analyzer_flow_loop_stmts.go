@@ -339,10 +339,18 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	a.bindIterLoopPattern(loopScope, stmt.Pattern, stmt.Mode, info.ItemType, info.ItemFacts, info.HasItemFacts)
 	if stmt.PatternFilter != nil {
 		var valueExpr ast.Expr
-		if namePattern, ok := stmt.Pattern.(*ast.MoveBindNamePattern); ok && namePattern.Name != "_" {
+		patternType := info.ItemType
+		if stmt.PatternFilterSubject != "" {
+			if sym, ok := loopScope.Lookup(stmt.PatternFilterSubject); ok {
+				patternType = sym.Type
+				valueExpr = &ast.Ident{Position: stmt.PatternFilter.Pos(), Name: stmt.PatternFilterSubject}
+			} else {
+				a.errorf(stmt.PatternFilter.Pos(), "for where pattern filter subject %q is not bound by the loop pattern", stmt.PatternFilterSubject)
+			}
+		} else if namePattern, ok := stmt.Pattern.(*ast.MoveBindNamePattern); ok && namePattern.Name != "_" {
 			valueExpr = &ast.Ident{Position: namePattern.Pos(), Name: namePattern.Name}
 		}
-		a.analyzeNestedMatchPattern(stmt.PatternFilter, info.ItemType, valueExpr, loopScope)
+		a.analyzeNestedMatchPattern(stmt.PatternFilter, patternType, valueExpr, loopScope)
 	}
 	stmt.WhereFilter = a.rewriteFrozenTreeRowFieldFilterShorthand(loopScope, stmt.Pattern, sourceType, stmt.WhereFilter)
 	stmt.Filter = a.rewriteFrozenTreeRowFieldFilterShorthand(loopScope, stmt.Pattern, sourceType, stmt.Filter)

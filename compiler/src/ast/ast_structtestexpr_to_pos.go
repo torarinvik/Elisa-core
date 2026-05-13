@@ -9,6 +9,7 @@ type StructTestExpr struct {
 type IsPatternExpr struct {
 	Position lexer.Pos
 	Targets  []Expr
+	Brackets bool
 }
 type IsAliasExpr struct {
 	Position lexer.Pos
@@ -321,15 +322,16 @@ const (
 )
 
 type IterForStmt struct {
-	Position      lexer.Pos
-	Reverse       bool
-	Pattern       MoveBindPattern
-	Mode          IterBindMode
-	Source        Expr
-	PatternFilter MatchPattern
-	WhereFilter   Expr
-	Filter        Expr
-	Body          []Stmt
+	Position             lexer.Pos
+	Reverse              bool
+	Pattern              MoveBindPattern
+	Mode                 IterBindMode
+	Source               Expr
+	PatternFilter        MatchPattern
+	PatternFilterSubject string
+	WhereFilter          Expr
+	Filter               Expr
+	Body                 []Stmt
 }
 type ParallelForStmt struct {
 	Position  lexer.Pos

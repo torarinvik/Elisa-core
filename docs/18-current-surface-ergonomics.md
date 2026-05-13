@@ -44,7 +44,7 @@ Use `|` after `is` when a value can match any of several variants or enum member
 
 ```elisa
 def is_additive(op: TokenKind) -> bool:
-    return op is .PLUS | .MINUS
+    return op is [.PLUS | .MINUS]
 ```
 
 For longer variant families, wrap the alternatives in parentheses and put one alternative per line. This is the preferred shape for long declaration-family or AST-kind classifiers.
@@ -550,6 +550,13 @@ def positive_int_payloads(owner: Arena, items: darray[Expr]) -> darray[i64]:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     return value for each item in items where Expr.Int(value): value > 0 with alloc
 
+def positive_int_payloads_explicit(owner: Arena, items: darray[Expr]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    return value for each item in items where item is Expr.Int(value): value > 0 with alloc
+
+def positive_after_index(items: darray[Expr]) -> bool:
+    return any index, item in items.enumerate() where item is Expr.Int(value): value > index
+
 def all_names(owner: Arena, entries: darray[Entry]) -> darray[NameId]:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     return entry.name_id for each entry in entries with alloc
@@ -566,11 +573,14 @@ Current rules:
 - `projection for first name in source where predicate` returns the projected value as `U?`; the `where` clause may be omitted to project the first element
 - `projection for each name in source where predicate with owner` returns projected values as `darray[U]`; the `where` clause may be omitted for pure maps, and `with owner` can replace an enclosing `in <arena>:` scope
 - pattern filters may add a guard after `:`, as in `where Expr.Int(value): value > 0`; this works for query expressions and iterable `for` loops
+- explicit-subject pattern filters are accepted as an equivalent readability form, as in `where item is Expr.Int(value): value > 0`; they lower to the same typed narrowing as the shorter pattern filter
+- multi-bind queries and `enumerate()` filters may name the narrowed subject explicitly, as in `index, item ... where item is Expr.Int(value)`; the subject must be one of the query binders
 - `count name in source where predicate` returns `usize`
 - the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `source.enumerate()`, and tree child views
 - range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now
-- the predicate is analyzed in a scope where the loop name is bound to the iterable element type
-- pattern-bound names are scoped to the query projection, filter guard, or loop body; they do not leak after the query or loop
+- loop-header typed `where` payloads are visible in the loop body
+- query predicates are analyzed in a scope where the query binder is bound to the iterable element type, or each multi-bind name is bound to its tuple/struct field type
+- query pattern-bound names are scoped to the query projection and filter guard; they do not leak after the query expression
 - use explicit loops when the body has side effects or needs multiple statements
 
 Iterable `for` loops use the same filter clause after composed sources, so tuple destructuring from `enumerate()` is available in the filter:
@@ -604,6 +614,8 @@ names inside the predicate:
 ```elisa
 return (exprs where Expr.Int(value)).reduce_sum(score_expr)
 return (exprs where Expr.Int(value): value > 0).reduce_sum(score_expr)
+return (exprs where item is Expr.Int(value): value > 0).reduce_sum(score_expr)
+return (exprs.enumerate() where index, item is Expr.Int(value): value > index).reduce_sum(score_pair)
 ```
 
 The parenthesized form is useful when immediately calling another helper on the filtered view.
@@ -2055,6 +2067,9 @@ for token in tokens where token.kind == TokenKind.IDENT:
 for decl in block.decls where Pascal.Decl.LabelDecl(labels):
     validate_labels(labels)
 
+for decl in block.decls where decl is Pascal.Decl.LabelDecl(labels):
+    validate_labels(labels)
+
 for decl in block.decls where Pascal.Decl.LabelDecl:
     validate_label_decl(decl)
 
@@ -2067,6 +2082,8 @@ Current rules:
 - the binder runs before the filter, so the filter may reference destructured names such as `left`
 - the loop binder may be a simple name, an irrefutable brace destructure pattern, or a typed variant filter pattern
 - the filter may be an ordinary boolean expression or a pattern predicate
+- `where name is Variant(payload)` is an explicit-subject spelling for the same pattern predicate and binds payload names in the guard, projection, or loop body
+- tuple binders can narrow a selected subject with `where index, item is Variant(payload)`; payload names are scoped to the guard for expression-level filtered views and to the loop body for iterable loop headers
 - a variant pattern filter may omit payload parentheses when it only tests the variant kind and does not bind payload fields
 - loop headers can chain another `for` clause to express a simple nested iteration without adding an extra indentation level
 - this works over ordinary iterable sources and store-row iterators such as `rows()`

@@ -25,14 +25,25 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 		}
 	}
 	loopScope := NewScope(a.currentScope)
-	pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
+	pattern := ast.MoveBindPattern(&ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name})
+	if expr.Pattern != nil {
+		pattern = expr.Pattern
+	}
 	a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
 	if expr.PatternFilter != nil {
 		var valueExpr ast.Expr
-		if expr.Name != "_" {
+		patternType := info.ItemType
+		if expr.PatternFilterSubject != "" {
+			if sym, ok := loopScope.Lookup(expr.PatternFilterSubject); ok {
+				patternType = sym.Type
+				valueExpr = &ast.Ident{Position: expr.PatternFilter.Pos(), Name: expr.PatternFilterSubject}
+			} else {
+				a.errorf(expr.PatternFilter.Pos(), "query where pattern filter subject %q is not bound by the query pattern", expr.PatternFilterSubject)
+			}
+		} else if expr.Name != "_" {
 			valueExpr = &ast.Ident{Position: expr.Pos(), Name: expr.Name}
 		}
-		a.analyzeNestedMatchPattern(expr.PatternFilter, info.ItemType, valueExpr, loopScope)
+		a.analyzeNestedMatchPattern(expr.PatternFilter, patternType, valueExpr, loopScope)
 	}
 	expr.Filter = a.rewriteFrozenTreeRowFieldFilterShorthand(loopScope, pattern, sourceType, expr.Filter)
 	if expr.Filter != nil {

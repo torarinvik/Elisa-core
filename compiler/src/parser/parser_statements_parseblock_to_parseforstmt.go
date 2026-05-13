@@ -582,9 +582,19 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		return &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
 	}
 	var patternFilter ast.MatchPattern
+	var patternFilterSubject string
 	var whereFilter ast.Expr
 	if p.matchIdentText("where") {
-		if p.peekForWherePatternFilter() {
+		if subject, ok := p.peekForWhereSubjectPattern(pattern); ok {
+			patternFilterSubject = subject
+			p.expect(lexer.TOKEN_IDENT)
+			p.expect(lexer.TOKEN_IS)
+			patternFilter = p.parseMatchPattern()
+			if p.peek() == lexer.TOKEN_COLON && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_NEWLINE {
+				p.advance()
+				whereFilter = p.parseForHeaderExpr()
+			}
+		} else if p.peekForWherePatternFilter() {
 			patternFilter = p.parseMatchPattern()
 			if p.peek() == lexer.TOKEN_COLON && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_NEWLINE {
 				p.advance()
@@ -608,7 +618,31 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		filter = p.parseExpr()
 	}
 	body := p.parseForStmtBody()
-	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, PatternFilter: patternFilter, WhereFilter: whereFilter, Filter: filter, Body: body}
+	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, PatternFilter: patternFilter, PatternFilterSubject: patternFilterSubject, WhereFilter: whereFilter, Filter: filter, Body: body}
+}
+
+func (p *Parser) peekForWhereSubjectPattern(pattern ast.MoveBindPattern) (string, bool) {
+	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IS {
+		return "", false
+	}
+	subject := p.cur().Text
+	switch bind := pattern.(type) {
+	case *ast.MoveBindNamePattern:
+		return subject, bind.Name != "" && bind.Name == subject
+	case *ast.MoveBindTuplePattern:
+		for _, arg := range bind.Args {
+			if arg.Name == subject && subject != "_" {
+				return subject, true
+			}
+		}
+	case *ast.MoveBindStructPattern:
+		for _, arg := range bind.Args {
+			if arg.Name == subject && subject != "_" {
+				return subject, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (p *Parser) parseForStmtBody() []ast.Stmt {

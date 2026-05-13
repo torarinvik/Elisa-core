@@ -173,6 +173,86 @@ func TestParseIterableForStatementWithPatternFilter(t *testing.T) {
 		t.Fatalf("expected formatter to preserve pattern filter, got:\n%s", formatted)
 	}
 }
+
+func TestParseIterableForStatementWithSubjectIsPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    None\n\ndef walk(items: darray[Expr]) -> void:\n    for item in items where item is Expr.Int(value):\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := iterStmt.PatternFilter.(*ast.MatchVariantPattern)
+	if !ok {
+		t.Fatalf("expected variant pattern filter, got %T", iterStmt.PatternFilter)
+	}
+	if pattern.EnumName != "Expr" || pattern.Variant != "Int" {
+		t.Fatalf("unexpected pattern filter target: %#v", pattern)
+	}
+	if iterStmt.PatternFilterSubject != "item" {
+		t.Fatalf("expected explicit pattern subject item, got %q", iterStmt.PatternFilterSubject)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for item in items where item is Expr.Int(value):") {
+		t.Fatalf("expected subject-is filter to preserve its subject, got:\n%s", formatted)
+	}
+}
+
+func TestParseIterableForTupleStatementWithSubjectIsPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    None\n\ndef walk(items: darray[Expr]) -> void:\n    for index, item in items.enumerate() where item is Expr.Int(value):\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := iterStmt.PatternFilter.(*ast.MatchVariantPattern)
+	if !ok {
+		t.Fatalf("expected variant pattern filter, got %T", iterStmt.PatternFilter)
+	}
+	if pattern.EnumName != "Expr" || pattern.Variant != "Int" {
+		t.Fatalf("unexpected pattern filter target: %#v", pattern)
+	}
+	if iterStmt.PatternFilterSubject != "item" {
+		t.Fatalf("expected explicit pattern subject item, got %q", iterStmt.PatternFilterSubject)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for index, item in items.enumerate() where item is Expr.Int(value):") {
+		t.Fatalf("expected formatter to preserve tuple subject pattern filter, got:\n%s", formatted)
+	}
+}
+
+func TestParseIterableForStructStatementWithSubjectIsPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    None\n\nstruct Entry:\n    index: int\n    item: Expr\n\ndef walk(entries: darray[Entry]) -> void:\n    for {index, item} in entries where item is Expr.Int(value):\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[2].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := iterStmt.Pattern.(*ast.MoveBindStructPattern)
+	if !ok || len(pattern.Args) != 2 {
+		t.Fatalf("expected struct loop pattern, got %T %#v", iterStmt.Pattern, iterStmt.Pattern)
+	}
+	filter, ok := iterStmt.PatternFilter.(*ast.MatchVariantPattern)
+	if !ok {
+		t.Fatalf("expected variant pattern filter, got %T", iterStmt.PatternFilter)
+	}
+	if filter.EnumName != "Expr" || filter.Variant != "Int" {
+		t.Fatalf("unexpected pattern filter target: %#v", filter)
+	}
+	if iterStmt.PatternFilterSubject != "item" {
+		t.Fatalf("expected explicit pattern subject item, got %q", iterStmt.PatternFilterSubject)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for {index, item} in entries where item is Expr.Int(value):") {
+		t.Fatalf("expected formatter to preserve struct subject pattern filter, got:\n%s", formatted)
+	}
+}
+
 func TestParseIterableForStatementWithBareVariantPatternFilter(t *testing.T) {
 	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    None\n\ndef walk(items: darray[Expr]) -> void:\n    for item in items where Expr.Int:\n        pass\n")
 	if len(errs) != 0 {

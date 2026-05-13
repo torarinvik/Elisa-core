@@ -14,6 +14,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
+	"elisacore/src/unparse"
 	"fmt"
 )
 
@@ -536,7 +537,7 @@ func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, source
 	}
 	filterValue, filterType, err := s.emitExpr(filter, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("emit iterable filter at %s (%T %q): %w", filter.Pos(), filter, unparse.FormatExpr(filter), err)
 	}
 	filterBool, err := s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
 	if err != nil {
@@ -648,6 +649,15 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	}
 	if stmt.PatternFilter != nil {
 		filterValue := boundItemValue
+		filterType := itemType
+		if stmt.PatternFilterSubject != "" {
+			subject := &ast.Ident{Position: stmt.PatternFilter.Pos(), Name: stmt.PatternFilterSubject}
+			filterValue, filterType, err = s.emitIdent(subject)
+			if err != nil {
+				s.popScope()
+				return err
+			}
+		}
 		if filterValue == nil {
 			filterValue, err = s.loadValue(boundItemPtr, itemType, "iter.pattern.value")
 			if err != nil {
@@ -656,7 +666,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			}
 		}
 		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.pattern.filter.body"))
-		if _, _, err := s.emitMatchPatternTest(stmt.PatternFilter, filterValue, nil, itemType, nil, nil, nil, filterBodyBB, stepBB); err != nil {
+		if _, _, err := s.emitMatchPatternTest(stmt.PatternFilter, filterValue, nil, filterType, nil, nil, nil, filterBodyBB, stepBB); err != nil {
 			s.popScope()
 			return err
 		}

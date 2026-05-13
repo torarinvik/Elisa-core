@@ -157,7 +157,7 @@ func TestGenerateLLVMIRLowersIsExprWithAlternativeValueTargets(t *testing.T) {
 	GTEQ = 4
 
 def is_rel(kind: Tok) -> bool:
-	return kind is .LT | .LTEQ | .GT | .GTEQ
+	return kind is [.LT | .LTEQ | .GT | .GTEQ]
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_is_expr_alternatives.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -168,6 +168,34 @@ def is_rel(kind: Tok) -> bool:
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected alternative is lowering to include %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestGenerateLLVMIRLowersBracketedAndUnbracketedQualifiedAlternativesEquivalently(t *testing.T) {
+	src := `enum Expr:
+	Int
+	Bool
+	Char
+	Missing
+
+def old_scalar(value: Expr) -> bool:
+	return value is Expr.Int | Expr.Bool | Expr.Char
+
+def new_scalar(value: Expr) -> bool:
+	return value is [Expr.Int | Expr.Bool | Expr.Char]
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_is_expr_qualified_alternative_equivalence.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @old_scalar(", "define i1 @new_scalar(", "icmp eq i32", "istest.or"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected qualified alternative is lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if count := strings.Count(output, "istest.or"); count < 2 {
+		t.Fatalf("expected both bracketed and unbracketed alternatives to lower through istest.or, saw %d occurrences in:\n%s", count, output)
 	}
 }
 
@@ -258,6 +286,34 @@ def check(stmt: Perl.Stmt) -> void:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersCategoryUnionExpectTreeBlockFieldShapeListPattern(t *testing.T) {
+	src := `@layout(category_union)
+tree Perl:
+    block Block:
+        stmts: darray[Stmt]
+
+    node Stmt:
+        While(condition: int, body: Block)
+        Last
+        Next
+
+def check(stmt: Perl.Stmt) -> void:
+    can Abort.Panic:
+        expect stmt as Perl.Stmt.While(_, {stmts: [Perl.Stmt.Next, Perl.Stmt.Last]})
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_category_union_expect_tree_block_field_shape_list.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"expect.ok", "expect.fail", "match.struct.field", "match.list.items", "define void @check(i32"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected category-union tree-block field-shape/list expect lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersStructFieldPatternsInIsAndMatch(t *testing.T) {
 	src := `const enum Tok of i32:
 	INTEGER = 1

@@ -358,7 +358,7 @@ func (a *Analyzer) evalConstIndexExpr(expr *ast.IndexExpr) (ConstValue, bool) {
 }
 
 func (a *Analyzer) evalConstQueryExpr(expr *ast.QueryExpr) (ConstValue, bool) {
-	if expr == nil || expr.PatternFilter != nil {
+	if expr == nil || expr.PatternFilter != nil || expr.Pattern != nil {
 		return ConstValue{}, false
 	}
 	source, ok := a.evalConstExpr(expr.Source)

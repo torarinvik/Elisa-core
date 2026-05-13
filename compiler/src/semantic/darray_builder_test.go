@@ -488,6 +488,208 @@ def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
 	}
 }
 
+func TestAnalyzeSubjectIsQueryPatternFilterNarrowsPayload(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "subject_is_query_pattern.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def has_positive(items: darray[Expr]) -> bool:
+    return any item in items where item is Expr.Int(value): value > 0
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "has_positive" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected has_positive function declaration")
+	}
+	ret := fn.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok || query.PatternFilter == nil || query.Filter == nil {
+		t.Fatalf("expected subject-is guarded pattern-filter query, got %T %#v", ret.Value, ret.Value)
+	}
+	if typ := result.ExprTypes[query]; !IsBoolType(typ) {
+		t.Fatalf("expected query result bool, got %s", typ)
+	}
+}
+
+func TestAnalyzeTupleSubjectQueryPatternFilterNarrowsPayload(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "tuple_subject_query_pattern.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def has_positive_after_index(items: darray[Expr]) -> bool:
+    return any index, item in items.enumerate() where item is Expr.Int(value): value > index
+
+def count_positive_after_index(items: darray[Expr]) -> usize:
+    return count index, item in items.enumerate() where item is Expr.Int(value): value > index
+
+def first_positive_after_index(items: darray[Expr]) -> i64?:
+    return value for first index, item in items.enumerate() where item is Expr.Int(value): value > index
+`)
+
+	for _, name := range []string{"has_positive_after_index", "count_positive_after_index", "first_positive_after_index"} {
+		var fn *ast.FuncDecl
+		for _, decl := range result.File.Decls {
+			if current, ok := decl.(*ast.FuncDecl); ok && current.Name == name {
+				fn = current
+				break
+			}
+		}
+		if fn == nil {
+			t.Fatalf("expected %s function declaration", name)
+		}
+		ret := fn.Body[0].(*ast.ReturnStmt)
+		query, ok := ret.Value.(*ast.QueryExpr)
+		if !ok || query.Pattern == nil || query.PatternFilter == nil || query.PatternFilterSubject != "item" {
+			t.Fatalf("expected tuple subject pattern-filter query for %s, got %T %#v", name, ret.Value, ret.Value)
+		}
+	}
+}
+
+func TestAnalyzeRejectsUnknownQueryPatternFilterSubject(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "query_pattern_filter_unknown_subject.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def has_positive_after_index(items: darray[Expr]) -> bool:
+    return any index, item in items.enumerate() where missing is Expr.Int
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `undefined identifier "missing"`) {
+		t.Fatalf("expected unknown query pattern subject diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsQueryPayloadBindingOutsideExpressionScope(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "query_payload_binding_after_expression.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def keep(items: darray[Expr]) -> i64:
+    _ = any index, item in items.enumerate() where item is Expr.Int(value): value > index
+    return value
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `undefined identifier "value"`) {
+		t.Fatalf("expected query payload scope diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsQueryPatternFilterOnWrongTupleFieldType(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "query_pattern_filter_wrong_tuple_field.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def has_positive_after_index(items: darray[Expr]) -> bool:
+    return any index, item in items.enumerate() where index is Expr.Int(value): value > 0
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `nested variant pattern "Expr.Int" requires an enum, const enum, or tree-category payload, got usize`) {
+		t.Fatalf("expected wrong tuple-field pattern diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeSubjectIsEachProjectionQueryPatternFilterNarrowsPayload(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "subject_is_each_projection_query_pattern.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return value for each item in items where item is Expr.Int(value)
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "ints" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected ints function declaration")
+	}
+	inStmt := fn.Body[1].(*ast.InStoreStmt)
+	ret := inStmt.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok || query.PatternFilter == nil {
+		t.Fatalf("expected subject-is pattern-filter projection query, got %T %#v", ret.Value, ret.Value)
+	}
+	darrayType, ok := result.ExprTypes[query].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected darray query result, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+	}
+	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected pattern-filter projection query element i64, got %#v", darrayType.Elem)
+	}
+}
+
+func TestAnalyzeTupleSubjectIterablePatternFilterNarrowsPayloadInLoopBody(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "tuple_subject_iter_pattern.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def sum(items: darray[Expr]) -> i64:
+    total: mutable i64 = 0
+    for index, item in items.enumerate() where item is Expr.Int(value):
+        total <- total + value + index
+    return total
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "sum" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected sum function declaration")
+	}
+	loop, ok := fn.Body[1].(*ast.IterForStmt)
+	if !ok || loop.PatternFilter == nil || loop.PatternFilterSubject != "item" {
+		t.Fatalf("expected tuple subject pattern-filter loop, got %T %#v", fn.Body[1], fn.Body[1])
+	}
+}
+
+func TestAnalyzeStructSubjectIterablePatternFilterNarrowsPayloadInLoopBody(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "struct_subject_iter_pattern.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+struct Entry:
+    index: i64
+    item: Expr
+
+def sum(entries: darray[Entry]) -> i64:
+    total: mutable i64 = 0
+    for {index, item} in entries where item is Expr.Int(value):
+        total <- total + value + index
+    return total
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "sum" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected sum function declaration")
+	}
+	loop, ok := fn.Body[1].(*ast.IterForStmt)
+	if !ok || loop.PatternFilter == nil || loop.PatternFilterSubject != "item" {
+		t.Fatalf("expected struct subject pattern-filter loop, got %T %#v", fn.Body[1], fn.Body[1])
+	}
+}
+
 func TestAnalyzeEachProjectionQueryPatternFilterGuard(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "each_projection_query_pattern_guard.elisa", `enum Expr:
     Int(value: i64)
@@ -537,6 +739,23 @@ def keep(items: darray[Expr]) -> i64:
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `undefined identifier "value"`) {
 		t.Fatalf("expected pattern-binding scope diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsExpressionWhereTupleSubjectPatternBindingOutsideFilterScope(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "expr_where_tuple_subject_pattern_scope.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def sum(items: darray[Expr]) -> i64:
+    total: mutable i64 = 0
+    for index, item in (items.enumerate() where index, item is Expr.Int(value): value > index):
+        total <- total + value
+    return total
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `undefined identifier "value"`) {
+		t.Fatalf("expected expression where pattern-binding scope diagnostic, got:\n%s", all)
 	}
 }
 

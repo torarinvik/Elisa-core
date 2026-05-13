@@ -319,6 +319,13 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 		c.countExpr(n.Value)
 	case *ast.CanExpr:
 		c.countExpr(n.Expr)
+	case *ast.QueryExpr:
+		c.countExpr(n.Source)
+		c.countExpr(n.Filter)
+		c.countMatchPattern(n.PatternFilter)
+		c.countMoveBindPattern(n.Pattern)
+		c.countExpr(n.Projection)
+		c.countExpr(n.Owner)
 	case *ast.MatchExpr:
 		c.countExpr(n.Value)
 		c.countExpr(n.Store)
