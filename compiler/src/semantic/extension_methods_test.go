@@ -780,6 +780,22 @@ def read[T](table: SymbolTable[cstr, T]&, symbol_id: SymbolTableId) -> T:
 	}
 }
 
+func TestAnalyzeExternUFCSOnlyFunctionSupportsReceiverCall(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "extern_ufcs_only_builder_method.elisa", `
+struct DArrayBuilder[T]:
+    marker: u8
+
+@ufcs_only
+extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
+
+def read(builder: DArrayBuilder[i64]&) -> darray[i64]:
+    return builder.finish()
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
 func TestAnalyzeUFCSAmbiguityReportsCandidates(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ufcs_ambiguous.elisa", `
 namespace left:

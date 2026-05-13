@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "ufcs_only":
 		return true
 	default:
 		return false
@@ -335,6 +335,13 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 		case "link_name":
 			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
 				a.errorf(annotation.Position, "@link_name on extern function %q expects exactly one non-empty symbol name", fn.Name)
+			}
+		case "ufcs_only":
+			if len(annotation.Args) != 0 {
+				a.errorf(annotation.Position, "@ufcs_only on extern function %q does not take arguments", fn.Name)
+			}
+			if len(fnType.Params) == 0 {
+				a.errorf(annotation.Position, "@ufcs_only extern function %q must take at least one receiver parameter", fn.Name)
 			}
 		case "borrows_return":
 			a.applyExternBorrowsReturnAnnotation(fn, fnType, annotation)

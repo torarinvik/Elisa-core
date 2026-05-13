@@ -439,7 +439,18 @@ func funcHasAnnotation(fn *ast.FuncDecl, name string) bool {
 	if fn == nil || name == "" {
 		return false
 	}
-	for _, annotation := range fn.Annotations {
+	return annotationsHave(fn.Annotations, name)
+}
+
+func externFuncHasAnnotation(fn *ast.ExternFuncDecl, name string) bool {
+	if fn == nil || name == "" {
+		return false
+	}
+	return annotationsHave(fn.Annotations, name)
+}
+
+func annotationsHave(annotations []ast.Annotation, name string) bool {
+	for _, annotation := range annotations {
 		if annotation.Name == name {
 			return true
 		}

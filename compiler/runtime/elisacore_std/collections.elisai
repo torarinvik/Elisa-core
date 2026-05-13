@@ -1,0 +1,578 @@
+const ARENA_BACKEND_LIBC_MALLOC = 0
+
+const ARENA_BACKEND_LINUX_MMAP = 1
+
+const ARENA_BACKEND_WIN32_VIRTUALALLOC = 2
+
+const ARENA_BACKEND_WASM_HEAPBASE = 3
+
+const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
+
+const ARENA_REGION_DEFAULT_CAPACITY: usize = (8 * 1024)
+
+const ARENA_WASM_PAGE_SIZE: usize = (64 * 1024)
+
+error RuntimeError:
+    OutOfMemory
+
+struct Region:
+    next: mutable heap Region&?
+    count: mutable usize
+    capacity: mutable usize
+    owner_tag: mutable uintptr
+    owner_next: mutable heap Region&?
+    global_index: mutable usize
+    data: tail uintptr
+
+struct Arena:
+    begin: mutable heap Region&?
+    end: mutable heap Region&?
+    end_index: mutable usize
+
+struct ArenaMark:
+    region: heap Region&?
+    count: usize
+
+static if (ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC):
+    extern malloc(size: usize) -> mutable heap void&? effects[Memory.Allocate]
+    extern free(ptr: heap void&) effects[Memory.Release]
+static elif (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
+    const PROT_READ = 0x1
+    const PROT_WRITE = 0x2
+    const MAP_PRIVATE = 0x02
+    const MAP_ANONYMOUS = 0x20
+    extern mmap(addr: heap void&?, length: usize, prot: int, flags: int, fd: int, offset: isize) -> mutable heap void&?
+    extern munmap(addr: heap void&, length: usize) -> int
+    extern MAP_FAILED() -> mutable heap void&?
+static elif (ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC):
+    const MEM_COMMIT = 0x1000
+    const MEM_RESERVE = 0x2000
+    const MEM_RELEASE = 0x8000
+    const PAGE_READWRITE = 0x04
+    extern GetCurrentProcess() -> void&
+    extern VirtualAllocEx(process: void&, address: mutable heap void&?, size: usize, alloc_type: int, protect: int) -> mutable heap void&?
+    extern VirtualFreeEx(process: void&, address: heap void&, size: usize, free_type: int) -> bool
+static elif (ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE):
+    extern __heap_base: heap u8&
+    extern wasm_memory_size(index: int) -> int
+    extern wasm_memory_grow(index: int, pages: usize) -> int
+    extern bump_pointer: heap u8&
+
+extern assert(condition: bool)
+
+extern max(a: usize, b: usize) -> usize
+
+extern inv_handle(ptr: heap void&?) -> bool
+
+extern sfree[T](ptr: heap T&) -> heap T!
+
+extern new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&
+
+extern new_region(capacity: usize) -> mutable heap Region&
+
+extern free_region(r: heap Region&)
+
+extern arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&
+
+extern arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&
+
+extern arena_strlen(s: u8&) -> usize
+
+extern arena_memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
+
+extern arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool
+
+extern arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&
+
+extern arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void&
+
+extern arena_snapshot(a: Arena&) -> ArenaMark
+
+extern arena_reset(a: mutable Arena&)
+
+extern arena_rewind(a: mutable Arena&, m: ArenaMark)
+
+extern arena_free(a: mutable Arena&)
+
+extern arena_trim(a: mutable Arena&)
+
+extern va_list
+
+extern va_copy(args: va_list) -> va_list
+
+extern va_end(args: va_list)
+
+extern vsnprintf(buffer: u8&?, buffer_size: usize, format: u8&, args: va_list) -> int
+
+extern arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8&
+
+const ARENA_DEQUE_INIT_CAP: usize = 16
+
+struct Deque[T]:
+    items: mutable T&?
+    head: mutable usize
+    count: mutable usize
+    capacity: mutable usize
+
+extern arena_deque_init[T]() -> Deque[T]
+
+extern arena_deque_init_buffer[T](buffer: T&, capacity: usize) -> Deque[T]
+
+extern arena_deque_with_capacity[T](a: mutable Arena&, capacity: usize) -> Deque[T]
+
+extern arena_deque_len[T](d: Deque[T]&) -> usize
+
+extern arena_deque_capacity[T](d: Deque[T]&) -> usize
+
+extern arena_deque_is_empty[T](d: Deque[T]&) -> bool
+
+extern arena_deque_clear[T](d: mutable Deque[T]&)
+
+extern arena_deque_buffer_index[T](d: Deque[T]&, logical_index: usize) -> usize
+
+extern arena_deque_copy_linearized[T](d: Deque[T]&, dst: mutable T&)
+
+extern arena_deque_reserve[T](a: mutable Arena&, d: mutable Deque[T]&, needed: usize) -> mutable Deque[T]&
+
+extern arena_deque_ensure_unused[T](a: mutable Arena&, d: mutable Deque[T]&, additional: usize) -> mutable Deque[T]&
+
+extern arena_deque_push_front_assume_capacity[T](d: mutable Deque[T]&, item: T)
+
+extern arena_deque_push_back_assume_capacity[T](d: mutable Deque[T]&, item: T)
+
+extern arena_deque_push_front_bounded[T](d: mutable Deque[T]&, item: T) -> bool
+
+extern arena_deque_push_back_bounded[T](d: mutable Deque[T]&, item: T) -> bool
+
+extern arena_deque_push_front[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -> mutable Deque[T]&
+
+extern arena_deque_push_back[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -> mutable Deque[T]&
+
+extern arena_deque_front[T](d: Deque[T]&) -> T&?
+
+extern arena_deque_back[T](d: Deque[T]&) -> T&?
+
+extern arena_deque_at[T](d: Deque[T]&, index: usize) -> T&
+
+extern arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool
+
+extern arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool
+
+const ARENA_DA_INIT_CAP: usize = 256
+
+const DICT_INIT_CAP: usize = 8
+
+struct DynArray[T]:
+    items: mutable T&?
+    count: mutable usize
+    capacity: mutable usize
+
+struct DynArrayView:
+    data: mutable void&?
+    len: mutable usize
+    elem_size: mutable usize
+
+struct DictBucket[K, T]:
+    key: mutable K
+    value: mutable T
+
+struct DynDict[K, T]:
+    items: mutable DictBucket[K, T]&?
+    count: mutable usize
+    used: mutable usize
+    capacity: mutable usize
+    arena: mutable Arena&?
+
+struct DictProbeResult:
+    index: mutable usize
+    found: mutable bool
+
+extern SymbolTableSlot
+
+type SymbolTableId = id[SymbolTableSlot]
+
+extern __cast__(value: u32) -> SymbolTableId
+
+extern SYMBOL_TABLE_INVALID_ID: SymbolTableId
+
+struct SymbolEntry[K, T]:
+    key: mutable K
+    value: mutable T
+
+struct IndexMapEntry[K, T]:
+    key: mutable K
+    value: mutable T
+
+struct IndexMap[K, T]:
+    owner: mutable Arena&?
+    entries: mutable darray[IndexMapEntry[K, T]]
+    by_key: mutable dict[K, usize]
+
+struct SymbolTable[K, T]:
+    items: mutable IndexMap[K, T]
+
+struct InlineVec[T, N: usize]:
+    owner: mutable Arena&?
+    inline_items: mutable T[N]
+    overflow: mutable darray[T]
+    len: mutable usize
+    is_spilled: mutable bool
+
+struct DArrayBuilder[T]:
+    owner: mutable Arena&?
+    items: mutable darray[T]
+
+struct Flags[T]:
+    bits: mutable u64
+
+struct IndexMapNamespace:
+    _unused: u8
+
+struct SymbolTableNamespace:
+    _unused: u8
+
+struct InlineVecNamespace:
+    _unused: u8
+
+struct DArrayBuilderNamespace:
+    _unused: u8
+
+struct FlagsNamespace:
+    _unused: u8
+
+extern indexmap: IndexMapNamespace
+
+extern symtab: SymbolTableNamespace
+
+extern inlinevec: InlineVecNamespace
+
+extern arraybuilder: DArrayBuilderNamespace
+
+extern flags: FlagsNamespace
+
+extern arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, needed: usize) -> mutable darray[T, shape_out]&
+
+extern arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]
+
+extern arena_da_view_len[T](view: dview[T]) -> usize
+
+extern arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
+
+extern arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]
+
+extern arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]
+
+extern arena_da_view_get[T](view: dview[T], index: usize) -> T
+
+extern arena_da_fill[T](dst: dview[T], value: T)
+
+extern arena_da_copy_exact[T](dst: dview[T], src: dview[T])
+
+extern arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool
+
+extern arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_out]
+
+extern darray_view[T](da: darray[T]) -> dview[T]
+
+@ufcs_only
+extern view[T](da: darray[T]) -> dview[T]
+
+@ufcs_only
+extern where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]
+
+extern darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
+
+extern new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[T]
+
+@ufcs_only
+extern builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
+
+extern darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize
+
+@ufcs_only
+extern count[T](builder: DArrayBuilder[T]&) -> usize
+
+extern darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool
+
+@ufcs_only
+extern is_empty[T](builder: DArrayBuilder[T]&) -> bool
+
+extern darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T
+
+@ufcs_only
+extern get[T](builder: DArrayBuilder[T]&, index: usize) -> T
+
+extern darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize)
+
+@ufcs_only
+extern reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize)
+
+extern darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T)
+
+@ufcs_only
+extern push[T](builder: mutable DArrayBuilder[T]&, item: T)
+
+extern darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]
+
+@ufcs_only
+extern view[T](builder: DArrayBuilder[T]&) -> dview[T]
+
+extern darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]
+
+@ufcs_only
+extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
+
+extern darray_builder_clear[T](builder: mutable DArrayBuilder[T]&)
+
+@ufcs_only
+extern clear[T](builder: mutable DArrayBuilder[T]&)
+
+extern inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]
+
+extern new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> InlineVec[T, N]
+
+extern inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize
+
+@ufcs_only
+extern count[T, N: usize](vec: InlineVec[T, N]&) -> usize
+
+extern inline_vec_is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool
+
+@ufcs_only
+extern is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool
+
+extern inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool
+
+@ufcs_only
+extern spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool
+
+extern inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T
+
+@ufcs_only
+extern get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T
+
+extern inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T)
+
+@ufcs_only
+extern set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T)
+
+extern inline_vec_spill[T, N: usize](vec: mutable InlineVec[T, N]&)
+
+extern inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T)
+
+@ufcs_only
+extern push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T)
+
+extern inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T
+
+@ufcs_only
+extern pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T
+
+extern inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T
+
+@ufcs_only
+extern last[T, N: usize](vec: InlineVec[T, N]&) -> T
+
+extern inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]
+
+@ufcs_only
+extern view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]
+
+extern inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&)
+
+@ufcs_only
+extern clear[T, N: usize](vec: mutable InlineVec[T, N]&)
+
+extern flags_new[T](api: FlagsNamespace) -> Flags[T]
+
+extern new[T](api: FlagsNamespace) -> Flags[T]
+
+extern flags_empty[T]() -> Flags[T]
+
+extern flags_from_bits[T](bits: u64) -> Flags[T]
+
+extern flags_bits[T](items: Flags[T]&) -> u64
+
+extern bits[T](items: Flags[T]&) -> u64
+
+extern flags_mask[T](value: T) -> u64
+
+extern flags_has[T](items: Flags[T]&, value: T) -> bool
+
+extern has[T](items: Flags[T]&, value: T) -> bool
+
+extern flags_add[T](items: mutable Flags[T]&, value: T)
+
+extern add[T](items: mutable Flags[T]&, value: T)
+
+extern flags_remove[T](items: mutable Flags[T]&, value: T)
+
+extern remove[T](items: mutable Flags[T]&, value: T)
+
+extern flags_set[T](items: mutable Flags[T]&, value: T, enabled: bool)
+
+extern flags_clear[T](items: mutable Flags[T]&)
+
+extern flags_any[T](items: Flags[T]&) -> bool
+
+extern flags_union[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]
+
+extern flags_intersection[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]
+
+extern flags_difference[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]
+
+extern arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]&
+
+extern arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&
+
+extern arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&
+
+extern arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, cstr: u8&) -> mutable darray[u8, shape_out]&
+
+extern arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]&
+
+extern arena_dict_next_capacity(min_capacity: usize) -> usize
+
+extern arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult
+
+extern arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize)
+
+extern arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]
+
+extern arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void error[RuntimeError]
+
+extern arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?
+
+extern arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]
+
+extern arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]
+
+extern arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool
+
+extern arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool
+
+extern arena_dict_clear[K, T](m: mutable dict[K, T]&)
+
+extern arena_dict_new__i64(a: mutable Arena&, initial_capacity: usize) -> dict[cstr[key_shape], i64]
+
+extern arena_dict_reserve__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError]
+
+extern arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> mutable i64&?
+
+extern arena_dict_put__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]
+
+extern arena_dict_get_or_insert__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]
+
+extern arena_dict_contains__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool
+
+extern arena_dict_remove__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool
+
+extern arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&)
+
+extern index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]
+
+extern index_map_new[K, T](owner: mutable Arena&) -> IndexMap[K, T]
+
+extern new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]
+
+extern index_map_with_capacity[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]
+
+extern with_capacity[K, T](api: IndexMapNamespace, owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]
+
+extern index_map_count[K, T](map: IndexMap[K, T]&) -> usize
+
+extern count[K, T](map: IndexMap[K, T]&) -> usize
+
+extern index_map_valid_index[K, T](map: IndexMap[K, T]&, index: usize) -> bool
+
+extern index_map_find_index[K, T](map: IndexMap[K, T]&, key: K) -> usize?
+
+extern index_map_contains[K, T](map: IndexMap[K, T]&, key: K) -> bool
+
+extern index_map_entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]
+
+extern index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T
+
+extern index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]
+
+@ufcs_only
+extern entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]
+
+@ufcs_only
+extern value[K, T](map: IndexMap[K, T]&, index: usize) -> T
+
+@ufcs_only
+extern entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]
+
+extern index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
+
+extern put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
+
+extern index_map_set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
+
+extern set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
+
+extern index_map_get[K, T](map: IndexMap[K, T]&, key: K) -> T?
+
+extern get[K, T](map: IndexMap[K, T]&, key: K) -> T?
+
+extern index_map_has[K, T](map: IndexMap[K, T]&, key: K) -> bool
+
+extern has[K, T](map: IndexMap[K, T]&, key: K) -> bool
+
+extern update_at[K, T](map: mutable IndexMap[K, T]&, index: usize, value: T) -> bool
+
+extern clear[K, T](map: mutable IndexMap[K, T]&)
+
+extern symbol_table_index(symbol_id: SymbolTableId) -> usize
+
+extern symbol_table_id_from_index(index: usize) -> SymbolTableId
+
+extern symbol_table[K, T](owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]
+
+extern new[K, T](api: SymbolTableNamespace, owner: mutable Arena&) -> SymbolTable[K, T]
+
+extern with_capacity[K, T](api: SymbolTableNamespace, owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]
+
+extern symbol_table_count[K, T](table: SymbolTable[K, T]&) -> usize
+
+extern count[K, T](table: SymbolTable[K, T]&) -> usize
+
+extern symbol_table_valid_id[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> bool
+
+extern symbol_table_find_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId
+
+extern symbol_table_contains[K, T](table: SymbolTable[K, T]&, key: K) -> bool
+
+extern has[K, T](table: SymbolTable[K, T]&, key: K) -> bool
+
+extern symbol_table_entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]
+
+extern symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
+
+extern symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]
+
+@ufcs_only
+extern entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]
+
+@ufcs_only
+extern value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
+
+@ufcs_only
+extern entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]
+
+extern symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId
+
+extern declare[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId
+
+extern lookup_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId
+
+extern get[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
+
+extern lookup[K, T](table: SymbolTable[K, T]&, key: K) -> T?
+
+extern symbol_table_replace[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool
+
+extern update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool
+
+extern symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&)
