@@ -1415,10 +1415,29 @@ The strict unsafe-permission analysis path currently gates:
 | --- | --- |
 | `Unsafe.PointerCast` | numeric/reference and representation-changing pointer-like casts |
 | `Unsafe.PointerArithmetic` | raw reference plus/minus integer offset math |
-| `Unsafe.UncheckedIndex` | scalar/byte reference indexing that has no proof-carrying bound yet |
+| `Unsafe.UncheckedIndex` | scalar/byte reference indexing, plus fixed-size array indexing that has no proof-carrying bound yet |
 | `Unsafe.RawExtern` | direct calls to `extern` functions |
 | `Unsafe.MutableGlobal` | reads/writes of `global mutable` declarations |
 | `Unsafe.ThreadShare` | `spawn1` / `pool_submit1` transfers or result payloads containing non-static refs |
+
+The first proof-carrying bounds slice is intentionally small. In strict mode, a fixed-size array index is treated as safe when the compiler can see a simple range-loop proof:
+
+```elisa
+def sum4(items: i32[4]) -> i32:
+    total: mutable i32 = 0
+    for i in 0..<4:
+        total <- total + items[i]
+    return total
+```
+
+An equivalent unproven index requires `Unsafe.UncheckedIndex` or a checked/fallback indexing form:
+
+```elisa
+def read_at(items: i32[4], index: usize) -> i32 can[Unsafe.UncheckedIndex]:
+    return items[index]
+```
+
+Future proof sources should include branch refinements such as `if i < items.count:`, early-return guards, `assert i < len`, dynamic collection/view lengths, and enumerate-derived facts. `assert` should be the runtime-checked proof path; a future `assume` form should require a separate unsafe capability rather than silently manufacturing facts.
 
 The default compiler path remains compatibility-oriented while runtime and generated sources migrate into trusted wrappers. Strict mode is the audit surface: it turns low-level footguns into named, searchable permissions without adding runtime branches or Rust-style lifetime analysis.
 

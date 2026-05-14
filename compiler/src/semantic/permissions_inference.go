@@ -270,7 +270,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Object)
 		c.collectExpr(n.Index)
 		c.collectExpr(n.Fallback)
-		if c.analyzer.enforceUnsafePermissions && indexExprRequiresUnsafeUncheckedIndex(c.analyzer.exprTypes[n.Object]) {
+		if c.analyzer.enforceUnsafePermissions && c.analyzer.indexExprRequiresUncheckedIndexPermission(n) {
 			c.addRefs(unsafeUncheckedIndexRefs(n.Position))
 		}
 	case *ast.SliceExpr:

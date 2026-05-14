@@ -266,7 +266,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Object, granted)
 		a.validatePermissionExpr(n.Index, granted)
 		a.validatePermissionExpr(n.Fallback, granted)
-		if a.enforceUnsafePermissions && indexExprRequiresUnsafeUncheckedIndex(a.exprTypes[n.Object]) {
+		if a.enforceUnsafePermissions && a.indexExprRequiresUncheckedIndexPermission(n) {
 			a.warnOnMissingLocalGrant(n.Pos(), "unchecked index", unsafeUncheckedIndexRefs(n.Position), granted)
 		}
 	case *ast.SliceExpr:

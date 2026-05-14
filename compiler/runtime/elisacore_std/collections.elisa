@@ -443,7 +443,8 @@ def inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
     assert index < vec.len
     if vec.is_spilled:
         return vec.overflow[index]
-    return vec.inline_items[index]
+    trusted Unsafe.UncheckedIndex:
+        return vec.inline_items[index]
 
 
 @ufcs_only
@@ -456,7 +457,8 @@ def inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, ite
     if vec.is_spilled:
         vec.overflow[index] <- item
     else:
-        vec.inline_items[index] <- item
+        trusted Unsafe.UncheckedIndex:
+            vec.inline_items[index] <- item
 
 
 @ufcs_only
@@ -474,7 +476,8 @@ def inline_vec_spill[T, N: usize](vec: mutable InlineVec[T, N]&):
         in owner:
             _ = vec.overflow.reserve(N * 2)
             for index in 0..<vec.len:
-                vec.overflow.push(vec.inline_items[index])
+                trusted Unsafe.UncheckedIndex:
+                    vec.overflow.push(vec.inline_items[index])
 
         vec.is_spilled <- true
 
@@ -490,7 +493,8 @@ def inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
             return
 
         if vec.len < N:
-            vec.inline_items[vec.len] <- item
+            trusted Unsafe.UncheckedIndex:
+                vec.inline_items[vec.len] <- item
             vec.len <- vec.len + 1
             return
 
@@ -514,7 +518,8 @@ def inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
     if vec.is_spilled:
         vec.overflow.count <- vec.len
         return vec.overflow[vec.len]
-    return vec.inline_items[vec.len]
+    trusted Unsafe.UncheckedIndex:
+        return vec.inline_items[vec.len]
 
 
 @ufcs_only

@@ -6,9 +6,6 @@ import (
 
 func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	objType := a.analyzeExpr(expr.Object)
-	if a.enforceUnsafePermissions && indexExprRequiresUnsafeUncheckedIndex(objType) {
-		a.recordFunctionPermissionRefs(unsafeUncheckedIndexRefs(expr.Position))
-	}
 	if flagType, ok := FlagsInstanceType(objType); ok {
 		indexType := a.analyzeValueExpr(expr.Index, flagType)
 		if expr.Fallback != nil {
@@ -32,6 +29,10 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		indexExpected = &IDType{Tag: storeType, Storage: a.namedTypes["u32"]}
 	}
 	indexType := a.analyzeValueExpr(expr.Index, indexExpected)
+	a.markIndexBoundsProof(expr, objType)
+	if a.enforceUnsafePermissions && a.indexExprRequiresUncheckedIndexPermission(expr) {
+		a.recordFunctionPermissionRefs(unsafeUncheckedIndexRefs(expr.Position))
+	}
 	finish := func(result Type) Type {
 		if expr.Fallback != nil {
 			if !safeIndexFallbackOperandType(objType) {

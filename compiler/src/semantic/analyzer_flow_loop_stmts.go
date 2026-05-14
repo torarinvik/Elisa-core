@@ -97,11 +97,22 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	loopSym := &Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: loopType, Node: stmt, Mutable: false}
 	a.defineLocalInScope(loopScope, loopSym, stmt.Pos())
 
+	savedIndexBounds := a.currentIndexBounds
+	loopIndexBounds := cloneIndexBoundFacts(savedIndexBounds)
+	if stmt.Op == lexer.TOKEN_RANGE_LT && isZeroOptimizationExpr(stmt.Start) {
+		if loopIndexBounds == nil {
+			loopIndexBounds = map[string]indexBoundFact{}
+		}
+		loopIndexBounds[stmt.Name] = indexBoundFact{Upper: optimizationExprString(stmt.End)}
+	}
+	a.currentIndexBounds = loopIndexBounds
+
 	mergedAffine := a.cloneAffineValueStates()
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
+	a.currentIndexBounds = savedIndexBounds
 	if !blockDefinitelyExits(stmt.Body) {
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)

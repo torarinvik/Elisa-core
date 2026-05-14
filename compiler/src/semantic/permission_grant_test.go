@@ -476,6 +476,53 @@ def read_at(ptr: u8&, index: usize) -> u8:
 	}
 }
 
+func TestUnprovenArrayIndexRequiresUnsafeUncheckedIndexGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "array_index_requires_bounds.elisa", `
+def read_at(items: i32[4], index: usize) -> i32:
+    return items[index]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(all, `unchecked index requires can[Unsafe]`) {
+		t.Fatalf("expected unproven array index to require unchecked index grant, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("read_at")
+	if !ok {
+		t.Fatal("expected read_at symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected read_at function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Unsafe.UncheckedIndex]" {
+		t.Fatalf("expected unproven array index to infer caller permission, got %q", got)
+	}
+}
+
+func TestRangeLoopProvesFixedArrayIndexBounds(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "range_loop_proves_array_index.elisa", `
+def sum4(items: i32[4]) -> i32:
+    total: mutable i32 = 0
+    for i in 0..<4:
+        total <- total + items[i]
+    return total
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := strings.Join(result.Warnings(), "\n")
+	if strings.Contains(all, `unchecked index requires`) {
+		t.Fatalf("expected range loop bound to prove array indexing, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("sum4")
+	if !ok {
+		t.Fatal("expected sum4 symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected sum4 function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != "" {
+		t.Fatalf("expected proven array index not to infer caller permission, got %q", got)
+	}
+}
+
 func TestUncheckedIndexGrantDoesNotCoverPointerArithmetic(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "unchecked_index_grant_not_arithmetic.elisa", `
 def advance(ptr: u8&, offset: usize) -> u8&:

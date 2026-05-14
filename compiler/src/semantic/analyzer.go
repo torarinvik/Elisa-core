@@ -97,6 +97,7 @@ type Analyzer struct {
 	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
 	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
 	exprFacts                         map[ast.Expr]OptimizationFacts
+	indexBoundsProven                 map[*ast.IndexExpr]bool
 	numericLiteralSuffixWarnings      map[ast.Expr]bool
 	treeConstructorCallees            map[ast.Expr]bool
 	resolvedCastHooks                 map[ast.Expr]*Symbol
@@ -150,6 +151,7 @@ type Analyzer struct {
 	currentSequenceRewrite            *sequenceRewriteContext
 	currentAllocExpr                  ast.Expr
 	currentPoolScopes                 []poolScopeState
+	currentIndexBounds                map[string]indexBoundFact
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	currentReturnProvenance           regionRefState
@@ -362,6 +364,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
 		safeCalls:                         make(map[*ast.CallExpr]*SafeCallInfo, exprCapacity/32+8),
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
+		indexBoundsProven:                 make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
 		numericLiteralSuffixWarnings:      make(map[ast.Expr]bool, exprCapacity/64+8),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
