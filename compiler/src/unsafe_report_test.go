@@ -1,0 +1,58 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestRunCLIEmitsUnsafeSummary(t *testing.T) {
+	dir := t.TempDir()
+	fixturePath := filepath.Join(dir, "unsafe_summary.elisa")
+	src := `
+extern raw_cast(value: uintptr) -> heap u8& can[Unsafe.PointerCast]
+extern raw_thread_share(value: heap u8&) -> void can[Unsafe.ThreadShare]
+extern c_probe() -> i64
+
+def safe_wrapper(value: uintptr) -> heap u8&:
+    trusted Unsafe.PointerCast:
+        return value.cast[heap u8&]
+
+def safe_ffi_wrapper() -> i64:
+    trusted Unsafe.RawExtern:
+        return c_probe()
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "unsafe", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"=== unsafe ===",
+		"total: 5",
+		"Unsafe.PointerCast: 1",
+		"Unsafe.RawExtern: 3",
+		"Unsafe.ThreadShare: 1",
+		"c_probe: Unsafe.RawExtern",
+		"raw_cast: Unsafe.PointerCast, Unsafe.RawExtern",
+		"raw_thread_share: Unsafe.RawExtern, Unsafe.ThreadShare",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected unsafe report to contain %q, got:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "safe_wrapper:") {
+		t.Fatalf("expected trusted wrapper implementation detail not to appear in surface unsafe report, got:\n%s", output)
+	}
+	if strings.Contains(output, "safe_ffi_wrapper:") {
+		t.Fatalf("expected trusted raw extern wrapper not to appear in surface unsafe report, got:\n%s", output)
+	}
+}

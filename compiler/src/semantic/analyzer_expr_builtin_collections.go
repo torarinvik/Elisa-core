@@ -58,6 +58,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		Return: resultType,
 	}
 	a.exprTypes[expr] = resultType
+	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray push"))
 	return resultType, true
 }
 
@@ -114,6 +115,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 		Return: resultType,
 	}
 	a.exprTypes[expr] = resultType
+	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray extend"))
 	return resultType, true
 }
 
@@ -171,6 +173,7 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 		Return: resultType,
 	}
 	a.exprTypes[expr] = resultType
+	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray reserve"))
 	return resultType, true
 }
 
@@ -213,6 +216,7 @@ func (a *Analyzer) analyzeBuiltinDarrayClearCall(expr *ast.CallExpr) (Type, bool
 	}
 	a.exprTypes[expr.Func] = &FuncType{Name: "darray.clear", Params: []Type{resultType}, Return: resultType}
 	a.exprTypes[expr] = resultType
+	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray clear"))
 	return resultType, true
 }
 
@@ -260,6 +264,7 @@ func (a *Analyzer) analyzeBuiltinDarrayTruncateCall(expr *ast.CallExpr) (Type, b
 	}
 	a.exprTypes[expr.Func] = &FuncType{Name: "darray.truncate", Params: []Type{resultType, usizeType}, Return: resultType}
 	a.exprTypes[expr] = resultType
+	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray truncate"))
 	return resultType, true
 }
 

@@ -15,12 +15,18 @@ func (a *Analyzer) analyzeBlock(stmts []ast.Stmt) {
 
 func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	saved := a.currentScope
+	savedAliasAccesses := a.currentAliasAccesses
+	savedAliasBindings := a.currentAliasBindings
 	a.currentScope = scope
+	a.currentAliasAccesses = a.cloneAliasAccesses()
+	a.currentAliasBindings = a.cloneAliasBindings()
 	a.withLocalParamPackFrame(func() {
 		for _, stmt := range stmts {
 			a.analyzeStmt(stmt)
 		}
 	})
+	a.currentAliasAccesses = savedAliasAccesses
+	a.currentAliasBindings = savedAliasBindings
 	a.currentScope = saved
 }
 
@@ -55,6 +61,7 @@ type affineFlowSnapshot struct {
 	FunctionValues        map[*Symbol]*FuncType
 	SpecializedValueTypes map[*Symbol]Type
 	ValueBindings         map[*Symbol]ast.Expr
+	StorageViewDeps       map[*Symbol]storageViewDependencyState
 }
 
 type borrowedOwnerRefSummaryTarget struct {
@@ -76,6 +83,7 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 	scope := a.refinedScopeForCondition(parent, cond, truthy)
 	return a.analyzeBlockWithAffineClonePrepared(stmts, scope, func() {
 		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
+		a.applyIndexBoundsFactsForCondition(cond, truthy)
 	})
 }
 
@@ -711,22 +719,34 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
+	savedStorageViewDeps := a.currentStorageViewDeps
+	savedAliasAccesses := a.currentAliasAccesses
+	savedAliasBindings := a.currentAliasBindings
 	savedPackedVariantViews := a.currentPackedVariantViews
+	savedIndexBounds := a.currentIndexBounds
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
 	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
 	a.currentValueBindings = a.cloneValueBindings()
+	a.currentStorageViewDeps = a.cloneStorageViewDeps()
+	a.currentAliasAccesses = a.cloneAliasAccesses()
+	a.currentAliasBindings = a.cloneAliasBindings()
+	a.currentIndexBounds = cloneIndexBoundFacts(a.currentIndexBounds)
 	if prepare != nil {
 		prepare()
 	}
 	a.analyzeBlockWithRegionClone(stmts, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), StorageViewDeps: a.cloneStorageViewDeps()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
+	a.currentStorageViewDeps = savedStorageViewDeps
+	a.currentAliasAccesses = savedAliasAccesses
+	a.currentAliasBindings = savedAliasBindings
 	a.currentPackedVariantViews = savedPackedVariantViews
+	a.currentIndexBounds = savedIndexBounds
 	return snapshot
 }

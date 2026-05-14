@@ -11,6 +11,7 @@ import (
 	"elisacore/src/frontendir"
 	"elisacore/src/grammar"
 	"elisacore/src/interpreter"
+	"elisacore/src/semantic"
 	"elisacore/src/unparse"
 )
 
@@ -111,6 +112,28 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if err := writeOutputFile(outputPath, encoded); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
+		}
+		return 0
+	case emitUnsafe:
+		file, ok := parseLoadedProgram(program, stderr)
+		if !ok {
+			return 1
+		}
+		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+		if errs := result.Errors(); len(errs) > 0 {
+			for _, e := range errs {
+				fmt.Fprintf(stderr, "%s\n", e)
+			}
+			return 1
+		}
+		report := generateUnsafeReport(result)
+		if options.output != "" {
+			if err := writeOutputFile(options.output, []byte(report)); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, report)
 		}
 		return 0
 	}

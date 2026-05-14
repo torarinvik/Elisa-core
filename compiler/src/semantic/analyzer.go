@@ -98,6 +98,9 @@ type Analyzer struct {
 	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
 	exprFacts                         map[ast.Expr]OptimizationFacts
 	indexBoundsProven                 map[*ast.IndexExpr]bool
+	storageViewStaleUses              map[ast.Expr]storageViewDependencyState
+	unsafeAliasExprs                  map[ast.Expr]bool
+	unsafeAliasStmts                  map[ast.Stmt]bool
 	numericLiteralSuffixWarnings      map[ast.Expr]bool
 	treeConstructorCallees            map[ast.Expr]bool
 	resolvedCastHooks                 map[ast.Expr]*Symbol
@@ -142,6 +145,9 @@ type Analyzer struct {
 	currentFunctionValues             map[*Symbol]*FuncType
 	currentSpecializedValueTypes      map[*Symbol]Type
 	currentValueBindings              map[*Symbol]ast.Expr
+	currentStorageViewDeps            map[*Symbol]storageViewDependencyState
+	currentAliasAccesses              map[string]aliasAccessState
+	currentAliasBindings              map[*Symbol]aliasAccessBinding
 	currentPackedVariantViews         map[*Symbol]*PackedVariantViewType
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
@@ -212,6 +218,12 @@ type checkpointState struct {
 	Kind          checkpointKind
 	Target        ast.Expr
 	TargetType    Type
+	Valid         bool
+	InvalidatedBy string
+}
+
+type storageViewDependencyState struct {
+	Source        string
 	Valid         bool
 	InvalidatedBy string
 }
@@ -365,6 +377,9 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		safeCalls:                         make(map[*ast.CallExpr]*SafeCallInfo, exprCapacity/32+8),
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
 		indexBoundsProven:                 make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
+		storageViewStaleUses:              make(map[ast.Expr]storageViewDependencyState, exprCapacity/64+8),
+		unsafeAliasExprs:                  make(map[ast.Expr]bool, exprCapacity/64+8),
+		unsafeAliasStmts:                  make(map[ast.Stmt]bool, exprCapacity/64+8),
 		numericLiteralSuffixWarnings:      make(map[ast.Expr]bool, exprCapacity/64+8),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),

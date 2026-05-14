@@ -50,6 +50,21 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordFunctionValueBinding(sym, n.Value)
 		a.recordImmutableSymbolOptimizationFacts(sym, n.Value)
 		a.recordRegionRefBinding(sym, n.Value)
+		a.recordStorageViewBinding(sym, n.Value)
+		aliasAccessType := declType
+		if n.Type == nil || typeExprHasExplicitMutableRef(n.Type) {
+			aliasAccessType = bindingType
+		} else if _, ok := aliasAccessType.(*RefType); !ok {
+			aliasAccessType = bindingType
+		}
+		if n.Type != nil && (typeExprHasExplicitMutableRef(n.Type) || (n.Mutable && aliasExprIsExplicitBorrow(n.Value))) {
+			if ref, ok := aliasAccessType.(*RefType); ok && !ref.Mutable {
+				cloned := cloneRefType(ref)
+				cloned.Mutable = true
+				aliasAccessType = cloned
+			}
+		}
+		a.recordLocalRefAliasBinding(n, sym, n.Value, aliasAccessType)
 		if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
 			a.remapPackedStoreDependencies(from, sym, PackedEnumStoreWithState(fromType, a.namedTypes["Frozen"]))
 		}
@@ -119,6 +134,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.recordImmutableSymbolOptimizationFacts(sym, fieldExpr)
 				a.recordBorrowedOwnerRefBinding(sym, fieldExpr)
 				a.recordRegionRefBinding(sym, fieldExpr)
+				a.recordStorageViewBinding(sym, fieldExpr)
 				continue
 			}
 			target := &ast.Ident{Position: binding.Position, Name: binding.Name}
@@ -133,6 +149,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 			a.recordAssignmentRefinement(target, targetType, fields[i].Type)
 			a.recordRegionRefAssignment(target, fieldExpr)
+			a.recordStorageViewAssignment(target, fieldExpr)
 			a.recordSpecializedValueTypeTarget(target, fields[i].Type)
 			a.recordNamedStateAssignmentTarget(target, fieldExpr, fields[i].Type)
 			a.clearAffineValueTarget(target)
@@ -201,6 +218,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !n.Optional {
 			a.recordAssignmentRefinement(n.Target, targetType, valueType)
 			a.recordRegionRefAssignment(n.Target, n.Value)
+			a.recordStorageViewAssignment(n.Target, n.Value)
 		}
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {
@@ -217,6 +235,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
 			a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
 			a.recordFunctionValueTarget(n.Target, n.Value)
+			a.recordLocalRefAliasAssignment(n, targetType)
 		}
 		if AssignableTo(targetType, valueType) {
 			a.bindActivePackedStoreType(targetType)
@@ -239,6 +258,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 		a.recordRegionRefAssignment(n.Target, n.Value)
+		a.recordStorageViewAssignment(n.Target, n.Value)
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
 		a.clearAffineValueTarget(n.Target)
@@ -317,12 +337,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+		mergedStorageViewDeps := a.cloneStorageViewDeps()
 		functionValueBranches := make([]map[*Symbol]*FuncType, 0, len(n.Elifs)+2)
 		specializedValueTypeBranches := make([]map[*Symbol]Type, 0, len(n.Elifs)+2)
 		thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
 		if !blockDefinitelyExits(n.Then) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)
+			mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, thenSnapshot.StorageViewDeps)
 			functionValueBranches = append(functionValueBranches, thenSnapshot.FunctionValues)
 			specializedValueTypeBranches = append(specializedValueTypeBranches, thenSnapshot.SpecializedValueTypes)
 		}
@@ -335,6 +357,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if !blockDefinitelyExits(elif.Body) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elifSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elifSnapshot.BorrowedOwnerRefs)
+				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elifSnapshot.StorageViewDeps)
 				functionValueBranches = append(functionValueBranches, elifSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elifSnapshot.SpecializedValueTypes)
 			}
@@ -344,6 +367,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if !blockDefinitelyExits(n.Else) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
+				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elseSnapshot.StorageViewDeps)
 				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elseSnapshot.SpecializedValueTypes)
 			}
@@ -352,6 +376,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if !blockDefinitelyExits(n.Else) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
+				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elseSnapshot.StorageViewDeps)
 				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elseSnapshot.SpecializedValueTypes)
 			}
@@ -362,6 +387,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+		a.currentStorageViewDeps = mergedStorageViewDeps
 		if mergedFunctionValues, ok := a.intersectFunctionValueFlows(functionValueBranches...); ok {
 			a.currentFunctionValues = mergedFunctionValues
 		}
@@ -369,6 +395,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 		}
 		a.applyPostIfFallthroughRefinement(n)
+		if len(n.Elifs) == 0 && len(n.Else) == 0 && blockDefinitelyExits(n.Then) {
+			a.applyIndexBoundsFactsForCondition(n.Cond, false)
+		}
 	case *ast.MatchStmt:
 		a.analyzeMatchStmt(n)
 	case *ast.ExpectPatternStmt:
@@ -395,17 +424,20 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		mergedFunctionValues := a.cloneFunctionValueBindings()
 		mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+		mergedStorageViewDeps := a.cloneStorageViewDeps()
 		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
 		if !blockDefinitelyExits(n.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
 			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+			mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, bodySnapshot.StorageViewDeps)
 		}
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentFunctionValues = mergedFunctionValues
 		a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+		a.currentStorageViewDeps = mergedStorageViewDeps
 	case *ast.ForStmt:
 		a.analyzeForStmt(n)
 	case *ast.IterForStmt:
@@ -427,6 +459,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.errorf(n.Pos(), "assert condition must be bool, got %s", condType)
 			}
 			a.applyConditionRefinements(a.currentScope, cond, true)
+			a.applyIndexBoundsFactsForCondition(cond, true)
 			return
 		}
 		a.analyzeExpr(n.Expr)

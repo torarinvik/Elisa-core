@@ -1406,6 +1406,8 @@ Current builtin unsafe capabilities are:
 - `Unsafe.RawExtern` for direct calls across a raw foreign boundary
 - `Unsafe.MutableGlobal` for shared mutable global state
 - `Unsafe.ThreadShare` for transferring mutable or non-frozen references across threads before stronger ownership facts prove safety
+- `Unsafe.StaleRef` for using a view or borrowed storage value after an invalidating container/storage operation
+- `Unsafe.Alias` for explicit mutable aliasing that violates the one-writer-or-many-readers rule
 
 Keep trusted blocks narrow. The preferred style is to wrap only the operation whose invariant has been checked nearby, not a whole function body. This keeps low-level code inspectable without pushing every trusted implementation detail into caller-facing permissions.
 
@@ -1419,8 +1421,10 @@ The strict unsafe-permission analysis path currently gates:
 | `Unsafe.RawExtern` | direct calls to `extern` functions |
 | `Unsafe.MutableGlobal` | reads/writes of `global mutable` declarations |
 | `Unsafe.ThreadShare` | `spawn1` / `pool_submit1` transfers or result payloads containing non-static refs |
+| `Unsafe.StaleRef` | view/slice use after `clear`, `reserve`, `push`, or similar storage-invalidating operations |
+| `Unsafe.Alias` | duplicate mutable refs, shared+mutable ref overlap, and live local borrow conflicts at calls |
 
-The first proof-carrying bounds slice is intentionally small. In strict mode, a fixed-size array index is treated as safe when the compiler can see a simple range-loop proof:
+The first proof-carrying bounds slice is intentionally small. In strict mode, a fixed-size array or dynamic array index is treated as safe when the compiler can see a simple proof from a range loop, branch guard, early-return guard, or `assert`:
 
 ```elisa
 def sum4(items: i32[4]) -> i32:
@@ -1437,7 +1441,15 @@ def read_at(items: i32[4], index: usize) -> i32 can[Unsafe.UncheckedIndex]:
     return items[index]
 ```
 
-Future proof sources should include branch refinements such as `if i < items.count:`, early-return guards, `assert i < len`, dynamic collection/view lengths, and enumerate-derived facts. `assert` should be the runtime-checked proof path; a future `assume` form should require a separate unsafe capability rather than silently manufacturing facts.
+Use the unsafe report to keep the public unsafe surface countable:
+
+```sh
+go run ./src -emit unsafe path/to/file.elisa
+```
+
+The report runs strict unsafe analysis and lists caller-visible `Unsafe.*` requirements by capability and function. Trusted implementation blocks are intentionally not counted as caller-facing API; keep those blocks narrow so a code review can still inspect the exact unsafe operation and the nearby invariant that justifies it.
+
+Future proof sources should include enumerate-derived facts and a deliberate `assume` form. `assert` is the runtime-checked proof path; `assume` should require a separate unsafe capability rather than silently manufacturing facts.
 
 The default compiler path remains compatibility-oriented while runtime and generated sources migrate into trusted wrappers. Strict mode is the audit surface: it turns low-level footguns into named, searchable permissions without adding runtime branches or Rust-style lifetime analysis.
 

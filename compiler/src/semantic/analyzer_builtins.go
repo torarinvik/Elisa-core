@@ -30,7 +30,7 @@ func (a *Analyzer) registerBuiltinPermissions() {
 	a.registerBuiltinPermission("Pool", []string{"Create", "Submit", "Await", "WaitAll", "Shutdown"})
 	a.registerBuiltinPermission("Sync", []string{"Lock", "Unlock", "Wait", "Notify"})
 	a.registerBuiltinPermission("Atomics", []string{"Load", "Store", "Exchange", "CompareExchange", "Rmw", "Fence"})
-	a.registerBuiltinPermission("Unsafe", []string{"PointerCast", "PointerArithmetic", "UncheckedIndex", "RawExtern", "MutableGlobal", "ThreadShare"})
+	a.registerBuiltinPermission("Unsafe", []string{"PointerCast", "PointerArithmetic", "UncheckedIndex", "RawExtern", "MutableGlobal", "ThreadShare", "StaleRef", "Alias"})
 }
 
 func (a *Analyzer) registerBuiltinPermission(name string, members []string) {

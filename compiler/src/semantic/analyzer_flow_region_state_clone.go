@@ -44,6 +44,17 @@ func (a *Analyzer) cloneRegionRefStates() map[*Symbol]regionRefState {
 	return cloned
 }
 
+func (a *Analyzer) cloneStorageViewDeps() map[*Symbol]storageViewDependencyState {
+	if a.currentStorageViewDeps == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]storageViewDependencyState, len(a.currentStorageViewDeps))
+	for sym, dep := range a.currentStorageViewDeps {
+		cloned[sym] = dep
+	}
+	return cloned
+}
+
 func cloneRegionDependencyStates(src map[*Symbol]regionDependencyState) map[*Symbol]regionDependencyState {
 	if len(src) == 0 {
 		return nil

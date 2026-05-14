@@ -70,6 +70,53 @@ func TestAnalyzeInvalidatedRegionRefDiagnosticUsesFactVocabulary(t *testing.T) {
 	}
 }
 
+func TestAnalyzeInvalidatedDArrayViewDiagnosticUsesFactVocabulary(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_view_fact_invalidated_use.elisa", `def build(owner: Arena) -> i32:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        items: mutable darray[i32] = [1, 2, 3]
+        view: dview[i32] = items[0:items.count]
+        items.push(4)
+        return view[0u]
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `view "view" cannot be used: storage dependency facts were invalidated by darray push of items`) {
+		t.Fatalf("expected invalidated view fact diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeCopiedDArrayViewInvalidatesWithSourceMutation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "copied_darray_view_fact_invalidated_use.elisa", `def build(owner: Arena) -> i32:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        items: mutable darray[i32] = [1, 2, 3]
+        view: dview[i32] = items[0:items.count]
+        copy: dview[i32] = view
+        items.clear()
+        return copy[0u]
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `view "copy" cannot be used: storage dependency facts were invalidated by darray clear of items`) {
+		t.Fatalf("expected copied invalidated view diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeBranchDArrayMutationInvalidatesViewAfterMerge(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "branch_darray_view_fact_invalidated_use.elisa", `def build(owner: Arena, cond: bool) -> i32:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        items: mutable darray[i32] = [1, 2, 3]
+        view: dview[i32] = items[0:items.count]
+        if cond:
+            items.push(4)
+        return view[0u]
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `view "view" cannot be used: storage dependency facts were invalidated by darray push of items`) {
+		t.Fatalf("expected branch invalidated view diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
 	l := lexer.New("legacy_reverse_iter_error.elisa", []byte(`def build(items: darray[int]) -> void:
     for rev value in items:

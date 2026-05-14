@@ -38,6 +38,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 						return
 					}
 				}
+				a.reportInvalidStorageViewUse(n)
 				if state, ok := a.lookupAffineValueState(n); ok && a.containsAffineHandleValues(result, map[string]bool{}) {
 					a.errorf(n.Pos(), consumedFactUseMessage(affineHandleKind(sym.Type), n.Name, state.ConsumedBy))
 					return

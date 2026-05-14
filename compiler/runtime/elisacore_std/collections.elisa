@@ -442,7 +442,8 @@ def spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
 def inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
     assert index < vec.len
     if vec.is_spilled:
-        return vec.overflow[index]
+        trusted Unsafe.UncheckedIndex:
+            return vec.overflow[index]
     trusted Unsafe.UncheckedIndex:
         return vec.inline_items[index]
 
@@ -455,7 +456,8 @@ def get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
 def inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
     assert index < vec.len
     if vec.is_spilled:
-        vec.overflow[index] <- item
+        trusted Unsafe.UncheckedIndex:
+            vec.overflow[index] <- item
     else:
         trusted Unsafe.UncheckedIndex:
             vec.inline_items[index] <- item
@@ -517,7 +519,8 @@ def inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
     vec.len <- vec.len - 1
     if vec.is_spilled:
         vec.overflow.count <- vec.len
-        return vec.overflow[vec.len]
+        trusted Unsafe.UncheckedIndex:
+            return vec.overflow[vec.len]
     trusted Unsafe.UncheckedIndex:
         return vec.inline_items[vec.len]
 
@@ -543,7 +546,8 @@ def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
     if vec.is_spilled:
         assert vec.overflow.items != null
         return DynArrayView(collections_void_from_items[T](vec.overflow.items), vec.len, elem_size)
-    return DynArrayView(collections_void_from_items[T](vec.inline_items[0].ref[T&]), vec.len, elem_size)
+    trusted Unsafe.UncheckedIndex:
+        return DynArrayView(collections_void_from_items[T](vec.inline_items[0].ref[T&]), vec.len, elem_size)
 
 
 @ufcs_only
@@ -946,7 +950,7 @@ def index_map_contains[K, T](map: IndexMap[K, T]&, key: K) -> bool:
 
 
 def index_map_entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
-    assert index_map_valid_index[K, T](map, index)
+    assert index < map.entries.count
     return map.entries[index]
 
 
@@ -979,6 +983,7 @@ def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
             null:
                 pass
             existing_index:
+                assert existing_index < map.entries.count
                 map.entries[existing_index].value <- value
                 return existing_index
 
@@ -1026,6 +1031,7 @@ def has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
 
 def update_at[K, T](map: mutable IndexMap[K, T]&, index: usize, value: T) -> bool:
     false return if not index_map_valid_index[K, T](map, index)
+    assert index < map.entries.count
     map.entries[index].value <- value
     return true
 

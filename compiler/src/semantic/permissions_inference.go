@@ -93,6 +93,9 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if n.Value != nil {
 			c.collectExpr(n.Value)
 		}
+		if c.analyzer.enforceUnsafePermissions && c.analyzer.stmtRequiresUnsafeAlias(n) {
+			c.addRefs(unsafeAliasRefs(n.Position))
+		}
 	case *ast.LetDestructureStmt:
 		c.collectExpr(n.Value)
 	case *ast.TupleBindStmt:
@@ -117,6 +120,9 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	case *ast.AssignStmt:
 		c.collectExpr(n.Target)
 		c.collectExpr(n.Value)
+		if c.analyzer.enforceUnsafePermissions && c.analyzer.stmtRequiresUnsafeAlias(n) {
+			c.addRefs(unsafeAliasRefs(n.Position))
+		}
 	case *ast.AugAssignStmt:
 		c.collectExpr(n.Target)
 		c.collectExpr(n.Value)
@@ -231,6 +237,9 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			if sym, _, ok := c.analyzer.lookupVisibleGlobal(n.Name); ok && sym.Kind == SymbolGlobal && sym.Mutable {
 				c.addRefs(unsafeMutableGlobalRefs(n.Position))
 			}
+			if c.analyzer.storageViewUseRequiresUnsafeStaleRef(n) {
+				c.addRefs(unsafeStaleRefRefs(n.Position))
+			}
 		}
 	case *ast.BinaryExpr:
 		c.collectExpr(n.Left)
@@ -245,6 +254,9 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.SafeReceiver)
 		for _, arg := range n.Args {
 			c.collectExpr(arg)
+		}
+		if c.analyzer.enforceUnsafePermissions && c.analyzer.exprRequiresUnsafeAlias(n) {
+			c.addRefs(unsafeAliasRefs(n.Position))
 		}
 		if fnType, ok := c.analyzer.exprTypes[n.Func].(*FuncType); ok {
 			c.addRefs(functionPermissionRefs(fnType))

@@ -28,6 +28,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
+	savedStorageViewDeps := a.currentStorageViewDeps
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
@@ -50,6 +51,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
+	a.currentStorageViewDeps = map[*Symbol]storageViewDependencyState{}
 	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
@@ -154,6 +156,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
+	a.currentStorageViewDeps = savedStorageViewDeps
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
@@ -192,6 +195,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
+	savedStorageViewDeps := a.currentStorageViewDeps
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
@@ -216,6 +220,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
+	a.currentStorageViewDeps = map[*Symbol]storageViewDependencyState{}
 	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
@@ -287,6 +292,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
+	a.currentStorageViewDeps = savedStorageViewDeps
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
@@ -322,6 +328,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
+	savedStorageViewDeps := a.currentStorageViewDeps
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
@@ -346,6 +353,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
+	a.currentStorageViewDeps = map[*Symbol]storageViewDependencyState{}
 	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
@@ -411,6 +419,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
+	a.currentStorageViewDeps = savedStorageViewDeps
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions

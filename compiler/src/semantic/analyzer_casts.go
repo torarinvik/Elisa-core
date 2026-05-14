@@ -127,6 +127,14 @@ func unsafeThreadShareRefs(pos lexer.Pos) []ast.PermissionRef {
 	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "ThreadShare"}}
 }
 
+func unsafeStaleRefRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "StaleRef"}}
+}
+
+func unsafeAliasRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "Alias"}}
+}
+
 func binaryExprRequiresUnsafePointerArithmetic(op lexer.TokenKind, left, right Type) bool {
 	if op != lexer.TOKEN_PLUS && op != lexer.TOKEN_MINUS {
 		return false

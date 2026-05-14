@@ -87,6 +87,9 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Value != nil {
 			a.validatePermissionExpr(n.Value, granted)
 		}
+		if a.enforceUnsafePermissions && a.stmtRequiresUnsafeAlias(n) {
+			a.warnOnMissingLocalGrant(n.Pos(), "mutable alias", unsafeAliasRefs(n.Position), granted)
+		}
 	case *ast.LetDestructureStmt:
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.TupleBindStmt:
@@ -111,6 +114,9 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 	case *ast.AssignStmt:
 		a.validatePermissionExpr(n.Target, granted)
 		a.validatePermissionExpr(n.Value, granted)
+		if a.enforceUnsafePermissions && a.stmtRequiresUnsafeAlias(n) {
+			a.warnOnMissingLocalGrant(n.Pos(), "mutable alias", unsafeAliasRefs(n.Position), granted)
+		}
 	case *ast.AugAssignStmt:
 		a.validatePermissionExpr(n.Target, granted)
 		a.validatePermissionExpr(n.Value, granted)
@@ -227,6 +233,9 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 			if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok && sym.Kind == SymbolGlobal && sym.Mutable {
 				a.warnOnMissingLocalGrant(n.Pos(), "mutable global access", unsafeMutableGlobalRefs(n.Position), granted)
 			}
+			if a.storageViewUseRequiresUnsafeStaleRef(n) {
+				a.warnOnMissingLocalGrant(n.Pos(), "stale reference", unsafeStaleRefRefs(n.Position), granted)
+			}
 		}
 	case *ast.BinaryExpr:
 		a.validatePermissionExpr(n.Left, granted)
@@ -241,6 +250,9 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.SafeReceiver, granted)
 		for _, arg := range n.Args {
 			a.validatePermissionExpr(arg, granted)
+		}
+		if a.enforceUnsafePermissions && a.exprRequiresUnsafeAlias(n) {
+			a.warnOnMissingLocalGrant(n.Pos(), "mutable alias", unsafeAliasRefs(n.Position), granted)
 		}
 		a.validateCallPermissions(n.Position, n.Func, granted)
 		if a.enforceUnsafePermissions {

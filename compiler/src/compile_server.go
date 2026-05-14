@@ -13,6 +13,7 @@ import (
 	"elisacore/src/frontendir"
 	"elisacore/src/grammar"
 	"elisacore/src/interpreter"
+	"elisacore/src/semantic"
 	"elisacore/src/unparse"
 )
 
@@ -117,6 +118,19 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 			return compileServerResponse{OK: false, Error: err.Error(), ErrorCode: "fact_trace_filter", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
 		response.Output = facts
+	case emitUnsafe:
+		file, ok := parseLoadedProgram(program, &stderr)
+		if !ok {
+			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+		if errs := result.Errors(); len(errs) > 0 {
+			for _, e := range errs {
+				fmt.Fprintf(&stderr, "%s\n", e)
+			}
+			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		response.Output = generateUnsafeReport(result)
 	case emitFmt:
 		file, ok := parseLoadedProgram(program, &stderr)
 		if !ok {
