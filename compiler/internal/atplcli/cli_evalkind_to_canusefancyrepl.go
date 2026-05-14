@@ -33,6 +33,9 @@ type Evaluator interface {
 	Reset() error
 	Eval(source string) (EvalResult, error)
 }
+type ReplEvaluator interface {
+	EvalREPL(source string) (EvalResult, error)
+}
 
 var replCommands = []string{":help", ":modules", ":load", ":open", ":reload", ":reset", ":clear", ":quit", ":q", "exit"}
 
@@ -375,7 +378,7 @@ func (r *replState) finishPending(remember bool, recordHistory func(string)) {
 	r.buffer = r.buffer[:0]
 }
 func (r *replState) evaluateChunk(source string, historyEntry string, recordHistory func(string)) {
-	result, err := r.evaluator.Eval(source)
+	result, err := r.evaluateREPL(source)
 	if err != nil {
 		r.writeError(err.Error())
 		return
@@ -391,6 +394,12 @@ func (r *replState) evaluateChunk(source string, historyEntry string, recordHist
 	}
 
 	fmt.Fprintln(r.out, result.Text)
+}
+func (r *replState) evaluateREPL(source string) (EvalResult, error) {
+	if replEvaluator, ok := r.evaluator.(ReplEvaluator); ok {
+		return replEvaluator.EvalREPL(source)
+	}
+	return r.evaluator.Eval(source)
 }
 func (r *replState) handleCommand(command string) bool {
 	switch command {
