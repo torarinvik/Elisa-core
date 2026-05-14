@@ -81,6 +81,52 @@ func TestParseEachProjectionQueryExpr(t *testing.T) {
 	}
 }
 
+func TestParseEachIdentityQueryExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(items: darray[i64]) -> darray[i64]:\n    return each item in items where item > 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok {
+		t.Fatalf("expected query expr, got %T", ret.Value)
+	}
+	if query.Kind != ast.QueryExprEach || query.Name != "item" || query.Projection != nil {
+		t.Fatalf("unexpected identity each query shape: %#v", query)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return each item in items where (item > 0)") {
+		t.Fatalf("expected formatted identity each query expression, got:\n%s", formatted)
+	}
+}
+
+func TestParseEachIdentityQueryPatternFilter(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Missing\n\ndef keep(items: darray[Expr]) -> darray[Expr]:\n    return each item in items where item is Expr.Int(value): value > 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok {
+		t.Fatalf("expected query expr, got %T", ret.Value)
+	}
+	if query.Kind != ast.QueryExprEach || query.Projection != nil || query.PatternFilter == nil || query.Filter == nil {
+		t.Fatalf("unexpected guarded identity each query shape: %#v", query)
+	}
+	formatted := unparse.FormatDecl(decl)
+	if !strings.Contains(formatted, "return each item in items where item is Expr.Int(value): (value > 0)") {
+		t.Fatalf("expected formatted guarded identity each query expression, got:\n%s", formatted)
+	}
+}
+
 func TestParseProjectionQueryPatternFilter(t *testing.T) {
 	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Missing\n\ndef keep(items: darray[Expr]) -> darray[i64]:\n    return value for each item in items where Expr.Int(value)\n")
 	if len(errs) != 0 {

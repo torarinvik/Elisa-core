@@ -297,7 +297,7 @@ def write(maybe_ref: Box&?) -> void:
 	}
 }
 
-func TestParseTryDefaultShorthand(t *testing.T) {
+func TestParseTryElseRecovery(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 error FileError:
     NotFound
@@ -305,7 +305,7 @@ error FileError:
 extern read_value(flag: bool) -> int error[FileError]
 
 def fallback_value(flag: bool) -> int:
-    return try? read_value(flag) default 11
+    return try read_value(flag) else 11
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -322,14 +322,11 @@ def fallback_value(flag: bool) -> int:
 	if !ok {
 		t.Fatalf("expected try expression, got %T", ret.Value)
 	}
-	if !tryExpr.UsesDefaultShorthandForm {
-		t.Fatal("expected try expression to preserve default shorthand form")
-	}
 	if tryExpr.Fallback == nil {
-		t.Fatal("expected try shorthand to record fallback")
+		t.Fatal("expected try expression to record fallback")
 	}
-	if got := unparse.FormatExpr(tryExpr); got != "try? read_value(flag) default 11" {
-		t.Fatalf("expected try shorthand to unparse canonically, got %q", got)
+	if got := unparse.FormatExpr(tryExpr); got != "try read_value(flag) else 11" {
+		t.Fatalf("expected try expression to unparse with unified else formatting, got %q", got)
 	}
 }
 

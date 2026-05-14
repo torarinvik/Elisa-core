@@ -488,6 +488,74 @@ def ints(owner: Arena, items: darray[Expr]) -> darray[i64]:
 	}
 }
 
+func TestAnalyzeEachIdentityQueryExpr(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "each_identity_query.elisa", `def positives(owner: Arena, items: darray[i64]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return each item in items where item > 0
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "positives" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected positives function declaration")
+	}
+	inStmt := fn.Body[1].(*ast.InStoreStmt)
+	ret := inStmt.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok || query.Kind != ast.QueryExprEach || query.Projection != nil {
+		t.Fatalf("expected identity each query expr, got %T %#v", ret.Value, ret.Value)
+	}
+	darrayType, ok := result.ExprTypes[query].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected identity each query to resolve to darray type, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+	}
+	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected identity each query element i64, got %#v", darrayType.Elem)
+	}
+}
+
+func TestAnalyzeEachIdentityQueryPatternFilterGuard(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "each_identity_query_pattern_guard.elisa", `enum Expr:
+    Int(value: i64)
+    Missing
+
+def ints(owner: Arena, items: darray[Expr]) -> darray[Expr]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return each item in items where item is Expr.Int(value): value > 0
+`)
+
+	var fn *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if current, ok := decl.(*ast.FuncDecl); ok && current.Name == "ints" {
+			fn = current
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("expected ints function declaration")
+	}
+	inStmt := fn.Body[1].(*ast.InStoreStmt)
+	ret := inStmt.Body[0].(*ast.ReturnStmt)
+	query, ok := ret.Value.(*ast.QueryExpr)
+	if !ok || query.Kind != ast.QueryExprEach || query.PatternFilter == nil || query.Filter == nil || query.Projection != nil {
+		t.Fatalf("expected guarded identity each query expr, got %T %#v", ret.Value, ret.Value)
+	}
+	darrayType, ok := result.ExprTypes[query].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected guarded identity each query to resolve to darray type, got %T %#v", result.ExprTypes[query], result.ExprTypes[query])
+	}
+	if enumType, ok := darrayType.Elem.(*EnumType); !ok || enumType.Name != "Expr" {
+		t.Fatalf("expected guarded identity each query element Expr, got %#v", darrayType.Elem)
+	}
+}
+
 func TestAnalyzeSubjectIsQueryPatternFilterNarrowsPayload(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "subject_is_query_pattern.elisa", `enum Expr:
     Int(value: i64)

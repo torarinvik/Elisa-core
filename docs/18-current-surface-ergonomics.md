@@ -40,7 +40,7 @@ Current rules:
 
 ## Grouped `is` alternatives
 
-Use `|` after `is` when a value can match any of several variants or enum members. Short checks stay inline.
+Use bracketed `is [A | B | C]` when a value can match any of several variants or enum members. Short checks stay inline and the bracketed form keeps the intent obvious.
 
 ```elisa
 def is_additive(op: TokenKind) -> bool:
@@ -61,7 +61,7 @@ def has_routine_body(decl: Pascal.Decl) -> bool:
     )
 ```
 
-The formatter preserves compact alternatives when they are short and rewrites longer groups into the parenthesized vertical form.
+The formatter preserves compact bracketed alternatives when they are short and rewrites longer groups into the parenthesized vertical form.
 
 ## Optional AST payloads
 
@@ -146,7 +146,7 @@ def write_best_effort(value: Buffer) -> void:
 
 The same recovery actions are available for handled error unions: `try fallible() else return fallback`, `try fallible() else raise Error.Tag`, and `try fallible_void() else void`.
 
-`return?`, `match?`, and `try? ... default` remain accepted as migration syntax, but they are deprecated in favor of the unified `else` forms.
+`return?`, `match?`, and `try? ... default` remain accepted as migration syntax, but the preferred spelling is the unified `else` form: `value else ...` for optionals and `try expr else ...` for handled error unions.
 
 ## Membership Candidate Sets
 
@@ -551,6 +551,10 @@ def enabled_names(owner: Arena, entries: darray[Entry]) -> darray[NameId]:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     return entry.name_id for each entry in entries where entry.enabled with alloc
 
+def enabled_entries(owner: Arena, entries: darray[Entry]) -> darray[Entry]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    return each entry in entries where entry.enabled with alloc
+
 def positive_int_payloads(owner: Arena, items: darray[Expr]) -> darray[i64]:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     return value for each item in items where Expr.Int(value): value > 0 with alloc
@@ -577,6 +581,7 @@ Current rules:
 - `first name in source where predicate` returns the element as `T?`
 - `projection for first name in source where predicate` returns the projected value as `U?`; the `where` clause may be omitted to project the first element
 - `projection for each name in source where predicate with owner` returns projected values as `darray[U]`; the `where` clause may be omitted for pure maps, and `with owner` can replace an enclosing `in <arena>:` scope
+- `each name in source where predicate with owner` returns the original elements as `darray[T]`; omit the projection when the query should keep the source element unchanged
 - pattern filters may add a guard after `:`, as in `where Expr.Int(value): value > 0`; this works for query expressions and iterable `for` loops
 - explicit-subject pattern filters are accepted as an equivalent readability form, as in `where item is Expr.Int(value): value > 0`; they lower to the same typed narrowing as the shorter pattern filter
 - multi-bind queries and `enumerate()` filters may name the narrowed subject explicitly, as in `index, item ... where item is Expr.Int(value)`; the subject must be one of the query binders
@@ -620,7 +625,6 @@ names inside the predicate:
 return (exprs where Expr.Int(value)).reduce_sum(score_expr)
 return (exprs where Expr.Int(value): value > 0).reduce_sum(score_expr)
 return (exprs where item is Expr.Int(value): value > 0).reduce_sum(score_expr)
-return (exprs.enumerate() where index, item is Expr.Int(value): value > index).reduce_sum(score_pair)
 ```
 
 The parenthesized form is useful when immediately calling another helper on the filtered view.
@@ -845,6 +849,7 @@ Current rules:
 - `static assert:` groups assertion conditions in an indented block; each line is checked as an independent static assertion and may optionally use `condition, "message"`
 - `static:` blocks group static-only statements inside runtime functions; inside the block, `assert`, `if` / `elif` / `else`, and `error(...)` are static by context
 - `static def` declares a compile-time-only function; inside its body, plain `assert ...` and `error(...)` are static by context, and static assertions or static expression statements may call simple static functions with compile-time locals, assignments, conditionals, `match` over compile-time literal values, bounded loops, iterable loops over const lists, named arguments, defaults, constant tuple/list literals and aggregate locals with constant indexing, simple compile-time `darray` builders via `push` and `extend`, compile-time aggregate `.count`, static reflection through `variants(T)` / `fields(T)`, compile-time `any` / `all` / `first` / `count` / `each` queries over const-built lists, optional fallback with `else`, and direct structurally decreasing recursion, while runtime calls are rejected
+- static iterable loops and compile-time queries can use tuple, list, and struct pattern filters when the source values are const-evaluable; non-matching elements are skipped the same way as runtime `where` filters
 - non-void static functions must return on all paths; `void` static functions may terminate by falling through; direct recursive static calls must visibly decrease a parameter with `parameter - positive_compile_time_integer` and have a visible lower-bound base case such as `if n <= 0: return ...`, `return base if n <= 0 else recurse`, or `if n > 0: recurse else return ...` for signed counters, with analogous `n == 0` / `n != 0` forms for unsigned counters; indirect recursive static cycles are rejected for now, and the evaluator reports a call-depth limit if a compile-time computation grows too large
 - the condition must type-check as `bool`
 - if the condition is a semantic compile-time constant, a false value is reported before backend lowering
@@ -2092,7 +2097,7 @@ Current rules:
 - the loop binder may be a simple name, an irrefutable brace destructure pattern, or a typed variant filter pattern
 - the filter may be an ordinary boolean expression or a pattern predicate
 - `where name is Variant(payload)` is an explicit-subject spelling for the same pattern predicate and binds payload names in the guard, projection, or loop body
-- tuple binders can narrow a selected subject with `where index, item is Variant(payload)`; payload names are scoped to the guard for expression-level filtered views and to the loop body for iterable loop headers
+- multi-bind query and loop headers can narrow a selected subject with `where item is Variant(payload)`; payload names are scoped to the query expression or loop body
 - a variant pattern filter may omit payload parentheses when it only tests the variant kind and does not bind payload fields
 - loop headers can chain another `for` clause to express a simple nested iteration without adding an extra indentation level
 - this works over ordinary iterable sources and store-row iterators such as `rows()`

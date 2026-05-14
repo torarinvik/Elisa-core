@@ -349,12 +349,13 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 		if !ok || darrayType == nil {
 			return nil, nil, fmt.Errorf("each query expression requires a darray result type")
 		}
-		if expr.Projection == nil {
-			return nil, nil, fmt.Errorf("each query expression requires a projection")
-		}
 		init = &ast.ListLitExpr{Position: expr.Position, Owner: expr.Owner}
 		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
 			s.g.result.ExprTypes[init] = darrayType
+		}
+		value := expr.Projection
+		if value == nil {
+			value = &ast.Ident{Position: expr.Position, Name: expr.Name}
 		}
 		pushCall := &ast.CallExpr{
 			Position: expr.Position,
@@ -363,7 +364,7 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 				Object:   resultIdent,
 				Field:    "push",
 			},
-			Args: []ast.Expr{expr.Projection},
+			Args: []ast.Expr{value},
 		}
 		body = []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: pushCall}}
 	case ast.QueryExprFirst:

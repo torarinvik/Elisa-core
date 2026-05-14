@@ -394,7 +394,7 @@ func TestAnalyzeStaticFunctionCanUseConstQueries(t *testing.T) {
 	assert any item in items where item == 9
 	assert all item in items where item > 0
 	assert (count item in items where item > 8) == 2
-	selected = item for each item in items where item > 8
+	selected = each item in items where item > 8
 	assert selected.count == 2
 	first_large = first item in items where item > 8
 	missing = first item in items where item > 20
@@ -402,6 +402,85 @@ func TestAnalyzeStaticFunctionCanUseConstQueries(t *testing.T) {
 
 def keep() -> void:
 	static assert score() == 35
+`)
+}
+
+func TestAnalyzeStaticFunctionCanUseTupleBinderConstQueries(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_tuple_query_binders.elisa", `static def score() -> i64:
+	pairs = [(1, 4), (5, 3), (2, 9)]
+	selected = each left, right in pairs where left < right
+	assert selected.count == 2
+	return selected[0][0] + selected[0][1] + selected[1][0] + selected[1][1]
+
+def keep() -> void:
+	static assert score() == 16
+`)
+}
+
+func TestAnalyzeStaticFunctionCanUseTupleBinderIterLoops(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_tuple_iter_binders.elisa", `static def score() -> i64:
+	pairs = [(1, 4), (5, 3), (2, 9)]
+	total: mutable i64 = 0
+	for left, right in pairs where left < right:
+		total <- total + left + right
+	return total
+
+def keep() -> void:
+	static assert score() == 16
+`)
+}
+
+func TestAnalyzeStaticFunctionCanUsePatternFiltersInQueriesAndLoops(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_pattern_filters.elisa", `struct Pair:
+	left: i64
+	right: i64
+
+static def score() -> i64:
+	values = [Pair{left: 1, right: 4}, Pair{left: 5, right: 3}, Pair{left: 1, right: 2}]
+	selected = each pair in values where pair is Pair{left: 1, right: value}
+	total: mutable i64 = 0
+	for pair in values where pair is Pair{left: 1, right: value}:
+		total <- total + value
+	return selected.count + total
+
+def keep() -> void:
+	static assert score() == 8
+`)
+}
+
+func TestAnalyzeStaticFunctionCanUseListPatternFiltersInQueriesAndLoops(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_list_pattern_filters.elisa", `static def score() -> i64:
+	values = [[1, 4], [5, 3], [1, 2]]
+	selected = each pair in values where pair is [1, value]
+	total: mutable i64 = 0
+	for pair in values where pair is [1, value]:
+		total <- total + value
+	return selected.count + total
+
+def keep() -> void:
+	static assert score() == 8
+`)
+}
+
+func TestAnalyzeStaticPatternFiltersSkipNonMatches(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "static_def_pattern_filters_skip_nonmatches.elisa", `struct Pair:
+	left: i64
+	right: i64
+
+static def score() -> i64:
+	records = [Pair{left: 1, right: 4}, Pair{left: 2, right: 8}]
+	record_matches = each pair in records where pair is Pair{left: 9, right: value}
+	lists = [[1, 4], [2, 8]]
+	list_matches = each pair in lists where pair is [9, value]
+	total: mutable i64 = 0
+	for pair in records where pair is Pair{left: 9, right: value}:
+		total <- total + value
+	for pair in lists where pair is [9, value]:
+		total <- total + value
+	return record_matches.count + list_matches.count + total
+
+def keep() -> void:
+	static assert score() == 0
 `)
 }
 

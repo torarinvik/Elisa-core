@@ -171,15 +171,19 @@ def is_rel(kind: Tok) -> bool:
 	}
 }
 
-func TestGenerateLLVMIRLowersBracketedAndUnbracketedQualifiedAlternativesEquivalently(t *testing.T) {
+func TestGenerateLLVMIRLowersBracketedAndGroupedQualifiedAlternativesEquivalently(t *testing.T) {
 	src := `enum Expr:
 	Int
 	Bool
 	Char
 	Missing
 
-def old_scalar(value: Expr) -> bool:
-	return value is Expr.Int | Expr.Bool | Expr.Char
+def grouped_scalar(value: Expr) -> bool:
+	return value is (
+		Expr.Int
+		| Expr.Bool
+		| Expr.Char
+	)
 
 def new_scalar(value: Expr) -> bool:
 	return value is [Expr.Int | Expr.Bool | Expr.Char]
@@ -189,13 +193,13 @@ def new_scalar(value: Expr) -> bool:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i1 @old_scalar(", "define i1 @new_scalar(", "icmp eq i32", "istest.or"} {
+	for _, check := range []string{"define i1 @grouped_scalar(", "define i1 @new_scalar(", "icmp eq i32", "istest.or"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected qualified alternative is lowering to include %q, got:\n%s", check, output)
 		}
 	}
 	if count := strings.Count(output, "istest.or"); count < 2 {
-		t.Fatalf("expected both bracketed and unbracketed alternatives to lower through istest.or, saw %d occurrences in:\n%s", count, output)
+		t.Fatalf("expected both bracketed and grouped alternatives to lower through istest.or, saw %d occurrences in:\n%s", count, output)
 	}
 }
 

@@ -74,19 +74,19 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 		if expr.Owner == nil && a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 			a.errorf(expr.Pos(), "each query expression requires an active in <arena>: scope")
 		}
-		if expr.Projection == nil {
-			a.errorf(expr.Pos(), "each query expression requires a projection before for each")
-			result = invalidType
-			break
+		projectionType := info.ItemType
+		if expr.Projection != nil {
+			savedScope := a.currentScope
+			a.currentScope = loopScope
+			projectionType = a.analyzeExpr(expr.Projection)
+			a.currentScope = savedScope
 		}
-		savedScope := a.currentScope
-		a.currentScope = loopScope
-		projectionType := a.analyzeExpr(expr.Projection)
-		a.currentScope = savedScope
 		if projectionType == nil || IsInvalidType(projectionType) {
 			result = invalidType
 		} else {
-			a.consumeAffineValueExpr(expr.Projection, projectionType, "move into each query element")
+			if expr.Projection != nil {
+				a.consumeAffineValueExpr(expr.Projection, projectionType, "move into each query element")
+			}
 			result = &DArrayType{Elem: projectionType, Shape: &WildcardShape{}, SurfaceName: "darray"}
 		}
 	case ast.QueryExprCount:

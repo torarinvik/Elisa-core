@@ -335,6 +335,21 @@ func (s *functionState) evalStaticMatchPattern(pattern ast.MatchPattern, value s
 			return false, nil, true
 		}
 		return value.String == p.Value, nil, true
+	case *ast.MatchTuplePattern:
+		if value.Kind != semantic.ConstTuple && value.Kind != semantic.ConstList {
+			return false, nil, true
+		}
+		return s.evalStaticSequenceMatchPatterns(p.Elems, value.Elems)
+	case *ast.MatchListPattern:
+		if value.Kind != semantic.ConstList {
+			return false, nil, true
+		}
+		return s.evalStaticSequenceMatchPatterns(p.Elems, value.Elems)
+	case *ast.MatchStructPattern:
+		if value.Kind != semantic.ConstRecord {
+			return false, nil, true
+		}
+		return s.evalStaticStructMatchPatterns(matchStructPatternArgs(p), value)
 	case *ast.MatchVariantPattern:
 		if len(p.Args) != 0 {
 			return false, nil, false
@@ -362,6 +377,79 @@ func (s *functionState) evalStaticMatchPattern(pattern ast.MatchPattern, value s
 	default:
 		return false, nil, false
 	}
+}
+
+func matchStructPatternArgs(pattern *ast.MatchStructPattern) []*ast.MatchPatternArg {
+	if pattern == nil {
+		return nil
+	}
+	if len(pattern.ResolvedArgs) != 0 {
+		return pattern.ResolvedArgs
+	}
+	args := make([]*ast.MatchPatternArg, 0, len(pattern.Args))
+	for i := range pattern.Args {
+		arg := pattern.Args[i]
+		args = append(args, &ast.MatchPatternArg{Position: arg.Position, Name: arg.Name, Pattern: arg.Pattern})
+	}
+	return args
+}
+
+func (s *functionState) evalStaticSequenceMatchPatterns(patterns []ast.MatchPattern, elems []semantic.ConstValue) (bool, map[string]semantic.ConstValue, bool) {
+	if len(patterns) == 0 {
+		return len(elems) == 0, nil, true
+	}
+	if _, ok := patterns[len(patterns)-1].(*ast.MatchRestPattern); ok {
+		if len(elems) < len(patterns)-1 {
+			return false, nil, true
+		}
+	} else if len(elems) != len(patterns) {
+		return false, nil, true
+	}
+	bindings := map[string]semantic.ConstValue{}
+	limit := len(patterns)
+	if _, ok := patterns[len(patterns)-1].(*ast.MatchRestPattern); ok {
+		limit--
+	}
+	for i := 0; i < limit; i++ {
+		matched, itemBindings, ok := s.evalStaticMatchPattern(patterns[i], elems[i])
+		if !ok {
+			return false, nil, false
+		}
+		if !matched {
+			return false, nil, true
+		}
+		for name, value := range itemBindings {
+			bindings[name] = value
+		}
+	}
+	return true, bindings, true
+}
+
+func (s *functionState) evalStaticStructMatchPatterns(args []*ast.MatchPatternArg, value semantic.ConstValue) (bool, map[string]semantic.ConstValue, bool) {
+	bindings := map[string]semantic.ConstValue{}
+	for _, arg := range args {
+		if arg == nil || arg.Name == "" {
+			continue
+		}
+		fieldValue, ok := semantic.ConstReflectionRecordField(value, arg.Name)
+		if !ok {
+			return false, nil, true
+		}
+		if arg.Pattern == nil {
+			continue
+		}
+		matched, itemBindings, ok := s.evalStaticMatchPattern(arg.Pattern, fieldValue)
+		if !ok {
+			return false, nil, false
+		}
+		if !matched {
+			return false, nil, true
+		}
+		for name, value := range itemBindings {
+			bindings[name] = value
+		}
+	}
+	return true, bindings, true
 }
 
 func (s *functionState) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (semantic.ConstValue, bool, bool) {
@@ -414,16 +502,16 @@ func (s *functionState) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (
 }
 
 func (s *functionState) evalStaticIterForStmt(stmt *ast.IterForStmt, allowReturn bool) (semantic.ConstValue, bool, bool) {
-	if stmt == nil || stmt.Mode != ast.IterBindValue || stmt.PatternFilter != nil {
-		return semantic.ConstValue{}, false, false
-	}
-	bind, ok := stmt.Pattern.(*ast.MoveBindNamePattern)
-	if !ok || bind == nil {
+	if stmt == nil || stmt.Mode != ast.IterBindValue {
 		return semantic.ConstValue{}, false, false
 	}
 	source, ok := s.evalConstExpr(stmt.Source)
 	if !ok || (source.Kind != semantic.ConstList && source.Kind != semantic.ConstTuple) {
 		return semantic.ConstValue{}, false, false
+	}
+	pattern := stmt.Pattern
+	if pattern == nil {
+		pattern = &ast.MoveBindNamePattern{Position: stmt.Pos(), Name: "_"}
 	}
 	elems := source.Elems
 	for i := 0; i < len(elems); i++ {
@@ -431,11 +519,26 @@ func (s *functionState) evalStaticIterForStmt(stmt *ast.IterForStmt, allowReturn
 		if stmt.Reverse {
 			item = elems[len(elems)-1-i]
 		}
-		scope := map[string]semantic.ConstValue{}
-		if bind.Name != "" && bind.Name != "_" {
-			scope[bind.Name] = cloneBackendConstValue(item)
+		scope, ok := bindBackendConstMovePattern(pattern, item)
+		if !ok {
+			return semantic.ConstValue{}, false, false
 		}
 		s.g.constEvalScopes = append(s.g.constEvalScopes, scope)
+		if stmt.PatternFilter != nil {
+			matched, bindings, ok := s.evalStaticIterPatternFilter(stmt)
+			if !ok {
+				s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+				return semantic.ConstValue{}, false, false
+			}
+			if !matched {
+				s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+				continue
+			}
+			for name, value := range bindings {
+				scope[name] = value
+			}
+			s.g.constEvalScopes[len(s.g.constEvalScopes)-1] = scope
+		}
 		include := true
 		if stmt.WhereFilter != nil {
 			filter, ok := s.evalConstExpr(stmt.WhereFilter)
@@ -463,6 +566,33 @@ func (s *functionState) evalStaticIterForStmt(stmt *ast.IterForStmt, allowReturn
 		s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
 	}
 	return semantic.ConstValue{}, false, true
+}
+
+func (s *functionState) evalStaticIterPatternFilter(stmt *ast.IterForStmt) (bool, map[string]semantic.ConstValue, bool) {
+	if stmt == nil || stmt.PatternFilter == nil {
+		return true, nil, true
+	}
+	subjectName := stmt.PatternFilterSubject
+	if subjectName == "" {
+		if bind, ok := stmt.Pattern.(*ast.MoveBindNamePattern); ok && bind != nil && bind.Name != "" && bind.Name != "_" {
+			subjectName = bind.Name
+		}
+	}
+	subject, _, ok := s.constEvalValueScope(subjectName)
+	if !ok {
+		if subjectName == "" {
+			return false, nil, true
+		}
+		return false, nil, false
+	}
+	matched, bindings, ok := s.evalStaticMatchPattern(stmt.PatternFilter, subject)
+	if !ok {
+		return false, nil, false
+	}
+	if !matched {
+		return false, nil, true
+	}
+	return true, bindings, true
 }
 
 func backendStaticForLoopContinue(op lexer.TokenKind, current int64, end int64, ascending bool) bool {

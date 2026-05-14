@@ -468,6 +468,34 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			elems = append(elems, value)
 		}
 		return semantic.ConstValue{Kind: semantic.ConstList, Elems: elems}, true
+	case *ast.StructLitExpr:
+		if len(n.Spreads) != 0 {
+			for _, spread := range n.Spreads {
+				if spread != nil {
+					return semantic.ConstValue{}, false
+				}
+			}
+		}
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		fields := map[string]semantic.ConstValue{}
+		for i, arg := range args {
+			if i >= len(n.ArgNames) {
+				return semantic.ConstValue{}, false
+			}
+			fieldName := n.ArgNames[i]
+			if fieldName == "" {
+				return semantic.ConstValue{}, false
+			}
+			value, ok := evalConstExprWithLookup(arg, lookup, call)
+			if !ok {
+				return semantic.ConstValue{}, false
+			}
+			fields[fieldName] = value
+		}
+		return semantic.ConstValue{Kind: semantic.ConstRecord, Fields: fields}, true
 	case *ast.IndexExpr:
 		object, ok := evalConstExprWithLookup(n.Object, lookup, call)
 		if !ok {
@@ -519,7 +547,7 @@ func evalBackendConstAggregateFieldExpr(expr *ast.FieldExpr, lookup func(string)
 }
 
 func (s *functionState) evalConstQueryExpr(expr *ast.QueryExpr) (semantic.ConstValue, bool) {
-	if expr == nil || expr.PatternFilter != nil {
+	if expr == nil {
 		return semantic.ConstValue{}, false
 	}
 	source, ok := s.evalConstExpr(expr.Source)
@@ -573,12 +601,9 @@ func (s *functionState) evalConstQueryExpr(expr *ast.QueryExpr) (semantic.ConstV
 		}
 		return semantic.ConstValue{Kind: semantic.ConstOptional}, true
 	case ast.QueryExprEach:
-		if expr.Projection == nil {
-			return semantic.ConstValue{}, false
-		}
 		elems := make([]semantic.ConstValue, 0, len(source.Elems))
 		for _, elem := range source.Elems {
-			include, value, ok := s.evalConstQueryProjection(expr, elem)
+			include, value, ok := s.evalConstQueryProjectedValue(expr, elem)
 			if !ok {
 				return semantic.ConstValue{}, false
 			}
@@ -626,17 +651,76 @@ func (s *functionState) evalConstQueryProjection(expr *ast.QueryExpr, item seman
 
 func (s *functionState) evalConstQueryInItemScope(expr *ast.QueryExpr, item semantic.ConstValue, eval func() (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
 	scope := map[string]semantic.ConstValue{}
-	if expr != nil && expr.Name != "" && expr.Name != "_" {
-		scope[expr.Name] = cloneBackendConstValue(item)
+	if expr != nil {
+		pattern := ast.MoveBindPattern(&ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name})
+		if expr.Pattern != nil {
+			pattern = expr.Pattern
+		}
+		var ok bool
+		scope, ok = bindBackendConstMovePattern(pattern, item)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
 	}
 	s.g.constEvalScopes = append(s.g.constEvalScopes, scope)
+	if expr != nil && expr.PatternFilter != nil {
+		matched, bindings, ok := s.evalConstQueryPatternFilter(expr)
+		if !ok {
+			s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+			return semantic.ConstValue{}, ok
+		}
+		if !matched {
+			s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: false}, true
+		}
+		for name, value := range bindings {
+			scope[name] = value
+		}
+		s.g.constEvalScopes[len(s.g.constEvalScopes)-1] = scope
+	}
 	value, ok := eval()
 	s.g.constEvalScopes = s.g.constEvalScopes[:len(s.g.constEvalScopes)-1]
 	return value, ok
 }
 
+func (s *functionState) evalConstQueryPatternFilter(expr *ast.QueryExpr) (bool, map[string]semantic.ConstValue, bool) {
+	if expr == nil || expr.PatternFilter == nil {
+		return true, nil, true
+	}
+	subject, ok := s.evalConstQueryPatternFilterSubject(expr)
+	if !ok {
+		return false, nil, false
+	}
+	matched, bindings, ok := s.evalStaticMatchPattern(expr.PatternFilter, subject)
+	if !ok {
+		return false, nil, false
+	}
+	if !matched {
+		return false, nil, true
+	}
+	return true, bindings, true
+}
+
+func (s *functionState) evalConstQueryPatternFilterSubject(expr *ast.QueryExpr) (semantic.ConstValue, bool) {
+	if expr == nil || expr.PatternFilter == nil {
+		return semantic.ConstValue{}, false
+	}
+	if expr.PatternFilterSubject != "" {
+		if value, _, ok := s.constEvalValueScope(expr.PatternFilterSubject); ok {
+			return value, true
+		}
+		return semantic.ConstValue{}, false
+	}
+	if expr.Name != "" && expr.Name != "_" {
+		if value, _, ok := s.constEvalValueScope(expr.Name); ok {
+			return value, true
+		}
+	}
+	return semantic.ConstValue{}, false
+}
+
 func (g *llvmGenerator) evalConstQueryExpr(expr *ast.QueryExpr) (semantic.ConstValue, bool) {
-	if expr == nil || expr.PatternFilter != nil {
+	if expr == nil {
 		return semantic.ConstValue{}, false
 	}
 	source, ok := g.evalConstExpr(expr.Source)
@@ -690,12 +774,9 @@ func (g *llvmGenerator) evalConstQueryExpr(expr *ast.QueryExpr) (semantic.ConstV
 		}
 		return semantic.ConstValue{Kind: semantic.ConstOptional}, true
 	case ast.QueryExprEach:
-		if expr.Projection == nil {
-			return semantic.ConstValue{}, false
-		}
 		elems := make([]semantic.ConstValue, 0, len(source.Elems))
 		for _, elem := range source.Elems {
-			include, value, ok := g.evalConstQueryProjection(expr, elem)
+			include, value, ok := g.evalConstQueryProjectedValue(expr, elem)
 			if !ok {
 				return semantic.ConstValue{}, false
 			}
@@ -743,13 +824,122 @@ func (g *llvmGenerator) evalConstQueryProjection(expr *ast.QueryExpr, item seman
 
 func (g *llvmGenerator) evalConstQueryInItemScope(expr *ast.QueryExpr, item semantic.ConstValue, eval func() (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
 	scope := map[string]semantic.ConstValue{}
-	if expr != nil && expr.Name != "" && expr.Name != "_" {
-		scope[expr.Name] = cloneBackendConstValue(item)
+	if expr != nil {
+		pattern := ast.MoveBindPattern(&ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name})
+		if expr.Pattern != nil {
+			pattern = expr.Pattern
+		}
+		var ok bool
+		scope, ok = bindBackendConstMovePattern(pattern, item)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
 	}
 	g.constEvalScopes = append(g.constEvalScopes, scope)
+	if expr != nil && expr.PatternFilter != nil {
+		matched, bindings, ok := g.evalConstQueryPatternFilter(expr)
+		if !ok {
+			g.constEvalScopes = g.constEvalScopes[:len(g.constEvalScopes)-1]
+			return semantic.ConstValue{}, ok
+		}
+		if !matched {
+			g.constEvalScopes = g.constEvalScopes[:len(g.constEvalScopes)-1]
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: false}, true
+		}
+		for name, value := range bindings {
+			scope[name] = value
+		}
+		g.constEvalScopes[len(g.constEvalScopes)-1] = scope
+	}
 	value, ok := eval()
 	g.constEvalScopes = g.constEvalScopes[:len(g.constEvalScopes)-1]
 	return value, ok
+}
+
+func (g *llvmGenerator) evalConstQueryPatternFilter(expr *ast.QueryExpr) (bool, map[string]semantic.ConstValue, bool) {
+	if expr == nil || expr.PatternFilter == nil {
+		return true, nil, true
+	}
+	subject, ok := g.evalConstQueryPatternFilterSubject(expr)
+	if !ok {
+		return false, nil, false
+	}
+	matched, bindings, ok := g.evalStaticMatchPattern(expr.PatternFilter, subject)
+	if !ok {
+		return false, nil, false
+	}
+	if !matched {
+		return false, nil, true
+	}
+	return true, bindings, true
+}
+
+func (g *llvmGenerator) evalConstQueryPatternFilterSubject(expr *ast.QueryExpr) (semantic.ConstValue, bool) {
+	if expr == nil || expr.PatternFilter == nil {
+		return semantic.ConstValue{}, false
+	}
+	if expr.PatternFilterSubject != "" {
+		if value, _, ok := g.constEvalValueScope(expr.PatternFilterSubject); ok {
+			return value, true
+		}
+		return semantic.ConstValue{}, false
+	}
+	if expr.Name != "" && expr.Name != "_" {
+		if value, _, ok := g.constEvalValueScope(expr.Name); ok {
+			return value, true
+		}
+	}
+	return semantic.ConstValue{}, false
+}
+
+func backendConstMoveBindFieldName(arg ast.MoveBindArg) string {
+	if arg.Field != "" {
+		return arg.Field
+	}
+	return arg.Name
+}
+
+func bindBackendConstMovePattern(pattern ast.MoveBindPattern, item semantic.ConstValue) (map[string]semantic.ConstValue, bool) {
+	scope := map[string]semantic.ConstValue{}
+	if pattern == nil {
+		return scope, true
+	}
+	switch p := pattern.(type) {
+	case *ast.MoveBindNamePattern:
+		if p == nil || p.Name == "" || p.Name == "_" {
+			return scope, true
+		}
+		scope[p.Name] = cloneBackendConstValue(item)
+		return scope, true
+	case *ast.MoveBindTuplePattern:
+		if p == nil || (item.Kind != semantic.ConstTuple && item.Kind != semantic.ConstList) || len(item.Elems) < len(p.Args) {
+			return nil, false
+		}
+		for index, arg := range p.Args {
+			if arg.Name == "" || arg.Name == "_" {
+				continue
+			}
+			scope[arg.Name] = cloneBackendConstValue(item.Elems[index])
+		}
+		return scope, true
+	case *ast.MoveBindStructPattern:
+		if p == nil || item.Kind != semantic.ConstRecord {
+			return nil, false
+		}
+		for _, arg := range p.Args {
+			if arg.Name == "" || arg.Name == "_" {
+				continue
+			}
+			fieldValue, ok := semantic.ConstReflectionRecordField(item, backendConstMoveBindFieldName(arg))
+			if !ok {
+				return nil, false
+			}
+			scope[arg.Name] = cloneBackendConstValue(fieldValue)
+		}
+		return scope, true
+	default:
+		return nil, false
+	}
 }
 
 func lookupConstEvalValue(lookup func(string) (semantic.ConstValue, bool), name string) (semantic.ConstValue, bool) {
@@ -913,6 +1103,20 @@ func (g *llvmGenerator) constEvalValueScope(name string) (semantic.ConstValue, i
 		}
 	}
 	return semantic.ConstValue{}, -1, false
+}
+
+func (s *functionState) constEvalValueScope(name string) (semantic.ConstValue, int, bool) {
+	if s == nil || s.g == nil {
+		return semantic.ConstValue{}, -1, false
+	}
+	return s.g.constEvalValueScope(name)
+}
+
+func (g *llvmGenerator) evalStaticMatchPattern(pattern ast.MatchPattern, value semantic.ConstValue) (bool, map[string]semantic.ConstValue, bool) {
+	if g == nil {
+		return false, nil, false
+	}
+	return (&functionState{g: g}).evalStaticMatchPattern(pattern, value)
 }
 func evalConstEquality(left, right semantic.ConstValue, equal bool) (semantic.ConstValue, bool) {
 	matched := false

@@ -334,9 +334,6 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.RaiseExpr:
 		return "raise " + formatExpr(n.Error)
 	case *ast.TryExpr:
-		if n.Fallback != nil && n.UsesDefaultShorthandForm {
-			return "try? " + formatExpr(n.Value) + " default " + formatExpr(n.Fallback)
-		}
 		line := "try " + formatExpr(n.Value)
 		if n.Recovery != nil || n.Fallback != nil {
 			line += " else " + formatRecoveryClause(n.Recovery, n.Fallback)

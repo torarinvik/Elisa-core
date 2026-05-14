@@ -138,6 +138,8 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 		kind = ast.QueryExprFirst
 	case "count":
 		kind = ast.QueryExprCount
+	case "each":
+		kind = ast.QueryExprEach
 	default:
 		p.errorAt(pos, "unknown query expression %q", kindText)
 	}
@@ -177,7 +179,7 @@ func (p *Parser) looksLikeQueryExpr() bool {
 		return false
 	}
 	switch p.cur().Text {
-	case "any", "all", "first", "count":
+	case "any", "all", "first", "count", "each":
 	default:
 		return false
 	}

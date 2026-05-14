@@ -270,6 +270,46 @@ def enabled_names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
 	}
 }
 
+func TestGenerateLLVMIRLowersEachIdentityQueryExpr(t *testing.T) {
+	src := `def positives(owner: Arena, items: darray[i64]) -> darray[i64]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return each item in items where item > 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_each_identity_query.elisa", src)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	for _, check := range []string{"query.result", ".push", "icmp sgt"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected identity each query to lower through query push path, got:\n%s", output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersEachIdentityQueryPatternFilterGuard(t *testing.T) {
+	src := `enum Expr:
+    Int(value: i64)
+    Missing
+
+def ints(owner: Arena, items: darray[Expr]) -> darray[Expr]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        return each item in items where item is Expr.Int(value): value > 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_each_identity_query_pattern_guard.elisa", src)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	for _, check := range []string{"query.result", "iter.pattern.filter.body", "match.tag", ".push"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected guarded identity each query to lower through pattern-filter push path, got:\n%s", output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersEachProjectionQueryPatternFilter(t *testing.T) {
 	src := `enum Expr:
     Int(value: i64)

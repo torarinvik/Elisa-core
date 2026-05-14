@@ -319,6 +319,34 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			elems = append(elems, value)
 		}
 		return ConstValue{Kind: ConstList, Elems: elems}, true
+	case *ast.StructLitExpr:
+		if len(n.Spreads) != 0 {
+			for _, spread := range n.Spreads {
+				if spread != nil {
+					return ConstValue{}, false
+				}
+			}
+		}
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		fields := map[string]ConstValue{}
+		for i, arg := range args {
+			if i >= len(n.ArgNames) {
+				return ConstValue{}, false
+			}
+			fieldName := n.ArgNames[i]
+			if fieldName == "" {
+				return ConstValue{}, false
+			}
+			value, ok := a.evalConstExpr(arg)
+			if !ok {
+				return ConstValue{}, false
+			}
+			fields[fieldName] = value
+		}
+		return ConstValue{Kind: ConstRecord, Fields: fields}, true
 	case *ast.IndexExpr:
 		return a.evalConstIndexExpr(n)
 	case *ast.QueryExpr:
@@ -358,7 +386,7 @@ func (a *Analyzer) evalConstIndexExpr(expr *ast.IndexExpr) (ConstValue, bool) {
 }
 
 func (a *Analyzer) evalConstQueryExpr(expr *ast.QueryExpr) (ConstValue, bool) {
-	if expr == nil || expr.PatternFilter != nil || expr.Pattern != nil {
+	if expr == nil {
 		return ConstValue{}, false
 	}
 	source, ok := a.evalConstExpr(expr.Source)
@@ -412,12 +440,9 @@ func (a *Analyzer) evalConstQueryExpr(expr *ast.QueryExpr) (ConstValue, bool) {
 		}
 		return ConstValue{Kind: ConstOptional}, true
 	case ast.QueryExprEach:
-		if expr.Projection == nil {
-			return ConstValue{}, false
-		}
 		elems := make([]ConstValue, 0, len(source.Elems))
 		for _, elem := range source.Elems {
-			include, value, ok := a.evalConstQueryProjection(expr, elem)
+			include, value, ok := a.evalConstQueryProjectedValue(expr, elem)
 			if !ok {
 				return ConstValue{}, false
 			}
@@ -468,13 +493,122 @@ func (a *Analyzer) evalConstQueryProjection(expr *ast.QueryExpr, item ConstValue
 
 func (a *Analyzer) evalConstQueryInItemScope(expr *ast.QueryExpr, item ConstValue, eval func() (ConstValue, bool)) (ConstValue, bool) {
 	scope := map[string]ConstValue{}
-	if expr != nil && expr.Name != "" && expr.Name != "_" {
-		scope[expr.Name] = cloneConstValue(item)
+	if expr != nil {
+		pattern := ast.MoveBindPattern(&ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name})
+		if expr.Pattern != nil {
+			pattern = expr.Pattern
+		}
+		var ok bool
+		scope, ok = a.bindConstMovePattern(pattern, item)
+		if !ok {
+			return ConstValue{}, false
+		}
 	}
 	a.constEvalScopes = append(a.constEvalScopes, scope)
+	if expr != nil && expr.PatternFilter != nil {
+		matched, bindings, ok := a.evalConstQueryPatternFilter(expr)
+		if !ok {
+			a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+			return ConstValue{}, ok
+		}
+		if !matched {
+			a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+			return ConstValue{Kind: ConstBool, Bool: false}, true
+		}
+		for name, value := range bindings {
+			scope[name] = value
+		}
+		a.constEvalScopes[len(a.constEvalScopes)-1] = scope
+	}
 	value, ok := eval()
 	a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
 	return value, ok
+}
+
+func (a *Analyzer) evalConstQueryPatternFilter(expr *ast.QueryExpr) (bool, map[string]ConstValue, bool) {
+	if expr == nil || expr.PatternFilter == nil {
+		return true, nil, true
+	}
+	subject, ok := a.evalConstQueryPatternFilterSubject(expr)
+	if !ok {
+		return false, nil, false
+	}
+	matched, bindings, ok := a.evalStaticMatchPattern(expr.PatternFilter, subject)
+	if !ok {
+		return false, nil, false
+	}
+	if !matched {
+		return false, nil, true
+	}
+	return true, bindings, true
+}
+
+func (a *Analyzer) evalConstQueryPatternFilterSubject(expr *ast.QueryExpr) (ConstValue, bool) {
+	if expr == nil || expr.PatternFilter == nil {
+		return ConstValue{}, false
+	}
+	if expr.PatternFilterSubject != "" {
+		if value, _, ok := a.constEvalValueScope(expr.PatternFilterSubject); ok {
+			return value, true
+		}
+		return ConstValue{}, false
+	}
+	if expr.Name != "" && expr.Name != "_" {
+		if value, _, ok := a.constEvalValueScope(expr.Name); ok {
+			return value, true
+		}
+	}
+	return ConstValue{}, false
+}
+
+func constMoveBindFieldName(arg ast.MoveBindArg) string {
+	if arg.Field != "" {
+		return arg.Field
+	}
+	return arg.Name
+}
+
+func (a *Analyzer) bindConstMovePattern(pattern ast.MoveBindPattern, item ConstValue) (map[string]ConstValue, bool) {
+	scope := map[string]ConstValue{}
+	if pattern == nil {
+		return scope, true
+	}
+	switch p := pattern.(type) {
+	case *ast.MoveBindNamePattern:
+		if p == nil || p.Name == "" || p.Name == "_" {
+			return scope, true
+		}
+		scope[p.Name] = cloneConstValue(item)
+		return scope, true
+	case *ast.MoveBindTuplePattern:
+		if p == nil || (item.Kind != ConstTuple && item.Kind != ConstList) || len(item.Elems) < len(p.Args) {
+			return nil, false
+		}
+		for index, arg := range p.Args {
+			if arg.Name == "" || arg.Name == "_" {
+				continue
+			}
+			scope[arg.Name] = cloneConstValue(item.Elems[index])
+		}
+		return scope, true
+	case *ast.MoveBindStructPattern:
+		if p == nil || item.Kind != ConstRecord {
+			return nil, false
+		}
+		for _, arg := range p.Args {
+			if arg.Name == "" || arg.Name == "_" {
+				continue
+			}
+			fieldValue, ok := ConstReflectionRecordField(item, constMoveBindFieldName(arg))
+			if !ok {
+				return nil, false
+			}
+			scope[arg.Name] = cloneConstValue(fieldValue)
+		}
+		return scope, true
+	default:
+		return nil, false
+	}
 }
 
 func (a *Analyzer) evalConstAggregateFieldExpr(expr *ast.FieldExpr) (ConstValue, bool) {
@@ -872,6 +1006,21 @@ func (a *Analyzer) evalStaticMatchPattern(pattern ast.MatchPattern, value ConstV
 			return false, nil, true
 		}
 		return value.String == p.Value, nil, true
+	case *ast.MatchTuplePattern:
+		if value.Kind != ConstTuple && value.Kind != ConstList {
+			return false, nil, true
+		}
+		return a.evalStaticSequenceMatchPatterns(p.Elems, value.Elems)
+	case *ast.MatchListPattern:
+		if value.Kind != ConstList {
+			return false, nil, true
+		}
+		return a.evalStaticSequenceMatchPatterns(p.Elems, value.Elems)
+	case *ast.MatchStructPattern:
+		if value.Kind != ConstRecord {
+			return false, nil, true
+		}
+		return a.evalStaticStructMatchPatterns(matchStructPatternArgs(p), value)
 	case *ast.MatchVariantPattern:
 		if len(p.Args) != 0 {
 			return false, nil, false
@@ -899,6 +1048,79 @@ func (a *Analyzer) evalStaticMatchPattern(pattern ast.MatchPattern, value ConstV
 	default:
 		return false, nil, false
 	}
+}
+
+func (a *Analyzer) evalStaticSequenceMatchPatterns(patterns []ast.MatchPattern, elems []ConstValue) (bool, map[string]ConstValue, bool) {
+	if len(patterns) == 0 {
+		return len(elems) == 0, nil, true
+	}
+	if _, ok := patterns[len(patterns)-1].(*ast.MatchRestPattern); ok {
+		if len(elems) < len(patterns)-1 {
+			return false, nil, true
+		}
+	} else if len(elems) != len(patterns) {
+		return false, nil, true
+	}
+	bindings := map[string]ConstValue{}
+	limit := len(patterns)
+	if _, ok := patterns[len(patterns)-1].(*ast.MatchRestPattern); ok {
+		limit--
+	}
+	for i := 0; i < limit; i++ {
+		matched, itemBindings, ok := a.evalStaticMatchPattern(patterns[i], elems[i])
+		if !ok {
+			return false, nil, false
+		}
+		if !matched {
+			return false, nil, true
+		}
+		for name, value := range itemBindings {
+			bindings[name] = value
+		}
+	}
+	return true, bindings, true
+}
+
+func matchStructPatternArgs(pattern *ast.MatchStructPattern) []*ast.MatchPatternArg {
+	if pattern == nil {
+		return nil
+	}
+	if len(pattern.ResolvedArgs) != 0 {
+		return pattern.ResolvedArgs
+	}
+	args := make([]*ast.MatchPatternArg, 0, len(pattern.Args))
+	for i := range pattern.Args {
+		arg := pattern.Args[i]
+		args = append(args, &ast.MatchPatternArg{Position: arg.Position, Name: arg.Name, Pattern: arg.Pattern})
+	}
+	return args
+}
+
+func (a *Analyzer) evalStaticStructMatchPatterns(args []*ast.MatchPatternArg, value ConstValue) (bool, map[string]ConstValue, bool) {
+	bindings := map[string]ConstValue{}
+	for _, arg := range args {
+		if arg == nil || arg.Name == "" {
+			continue
+		}
+		fieldValue, ok := ConstReflectionRecordField(value, arg.Name)
+		if !ok {
+			return false, nil, true
+		}
+		if arg.Pattern == nil {
+			continue
+		}
+		matched, itemBindings, ok := a.evalStaticMatchPattern(arg.Pattern, fieldValue)
+		if !ok {
+			return false, nil, false
+		}
+		if !matched {
+			return false, nil, true
+		}
+		for name, value := range itemBindings {
+			bindings[name] = value
+		}
+	}
+	return true, bindings, true
 }
 
 func (a *Analyzer) evalStaticForStmt(stmt *ast.ForStmt, allowReturn bool) (ConstValue, bool, bool) {
@@ -963,19 +1185,14 @@ func (a *Analyzer) evalStaticIterForStmt(stmt *ast.IterForStmt, allowReturn bool
 		a.errorf(stmt.Pos(), "static iterable for currently supports value binding only")
 		return ConstValue{}, false, false
 	}
-	if stmt.PatternFilter != nil {
-		a.errorf(stmt.Pos(), "static iterable for does not support pattern filters yet")
-		return ConstValue{}, false, false
-	}
-	bind, ok := stmt.Pattern.(*ast.MoveBindNamePattern)
-	if !ok || bind == nil {
-		a.errorf(stmt.Pos(), "static iterable for currently supports name bindings only")
-		return ConstValue{}, false, false
-	}
 	source, ok := a.evalConstExpr(stmt.Source)
 	if !ok || (source.Kind != ConstList && source.Kind != ConstTuple) {
 		a.errorf(stmt.Pos(), "static iterable for source must evaluate to a compile-time list or tuple")
 		return ConstValue{}, false, false
+	}
+	pattern := stmt.Pattern
+	if pattern == nil {
+		pattern = &ast.MoveBindNamePattern{Position: stmt.Pos(), Name: "_"}
 	}
 	elems := source.Elems
 	for i := 0; i < len(elems); i++ {
@@ -983,11 +1200,28 @@ func (a *Analyzer) evalStaticIterForStmt(stmt *ast.IterForStmt, allowReturn bool
 		if stmt.Reverse {
 			item = elems[len(elems)-1-i]
 		}
-		scope := map[string]ConstValue{}
-		if bind.Name != "" && bind.Name != "_" {
-			scope[bind.Name] = cloneConstValue(item)
+		scope, ok := a.bindConstMovePattern(pattern, item)
+		if !ok {
+			a.errorf(stmt.Pos(), "static iterable for pattern does not match compile-time item")
+			return ConstValue{}, false, false
 		}
 		a.constEvalScopes = append(a.constEvalScopes, scope)
+		if stmt.PatternFilter != nil {
+			matched, bindings, ok := a.evalStaticIterPatternFilter(stmt)
+			if !ok {
+				a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+				a.errorf(stmt.PatternFilter.Pos(), "static iterable for pattern filter must be a compile-time matchable pattern")
+				return ConstValue{}, false, false
+			}
+			if !matched {
+				a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
+				continue
+			}
+			for name, value := range bindings {
+				scope[name] = value
+			}
+			a.constEvalScopes[len(a.constEvalScopes)-1] = scope
+		}
 		include := true
 		if stmt.WhereFilter != nil {
 			filter, ok := a.evalConstExpr(stmt.WhereFilter)
@@ -1017,6 +1251,33 @@ func (a *Analyzer) evalStaticIterForStmt(stmt *ast.IterForStmt, allowReturn bool
 		a.constEvalScopes = a.constEvalScopes[:len(a.constEvalScopes)-1]
 	}
 	return ConstValue{}, false, true
+}
+
+func (a *Analyzer) evalStaticIterPatternFilter(stmt *ast.IterForStmt) (bool, map[string]ConstValue, bool) {
+	if stmt == nil || stmt.PatternFilter == nil {
+		return true, nil, true
+	}
+	subjectName := stmt.PatternFilterSubject
+	if subjectName == "" {
+		if bind, ok := stmt.Pattern.(*ast.MoveBindNamePattern); ok && bind != nil && bind.Name != "" && bind.Name != "_" {
+			subjectName = bind.Name
+		}
+	}
+	subject, _, ok := a.constEvalValueScope(subjectName)
+	if !ok {
+		if subjectName == "" {
+			return false, nil, true
+		}
+		return false, nil, false
+	}
+	matched, bindings, ok := a.evalStaticMatchPattern(stmt.PatternFilter, subject)
+	if !ok {
+		return false, nil, false
+	}
+	if !matched {
+		return false, nil, true
+	}
+	return true, bindings, true
 }
 
 func staticForLoopContinue(op lexer.TokenKind, current int64, end int64, ascending bool) bool {
