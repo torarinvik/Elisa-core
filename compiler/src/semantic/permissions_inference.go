@@ -71,13 +71,12 @@ func (c *permissionEffectCollector) collectWithGrantedRefs(refs []ast.Permission
 		collect()
 		return
 	}
-	granted := grantedPermissionFamilies(permissionFamiliesFromRefs(refs))
+	granted := grantedPermissionRefs(refs)
 	savedSeen := c.seen
 	c.seen = nil
 	collect()
 	bodyRefs := canonicalizePermissionRefs(c.seen)
-	remainingFamilies := missingGrantedPermissionFamilies(bodyRefs, granted)
-	remainingRefs := filterPermissionRefsByFamilies(bodyRefs, remainingFamilies)
+	remainingRefs := missingGrantedPermissionRefs(bodyRefs, granted)
 	c.seen = savedSeen
 	c.addRefs(remainingRefs)
 }
@@ -227,9 +226,18 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		return
 	}
 	switch n := expr.(type) {
+	case *ast.Ident:
+		if c.analyzer.enforceUnsafePermissions {
+			if sym, _, ok := c.analyzer.lookupVisibleGlobal(n.Name); ok && sym.Kind == SymbolGlobal && sym.Mutable {
+				c.addRefs(unsafeMutableGlobalRefs(n.Position))
+			}
+		}
 	case *ast.BinaryExpr:
 		c.collectExpr(n.Left)
 		c.collectExpr(n.Right)
+		if c.analyzer.enforceUnsafePermissions && binaryExprRequiresUnsafePointerArithmetic(n.Op, c.analyzer.exprTypes[n.Left], c.analyzer.exprTypes[n.Right]) {
+			c.addRefs(unsafePointerArithmeticRefs(n.Position))
+		}
 	case *ast.UnaryExpr:
 		c.collectExpr(n.Operand)
 	case *ast.CallExpr:
@@ -240,6 +248,21 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		}
 		if fnType, ok := c.analyzer.exprTypes[n.Func].(*FuncType); ok {
 			c.addRefs(functionPermissionRefs(fnType))
+			if c.analyzer.enforceUnsafePermissions {
+				if fnType.Name == "spawn1" && len(n.Args) > 1 {
+					if threadTransferRequiresUnsafeThreadShare(c.analyzer.exprTypes[n.Args[1]], map[string]bool{}) {
+						c.addRefs(unsafeThreadShareRefs(n.Args[1].Pos()))
+					}
+				}
+				if fnType.Name == "pool_submit1" && len(n.Args) > 2 {
+					if threadTransferRequiresUnsafeThreadShare(c.analyzer.exprTypes[n.Args[2]], map[string]bool{}) {
+						c.addRefs(unsafeThreadShareRefs(n.Args[2].Pos()))
+					}
+				}
+				if resultPayload, ok := threadTransferResultPayloadType(fnType.Name, fnType.Return); ok && threadTransferRequiresUnsafeThreadShare(resultPayload, map[string]bool{}) {
+					c.addRefs(unsafeThreadShareRefs(n.Position))
+				}
+			}
 		}
 	case *ast.FieldExpr:
 		c.collectExpr(n.Object)
@@ -247,6 +270,9 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Object)
 		c.collectExpr(n.Index)
 		c.collectExpr(n.Fallback)
+		if c.analyzer.enforceUnsafePermissions && indexExprRequiresUnsafeUncheckedIndex(c.analyzer.exprTypes[n.Object]) {
+			c.addRefs(unsafeUncheckedIndexRefs(n.Position))
+		}
 	case *ast.SliceExpr:
 		c.collectExpr(n.Object)
 		c.collectExpr(n.Start)
@@ -258,6 +284,11 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Owner)
 	case *ast.CastExpr:
 		c.collectExpr(n.Operand)
+		src := c.analyzer.exprTypes[n.Operand]
+		dst := c.analyzer.exprTypes[n]
+		if c.analyzer.enforceUnsafePermissions && castRequiresUnsafePointerCast(src, dst) {
+			c.addRefs(unsafePointerCastRefs(n.Position))
+		}
 		if sym, ok := c.analyzer.resolvedCastHooks[n]; ok {
 			if fnType, ok := sym.Type.(*FuncType); ok {
 				c.addRefs(functionPermissionRefs(fnType))

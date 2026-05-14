@@ -660,6 +660,46 @@ Current receiver helpers:
 
 Actual fields and declared methods still win over helper rewriting, so this surface remains compatible with ordinary member access.
 
+## Inspectable Lexer Compression
+
+Lexer helpers follow Elisa Core's pyramid-of-abstraction rule: source syntax may compress intent, but every layer must remain inspectable. A declaration should lower to named helper functions or data with predictable cost, and generated helpers should be easy to compare with equivalent handwritten code.
+
+The first lexer-compression primitive is `charset`, an ASCII byte character set declaration for common lexer predicates:
+
+```elisa
+charset IdentStart = 'a'..'z' | 'A'..'Z' | '_'
+charset Digit = '0'..'9'
+charset IdentContinue = IdentStart | Digit
+
+def is_ident_start(ch: char) -> bool:
+    return ch in IdentStart
+
+def is_ident_continue(ch: char) -> bool:
+    return ch in IdentContinue
+```
+
+This MVP accepts ASCII character literals, inclusive ranges, and references to other `charset` declarations. References are expanded during semantic analysis, so membership checks such as `ch in IdentContinue` lower through the existing membership-candidate path as ordinary range/equality comparisons. Unknown references, cycles, duplicate expanded characters, descending ranges, and non-ASCII literals are rejected. Later implementations may choose a compact table or generated helper when that is clearer or faster, but the lowered representation should remain visible and documented.
+
+`keywordmap` is the matching string-to-token primitive. The source declares the keyword table once, and lowering produces a normal function with a string `match`, so the exact dispatch remains visible in formatted lowered output:
+
+```elisa
+keywordmap lua_keyword: sview -> LuaTokenKind:
+    "and" => .AND
+    "break" => .BREAK
+    _ => .NAME
+```
+
+The input carrier can be `sview` for lexer slices or `cstr` for null-terminated frontend token lookup helpers:
+
+```elisa
+keywordmap token_kind_for_text: cstr -> TokenKind:
+    "program" => .PROGRAM
+    "+" => .PLUS
+    _ => .EOF
+```
+
+The `_` arm is required and acts as the fallback for non-keyword identifiers. Duplicate keyword entries are rejected by the parser. The MVP lowers to a straightforward string match; later slices may add table/trie/perfect-hash lowering when benchmarks justify it, as long as the selected representation remains inspectable.
+
 ## Data-Oriented Helpers
 
 Elisa Core now has a small set of built-in data-oriented containers and layout surfaces used heavily by the Pascal, Lua, and ATPL implementations.
@@ -725,7 +765,7 @@ id: RowId[PascalSymbols] = symbols.push(...)
 symbols.flags[id].add(PascalSymbolFlag.Routine)
 ```
 
-Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Generic helpers may mention `Flags[T]` before `T` is specialized, but concrete instantiations must use a `const enum` element type. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
+Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Prefer `flags.new()` plus `.add(...)`, `.remove(...)`, and `flags[Enum.Member]` membership checks over hand-built integer masks; reserve `flags_from_bits(...)` and `flags_bits(...)` for interop or serialization boundaries. Generic helpers may mention `Flags[T]` before `T` is specialized, but concrete instantiations must use a `const enum` element type. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
 
 Use `InlineVec[T, N]` for tiny hot lists where most values fit inline but occasional spill to an arena-owned `darray` is acceptable. Parser and semantic scratch lists such as params, labels, directives, and duplicate-detection sets are the intended shape.
 
@@ -1227,35 +1267,37 @@ Current rules:
 
 If a shorthand named argument such as `missing:` has no in-scope value named `missing`, semantic analysis reports that directly.
 
-## Effect declarations, aliases, and `signal`
+## Permission declarations, aliases, and `signal`
 
-Top-level `effect` declarations introduce named effect families directly in source. An effect with members behaves like a permission family with explicit members; `pass` declares a marker effect with no members.
+Top-level `permission` declarations introduce named authority families directly in source. A permission with members behaves like a capability family with explicit members; `pass` declares a marker permission with no members.
 
 ```elisa
-effect FooEffect:
+permission FooPermission:
     pass
 
-effect ConsoleEffect:
+permission ConsolePermission:
     Write
     Flush
 
 def run() -> void:
-    can FooEffect, ConsoleEffect.Write:
-        signal FooEffect
-        signal ConsoleEffect.Write
+    can FooPermission, ConsolePermission.Write:
+        signal FooPermission
+        signal ConsolePermission.Write
 ```
 
-`signal` is a zero-runtime statement. It does not emit a runtime trap or object; it exists to make effect usage explicit so the surrounding function contract still records and checks the effect.
+`signal` is a zero-runtime statement. It does not emit a runtime trap or object; it exists to make permission usage explicit so the surrounding function contract still records and checks the authority requirement.
 
-Current rules for `effect` and `signal`:
+Current rules for `permission` and `signal`:
 
-- `effect Name:` declares a family directly
-- `effect Name: pass` is the marker-effect form with no members
+- `permission Name:` declares a family directly
+- `permission Name: pass` is the marker-permission form with no members
 - indented names such as `Write` and `Flush` declare members of that family
-- `signal Name` records use of a whole-family effect
+- `effect Name:` is accepted as a deprecated compatibility alias for `permission Name:`
+- formatting canonicalizes compatibility `effect` declarations back to `permission`
+- `signal Name` records use of a whole-family permission
 - `signal Name.Member` records use of one concrete member
-- `signal` participates in the same effect inference and local-grant checking as calls to effectful functions
-- family-level signature effects such as `effects[ConsoleEffect]` satisfy member signals and calls from the same family
+- `signal` participates in the same permission inference and local-grant checking as calls to permission-requiring functions
+- family-level signature permissions such as `effects[ConsolePermission]` satisfy member signals and calls from the same family
 - function bodies infer their callable permission surface from effectful operations and local grants
 - explicit signature permissions still matter on surfaces without bodies, such as `extern` declarations and function types
 - explicit signature permissions do not by themselves satisfy local-grant checking inside the body
@@ -1281,7 +1323,8 @@ Current rules:
 - aliases may be used on function declarations and function types
 - aliases may bundle `error[...]`, `can[...]`, or both
 - bracketed signature rows may include aliases, direct capability refs such as `Abort.Panic`, and direct errors such as `error ParseErr`
-- `effect` declarations and `effectalias` aliases are compile-time surface only; both lower into the existing semantic effect model rather than a runtime object
+- `permission` declarations and `effectalias` aliases are compile-time surface only; both lower into the existing semantic permission/effect model rather than a runtime object
+- `effect` declarations remain accepted during migration but are deprecated; prefer `permission`
 
 ### Local `can` grants and formatter normalization
 
@@ -1315,6 +1358,69 @@ Style guidance:
 
 - prefer an inline grant when one operation needs the permission once
 - prefer a `can ...:` block when multiple operations share the same grant or when keeping the grant as a block makes control flow or non-null narrowing clearer
+
+### Trusted implementation grants and unsafe capabilities
+
+Use `trusted ...:` when a function uses a permission internally but does not expose that permission to callers. This is the surface for safe wrappers around low-level operations: the trusted block is still locally checked, but the granted permissions are not inferred into the enclosing function type.
+
+```elisa
+extern raw_pointer_cast(value: uintptr) -> heap u8& can[Unsafe.PointerCast]
+
+def as_byte_ptr(value: uintptr) -> heap u8&:
+    trusted Unsafe.PointerCast:
+        return raw_pointer_cast(value)
+```
+
+Use ordinary `can ...:` instead when the caller must uphold the invariant:
+
+```elisa
+def as_byte_ptr_unchecked(value: uintptr) -> heap u8&:
+    can Unsafe.PointerCast:
+        return raw_pointer_cast(value)
+```
+
+The same distinction applies to FFI, indexing, globals, and thread sharing. A safe wrapper should check or establish the invariant nearby, then use a narrow `trusted` block only around the operation that needs authority:
+
+```elisa
+extern malloc(bytes: usize) -> heap void&? can[Memory.Allocate]
+
+def require_alloc(bytes: usize) -> heap void& error[MemoryError.OutOfMemory]:
+    can Memory.Allocate:
+        trusted Unsafe.RawExtern:
+            raw: heap void&? = malloc(bytes)
+        return raw else raise MemoryError.OutOfMemory
+```
+
+Unchecked APIs expose the invariant to their caller instead:
+
+```elisa
+def get_unchecked[T](items: T&, index: usize) -> T can[Unsafe.UncheckedIndex]:
+    return items[index]
+```
+
+Current builtin unsafe capabilities are:
+
+- `Unsafe.PointerCast` for representation-changing pointer/reference casts
+- `Unsafe.PointerArithmetic` for raw pointer offset math
+- `Unsafe.UncheckedIndex` for indexing without a proven or checked bound
+- `Unsafe.RawExtern` for direct calls across a raw foreign boundary
+- `Unsafe.MutableGlobal` for shared mutable global state
+- `Unsafe.ThreadShare` for transferring mutable or non-frozen references across threads before stronger ownership facts prove safety
+
+Keep trusted blocks narrow. The preferred style is to wrap only the operation whose invariant has been checked nearby, not a whole function body. This keeps low-level code inspectable without pushing every trusted implementation detail into caller-facing permissions.
+
+The strict unsafe-permission analysis path currently gates:
+
+| Capability | Strict-mode gate |
+| --- | --- |
+| `Unsafe.PointerCast` | numeric/reference and representation-changing pointer-like casts |
+| `Unsafe.PointerArithmetic` | raw reference plus/minus integer offset math |
+| `Unsafe.UncheckedIndex` | scalar/byte reference indexing that has no proof-carrying bound yet |
+| `Unsafe.RawExtern` | direct calls to `extern` functions |
+| `Unsafe.MutableGlobal` | reads/writes of `global mutable` declarations |
+| `Unsafe.ThreadShare` | `spawn1` / `pool_submit1` transfers or result payloads containing non-static refs |
+
+The default compiler path remains compatibility-oriented while runtime and generated sources migrate into trusted wrappers. Strict mode is the audit surface: it turns low-level footguns into named, searchable permissions without adding runtime branches or Rust-style lifetime analysis.
 
 ## Named bundles
 

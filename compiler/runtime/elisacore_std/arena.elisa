@@ -107,12 +107,78 @@ def max(a: usize, b: usize) -> usize:
 def inv_handle(ptr: heap void&?) -> bool:
     return ptr == null
 
+@internal
+def arena_region_from_raw(raw: heap void&) -> mutable heap Region&:
+    trusted Unsafe.PointerCast:
+        return raw.cast[mutable heap Region&]
+
+@internal
+def arena_heap_void_from_region(r: heap Region&) -> heap void&:
+    trusted Unsafe.PointerCast:
+        return r.cast[heap void&]
+
+@internal
+def arena_heap_u8_from_region_data(r: heap Region&) -> mutable heap u8&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (r.cast[heap u8&] + size_of(Region)).cast[mutable heap u8&]
+
+@internal
+def arena_heap_void_from_data_base(data_base: heap u8&, offset_bytes: usize) -> mutable heap void&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (data_base + offset_bytes).cast[mutable heap void&]
+
+@internal
+def arena_heap_void_from_mutable(ptr: mutable void&) -> mutable heap void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable heap void&]
+
+@internal
+def arena_heap_u8_from_void(ptr: heap void&) -> mutable heap u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable heap u8&]
+
+@internal
+def arena_heap_void_from_u8(ptr: heap u8&) -> heap void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[heap void&]
+
+@internal
+def arena_u8_from_void(ptr: void&) -> u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[u8&]
+
+@internal
+def arena_mutable_u8_from_void(ptr: mutable void&) -> mutable u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable u8&]
+
+@internal
+def arena_heap_u8_from_alloc(ptr: heap void&) -> mutable heap u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable heap u8&]
+
+@internal
+def arena_void_from_mutable_u8(ptr: mutable heap u8&) -> mutable void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable void&]
+
+@internal
+def arena_void_from_u8(ptr: u8&) -> void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[void&]
+
+@internal
+def arena_nullable_u8_from_heap(ptr: heap u8&) -> u8&?:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[u8&?]
+
 # ------------------------------------------------------------
 # Pointer-state helpers
 # ------------------------------------------------------------
 
 def sfree[T](ptr: heap T&) -> heap T!:
-    free(ptr.cast[heap void&]) can Memory.Release
+    trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+        free(ptr.cast[heap void&]) can Memory.Release
     return null
 
 # ------------------------------------------------------------
@@ -124,9 +190,11 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         size_bytes: usize = size_of(Region) + size_of(uintptr) * capacity
 
         static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
-            raw: heap void&? = malloc(size_bytes)
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- malloc(size_bytes)
             assert raw != null
-            r: heap Region& = raw.cast[heap Region&]
+            r: heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
             raw: heap void&? = mmap(
@@ -138,7 +206,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
                 0
             )
             assert raw != MAP_FAILED()
-            r: heap Region& = raw.cast[heap Region&]
+            r: heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             raw: heap void&? = VirtualAllocEx(
@@ -149,18 +217,22 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
                 PAGE_READWRITE
             )
             assert not inv_handle(raw)
-            r: heap Region& = raw.cast[heap Region&]
+            r: heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
-            r: heap Region& = bump_pointer.cast[heap Region&]
-            current_memory_size: usize = ARENA_WASM_PAGE_SIZE * wasm_memory_size(0).usize()
+            r: heap Region& = arena_region_from_raw(arena_heap_void_from_u8(bump_pointer))
+            current_memory_size: mutable usize = 0
+            trusted Unsafe.RawExtern:
+                current_memory_size <- ARENA_WASM_PAGE_SIZE * wasm_memory_size(0).usize()
             desired_memory_size: usize = bump_pointer.usize() + size_bytes
 
             if desired_memory_size > current_memory_size:
                 delta_bytes: usize = desired_memory_size - current_memory_size
                 delta_pages: usize = (delta_bytes + (ARENA_WASM_PAGE_SIZE - 1)) / ARENA_WASM_PAGE_SIZE
 
-                grow_result: int = wasm_memory_grow(0, delta_pages)
+                grow_result: mutable int = -1
+                trusted Unsafe.RawExtern:
+                    grow_result <- wasm_memory_grow(0, delta_pages)
                 assert grow_result >= 0
 
             bump_pointer <- bump_pointer + size_bytes
@@ -182,17 +254,18 @@ def new_region(capacity: usize) -> mutable heap Region&:
 def free_region(r: heap Region&):
     can Memory.Release, Abort.Panic:
         static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
-            free(r.cast[heap void&])
+            trusted Unsafe.RawExtern:
+                free(arena_heap_void_from_region(r))
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
             size_bytes: usize = size_of(Region) + size_of(uintptr) * r.capacity
-            ret: int = munmap(r.cast[heap void&], size_bytes)
+            ret: int = munmap(arena_heap_void_from_region(r), size_bytes)
             assert ret == 0
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             ok: bool = VirtualFreeEx(
                 GetCurrentProcess(),
-                r.cast[heap void&],
+                arena_heap_void_from_region(r),
                 0,
                 MEM_RELEASE
             )
@@ -235,22 +308,23 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             a.end_index <- a.end_index + 1
             a.end.global_index <- a.end_index
 
-        data_base: heap u8& = (a.end.cast[heap u8&] + size_of(Region)).cast[heap u8&]
+        data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
         offset_bytes: usize = a.end.count * size_of(uintptr)
-        result: heap void& = (data_base + offset_bytes).cast[heap void&]
+        result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
         a.end.count <- a.end.count + size
         return result
 
 def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
-        oldptr.cast[heap void&] return if newsz <= oldsz
+        arena_heap_void_from_mutable(oldptr) return if newsz <= oldsz
 
         newptr: heap void& = arena_alloc(a, newsz)
-        newptr_bytes: heap u8& = newptr.cast[heap u8&]
-        oldptr_bytes: u8& = oldptr.cast[u8&]
+        newptr_bytes: heap u8& = arena_heap_u8_from_void(newptr)
+        oldptr_bytes: u8& = arena_u8_from_void(oldptr)
 
-        for i in 0..<oldsz:
-            newptr_bytes[i] <- oldptr_bytes[i]
+        trusted Unsafe.UncheckedIndex:
+            for i in 0..<oldsz:
+                newptr_bytes[i] <- oldptr_bytes[i]
 
         return newptr
 
@@ -260,38 +334,42 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
 
 def arena_strlen(s: u8&) -> usize:
     n:mutable usize = 0
-    while s[n] != 0:
-        n <- n + 1
+    trusted Unsafe.UncheckedIndex:
+        while s[n] != 0:
+            n <- n + 1
     return n
 
 def arena_memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&:
-    d: u8& = dest.cast[u8&]
-    s: u8& = src.cast[u8&]
+    d: mutable u8& = arena_mutable_u8_from_void(dest)
+    s: u8& = arena_u8_from_void(src)
 
-    for i in 0..<n:
-        d[i] <- s[i]
+    trusted Unsafe.UncheckedIndex:
+        for i in 0..<n:
+            d[i] <- s[i]
 
     return dest
 
 def arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool:
-    left: u8& = lhs.cast[u8&]
-    right: u8& = rhs.cast[u8&]
+    left: u8& = arena_u8_from_void(lhs)
+    right: u8& = arena_u8_from_void(rhs)
 
-    for i in 0..<n:
-        false return if left[i] != right[i]
+    trusted Unsafe.UncheckedIndex:
+        for i in 0..<n:
+            false return if left[i] != right[i]
 
     return true
 
 def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&:
     n: usize = arena_strlen(cstr)
-    dup: mutable heap u8& = arena_alloc(a, n + 1).cast[mutable heap u8&] can Memory.Allocate, Abort.Panic
-    arena_memcpy(dup.cast[mutable void&], cstr.cast[void&], n)
-    dup[n] <- 0
+    dup: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, n + 1)) can Memory.Allocate, Abort.Panic
+    arena_memcpy(arena_void_from_mutable_u8(dup), arena_void_from_u8(cstr), n)
+    trusted Unsafe.UncheckedIndex:
+        dup[n] <- 0
     return dup
 
 def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void&:
     dup: mutable heap void& = arena_alloc(a, size) can Memory.Allocate, Abort.Panic
-    _ = arena_memcpy(dup.cast[mutable void&], data, size)
+    _ = arena_memcpy(dup, data, size)
     return dup
 
 # ------------------------------------------------------------
@@ -381,12 +459,16 @@ extern vsnprintf(
 
 def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8&:
     can Memory.Allocate, Console.Format, Abort.Panic:
-        args_copy: va_list = va_copy(args)
-        n: int = vsnprintf(null, 0, format, args_copy)
-        va_end(args_copy)
+        args_copy: mutable va_list = args
+        n: mutable int = -1
+        trusted Unsafe.RawExtern:
+            args_copy <- va_copy(args)
+            n <- vsnprintf(null, 0, format, args_copy)
+            va_end(args_copy)
 
         assert n >= 0
 
-        result: heap u8& = arena_alloc(a, n.usize() + 1).cast[heap u8&]
-        _ = vsnprintf(result.cast[u8&?], n.usize() + 1, format, args)
+        result: heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, n.usize() + 1))
+        trusted Unsafe.RawExtern:
+            _ = vsnprintf(arena_nullable_u8_from_heap(result), n.usize() + 1, format, args)
         return result

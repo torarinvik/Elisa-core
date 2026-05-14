@@ -48,6 +48,9 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 				declType := a.analyzeListLitExprWithExpected(n.Value, expected)
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
+			case *ast.CharsetDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: invalidType, Node: n, Mutable: false}, n.Pos())
 			case *ast.ConstEnumDecl:
 			case *ast.GlobalDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
@@ -111,6 +114,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 							qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
 							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
 							a.applyExternFuncAnnotations(fnDecl, fnType)
+							a.markRawExternFuncType(fnDecl, fnType)
 							linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
 							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(fnDecl, "ufcs_only")}
 							a.functionTypes[qualifiedName] = fnType
@@ -137,6 +141,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
 						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
 						a.applyExternFuncAnnotations(fnDecl, fnType)
+						a.markRawExternFuncType(fnDecl, fnType)
 						linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
 						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(fnDecl, "ufcs_only")}
 						a.functionTypes[qualifiedName] = fnType
@@ -147,6 +152,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Variadic)
 				a.applyExternFuncAnnotations(n, fnType)
+				a.markRawExternFuncType(n, fnType)
 				if !fnType.ReturnProvenanceKnown {
 					fnType.ReturnProvenanceKnown = true
 				}

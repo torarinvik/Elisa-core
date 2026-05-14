@@ -103,6 +103,81 @@ func isPointerLikeCastType(t Type) bool {
 	}
 }
 
+func unsafePointerCastRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "PointerCast"}}
+}
+
+func unsafePointerArithmeticRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "PointerArithmetic"}}
+}
+
+func unsafeRawExternRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "RawExtern"}}
+}
+
+func unsafeMutableGlobalRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "MutableGlobal"}}
+}
+
+func unsafeUncheckedIndexRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "UncheckedIndex"}}
+}
+
+func unsafeThreadShareRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "ThreadShare"}}
+}
+
+func binaryExprRequiresUnsafePointerArithmetic(op lexer.TokenKind, left, right Type) bool {
+	if op != lexer.TOKEN_PLUS && op != lexer.TOKEN_MINUS {
+		return false
+	}
+	if _, ok := left.(*RefType); ok && IsIntegralStorageType(right) {
+		return true
+	}
+	if op == lexer.TOKEN_PLUS {
+		if _, ok := right.(*RefType); ok && IsIntegralStorageType(left) {
+			return true
+		}
+	}
+	return false
+}
+
+func indexExprRequiresUnsafeUncheckedIndex(obj Type) bool {
+	if IsInvalidType(obj) {
+		return false
+	}
+	ref, ok := obj.(*RefType)
+	if !ok || ref == nil {
+		return false
+	}
+	return IsNumericType(ref.Elem) || IsBoolType(ref.Elem)
+}
+
+func castRequiresUnsafePointerCast(src, dst Type) bool {
+	if IsInvalidType(src) || IsInvalidType(dst) || SameType(src, dst) || AssignableTo(dst, src) {
+		return false
+	}
+	if _, ok := src.(*TypeParamType); ok {
+		return false
+	}
+	if _, ok := dst.(*TypeParamType); ok {
+		return false
+	}
+	if IsNullType(src) {
+		return false
+	}
+	if isPointerLikeCastType(src) && isPointerLikeCastType(dst) {
+		return true
+	}
+	if isPointerLikeCastType(src) && IsNumericType(dst) {
+		return true
+	}
+	if IsNumericType(src) && isPointerLikeCastType(dst) {
+		return true
+	}
+	return false
+}
+
 func (a *Analyzer) regionQualifierDefined(name string) bool {
 	if name == "" {
 		return false

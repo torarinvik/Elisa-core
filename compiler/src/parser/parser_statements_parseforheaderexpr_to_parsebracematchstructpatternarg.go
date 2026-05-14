@@ -260,6 +260,15 @@ func (p *Parser) parseCanStmt() *ast.CanStmt {
 	body := p.parseBlock()
 	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body}
 }
+func (p *Parser) parseTrustedStmt() *ast.CanStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("trusted")
+	permissions := p.parsePermissionRefs(false)
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body, SuppressPermissionInference: true}
+}
 func (p *Parser) parseArgsScopeItems() ([]ast.WithArg, []ast.ParamPackUse, []ast.ArgsScopeItem) {
 	args := make([]ast.WithArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	packs := make([]ast.ParamPackUse, 0, 1)

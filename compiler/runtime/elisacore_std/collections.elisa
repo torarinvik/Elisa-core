@@ -107,6 +107,51 @@ global inlinevec: InlineVecNamespace = InlineVecNamespace(0)
 global arraybuilder: DArrayBuilderNamespace = DArrayBuilderNamespace(0)
 global flags: FlagsNamespace = FlagsNamespace(0)
 
+@internal
+def collections_items_from_alloc[T](ptr: heap void&) -> mutable T&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable T&]
+
+@internal
+def collections_void_from_items[T](items: T&) -> void&:
+    trusted Unsafe.PointerCast:
+        return items.cast[void&]
+
+@internal
+def collections_mutable_void_from_items[T](items: mutable T&) -> mutable void&:
+    trusted Unsafe.PointerCast:
+        return items.cast[mutable void&]
+
+@internal
+def collections_void_from_items_at[T](items: T&, index: usize) -> void&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (items + index).cast[void&]
+
+@internal
+def collections_mutable_void_from_items_at[T](items: mutable T&, index: usize) -> mutable void&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (items + index).cast[mutable void&]
+
+@internal
+def collections_void_from_data_at(data: void&, offset: usize) -> void&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (data.cast[u8&] + offset).cast[void&]
+
+@internal
+def collections_items_from_data_at[T](data: void&, offset: usize) -> T&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (data.cast[u8&] + offset).cast[T&]
+
+@internal
+def collections_items_from_data[T](data: void&) -> T&:
+    trusted Unsafe.PointerCast:
+        return data.cast[T&]
+
+@internal
+def collections_mutable_items_from_data[T](data: mutable void&) -> mutable T&:
+    trusted Unsafe.PointerCast:
+        return data.cast[mutable T&]
+
 # ------------------------------------------------------------
 # Dynamic array helpers (replacement for C macros)
 # ------------------------------------------------------------
@@ -126,14 +171,15 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
         new_size: usize = new_capacity * size_of(T)
 
         if da.items == null:
-            da.items as & <- arena_alloc(a, new_size).cast[T&]
+            da.items as & <- collections_items_from_alloc[T](arena_alloc(a, new_size))
         else:
-            da.items as & <- arena_realloc(
+            resized: heap void& = arena_realloc(
                 a,
-                da.items.cast[mutable void&],
+                collections_mutable_void_from_items[T](da.items),
                 old_size,
                 new_size
-            ).cast[T&]
+            )
+            da.items as & <- collections_items_from_alloc[T](resized)
 
         da.capacity <- new_capacity
         return da
@@ -149,7 +195,7 @@ def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dvie
 
     DynArrayView(null, 0, elem_size) return if hi == lo
 
-    return DynArrayView((da.items + lo).cast[void&], hi - lo, elem_size)
+    return DynArrayView(collections_void_from_items_at[T](da.items, lo), hi - lo, elem_size)
 
 def arena_da_view_len[T](view: dview[T]) -> usize:
     return view.len
@@ -165,7 +211,7 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
     DynArrayView(null, 0, view.elem_size) return if hi == lo
 
     offset: usize = lo * view.elem_size
-    return DynArrayView((view.data.cast[u8&] + offset).cast[void&], hi - lo, view.elem_size)
+    return DynArrayView(collections_void_from_data_at(view.data, offset), hi - lo, view.elem_size)
 
 def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
     return arena_da_view_slice(view, 0, end)
@@ -178,7 +224,7 @@ def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     assert view.data != null
 
     offset: usize = index * view.elem_size
-    base: T& = (view.data.cast[u8&] + offset).cast[T&]
+    base: T& = collections_items_from_data_at[T](view.data, offset)
     return base[0]
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -187,7 +233,7 @@ def arena_da_fill[T](dst: dview[T], value: T):
 
 	assert dst.data != null
 
-    out: T& = dst.data.cast[T&]
+    out: mutable T& = collections_mutable_items_from_data[T](dst.data)
     for i in 0..<dst.len:
 		out[i] <- value
 
@@ -199,8 +245,8 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
     assert dst.data != null
     assert src.data != null
 
-    out: T& = dst.data.cast[T&]
-    src_items: T& = src.data.cast[T&]
+    out: mutable T& = collections_mutable_items_from_data[T](dst.data)
+    src_items: T& = collections_items_from_data[T](src.data)
     for i in 0..<dst.len:
         out[i] <- src_items[i]
 
@@ -213,15 +259,15 @@ def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
     assert right.data != null
 
     byte_count: usize = left.len * left.elem_size
-    return arena_memeq(left.data.cast[void&], right.data.cast[void&], byte_count)
+    return arena_memeq(left.data, right.data, byte_count)
 
 def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_out]:
     can Memory.Allocate, Abort.Panic:
         zeroed return if view.len == 0
 
-        items: T& = arena_alloc(a, view.len * size_of(T)).cast[T&]
+        items: mutable T& = collections_items_from_alloc[T](arena_alloc(a, view.len * size_of(T)))
         assert view.data != null
-        arena_memcpy(items.cast[mutable void&], view.data.cast[void&], view.len * view.elem_size)
+        arena_memcpy(collections_mutable_void_from_items[T](items), view.data, view.len * view.elem_size)
 
         out: mutable darray[T, shape_out] = zeroed
         out.items as & <- items
@@ -233,7 +279,7 @@ def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_
 def darray_view[T](da: darray[T]) -> dview[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if da.items == null or da.count == 0
-    return DynArrayView(da.items.cast[void&], da.count, elem_size)
+    return DynArrayView(collections_void_from_items[T](da.items), da.count, elem_size)
 
 
 @ufcs_only
@@ -325,7 +371,7 @@ def push[T](builder: mutable DArrayBuilder[T]&, item: T):
 def darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if builder.items.items == null or builder.items.count == 0
-    return DynArrayView(builder.items.items.cast[void&], builder.items.count, elem_size)
+    return DynArrayView(collections_void_from_items[T](builder.items.items), builder.items.count, elem_size)
 
 
 @ufcs_only
@@ -491,8 +537,8 @@ def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
     DynArrayView(null, 0, elem_size) return if vec.len == 0
     if vec.is_spilled:
         assert vec.overflow.items != null
-        return DynArrayView(vec.overflow.items.cast[void&], vec.len, elem_size)
-    return DynArrayView(vec.inline_items[0].ref[T&].cast[void&], vec.len, elem_size)
+        return DynArrayView(collections_void_from_items[T](vec.overflow.items), vec.len, elem_size)
+    return DynArrayView(collections_void_from_items[T](vec.inline_items[0].ref[T&]), vec.len, elem_size)
 
 
 @ufcs_only
@@ -629,22 +675,23 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
             new_size: usize = new_capacity * size_of(T)
 
             if da.items == null:
-                da.items as & <- arena_alloc(a, new_size).cast[T&]
+                da.items as & <- collections_items_from_alloc[T](arena_alloc(a, new_size))
             else:
-                da.items as & <- arena_realloc(
+                resized: heap void& = arena_realloc(
                     a,
-                    da.items.cast[mutable void&],
+                    collections_mutable_void_from_items[T](da.items),
                     old_size,
                     new_size
-                ).cast[T&]
+                )
+                da.items as & <- collections_items_from_alloc[T](resized)
 
             da.capacity <- new_capacity
 
         assert da.items != null
 
         arena_memcpy(
-            (da.items + da.count).cast[mutable void&],
-            new_items.cast[void&],
+            collections_mutable_void_from_items_at[T](da.items, da.count),
+            collections_void_from_items[T](new_items),
             new_items_count * size_of(T)
         )
 
@@ -686,7 +733,7 @@ def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
     return DictProbeResult(m.count, false)
 
 def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
-    view: dview[DictBucket[K, T]] = DynArrayView(items.cast[void&], capacity, size_of(DictBucket[K, T]))
+    view: dview[DictBucket[K, T]] = DynArrayView(collections_void_from_items[DictBucket[K, T]](items), capacity, size_of(DictBucket[K, T]))
     arena_da_fill(view, zeroed)
 
 def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
@@ -697,7 +744,7 @@ def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, 
         capacity: usize = arena_dict_next_capacity(initial_capacity)
         out return if capacity == 0
 
-        items: mutable DictBucket[K, T]& = arena_alloc(a, capacity * size_of(DictBucket[K, T])).cast[DictBucket[K, T]&]
+        items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(a, capacity * size_of(DictBucket[K, T])))
         arena_dict_zero_buckets(items, capacity)
 
         out.items as & <- items
@@ -714,7 +761,7 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
             return
 
         owner: mutable Arena& = m.arena if m.arena != null else a
-        new_items: DictBucket[K, T]& = arena_alloc(owner, target_capacity * size_of(DictBucket[K, T])).cast[DictBucket[K, T]&]
+        new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(owner, target_capacity * size_of(DictBucket[K, T])))
         arena_dict_zero_buckets(new_items, target_capacity)
 
         if m.items != null and m.count > 0:
@@ -885,7 +932,8 @@ def index_map_valid_index[K, T](map: IndexMap[K, T]&, index: usize) -> bool:
 def index_map_find_index[K, T](map: IndexMap[K, T]&, key: K) -> usize?:
     found: mutable usize&? = arena_dict_get[K, usize](map.by_key, key)
     null return if found == null
-    return found[0]
+    trusted Unsafe.UncheckedIndex:
+        return found[0]
 
 
 def index_map_contains[K, T](map: IndexMap[K, T]&, key: K) -> bool:

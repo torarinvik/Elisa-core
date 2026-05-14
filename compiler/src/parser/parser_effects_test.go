@@ -126,6 +126,37 @@ def f() -> i64:
 	}
 }
 
+func TestParseTrustedPermissionBlock(t *testing.T) {
+	src := `extern raw_pointer_cast() -> i64 can[Unsafe.PointerCast]
+
+def f() -> i64:
+    trusted Unsafe.PointerCast:
+        return raw_pointer_cast()
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[1].(*ast.FuncDecl)
+	trusted, ok := fn.Body[0].(*ast.CanStmt)
+	if !ok {
+		t.Fatalf("expected trusted block to parse as permission grant stmt, got %T", fn.Body[0])
+	}
+	if !trusted.SuppressPermissionInference {
+		t.Fatalf("expected trusted block to suppress permission inference")
+	}
+	if len(trusted.Permissions) != 1 || trusted.Permissions[0].Name != "Unsafe" || trusted.Permissions[0].Member != "PointerCast" {
+		t.Fatalf("unexpected trusted permissions: %#v", trusted.Permissions)
+	}
+	formatted := strings.TrimSpace(unparse.FormatFile(file))
+	if !strings.Contains(formatted, "trusted Unsafe.PointerCast:\n        return raw_pointer_cast()") {
+		t.Fatalf("expected formatter to preserve trusted block, got:\n%s", formatted)
+	}
+	if _, errs := parseSourceFile(t, formatted); len(errs) != 0 {
+		t.Fatalf("expected formatted trusted block to parse cleanly, got %v\n%s", errs, formatted)
+	}
+}
+
 func TestParseEffectDeclAndSignalStmt(t *testing.T) {
 	src := `effect FooEffect: pass
 effect ConsoleEffect: Write Flush
@@ -138,16 +169,19 @@ def run() -> void can[FooEffect, ConsoleEffect.Write]:
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
-	first, ok := file.Decls[0].(*ast.EffectDecl)
+	first, ok := file.Decls[0].(*ast.PermissionDecl)
 	if !ok {
-		t.Fatalf("expected effect decl, got %T", file.Decls[0])
+		t.Fatalf("expected compatibility permission decl, got %T", file.Decls[0])
 	}
 	if first.Name != "FooEffect" || len(first.Members) != 0 {
-		t.Fatalf("unexpected marker effect decl: %#v", first)
+		t.Fatalf("unexpected marker permission decl: %#v", first)
 	}
-	second, ok := file.Decls[1].(*ast.EffectDecl)
+	if first.DeprecatedSyntax == "" || first.DeprecatedReplacement == "" {
+		t.Fatalf("expected effect compatibility decl to carry deprecation metadata: %#v", first)
+	}
+	second, ok := file.Decls[1].(*ast.PermissionDecl)
 	if !ok {
-		t.Fatalf("expected second effect decl, got %T", file.Decls[1])
+		t.Fatalf("expected second compatibility permission decl, got %T", file.Decls[1])
 	}
 	if len(second.Members) != 2 || second.Members[0] != "Write" || second.Members[1] != "Flush" {
 		t.Fatalf("unexpected members: %#v", second.Members)
@@ -183,7 +217,17 @@ def run() -> void can[FooEffect, ConsoleEffect.Write]:
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	got := strings.TrimSpace(unparse.FormatFile(file))
-	if got != strings.TrimSpace(src) {
+	want := `permission FooEffect:
+    pass
+
+permission ConsoleEffect:
+    Write
+    Flush
+
+def run() -> void can[FooEffect, ConsoleEffect.Write]:
+    signal FooEffect
+    signal ConsoleEffect.Write`
+	if got != strings.TrimSpace(want) {
 		t.Fatalf("unexpected unparse output:\n%s", got)
 	}
 }

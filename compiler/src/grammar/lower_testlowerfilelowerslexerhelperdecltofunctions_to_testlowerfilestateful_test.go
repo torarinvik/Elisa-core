@@ -60,6 +60,39 @@ lexer DemoLex:
 		t.Fatalf("expected longest literal match to be checked before shorter prefix, got:\n%s", formatted)
 	}
 }
+
+func TestLowerFileLowersKeywordMapDeclToFunction(t *testing.T) {
+	file := parseGrammarTestFile(t, `const enum LuaTokenKind of i16:
+    NAME = 0
+    AND = 1
+    BREAK = 2
+
+keywordmap lua_keyword: sview -> LuaTokenKind:
+    "and" => .AND
+    "break" => .BREAK
+    _ => .NAME
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def lua_keyword(text: sview) -> LuaTokenKind:",
+		"match text:",
+		`"and":`,
+		"return .AND",
+		`"break":`,
+		"return .BREAK",
+		"_:",
+		"return .NAME",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected keywordmap lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "keywordmap lua_keyword") {
+		t.Fatalf("expected keywordmap decl to be lowered away, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileLexerImportsGrammarTokenAliases(t *testing.T) {
 	file := parseGrammarTestFile(t, `const enum DemoTokenKind of i16:
     EOF = 0

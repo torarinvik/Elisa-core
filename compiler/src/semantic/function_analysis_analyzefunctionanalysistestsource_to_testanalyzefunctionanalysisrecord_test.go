@@ -10,6 +10,11 @@ import (
 
 func analyzeFunctionAnalysisTestSource(t *testing.T, filename string, src string) *Result {
 	t.Helper()
+	return analyzeFunctionAnalysisTestSourceWithOptions(t, filename, src, AnalyzeOptions{})
+}
+
+func analyzeFunctionAnalysisTestSourceWithOptions(t *testing.T, filename string, src string, options AnalyzeOptions) *Result {
+	t.Helper()
 	l := lexer.New(filename, []byte(src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
@@ -20,7 +25,7 @@ func analyzeFunctionAnalysisTestSource(t *testing.T, filename string, src string
 	if errs := p.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected parse errors: %v", errs)
 	}
-	result := Analyze(file)
+	result := AnalyzeWithOptions(file, options)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
 	}

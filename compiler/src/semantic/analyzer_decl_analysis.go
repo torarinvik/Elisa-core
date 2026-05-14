@@ -30,6 +30,8 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 						a.errorf(n.Pos(), "tokenset %q expects %s, got %s", n.Name, sym.Type, valueType)
 					}
 				}
+			case *ast.CharsetDecl:
+				a.analyzeCharsetDecl(n)
 			case *ast.GlobalDecl:
 				if n.Value != nil {
 					if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
@@ -120,6 +122,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionTemperatureAnnotation(annotation, fn, signature)
 			case "guard_nonnull", "guard_variant":
 				a.applyFunctionGuardAnnotation(annotation, fn, signature)
+			case "internal":
+				// Interface visibility marker only; it is not a runtime/test annotation.
 			default:
 				accepted = append(accepted, annotation)
 			}
@@ -224,6 +228,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		return a.validateFunctionGuardVariantAnnotation(annotation, fn, signature)
 	}
 	if annotation.Name == "skip" || annotation.Name == "ignore" {
+		return true
+	}
+	if annotation.Name == "internal" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@internal on function %q does not take arguments", fn.Name)
+			return false
+		}
 		return true
 	}
 	if annotation.Name == "ufcs_only" {
@@ -460,7 +471,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant", "ufcs_only":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant", "ufcs_only", "internal":
 		return true
 	default:
 		return false

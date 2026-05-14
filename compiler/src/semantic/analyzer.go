@@ -158,6 +158,7 @@ type Analyzer struct {
 	currentRegionFactTransforms       []FactTransform
 	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
 	suppressDiagnostics               bool
+	enforceUnsafePermissions          bool
 	suppressOptimizationFacts         bool
 	suppressLazyFuncSummaryInference  bool
 	returnProvenanceInProgress        map[*ast.FuncDecl]bool
@@ -298,7 +299,15 @@ type poolScopeState struct {
 	Name string
 }
 
+type AnalyzeOptions struct {
+	EnforceUnsafePermissions bool
+}
+
 func Analyze(file *ast.File) *Result {
+	return AnalyzeWithOptions(file, AnalyzeOptions{})
+}
+
+func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	normalizeCascadeStmts(file)
 	loweredFile := grammar.LowerFile(file)
 	activeFile := loweredFile
@@ -366,6 +375,7 @@ func Analyze(file *ast.File) *Result {
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
+		enforceUnsafePermissions:          options.EnforceUnsafePermissions,
 		loweredWithStmts:                  map[*ast.WithStmt]bool{},
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},

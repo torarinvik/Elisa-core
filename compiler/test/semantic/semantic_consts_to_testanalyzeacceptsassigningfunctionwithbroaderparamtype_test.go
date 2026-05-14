@@ -33,6 +33,11 @@ def task_group_wait_all(group: TaskGroup&) -> void can[Pool.WaitAll]:
 
 func parseAndAnalyze(t *testing.T, filename string, src string) (*semantic.Result, []string) {
 	t.Helper()
+	return parseAndAnalyzeWithOptions(t, filename, src, semantic.AnalyzeOptions{})
+}
+
+func parseAndAnalyzeWithOptions(t *testing.T, filename string, src string, options semantic.AnalyzeOptions) (*semantic.Result, []string) {
+	t.Helper()
 	l := lexer.New(filename, []byte(src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) > 0 {
@@ -43,7 +48,7 @@ func parseAndAnalyze(t *testing.T, filename string, src string) (*semantic.Resul
 	if errs := p.Errors(); len(errs) > 0 {
 		return nil, errs
 	}
-	result := semantic.Analyze(file)
+	result := semantic.AnalyzeWithOptions(file, options)
 	return result, result.Errors()
 }
 func requireNoErrors(t *testing.T, errs []string) {

@@ -121,6 +121,13 @@ def run() -> void:
 	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[ConsoleEffect.Write, FooEffect]" {
 		t.Fatalf("unexpected inferred permissions: %q", got)
 	}
+	deprecations := strings.Join(result.Deprecations(), "\n")
+	if !strings.Contains(deprecations, "`effect FooEffect:` is deprecated; use `permission FooEffect:`") {
+		t.Fatalf("expected effect compatibility deprecation for FooEffect, got:\n%s", deprecations)
+	}
+	if !strings.Contains(deprecations, "`effect ConsoleEffect:` is deprecated; use `permission ConsoleEffect:`") {
+		t.Fatalf("expected effect compatibility deprecation for ConsoleEffect, got:\n%s", deprecations)
+	}
 }
 
 func TestSignalUnknownEffectErrors(t *testing.T) {

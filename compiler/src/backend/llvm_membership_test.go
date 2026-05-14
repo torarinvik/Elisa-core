@@ -75,6 +75,92 @@ func TestGenerateLLVMIRLowersBraceMembershipRangeExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersCharsetMembershipExpr(t *testing.T) {
+	src := `charset IdentStart = 'a'..'z' | 'A'..'Z' | '_'
+
+def keep(ch: char) -> bool:
+    return ch in IdentStart
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_charset_membership.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @keep(", "membership.range.lower", "membership.range.upper", "membership.result"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected charset membership lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersReferencedCharsetMembershipExpr(t *testing.T) {
+	src := `charset IdentStart = 'a'..'z' | 'A'..'Z' | '_'
+charset Digit = '0'..'9'
+charset IdentContinue = IdentStart | Digit
+
+def keep(ch: char) -> bool:
+    return ch in IdentContinue
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_referenced_charset_membership.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @keep(", "membership.range.lower", "membership.range.upper", "membership.next.2", "membership.result"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected referenced charset membership lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersKeywordMapFunction(t *testing.T) {
+	src := `const enum LuaTokenKind of i16:
+    NAME = 0
+    AND = 1
+    BREAK = 2
+
+keywordmap lua_keyword: sview -> LuaTokenKind:
+    "and" => .AND
+    "break" => .BREAK
+    _ => .NAME
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_keywordmap.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i16 @lua_keyword", "match.next", "svlit.len.eq", "ret i16"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected keywordmap lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersCStrKeywordMapFunction(t *testing.T) {
+	src := `const enum TokenKind of i16:
+    NAME = 0
+    PROGRAM = 1
+
+keywordmap token_kind_for_text: cstr -> TokenKind:
+    "program" => .PROGRAM
+    _ => .NAME
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_cstr_keywordmap.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i16 @token_kind_for_text", "match.next", "cstrlit.len.eq", "ret i16"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected cstr keywordmap lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersBraceMembershipShorthandMembers(t *testing.T) {
 	src := `const enum TokenKind of u32:
     IF

@@ -624,11 +624,60 @@ func (s *functionState) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr
 	if !ok || sym == nil {
 		return nil, false
 	}
-	decl, ok := sym.Node.(*ast.TokenSetDecl)
-	if !ok || decl == nil {
+	switch decl := sym.Node.(type) {
+	case *ast.TokenSetDecl:
+		if decl == nil {
+			return nil, false
+		}
+		return decl.Value, true
+	case *ast.CharsetDecl:
+		return s.backendCharsetMembershipList(decl), true
+	default:
 		return nil, false
 	}
-	return decl.Value, true
+}
+
+func (s *functionState) backendCharsetMembershipList(decl *ast.CharsetDecl) *ast.ListLitExpr {
+	if decl == nil {
+		return nil
+	}
+	elems := s.backendCharsetMembershipElems(decl.Terms, map[*ast.CharsetDecl]bool{decl: true})
+	return &ast.ListLitExpr{Position: decl.Position, Elems: elems}
+}
+
+func (s *functionState) backendCharsetMembershipElems(terms []ast.LexerCharClassTerm, visiting map[*ast.CharsetDecl]bool) []ast.Expr {
+	elems := make([]ast.Expr, 0, len(terms))
+	for _, term := range terms {
+		if term.Ref {
+			ref := s.backendCharsetRef(term.Name)
+			if ref == nil || visiting[ref] {
+				continue
+			}
+			visiting[ref] = true
+			elems = append(elems, s.backendCharsetMembershipElems(ref.Terms, visiting)...)
+			delete(visiting, ref)
+			continue
+		}
+		start := &ast.CharLit{Position: term.Position, Value: term.Start}
+		if term.Range {
+			elems = append(elems, &ast.MembershipRangeExpr{Position: term.Position, Start: start, End: &ast.CharLit{Position: term.Position, Value: term.End}, Op: lexer.TOKEN_RANGE})
+			continue
+		}
+		elems = append(elems, start)
+	}
+	return elems
+}
+
+func (s *functionState) backendCharsetRef(name string) *ast.CharsetDecl {
+	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
+		return nil
+	}
+	sym, ok := s.g.result.GlobalScope.Lookup(name)
+	if !ok || sym == nil {
+		return nil
+	}
+	ref, _ := sym.Node.(*ast.CharsetDecl)
+	return ref
 }
 func (s *functionState) emitMembershipCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rightExpr ast.Expr) (C.LLVMValueRef, error) {
 	if rangeExpr, ok := rightExpr.(*ast.MembershipRangeExpr); ok {

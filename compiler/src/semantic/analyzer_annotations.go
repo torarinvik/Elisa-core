@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "ufcs_only":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "ufcs_only", "internal":
 		return true
 	default:
 		return false
@@ -25,6 +25,14 @@ func isSupportedExternVarAnnotation(name string) bool {
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) markRawExternFuncType(fn *ast.ExternFuncDecl, fnType *FuncType) {
+	if a == nil || fn == nil || fnType == nil || !a.enforceUnsafePermissions {
+		return
+	}
+	fnType.PermissionRefs = mergePermissionRefs(fnType.PermissionRefs, unsafeRawExternRefs(fn.Pos()))
+	fnType.Permissions = permissionFamiliesFromRefs(fnType.PermissionRefs)
 }
 
 func externLinkNameFromAnnotations(annotations []ast.Annotation) (string, bool) {
@@ -342,6 +350,10 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			}
 			if len(fnType.Params) == 0 {
 				a.errorf(annotation.Position, "@ufcs_only extern function %q must take at least one receiver parameter", fn.Name)
+			}
+		case "internal":
+			if len(annotation.Args) != 0 {
+				a.errorf(annotation.Position, "@internal on extern function %q does not take arguments", fn.Name)
 			}
 		case "borrows_return":
 			a.applyExternBorrowsReturnAnnotation(fn, fnType, annotation)

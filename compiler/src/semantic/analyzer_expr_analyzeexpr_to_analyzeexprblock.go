@@ -17,6 +17,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if a.currentScope != nil {
 			if sym, ok := a.currentScope.Lookup(n.Name); ok {
 				result = promoteWritableRefType(sym.Type, sym.Mutable)
+				if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+					a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Position))
+				}
 				if sym.Kind == SymbolRegionMark {
 					a.errorf(n.Pos(), "checkpoint %q can only be used in restore <region> from %q", n.Name, n.Name)
 					return
@@ -77,6 +80,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
 			result = promoteWritableRefType(sym.Type, sym.Mutable)
+			if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+				a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Position))
+			}
 			if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
 				if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {
 					result = promoteWritableRefType(fnType, sym.Mutable)
@@ -465,6 +471,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src, dst)
+		}
+		if a.enforceUnsafePermissions && castRequiresUnsafePointerCast(src, dst) {
+			a.recordFunctionPermissionRefs(unsafePointerCastRefs(n.Position))
 		}
 		if srcRef, ok := src.(*RefType); ok {
 			if dstRef, ok := dst.(*RefType); ok && srcRef.Mutable && !dstRef.Mutable {

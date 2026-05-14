@@ -101,6 +101,8 @@ func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.Grammar
 			continue
 		case *ast.LexerDecl:
 			lowered = append(lowered, lowerLexerDecls(n, grammarScope, envScope)...)
+		case *ast.KeywordMapDecl:
+			lowered = append(lowered, lowerKeywordMapDecl(n))
 		case *ast.NamespaceDecl:
 			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScopeForNamespace(n.Decls, n.Name), grammarEnvDeclScope(n.Decls), structDeclScope(n.Decls), preserveGrammarDecls)}
 			lowered = append(lowered, cloned)

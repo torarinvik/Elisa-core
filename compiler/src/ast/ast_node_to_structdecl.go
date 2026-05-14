@@ -26,6 +26,24 @@ type TokenSetDecl struct {
 	ElemType TypeExpr
 	Value    *ListLitExpr
 }
+type CharsetDecl struct {
+	Position lexer.Pos
+	Name     string
+	Terms    []LexerCharClassTerm
+}
+type KeywordMapDecl struct {
+	Position   lexer.Pos
+	Name       string
+	InputType  TypeExpr
+	ReturnType TypeExpr
+	Fallback   Expr
+	Entries    []KeywordMapEntry
+}
+type KeywordMapEntry struct {
+	Position lexer.Pos
+	Text     string
+	Value    Expr
+}
 type ConstEnumDecl struct {
 	Position lexer.Pos
 	Name     string
@@ -65,9 +83,11 @@ type SignatureEffectItem struct {
 	Permission   *PermissionRef
 }
 type PermissionDecl struct {
-	Position lexer.Pos
-	Name     string
-	Members  []string
+	Position              lexer.Pos
+	Name                  string
+	Members               []string
+	DeprecatedSyntax      string
+	DeprecatedReplacement string
 }
 type NamespaceDecl struct {
 	Position lexer.Pos

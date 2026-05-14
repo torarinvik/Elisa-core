@@ -12,6 +12,31 @@ struct Deque[T]:
     count: mutable usize
     capacity: mutable usize
 
+@internal
+def deque_items_from_alloc[T](ptr: heap void&) -> mutable T&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable T&]
+
+@internal
+def deque_mutable_void_from_items[T](items: mutable T&) -> mutable void&:
+    trusted Unsafe.PointerCast:
+        return items.cast[mutable void&]
+
+@internal
+def deque_void_from_items[T](items: T&) -> void&:
+    trusted Unsafe.PointerCast:
+        return items.cast[void&]
+
+@internal
+def deque_void_from_items_at[T](items: T&, index: usize) -> void&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (items + index).cast[void&]
+
+@internal
+def deque_mutable_void_from_items_at[T](items: mutable T&, index: usize) -> mutable void&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (items + index).cast[mutable void&]
+
 def arena_deque_init[T]() -> Deque[T]:
     out: mutable Deque[T] = zeroed
     return out
@@ -31,7 +56,7 @@ def arena_deque_with_capacity[T](a: mutable Arena&, capacity: usize) -> Deque[T]
             return out0
 
         out: mutable Deque[T] = zeroed
-        out.items as & <- arena_alloc(a, capacity * size_of(T)).cast[T&]
+        out.items as & <- deque_items_from_alloc[T](arena_alloc(a, capacity * size_of(T)))
         out.head <- 0
         out.count <- 0
         out.capacity <- capacity
@@ -66,8 +91,8 @@ def arena_deque_copy_linearized[T](d: Deque[T]&, dst: mutable T&):
 
     if d.head <= d.capacity - d.count:
         arena_memcpy(
-            dst.cast[mutable void&],
-            (d.items + d.head).cast[void&],
+            deque_mutable_void_from_items[T](dst),
+            deque_void_from_items_at[T](d.items, d.head),
             d.count * size_of(T)
         )
         return
@@ -76,13 +101,13 @@ def arena_deque_copy_linearized[T](d: Deque[T]&, dst: mutable T&):
     tail_count: usize = d.count - head_count
 
     arena_memcpy(
-        dst.cast[mutable void&],
-        (d.items + d.head).cast[void&],
+        deque_mutable_void_from_items[T](dst),
+        deque_void_from_items_at[T](d.items, d.head),
         head_count * size_of(T)
     )
     arena_memcpy(
-        (dst + head_count).cast[mutable void&],
-        d.items.cast[void&],
+        deque_mutable_void_from_items_at[T](dst, head_count),
+        deque_void_from_items[T](d.items),
         tail_count * size_of(T)
     )
 
@@ -97,7 +122,7 @@ def arena_deque_reserve[T](a: mutable Arena&, d: mutable Deque[T]&, needed: usiz
         while needed > new_capacity:
             new_capacity <- new_capacity * 2
 
-        new_items: T& = arena_alloc(a, new_capacity * size_of(T)).cast[T&]
+        new_items: mutable T& = deque_items_from_alloc[T](arena_alloc(a, new_capacity * size_of(T)))
         arena_deque_copy_linearized(d, new_items)
 
         d.items as & <- new_items

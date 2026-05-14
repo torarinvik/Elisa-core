@@ -254,6 +254,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			argType = a.analyzeExpr(orderedArgs[i])
 		}
 		if (ft.Name == "spawn1" && i == 1) || (ft.Name == "pool_submit1" && i == 2) {
+			if a.enforceUnsafePermissions && threadTransferRequiresUnsafeThreadShare(argType, map[string]bool{}) {
+				a.recordFunctionPermissionRefs(unsafeThreadShareRefs(orderedArgs[i].Pos()))
+			}
 			a.validateThreadTransferArg(ft.Name, orderedArgs[i], argType)
 		}
 		if isAtomicRmwCallName(ft.Name) && i == 0 {
@@ -330,6 +333,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		a.exprTypes[expr.Func] = appliedType
 	}
 	if resultPayload, ok := threadTransferResultPayloadType(ft.Name, appliedType.Return); ok {
+		if a.enforceUnsafePermissions && threadTransferRequiresUnsafeThreadShare(resultPayload, map[string]bool{}) {
+			a.recordFunctionPermissionRefs(unsafeThreadShareRefs(expr.Pos()))
+		}
 		a.validateThreadTransferResultType(ft.Name, expr.Pos(), resultPayload)
 	}
 	originalTrackedByRoot := map[*Symbol]Type{}

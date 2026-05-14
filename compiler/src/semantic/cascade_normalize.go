@@ -19,6 +19,11 @@ func normalizeCascadeDecls(decls []ast.Decl) {
 			n.Value = normalizeCascadeExpr(n.Value, nil, false)
 		case *ast.TokenSetDecl:
 			n.Value = normalizeCascadeExpr(n.Value, nil, false).(*ast.ListLitExpr)
+		case *ast.KeywordMapDecl:
+			n.Fallback = normalizeCascadeExpr(n.Fallback, nil, false)
+			for i := range n.Entries {
+				n.Entries[i].Value = normalizeCascadeExpr(n.Entries[i].Value, nil, false)
+			}
 		case *ast.ConstEnumDecl:
 			for i := range n.Members {
 				n.Members[i].Value = normalizeCascadeExpr(n.Members[i].Value, nil, false)

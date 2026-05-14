@@ -92,6 +92,59 @@ func isBlessedThreadTransferCarrierType(t Type) bool {
 	}
 }
 
+func threadTransferRequiresUnsafeThreadShare(t Type, seen map[string]bool) bool {
+	if t == nil || IsInvalidType(t) || isBlessedThreadTransferCarrierType(t) {
+		return false
+	}
+	key := t.String()
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *RefType:
+		return tt.Storage != RefStorageStatic
+	case *ArrayType:
+		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
+	case *DArrayType:
+		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
+	case *ViewType:
+		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
+	case *DArrayViewType:
+		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
+	case *DictType:
+		return threadTransferRequiresUnsafeThreadShare(tt.Key, seen) || threadTransferRequiresUnsafeThreadShare(tt.Value, seen)
+	case *EnumType:
+		if tt.Packed {
+			return false
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if threadTransferRequiresUnsafeThreadShare(payload, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	case *StructType:
+		for _, field := range tt.Fields {
+			if threadTransferRequiresUnsafeThreadShare(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *GenericInstanceType:
+		for _, arg := range tt.Args {
+			if threadTransferRequiresUnsafeThreadShare(arg, seen) {
+				return true
+			}
+		}
+		return threadTransferRequiresUnsafeThreadShare(tt.Base, seen)
+	default:
+		return false
+	}
+}
+
 func threadTransferResultPayloadType(callName string, returnType Type) (Type, bool) {
 	instance, ok := returnType.(*GenericInstanceType)
 	if !ok || len(instance.Args) == 0 {

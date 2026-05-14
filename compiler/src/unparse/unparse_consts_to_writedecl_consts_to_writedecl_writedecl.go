@@ -23,6 +23,10 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.PermissionDecl:
 		f.writeLine(level, "permission "+n.Name+":")
+		if len(n.Members) == 0 {
+			f.writeLine(level+1, "pass")
+			return
+		}
 		for _, member := range n.Members {
 			f.writeLine(level+1, member)
 		}
@@ -64,6 +68,19 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		line += " = " + formatTokenSetValue(n)
 		f.writePrefixedMultiline(level, "", line)
+	case *ast.CharsetDecl:
+		parts := make([]string, 0, len(n.Terms))
+		for _, term := range n.Terms {
+			parts = append(parts, formatLexerCharClassTerm(term))
+		}
+		f.writeLine(level, "charset "+n.Name+" = "+strings.Join(parts, " | "))
+	case *ast.KeywordMapDecl:
+		line := "keywordmap " + n.Name + ": " + formatTypeExpr(n.InputType) + " -> " + formatTypeExpr(n.ReturnType) + ":"
+		f.writeLine(level, line)
+		for _, entry := range n.Entries {
+			f.writeLine(level+1, strconv.Quote(entry.Text)+" => "+formatExpr(entry.Value))
+		}
+		f.writeLine(level+1, "_ => "+formatExpr(n.Fallback))
 	case *ast.ConstEnumDecl:
 		f.writeLine(level, "const enum "+n.Name+" of "+formatTypeExpr(n.Storage)+":")
 		for _, member := range n.Members {

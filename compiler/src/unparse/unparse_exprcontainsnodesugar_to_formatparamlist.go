@@ -93,7 +93,7 @@ func exprContainsNodeSugar(expr ast.Expr) bool {
 	}
 }
 func formatSingleStmtCanBlock(stmt *ast.CanStmt) (string, bool) {
-	if stmt == nil || len(stmt.Body) != 1 {
+	if stmt == nil || stmt.SuppressPermissionInference || len(stmt.Body) != 1 {
 		return "", false
 	}
 	return formatInlineCanStmt(stmt.Body[0], stmt.Permissions)
@@ -285,7 +285,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			f.writePrefixedMultiline(level, "", line)
 			return
 		}
-		f.writeLine(level, "can "+formatPermissionRefSurfaceList(n.Permissions)+":")
+		keyword := "can"
+		if n.SuppressPermissionInference {
+			keyword = "trusted"
+		}
+		f.writeLine(level, keyword+" "+formatPermissionRefSurfaceList(n.Permissions)+":")
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}

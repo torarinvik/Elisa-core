@@ -14,15 +14,14 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 		return
 	}
-	granted := grantedPermissionFamilies(permissionFamiliesFromRefs(refs))
+	granted := grantedPermissionRefs(refs)
 	savedUsedPermissions := a.currentFunctionUsedPermissions
 	savedUsedRefs := a.currentFunctionUsedPermissionRefs
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 	bodyRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
-	remainingFamilies := missingGrantedPermissionFamilies(bodyRefs, granted)
-	remainingRefs := filterPermissionRefsByFamilies(bodyRefs, remainingFamilies)
+	remainingRefs := missingGrantedPermissionRefs(bodyRefs, granted)
 	a.currentFunctionUsedPermissions = savedUsedPermissions
 	a.currentFunctionUsedPermissionRefs = savedUsedRefs
 	a.recordFunctionPermissionRefs(remainingRefs)

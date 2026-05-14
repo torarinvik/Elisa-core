@@ -39,15 +39,18 @@ func grantedPermissionFamilies(families []string) map[string]bool {
 }
 
 func missingGrantedPermissionFamilies(refs []ast.PermissionRef, granted map[string]bool) []string {
-	families := permissionFamiliesFromRefs(refs)
-	if len(families) == 0 {
+	missingRefs := missingGrantedPermissionRefs(refs, granted)
+	if len(missingRefs) == 0 {
 		return nil
 	}
-	missing := make([]string, 0, len(families))
-	for _, family := range families {
-		if !granted[family] {
-			missing = append(missing, family)
+	missing := make([]string, 0, len(missingRefs))
+	seen := map[string]bool{}
+	for _, ref := range missingRefs {
+		if ref.Name == "" || seen[ref.Name] {
+			continue
 		}
+		seen[ref.Name] = true
+		missing = append(missing, ref.Name)
 	}
 	return missing
 }
@@ -61,16 +64,14 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 }
 
 func (a *Analyzer) warnOnRedundantLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
-	families := permissionFamiliesFromRefs(refs)
-	if len(families) == 0 {
+	refs = canonicalizePermissionRefs(refs)
+	if len(refs) == 0 {
 		return
 	}
-	for _, family := range families {
-		if !granted[family] {
-			return
-		}
+	if len(missingGrantedPermissionRefs(refs, granted)) != 0 {
+		return
 	}
-	hint := strings.TrimSpace(permissionGrantHint(refs, families))
+	hint := strings.TrimSpace(permissionGrantHint(refs, permissionFamiliesFromRefs(refs)))
 	a.warnf(pos, "%s grants %s redundantly; a surrounding can ...: block already grants these effects", label, hint)
 }
 
@@ -144,8 +145,7 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if !n.SuppressPermissionInference {
 			a.warnOnRedundantLocalGrant(n.Pos(), "can block", refs, granted)
 		}
-		families := permissionFamiliesFromRefs(refs)
-		a.validatePermissionStmts(n.Body, extendGrantedPermissionFamilies(granted, families))
+		a.validatePermissionStmts(n.Body, extendGrantedPermissionRefs(granted, refs))
 	case *ast.SignalStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
 		a.warnOnMissingLocalGrant(n.Pos(), "signal", refs, granted)
@@ -222,9 +222,18 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		return
 	}
 	switch n := expr.(type) {
+	case *ast.Ident:
+		if a.enforceUnsafePermissions {
+			if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok && sym.Kind == SymbolGlobal && sym.Mutable {
+				a.warnOnMissingLocalGrant(n.Pos(), "mutable global access", unsafeMutableGlobalRefs(n.Position), granted)
+			}
+		}
 	case *ast.BinaryExpr:
 		a.validatePermissionExpr(n.Left, granted)
 		a.validatePermissionExpr(n.Right, granted)
+		if a.enforceUnsafePermissions && binaryExprRequiresUnsafePointerArithmetic(n.Op, a.exprTypes[n.Left], a.exprTypes[n.Right]) {
+			a.warnOnMissingLocalGrant(n.Pos(), "pointer arithmetic", unsafePointerArithmeticRefs(n.Position), granted)
+		}
 	case *ast.UnaryExpr:
 		a.validatePermissionExpr(n.Operand, granted)
 	case *ast.CallExpr:
@@ -234,12 +243,32 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 			a.validatePermissionExpr(arg, granted)
 		}
 		a.validateCallPermissions(n.Position, n.Func, granted)
+		if a.enforceUnsafePermissions {
+			if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok {
+				if fnType.Name == "spawn1" && len(n.Args) > 1 {
+					if threadTransferRequiresUnsafeThreadShare(a.exprTypes[n.Args[1]], map[string]bool{}) {
+						a.warnOnMissingLocalGrant(n.Args[1].Pos(), "thread share", unsafeThreadShareRefs(n.Args[1].Pos()), granted)
+					}
+				}
+				if fnType.Name == "pool_submit1" && len(n.Args) > 2 {
+					if threadTransferRequiresUnsafeThreadShare(a.exprTypes[n.Args[2]], map[string]bool{}) {
+						a.warnOnMissingLocalGrant(n.Args[2].Pos(), "thread share", unsafeThreadShareRefs(n.Args[2].Pos()), granted)
+					}
+				}
+				if resultPayload, ok := threadTransferResultPayloadType(fnType.Name, fnType.Return); ok && threadTransferRequiresUnsafeThreadShare(resultPayload, map[string]bool{}) {
+					a.warnOnMissingLocalGrant(n.Pos(), "thread share", unsafeThreadShareRefs(n.Position), granted)
+				}
+			}
+		}
 	case *ast.FieldExpr:
 		a.validatePermissionExpr(n.Object, granted)
 	case *ast.IndexExpr:
 		a.validatePermissionExpr(n.Object, granted)
 		a.validatePermissionExpr(n.Index, granted)
 		a.validatePermissionExpr(n.Fallback, granted)
+		if a.enforceUnsafePermissions && indexExprRequiresUnsafeUncheckedIndex(a.exprTypes[n.Object]) {
+			a.warnOnMissingLocalGrant(n.Pos(), "unchecked index", unsafeUncheckedIndexRefs(n.Position), granted)
+		}
 	case *ast.SliceExpr:
 		a.validatePermissionExpr(n.Object, granted)
 		a.validatePermissionExpr(n.Start, granted)
@@ -251,6 +280,11 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Owner, granted)
 	case *ast.CastExpr:
 		a.validatePermissionExpr(n.Operand, granted)
+		src := a.exprTypes[n.Operand]
+		dst := a.exprTypes[n]
+		if a.enforceUnsafePermissions && castRequiresUnsafePointerCast(src, dst) {
+			a.warnOnMissingLocalGrant(n.Pos(), "pointer cast", unsafePointerCastRefs(n.Position), granted)
+		}
 		if sym, ok := a.resolvedCastHooks[n]; ok {
 			if fnType, ok := sym.Type.(*FuncType); ok {
 				a.validateRequiredPermissions(n.Position, fnType, granted)
@@ -308,8 +342,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		if !n.SuppressPermissionInference {
 			a.warnOnRedundantLocalGrant(n.Pos(), "inline can", refs, granted)
 		}
-		families := permissionFamiliesFromRefs(refs)
-		a.validatePermissionExpr(n.Expr, extendGrantedPermissionFamilies(granted, families))
+		a.validatePermissionExpr(n.Expr, extendGrantedPermissionRefs(granted, refs))
 	case *ast.MatchExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		if n.Store != nil {
@@ -354,12 +387,7 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	if a.permissionWarningsSuppressedByGenericContext(fnType, granted) {
 		return
 	}
-	missing := make([]string, 0)
-	for _, family := range fnType.Permissions {
-		if !granted[family] {
-			missing = append(missing, family)
-		}
-	}
+	missing := missingGrantedPermissionFamilies(functionPermissionRefs(fnType), granted)
 	if len(missing) == 0 {
 		return
 	}

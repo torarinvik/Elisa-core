@@ -84,6 +84,45 @@ func permissionFamiliesFromRefs(refs []ast.PermissionRef) []string {
 	return out
 }
 
+func grantedPermissionRefs(refs []ast.PermissionRef) map[string]bool {
+	granted := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		if ref.Name == "" {
+			continue
+		}
+		granted[permissionRefKey(ref)] = true
+	}
+	return granted
+}
+
+func permissionRefGranted(ref ast.PermissionRef, granted map[string]bool) bool {
+	if ref.Name == "" {
+		return true
+	}
+	if granted[ref.Name] {
+		return true
+	}
+	if ref.Member != "" && granted[permissionRefKey(ref)] {
+		return true
+	}
+	return false
+}
+
+func missingGrantedPermissionRefs(refs []ast.PermissionRef, granted map[string]bool) []ast.PermissionRef {
+	refs = canonicalizePermissionRefs(refs)
+	if len(refs) == 0 {
+		return nil
+	}
+	missing := make([]ast.PermissionRef, 0, len(refs))
+	for _, ref := range refs {
+		if permissionRefGranted(ref, granted) {
+			continue
+		}
+		missing = append(missing, ref)
+	}
+	return canonicalizePermissionRefs(missing)
+}
+
 func mergePermissionFamilies(left []string, right []string) []string {
 	if len(left) == 0 && len(right) == 0 {
 		return nil
@@ -269,6 +308,17 @@ func extendGrantedPermissionFamilies(granted map[string]bool, families []string)
 	next := cloneGrantedPermissionFamilies(granted)
 	for _, family := range families {
 		next[family] = true
+	}
+	return next
+}
+
+func extendGrantedPermissionRefs(granted map[string]bool, refs []ast.PermissionRef) map[string]bool {
+	next := cloneGrantedPermissionFamilies(granted)
+	for _, ref := range refs {
+		if ref.Name == "" {
+			continue
+		}
+		next[permissionRefKey(ref)] = true
 	}
 	return next
 }

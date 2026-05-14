@@ -58,6 +58,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
 				return p.parseCanStmt()
 			}
+		case "trusted":
+			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
+				return p.parseTrustedStmt()
+			}
 		case "signal":
 			if p.looksLikeSignalStmt() {
 				return p.parseSignalStmt()

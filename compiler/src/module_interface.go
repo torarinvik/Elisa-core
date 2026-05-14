@@ -41,7 +41,7 @@ func interfaceDeclList(decls []ast.Decl) []ast.Decl {
 func interfaceizeDecl(decl ast.Decl) ast.Decl {
 	switch n := decl.(type) {
 	case *ast.FuncDecl:
-		if n.Static {
+		if n.Static || hasInterfaceInternalAnnotation(n.Annotations) {
 			return nil
 		}
 		return &ast.ExternFuncDecl{
@@ -63,6 +63,11 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			Params:           append([]ast.ParamDecl(nil), n.Params...),
 			ReturnType:       n.ReturnType,
 		}
+	case *ast.ExternFuncDecl:
+		if hasInterfaceInternalAnnotation(n.Annotations) {
+			return nil
+		}
+		return n
 	case *ast.InterfaceDecl:
 		members := make([]ast.InterfaceMember, 0, len(n.Members))
 		for _, member := range n.Members {
@@ -81,11 +86,14 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			case *ast.ImplAssociatedTypeDecl:
 				members = append(members, &ast.ImplAssociatedTypeDecl{Position: m.Position, Name: m.Name, Type: m.Type})
 			case *ast.FuncDecl:
-				if m.Static {
+				if m.Static || hasInterfaceInternalAnnotation(m.Annotations) {
 					continue
 				}
 				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Effects: append([]ast.SignatureEffectItem(nil), m.Effects...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType})
 			case *ast.ExternFuncDecl:
+				if hasInterfaceInternalAnnotation(m.Annotations) {
+					continue
+				}
 				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Effects: append([]ast.SignatureEffectItem(nil), m.Effects...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
 			}
 		}
@@ -93,7 +101,11 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 	case *ast.GlobalDecl:
 		return &ast.ExternVarDecl{Position: n.Position, Name: n.Name, Type: n.Type}
 	case *ast.NamespaceDecl:
-		return &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: interfaceDeclList(n.Decls)}
+		decls := interfaceDeclList(n.Decls)
+		if len(decls) == 0 {
+			return nil
+		}
+		return &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: decls}
 	case *ast.StaticIfDecl:
 		elifs := make([]ast.StaticElifDecl, 0, len(n.Elifs))
 		for _, elif := range n.Elifs {
@@ -109,4 +121,13 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 	default:
 		return decl
 	}
+}
+
+func hasInterfaceInternalAnnotation(annotations []ast.Annotation) bool {
+	for _, annotation := range annotations {
+		if annotation.Name == "internal" {
+			return true
+		}
+	}
+	return false
 }

@@ -194,7 +194,7 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "module_interface_fixture.elisa")
 	interfacePath := filepath.Join(fixtureDir, "module_interface_fixture.elisai")
-	src := "struct Box[T]:\n    value: T\n\nstruct Expr in owner:\n    next: owner Expr&?\n\nglobal counter: int = 0\n\nstatic interface Builder:\n    type State\n    def state() -> State\n\ndef identity[T](value: T) -> T:\n    return value\n\ndef needs_builder[B: Builder]() -> B.State can[Console.Write]:\n    can Console.Write:\n        signal Console.Write\n    return B.state()\n\nnamespace util:\n    def inc(value: int) -> int:\n        return value + 1\n"
+	src := "struct Box[T]:\n    value: T\n\nstruct Expr in owner:\n    next: owner Expr&?\n\nglobal counter: int = 0\n\nstatic interface Builder:\n    type State\n    def state() -> State\n\ndef identity[T](value: T) -> T:\n    return value\n\n@internal\ndef hidden_identity[T](value: T) -> T:\n    return value\n\ndef needs_builder[B: Builder]() -> B.State can[Console.Write]:\n    can Console.Write:\n        signal Console.Write\n    return B.state()\n\nnamespace util:\n    def inc(value: int) -> int:\n        return value + 1\n\n    @internal\n    def hidden_inc(value: int) -> int:\n        return value + 1\n\nnamespace hidden_only:\n    @internal\n    def nope(value: int) -> int:\n        return value\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write interface fixture: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 			t.Fatalf("expected interface source to contain %q, got:\n%s", check, interfaceSource)
 		}
 	}
-	for _, bad := range []string{"return value", "global counter: int = 0"} {
+	for _, bad := range []string{"return value", "global counter: int = 0", "hidden_identity", "hidden_inc", "hidden_only"} {
 		if strings.Contains(interfaceSource, bad) {
 			t.Fatalf("expected interface source to omit %q, got:\n%s", bad, interfaceSource)
 		}

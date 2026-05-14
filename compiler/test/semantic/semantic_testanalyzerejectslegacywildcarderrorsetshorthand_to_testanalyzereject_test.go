@@ -348,6 +348,21 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	requireFunctionPermissionRefs(t, result, "arena_trim", "Memory.Release", "Abort.Panic")
 	requireFunctionPermissionRefs(t, result, "arena_vsprintf", "Memory.Allocate", "Console.Format", "Abort.Panic")
 }
+func TestAnalyzeStrictUnsafePinsArenaPointerCastsAsTrustedInternals(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "arena.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyzeWithOptions(t, "arena.elisa", src, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionPermissionRefs(t, result, "sfree", "Memory.Release")
+	requireFunctionPermissionRefs(t, result, "new_region_with_owner", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_alloc", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_realloc", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_memcpy")
+	requireFunctionPermissionRefs(t, result, "arena_memeq")
+	requireFunctionPermissionRefs(t, result, "arena_strdup", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_memdup", "Memory.Allocate", "Abort.Panic")
+}
 func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "arena.elisa"), map[string]bool{})
@@ -364,6 +379,19 @@ func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "arena_memdup", "heap mutable void&")
 	requireFunctionReturnTypeString(t, result, "arena_vsprintf", "heap mutable u8&")
 }
+func TestAnalyzeStrictUnsafeHeapFixedBufferCastsStayInternal(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "heap.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyzeWithOptions(t, "heap.elisa", src, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+	requireNoErrors(t, errs)
+	requireFunctionPermissionRefs(t, result, "fixed_buffer_owns_ptr")
+	requireFunctionPermissionRefs(t, result, "fixed_buffer_owns_range")
+	requireFunctionPermissionRefs(t, result, "fixed_buffer_is_last_allocation")
+	requireFunctionPermissionRefs(t, result, "fixed_buffer_alloc_align")
+	requireFunctionPermissionRefs(t, result, "fixed_buffer_resize")
+	requireFunctionPermissionRefs(t, result, "fixed_buffer_alloc_align_or_panic", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "fixed_buffer_alloc_or_panic", "Abort.Panic")
+}
 func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "collections.elisa"), map[string]bool{})
@@ -372,6 +400,22 @@ func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "dict[cstr[key_shape], i64]")
 	requireFunctionReturnTypeString(t, result, "arena_dict_get__i64", "mutable i64&?")
+}
+func TestAnalyzeStrictUnsafeCollectionsCastsStayInternal(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "collections.elisa"), map[string]bool{})
+	result, errs := parseAndAnalyzeWithOptions(t, "collections.elisa", src, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionPermissionRefs(t, result, "arena_da_reserve", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_da_view")
+	requireFunctionPermissionRefs(t, result, "arena_da_view_slice")
+	requireFunctionPermissionRefs(t, result, "arena_da_from_view", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "darray_view")
+	requireFunctionPermissionRefs(t, result, "darray_builder_view")
+	requireFunctionPermissionRefs(t, result, "inline_vec_view")
+	requireFunctionPermissionRefs(t, result, "arena_dict_new", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_dict_reserve", "Memory.Allocate", "Abort.Panic")
 }
 func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)

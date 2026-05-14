@@ -308,6 +308,9 @@ func TestRunCLIFmtKeepsSignalSurfaceSyntax(t *testing.T) {
 		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
 	}
 	formatted := stdout.String()
+	if !strings.Contains(formatted, "permission FooEffect:") || strings.Contains(formatted, "effect FooEffect:") {
+		t.Fatalf("expected formatter to canonicalize effect declarations to permission, got:\n%s", formatted)
+	}
 	for _, check := range []string{"signal FooEffect", "signal ConsoleEffect.Write"} {
 		if !strings.Contains(formatted, check) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", check, formatted)

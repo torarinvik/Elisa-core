@@ -320,7 +320,7 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 			}
 		}
 		return nil
-	case *ast.ConstDecl, *ast.TokenSetDecl, *ast.ConstEnumDecl, *ast.StaticIfDecl, *ast.AttributeDecl:
+	case *ast.ConstDecl, *ast.TokenSetDecl, *ast.CharsetDecl, *ast.KeywordMapDecl, *ast.ConstEnumDecl, *ast.StaticIfDecl, *ast.AttributeDecl:
 		return nil
 	case *ast.StaticAssertDecl:
 		return g.checkStaticAssertDecl(n)
@@ -360,6 +360,10 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 	case *ast.ConstDecl:
 		return nil
 	case *ast.TokenSetDecl:
+		return nil
+	case *ast.CharsetDecl:
+		return nil
+	case *ast.KeywordMapDecl:
 		return nil
 	case *ast.ConstEnumDecl:
 		return nil

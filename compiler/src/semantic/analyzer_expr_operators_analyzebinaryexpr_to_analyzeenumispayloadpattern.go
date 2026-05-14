@@ -55,10 +55,16 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS:
 		if lref, ok := left.(*RefType); ok && IsIntegralStorageType(right) {
+			if a.enforceUnsafePermissions {
+				a.recordFunctionPermissionRefs(unsafePointerArithmeticRefs(expr.Position))
+			}
 			return lref
 		}
 		if expr.Op == lexer.TOKEN_PLUS {
 			if rref, ok := right.(*RefType); ok && IsIntegralStorageType(left) {
+				if a.enforceUnsafePermissions {
+					a.recordFunctionPermissionRefs(unsafePointerArithmeticRefs(expr.Position))
+				}
 				return rref
 			}
 			if result, ok := a.analyzeSpanAlgebraExpr(expr, left, right); ok {
@@ -198,6 +204,7 @@ func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
 		a.errorf(expr.Right.Pos(), "membership operator requires a list literal or tokenset on the right-hand side, got %s", right)
 		return resultType
 	}
+	expr.Right = list
 
 	var elemType Type
 	for i, elem := range list.Elems {
@@ -312,11 +319,48 @@ func (a *Analyzer) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr, boo
 	if !found || sym == nil {
 		return nil, false
 	}
-	decl, ok := sym.Node.(*ast.TokenSetDecl)
-	if !ok || decl == nil {
+	switch decl := sym.Node.(type) {
+	case *ast.TokenSetDecl:
+		if decl == nil {
+			return nil, false
+		}
+		return decl.Value, true
+	case *ast.CharsetDecl:
+		return a.charsetMembershipList(decl), true
+	default:
 		return nil, false
 	}
-	return decl.Value, true
+}
+
+func (a *Analyzer) charsetMembershipList(decl *ast.CharsetDecl) *ast.ListLitExpr {
+	if decl == nil {
+		return nil
+	}
+	elems := a.charsetMembershipElems(decl, decl.Terms, map[*ast.CharsetDecl]bool{decl: true})
+	return &ast.ListLitExpr{Position: decl.Position, Elems: elems}
+}
+
+func (a *Analyzer) charsetMembershipElems(owner *ast.CharsetDecl, terms []ast.LexerCharClassTerm, visiting map[*ast.CharsetDecl]bool) []ast.Expr {
+	elems := make([]ast.Expr, 0, len(terms))
+	for _, term := range terms {
+		if term.Ref {
+			ref, ok := a.lookupCharsetRef(owner, term)
+			if !ok || visiting[ref] {
+				continue
+			}
+			visiting[ref] = true
+			elems = append(elems, a.charsetMembershipElems(owner, ref.Terms, visiting)...)
+			delete(visiting, ref)
+			continue
+		}
+		start := &ast.CharLit{Position: term.Position, Value: term.Start}
+		if term.Range {
+			elems = append(elems, &ast.MembershipRangeExpr{Position: term.Position, Start: start, End: &ast.CharLit{Position: term.Position, Value: term.End}, Op: lexer.TOKEN_RANGE})
+			continue
+		}
+		elems = append(elems, start)
+	}
+	return elems
 }
 func typesComparableForEquality(left Type, right Type) bool {
 	if runtimeStringComparable(left, right) {
