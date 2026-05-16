@@ -1,0 +1,4 @@
+def spin(flag: bool) -> void:
+    while flag:
+        can Progress.Tick:
+            signal Progress.Tick

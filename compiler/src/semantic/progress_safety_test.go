@@ -186,6 +186,33 @@ def on_click() -> void:
 	}
 }
 
+func TestProgressSafetyReportsTransitiveBlockingPath(t *testing.T) {
+	result := analyzeProgressSafetyTestSourceAllowingErrors(t, "progress_main_thread_transitive_blocking_call.elisa", `
+extern wait_for_worker() -> void can[Blocking.Wait]
+
+def wait_for_compile() -> void:
+    wait_for_worker()
+
+@main_thread
+def on_click() -> void:
+    wait_for_compile()
+`)
+
+	allErrors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(allErrors, "path: on_click -> wait_for_compile -> wait_for_worker") {
+		t.Fatalf("expected transitive main-thread blocking path, got:\n%s", allErrors)
+	}
+	sym, ok := result.GlobalScope.Lookup("on_click")
+	if !ok {
+		t.Fatal("expected on_click symbol")
+	}
+	fn := sym.Node.(*ast.FuncDecl)
+	summary := result.ProgressSummaries[fn]
+	if summary == nil || strings.Join(summary.BlockingPath, " -> ") != "on_click -> wait_for_compile -> wait_for_worker" {
+		t.Fatalf("expected transitive blocking path in summary, got %#v", summary)
+	}
+}
+
 func TestProgressSafetyAllowsTrustedBlockMainEscapeHatch(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_blocking_call_trusted.elisa", `
 extern wait_for_worker() -> void can[Blocking.Wait]
@@ -215,5 +242,53 @@ def on_click() -> void:
 	summary := result.ProgressSummaries[fn]
 	if summary == nil || !summary.MainThread || !summary.HasBlocking || !summary.HasUnsafeBlockMain {
 		t.Fatalf("expected blocking and Unsafe.BlockMain in progress summary, got %#v", summary)
+	}
+}
+
+func TestProgressSafetyTreatsBlockingExternAnnotationAsBlocking(t *testing.T) {
+	result := analyzeProgressSafetyTestSourceAllowingErrors(t, "progress_blocking_extern_annotation.elisa", `
+@blocking
+extern wait_for_worker() -> void
+
+@main_thread
+def on_click() -> void:
+    wait_for_worker()
+`)
+
+	allErrors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(allErrors, "progress error: @main_thread function may block via Blocking.* permission") {
+		t.Fatalf("expected @blocking extern to trigger main-thread blocking error, got:\n%s", allErrors)
+	}
+	if !strings.Contains(allErrors, "path: on_click -> wait_for_worker") {
+		t.Fatalf("expected @blocking extern call path, got:\n%s", allErrors)
+	}
+	sym, ok := result.GlobalScope.Lookup("wait_for_worker")
+	if !ok {
+		t.Fatal("expected wait_for_worker symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected wait_for_worker function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Blocking.RawExtern]" {
+		t.Fatalf("expected @blocking to add Blocking.RawExtern permission, got %q", got)
+	}
+}
+
+func TestProgressSafetyAllowsNonblockingExternAnnotation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_nonblocking_extern_annotation.elisa", `
+@nonblocking
+extern monotonic_time() -> i64
+
+@main_thread
+def on_click() -> i64:
+    return monotonic_time()
+`, AnalyzeOptions{EnforceProgressSafety: true})
+
+	if all := strings.Join(result.Errors(), "\n"); strings.Contains(all, "progress error") {
+		t.Fatalf("expected @nonblocking extern to avoid main-thread blocking error, got:\n%s", all)
+	}
+	if all := strings.Join(result.Warnings(), "\n"); strings.Contains(all, "progress warning") {
+		t.Fatalf("expected @nonblocking extern to avoid progress warning, got:\n%s", all)
 	}
 }

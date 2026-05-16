@@ -461,6 +461,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
 	if options.EnforceProgressSafety {
+		a.validateProgressBlocking(activeDecls)
 		a.validateProgressRecursion(activeDecls)
 	}
 	a.validatePermissionUsage(activeDecls)

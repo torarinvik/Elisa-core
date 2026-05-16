@@ -30,6 +30,7 @@ type FunctionProgressSummary struct {
 	HasUnsafeNonProgress bool
 	HasBlocking          bool
 	HasUnsafeBlockMain   bool
+	BlockingPath         []string
 	MainThread           bool
 }
 
@@ -63,11 +64,6 @@ func (a *Analyzer) finishFunctionProgressSummary(fn *ast.FuncDecl, refs []ast.Pe
 	}
 	if !a.enforceProgressSafety {
 		return
-	}
-	if summary.MainThread && summary.HasBlocking && !summary.HasUnsafeBlockMain {
-		a.errorf(fn.Pos(), "progress error: @main_thread function may block via Blocking.* permission; use a yielding/budgeted wait, move the work off the main thread, or wrap an intentional block in trusted Unsafe.BlockMain")
-	} else if summary.HasBlocking && !summary.HasUnsafeBlockMain {
-		a.warnf(fn.Pos(), "progress warning: function may block via Blocking.* permission; keep it off main-thread paths, use a yielding/budgeted wait, or wrap an intentional main-thread block in trusted Unsafe.BlockMain")
 	}
 	for _, obligation := range summary.Obligations {
 		if obligation.Discharged {
@@ -139,6 +135,67 @@ func unsafePermissionRefsContainBlockMain(refs []ast.PermissionRef) bool {
 
 func blockingPermissionRefsContainBlocking(refs []ast.PermissionRef) bool {
 	return permissionRefsContain(refs, "Blocking", "")
+}
+
+func (a *Analyzer) validateProgressBlocking(decls []scopedDecl) {
+	funcs := map[string]*ast.FuncDecl{}
+	namesByDecl := map[*ast.FuncDecl]string{}
+	for _, scoped := range decls {
+		fn, ok := scoped.Decl.(*ast.FuncDecl)
+		if !ok || fn == nil {
+			continue
+		}
+		name := joinQualifiedName(scoped.Namespace, fn.Name)
+		funcs[name] = fn
+		funcs[fn.Name] = fn
+		namesByDecl[fn] = name
+	}
+	for fn, name := range namesByDecl {
+		summary := a.progressSummaries[fn]
+		if summary == nil || !summary.HasBlocking || summary.HasUnsafeBlockMain {
+			continue
+		}
+		path := a.progressBlockingPath(fn, funcs, map[*ast.FuncDecl]bool{})
+		if len(path) == 0 {
+			path = []string{name}
+		}
+		summary.BlockingPath = path
+		pathText := strings.Join(path, " -> ")
+		if summary.MainThread {
+			a.errorf(fn.Pos(), "progress error: @main_thread function may block via Blocking.* permission (path: %s); use a yielding/budgeted wait, move the work off the main thread, or wrap an intentional block in trusted Unsafe.BlockMain", pathText)
+		} else {
+			a.warnf(fn.Pos(), "progress warning: function may block via Blocking.* permission (path: %s); keep it off main-thread paths, use a yielding/budgeted wait, or wrap an intentional main-thread block in trusted Unsafe.BlockMain", pathText)
+		}
+	}
+}
+
+func (a *Analyzer) progressBlockingPath(fn *ast.FuncDecl, funcs map[string]*ast.FuncDecl, visiting map[*ast.FuncDecl]bool) []string {
+	if fn == nil {
+		return nil
+	}
+	if visiting[fn] {
+		return nil
+	}
+	visiting[fn] = true
+	defer delete(visiting, fn)
+	for _, call := range collectProgressDirectCalls(fn.Body) {
+		sym, ok := a.globalScope.Lookup(call)
+		if !ok || sym == nil {
+			continue
+		}
+		fnType, _ := sym.Type.(*FuncType)
+		if fnType == nil || !blockingPermissionRefsContainBlocking(functionPermissionRefs(fnType)) {
+			continue
+		}
+		if callee := funcs[call]; callee != nil {
+			childPath := a.progressBlockingPath(callee, funcs, visiting)
+			if len(childPath) != 0 {
+				return append([]string{fn.Name}, childPath...)
+			}
+		}
+		return []string{fn.Name, call}
+	}
+	return []string{fn.Name}
 }
 
 func (a *Analyzer) validateProgressRecursion(decls []scopedDecl) {

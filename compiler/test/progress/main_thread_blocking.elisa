@@ -1,0 +1,5 @@
+extern wait_for_worker() -> void can[Blocking.Wait]
+
+@main_thread
+def on_click() -> void:
+    wait_for_worker()

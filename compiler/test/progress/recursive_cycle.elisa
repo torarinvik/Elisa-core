@@ -1,0 +1,5 @@
+def ping() -> void:
+    pong()
+
+def pong() -> void:
+    ping()

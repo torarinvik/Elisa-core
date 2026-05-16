@@ -1,0 +1,3 @@
+def spin(flag: bool) -> void:
+    while flag:
+        pass

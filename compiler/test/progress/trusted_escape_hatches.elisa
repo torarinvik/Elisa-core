@@ -1,0 +1,11 @@
+extern wait_for_worker() -> void can[Blocking.Wait]
+
+@main_thread
+def on_click() -> void:
+    trusted Unsafe.BlockMain:
+        wait_for_worker()
+
+def intentional_spin(flag: bool) -> void:
+    trusted Unsafe.NonProgress:
+        while flag:
+            pass

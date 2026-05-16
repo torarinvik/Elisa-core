@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "ufcs_only", "internal":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "ufcs_only", "internal", "blocking", "nonblocking":
 		return true
 	default:
 		return false
@@ -329,6 +329,8 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 		return
 	}
 	seen := make(map[string]lexer.Pos, len(fn.Annotations))
+	var blockingPos lexer.Pos
+	var nonblockingPos lexer.Pos
 	for _, annotation := range fn.Annotations {
 		if prev, exists := seen[annotation.Name]; exists {
 			a.errorf(annotation.Position, "duplicate @%s annotation on extern function %q (first seen at %s:%d:%d)", annotation.Name, fn.Name, prev.File, prev.Line, prev.Col)
@@ -355,6 +357,18 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			if len(annotation.Args) != 0 {
 				a.errorf(annotation.Position, "@internal on extern function %q does not take arguments", fn.Name)
 			}
+		case "blocking":
+			if len(annotation.Args) != 0 {
+				a.errorf(annotation.Position, "@blocking on extern function %q does not take arguments", fn.Name)
+			}
+			blockingPos = annotation.Position
+			fnType.PermissionRefs = mergePermissionRefs(fnType.PermissionRefs, []ast.PermissionRef{{Position: annotation.Position, Name: "Blocking", Member: "RawExtern"}})
+			fnType.Permissions = permissionFamiliesFromRefs(fnType.PermissionRefs)
+		case "nonblocking":
+			if len(annotation.Args) != 0 {
+				a.errorf(annotation.Position, "@nonblocking on extern function %q does not take arguments", fn.Name)
+			}
+			nonblockingPos = annotation.Position
 		case "borrows_return":
 			a.applyExternBorrowsReturnAnnotation(fn, fnType, annotation)
 		case "borrows_return_field":
@@ -364,6 +378,9 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 		case "borrows_return_field_rebased":
 			a.applyExternBorrowsReturnFieldRebasedAnnotation(fn, fnType, annotation)
 		}
+	}
+	if !blockingPos.IsZero() && !nonblockingPos.IsZero() {
+		a.errorf(nonblockingPos, "extern function %q cannot be both @blocking and @nonblocking (first @blocking at %s:%d:%d)", fn.Name, blockingPos.File, blockingPos.Line, blockingPos.Col)
 	}
 }
 
