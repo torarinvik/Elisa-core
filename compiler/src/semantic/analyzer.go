@@ -101,6 +101,7 @@ type Analyzer struct {
 	storageViewStaleUses              map[ast.Expr]storageViewDependencyState
 	unsafeAliasExprs                  map[ast.Expr]bool
 	unsafeAliasStmts                  map[ast.Stmt]bool
+	progressSummaries                 map[*ast.FuncDecl]*FunctionProgressSummary
 	numericLiteralSuffixWarnings      map[ast.Expr]bool
 	treeConstructorCallees            map[ast.Expr]bool
 	resolvedCastHooks                 map[ast.Expr]*Symbol
@@ -160,6 +161,8 @@ type Analyzer struct {
 	currentIndexBounds                map[string]indexBoundFact
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
+	currentProgressSummary            *FunctionProgressSummary
+	currentTrustedNonProgressDepth    int
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening
@@ -167,6 +170,7 @@ type Analyzer struct {
 	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
 	suppressDiagnostics               bool
 	enforceUnsafePermissions          bool
+	enforceProgressSafety             bool
 	suppressOptimizationFacts         bool
 	suppressLazyFuncSummaryInference  bool
 	returnProvenanceInProgress        map[*ast.FuncDecl]bool
@@ -315,6 +319,7 @@ type poolScopeState struct {
 
 type AnalyzeOptions struct {
 	EnforceUnsafePermissions bool
+	EnforceProgressSafety    bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -380,6 +385,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		storageViewStaleUses:              make(map[ast.Expr]storageViewDependencyState, exprCapacity/64+8),
 		unsafeAliasExprs:                  make(map[ast.Expr]bool, exprCapacity/64+8),
 		unsafeAliasStmts:                  make(map[ast.Stmt]bool, exprCapacity/64+8),
+		progressSummaries:                 make(map[*ast.FuncDecl]*FunctionProgressSummary, funcDeclCapacity),
 		numericLiteralSuffixWarnings:      make(map[ast.Expr]bool, exprCapacity/64+8),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
@@ -394,6 +400,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
 		enforceUnsafePermissions:          options.EnforceUnsafePermissions,
+		enforceProgressSafety:             options.EnforceProgressSafety,
 		loweredWithStmts:                  map[*ast.WithStmt]bool{},
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
@@ -453,6 +460,9 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectStaticImpls(activeDecls)
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
+	if options.EnforceProgressSafety {
+		a.validateProgressRecursion(activeDecls)
+	}
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
 	return &Result{
@@ -482,6 +492,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		Fold:                    a.foldInfo,
 		Lambdas:                 a.lambdaInfo,
 		FunctionAnalyses:        a.functionAnalyses,
+		ProgressSummaries:       a.progressSummaries,
 		AnnotatedFuncs:          a.annotatedFuncs,
 		ExportedTypes:           a.exportedTypes,
 		ExportedFuncs:           a.exportedFuncs,

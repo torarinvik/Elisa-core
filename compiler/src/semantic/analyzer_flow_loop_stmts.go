@@ -17,6 +17,10 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	granted := grantedPermissionRefs(refs)
 	savedUsedPermissions := a.currentFunctionUsedPermissions
 	savedUsedRefs := a.currentFunctionUsedPermissionRefs
+	savedTrustedNonProgressDepth := a.currentTrustedNonProgressDepth
+	if permissionRefsContain(refs, "Unsafe", "NonProgress") {
+		a.currentTrustedNonProgressDepth++
+	}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
@@ -24,6 +28,7 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	remainingRefs := missingGrantedPermissionRefs(bodyRefs, granted)
 	a.currentFunctionUsedPermissions = savedUsedPermissions
 	a.currentFunctionUsedPermissionRefs = savedUsedRefs
+	a.currentTrustedNonProgressDepth = savedTrustedNonProgressDepth
 	a.recordFunctionPermissionRefs(remainingRefs)
 }
 

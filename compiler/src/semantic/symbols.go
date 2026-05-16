@@ -56,6 +56,7 @@ type Result struct {
 	Fold                    map[*ast.FoldExpr]*FoldInfo
 	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo
 	FunctionAnalyses        map[*ast.FuncDecl]*FunctionAnalysis
+	ProgressSummaries       map[*ast.FuncDecl]*FunctionProgressSummary
 	AnnotatedFuncs          []*AnnotatedFunc
 	ExportedTypes           []*ExportedType
 	ExportedFuncs           []*ExportedFunc

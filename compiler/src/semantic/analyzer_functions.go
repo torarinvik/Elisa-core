@@ -37,6 +37,8 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedAllocExpr := a.currentAllocExpr
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
+	savedProgressSummary := a.currentProgressSummary
+	savedTrustedNonProgressDepth := a.currentTrustedNonProgressDepth
 	savedImplicitScopes := a.currentImplicitScopes
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
@@ -60,6 +62,8 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionUsedTreeStores = map[string]*TreeStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
+	a.currentProgressSummary = a.beginFunctionProgressSummary(fn)
+	a.currentTrustedNonProgressDepth = 0
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentFuncDecl = fn
@@ -142,6 +146,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
 		a.finalizeFunctionAnalysis(fn, fnType)
 	}
+	a.finishFunctionProgressSummary(fn, a.currentFunctionUsedPermissionRefs)
 	a.reportUnconsumedProtocolValues()
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
@@ -165,6 +170,8 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentAllocExpr = savedAllocExpr
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
+	a.currentProgressSummary = savedProgressSummary
+	a.currentTrustedNonProgressDepth = savedTrustedNonProgressDepth
 	a.currentImplicitScopes = savedImplicitScopes
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
