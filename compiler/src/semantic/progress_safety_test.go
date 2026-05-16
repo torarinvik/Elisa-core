@@ -3,6 +3,8 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/ast"
 )
 
 func TestProgressSafetyWarnsForUnbudgetedWhileLoop(t *testing.T) {
@@ -112,5 +114,57 @@ def pong() -> void:
 	all := strings.Join(result.Warnings(), "\n")
 	if strings.Contains(all, "progress warning") {
 		t.Fatalf("expected Progress.EnterRecursion to discharge recursive-cycle progress obligation, got:\n%s", all)
+	}
+}
+
+func TestProgressSafetyWarnsForBlockingOperation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_blocking_call.elisa", `
+extern wait_for_worker() -> void can[Blocking.Wait]
+
+def on_click() -> void:
+    wait_for_worker()
+`, AnalyzeOptions{EnforceProgressSafety: true})
+
+	all := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(all, "progress warning: function may block via Blocking.* permission") {
+		t.Fatalf("expected blocking-call progress warning, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("on_click")
+	if !ok {
+		t.Fatal("expected on_click symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected on_click function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Blocking.Wait]" {
+		t.Fatalf("expected visible Blocking.Wait permission, got %q", got)
+	}
+}
+
+func TestProgressSafetyAllowsTrustedBlockMainEscapeHatch(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_blocking_call_trusted.elisa", `
+extern wait_for_worker() -> void can[Blocking.Wait]
+
+def on_click() -> void:
+    trusted Unsafe.BlockMain:
+        wait_for_worker()
+`, AnalyzeOptions{EnforceProgressSafety: true})
+
+	all := strings.Join(result.Warnings(), "\n")
+	if strings.Contains(all, "progress warning") {
+		t.Fatalf("expected trusted Unsafe.BlockMain to acknowledge blocking risk, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("on_click")
+	if !ok {
+		t.Fatal("expected on_click symbol")
+	}
+	fn, ok := sym.Node.(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected on_click function declaration, got %T", sym.Node)
+	}
+	summary := result.ProgressSummaries[fn]
+	if summary == nil || !summary.HasBlocking || !summary.HasUnsafeBlockMain {
+		t.Fatalf("expected blocking and Unsafe.BlockMain in progress summary, got %#v", summary)
 	}
 }

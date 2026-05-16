@@ -28,6 +28,8 @@ type FunctionProgressSummary struct {
 	Obligations          []ProgressObligation
 	HasProgressEvidence  bool
 	HasUnsafeNonProgress bool
+	HasBlocking          bool
+	HasUnsafeBlockMain   bool
 }
 
 func (a *Analyzer) beginFunctionProgressSummary(fn *ast.FuncDecl) *FunctionProgressSummary {
@@ -52,8 +54,17 @@ func (a *Analyzer) finishFunctionProgressSummary(fn *ast.FuncDecl, refs []ast.Pe
 	if unsafePermissionRefsContainNonProgress(refs) {
 		summary.HasUnsafeNonProgress = true
 	}
+	if blockingPermissionRefsContainBlocking(refs) {
+		summary.HasBlocking = true
+	}
+	if unsafePermissionRefsContainBlockMain(refs) {
+		summary.HasUnsafeBlockMain = true
+	}
 	if !a.enforceProgressSafety {
 		return
+	}
+	if summary.HasBlocking && !summary.HasUnsafeBlockMain {
+		a.warnf(fn.Pos(), "progress warning: function may block via Blocking.* permission; keep it off main-thread paths, use a yielding/budgeted wait, or wrap an intentional main-thread block in trusted Unsafe.BlockMain")
 	}
 	for _, obligation := range summary.Obligations {
 		if obligation.Discharged {
@@ -117,6 +128,14 @@ func progressPermissionRefsContainEvidence(refs []ast.PermissionRef) bool {
 
 func unsafePermissionRefsContainNonProgress(refs []ast.PermissionRef) bool {
 	return permissionRefsContain(refs, "Unsafe", "NonProgress")
+}
+
+func unsafePermissionRefsContainBlockMain(refs []ast.PermissionRef) bool {
+	return permissionRefsContain(refs, "Unsafe", "BlockMain")
+}
+
+func blockingPermissionRefsContainBlocking(refs []ast.PermissionRef) bool {
+	return permissionRefsContain(refs, "Blocking", "")
 }
 
 func (a *Analyzer) validateProgressRecursion(decls []scopedDecl) {

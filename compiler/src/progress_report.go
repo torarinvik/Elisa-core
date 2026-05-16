@@ -19,11 +19,13 @@ func generateProgressReport(result *semantic.Result) string {
 	if len(summaries) != 0 {
 		out.WriteString("function summaries:\n")
 		for _, summary := range summaries {
-			fmt.Fprintf(&out, "  %s: obligations=%s evidence=%s unsafe_nonprogress=%t\n",
+			fmt.Fprintf(&out, "  %s: obligations=%s evidence=%s unsafe_nonprogress=%t blocking=%t unsafe_block_main=%t\n",
 				summary.Name,
 				strings.Join(summary.Obligations, ", "),
 				summary.Evidence,
 				summary.UnsafeNonProgress,
+				summary.Blocking,
+				summary.UnsafeBlockMain,
 			)
 		}
 	}
@@ -41,6 +43,8 @@ type progressReportSummary struct {
 	Obligations       []string
 	Evidence          string
 	UnsafeNonProgress bool
+	Blocking          bool
+	UnsafeBlockMain   bool
 }
 
 func collectProgressSummaries(result *semantic.Result) []progressReportSummary {
@@ -55,6 +59,8 @@ func collectProgressSummaries(result *semantic.Result) []progressReportSummary {
 		item := progressReportSummary{
 			Name:              summary.Name,
 			UnsafeNonProgress: summary.HasUnsafeNonProgress,
+			Blocking:          summary.HasBlocking,
+			UnsafeBlockMain:   summary.HasUnsafeBlockMain,
 			Evidence:          "none",
 		}
 		if summary.HasProgressEvidence {

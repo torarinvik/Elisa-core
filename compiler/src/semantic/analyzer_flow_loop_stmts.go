@@ -21,6 +21,9 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	if permissionRefsContain(refs, "Unsafe", "NonProgress") {
 		a.currentTrustedNonProgressDepth++
 	}
+	if permissionRefsContain(refs, "Unsafe", "BlockMain") && a.currentProgressSummary != nil {
+		a.currentProgressSummary.HasUnsafeBlockMain = true
+	}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
