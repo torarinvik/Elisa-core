@@ -30,13 +30,14 @@ type FunctionProgressSummary struct {
 	HasUnsafeNonProgress bool
 	HasBlocking          bool
 	HasUnsafeBlockMain   bool
+	MainThread           bool
 }
 
 func (a *Analyzer) beginFunctionProgressSummary(fn *ast.FuncDecl) *FunctionProgressSummary {
 	if fn == nil {
 		return nil
 	}
-	summary := &FunctionProgressSummary{Name: fn.Name, Decl: fn}
+	summary := &FunctionProgressSummary{Name: fn.Name, Decl: fn, MainThread: annotationsHave(fn.Annotations, "main_thread")}
 	if a.progressSummaries != nil {
 		a.progressSummaries[fn] = summary
 	}
@@ -63,7 +64,9 @@ func (a *Analyzer) finishFunctionProgressSummary(fn *ast.FuncDecl, refs []ast.Pe
 	if !a.enforceProgressSafety {
 		return
 	}
-	if summary.HasBlocking && !summary.HasUnsafeBlockMain {
+	if summary.MainThread && summary.HasBlocking && !summary.HasUnsafeBlockMain {
+		a.errorf(fn.Pos(), "progress error: @main_thread function may block via Blocking.* permission; use a yielding/budgeted wait, move the work off the main thread, or wrap an intentional block in trusted Unsafe.BlockMain")
+	} else if summary.HasBlocking && !summary.HasUnsafeBlockMain {
 		a.warnf(fn.Pos(), "progress warning: function may block via Blocking.* permission; keep it off main-thread paths, use a yielding/budgeted wait, or wrap an intentional main-thread block in trusted Unsafe.BlockMain")
 	}
 	for _, obligation := range summary.Obligations {

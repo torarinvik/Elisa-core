@@ -5,7 +5,24 @@ import (
 	"testing"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 )
+
+func analyzeProgressSafetyTestSourceAllowingErrors(t *testing.T, filename string, src string) *Result {
+	t.Helper()
+	l := lexer.New(filename, []byte(src))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lex errors: %v", errs)
+	}
+	p := parser.New(tokens)
+	file := p.ParseFile(filename)
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	return AnalyzeWithOptions(file, AnalyzeOptions{EnforceProgressSafety: true})
+}
 
 func TestProgressSafetyWarnsForUnbudgetedWhileLoop(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_unbudgeted_while.elisa", `
@@ -142,18 +159,18 @@ def on_click() -> void:
 	}
 }
 
-func TestProgressSafetyAllowsTrustedBlockMainEscapeHatch(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_blocking_call_trusted.elisa", `
+func TestProgressSafetyErrorsForMainThreadBlockingOperation(t *testing.T) {
+	result := analyzeProgressSafetyTestSourceAllowingErrors(t, "progress_main_thread_blocking_call.elisa", `
 extern wait_for_worker() -> void can[Blocking.Wait]
 
+@main_thread
 def on_click() -> void:
-    trusted Unsafe.BlockMain:
-        wait_for_worker()
-`, AnalyzeOptions{EnforceProgressSafety: true})
+    wait_for_worker()
+`)
 
-	all := strings.Join(result.Warnings(), "\n")
-	if strings.Contains(all, "progress warning") {
-		t.Fatalf("expected trusted Unsafe.BlockMain to acknowledge blocking risk, got:\n%s", all)
+	allErrors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(allErrors, "progress error: @main_thread function may block via Blocking.* permission") {
+		t.Fatalf("expected main-thread blocking progress error, got:\n%s", allErrors)
 	}
 	sym, ok := result.GlobalScope.Lookup("on_click")
 	if !ok {
@@ -164,7 +181,39 @@ def on_click() -> void:
 		t.Fatalf("expected on_click function declaration, got %T", sym.Node)
 	}
 	summary := result.ProgressSummaries[fn]
-	if summary == nil || !summary.HasBlocking || !summary.HasUnsafeBlockMain {
+	if summary == nil || !summary.MainThread || !summary.HasBlocking || summary.HasUnsafeBlockMain {
+		t.Fatalf("expected main-thread blocking summary without escape hatch, got %#v", summary)
+	}
+}
+
+func TestProgressSafetyAllowsTrustedBlockMainEscapeHatch(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_blocking_call_trusted.elisa", `
+extern wait_for_worker() -> void can[Blocking.Wait]
+
+@main_thread
+def on_click() -> void:
+    trusted Unsafe.BlockMain:
+        wait_for_worker()
+`, AnalyzeOptions{EnforceProgressSafety: true})
+
+	all := strings.Join(result.Warnings(), "\n")
+	if strings.Contains(all, "progress warning") {
+		t.Fatalf("expected trusted Unsafe.BlockMain to acknowledge blocking risk, got:\n%s", all)
+	}
+	allErrors := strings.Join(result.Errors(), "\n")
+	if strings.Contains(allErrors, "progress error") {
+		t.Fatalf("expected trusted Unsafe.BlockMain to avoid main-thread blocking error, got:\n%s", allErrors)
+	}
+	sym, ok := result.GlobalScope.Lookup("on_click")
+	if !ok {
+		t.Fatal("expected on_click symbol")
+	}
+	fn, ok := sym.Node.(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected on_click function declaration, got %T", sym.Node)
+	}
+	summary := result.ProgressSummaries[fn]
+	if summary == nil || !summary.MainThread || !summary.HasBlocking || !summary.HasUnsafeBlockMain {
 		t.Fatalf("expected blocking and Unsafe.BlockMain in progress summary, got %#v", summary)
 	}
 }

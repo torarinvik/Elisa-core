@@ -237,6 +237,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
+	if annotation.Name == "main_thread" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@main_thread on function %q does not take arguments", fn.Name)
+			return false
+		}
+		return true
+	}
 	if annotation.Name == "ufcs_only" {
 		if len(annotation.Args) != 0 {
 			a.errorf(annotation.Position, "@ufcs_only on function %q does not take arguments", fn.Name)
@@ -471,7 +478,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant", "ufcs_only", "internal":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread":
 		return true
 	default:
 		return false
