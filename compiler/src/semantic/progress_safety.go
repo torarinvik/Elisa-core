@@ -55,9 +55,6 @@ func (a *Analyzer) finishFunctionProgressSummary(fn *ast.FuncDecl, refs []ast.Pe
 	if !a.enforceProgressSafety {
 		return
 	}
-	if summary.HasProgressEvidence || summary.HasUnsafeNonProgress {
-		return
-	}
 	for _, obligation := range summary.Obligations {
 		if obligation.Discharged {
 			continue
@@ -69,9 +66,9 @@ func (a *Analyzer) finishFunctionProgressSummary(fn *ast.FuncDecl, refs []ast.Pe
 	}
 }
 
-func (a *Analyzer) recordProgressLoopObligation(stmt *ast.WhileStmt) {
+func (a *Analyzer) recordProgressLoopObligation(stmt *ast.WhileStmt) int {
 	if a == nil || stmt == nil || a.currentProgressSummary == nil {
-		return
+		return -1
 	}
 	discharged := a.currentTrustedNonProgressDepth > 0
 	if discharged {
@@ -82,6 +79,16 @@ func (a *Analyzer) recordProgressLoopObligation(stmt *ast.WhileStmt) {
 		Pos:        stmt.Pos(),
 		Discharged: discharged,
 	})
+	return len(a.currentProgressSummary.Obligations) - 1
+}
+
+func (a *Analyzer) finishProgressLoopObligation(index int, bodyRefs []ast.PermissionRef) {
+	if a == nil || a.currentProgressSummary == nil || index < 0 || index >= len(a.currentProgressSummary.Obligations) {
+		return
+	}
+	if progressPermissionRefsContainEvidence(bodyRefs) || unsafePermissionRefsContainNonProgress(bodyRefs) {
+		a.currentProgressSummary.Obligations[index].Discharged = true
+	}
 }
 
 func permissionRefsContain(refs []ast.PermissionRef, family string, member string) bool {

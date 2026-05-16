@@ -416,7 +416,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.LockStmt:
 		a.analyzeLockStmt(n)
 	case *ast.WhileStmt:
-		a.recordProgressLoopObligation(n)
+		bodyPermissionRefStart := len(a.currentFunctionUsedPermissionRefs)
+		progressObligationIndex := a.recordProgressLoopObligation(n)
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "while condition must be bool, got %s", condType)
@@ -427,6 +428,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 		mergedStorageViewDeps := a.cloneStorageViewDeps()
 		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
+		a.finishProgressLoopObligation(progressObligationIndex, a.currentFunctionUsedPermissionRefs[bodyPermissionRefStart:])
 		if !blockDefinitelyExits(n.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)

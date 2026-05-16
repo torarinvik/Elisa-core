@@ -43,6 +43,21 @@ def spin(flag: bool) -> void:
 	}
 }
 
+func TestProgressSafetyRequiresLoopLocalEvidence(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_tick_outside_while.elisa", `
+def spin(flag: bool) -> void:
+    can Progress.Tick:
+        signal Progress.Tick
+    while flag:
+        pass
+`, AnalyzeOptions{EnforceProgressSafety: true})
+
+	all := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(all, "progress warning: while loop has no progress evidence") {
+		t.Fatalf("expected progress evidence outside loop not to discharge loop obligation, got:\n%s", all)
+	}
+}
+
 func TestProgressSafetyAllowsTrustedIntentionalNonProgressLoop(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_trusted_nonprogress_while.elisa", `
 def spin(flag: bool) -> void:
