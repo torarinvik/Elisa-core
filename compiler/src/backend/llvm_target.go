@@ -19,6 +19,13 @@ static LLVMBool elisacoreInitializeNativeAsmPrinter(void) {
 	return LLVMInitializeNativeAsmPrinter();
 }
 
+static void elisacoreInitializeAllTargetsForCrossEmission(void) {
+	LLVMInitializeAllTargetInfos();
+	LLVMInitializeAllTargets();
+	LLVMInitializeAllTargetMCs();
+	LLVMInitializeAllAsmPrinters();
+}
+
 static LLVMTargetMachineRef elisacoreCreateTargetMachineDefault(
 	LLVMTargetRef Target,
 	char *Triple,
@@ -103,15 +110,31 @@ func WriteLLVMObjectFileWithOpt(result *semantic.Result, outputPath string, optL
 }
 
 func WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result *semantic.Result, outputPath string, optLevel OptimizationLevel, profile PackedLoweringProfile) error {
+	return WriteLLVMObjectFileWithOptions(result, outputPath, LLVMObjectEmitOptions{
+		OptLevel:      optLevel,
+		PackedProfile: profile,
+	})
+}
+
+type LLVMObjectEmitOptions struct {
+	OptLevel      OptimizationLevel
+	PackedProfile PackedLoweringProfile
+	TargetTriple  string
+}
+
+func WriteLLVMObjectFileWithOptions(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
-	g, err := compileLLVMModule(result, optLevel, profile)
+	if options.PackedProfile == (PackedLoweringProfile{}) {
+		options.PackedProfile = DefaultPackedLoweringProfile()
+	}
+	g, err := compileLLVMModuleWithTarget(result, options.OptLevel, options.PackedProfile, strings.TrimSpace(options.TargetTriple))
 	if err != nil {
 		return err
 	}
 	defer g.dispose()
-	return g.writeObjectFile(outputPath, optLevel)
+	return g.writeObjectFile(outputPath, options.OptLevel)
 }
 
 func (g *llvmGenerator) writeBitcodeFile(outputPath string) error {
@@ -181,10 +204,18 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	if C.elisacoreInitializeNativeAsmPrinter() != 0 {
 		return fmt.Errorf("failed to initialize native LLVM asm printer")
 	}
+	C.elisacoreInitializeAllTargetsForCrossEmission()
 
-	triple := C.LLVMGetDefaultTargetTriple()
-	if triple == nil {
-		return fmt.Errorf("failed to determine default target triple")
+	tripleOwnedByLLVM := false
+	var triple *C.char
+	if requested := strings.TrimSpace(g.requestedTargetTriple); requested != "" {
+		triple = cString(requested)
+	} else {
+		triple = C.LLVMGetDefaultTargetTriple()
+		tripleOwnedByLLVM = true
+		if triple == nil {
+			return fmt.Errorf("failed to determine default target triple")
+		}
 	}
 
 	var target C.LLVMTargetRef
@@ -192,7 +223,11 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	if C.LLVMGetTargetFromTriple(triple, &target, &message) != 0 {
 		errText := disposeLLVMMessage(message, "unknown LLVM target lookup error")
 		tripleText := C.GoString(triple)
-		C.LLVMDisposeMessage(triple)
+		if tripleOwnedByLLVM {
+			C.LLVMDisposeMessage(triple)
+		} else {
+			C.free(unsafe.Pointer(triple))
+		}
 		return fmt.Errorf("failed to resolve LLVM target %q: %s", tripleText, errText)
 	}
 
@@ -203,7 +238,11 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	C.free(unsafe.Pointer(features))
 	if tm == nil {
 		tripleText := C.GoString(triple)
-		C.LLVMDisposeMessage(triple)
+		if tripleOwnedByLLVM {
+			C.LLVMDisposeMessage(triple)
+		} else {
+			C.free(unsafe.Pointer(triple))
+		}
 		return fmt.Errorf("failed to create LLVM target machine for %s", tripleText)
 	}
 
@@ -215,6 +254,7 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	g.targetMachine = tm
 	g.targetData = dataLayout
 	g.targetTriple = triple
+	g.targetTripleOwnedByLLVM = tripleOwnedByLLVM
 	return nil
 }
 

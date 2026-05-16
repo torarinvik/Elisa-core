@@ -164,6 +164,7 @@ const (
 	emitHeader     = "header"
 	emitBitcode    = "bc"
 	emitObject     = "obj"
+	emitCArchive   = "c-archive"
 )
 
 type cliOptions struct {
@@ -176,6 +177,7 @@ type cliOptions struct {
 	linkFlags     []string
 	linkNative    bool
 	runNative     bool
+	targetTriple  string
 	packedProfile backend.PackedLoweringProfile
 	optLevel      backend.OptimizationLevel
 	hasOptLevel   bool
@@ -235,6 +237,14 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("missing value after -filter")
 			}
 			options.filter = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-target-triple="):
+			options.targetTriple = strings.TrimSpace(strings.TrimPrefix(arg, "-target-triple="))
+		case arg == "-target-triple":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -target-triple")
+			}
+			options.targetTriple = strings.TrimSpace(args[i])
 		case strings.HasPrefix(arg, "-packed-abi="):
 			return cliOptions{}, fmt.Errorf("-packed-abi has been removed; use canonical packed lowering or enum-level @packed_profile(...) instead")
 		case arg == "-packed-abi":
@@ -313,8 +323,8 @@ func parseArgs(args []string) (cliOptions, error) {
 	return options, nil
 }
 func printUsage(w io.Writer) {
-	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject}
-	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
+	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject, emitCArchive}
+	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore build|run|test|bench [target] [--project <dir|project.json>]")
@@ -338,7 +348,7 @@ func effectiveOptimizationLevel(options cliOptions) backend.OptimizationLevel {
 		return options.optLevel
 	}
 	switch options.emit {
-	case emitBitcode, emitObject:
+	case emitBitcode, emitObject, emitCArchive:
 		return backend.OptimizationLevel3
 	default:
 		return backend.OptimizationLevel0
@@ -394,6 +404,8 @@ func normalizeEmitMode(value string) string {
 		return emitBitcode
 	case emitObject, "object":
 		return emitObject
+	case emitCArchive, "carchive", "archive", "static-archive", "staticlib", "static-lib":
+		return emitCArchive
 	default:
 		return strings.TrimSpace(value)
 	}

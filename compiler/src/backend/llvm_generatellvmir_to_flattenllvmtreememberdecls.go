@@ -47,6 +47,10 @@ func GenerateLLVMIRWithOptAndPackedLoweringProfile(result *semantic.Result, optL
 	return g.printModule(), nil
 }
 func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile) (*llvmGenerator, error) {
+	return compileLLVMModuleWithTarget(result, optLevel, profile, "")
+}
+
+func compileLLVMModuleWithTarget(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string) (*llvmGenerator, error) {
 	g, err := newLLVMGenerator(result)
 	if err != nil {
 		return nil, err
@@ -54,6 +58,7 @@ func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, prof
 	g.optLevel = optLevel
 	g.packedProfile = profile
 	g.packedEnumABI = profile.packedModeForStore(nil)
+	g.requestedTargetTriple = targetTriple
 	if g.result != nil {
 		g.result.PackedLowering = profile.metadata()
 	}
@@ -77,6 +82,8 @@ type llvmGenerator struct {
 	targetMachine             C.LLVMTargetMachineRef
 	targetData                C.LLVMTargetDataRef
 	targetTriple              *C.char
+	targetTripleOwnedByLLVM   bool
+	requestedTargetTriple     string
 	optimizedForCodegen       bool
 	preferPrivateLinkage      bool
 	packedProfile             PackedLoweringProfile
@@ -194,7 +201,11 @@ func (g *llvmGenerator) dispose() {
 		C.LLVMDisposeTargetMachine(g.targetMachine)
 	}
 	if g.targetTriple != nil {
-		C.LLVMDisposeMessage(g.targetTriple)
+		if g.targetTripleOwnedByLLVM {
+			C.LLVMDisposeMessage(g.targetTriple)
+		} else {
+			C.free(unsafe.Pointer(g.targetTriple))
+		}
 	}
 	if g.module != nil {
 		C.LLVMDisposeModule(g.module)

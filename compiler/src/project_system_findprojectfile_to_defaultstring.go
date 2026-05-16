@@ -144,6 +144,10 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	if outputPath != "" {
 		outputPath = projectRelativePath(project.root, outputPath)
 	}
+	targetTriple := strings.TrimSpace(definition.TargetTriple)
+	if strings.TrimSpace(options.targetTriple) != "" {
+		targetTriple = strings.TrimSpace(options.targetTriple)
+	}
 	packedProfile := backend.DefaultPackedLoweringProfile()
 	if strings.TrimSpace(definition.PackedABI) != "" {
 		return nil, fmt.Errorf("project target %q uses removed packed-abi override; use canonical packed lowering or enum-level @packed_profile(...) instead", targetName)
@@ -168,6 +172,7 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		targetExec:            append([]string{}, definition.Exec...),
 		optLevel:              optLevel,
 		hasOptLevel:           hasOptLevel,
+		targetTriple:          targetTriple,
 		packedProfile:         packedProfile,
 	}, nil
 }

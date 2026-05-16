@@ -52,11 +52,23 @@ func WriteLLVMObjectFileWithOpt(result *semantic.Result, outputPath string, optL
 }
 
 func WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result *semantic.Result, outputPath string, optLevel OptimizationLevel, profile PackedLoweringProfile) error {
+	return WriteLLVMObjectFileWithOptions(result, outputPath, LLVMObjectEmitOptions{
+		OptLevel:      optLevel,
+		PackedProfile: profile,
+	})
+}
+
+type LLVMObjectEmitOptions struct {
+	OptLevel      OptimizationLevel
+	PackedProfile PackedLoweringProfile
+	TargetTriple  string
+}
+
+func WriteLLVMObjectFileWithOptions(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {
 	if result == nil {
 		return fmt.Errorf("backend requires a semantic result")
 	}
 	_ = outputPath
-	_ = optLevel
-	_ = profile
+	_ = options
 	return fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
 }

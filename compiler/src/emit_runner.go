@@ -329,7 +329,17 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
-		if err := backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, outputPathForEmit(program.filename, options.output, ".o"), effectiveOptimizationLevel(options), options.packedProfile); err != nil {
+		if err := backend.WriteLLVMObjectFileWithOptions(result, outputPathForEmit(program.filename, options.output, ".o"), backend.LLVMObjectEmitOptions{
+			OptLevel:      effectiveOptimizationLevel(options),
+			PackedProfile: options.packedProfile,
+			TargetTriple:  options.targetTriple,
+		}); err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		return 0
+	case emitCArchive:
+		if err := buildCArchive(result, program.filename, options.output, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, stderr); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}

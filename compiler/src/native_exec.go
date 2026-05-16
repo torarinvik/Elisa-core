@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,22 @@ import (
 	"elisacore/src/backend"
 	"elisacore/src/semantic"
 )
+
+type cArchiveManifest struct {
+	Source            string   `json:"source"`
+	Archive           string   `json:"archive"`
+	TargetTriple      string   `json:"target_triple,omitempty"`
+	Objects           []string `json:"objects"`
+	RuntimeIncluded   bool     `json:"runtime_included"`
+	RuntimeObject     string   `json:"runtime_object,omitempty"`
+	HeaderAudit       string   `json:"header_audit"`
+	UnsafeReport      string   `json:"unsafe_report"`
+	ExportedFunctions []string `json:"exported_functions"`
+	ExportedGlobals   []string `json:"exported_globals"`
+	ExportedTypes     []string `json:"exported_types"`
+	GeneratedBy       string   `json:"generated_by"`
+	ABIContract       string   `json:"abi_contract"`
+}
 
 type nativeBuildTiming struct {
 	ObjectWrite  time.Duration
@@ -35,6 +52,153 @@ func buildNativeExecutable(result *semantic.Result, foreignFiles []string, linkF
 	}
 	exePath, cleanup, _, err := buildNativeExecutableWithClang(clangPath, result, foreignFiles, linkFlags, outputPath, optLevel, packedProfile, stderr)
 	return exePath, cleanup, err
+}
+
+func buildCArchive(result *semantic.Result, sourcePath string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
+	if result == nil {
+		return fmt.Errorf("semantic result is nil")
+	}
+	archivePath := outputPathForEmit(sourcePath, outputPath, ".a")
+	if err := ensureOutputParentExists(archivePath); err != nil {
+		return err
+	}
+	tempDir, err := os.MkdirTemp("", "elisacore-c-archive-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
+	moduleObjectPath := filepath.Join(tempDir, "elisacore_module.o")
+	objectOptions := backend.LLVMObjectEmitOptions{
+		OptLevel:      optLevel,
+		PackedProfile: packedProfile,
+		TargetTriple:  targetTriple,
+	}
+	if err := backend.WriteLLVMObjectFileWithOptions(result, moduleObjectPath, objectOptions); err != nil {
+		return err
+	}
+
+	objectPaths := []string{moduleObjectPath}
+	manifestObjects := []string{"elisacore_module.o"}
+	runtimeIncluded := false
+	runtimeObjectPath := ""
+	if !resultDefinesDefaultElisaCoreRuntime(result) {
+		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
+		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, targetTriple, stderr); err != nil {
+			return err
+		}
+		objectPaths = append(objectPaths, runtimeObjectPath)
+		manifestObjects = append(manifestObjects, "elisacore_runtime.o")
+		runtimeIncluded = true
+	}
+
+	arPath, err := exec.LookPath("ar")
+	if err != nil {
+		return fmt.Errorf("ar is required to build C ABI archives: %w", err)
+	}
+	args := append([]string{"rcs", archivePath}, objectPaths...)
+	cmd := exec.Command(arPath, args...)
+	cmd.Stdout = stderr
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to build C ABI archive: %w", err)
+	}
+
+	base := cArchiveSidecarBase(archivePath)
+	headerPath := base + ".h"
+	headerSource, err := backend.GenerateCHeader(result)
+	if err != nil {
+		return err
+	}
+	if err := writeOutputFile(headerPath, []byte(headerSource)); err != nil {
+		return err
+	}
+
+	unsafePath := base + ".unsafe.txt"
+	unsafeResult := semantic.AnalyzeWithOptions(result.File, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+	if errs := unsafeResult.Errors(); len(errs) != 0 {
+		for _, e := range errs {
+			if stderr != nil {
+				fmt.Fprintf(stderr, "%s\n", e)
+			}
+		}
+		return fmt.Errorf("unsafe permission audit failed")
+	}
+	unsafeReport := generateUnsafeReport(unsafeResult)
+	if err := writeOutputFile(unsafePath, []byte(unsafeReport)); err != nil {
+		return err
+	}
+
+	manifestPath := base + ".elisa-abi.json"
+	manifest := cArchiveManifest{
+		Source:            sourcePath,
+		Archive:           archivePath,
+		TargetTriple:      strings.TrimSpace(targetTriple),
+		Objects:           manifestObjects,
+		RuntimeIncluded:   runtimeIncluded,
+		RuntimeObject:     "elisacore_runtime.o",
+		HeaderAudit:       headerPath,
+		UnsafeReport:      unsafePath,
+		ExportedFunctions: exportedFunctionNames(result),
+		ExportedGlobals:   exportedGlobalNames(result),
+		ExportedTypes:     exportedTypeNames(result),
+		GeneratedBy:       "elisacore -emit c-archive",
+		ABIContract:       "checked-in C/C++ headers are the build contract; generated headers are audit artifacts",
+	}
+	if !runtimeIncluded {
+		manifest.RuntimeObject = ""
+	}
+	payload, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeOutputFile(manifestPath, append(payload, '\n'))
+}
+
+func cArchiveSidecarBase(archivePath string) string {
+	if strings.EqualFold(filepath.Ext(archivePath), ".a") {
+		return strings.TrimSuffix(archivePath, filepath.Ext(archivePath))
+	}
+	return archivePath
+}
+
+func exportedFunctionNames(result *semantic.Result) []string {
+	if result == nil {
+		return nil
+	}
+	names := make([]string, 0, len(result.ExportedFuncs))
+	for _, exported := range result.ExportedFuncs {
+		if exported != nil {
+			names = append(names, exported.PublicName)
+		}
+	}
+	return names
+}
+
+func exportedGlobalNames(result *semantic.Result) []string {
+	if result == nil {
+		return nil
+	}
+	names := make([]string, 0, len(result.ExportedGlobals))
+	for _, exported := range result.ExportedGlobals {
+		if exported != nil {
+			names = append(names, exported.PublicName)
+		}
+	}
+	return names
+}
+
+func exportedTypeNames(result *semantic.Result) []string {
+	if result == nil {
+		return nil
+	}
+	names := make([]string, 0, len(result.ExportedTypes))
+	for _, exported := range result.ExportedTypes {
+		if exported != nil {
+			names = append(names, exported.PublicName)
+		}
+	}
+	return names
 }
 
 func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
@@ -73,7 +237,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	runtimeObjectPath := ""
 	if !resultDefinesDefaultElisaCoreRuntime(result) {
 		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
-		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, stderr); err != nil {
+		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, "", stderr); err != nil {
 			cleanup()
 			return "", func() {}, timing, err
 		}
@@ -261,7 +425,7 @@ func defaultElisaCoreRuntimeSupportPath() (string, error) {
 	return path, nil
 }
 
-func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, stderr io.Writer) error {
+func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
 	runtimePath, err := defaultElisaCoreRuntimeSupportPath()
 	if err != nil {
 		return err
@@ -295,7 +459,11 @@ func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend
 			fmt.Fprintf(stderr, "%s\n", w)
 		}
 	}
-	return backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile)
+	return backend.WriteLLVMObjectFileWithOptions(runtimeResult, outputPath, backend.LLVMObjectEmitOptions{
+		OptLevel:      backend.OptimizationLevel3,
+		PackedProfile: packedProfile,
+		TargetTriple:  targetTriple,
+	})
 }
 
 func resultDefinesDefaultElisaCoreRuntime(result *semantic.Result) bool {

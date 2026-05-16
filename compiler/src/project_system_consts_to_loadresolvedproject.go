@@ -48,6 +48,7 @@ type projectCLIOptions struct {
 	filter        string
 	linkFlags     []string
 	trust         trustLevel
+	targetTriple  string
 	optLevel      backend.OptimizationLevel
 	hasOptLevel   bool
 	initName      string
@@ -75,6 +76,7 @@ type projectTargetDefinition struct {
 	LinkFlags    []string `json:"link-flags,omitempty"`
 	Exec         []string `json:"exec,omitempty"`
 	Opt          string   `json:"opt,omitempty"`
+	TargetTriple string   `json:"target-triple,omitempty"`
 	PackedABI    string   `json:"packed-abi,omitempty"`
 }
 type manifestDefinition struct {
@@ -120,6 +122,7 @@ type resolvedProjectTarget struct {
 	targetExec            []string
 	optLevel              backend.OptimizationLevel
 	hasOptLevel           bool
+	targetTriple          string
 	packedProfile         backend.PackedLoweringProfile
 }
 type projectResolver struct {
@@ -196,6 +199,7 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		filter:        options.filter,
 		foreignFiles:  append([]string(nil), target.foreignFiles...),
 		linkFlags:     append([]string(nil), target.linkFlags...),
+		targetTriple:  target.targetTriple,
 		packedProfile: target.packedProfile,
 		hasOptLevel:   target.hasOptLevel,
 		optLevel:      target.optLevel,
@@ -316,6 +320,14 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 				return projectCLIOptions{}, fmt.Errorf("missing value after -filter")
 			}
 			options.filter = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-target-triple="):
+			options.targetTriple = strings.TrimSpace(strings.TrimPrefix(arg, "-target-triple="))
+		case arg == "-target-triple":
+			i++
+			if i >= len(args) {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -target-triple")
+			}
+			options.targetTriple = strings.TrimSpace(args[i])
 		case strings.HasPrefix(arg, "-emit="):
 			options.emitOverride = normalizeEmitMode(strings.TrimSpace(strings.TrimPrefix(arg, "-emit=")))
 		case arg == "-emit":
