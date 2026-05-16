@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,47 @@ def spin(flag: bool) -> void:
 	output := stdout.String()
 	for _, check := range []string{
 		"warnings: 0",
+		"spin: obligations=Loop:1 evidence=progress unsafe_nonprogress=false",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected progress report to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIEmitProgressRecognizesRuntimeProgressTickEvidence(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "progress_runtime_tick.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	src := fmt.Sprintf(`include %q
+
+def spin(flag: bool) -> void:
+    budget: mutable ProgressBudget = progress_budget_steps(3)
+    while flag:
+        progress_tick(budget.ref[mutable ProgressBudget&]) can Progress.Tick, Progress.CheckCancel, Abort.Panic
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write progress fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "progress", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected progress report to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected progress report diagnostics in stdout only, got stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"=== progress ===",
 		"spin: obligations=Loop:1 evidence=progress unsafe_nonprogress=false",
 	} {
 		if !strings.Contains(output, check) {

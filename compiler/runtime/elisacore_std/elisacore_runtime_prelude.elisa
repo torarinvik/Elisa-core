@@ -58,12 +58,62 @@ struct StringView:
 	data: mutable u8&
 	len: mutable i64
 
+struct ProgressBudget:
+	remaining_steps: mutable i64
+	max_depth: mutable i64
+	current_depth: mutable i64
+	cancelled: mutable bool
+
 # ------------------------------------------------------------
 # Global caches (zero-initialized)
 # ------------------------------------------------------------
 
 global mutable small_string_cache: heap SmallStringCacheEntry&?[CTX_SMALL_STRING_CACHE_BUCKETS] = zeroed
 global mutable string_len_cache: heap StringLenCacheEntry&?[CTX_STRING_LEN_CACHE_BUCKETS] = zeroed
+
+# ------------------------------------------------------------
+# Cooperative progress budget
+# ------------------------------------------------------------
+
+def progress_budget_steps(steps: i64) -> ProgressBudget:
+	budget: ProgressBudget = zeroed
+	budget.remaining_steps <- steps
+	budget.max_depth <- 0
+	budget.current_depth <- 0
+	budget.cancelled <- false
+	return budget
+
+def progress_budget_steps_and_depth(steps: i64, max_depth: i64) -> ProgressBudget:
+	budget: ProgressBudget = progress_budget_steps(steps)
+	budget.max_depth <- max_depth
+	return budget
+
+def progress_cancel(budget: mutable ProgressBudget&):
+	budget.cancelled <- true
+
+def progress_check_cancel(budget: mutable ProgressBudget&):
+	can Progress.CheckCancel, Abort.Panic:
+		if budget.cancelled:
+			panic("progress budget cancelled")
+
+def progress_tick(budget: mutable ProgressBudget&):
+	can Progress.Tick, Progress.CheckCancel, Abort.Panic:
+		progress_check_cancel(budget)
+		if budget.remaining_steps <= 0:
+			panic("progress budget exhausted")
+		budget.remaining_steps <- budget.remaining_steps - 1
+
+def progress_enter_recursion(budget: mutable ProgressBudget&):
+	can Progress.EnterRecursion, Progress.CheckCancel, Abort.Panic:
+		progress_check_cancel(budget)
+		if budget.max_depth > 0 and budget.current_depth >= budget.max_depth:
+			panic("progress recursion depth exhausted")
+		budget.current_depth <- budget.current_depth + 1
+
+def progress_leave_recursion(budget: mutable ProgressBudget&):
+	can Progress.LeaveRecursion:
+		if budget.current_depth > 0:
+			budget.current_depth <- budget.current_depth - 1
 
 # ------------------------------------------------------------
 # Permanent / scratch arena allocation
