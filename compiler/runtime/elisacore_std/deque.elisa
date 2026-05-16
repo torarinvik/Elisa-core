@@ -119,8 +119,9 @@ def arena_deque_reserve[T](a: mutable Arena&, d: mutable Deque[T]&, needed: usiz
         if new_capacity == 0:
             new_capacity <- ARENA_DEQUE_INIT_CAP
 
-        while needed > new_capacity:
-            new_capacity <- new_capacity * 2
+        trusted Unsafe.AssumeProgress:
+            while needed > new_capacity:
+                new_capacity <- new_capacity * 2
 
         new_items: mutable T& = deque_items_from_alloc[T](arena_alloc(a, new_capacity * size_of(T)))
         arena_deque_copy_linearized(d, new_items)

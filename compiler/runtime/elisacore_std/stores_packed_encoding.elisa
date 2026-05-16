@@ -33,17 +33,18 @@ def ctx_packed_store_encode(a: mutable Arena&, ptr: void&, state_bits: mutable v
                     return (state.decode_region_index.uintptr() << 32.uintptr()) | ((decode_offset_words + 1.uintptr()) << 1.uintptr())
 
             owner_cursor: mutable heap Region&? = state.head_region
-            while owner_cursor != null:
-                owner_data_base: heap u8& = packed_store_region_data(owner_cursor)
-                owner_data_begin: uintptr = owner_data_base.uintptr()
-                owner_data_end: uintptr = owner_data_begin + (owner_cursor.capacity * size_of(uintptr)).uintptr()
+            trusted Unsafe.AssumeProgress:
+                while owner_cursor != null:
+                    owner_data_base: heap u8& = packed_store_region_data(owner_cursor)
+                    owner_data_begin: uintptr = owner_data_base.uintptr()
+                    owner_data_end: uintptr = owner_data_begin + (owner_cursor.capacity * size_of(uintptr)).uintptr()
 
-                if raw >= owner_data_begin and raw < owner_data_end:
-                    owner_offset_bytes: uintptr = raw - owner_data_begin
-                    owner_offset_words: uintptr = owner_offset_bytes / size_of(uintptr).uintptr()
-                    return (owner_cursor.global_index.uintptr() << 32.uintptr()) | ((owner_offset_words + 1.uintptr()) << 1.uintptr())
+                    if raw >= owner_data_begin and raw < owner_data_end:
+                        owner_offset_bytes: uintptr = raw - owner_data_begin
+                        owner_offset_words: uintptr = owner_offset_bytes / size_of(uintptr).uintptr()
+                        return (owner_cursor.global_index.uintptr() << 32.uintptr()) | ((owner_offset_words + 1.uintptr()) << 1.uintptr())
 
-                owner_cursor <- owner_cursor.owner_next
+                    owner_cursor <- owner_cursor.owner_next
 
         if a.end != null:
             end_data_base: heap u8& = packed_store_region_data(a.end)
@@ -57,17 +58,18 @@ def ctx_packed_store_encode(a: mutable Arena&, ptr: void&, state_bits: mutable v
 
         r: mutable heap Region&? = a.begin
 
-        while r != null:
-            data_base: heap u8& = packed_store_region_data(r)
-            data_begin: uintptr = data_base.uintptr()
-            data_end: uintptr = data_begin + (r.capacity * size_of(uintptr)).uintptr()
+        trusted Unsafe.AssumeProgress:
+            while r != null:
+                data_base: heap u8& = packed_store_region_data(r)
+                data_begin: uintptr = data_base.uintptr()
+                data_end: uintptr = data_begin + (r.capacity * size_of(uintptr)).uintptr()
 
-            if raw >= data_begin and raw < data_end:
-                offset_bytes: uintptr = raw - data_begin
-                offset_words: uintptr = offset_bytes / size_of(uintptr).uintptr()
-                return (r.global_index.uintptr() << 32.uintptr()) | ((offset_words + 1.uintptr()) << 1.uintptr())
+                if raw >= data_begin and raw < data_end:
+                    offset_bytes: uintptr = raw - data_begin
+                    offset_words: uintptr = offset_bytes / size_of(uintptr).uintptr()
+                    return (r.global_index.uintptr() << 32.uintptr()) | ((offset_words + 1.uintptr()) << 1.uintptr())
 
-            r <- r.next
+                r <- r.next
 
         panic("packed store encode pointer outside arena")
 def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: mutable void&) -> mutable void&:
@@ -138,8 +140,9 @@ def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: muta
                     i <- state.decode_region_index
 
             if owner_cursor != null:
-                while owner_cursor != null and owner_cursor.global_index < region_index:
-                    owner_cursor <- owner_cursor.owner_next
+                trusted Unsafe.AssumeProgress:
+                    while owner_cursor != null and owner_cursor.global_index < region_index:
+                        owner_cursor <- owner_cursor.owner_next
 
                 if owner_cursor != null and owner_cursor.global_index == region_index:
                     offset_words: usize = offset_words_plus_one - 1
@@ -151,9 +154,10 @@ def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: muta
                     data_base: heap u8& = packed_store_region_data(owner_cursor)
                     return (data_base + offset_words * size_of(uintptr)).cast[mutable void&]
 
-        while i < region_index and r != null:
-            r <- r.next
-            i <- i + 1
+        trusted Unsafe.AssumeProgress:
+            while i < region_index and r != null:
+                r <- r.next
+                i <- i + 1
 
         assert r != null
         offset_words: usize = offset_words_plus_one - 1

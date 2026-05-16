@@ -80,9 +80,12 @@ func (a *Analyzer) recordProgressLoopObligation(stmt *ast.WhileStmt) int {
 	if a == nil || stmt == nil || a.currentProgressSummary == nil {
 		return -1
 	}
-	discharged := a.currentTrustedNonProgressDepth > 0
-	if discharged {
+	discharged := a.currentTrustedNonProgressDepth > 0 || a.currentTrustedAssumeProgressDepth > 0
+	if a.currentTrustedNonProgressDepth > 0 {
 		a.currentProgressSummary.HasUnsafeNonProgress = true
+	}
+	if a.currentTrustedAssumeProgressDepth > 0 {
+		a.currentProgressSummary.HasProgressEvidence = true
 	}
 	a.currentProgressSummary.Obligations = append(a.currentProgressSummary.Obligations, ProgressObligation{
 		Kind:       ProgressObligationLoop,

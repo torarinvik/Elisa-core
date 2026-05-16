@@ -39,6 +39,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedProgressSummary := a.currentProgressSummary
 	savedTrustedNonProgressDepth := a.currentTrustedNonProgressDepth
+	savedTrustedAssumeProgressDepth := a.currentTrustedAssumeProgressDepth
 	savedImplicitScopes := a.currentImplicitScopes
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
@@ -64,6 +65,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentProgressSummary = a.beginFunctionProgressSummary(fn)
 	a.currentTrustedNonProgressDepth = 0
+	a.currentTrustedAssumeProgressDepth = 0
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentFuncDecl = fn
@@ -172,6 +174,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentProgressSummary = savedProgressSummary
 	a.currentTrustedNonProgressDepth = savedTrustedNonProgressDepth
+	a.currentTrustedAssumeProgressDepth = savedTrustedAssumeProgressDepth
 	a.currentImplicitScopes = savedImplicitScopes
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs

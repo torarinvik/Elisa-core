@@ -163,6 +163,7 @@ type Analyzer struct {
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	currentProgressSummary            *FunctionProgressSummary
 	currentTrustedNonProgressDepth    int
+	currentTrustedAssumeProgressDepth int
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening

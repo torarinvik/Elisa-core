@@ -246,8 +246,9 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
                 i <- state.decode_region_index
 
         if owner_cursor != null:
-            while owner_cursor != null and owner_cursor.global_index < region_index:
-                owner_cursor <- owner_cursor.owner_next
+            trusted Unsafe.AssumeProgress:
+                while owner_cursor != null and owner_cursor.global_index < region_index:
+                    owner_cursor <- owner_cursor.owner_next
 
             if owner_cursor != null and owner_cursor.global_index == region_index:
                 offset_words: usize = offset_words_plus_one - 1
@@ -260,9 +261,10 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
                 row_tag: u32& = (data_base + offset_words * size_of(uintptr)).cast[u32&]
                 return row_tag[0]
 
-    while i < region_index and r != null:
-        r <- r.next
-        i <- i + 1
+    trusted Unsafe.AssumeProgress:
+        while i < region_index and r != null:
+            r <- r.next
+            i <- i + 1
 
     assert r != null
     offset_words: usize = offset_words_plus_one - 1
@@ -355,8 +357,9 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
                     i <- state.decode_region_index
 
             if owner_cursor != null:
-                while owner_cursor != null and owner_cursor.global_index < region_index:
-                    owner_cursor <- owner_cursor.owner_next
+                trusted Unsafe.AssumeProgress:
+                    while owner_cursor != null and owner_cursor.global_index < region_index:
+                        owner_cursor <- owner_cursor.owner_next
 
                 if owner_cursor != null and owner_cursor.global_index == region_index:
                     offset_words: usize = offset_words_plus_one - 1
@@ -369,9 +372,10 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
                     row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
                     return row_words[word_offset]
 
-        while i < region_index and r != null:
-            r <- r.next
-            i <- i + 1
+        trusted Unsafe.AssumeProgress:
+            while i < region_index and r != null:
+                r <- r.next
+                i <- i + 1
 
         assert r != null
         offset_words: usize = offset_words_plus_one - 1

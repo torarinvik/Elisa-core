@@ -188,18 +188,20 @@ def task_group_wait_all_raw(group: mutable TaskGroup&):
 	can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic:
 		current: mutable heap ConcurrencyRawTaskNode&? = group.handle.cast[heap ConcurrencyRawTaskNode&?]
 		group.handle <- null
-		while current != null:
-			next: mutable heap ConcurrencyRawTaskNode&? = current.next
-			ctx_concurrency_join_handle(current.handle)
-			free(current.cast[heap void&])
-			current <- next
+		trusted Unsafe.AssumeProgress:
+			while current != null:
+				next: mutable heap ConcurrencyRawTaskNode&? = current.next
+				ctx_concurrency_join_handle(current.handle)
+				free(current.cast[heap void&])
+				current <- next
 
 def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64:
-	while true:
-		current: i64 = load(slot, MemoryOrder.Acquire) can Atomics.Load
-		next: i64 = current - 1
-		if compare_exchange(slot, current, next, MemoryOrder.AcqRel, MemoryOrder.Acquire) can Atomics.CompareExchange:
-			return next
+	trusted Unsafe.AssumeProgress:
+		while true:
+			current: i64 = load(slot, MemoryOrder.Acquire) can Atomics.Load
+			next: i64 = current - 1
+			if compare_exchange(slot, current, next, MemoryOrder.AcqRel, MemoryOrder.Acquire) can Atomics.CompareExchange:
+				return next
 	return 0
 
 def ctx_concurrency_work1_release(state_bits: mutable void&?):
@@ -296,11 +298,12 @@ def ctx_task_group_release_all(group: mutable TaskGroup&):
 			return
 		current: mutable heap ConcurrencyTaskGroupNode&? = group.cleanup.cast[heap ConcurrencyTaskGroupNode&?]
 		group.cleanup <- null
-		while current != null:
-			next: mutable heap ConcurrencyTaskGroupNode&? = current.next
-			ctx_concurrency_work1_release(current.state_bits.cast[mutable void&])
-			free(current.cast[heap void&])
-			current <- next
+		trusted Unsafe.AssumeProgress:
+			while current != null:
+				next: mutable heap ConcurrencyTaskGroupNode&? = current.next
+				ctx_concurrency_work1_release(current.state_bits.cast[mutable void&])
+				free(current.cast[heap void&])
+				current <- next
 
 def spawn1[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> Thread[R, Joinable]:
 	can Thread.Spawn, Memory.Allocate, Abort.Panic:

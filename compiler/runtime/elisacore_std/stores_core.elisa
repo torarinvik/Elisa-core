@@ -56,8 +56,9 @@ def packed_store_ensure_prefix_columns(a: mutable Arena&, state: mutable PackedS
             return
 
         new_capacity: mutable usize = ARENA_DA_INIT_CAP if state.prefix_column_capacity == 0 else state.prefix_column_capacity * 2
-        while new_capacity < needed_rows:
-            new_capacity <- new_capacity * 2
+        trusted Unsafe.AssumeProgress:
+            while new_capacity < needed_rows:
+                new_capacity <- new_capacity * 2
 
         old_size: usize = state.prefix_column_capacity * size_of(uintptr)
         new_size: usize = new_capacity * size_of(uintptr)
@@ -89,8 +90,9 @@ def packed_store_ensure_side_columns(a: mutable Arena&, state: mutable PackedSto
             return
 
         new_capacity: mutable usize = ARENA_DA_INIT_CAP if state.side_column_capacity == 0 else state.side_column_capacity * 2
-        while new_capacity < needed_rows:
-            new_capacity <- new_capacity * 2
+        trusted Unsafe.AssumeProgress:
+            while new_capacity < needed_rows:
+                new_capacity <- new_capacity * 2
 
         old_size: usize = state.side_column_capacity * size_of(uintptr)
         new_size: usize = new_capacity * size_of(uintptr)
@@ -190,13 +192,14 @@ def ctx_packed_store_alloc_result_slow(a: mutable Arena&, size: usize, owner_tag
         found_region: mutable heap Region&? = null
         found_region_index: mutable usize = 0
 
-        while cursor != null:
-            if cursor.count + size <= cursor.capacity:
-                found_region <- cursor
-                found_region_index <- cursor.global_index
-                cursor <- null
-            else:
-                cursor <- cursor.owner_next
+        trusted Unsafe.AssumeProgress:
+            while cursor != null:
+                if cursor.count + size <= cursor.capacity:
+                    found_region <- cursor
+                    found_region_index <- cursor.global_index
+                    cursor <- null
+                else:
+                    cursor <- cursor.owner_next
 
         if found_region != null:
             state.alloc_region <- found_region

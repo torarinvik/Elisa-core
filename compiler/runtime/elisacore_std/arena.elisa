@@ -292,9 +292,10 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
 
         assert a.end != null
 
-        while (a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity) and a.end.next != null:
-            a.end <- a.end.next
-            a.end_index <- a.end_index + 1
+        trusted Unsafe.AssumeProgress:
+            while (a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity) and a.end.next != null:
+                a.end <- a.end.next
+                a.end_index <- a.end_index + 1
 
         if a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity:
             assert a.end.next == null
@@ -335,8 +336,9 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
 def arena_strlen(s: u8&) -> usize:
     n:mutable usize = 0
     trusted Unsafe.UncheckedIndex:
-        while s[n] != 0:
-            n <- n + 1
+        trusted Unsafe.AssumeProgress:
+            while s[n] != 0:
+                n <- n + 1
     return n
 
 def arena_memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&:
@@ -385,9 +387,10 @@ def arena_snapshot(a: Arena&) -> ArenaMark:
 
 def arena_reset(a: mutable Arena&):
     r: mutable heap Region&? = a.begin
-    while r != null:
-        r.count <- 0
-        r <- r.next
+    trusted Unsafe.AssumeProgress:
+        while r != null:
+            r.count <- 0
+            r <- r.next
 
     a.end <- a.begin
     a.end_index <- 0
@@ -401,17 +404,19 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
     region.count <- m.count
 
     r: mutable heap Region&? = region.next
-    while r != null:
-        r.count <- 0
-        r <- r.next
+    trusted Unsafe.AssumeProgress:
+        while r != null:
+            r.count <- 0
+            r <- r.next
 
     a.end as & <- region
 
     region_index: mutable usize = 0
     current: mutable heap Region&? = a.begin
-    while current != null and current != region:
-        current <- current.next
-        region_index <- region_index + 1
+    trusted Unsafe.AssumeProgress:
+        while current != null and current != region:
+            current <- current.next
+            region_index <- region_index + 1
 
     assert current != null
     a.end_index <- region_index
@@ -420,10 +425,11 @@ def arena_free(a: mutable Arena&):
     can Memory.Release, Abort.Panic:
         r: mutable heap Region&? = a.begin
 
-        while r != null:
-            r0: mutable heap Region& = r
-            r <- r.next
-            free_region(r0)
+        trusted Unsafe.AssumeProgress:
+            while r != null:
+                r0: mutable heap Region& = r
+                r <- r.next
+                free_region(r0)
 
         a.begin as ! <- null
         a.end as ! <- null
@@ -435,10 +441,11 @@ def arena_trim(a: mutable Arena&):
             return
 
         r: mutable heap Region&? = a.end.next
-        while r != null:
-            r0: mutable heap Region& = r
-            r <- r.next
-            free_region(r0)
+        trusted Unsafe.AssumeProgress:
+            while r != null:
+                r0: mutable heap Region& = r
+                r <- r.next
+                free_region(r0)
 
         a.end.next as ! <- null
 

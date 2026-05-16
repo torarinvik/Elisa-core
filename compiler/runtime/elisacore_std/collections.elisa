@@ -164,8 +164,9 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
         if new_capacity == 0:
             new_capacity <- ARENA_DA_INIT_CAP
 
-        while needed > new_capacity:
-            new_capacity <- new_capacity * 2
+        trusted Unsafe.AssumeProgress:
+            while needed > new_capacity:
+                new_capacity <- new_capacity * 2
 
         old_size: usize = da.capacity * size_of(T)
         new_size: usize = new_capacity * size_of(T)
@@ -677,8 +678,9 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
             if new_capacity == 0:
                 new_capacity <- ARENA_DA_INIT_CAP
 
-            while needed > new_capacity:
-                new_capacity <- new_capacity * 2
+            trusted Unsafe.AssumeProgress:
+                while needed > new_capacity:
+                    new_capacity <- new_capacity * 2
 
             old_size: usize = da.capacity * size_of(T)
             new_size: usize = new_capacity * size_of(T)
@@ -727,8 +729,9 @@ def arena_dict_next_capacity(min_capacity: usize) -> usize:
     0 return if min_capacity == 0
 
     cap: mutable usize = DICT_INIT_CAP
-    while cap < min_capacity:
-        cap <- cap * 2
+    trusted Unsafe.AssumeProgress:
+        while cap < min_capacity:
+            cap <- cap * 2
     return cap
 
 def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:

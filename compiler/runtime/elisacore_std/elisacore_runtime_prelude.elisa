@@ -149,11 +149,12 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 		bucket: usize = string_len_bucket(ptr.cast[u8&])
 
 		entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
-		while entry != null:
-			if entry.ptr == ptr.cast[u8&]:
-				entry.len <- len
-				return
-			entry <- entry.next
+		trusted Unsafe.AssumeProgress:
+			while entry != null:
+				if entry.ptr == ptr.cast[u8&]:
+					entry.len <- len
+					return
+				entry <- entry.next
 
 		new_entry: heap StringLenCacheEntry& = alloc_perm(size_of(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
 		new_entry.next <- string_len_cache[bucket]
@@ -170,17 +171,18 @@ def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
 	prev: mutable heap StringLenCacheEntry&? = null
 	entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
 
-	while entry != null:
-		if entry.ptr == ptr.cast[u8&]:
-			# Move-to-front heuristic
-			if prev != null:
-				prev.next <- entry.next
-				entry.next <- string_len_cache[bucket]
-				string_len_cache[bucket] <- entry
-			len_out <- entry.len
-			return 1
-		prev <- entry
-		entry <- entry.next
+	trusted Unsafe.AssumeProgress:
+		while entry != null:
+			if entry.ptr == ptr.cast[u8&]:
+				# Move-to-front heuristic
+				if prev != null:
+					prev.next <- entry.next
+					entry.next <- string_len_cache[bucket]
+					string_len_cache[bucket] <- entry
+				len_out <- entry.len
+				return 1
+			prev <- entry
+			entry <- entry.next
 
 	return 0
 
@@ -220,10 +222,11 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 		bucket: usize = (hash & (CTX_SMALL_STRING_CACHE_BUCKETS - 1).u64()).usize()
 
 		entry: mutable heap SmallStringCacheEntry&? = small_string_cache[bucket]
-		while entry != null:
-			if entry.len == len and memcmp(entry.text[0].ref[void&], src.cast[void&], len) == 0:
-				return entry.text[0].ref[heap u8&]
-			entry <- entry.next
+		trusted Unsafe.AssumeProgress:
+			while entry != null:
+				if entry.len == len and memcmp(entry.text[0].ref[void&], src.cast[void&], len) == 0:
+					return entry.text[0].ref[heap u8&]
+				entry <- entry.next
 
 		new_entry: mutable heap SmallStringCacheEntry& = alloc_perm(
 			(size_of(SmallStringCacheEntry) + len + 1).i64()
@@ -278,8 +281,9 @@ def char_to_string_into(arena: Arena&, value: i64) -> heap u8&:
 
 def string_builder_next_cap(min_cap: i64) -> i64:
 	cap: mutable i64 = 16
-	while cap < min_cap:
-		cap *= 2
+	trusted Unsafe.AssumeProgress:
+		while cap < min_cap:
+			cap *= 2
 	return cap
 
 def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:

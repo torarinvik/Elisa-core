@@ -102,6 +102,31 @@ def spin(flag: bool) -> void:
 	}
 }
 
+func TestProgressSafetyAllowsTrustedAssumeProgressLoop(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_trusted_assume_progress_while.elisa", `
+def walk(flag: bool) -> void:
+    trusted Unsafe.AssumeProgress:
+        while flag:
+            pass
+`, AnalyzeOptions{EnforceProgressSafety: true})
+
+	all := strings.Join(result.Warnings(), "\n")
+	if strings.Contains(all, "progress warning") {
+		t.Fatalf("expected trusted Unsafe.AssumeProgress to discharge loop locally, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("walk")
+	if !ok {
+		t.Fatal("expected walk symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected walk function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != "" {
+		t.Fatalf("expected trusted progress proof not to infer caller permissions, got %q", got)
+	}
+}
+
 func TestProgressSafetyWarnsForInfiniteRecursionPressureCase(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_recursive_cycle.elisa", `
 def ping() -> void:
