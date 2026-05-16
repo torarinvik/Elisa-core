@@ -72,12 +72,16 @@ func parseLoadedProgram(program *loadedProgram, stderr io.Writer) (*ast.File, bo
 }
 
 func analyzeLoadedProgram(program *loadedProgram, stderr io.Writer) (*ast.File, *semantic.Result, bool) {
+	return analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{})
+}
+
+func analyzeLoadedProgramWithOptions(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions) (*ast.File, *semantic.Result, bool) {
 	if program == nil {
 		fmt.Fprintf(stderr, "error: missing program input\n")
 		return nil, nil, false
 	}
 	if program.file != nil {
-		result := semantic.Analyze(program.file)
+		result := semantic.AnalyzeWithOptions(program.file, options)
 		if warns := result.Notices(); len(warns) > 0 {
 			for _, w := range warns {
 				if shouldSuppressDeprecatedWarningsForTests(w) {
@@ -94,7 +98,7 @@ func analyzeLoadedProgram(program *loadedProgram, stderr io.Writer) (*ast.File, 
 		}
 		return program.file, result, true
 	}
-	return analyzeProgram(program.filename, program.source, stderr)
+	return analyzeProgramWithOptions(program.filename, program.source, stderr, options)
 }
 
 func buildFrontendIRBundle(program *loadedProgram, file *ast.File) *frontendir.Bundle {

@@ -99,7 +99,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		}
 		return 0
 	case emitIR:
-		file, _, ok := analyzeLoadedProgram(program, stderr)
+		file, _, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple})
 		if !ok {
 			return 1
 		}
@@ -119,7 +119,10 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if !ok {
 			return 1
 		}
-		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{
+			EnforceUnsafePermissions: true,
+			TargetTriple:             options.targetTriple,
+		})
 		if errs := result.Errors(); len(errs) > 0 {
 			for _, e := range errs {
 				fmt.Fprintf(stderr, "%s\n", e)
@@ -141,7 +144,10 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if !ok {
 			return 1
 		}
-		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnforceProgressSafety: true})
+		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{
+			EnforceProgressSafety: true,
+			TargetTriple:          options.targetTriple,
+		})
 		if errs := result.Errors(); len(errs) > 0 {
 			for _, e := range errs {
 				fmt.Fprintf(stderr, "%s\n", e)
@@ -160,7 +166,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		return 0
 	}
 
-	_, result, ok := analyzeLoadedProgram(program, stderr)
+	_, result, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple})
 	if !ok {
 		return 1
 	}

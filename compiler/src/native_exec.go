@@ -115,7 +115,10 @@ func buildCArchive(result *semantic.Result, sourcePath string, outputPath string
 	}
 
 	unsafePath := base + ".unsafe.txt"
-	unsafeResult := semantic.AnalyzeWithOptions(result.File, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+	unsafeResult := semantic.AnalyzeWithOptions(result.File, semantic.AnalyzeOptions{
+		EnforceUnsafePermissions: true,
+		TargetTriple:             targetTriple,
+	})
 	if errs := unsafeResult.Errors(); len(errs) != 0 {
 		for _, e := range errs {
 			if stderr != nil {

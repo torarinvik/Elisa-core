@@ -89,12 +89,16 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 	return file, true
 }
 func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *semantic.Result, bool) {
+	return analyzeProgramWithOptions(filename, src, stderr, semantic.AnalyzeOptions{})
+}
+
+func analyzeProgramWithOptions(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions) (*ast.File, *semantic.Result, bool) {
 	file, ok := parseProgram(filename, src, stderr)
 	if !ok {
 		return nil, nil, false
 	}
 
-	result := semantic.Analyze(file)
+	result := semantic.AnalyzeWithOptions(file, options)
 	if warns := result.Notices(); len(warns) > 0 {
 		for _, w := range warns {
 			if shouldSuppressDeprecatedWarningsForTests(w) {
