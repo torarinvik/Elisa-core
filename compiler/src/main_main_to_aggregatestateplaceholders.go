@@ -145,6 +145,7 @@ const (
 	emitSemantic   = "semantic"
 	emitFacts      = "facts"
 	emitUnsafe     = "unsafe"
+	emitProgress   = "progress"
 	emitFmt        = "fmt"
 	emitDoc        = "doc"
 	emitInterface  = "iface"
@@ -312,7 +313,7 @@ func parseArgs(args []string) (cliOptions, error) {
 	return options, nil
 }
 func printUsage(w io.Writer) {
-	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject}
+	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject}
 	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
@@ -355,6 +356,8 @@ func normalizeEmitMode(value string) string {
 		return emitFacts
 	case emitUnsafe, "unsafe-summary", "unsafe-report":
 		return emitUnsafe
+	case emitProgress, "progress-summary", "progress-report":
+		return emitProgress
 	case emitFmt, "format", "formatter":
 		return emitFmt
 	case emitDoc, "docs", "reference":

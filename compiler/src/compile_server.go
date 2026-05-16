@@ -131,6 +131,19 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
 		response.Output = generateUnsafeReport(result)
+	case emitProgress:
+		file, ok := parseLoadedProgram(program, &stderr)
+		if !ok {
+			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnforceProgressSafety: true})
+		if errs := result.Errors(); len(errs) > 0 {
+			for _, e := range errs {
+				fmt.Fprintf(&stderr, "%s\n", e)
+			}
+			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		response.Output = generateProgressReport(result)
 	case emitFmt:
 		file, ok := parseLoadedProgram(program, &stderr)
 		if !ok {

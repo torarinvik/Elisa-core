@@ -136,6 +136,28 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprint(stdout, report)
 		}
 		return 0
+	case emitProgress:
+		file, ok := parseLoadedProgram(program, stderr)
+		if !ok {
+			return 1
+		}
+		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnforceProgressSafety: true})
+		if errs := result.Errors(); len(errs) > 0 {
+			for _, e := range errs {
+				fmt.Fprintf(stderr, "%s\n", e)
+			}
+			return 1
+		}
+		report := generateProgressReport(result)
+		if options.output != "" {
+			if err := writeOutputFile(options.output, []byte(report)); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, report)
+		}
+		return 0
 	}
 
 	_, result, ok := analyzeLoadedProgram(program, stderr)
