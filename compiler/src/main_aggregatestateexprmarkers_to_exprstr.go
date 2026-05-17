@@ -51,6 +51,9 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if n.Module {
 			keyword = "module"
 		}
+		if n.Const && n.Module {
+			keyword = "const module"
+		}
 		fmt.Fprintf(w, "%s%s %s: (%d decls)\n", prefix, keyword, n.Name, len(n.Decls))
 		for _, decl := range n.Decls {
 			printDecl(w, decl, level+1)

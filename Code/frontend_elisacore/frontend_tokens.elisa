@@ -58,6 +58,7 @@ enum FrontendTokenKind:
     With
     Context
     Colon
+    Scope
     Arrow
     Dot
     Range

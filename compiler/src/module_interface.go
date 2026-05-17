@@ -105,7 +105,7 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 		if len(decls) == 0 {
 			return nil
 		}
-		return &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: decls}
+		return &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: decls, Module: n.Module, Const: n.Const}
 	case *ast.StaticIfDecl:
 		elifs := make([]ast.StaticElifDecl, 0, len(n.Elifs))
 		for _, elif := range n.Elifs {

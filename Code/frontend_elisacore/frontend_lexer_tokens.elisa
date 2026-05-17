@@ -168,6 +168,8 @@ def frontend_next_token_kind(lexer: mutable FrontendLexer&) -> FrontendTokenKind
 
         if ch == FRONTEND_CH_COLON:
             _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_COLON):
+                return FrontendTokenKind.Scope
             return FrontendTokenKind.Colon
 
         if ch == FRONTEND_CH_COMMA:
@@ -363,6 +365,8 @@ def frontend_next_token(lexer: mutable FrontendLexer&) -> FrontendToken:
 
         if ch == FRONTEND_CH_COLON:
             _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_COLON):
+                return frontend_make_token(FrontendTokenKind.Scope, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
             return frontend_make_token(FrontendTokenKind.Colon, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
 
         if ch == FRONTEND_CH_COMMA:

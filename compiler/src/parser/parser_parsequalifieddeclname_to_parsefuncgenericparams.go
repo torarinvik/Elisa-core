@@ -8,7 +8,19 @@ import (
 
 func (p *Parser) parseQualifiedDeclName() string {
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	for p.match(lexer.TOKEN_DOT) {
+	for p.matchQualifiedNameSeparator() {
+		name += "." + p.expect(lexer.TOKEN_IDENT).Text
+	}
+	return name
+}
+
+func (p *Parser) matchQualifiedNameSeparator() bool {
+	return p.match(lexer.TOKEN_DOT) || p.match(lexer.TOKEN_SCOPE)
+}
+
+func (p *Parser) parseQualifiedIdentNameAfterFirst(first string) string {
+	name := first
+	for p.matchQualifiedNameSeparator() {
 		name += "." + p.expect(lexer.TOKEN_IDENT).Text
 	}
 	return name
@@ -26,6 +38,38 @@ func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
 	p.expectNewline()
 	decls := p.parseDeclBlock()
 	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: isModule}
+}
+func (p *Parser) parseConstModuleDecl() *ast.NamespaceDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_CONST)
+	p.expectIdentText("module")
+	name := p.parseQualifiedDeclName()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	decls := make([]ast.Decl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		decls = append(decls, p.parseConstModuleMemberDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true, Const: true}
+}
+func (p *Parser) parseConstModuleMemberDecl() *ast.ConstDecl {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	var typ ast.TypeExpr
+	if p.match(lexer.TOKEN_COLON) {
+		typ = p.parseTypeExpr()
+	}
+	p.expect(lexer.TOKEN_ASSIGN)
+	value := p.parseExpr()
+	p.expectNewlineAfterValueExpr(value)
+	return &ast.ConstDecl{Position: pos, Name: name, Type: typ, Value: value}
 }
 func (p *Parser) parseUsingDecl() *ast.UsingDecl {
 	pos := p.cur().Pos

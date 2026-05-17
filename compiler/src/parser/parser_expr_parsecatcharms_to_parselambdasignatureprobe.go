@@ -148,7 +148,7 @@ func (p *Parser) parseLambdaParams() ([]ast.ParamDecl, bool) {
 func (p *Parser) parseQualifiedTargetName() (string, lexer.Pos) {
 	pos := p.cur().Pos
 	parts := []string{p.expect(lexer.TOKEN_IDENT).Text}
-	for p.match(lexer.TOKEN_DOT) {
+	for p.matchQualifiedNameSeparator() {
 		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
 	}
 	return strings.Join(parts, "."), pos
@@ -426,7 +426,7 @@ func (p *Parser) parseWithValueClause() ([]ast.WithArg, []ast.WithBundleUse, []a
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		qualifiedName := name
 		hasDot := false
-		for p.match(lexer.TOKEN_DOT) {
+		for p.matchQualifiedNameSeparator() {
 			hasDot = true
 			qualifiedName += "." + p.expect(lexer.TOKEN_IDENT).Text
 		}

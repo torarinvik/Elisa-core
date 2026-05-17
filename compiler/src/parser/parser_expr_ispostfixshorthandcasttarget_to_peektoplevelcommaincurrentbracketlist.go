@@ -499,7 +499,7 @@ func canApplyAggregateState(typ ast.TypeExpr) bool {
 func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string, region string, storageParam string) ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	for p.match(lexer.TOKEN_DOT) {
+	for p.matchQualifiedNameSeparator() {
 		name += "." + p.expect(lexer.TOKEN_IDENT).Text
 	}
 	var typ ast.TypeExpr = &ast.NamedType{Position: pos, Name: name}

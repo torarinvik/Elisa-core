@@ -298,6 +298,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 	switch p.peek() {
 	case lexer.TOKEN_CONST:
+		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "module" {
+			return p.parseConstModuleDecl()
+		}
 		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 			return p.parseConstEnumDecl()
 		}

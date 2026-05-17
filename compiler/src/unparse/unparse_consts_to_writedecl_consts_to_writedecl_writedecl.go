@@ -45,10 +45,19 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.Module {
 			keyword = "module"
 		}
+		if n.Const && n.Module {
+			keyword = "const module"
+		}
 		f.writeLine(level, keyword+" "+n.Name+":")
 		for i, nested := range n.Decls {
-			if i > 0 {
+			if i > 0 && !(n.Const && n.Module) {
 				f.blankLine()
+			}
+			if n.Const && n.Module {
+				if constant, ok := nested.(*ast.ConstDecl); ok {
+					f.writeConstModuleMember(level+1, constant)
+					continue
+				}
 			}
 			f.writeDecl(level+1, nested)
 		}
@@ -523,6 +532,15 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeStaticGenerateStmt(level+1, stmt)
 		}
 	}
+}
+
+func (f *formatter) writeConstModuleMember(level int, n *ast.ConstDecl) {
+	line := n.Name
+	if n.Type != nil {
+		line += ": " + formatTypeExpr(n.Type)
+	}
+	line += " = " + formatExpr(n.Value)
+	f.writePrefixedMultiline(level, "", line)
 }
 
 func (f *formatter) writeStaticGenerateStmt(level int, stmt ast.StaticGenerateStmt) {

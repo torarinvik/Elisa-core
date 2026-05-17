@@ -221,6 +221,10 @@ func (l *Lexer) NextToken() Token {
 
 	case ':':
 		l.advance()
+		if l.match(':') {
+			l.pendingGroupedBlock = false
+			return l.finishToken(Token{Kind: TOKEN_SCOPE, Text: "::", Pos: p})
+		}
 		if l.pendingGroupedBlock && l.parenDepth > 0 {
 			l.groupedBlockContexts = append(l.groupedBlockContexts, groupedBlockContext{
 				ParenDepth: l.parenDepth,

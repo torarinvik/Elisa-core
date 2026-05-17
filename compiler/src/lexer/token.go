@@ -67,6 +67,7 @@ const (
 
 	// Punctuation & Operators
 	TOKEN_COLON     // :
+	TOKEN_SCOPE     // ::
 	TOKEN_ARROW     // ->
 	TOKEN_DOT       // .
 	TOKEN_RANGE     // ..
@@ -193,6 +194,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_TO:       "to",
 
 	TOKEN_COLON:     ":",
+	TOKEN_SCOPE:     "::",
 	TOKEN_ARROW:     "->",
 	TOKEN_FATARROW:  "=>",
 	TOKEN_DOT:       ".",

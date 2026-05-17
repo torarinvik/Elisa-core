@@ -35,6 +35,28 @@ def read(box: Box) -> NameId:
 	}
 }
 
+func TestConstModuleQualifiedConstants(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "const_module_ok.elisa", `
+const module OS:
+	WIN = 1
+	MAC = 2
+	UNIX = 3
+
+def is_win(os: i32) -> bool:
+	return os == OS::WIN
+`)
+	value, ok := result.ConstValues["OS.WIN"]
+	if !ok {
+		t.Fatalf("expected OS.WIN const value to be registered, got keys %#v", result.ConstValues)
+	}
+	if value.Kind != ConstInt || value.Int != 1 {
+		t.Fatalf("expected OS.WIN = 1, got %#v", value)
+	}
+	if _, ok := result.ConstValues["OS.MAC"]; !ok {
+		t.Fatal("expected OS.MAC const value to be registered")
+	}
+}
+
 func TestTypeAliasDuplicateErrors(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_duplicate.elisa", `
 type NameId = u32
@@ -228,5 +250,22 @@ def unwrap_symbol(pair: Pair) -> u32:
 	}
 	if fnType.Params[0].String() != "Pascal.Pair" {
 		t.Fatalf("expected using Pascal to resolve short Pair to Pascal.Pair, got %s", fnType.Params[0])
+	}
+}
+
+func TestModuleScopeQualifiedFunctionCall(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "module_scope_qualified_call.elisa", `
+module LaunchPipeline:
+    def normalize_exit(code: i32) -> i32:
+        return code
+
+def run() -> i32:
+    return LaunchPipeline::normalize_exit(7)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+	if _, ok := result.GlobalScope.Lookup("LaunchPipeline.normalize_exit"); !ok {
+		t.Fatal("expected qualified function symbol LaunchPipeline.normalize_exit")
 	}
 }

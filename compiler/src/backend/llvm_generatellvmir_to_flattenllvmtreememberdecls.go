@@ -237,37 +237,51 @@ func (g *llvmGenerator) emitModule() error {
 	}
 	return nil
 }
+
+func llvmQualifiedDeclName(namespace string, name string) string {
+	if namespace == "" || name == "" {
+		return name
+	}
+	return namespace + "." + name
+}
+
 func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
+	return g.predeclareDeclTypesInNamespace(decl, "")
+}
+
+func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace string) error {
 	switch n := decl.(type) {
 	case *ast.StructDecl:
-		if _, err := g.ensureNamedStructType(n.Name); err != nil {
+		qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
+		if _, err := g.ensureNamedStructType(qualifiedName); err != nil {
 			return err
 		}
 		if len(n.GenericParams) == 0 {
-			if st, ok := g.lookupStructType(n.Name); ok {
-				_, err := g.ensureStructBody(n.Name, st)
+			if st, ok := g.lookupStructType(qualifiedName); ok {
+				_, err := g.ensureStructBody(qualifiedName, st)
 				return err
 			}
 		}
 	case *ast.EnumDecl:
-		t, ok := g.result.NamedTypes[n.Name]
+		qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
+		t, ok := g.result.NamedTypes[qualifiedName]
 		if !ok {
-			return fmt.Errorf("missing semantic enum type %s", n.Name)
+			return fmt.Errorf("missing semantic enum type %s", qualifiedName)
 		}
 		enumType, ok := t.(*semantic.EnumType)
 		if !ok {
-			return fmt.Errorf("declaration %s does not resolve to enum type", n.Name)
+			return fmt.Errorf("declaration %s does not resolve to enum type", qualifiedName)
 		}
 		if enumType.Packed {
 			_, err := g.ensurePackedEnumStorageType(enumType)
 			return err
 		}
-		_, err := g.ensureEnumBody(n.Name, enumType)
+		_, err := g.ensureEnumBody(qualifiedName, enumType)
 		return err
 	case *ast.TreeDecl:
-		return g.predeclareTreeDeclTypes(n)
+		return g.predeclareTreeDeclTypes(n, llvmQualifiedDeclName(namespace, n.Name))
 	case *ast.ExternTypeDecl:
-		_, err := g.ensureNamedStructType(n.Name)
+		_, err := g.ensureNamedStructType(llvmQualifiedDeclName(namespace, n.Name))
 		return err
 	case *ast.FuncDecl, *ast.ExternFuncDecl:
 		if fnDecl, ok := decl.(*ast.FuncDecl); ok && fnDecl.Static {
@@ -345,9 +359,18 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		return nil
 	case *ast.ContextDecl:
 		return nil
+	case *ast.NamespaceDecl:
+		childNamespace := llvmQualifiedDeclName(namespace, n.Name)
+		for _, child := range n.Decls {
+			if err := g.predeclareDeclTypesInNamespace(child, childNamespace); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *ast.StoreDecl:
-		if st, ok := g.lookupStructType(n.Name); ok {
-			_, err := g.ensureStructBody(n.Name, st)
+		qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
+		if st, ok := g.lookupStructType(qualifiedName); ok {
+			_, err := g.ensureStructBody(qualifiedName, st)
 			return err
 		}
 		return nil
@@ -367,6 +390,10 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 	return nil
 }
 func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
+	return g.emitDeclInNamespace(decl, "")
+}
+
+func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) error {
 	switch n := decl.(type) {
 	case *ast.ConstDecl:
 		return nil
@@ -380,29 +407,31 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		return nil
 	case *ast.StructDecl:
 		if len(n.GenericParams) == 0 {
-			if st, ok := g.lookupStructType(n.Name); ok {
-				_, err := g.ensureStructBody(n.Name, st)
+			qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
+			if st, ok := g.lookupStructType(qualifiedName); ok {
+				_, err := g.ensureStructBody(qualifiedName, st)
 				return err
 			}
 		}
 		return nil
 	case *ast.EnumDecl:
-		t, ok := g.result.NamedTypes[n.Name]
+		qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
+		t, ok := g.result.NamedTypes[qualifiedName]
 		if !ok {
-			return fmt.Errorf("missing semantic enum type %s", n.Name)
+			return fmt.Errorf("missing semantic enum type %s", qualifiedName)
 		}
 		enumType, ok := t.(*semantic.EnumType)
 		if !ok {
-			return fmt.Errorf("declaration %s does not resolve to enum type", n.Name)
+			return fmt.Errorf("declaration %s does not resolve to enum type", qualifiedName)
 		}
 		if enumType.Packed {
 			_, err := g.ensurePackedEnumStorageType(enumType)
 			return err
 		}
-		_, err := g.ensureEnumBody(n.Name, enumType)
+		_, err := g.ensureEnumBody(qualifiedName, enumType)
 		return err
 	case *ast.TreeDecl:
-		return g.emitTreeDecl(n)
+		return g.emitTreeDecl(n, llvmQualifiedDeclName(namespace, n.Name))
 	case *ast.FuncDecl:
 		if n.Static {
 			return nil
@@ -479,9 +508,18 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		return nil
 	case *ast.ContextDecl:
 		return nil
+	case *ast.NamespaceDecl:
+		childNamespace := llvmQualifiedDeclName(namespace, n.Name)
+		for _, child := range n.Decls {
+			if err := g.emitDeclInNamespace(child, childNamespace); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *ast.StoreDecl:
-		if st, ok := g.lookupStructType(n.Name); ok {
-			_, err := g.ensureStructBody(n.Name, st)
+		qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
+		if st, ok := g.lookupStructType(qualifiedName); ok {
+			_, err := g.ensureStructBody(qualifiedName, st)
 			return err
 		}
 		return nil
@@ -499,17 +537,17 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		return fmt.Errorf("unsupported declaration %T", decl)
 	}
 }
-func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl) error {
+func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl, qualifiedName string) error {
 	if decl == nil {
 		return nil
 	}
-	familyBase, ok := g.result.NamedTypes[decl.Name]
+	familyBase, ok := g.result.NamedTypes[qualifiedName]
 	if !ok {
-		return fmt.Errorf("missing semantic tree type %s", decl.Name)
+		return fmt.Errorf("missing semantic tree type %s", qualifiedName)
 	}
 	familyType, ok := familyBase.(*semantic.TreeType)
 	if !ok || familyType == nil {
-		return fmt.Errorf("declaration %s does not resolve to tree type", decl.Name)
+		return fmt.Errorf("declaration %s does not resolve to tree type", qualifiedName)
 	}
 	for _, memberDecl := range flattenLLVMTreeMemberDecls(decl.Members) {
 		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
@@ -560,17 +598,17 @@ func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl) error {
 	}
 	return nil
 }
-func (g *llvmGenerator) emitTreeDecl(decl *ast.TreeDecl) error {
+func (g *llvmGenerator) emitTreeDecl(decl *ast.TreeDecl, qualifiedName string) error {
 	if decl == nil {
 		return nil
 	}
-	familyBase, ok := g.result.NamedTypes[decl.Name]
+	familyBase, ok := g.result.NamedTypes[qualifiedName]
 	if !ok {
-		return fmt.Errorf("missing semantic tree type %s", decl.Name)
+		return fmt.Errorf("missing semantic tree type %s", qualifiedName)
 	}
 	familyType, ok := familyBase.(*semantic.TreeType)
 	if !ok || familyType == nil {
-		return fmt.Errorf("declaration %s does not resolve to tree type", decl.Name)
+		return fmt.Errorf("declaration %s does not resolve to tree type", qualifiedName)
 	}
 	for _, memberDecl := range decl.Members {
 		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)

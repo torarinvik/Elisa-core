@@ -103,3 +103,87 @@ func TestParseModuleDeclPreservesModuleSpelling(t *testing.T) {
 		t.Fatalf("expected formatter not to rewrite module spelling to namespace, got:\n%s", formatted)
 	}
 }
+
+func TestParseConstModuleDeclPreservesConstModuleSpelling(t *testing.T) {
+	file, errs := parseSourceFile(t, `const module OS:
+    WIN = 1
+    MAC: i32 = 2
+    UNIX = 3
+
+def is_win(os: i32) -> bool:
+    return os == OS::WIN
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 2 {
+		t.Fatalf("expected 2 decls, got %d", len(file.Decls))
+	}
+	module, ok := file.Decls[0].(*ast.NamespaceDecl)
+	if !ok {
+		t.Fatalf("expected const module to parse as namespace decl, got %T", file.Decls[0])
+	}
+	if !module.Module || !module.Const {
+		t.Fatalf("expected const module flags to be preserved, got Module=%v Const=%v", module.Module, module.Const)
+	}
+	if module.Name != "OS" {
+		t.Fatalf("expected module name OS, got %q", module.Name)
+	}
+	if len(module.Decls) != 3 {
+		t.Fatalf("expected 3 const module members, got %d", len(module.Decls))
+	}
+	if first, ok := module.Decls[0].(*ast.ConstDecl); !ok || first.Name != "WIN" {
+		t.Fatalf("expected first const module member WIN, got %T %#v", module.Decls[0], module.Decls[0])
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "const module OS:") {
+		t.Fatalf("expected formatter to preserve const module spelling, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "    WIN = 1") || !strings.Contains(formatted, "    MAC: i32 = 2") {
+		t.Fatalf("expected formatter to write shorthand const module members, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, "const WIN") || strings.Contains(formatted, "module OS:") && !strings.Contains(formatted, "const module OS:") {
+		t.Fatalf("expected formatter not to rewrite const module members as top-level consts, got:\n%s", formatted)
+	}
+}
+
+func TestParseScopeQualifiedModuleNamesAndCalls(t *testing.T) {
+	file, errs := parseSourceFile(t, `module Ports::Launch:
+    type Code = i32
+
+    def exit_code() -> Code:
+        return 7
+
+def main() -> i32:
+    return Ports::Launch::exit_code()
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	module, ok := file.Decls[0].(*ast.NamespaceDecl)
+	if !ok {
+		t.Fatalf("expected module decl, got %T", file.Decls[0])
+	}
+	if module.Name != "Ports.Launch" {
+		t.Fatalf("expected scope-qualified module name to normalize to Ports.Launch, got %q", module.Name)
+	}
+	mainDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected main decl, got %T", file.Decls[1])
+	}
+	ret, ok := mainDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", mainDecl.Body[0])
+	}
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call expr, got %T", ret.Value)
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok {
+		t.Fatalf("expected scope-qualified call target to parse as ident, got %T", call.Func)
+	}
+	if ident.Name != "Ports.Launch.exit_code" {
+		t.Fatalf("expected normalized call target Ports.Launch.exit_code, got %q", ident.Name)
+	}
+}

@@ -94,6 +94,7 @@ type NamespaceDecl struct {
 	Name     string
 	Decls    []Decl
 	Module   bool
+	Const    bool
 }
 type UsingDecl struct {
 	Position lexer.Pos

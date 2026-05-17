@@ -400,6 +400,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 			return p.parseRewriteExpr()
 		}
 		tok := p.advance()
+		if p.peek() == lexer.TOKEN_SCOPE {
+			return &ast.Ident{Position: tok.Pos, Name: p.parseQualifiedIdentNameAfterFirst(tok.Text)}
+		}
 		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LPAREN) {
 			typeArgs := p.parseStructLiteralTypeArgs()
 			p.expect(lexer.TOKEN_LPAREN)
