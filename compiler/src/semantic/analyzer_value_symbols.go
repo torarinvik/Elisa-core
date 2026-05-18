@@ -64,6 +64,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
 				fnType.Static = n.Static
 				initLookupName, constructorSugar := a.constructorDeclInitHookName(scoped.Namespace, n, fnType)
+				explicitInit := funcHasInitAnnotation(n)
 				symbolName := qualifiedName
 				switch n.Name {
 				case "__cast__":
@@ -88,6 +89,8 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				default:
 					if constructorSugar {
 						a.registerInitHook(scoped.Namespace, n, initLookupName, fnType, sym)
+					} else if explicitInit {
+						a.registerInitHook(scoped.Namespace, n, "__init__", fnType, sym)
 					}
 				}
 			case *ast.AttributeDecl:

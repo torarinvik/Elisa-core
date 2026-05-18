@@ -67,8 +67,18 @@ func (a *Analyzer) structLiteralAsPascalCaseFunctionCall(expr *ast.StructLitExpr
 	if a == nil || expr == nil || expr.Brace || expr.Name == "" {
 		return nil, false
 	}
-	sym, _, ok := a.lookupVisibleGlobal(expr.Name)
-	if !ok || sym == nil {
+	var sym *Symbol
+	if a.currentScope != nil {
+		if localSym, ok := a.currentScope.Lookup(expr.Name); ok {
+			sym = localSym
+		}
+	}
+	if sym == nil {
+		if globalSym, _, ok := a.lookupVisibleGlobal(expr.Name); ok {
+			sym = globalSym
+		}
+	}
+	if sym == nil {
 		return nil, false
 	}
 	if sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc {

@@ -112,6 +112,10 @@ func (a *Analyzer) constructorDeclInitHookName(namespace string, decl *ast.FuncD
 	return "__init__", true
 }
 
+func funcHasInitAnnotation(fn *ast.FuncDecl) bool {
+	return funcHasAnnotation(fn, "init")
+}
+
 func (a *Analyzer) registerCastHook(namespace string, decl *ast.FuncDecl, fnType *FuncType, sym *Symbol) {
 	if a == nil || decl == nil || fnType == nil || sym == nil {
 		return

@@ -13,6 +13,7 @@ include "./stores.elisa"
 extern strlen(s: u8&) -> usize
 extern strcmp(lhs: u8&, rhs: u8&) -> int
 extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
+extern memmove(dest: mutable void&, src: void&, n: usize) -> mutable void&
 extern memcmp(lhs: void&, rhs: void&, n: usize) -> int
 extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
 extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
@@ -195,11 +196,9 @@ def runtime_strlen(value: u8&?) -> usize:
 
 	if src[0] == 0:
 		return 0
-
-	len: mutable usize = 0
-	if lookup_cached_string_len(src, len.ref[mutable usize&]) != 0:
-		return len
-
+	# Conservative correctness path:
+	# do not consult pointer-keyed cache here; non-permanent and reused
+	# arena addresses can make cache lookups unsafe across lifetimes.
 	return strlen(src)
 
 # ------------------------------------------------------------
@@ -208,39 +207,12 @@ def runtime_strlen(value: u8&?) -> usize:
 
 def intern_small_string(src: u8&, len: usize) -> heap u8&:
 	can Memory.Allocate, Abort.Panic:
-		if len == 0:
-			empty: heap u8& = alloc_perm(1).cast[heap u8&]
-			empty[0] <- 0
-			return empty
-
-		# FNV-1a hash
-		hash: mutable u64 = 1469598103934665603
-		for i in 0..<len:
-			hash ^= src[i].u64()
-			hash *= 1099511628211
-
-		bucket: usize = (hash & (CTX_SMALL_STRING_CACHE_BUCKETS - 1).u64()).usize()
-
-		entry: mutable heap SmallStringCacheEntry&? = small_string_cache[bucket]
-		trusted Unsafe.AssumeProgress:
-			while entry != null:
-				if entry.len == len and memcmp(entry.text[0].ref[void&], src.cast[void&], len) == 0:
-					return entry.text[0].ref[heap u8&]
-				entry <- entry.next
-
-		new_entry: mutable heap SmallStringCacheEntry& = alloc_perm(
-			(size_of(SmallStringCacheEntry) + len + 1).i64()
-		).cast[heap SmallStringCacheEntry&]
-
-		new_entry.next <- small_string_cache[bucket]
-		new_entry.len <- len
-		memcpy(new_entry.text[0].ref[mutable void&], src.cast[void&], len)
-		new_entry.text[len] <- 0
-		small_string_cache[bucket] <- new_entry
-
-		register_perm_string_len(new_entry.text[0].ref[u8&], len)
-
-		return new_entry.text[0].ref[heap u8&]
+		out: heap u8& = alloc_perm((len + 1).i64()).cast[heap u8&]
+		if len > 0:
+			memcpy(out.cast[mutable void&], src.cast[void&], len)
+		out[len] <- 0
+		register_perm_string_len(out.cast[u8&], len)
+		return out
 
 # ------------------------------------------------------------
 # Integer / bool / char to string conversion
@@ -326,7 +298,9 @@ def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -
 			b.cap <- new_cap
 
 		assert b.data != null
-		memcpy((b.data + b.len.usize()).cast[mutable void&], src.cast[void&], suffix_len)
+		# Append may legally receive a suffix that aliases builder storage.
+		# Use memmove to preserve defined behavior in overlap cases.
+		memmove((b.data + b.len.usize()).cast[mutable void&], src.cast[void&], suffix_len)
 		b.len += suffix_len.i64()
 		b.data[b.len.usize()] <- 0
 		return b

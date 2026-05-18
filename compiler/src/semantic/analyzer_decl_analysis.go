@@ -124,6 +124,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionGuardAnnotation(annotation, fn, signature)
 			case "internal":
 				// Interface visibility marker only; it is not a runtime/test annotation.
+			case "init":
+				// Constructor hook marker; registered during value-symbol collection.
 			default:
 				accepted = append(accepted, annotation)
 			}
@@ -255,6 +257,9 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
+	if annotation.Name == "init" {
+		return a.validateFunctionInitAnnotation(annotation, fn, signature)
+	}
 	if annotation.Name == "inline" {
 		if len(annotation.Args) != 1 {
 			a.errorf(annotation.Position, "@inline on function %q expects exactly one mode argument", fn.Name)
@@ -300,6 +305,56 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	case "test", "bench":
 		if !isVoidType(signature.Return) {
 			a.errorf(annotation.Position, "@%s function %q must return void, got %s", annotation.Name, fn.Name, signature.Return)
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) validateFunctionInitAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if len(annotation.Args) > 1 {
+		a.errorf(annotation.Position, "@init on function %q expects zero arguments or one return-type name", fn.Name)
+		return false
+	}
+	if len(signature.ImplicitParamNames) != 0 {
+		a.errorf(annotation.Position, "@init function %q must not declare implicit parameters", fn.Name)
+		return false
+	}
+	if len(signature.TypeParams) != 0 || len(signature.RefStorageParams) != 0 || len(signature.RefStateParams) != 0 || len(signature.RegionParams) != 0 || len(signature.PermissionParams) != 0 || len(signature.GenericParams) != 0 {
+		a.errorf(annotation.Position, "@init function %q must not be generic", fn.Name)
+		return false
+	}
+	if signature.Variadic {
+		a.errorf(annotation.Position, "@init function %q must not be variadic", fn.Name)
+		return false
+	}
+	if signature.Return == nil || isVoidType(signature.Return) {
+		a.errorf(annotation.Position, "@init function %q must return a concrete struct type", fn.Name)
+		return false
+	}
+	base, _, _, ok := structLiteralBaseAndBindings(signature.Return)
+	if !ok || base == nil {
+		a.errorf(annotation.Position, "@init function %q must return a concrete struct type, got %s", fn.Name, signature.Return)
+		return false
+	}
+	if len(annotation.Args) == 1 {
+		targetName := strings.TrimSpace(annotation.Args[0])
+		if targetName == "" {
+			a.errorf(annotation.Position, "@init on function %q expects a non-empty return-type name", fn.Name)
+			return false
+		}
+		targetType, _, ok := a.lookupVisibleType(targetName)
+		if !ok {
+			a.errorf(annotation.Position, "@init on function %q references unknown type %q", fn.Name, targetName)
+			return false
+		}
+		targetBase, _, _, ok := structLiteralBaseAndBindings(targetType)
+		if !ok || targetBase == nil {
+			a.errorf(annotation.Position, "@init on function %q target %q is not a concrete struct type", fn.Name, targetName)
+			return false
+		}
+		if targetBase.Name != base.Name {
+			a.errorf(annotation.Position, "@init on function %q targets %s but returns %s", fn.Name, targetType, signature.Return)
 			return false
 		}
 	}
@@ -478,7 +533,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init":
 		return true
 	default:
 		return false

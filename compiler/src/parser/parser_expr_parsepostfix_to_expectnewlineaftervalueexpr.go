@@ -195,17 +195,6 @@ func (p *Parser) parsePostfix() ast.Expr {
 			}
 			expr = p.attachOptionalCallWithClause(expr)
 
-		case lexer.TOKEN_IF:
-			if !p.allowTernary {
-				return expr
-			}
-			pos := p.cur().Pos
-			p.advance()
-			cond := p.parseOr()
-			p.expect(lexer.TOKEN_ELSE)
-			alt := p.parseExpr()
-			expr = &ast.TernaryExpr{Position: pos, Value: expr, Cond: cond, Alt: alt}
-
 		default:
 			return expr
 		}
