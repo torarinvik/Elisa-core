@@ -1,0 +1,78 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+struct DemoPcm:
+    format: mutable u32
+    sample_buffer: mutable void&?
+    num_samples: mutable u32
+
+@test
+def cxx_parity_byte_buffer_smoke() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        arena: mutable Arena = zeroed
+        defer block:
+            arena_free(arena.ref[Arena&])
+
+        src: mutable u8[4] = [1.u8(), 2.u8(), 3.u8(), 4.u8()]
+        copied: ByteBuffer = cxx_byte_buffer_from(arena.ref[Arena&], src[0].ref[void&], 4)
+        assert_eq(copied.len, 4)
+        assert copied.data != null
+        assert_eq(copied.data[0], 1.u8())
+        assert_eq(copied.data[3], 4.u8())
+
+        scratch: mutable ByteBuffer = cxx_byte_buffer_alloc(arena.ref[Arena&], 8)
+        assert_eq(scratch.len, 8)
+        assert scratch.data != null
+        assert_eq(scratch.data[7], 0.u8())
+        cxx_byte_buffer_clear(scratch.ref[ByteBuffer&])
+        assert_eq(scratch.len, 0)
+
+        heap_copy: mutable HeapByteBuffer = cxx_heap_byte_buffer_from(src[0].ref[void&], 4)
+        assert_eq(heap_copy.len, 4)
+        assert heap_copy.data != null
+        assert_eq(heap_copy.data[2], 3.u8())
+        cxx_heap_byte_buffer_free(heap_copy.ref[HeapByteBuffer&])
+        assert heap_copy.data == null
+        assert_eq(heap_copy.len, 0)
+
+@test
+def cxx_parity_abi_smoke() -> void:
+    can Abort.Panic:
+        pcm: mutable DemoPcm = DemoPcm(1u32, null, 256u32)
+        read: DemoPcm = cxx_read_value[DemoPcm](pcm.ref[void&])
+        assert_eq(read.format, 1u32)
+        assert_eq(read.num_samples, 256u32)
+
+        out: mutable DemoPcm = zeroed
+        cxx_write_value[DemoPcm](out.ref[void&], DemoPcm(0u32, null, 128u32))
+        assert_eq(out.format, 0u32)
+        assert_eq(out.num_samples, 128u32)
+
+@test
+def cxx_parity_container_smoke() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        arena: mutable Arena = zeroed
+        defer block:
+            arena_free(arena.ref[Arena&])
+
+        q: mutable Deque[i32] = cxx_deque_new[i32](arena.ref[Arena&], 2)
+        cxx_deque_push_back[i32](arena.ref[Arena&], q.ref[Deque[i32]&], 10)
+        cxx_deque_push_back[i32](arena.ref[Arena&], q.ref[Deque[i32]&], 20)
+        cxx_deque_push_back[i32](arena.ref[Arena&], q.ref[Deque[i32]&], 30)
+        assert_eq(arena_deque_len(q.ref[Deque[i32]&]), 3)
+        popped: mutable i32 = 0
+        assert cxx_deque_pop_front[i32](q.ref[Deque[i32]&], popped.ref[i32&])
+        assert_eq(popped, 10)
+
+        bytes: mutable darray[u8] = cxx_vector_new[u8](arena.ref[Arena&], 0)
+        src: mutable u8[3] = [7.u8(), 8.u8(), 9.u8()]
+        cxx_vector_assign_bytes(arena.ref[Arena&], bytes.ref[darray[u8]&], src[0].ref[void&], 3)
+        assert_eq(bytes.count, 3)
+        assert_eq(bytes[1], 8.u8())
+
+        map: mutable dict[u32, darray[u8]] = cxx_hash_map_new[u32, darray[u8]](arena.ref[Arena&], 2)
+        _ = try cxx_hash_map_put[u32, darray[u8]](arena.ref[Arena&], map.ref[dict[u32, darray[u8]]&], 3u32, bytes) else null
+        assert cxx_hash_map_contains[u32, darray[u8]](map.ref[dict[u32, darray[u8]]&], 3u32)
+        found: mutable darray[u8]&? = cxx_hash_map_get[u32, darray[u8]](map.ref[dict[u32, darray[u8]]&], 3u32)
+        assert found != null
+        assert_eq(found.cast[darray[u8]&].count, 3)
+        assert cxx_hash_map_remove[u32, darray[u8]](map.ref[dict[u32, darray[u8]]&], 3u32)
