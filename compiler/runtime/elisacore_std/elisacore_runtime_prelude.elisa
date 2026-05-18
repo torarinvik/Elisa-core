@@ -207,6 +207,14 @@ def runtime_strlen(value: u8&?) -> usize:
 
 def intern_small_string(src: u8&, len: usize) -> heap u8&:
 	can Memory.Allocate, Abort.Panic:
+		# Conservative baseline after short-string crash investigations:
+		# always allocate+copy and avoid cache-backed return aliases.
+		# This path stays until the regression family proves a safe
+		# small-string cache design under mixed string-builder flows.
+		# TODO(runtime): reintroduce cache path only after these pass:
+		# - short_string_builder_finish_regression
+		# - short_string_builder_mixed_inputs_regression
+		# - short_string_builder_cross_path_stress_regression
 		out: heap u8& = alloc_perm((len + 1).i64()).cast[heap u8&]
 		if len > 0:
 			memcpy(out.cast[mutable void&], src.cast[void&], len)

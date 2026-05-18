@@ -112,6 +112,12 @@ def make_queue_label(vqid: int) -> cstr:
 		builder <- rt_string_builder_append(builder, "]")
 		return rt_string_builder_finish(builder)
 
+def make_queue_label_with_suffix(vqid: int, suffix: cstr) -> cstr:
+	can Memory.Allocate, Abort.Panic, Console.Format:
+		builder: mutable heap StringBuilder& = rt_string_builder_new(make_queue_label(vqid))
+		builder <- rt_string_builder_append(builder, suffix)
+		return rt_string_builder_finish(builder)
+
 @test
 def short_string_builder_finish_regression() -> void:
 	can Abort.Panic, Memory.Allocate, Console.Format:
@@ -119,6 +125,49 @@ def short_string_builder_finish_regression() -> void:
 			label: cstr = make_queue_label((i %% 260).int())
 			assert ctx_strlen(label) >= 6
 			assert ctx_strlen(label) <= 8
+
+@test
+def short_string_builder_mixed_inputs_regression() -> void:
+	can Abort.Panic, Memory.Allocate, Console.Format:
+		for i in 0..<24000:
+			slot: int = (i %% 5).int()
+			vqid: mutable int = 0
+			expected: mutable cstr = ""
+			if slot == 0:
+				vqid <- 0
+				expected <- "ASC[0]"
+			if slot == 1:
+				vqid <- 9
+				expected <- "ASC[9]"
+			if slot == 2:
+				vqid <- 99
+				expected <- "ASC[99]"
+			if slot == 3:
+				vqid <- 100
+				expected <- "ASC[100]"
+			if slot == 4:
+				vqid <- 259
+				expected <- "GFX[259]"
+
+			plain: cstr = make_queue_label_with_suffix(vqid, "")
+			assert plain == expected
+			assert ctx_strlen(plain) >= 6
+			assert ctx_strlen(plain) <= 8
+
+@test
+def short_string_builder_cross_path_stress_regression() -> void:
+	can Abort.Panic, Memory.Allocate, Console.Format:
+		total: mutable i64 = 0
+		for i in 0..<16000:
+			base: cstr = make_queue_label((i %% 260).int())
+			builder: mutable heap StringBuilder& = rt_string_builder_new(base)
+			builder <- rt_string_builder_append(builder, ":")
+			builder <- rt_string_builder_append(builder, rt_int_to_string((ctx_strlen(base) + (i %% 11).i64()).i64()))
+			label: cstr = rt_string_builder_finish(builder)
+			assert ctx_strlen(label) >= 8
+			assert ctx_strlen(label) <= 12
+			total += ctx_strlen(label)
+		assert total > 0
 	`, runtimeInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write string builder regression fixture: %v", err)
@@ -137,7 +186,11 @@ def short_string_builder_finish_regression() -> void:
 	for _, check := range []string{
 		"[ RUN      ] short_string_builder_finish_regression",
 		"[       OK ] short_string_builder_finish_regression",
-		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+		"[ RUN      ] short_string_builder_mixed_inputs_regression",
+		"[       OK ] short_string_builder_mixed_inputs_regression",
+		"[ RUN      ] short_string_builder_cross_path_stress_regression",
+		"[       OK ] short_string_builder_cross_path_stress_regression",
+		"[ SUMMARY  ] 3 test(s) selected; passed=3 skipped=0 failed=0",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected string builder regression output to contain %q, got:\n%s", check, output)
