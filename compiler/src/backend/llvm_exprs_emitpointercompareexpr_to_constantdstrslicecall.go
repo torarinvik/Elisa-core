@@ -216,6 +216,9 @@ func (s *functionState) emitOptionalCompareOperandValue(expr ast.Expr, optionalT
 	return optionalValue, err
 }
 func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if _, ok := resultType.(*semantic.RefType); !ok {
+		return nil, nil, false, nil
+	}
 	leftRef, leftIsRef := leftType.(*semantic.RefType)
 	rightRef, rightIsRef := rightType.(*semantic.RefType)
 	leftIsNumeric := isNumericType(leftType)

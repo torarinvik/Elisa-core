@@ -39,21 +39,37 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	}
 	switch expr.Op {
 	case lexer.TOKEN_AND, lexer.TOKEN_OR:
+		left = valueContextOperandType(left)
+		right = valueContextOperandType(right)
 		if !IsBoolType(left) || !IsBoolType(right) {
 			a.errorf(expr.Pos(), "logical operator requires bool operands")
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
-		if !typesComparableForEquality(left, right) {
+		compareLeft := left
+		compareRight := right
+		if !typesComparableForEquality(compareLeft, compareRight) && !IsNullType(left) && !IsNullType(right) {
+			valueLeft := valueContextOperandType(left)
+			valueRight := valueContextOperandType(right)
+			if typesComparableForEquality(valueLeft, valueRight) {
+				compareLeft = valueLeft
+				compareRight = valueRight
+			}
+		}
+		if !typesComparableForEquality(compareLeft, compareRight) {
 			a.errorf(expr.Pos(), "cannot compare %s and %s", left, right)
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+		left = valueContextOperandType(left)
+		right = valueContextOperandType(right)
 		if !IsNumericType(left) || !IsNumericType(right) {
 			a.errorf(expr.Pos(), "comparison requires numeric operands")
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS:
+		left = mutableScalarRefValueContextOperandType(left)
+		right = mutableScalarRefValueContextOperandType(right)
 		if lref, ok := left.(*RefType); ok && IsIntegralStorageType(right) {
 			if a.enforceUnsafePermissions {
 				a.recordFunctionPermissionRefs(unsafePointerArithmeticRefs(expr.Position))
@@ -71,6 +87,8 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 				return result
 			}
 		}
+		left = valueContextOperandType(left)
+		right = valueContextOperandType(right)
 		if !IsNumericType(left) || !IsNumericType(right) {
 			a.errorf(expr.Pos(), "operator requires numeric operands")
 			return invalidType
@@ -79,6 +97,8 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	case lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 		lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+		left = valueContextOperandType(left)
+		right = valueContextOperandType(right)
 		requiresIntegral := expr.Op == lexer.TOKEN_PERCENT || expr.Op == lexer.TOKEN_CARET || expr.Op == lexer.TOKEN_PIPE || expr.Op == lexer.TOKEN_AMPERSAND || expr.Op == lexer.TOKEN_LSHIFT || expr.Op == lexer.TOKEN_RSHIFT
 		if !IsNumericType(left) || !IsNumericType(right) {
 			a.errorf(expr.Pos(), "operator requires numeric operands")
@@ -92,6 +112,34 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func valueContextOperandType(t Type) Type {
+	if ref, ok := t.(*RefType); ok && ref != nil {
+		if IsNumericType(ref.Elem) || IsBoolType(ref.Elem) {
+			return ref.Elem
+		}
+	}
+	return t
+}
+
+func mutableScalarRefValueContextOperandType(t Type) Type {
+	if ref, ok := t.(*RefType); ok && ref != nil {
+		if ref.Mutable && (IsNumericType(ref.Elem) || IsBoolType(ref.Elem)) && !isBytePointerArithmeticRef(ref) {
+			return ref.Elem
+		}
+	}
+	return t
+}
+
+func isBytePointerArithmeticRef(ref *RefType) bool {
+	if ref == nil {
+		return false
+	}
+	if builtin, ok := ref.Elem.(*BuiltinType); ok && builtin != nil {
+		return builtin.Name == "u8"
+	}
+	return false
 }
 func (a *Analyzer) analyzeSpanAlgebraExpr(expr *ast.BinaryExpr, left Type, right Type) (Type, bool) {
 	if expr == nil || expr.Op != lexer.TOKEN_PLUS {

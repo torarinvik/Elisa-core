@@ -122,6 +122,9 @@ func AssignableTo(dst, src Type) bool {
 	if IsNumericType(dst) && IsNumericType(src) {
 		return true
 	}
+	if sr, ok := src.(*RefType); ok && sr != nil && (IsNumericType(sr.Elem) || IsBoolType(sr.Elem)) && SameType(dst, sr.Elem) {
+		return true
+	}
 	if IsNullType(src) {
 		if r, ok := dst.(*RefType); ok {
 			return r.State != RefStateNonNull

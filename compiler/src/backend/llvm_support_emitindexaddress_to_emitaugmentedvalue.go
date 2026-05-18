@@ -162,6 +162,15 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 	if expected == nil || actual == nil || semantic.SameType(actual, expected) {
 		return value, nil
 	}
+	if actualRef, ok := actual.(*semantic.RefType); ok && actualRef != nil {
+		if _, expectedIsRef := expected.(*semantic.RefType); !expectedIsRef && semantic.SameType(actualRef.Elem, expected) && (isNumericType(actualRef.Elem) || semantic.IsBoolType(actualRef.Elem)) {
+			loaded, err := s.loadValue(value, actualRef.Elem, "ref.value")
+			if err != nil {
+				return nil, err
+			}
+			return s.coerceValue(loaded, actualRef.Elem, expected)
+		}
+	}
 	if semantic.IsNeverType(actual) {
 		if isVoidType(expected) {
 			return nil, nil
@@ -738,11 +747,22 @@ func (s *functionState) binaryOperandType(op lexer.TokenKind, left semantic.Type
 		lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 		lexer.TOKEN_PIPE, lexer.TOKEN_CARET, lexer.TOKEN_AMPERSAND,
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+		left = backendValueContextOperandType(left)
+		right = backendValueContextOperandType(right)
 		if isNumericType(left) && isNumericType(right) {
 			return semantic.CommonNumericType(left, right)
 		}
 	}
 	return left
+}
+
+func backendValueContextOperandType(t semantic.Type) semantic.Type {
+	if ref, ok := t.(*semantic.RefType); ok && ref != nil {
+		if isNumericType(ref.Elem) || semantic.IsBoolType(ref.Elem) {
+			return ref.Elem
+		}
+	}
+	return t
 }
 func (s *functionState) emitAugmentedValue(op lexer.TokenKind, left C.LLVMValueRef, right C.LLVMValueRef, t semantic.Type) (C.LLVMValueRef, error) {
 	switch op {
