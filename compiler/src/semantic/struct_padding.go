@@ -33,6 +33,9 @@ func (a *Analyzer) warnOnAvoidableStructPadding(decls []scopedDecl) {
 		if !ok {
 			continue
 		}
+		if annotationsHave(stDecl.Annotations, "fixed_layout") {
+			continue
+		}
 		qualifiedName := joinQualifiedName(scoped.Namespace, stDecl.Name)
 		st, _ := a.namedTypes[qualifiedName].(*StructType)
 		warning, ok := a.analyzeAvoidableStructPadding(st)

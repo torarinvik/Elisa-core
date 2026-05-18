@@ -178,7 +178,7 @@ func isSupportedEnumAnnotation(name string) bool {
 
 func isSupportedStructAnnotation(name string) bool {
 	switch name {
-	case "align", "cacheline_aligned":
+	case "align", "cacheline_aligned", "fixed_layout":
 		return true
 	default:
 		return false
@@ -333,6 +333,11 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 			alignment = cachelineAlignment
 			hasAlignment = true
 			alignmentSource = annotation.Name
+		case "fixed_layout":
+			if len(annotation.Args) != 0 {
+				a.errorf(annotation.Position, "@fixed_layout on struct %q does not take arguments", structDecl.Name)
+				continue
+			}
 		}
 	}
 	if hasAlignment {
