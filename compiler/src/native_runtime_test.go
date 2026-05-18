@@ -87,6 +87,64 @@ def string_view_empty_slice_test() -> void:
 	}
 }
 
+func TestRunCLINativeRuntimeStringBuilderShortStringRegression(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "native_runtime_string_builder_short_string_regression.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	src := fmt.Sprintf(`# include %q
+
+def make_queue_label(vqid: int) -> cstr:
+	can Memory.Allocate, Abort.Panic, Console.Format:
+		queue: cstr = "GFX" if vqid > 254 else "ASC"
+		builder: mutable heap StringBuilder& = rt_string_builder_new(queue)
+		builder <- rt_string_builder_append(builder, "[")
+		builder <- rt_string_builder_append(builder, rt_int_to_string((vqid %% 260).i64()))
+		builder <- rt_string_builder_append(builder, "]")
+		return rt_string_builder_finish(builder)
+
+@test
+def short_string_builder_finish_regression() -> void:
+	can Abort.Panic, Memory.Allocate, Console.Format:
+		for i in 0..<20000:
+			label: cstr = make_queue_label((i %% 260).int())
+			assert ctx_strlen(label) >= 6
+			assert ctx_strlen(label) <= 8
+	`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write string builder regression fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected string builder regression test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] short_string_builder_finish_regression",
+		"[       OK ] short_string_builder_finish_regression",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected string builder regression output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIExecutesCategoryUnionTreeNativeSmoke(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
