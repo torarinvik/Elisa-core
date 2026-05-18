@@ -390,6 +390,15 @@ func linkFlagsContainLibraryDir(flags []string, dir string) bool {
 
 func withDefaultNativeRuntimeForeignFiles(foreignFiles []string) ([]string, error) {
 	resolved := dedupeStrings(append([]string(nil), foreignFiles...))
+	repoRoot, err := compilerRepoRootForNativeExec()
+	if err != nil {
+		return nil, err
+	}
+	aesRuntimePath := filepath.Join(repoRoot, "compiler", "runtime", "aes.c")
+	if _, err := os.Stat(aesRuntimePath); err != nil {
+		return nil, fmt.Errorf("failed to locate default AES runtime support %s: %w", aesRuntimePath, err)
+	}
+	resolved = append(resolved, aesRuntimePath)
 	return dedupeStrings(resolved), nil
 }
 
