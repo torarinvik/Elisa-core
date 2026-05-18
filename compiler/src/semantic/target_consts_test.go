@@ -36,3 +36,26 @@ static assert ELISA_TARGET_OS_POSIX, "posix target expected"
 		t.Fatalf("expected target static assert to pass, got:\n%s", errors)
 	}
 }
+
+func TestTargetNamespaceConstsDriveStaticIf(t *testing.T) {
+	src := `
+static if target.os == "windows":
+    const SELECTED: int = 1
+static elif target.arch == "arm64":
+    const SELECTED: int = 2
+static elif target.features.posix:
+    const SELECTED: int = 3
+static else:
+    const SELECTED: int = 4
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "target_namespace.elisa", src, AnalyzeOptions{TargetTriple: "x86_64-unknown-linux-gnu"})
+	if value, ok := result.ConstValues["SELECTED"]; !ok || value.Kind != ConstInt || value.Int != 3 {
+		t.Fatalf("expected target namespace static if to select 3, got %#v ok=%v", value, ok)
+	}
+	if value, ok := result.ConstValues["target.os"]; !ok || value.Kind != ConstString || value.String != "linux" {
+		t.Fatalf("expected target.os const to be linux, got %#v ok=%v", value, ok)
+	}
+	if value, ok := result.ConstValues["target.libc.gnu_strerror_r"]; !ok || value.Kind != ConstBool || !value.Bool {
+		t.Fatalf("expected target.libc.gnu_strerror_r const to be true, got %#v ok=%v", value, ok)
+	}
+}

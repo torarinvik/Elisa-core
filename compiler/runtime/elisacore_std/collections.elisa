@@ -669,6 +669,34 @@ def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item
         da.count <- da.count + 1
         return da
 
+def darray_pop[T](da: mutable darray[T]&) -> T:
+    can Abort.Panic:
+        assert da.count > 0
+        da.count <- da.count - 1
+        return da[da.count]
+
+@ufcs_only
+def pop[T](da: mutable darray[T]&) -> T:
+    can Abort.Panic:
+        return darray_pop[T](da)
+
+def darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T:
+    can Abort.Panic:
+        assert index < da.count
+        removed: T = da[index]
+        next: mutable usize = index + 1
+        trusted Unsafe.AssumeProgress:
+            while next < da.count:
+                da[next - 1] <- da[next]
+                next <- next + 1
+        da.count <- da.count - 1
+        return removed
+
+@ufcs_only
+def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
+    can Abort.Panic:
+        return darray_remove_at[T](da, index)
+
 def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
     can Memory.Allocate, Abort.Panic:
         needed: usize = da.count + new_items_count

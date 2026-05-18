@@ -159,6 +159,11 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		if value, ok := a.evalConstAggregateFieldExpr(n); ok {
 			return value, true
 		}
+		if name, ok := constFieldExprName(n); ok {
+			if value, exists := a.constValues[name]; exists {
+				return value, true
+			}
+		}
 		ident, ok := n.Object.(*ast.Ident)
 		if !ok {
 			return ConstValue{}, false
@@ -358,6 +363,21 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		return a.evalStaticFunctionCall(n)
 	default:
 		return ConstValue{}, false
+	}
+}
+
+func constFieldExprName(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.FieldExpr:
+		base, ok := constFieldExprName(n.Object)
+		if !ok {
+			return "", false
+		}
+		return base + "." + n.Field, true
+	default:
+		return "", false
 	}
 }
 

@@ -26,6 +26,14 @@ static void elisacoreSetAlignment(LLVMValueRef Value, unsigned Bytes) {
 static char* elisacorePrintType(LLVMTypeRef Type) {
 	return LLVMPrintTypeToString(Type);
 }
+
+static void elisacoreSetFunctionCallConv(LLVMValueRef Fn, unsigned CallConv) {
+	LLVMSetFunctionCallConv(Fn, CallConv);
+}
+
+static void elisacoreSetInstructionCallConv(LLVMValueRef Call, unsigned CallConv) {
+	LLVMSetInstructionCallConv(Call, CallConv);
+}
 */
 import "C"
 
@@ -427,7 +435,11 @@ func (g *llvmGenerator) ensureGlobalDeclared(name string, t semantic.Type, exter
 	return value, nil
 }
 func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMValueRef, error) {
-	if intrinsicID, overloadedParamTypes, ok, err := g.lookupIntrinsic(name, fn); err != nil {
+	lookupName := name
+	if fn != nil && strings.TrimSpace(fn.IntrinsicName) != "" {
+		lookupName = strings.TrimSpace(fn.IntrinsicName)
+	}
+	if intrinsicID, overloadedParamTypes, ok, err := g.lookupIntrinsic(lookupName, fn); err != nil {
 		return nil, err
 	} else if ok {
 		return C.LLVMGetIntrinsicDeclaration(g.module, intrinsicID, llvmTypeSlicePtr(overloadedParamTypes), C.size_t(len(overloadedParamTypes))), nil
@@ -441,7 +453,37 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	defer C.free(unsafe.Pointer(nameC))
 	value := C.LLVMAddFunction(g.module, nameC, fnType)
 	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
+	if callConv, ok := g.llvmCallConvForFunc(fn); ok {
+		C.elisacoreSetFunctionCallConv(value, callConv)
+	}
 	return value, nil
+}
+
+func (g *llvmGenerator) llvmCallConvForFunc(fn *semantic.FuncType) (C.uint, bool) {
+	if fn == nil {
+		return 0, false
+	}
+	switch strings.ToLower(strings.TrimSpace(fn.CallConv)) {
+	case "", "c":
+		return C.LLVMCCallConv, fn.CallConv != ""
+	case "fast":
+		return C.LLVMFastCallConv, true
+	case "cold":
+		return C.LLVMColdCallConv, true
+	case "stdcall":
+		return C.LLVMX86StdcallCallConv, true
+	case "winapi":
+		triple := ""
+		if g != nil {
+			triple = strings.ToLower(g.requestedTargetTriple)
+		}
+		if strings.Contains(triple, "i386") || strings.Contains(triple, "i686") {
+			return C.LLVMX86StdcallCallConv, true
+		}
+		return C.LLVMCCallConv, true
+	default:
+		return 0, false
+	}
 }
 func (g *llvmGenerator) isDirectlyExportedFunction(name string) bool {
 	if g == nil || g.result == nil {

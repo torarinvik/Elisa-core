@@ -555,6 +555,8 @@ type FuncType struct {
 	HasNoRecurse                 bool
 	TemperatureMode              FuncTemperatureMode
 	HasTemperatureMode           bool
+	CallConv                     string
+	IntrinsicName                string
 	GuardEffects                 []FuncGuardEffect
 	Poststates                   []FuncPoststate
 	Params                       []Type

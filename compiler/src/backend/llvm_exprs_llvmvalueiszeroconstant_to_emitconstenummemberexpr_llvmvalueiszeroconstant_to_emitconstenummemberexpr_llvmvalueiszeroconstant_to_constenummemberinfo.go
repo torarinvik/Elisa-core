@@ -11,6 +11,10 @@ static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
 	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
 }
 
+static void elisacoreSetInstructionCallConvLocal(LLVMValueRef Call, unsigned CallConv) {
+	LLVMSetInstructionCallConv(Call, CallConv);
+}
+
 static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
 	if (value == NULL) {
 		return LLVMMDStringInContext2(ctx, "", 0);
@@ -396,6 +400,16 @@ func (s *functionState) buildCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRe
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))
 	return C.LLVMBuildCall2(s.builder, llvmFnType, callee, argPtr, C.unsigned(argCount), nameC)
+}
+
+func (s *functionState) buildTypedCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRef, args []C.LLVMValueRef, name string, fn *semantic.FuncType) C.LLVMValueRef {
+	call := s.buildCall(llvmFnType, callee, args, name)
+	if s != nil && s.g != nil {
+		if callConv, ok := s.g.llvmCallConvForFunc(fn); ok {
+			C.elisacoreSetInstructionCallConvLocal(call, callConv)
+		}
+	}
+	return call
 }
 func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
 	if actualType := s.exprType(expr); semantic.IsNullType(actualType) {

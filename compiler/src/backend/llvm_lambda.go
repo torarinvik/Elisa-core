@@ -358,7 +358,7 @@ func (s *functionState) emitFunctionValueCall(calleeValue C.LLVMValueRef, funcTy
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, rawBB)
-	rawCall := s.buildCall(rawLLVMType, calleeValue, callArgs, rawCallName)
+	rawCall := s.buildTypedCall(rawLLVMType, calleeValue, callArgs, rawCallName, funcType)
 	if !s.currentBlockTerminated() {
 		rawEnd := C.LLVMGetInsertBlock(s.builder)
 		C.LLVMBuildBr(s.builder, mergeBB)
@@ -383,7 +383,7 @@ func (s *functionState) emitFunctionValueCall(calleeValue C.LLVMValueRef, funcTy
 		closureArgs = append(closureArgs, envPtr)
 		closureArgs = append(closureArgs, callArgs...)
 	}
-	closureCall := s.buildCall(closureLLVMType, codePtr, closureArgs, closureCallName)
+	closureCall := s.buildTypedCall(closureLLVMType, codePtr, closureArgs, closureCallName, funcType)
 	if !s.currentBlockTerminated() {
 		closureEnd := C.LLVMGetInsertBlock(s.builder)
 		C.LLVMBuildBr(s.builder, mergeBB)

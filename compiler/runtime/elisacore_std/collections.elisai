@@ -423,6 +423,16 @@ extern flags_difference[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]
 
 extern arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]&
 
+extern darray_pop[T](da: mutable darray[T]&) -> T
+
+@ufcs_only
+extern pop[T](da: mutable darray[T]&) -> T
+
+extern darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T
+
+@ufcs_only
+extern remove_at[T](da: mutable darray[T]&, index: usize) -> T
+
 extern arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&
 
 extern arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&

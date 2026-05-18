@@ -104,6 +104,8 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		HasNoRecurse:              base.HasNoRecurse,
 		TemperatureMode:           base.TemperatureMode,
 		HasTemperatureMode:        base.HasTemperatureMode,
+		CallConv:                  base.CallConv,
+		IntrinsicName:             base.IntrinsicName,
 		Params:                    params,
 		ExplicitParamCount:        base.ExplicitParamCount,
 		ExplicitParamNames:        append([]string(nil), base.ExplicitParamNames...),

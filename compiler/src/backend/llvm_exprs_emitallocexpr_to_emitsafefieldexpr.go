@@ -447,7 +447,7 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 		callArgs = append(callArgs, args...)
 		var call C.LLVMValueRef
 		if direct {
-			call = s.buildCall(llvmFnType, callee, callArgs, "calltmp")
+			call = s.buildTypedCall(llvmFnType, callee, callArgs, "calltmp", funcType)
 		} else {
 			call, err = s.emitFunctionValueCall(callee, funcType, callArgs, "calltmp")
 			if err != nil {
@@ -470,7 +470,7 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	}
 	var call C.LLVMValueRef
 	if direct {
-		call = s.buildCall(llvmFnType, callee, args, callName)
+		call = s.buildTypedCall(llvmFnType, callee, args, callName, funcType)
 	} else {
 		call, err = s.emitFunctionValueCall(callee, funcType, args, "calltmp")
 		if err != nil {

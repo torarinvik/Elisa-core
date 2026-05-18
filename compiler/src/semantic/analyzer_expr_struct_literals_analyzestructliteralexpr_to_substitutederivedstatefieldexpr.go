@@ -11,6 +11,12 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 	targetType := a.structLiteralTargetType(expr, expected)
 	base, bindings, regionBindings, ok := structLiteralBaseAndBindings(targetType)
 	if !ok || base == nil {
+		if call, callOK := a.structLiteralAsPascalCaseFunctionCall(expr); callOK {
+			a.loweredInitCalls[expr] = call
+			result := a.analyzeCallExpr(call)
+			a.exprTypes[expr] = result
+			return result
+		}
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -55,6 +61,25 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		a.errorf(expr.Pos(), "struct literal %q does not satisfy derived state %s", expr.Name, desiredState)
 	}
 	return targetType
+}
+
+func (a *Analyzer) structLiteralAsPascalCaseFunctionCall(expr *ast.StructLitExpr) (*ast.CallExpr, bool) {
+	if a == nil || expr == nil || expr.Brace || expr.Name == "" {
+		return nil, false
+	}
+	sym, _, ok := a.lookupVisibleGlobal(expr.Name)
+	if !ok || sym == nil {
+		return nil, false
+	}
+	if sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc {
+		return nil, false
+	}
+	return &ast.CallExpr{
+		Position: expr.Position,
+		Func:     &ast.Ident{Position: expr.Position, Name: expr.Name},
+		Args:     append([]ast.Expr(nil), expr.Args...),
+		ArgNames: append([]string(nil), expr.ArgNames...),
+	}, true
 }
 
 func (a *Analyzer) expandStructLiteralParamPackSpreads(expr *ast.StructLitExpr) {

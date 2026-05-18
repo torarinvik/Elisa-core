@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "ufcs_only", "internal", "blocking", "nonblocking":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "ufcs_only", "internal", "blocking", "nonblocking":
 		return true
 	default:
 		return false
@@ -37,7 +37,7 @@ func (a *Analyzer) markRawExternFuncType(fn *ast.ExternFuncDecl, fnType *FuncTyp
 
 func externLinkNameFromAnnotations(annotations []ast.Annotation) (string, bool) {
 	for _, annotation := range annotations {
-		if annotation.Name != "link_name" || len(annotation.Args) != 1 {
+		if (annotation.Name != "link_name" && annotation.Name != "intrinsic") || len(annotation.Args) != 1 {
 			continue
 		}
 		linkName := strings.TrimSpace(annotation.Args[0])
@@ -47,6 +47,23 @@ func externLinkNameFromAnnotations(annotations []ast.Annotation) (string, bool) 
 		return linkName, true
 	}
 	return "", false
+}
+
+func normalizeExternCallConvAnnotationArg(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "c", "cdecl", "default":
+		return "c", true
+	case "fast", "fastcall":
+		return "fast", true
+	case "cold", "coldcc":
+		return "cold", true
+	case "stdcall", "x86_stdcall", "x86-stdcall":
+		return "stdcall", true
+	case "winapi", "windows":
+		return "winapi", true
+	default:
+		return "", false
+	}
 }
 
 func normalizePackedProfileAnnotationArg(value string) (string, bool) {
@@ -346,6 +363,34 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
 				a.errorf(annotation.Position, "@link_name on extern function %q expects exactly one non-empty symbol name", fn.Name)
 			}
+		case "intrinsic":
+			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
+				a.errorf(annotation.Position, "@intrinsic on extern function %q expects exactly one non-empty LLVM intrinsic name", fn.Name)
+				continue
+			}
+			intrinsicName := strings.TrimSpace(annotation.Args[0])
+			if !strings.HasPrefix(intrinsicName, "llvm.") {
+				a.errorf(annotation.Position, "@intrinsic on extern function %q expects an LLVM intrinsic name starting with \"llvm.\"", fn.Name)
+				continue
+			}
+			fnType.IntrinsicName = intrinsicName
+		case "callconv", "c_abi":
+			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
+				a.errorf(annotation.Position, "@%s on extern function %q expects exactly one calling convention name", annotation.Name, fn.Name)
+				continue
+			}
+			callConv, ok := normalizeExternCallConvAnnotationArg(annotation.Args[0])
+			if !ok {
+				a.errorf(annotation.Position, "unsupported calling convention %q on extern function %q", strings.TrimSpace(annotation.Args[0]), fn.Name)
+				continue
+			}
+			fnType.CallConv = callConv
+		case "stdcall":
+			if len(annotation.Args) != 0 {
+				a.errorf(annotation.Position, "@stdcall on extern function %q does not take arguments", fn.Name)
+				continue
+			}
+			fnType.CallConv = "stdcall"
 		case "ufcs_only":
 			if len(annotation.Args) != 0 {
 				a.errorf(annotation.Position, "@ufcs_only on extern function %q does not take arguments", fn.Name)
