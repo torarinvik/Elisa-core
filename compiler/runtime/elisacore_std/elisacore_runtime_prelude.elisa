@@ -28,6 +28,7 @@ extern stderr: void&
 
 const CTX_SMALL_STRING_CACHE_BUCKETS: usize = 1024
 const CTX_STRING_LEN_CACHE_BUCKETS: usize = 4096
+const CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT: bool = false
 
 # ------------------------------------------------------------
 # Global arena state
@@ -215,6 +216,9 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 		# - short_string_builder_finish_regression
 		# - short_string_builder_mixed_inputs_regression
 		# - short_string_builder_cross_path_stress_regression
+		# Experimental note:
+		# CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT exists to host
+		# test-first cache experiments on dedicated branches.
 		out: heap u8& = alloc_perm((len + 1).i64()).cast[heap u8&]
 		if len > 0:
 			memcpy(out.cast[mutable void&], src.cast[void&], len)
