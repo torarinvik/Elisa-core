@@ -238,6 +238,26 @@ func (g *llvmGenerator) emitModule() error {
 	return nil
 }
 
+func (g *llvmGenerator) activeDeclBranch(decl *ast.StaticIfDecl) ([]ast.Decl, error) {
+	selected, ok := g.evalConstBoolExpr(decl.Cond)
+	if !ok {
+		return nil, fmt.Errorf("static if condition must be a compile-time bool")
+	}
+	if selected {
+		return decl.Then, nil
+	}
+	for _, elif := range decl.Elifs {
+		selected, ok := g.evalConstBoolExpr(elif.Cond)
+		if !ok {
+			return nil, fmt.Errorf("static elif condition must be a compile-time bool")
+		}
+		if selected {
+			return elif.Body, nil
+		}
+	}
+	return decl.Else, nil
+}
+
 func llvmQualifiedDeclName(namespace string, name string) string {
 	if namespace == "" || name == "" {
 		return name
@@ -345,7 +365,18 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 			}
 		}
 		return nil
-	case *ast.ConstDecl, *ast.TokenSetDecl, *ast.CharsetDecl, *ast.KeywordMapDecl, *ast.ConstEnumDecl, *ast.StaticIfDecl, *ast.AttributeDecl:
+	case *ast.StaticIfDecl:
+		branch, err := g.activeDeclBranch(n)
+		if err != nil {
+			return err
+		}
+		for _, inner := range branch {
+			if err := g.predeclareDeclTypes(inner); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *ast.ConstDecl, *ast.TokenSetDecl, *ast.CharsetDecl, *ast.KeywordMapDecl, *ast.ConstEnumDecl, *ast.AttributeDecl:
 		return nil
 	case *ast.StaticAssertDecl:
 		return g.checkStaticAssertDecl(n)
@@ -498,7 +529,18 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 			}
 		}
 		return nil
-	case *ast.ExternTypeDecl, *ast.StaticIfDecl, *ast.AttributeDecl, *ast.StaticAssertDecl, *ast.StaticAssertBlockDecl, *ast.StaticGenerateDecl:
+	case *ast.StaticIfDecl:
+		branch, err := g.activeDeclBranch(n)
+		if err != nil {
+			return err
+		}
+		for _, inner := range branch {
+			if err := g.emitDecl(inner); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *ast.ExternTypeDecl, *ast.AttributeDecl, *ast.StaticAssertDecl, *ast.StaticAssertBlockDecl, *ast.StaticGenerateDecl:
 		return nil
 	case *ast.PermissionDecl:
 		return nil

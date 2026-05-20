@@ -27,6 +27,15 @@ func isSupportedExternVarAnnotation(name string) bool {
 	}
 }
 
+func isSupportedExternTypeAnnotation(name string) bool {
+	switch name {
+	case "c_opaque":
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *Analyzer) markRawExternFuncType(fn *ast.ExternFuncDecl, fnType *FuncType) {
 	if a == nil || fn == nil || fnType == nil || !a.enforceUnsafePermissions {
 		return
@@ -473,6 +482,27 @@ func (a *Analyzer) applyExternVarAnnotations(decl *ast.ExternVarDecl) {
 		}
 		if annotation.Name == "link_name" && (len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "") {
 			a.errorf(annotation.Position, "@link_name on extern var %q expects exactly one non-empty symbol name", decl.Name)
+		}
+	}
+}
+
+func (a *Analyzer) applyExternTypeAnnotations(decl *ast.ExternTypeDecl, opaque *OpaqueType) {
+	if decl == nil || opaque == nil {
+		return
+	}
+	for _, annotation := range decl.Annotations {
+		if !isSupportedExternTypeAnnotation(annotation.Name) {
+			a.errorf(annotation.Position, "unsupported annotation @%s on extern type %q", annotation.Name, decl.Name)
+			continue
+		}
+		switch annotation.Name {
+		case "c_opaque":
+			if len(annotation.Args) != 2 || strings.TrimSpace(annotation.Args[0]) == "" || strings.TrimSpace(annotation.Args[1]) == "" {
+				a.errorf(annotation.Position, "@c_opaque on extern type %q expects header and C type name", decl.Name)
+				continue
+			}
+			opaque.CHeader = strings.TrimSpace(annotation.Args[0])
+			opaque.CType = strings.TrimSpace(annotation.Args[1])
 		}
 	}
 }

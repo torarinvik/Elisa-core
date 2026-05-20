@@ -1,0 +1,15 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+@c_opaque(stdint.h, uint64_t)
+extern NativeU64
+
+@test
+def c_opaque_alloc_smoke():
+	can Memory.Allocate, Memory.Release, Abort.Panic:
+		size: usize = elisa_c_opaque_size("NativeU64")
+		assert size == 8
+		align: usize = elisa_c_opaque_align("uint64_t")
+		assert align >= 4
+		ptr: mutable heap void&? = elisa_c_opaque_alloc("NativeU64")
+		assert ptr != null
+		elisa_c_opaque_free(ptr.cast[heap void&])

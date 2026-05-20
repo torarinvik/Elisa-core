@@ -462,7 +462,9 @@ type StructType struct {
 }
 
 type OpaqueType struct {
-	Name string
+	Name    string
+	CHeader string
+	CType   string
 }
 
 type GenericInstanceType struct {

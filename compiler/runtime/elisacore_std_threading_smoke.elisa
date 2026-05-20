@@ -2,7 +2,7 @@ include "./elisacore_std/elisacore_runtime.elisa"
 
 @test
 def std_mutex_condvar_native_smoke():
-	can Memory.Allocate, Memory.Release, Sync.Lock, Sync.Unlock, Sync.Notify, Thread.Sleep, Thread.Yield:
+	can Memory.Allocate, Memory.Release, Sync.Lock, Sync.Unlock, Sync.Notify, Thread.Sleep, Thread.Yield, Abort.Panic:
 		mu: Mutex = mutex()
 		cv: CondVar = condvar()
 		assert mu.handle != null

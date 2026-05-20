@@ -66,6 +66,13 @@ func (s *functionState) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
 	}
 	return value.Bool, true
 }
+func (g *llvmGenerator) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
+	value, ok := g.evalConstExpr(expr)
+	if !ok || value.Kind != semantic.ConstBool {
+		return false, false
+	}
+	return value.Bool, true
+}
 func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
 	if ident, ok := expr.(*ast.Ident); ok && s.typeMap != nil {
 		if bound, ok := s.typeMap[ident.Name]; ok {

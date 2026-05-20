@@ -219,8 +219,9 @@ type ExternVarDecl struct {
 	Type        TypeExpr
 }
 type ExternTypeDecl struct {
-	Position lexer.Pos
-	Name     string
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
 }
 type TypeAliasDecl struct {
 	Position lexer.Pos

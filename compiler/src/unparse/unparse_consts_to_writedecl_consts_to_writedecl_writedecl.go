@@ -481,6 +481,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		f.writeAnnotations(level, n.Annotations)
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))
 	case *ast.ExternTypeDecl:
+		f.writeAnnotations(level, n.Annotations)
 		f.writeLine(level, "extern "+n.Name)
 	case *ast.TypeAliasDecl:
 		f.writeLine(level, "type "+n.Name+" = "+formatTypeExpr(n.Target))

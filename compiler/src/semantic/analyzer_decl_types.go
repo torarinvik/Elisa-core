@@ -262,7 +262,9 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
-				a.namedTypes[qualifiedName] = &OpaqueType{Name: qualifiedName}
+				opaque := &OpaqueType{Name: qualifiedName}
+				a.applyExternTypeAnnotations(n, opaque)
+				a.namedTypes[qualifiedName] = opaque
 			case *ast.ErrorDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {

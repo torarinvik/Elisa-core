@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -260,6 +261,14 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		}
 	}
 	timing.HeaderWrite = time.Since(headerWriteStart)
+	if shimSource := generatedCOpaqueRuntimeShimSource(result); strings.TrimSpace(shimSource) != "" {
+		shimPath := filepath.Join(tempDir, "elisacore_c_opaque_runtime.c")
+		if err := os.WriteFile(shimPath, []byte(shimSource), 0o644); err != nil {
+			cleanup()
+			return "", func() {}, timing, err
+		}
+		foreignFiles = append([]string{shimPath}, foreignFiles...)
+	}
 
 	linkArgs := make([]string, 0, 5+len(foreignFiles))
 	linkArgs = append(linkArgs, "-I", tempDir)
@@ -309,6 +318,85 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 		return fmt.Errorf("failed to compile LLVM IR object with clang: %w", err)
 	}
 	return nil
+}
+
+type cOpaqueRuntimeBinding struct {
+	ElisaName string
+	CHeader   string
+	CType     string
+}
+
+func collectCOpaqueRuntimeBindings(result *semantic.Result) []cOpaqueRuntimeBinding {
+	if result == nil {
+		return nil
+	}
+	names := make([]string, 0, len(result.NamedTypes))
+	for name := range result.NamedTypes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	bindings := make([]cOpaqueRuntimeBinding, 0)
+	seen := map[string]bool{}
+	for _, name := range names {
+		opaque, ok := result.NamedTypes[name].(*semantic.OpaqueType)
+		if !ok || strings.TrimSpace(opaque.CHeader) == "" || strings.TrimSpace(opaque.CType) == "" {
+			continue
+		}
+		key := name + "\x00" + opaque.CHeader + "\x00" + opaque.CType
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		bindings = append(bindings, cOpaqueRuntimeBinding{
+			ElisaName: name,
+			CHeader:   strings.TrimSpace(opaque.CHeader),
+			CType:     strings.TrimSpace(opaque.CType),
+		})
+	}
+	return bindings
+}
+
+func generatedCOpaqueRuntimeShimSource(result *semantic.Result) string {
+	bindings := collectCOpaqueRuntimeBindings(result)
+	if len(bindings) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n")
+	included := map[string]bool{}
+	for _, binding := range bindings {
+		if included[binding.CHeader] {
+			continue
+		}
+		included[binding.CHeader] = true
+		b.WriteString("#include ")
+		b.WriteString(formatCInclude(binding.CHeader))
+		b.WriteByte('\n')
+	}
+	b.WriteString("\nstatic size_t elisa_c_opaque_size_for(const char *name) {\n")
+	b.WriteString("  if (name == NULL) { return 0; }\n")
+	for _, binding := range bindings {
+		fmt.Fprintf(&b, "  if (strcmp(name, %q) == 0 || strcmp(name, %q) == 0) { return sizeof(%s); }\n", binding.ElisaName, binding.CType, binding.CType)
+	}
+	b.WriteString("  return 0;\n}\n\n")
+	b.WriteString("size_t elisa_c_opaque_size(const char *name) {\n")
+	b.WriteString("  return elisa_c_opaque_size_for(name);\n")
+	b.WriteString("}\n\n")
+	b.WriteString("size_t elisa_c_opaque_align(const char *name) {\n")
+	b.WriteString("  if (name == NULL) { return 0; }\n")
+	for _, binding := range bindings {
+		fmt.Fprintf(&b, "  if (strcmp(name, %q) == 0 || strcmp(name, %q) == 0) { return _Alignof(%s); }\n", binding.ElisaName, binding.CType, binding.CType)
+	}
+	b.WriteString("  return 0;\n}\n\n")
+	b.WriteString("void *elisa_c_opaque_alloc(const char *name) {\n")
+	b.WriteString("  size_t size = elisa_c_opaque_size_for(name);\n")
+	b.WriteString("  if (size == 0) { return NULL; }\n")
+	b.WriteString("  return calloc(1, size);\n")
+	b.WriteString("}\n\n")
+	b.WriteString("void elisa_c_opaque_free(void *ptr) {\n")
+	b.WriteString("  free(ptr);\n")
+	b.WriteString("}\n")
+	return b.String()
 }
 
 func resultNeedsLLVMCAPILinkage(result *semantic.Result) bool {

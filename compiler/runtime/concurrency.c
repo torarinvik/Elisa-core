@@ -1,8 +1,15 @@
-#include <pthread.h>
-#include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <process.h>
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 #if defined(__clang__) || defined(__GNUC__)
 #define CTX_RUNTIME_WEAK __attribute__((weak))
@@ -13,54 +20,28 @@
 typedef void *(*ctx_entry_fn)(void *);
 
 typedef struct {
-    uintptr_t handle;
-    void *state;
-} ctx_task_raw;
-
-typedef struct {
-    void *handle;
-} ctx_thread_pool;
-
-typedef struct {
     void *handle;
 } ctx_mutex;
 
 typedef struct {
     void *handle;
-} ctx_mutex_guard;
-
-typedef struct {
-    void *handle;
 } ctx_condvar;
 
+#if defined(_WIN32)
 typedef struct {
-    void *handle;
-    void *cleanup;
-} ctx_task_group;
-
-typedef struct ctx_task_state {
-    pthread_t thread;
     ctx_entry_fn entry;
     void *arg;
-    void *result;
-    int joined;
-    struct ctx_task_state *next;
-} ctx_task_state;
+} ctx_thread_start;
 
-typedef struct {
-    uint64_t worker_count;
-} ctx_pool_state;
-
-typedef struct {
-    ctx_task_state *head;
-    ctx_task_state *tail;
-} ctx_task_group_state;
-
-static void *ctx_run_entry(void *raw) {
-    ctx_task_state *state = (ctx_task_state *)raw;
-    state->result = state->entry(state->arg);
-    return state->result;
+static unsigned __stdcall ctx_thread_entry(void *raw) {
+    ctx_thread_start *start = (ctx_thread_start *)raw;
+    ctx_entry_fn entry = start->entry;
+    void *arg = start->arg;
+    free(start);
+    (void)entry(arg);
+    return 0u;
 }
+#endif
 
 static void *ctx_xmalloc(size_t size) {
     void *ptr = malloc(size);
@@ -70,225 +51,203 @@ static void *ctx_xmalloc(size_t size) {
     return ptr;
 }
 
-static ctx_task_group_state *ctx_ensure_group_state(ctx_task_group *group) {
-    ctx_task_group_state *state = (ctx_task_group_state *)group->handle;
-    if (state != NULL) {
-        return state;
+CTX_RUNTIME_WEAK int ctx_thread_create(uintptr_t *out, void *entry, void *arg) {
+    if (out == NULL || entry == NULL) {
+        return -1;
     }
 
-    state = (ctx_task_group_state *)ctx_xmalloc(sizeof(*state));
-    state->head = NULL;
-    state->tail = NULL;
-    group->handle = state;
-    return state;
+#if defined(_WIN32)
+    ctx_thread_start *start = (ctx_thread_start *)ctx_xmalloc(sizeof(*start));
+    uintptr_t handle;
+    start->entry = (ctx_entry_fn)entry;
+    start->arg = arg;
+    handle = _beginthreadex(NULL, 0u, ctx_thread_entry, start, 0u, NULL);
+    if (handle == 0u) {
+        free(start);
+        return -1;
+    }
+    *out = handle;
+    return 0;
+#else
+    pthread_t thread;
+    int status = pthread_create(&thread, NULL, (ctx_entry_fn)entry, arg);
+    if (status != 0) {
+        return status;
+    }
+    *out = (uintptr_t)thread;
+    return 0;
+#endif
 }
 
-CTX_RUNTIME_WEAK ctx_mutex mutex_new(void) {
-    pthread_mutex_t *mutex = (pthread_mutex_t *)ctx_xmalloc(sizeof(*mutex));
-    if (pthread_mutex_init(mutex, NULL) != 0) {
-        free(mutex);
-        abort();
+CTX_RUNTIME_WEAK int ctx_thread_join(uintptr_t handle) {
+#if defined(_WIN32)
+    if (handle == 0u) {
+        return -1;
     }
-    return (ctx_mutex){.handle = mutex};
+    if (WaitForSingleObject((HANDLE)handle, INFINITE) != WAIT_OBJECT_0) {
+        return -1;
+    }
+    CloseHandle((HANDLE)handle);
+    return 0;
+#else
+    return pthread_join((pthread_t)handle, NULL);
+#endif
+}
+
+CTX_RUNTIME_WEAK int ctx_thread_detach(uintptr_t handle) {
+#if defined(_WIN32)
+    if (handle == 0u) {
+        return -1;
+    }
+    CloseHandle((HANDLE)handle);
+    return 0;
+#else
+    return pthread_detach((pthread_t)handle);
+#endif
 }
 
 CTX_RUNTIME_WEAK void mutex_init(ctx_mutex *out) {
     if (out == NULL) {
         abort();
     }
-    *out = mutex_new();
+
+#if defined(_WIN32)
+    CRITICAL_SECTION *mutex = (CRITICAL_SECTION *)ctx_xmalloc(sizeof(*mutex));
+    InitializeCriticalSection(mutex);
+    out->handle = mutex;
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t *)ctx_xmalloc(sizeof(*mutex));
+    if (pthread_mutex_init(mutex, NULL) != 0) {
+        free(mutex);
+        abort();
+    }
+    out->handle = mutex;
+#endif
 }
 
 CTX_RUNTIME_WEAK void mutex_destroy(ctx_mutex *mutex) {
     if (mutex == NULL || mutex->handle == NULL) {
         return;
     }
+#if defined(_WIN32)
+    DeleteCriticalSection((CRITICAL_SECTION *)mutex->handle);
+#else
     if (pthread_mutex_destroy((pthread_mutex_t *)mutex->handle) != 0) {
         abort();
     }
+#endif
     free(mutex->handle);
     mutex->handle = NULL;
 }
 
-CTX_RUNTIME_WEAK ctx_mutex_guard mutex_lock(ctx_mutex *mutex) {
-    if (mutex == NULL || mutex->handle == NULL) {
-        abort();
+CTX_RUNTIME_WEAK int ctx_mutex_lock(void *handle) {
+    if (handle == NULL) {
+        return -1;
     }
-    if (pthread_mutex_lock((pthread_mutex_t *)mutex->handle) != 0) {
-        abort();
-    }
-    return (ctx_mutex_guard){.handle = mutex->handle};
+#if defined(_WIN32)
+    EnterCriticalSection((CRITICAL_SECTION *)handle);
+    return 0;
+#else
+    return pthread_mutex_lock((pthread_mutex_t *)handle);
+#endif
 }
 
-CTX_RUNTIME_WEAK void mutex_unlock(ctx_mutex_guard guard) {
-    if (guard.handle == NULL) {
-        abort();
+CTX_RUNTIME_WEAK int ctx_mutex_unlock(void *handle) {
+    if (handle == NULL) {
+        return -1;
     }
-    if (pthread_mutex_unlock((pthread_mutex_t *)guard.handle) != 0) {
-        abort();
-    }
-}
-
-CTX_RUNTIME_WEAK ctx_condvar condvar_new(void) {
-    pthread_cond_t *cond = (pthread_cond_t *)ctx_xmalloc(sizeof(*cond));
-    if (pthread_cond_init(cond, NULL) != 0) {
-        free(cond);
-        abort();
-    }
-    return (ctx_condvar){.handle = cond};
+#if defined(_WIN32)
+    LeaveCriticalSection((CRITICAL_SECTION *)handle);
+    return 0;
+#else
+    return pthread_mutex_unlock((pthread_mutex_t *)handle);
+#endif
 }
 
 CTX_RUNTIME_WEAK void condvar_init(ctx_condvar *out) {
     if (out == NULL) {
         abort();
     }
-    *out = condvar_new();
+
+#if defined(_WIN32)
+    CONDITION_VARIABLE *cond = (CONDITION_VARIABLE *)ctx_xmalloc(sizeof(*cond));
+    InitializeConditionVariable(cond);
+    out->handle = cond;
+#else
+    pthread_cond_t *cond = (pthread_cond_t *)ctx_xmalloc(sizeof(*cond));
+    if (pthread_cond_init(cond, NULL) != 0) {
+        free(cond);
+        abort();
+    }
+    out->handle = cond;
+#endif
 }
 
 CTX_RUNTIME_WEAK void condvar_destroy(ctx_condvar *cond) {
     if (cond == NULL || cond->handle == NULL) {
         return;
     }
+#if !defined(_WIN32)
     if (pthread_cond_destroy((pthread_cond_t *)cond->handle) != 0) {
         abort();
     }
+#endif
     free(cond->handle);
     cond->handle = NULL;
 }
 
-CTX_RUNTIME_WEAK ctx_mutex_guard cond_wait(ctx_condvar *cond, ctx_mutex_guard guard) {
-    if (cond == NULL || cond->handle == NULL || guard.handle == NULL) {
-        abort();
+CTX_RUNTIME_WEAK int ctx_cond_wait(void *cond, void *mutex) {
+    if (cond == NULL || mutex == NULL) {
+        return -1;
     }
-    if (pthread_cond_wait((pthread_cond_t *)cond->handle, (pthread_mutex_t *)guard.handle) != 0) {
-        abort();
-    }
-    return guard;
+#if defined(_WIN32)
+    return SleepConditionVariableCS((CONDITION_VARIABLE *)cond, (CRITICAL_SECTION *)mutex, INFINITE) ? 0 : -1;
+#else
+    return pthread_cond_wait((pthread_cond_t *)cond, (pthread_mutex_t *)mutex);
+#endif
 }
 
-CTX_RUNTIME_WEAK void notify_one(ctx_condvar *cond) {
-    if (cond == NULL || cond->handle == NULL) {
-        abort();
+CTX_RUNTIME_WEAK int ctx_cond_signal(void *cond) {
+    if (cond == NULL) {
+        return -1;
     }
-    if (pthread_cond_signal((pthread_cond_t *)cond->handle) != 0) {
-        abort();
-    }
+#if defined(_WIN32)
+    WakeConditionVariable((CONDITION_VARIABLE *)cond);
+    return 0;
+#else
+    return pthread_cond_signal((pthread_cond_t *)cond);
+#endif
 }
 
-CTX_RUNTIME_WEAK void notify_all(ctx_condvar *cond) {
-    if (cond == NULL || cond->handle == NULL) {
-        abort();
+CTX_RUNTIME_WEAK int ctx_cond_broadcast(void *cond) {
+    if (cond == NULL) {
+        return -1;
     }
-    if (pthread_cond_broadcast((pthread_cond_t *)cond->handle) != 0) {
-        abort();
-    }
+#if defined(_WIN32)
+    WakeAllConditionVariable((CONDITION_VARIABLE *)cond);
+    return 0;
+#else
+    return pthread_cond_broadcast((pthread_cond_t *)cond);
+#endif
 }
 
 CTX_RUNTIME_WEAK void thread_yield(void) {
+#if defined(_WIN32)
+    SwitchToThread();
+#else
     sched_yield();
+#endif
 }
 
 CTX_RUNTIME_WEAK void thread_sleep_usec(uint64_t usec) {
+#if defined(_WIN32)
+    DWORD millis = (DWORD)((usec + 999u) / 1000u);
+    Sleep(millis);
+#else
     struct timespec requested;
     requested.tv_sec = (time_t)(usec / 1000000u);
     requested.tv_nsec = (long)((usec % 1000000u) * 1000u);
     while (nanosleep(&requested, &requested) != 0) {
     }
-}
-
-CTX_RUNTIME_WEAK ctx_thread_pool pool_new(uint64_t threads) {
-    ctx_pool_state *state = (ctx_pool_state *)ctx_xmalloc(sizeof(*state));
-    state->worker_count = threads;
-    return (ctx_thread_pool){.handle = state};
-}
-
-CTX_RUNTIME_WEAK void pool_shutdown(ctx_thread_pool *pool) {
-    free(pool->handle);
-    pool->handle = NULL;
-}
-
-CTX_RUNTIME_WEAK ctx_task_raw pool_submit_raw(ctx_thread_pool *pool, void *entry, void *arg) {
-    (void)pool;
-
-    ctx_task_state *state = (ctx_task_state *)ctx_xmalloc(sizeof(*state));
-    state->entry = (ctx_entry_fn)entry;
-    state->arg = arg;
-    state->result = NULL;
-    state->joined = 0;
-    state->next = NULL;
-    if (pthread_create(&state->thread, NULL, ctx_run_entry, state) != 0) {
-        abort();
-    }
-
-    return (ctx_task_raw){.handle = (uintptr_t)state, .state = NULL};
-}
-
-CTX_RUNTIME_WEAK void *pool_await_raw(ctx_task_raw task) {
-    ctx_task_state *state = (ctx_task_state *)(uintptr_t)task.handle;
-    void *result = NULL;
-    if (state == NULL) {
-        return NULL;
-    }
-
-    if (!state->joined) {
-        if (pthread_join(state->thread, &result) != 0) {
-            abort();
-        }
-        state->joined = 1;
-        state->result = result;
-    }
-
-    result = state->result;
-    free(state);
-    return result;
-}
-
-CTX_RUNTIME_WEAK ctx_task_group task_group_new_raw(void) {
-    return (ctx_task_group){.handle = NULL, .cleanup = NULL};
-}
-
-CTX_RUNTIME_WEAK void task_group_add_raw(ctx_task_group *group, ctx_task_raw task) {
-    ctx_task_state *task_state = (ctx_task_state *)(uintptr_t)task.handle;
-    ctx_task_group_state *group_state;
-    if (task_state == NULL) {
-        return;
-    }
-
-    group_state = ctx_ensure_group_state(group);
-    task_state->next = NULL;
-    if (group_state->tail == NULL) {
-        group_state->head = task_state;
-        group_state->tail = task_state;
-        return;
-    }
-
-    group_state->tail->next = task_state;
-    group_state->tail = task_state;
-}
-
-CTX_RUNTIME_WEAK void task_group_wait_all_raw(ctx_task_group *group) {
-    ctx_task_group_state *group_state = (ctx_task_group_state *)group->handle;
-    ctx_task_state *current;
-
-    if (group_state == NULL) {
-        return;
-    }
-
-    current = group_state->head;
-    while (current != NULL) {
-        ctx_task_state *next = current->next;
-        void *result = NULL;
-        if (!current->joined) {
-            if (pthread_join(current->thread, &result) != 0) {
-                abort();
-            }
-            current->joined = 1;
-            current->result = result;
-        }
-        free(current);
-        current = next;
-    }
-
-    free(group_state);
-    group->handle = NULL;
+#endif
 }

@@ -382,7 +382,7 @@ There is also now a self-hosted parser fixture at `../Code/test_programs/json_pa
 - `../Code/benchmarks/json_parser_bench.c` is a standalone checksum-parser benchmark executable for file-backed corpora
 - `../Code/benchmarks/json_parser_ast_bench.c` is the AST-building benchmark executable for the same corpora
 - `../Code/benchmarks/json_parser_parallel_bench.c` is a pool-driven parallel batch benchmark over the same parser exports
-- `runtime/concurrency.c` provides a small pthread-backed implementation of the raw pool/task-group runtime seam used by the parallel benchmark path
+- `runtime/concurrency.c` provides a small cross-platform C FFI shim for host thread/sync primitives; pool/task-group orchestration lives in Elisa std runtime code
 - `test/benchmarks/cmd/gen_synthetic_json` writes the same deterministic corpus family to disk for external benchmarking
 - `scripts/ensure_json_parser_bench_input.sh` creates the default large synthetic corpus on demand and prints the path, which keeps ignored local task runners usable without hand-creating `/tmp/zimdjson-dom-large.json`
 

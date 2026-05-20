@@ -72,6 +72,52 @@ extern bad_callconv(value: i32) -> i32
 	}
 }
 
+func TestWindowsFFIModelCanBeGuardedByTargetStaticIf(t *testing.T) {
+	src := `
+static if ELISA_TARGET_OS_WINDOWS:
+	@c_opaque(windows.h, CRITICAL_SECTION)
+	extern Win32CriticalSection
+
+	@callconv(winapi)
+	extern EnterCriticalSection(section: mutable Win32CriticalSection&) -> void
+
+	def lock(section: mutable Win32CriticalSection&):
+		EnterCriticalSection(section)
+`
+
+	windows := analyzeFunctionAnalysisTestSourceWithOptions(t, "windows_ffi_model.elisa", src, AnalyzeOptions{TargetTriple: "x86_64-pc-windows-msvc"})
+	if errs := windows.Errors(); len(errs) != 0 {
+		t.Fatalf("expected no Windows-target errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+
+	sym, ok := windows.GlobalScope.Lookup("EnterCriticalSection")
+	if !ok {
+		t.Fatal("expected guarded Win32 extern on Windows target")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected function type for Win32 extern, got %T", sym.Type)
+	}
+	if fnType.CallConv != "winapi" {
+		t.Fatalf("expected winapi callconv, got %q", fnType.CallConv)
+	}
+	opaque, ok := windows.NamedTypes["Win32CriticalSection"].(*OpaqueType)
+	if !ok {
+		t.Fatalf("expected Win32CriticalSection opaque type, got %T", windows.NamedTypes["Win32CriticalSection"])
+	}
+	if opaque.CHeader != "windows.h" || opaque.CType != "CRITICAL_SECTION" {
+		t.Fatalf("expected c_opaque metadata, got header=%q type=%q", opaque.CHeader, opaque.CType)
+	}
+
+	posix := analyzeFunctionAnalysisTestSourceWithOptions(t, "windows_ffi_model_posix.elisa", src, AnalyzeOptions{TargetTriple: "x86_64-unknown-linux-gnu"})
+	if errs := posix.Errors(); len(errs) != 0 {
+		t.Fatalf("expected no POSIX-target errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+	if _, ok := posix.GlobalScope.Lookup("EnterCriticalSection"); ok {
+		t.Fatal("did not expect guarded Win32 extern on POSIX target")
+	}
+}
+
 func TestPascalCaseFunctionCallCanFallbackFromStructLiteralSyntax(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "pascal_case_function_call.elisa", `
 def DivCeil(value: usize, divisor: usize) -> usize:

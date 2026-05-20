@@ -62,34 +62,113 @@ enum MemoryOrder:
 	SeqCst
 
 # ------------------------------------------------------------
-# Low-level POSIX seam declarations
+# Low-level platform seams
 # ------------------------------------------------------------
 
-extern pthread_create(thread: mutable uintptr&, attr: void&?, start_routine: void&, arg: void&?) -> int effects[Thread.Spawn]
-extern pthread_join(thread: uintptr, retval: mutable void&?) -> int effects[Thread.Join]
-extern pthread_detach(thread: uintptr) -> int effects[Thread.Detach]
+static if ELISA_TARGET_OS_POSIX:
+	extern pthread_create(thread: mutable uintptr&, attr: void&?, start_routine: void&, arg: void&?) -> int effects[Thread.Spawn]
+	extern pthread_join(thread: uintptr, retval: mutable void&?) -> int effects[Thread.Join]
+	extern pthread_detach(thread: uintptr) -> int effects[Thread.Detach]
 
-extern pthread_mutex_lock(mutex: void&) -> int effects[Sync.Lock]
-extern pthread_mutex_unlock(mutex: void&) -> int effects[Sync.Unlock]
-extern pthread_cond_wait(cond: void&, mutex: void&) -> int effects[Sync.Wait]
-extern pthread_cond_signal(cond: void&) -> int effects[Sync.Notify]
-extern pthread_cond_broadcast(cond: void&) -> int effects[Sync.Notify]
+	extern pthread_mutex_lock(mutex: void&) -> int effects[Sync.Lock]
+	extern pthread_mutex_unlock(mutex: void&) -> int effects[Sync.Unlock]
+	extern pthread_cond_wait(cond: void&, mutex: void&) -> int effects[Sync.Wait]
+	extern pthread_cond_signal(cond: void&) -> int effects[Sync.Notify]
+	extern pthread_cond_broadcast(cond: void&) -> int effects[Sync.Notify]
+
+	def ctx_platform_mutex_lock(handle: void&) -> int:
+		can Sync.Lock:
+			return pthread_mutex_lock(handle)
+
+	def ctx_platform_mutex_unlock(handle: void&) -> int:
+		can Sync.Unlock:
+			return pthread_mutex_unlock(handle)
+
+	def ctx_platform_cond_wait(cond: void&, mutex: void&) -> int:
+		can Sync.Wait:
+			return pthread_cond_wait(cond, mutex)
+
+	def ctx_platform_cond_signal(cond: void&) -> int:
+		can Sync.Notify:
+			return pthread_cond_signal(cond)
+
+	def ctx_platform_cond_broadcast(cond: void&) -> int:
+		can Sync.Notify:
+			return pthread_cond_broadcast(cond)
+
+static elif ELISA_TARGET_OS_WINDOWS:
+	@c_opaque(windows.h, CRITICAL_SECTION)
+	extern Win32CriticalSection
+
+	@c_opaque(windows.h, CONDITION_VARIABLE)
+	extern Win32ConditionVariable
+
+	const WIN32_WAIT_INFINITE = 0xffffffffu32
+
+	@callconv(winapi)
+	extern EnterCriticalSection(section: mutable Win32CriticalSection&) -> void effects[Sync.Lock]
+
+	@callconv(winapi)
+	extern LeaveCriticalSection(section: mutable Win32CriticalSection&) -> void effects[Sync.Unlock]
+
+	@callconv(winapi)
+	extern SleepConditionVariableCS(cond: mutable Win32ConditionVariable&, section: mutable Win32CriticalSection&, milliseconds: u32) -> bool effects[Sync.Wait]
+
+	@callconv(winapi)
+	extern WakeConditionVariable(cond: mutable Win32ConditionVariable&) -> void effects[Sync.Notify]
+
+	@callconv(winapi)
+	extern WakeAllConditionVariable(cond: mutable Win32ConditionVariable&) -> void effects[Sync.Notify]
+
+	def ctx_platform_mutex_lock(handle: void&) -> int:
+		can Sync.Lock:
+			EnterCriticalSection(handle.cast[mutable Win32CriticalSection&])
+			return 0
+
+	def ctx_platform_mutex_unlock(handle: void&) -> int:
+		can Sync.Unlock:
+			LeaveCriticalSection(handle.cast[mutable Win32CriticalSection&])
+			return 0
+
+	def ctx_platform_cond_wait(cond: void&, mutex: void&) -> int:
+		can Sync.Wait:
+			ok: bool = SleepConditionVariableCS(
+				cond.cast[mutable Win32ConditionVariable&],
+				mutex.cast[mutable Win32CriticalSection&],
+				WIN32_WAIT_INFINITE
+			)
+			return 0 if ok else -1
+
+	def ctx_platform_cond_signal(cond: void&) -> int:
+		can Sync.Notify:
+			WakeConditionVariable(cond.cast[mutable Win32ConditionVariable&])
+			return 0
+
+	def ctx_platform_cond_broadcast(cond: void&) -> int:
+		can Sync.Notify:
+			WakeAllConditionVariable(cond.cast[mutable Win32ConditionVariable&])
+			return 0
 
 # ------------------------------------------------------------
-# First-slice explicit runtime-facing handles
+# Cross-platform runtime FFI handles
 # ------------------------------------------------------------
 
-extern mutex_new() -> Mutex effects[Memory.Allocate]
+extern ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> int effects[Thread.Spawn]
+extern ctx_thread_join(thread: uintptr) -> int effects[Thread.Join]
+extern ctx_thread_detach(thread: uintptr) -> int effects[Thread.Detach]
+extern elisa_c_opaque_alloc(type_name: u8&) -> mutable heap void&? effects[Memory.Allocate]
+extern elisa_c_opaque_free(ptr: heap void&) -> void effects[Memory.Release]
+extern elisa_c_opaque_size(type_name: u8&) -> usize
+extern elisa_c_opaque_align(type_name: u8&) -> usize
 extern mutex_init(out: mutable Mutex&) -> void effects[Memory.Allocate]
 extern mutex_destroy(mu: mutable Mutex&) -> void effects[Memory.Release]
-extern mutex_lock(mu: mutable Mutex&) -> MutexGuard[Held] effects[Sync.Lock]
-extern mutex_unlock(g: MutexGuard[Held]) -> void effects[Sync.Unlock]
-extern condvar_new() -> CondVar effects[Memory.Allocate]
+extern ctx_mutex_lock(mutex: void&) -> int effects[Sync.Lock]
+extern ctx_mutex_unlock(mutex: void&) -> int effects[Sync.Unlock]
 extern condvar_init(out: mutable CondVar&) -> void effects[Memory.Allocate]
 extern condvar_destroy(cv: mutable CondVar&) -> void effects[Memory.Release]
-extern cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held] effects[Sync.Wait]
-extern notify_one(cv: mutable CondVar&) -> void effects[Sync.Notify]
-extern notify_all(cv: mutable CondVar&) -> void effects[Sync.Notify]
+extern ctx_cond_wait(cond: void&, mutex: void&) -> int effects[Sync.Wait]
+extern ctx_cond_signal(cond: void&) -> int effects[Sync.Notify]
+extern ctx_cond_broadcast(cond: void&) -> int effects[Sync.Notify]
 extern thread_yield() -> void effects[Thread.Yield]
 extern thread_sleep_usec(usec: u64) -> void effects[Thread.Sleep]
 
@@ -121,6 +200,27 @@ def mutex_dispose(mu: mutable Mutex&):
 	can Memory.Release:
 		mutex_destroy(mu)
 
+def mutex_lock(mu: mutable Mutex&) -> MutexGuard[Held]:
+	can Sync.Lock, Abort.Panic:
+		if mu.handle == null:
+			panic("mutex_lock on uninitialized mutex")
+		status: int = ctx_platform_mutex_lock(mu.handle.cast[void&])
+		if status != 0:
+			panic("mutex lock failed")
+		guard: MutexGuard[Held] = zeroed
+		guard.handle <- mu.handle
+		return move guard
+
+def mutex_unlock(g: MutexGuard[Held]):
+	can Sync.Unlock, Abort.Panic:
+		handle: void&? = g.handle
+		_ = move g
+		if handle == null:
+			panic("mutex_unlock on empty guard")
+		status: int = ctx_platform_mutex_unlock(handle.cast[void&])
+		if status != 0:
+			panic("mutex unlock failed")
+
 def condvar() -> CondVar:
 	can Memory.Allocate:
 		out: CondVar = zeroed
@@ -130,6 +230,35 @@ def condvar() -> CondVar:
 def condvar_dispose(cv: mutable CondVar&):
 	can Memory.Release:
 		condvar_destroy(cv)
+
+def cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]:
+	can Sync.Wait, Abort.Panic:
+		cond_handle: void&? = cv.handle
+		mutex_handle: void&? = g.handle
+		if cond_handle == null:
+			panic("cond_wait on uninitialized condvar")
+		if mutex_handle == null:
+			panic("cond_wait with empty mutex guard")
+		status: int = ctx_platform_cond_wait(cond_handle.cast[void&], mutex_handle.cast[void&])
+		if status != 0:
+			panic("cond wait failed")
+		return move g
+
+def notify_one(cv: mutable CondVar&):
+	can Sync.Notify, Abort.Panic:
+		if cv.handle == null:
+			panic("notify_one on uninitialized condvar")
+		status: int = ctx_platform_cond_signal(cv.handle.cast[void&])
+		if status != 0:
+			panic("cond signal failed")
+
+def notify_all(cv: mutable CondVar&):
+	can Sync.Notify, Abort.Panic:
+		if cv.handle == null:
+			panic("notify_all on uninitialized condvar")
+		status: int = ctx_platform_cond_broadcast(cv.handle.cast[void&])
+		if status != 0:
+			panic("cond broadcast failed")
 
 def yield_thread():
 	can Thread.Yield:
@@ -141,16 +270,16 @@ def sleep_usec(usec: u64):
 
 def ctx_concurrency_join_handle(handle: uintptr):
 	can Thread.Join, Abort.Panic:
-		status: int = pthread_join(handle, null)
+		status: int = ctx_thread_join(handle)
 		if status != 0:
-			panic("pthread_join failed")
+			panic("thread join failed")
 
 def spawn_raw(entry: void&, arg: void&?) -> Thread[void&?, Joinable]:
 	can Thread.Spawn, Abort.Panic:
 		out: Thread[void&?, Joinable] = zeroed
-		status: int = pthread_create(out.handle.ref[mutable uintptr&], null, entry, arg)
+		status: int = ctx_thread_create(out.handle.ref[mutable uintptr&], entry, arg)
 		if status != 0:
-			panic("pthread_create failed")
+			panic("thread create failed")
 		out.state <- arg
 		return move out
 
@@ -166,9 +295,9 @@ def detach_raw(thread: Thread[void&?, Joinable]):
 	can Thread.Detach, Abort.Panic:
 		handle: uintptr = thread.handle
 		_ = move thread
-		status: int = pthread_detach(handle)
+		status: int = ctx_thread_detach(handle)
 		if status != 0:
-			panic("pthread_detach failed")
+			panic("thread detach failed")
 
 def pool_new(threads: usize) -> ThreadPool:
 	can Pool.Create, Memory.Allocate, Abort.Panic:
