@@ -238,6 +238,10 @@ func (l *Lexer) NextToken() Token {
 		l.advance()
 		return l.finishToken(Token{Kind: TOKEN_COMMA, Text: ",", Pos: p})
 
+	case ';':
+		l.advance()
+		return l.finishToken(Token{Kind: TOKEN_SEMICOLON, Text: ";", Pos: p})
+
 	case '(':
 		l.advance()
 		l.parenDepth++

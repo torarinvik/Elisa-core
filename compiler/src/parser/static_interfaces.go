@@ -278,8 +278,7 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	}
 
 	if p.match(lexer.TOKEN_COLON) {
-		p.expectNewline()
-		body := p.parseBlock()
+		body := p.parseFuncBodyAfterColon()
 		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 	}
 	p.expectNewline()

@@ -79,11 +79,19 @@ extern pthread_cond_broadcast(cond: void&) -> int effects[Sync.Notify]
 # First-slice explicit runtime-facing handles
 # ------------------------------------------------------------
 
+extern mutex_new() -> Mutex effects[Memory.Allocate]
+extern mutex_init(out: mutable Mutex&) -> void effects[Memory.Allocate]
+extern mutex_destroy(mu: mutable Mutex&) -> void effects[Memory.Release]
 extern mutex_lock(mu: mutable Mutex&) -> MutexGuard[Held] effects[Sync.Lock]
 extern mutex_unlock(g: MutexGuard[Held]) -> void effects[Sync.Unlock]
+extern condvar_new() -> CondVar effects[Memory.Allocate]
+extern condvar_init(out: mutable CondVar&) -> void effects[Memory.Allocate]
+extern condvar_destroy(cv: mutable CondVar&) -> void effects[Memory.Release]
 extern cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held] effects[Sync.Wait]
 extern notify_one(cv: mutable CondVar&) -> void effects[Sync.Notify]
 extern notify_all(cv: mutable CondVar&) -> void effects[Sync.Notify]
+extern thread_yield() -> void effects[Thread.Yield]
+extern thread_sleep_usec(usec: u64) -> void effects[Thread.Sleep]
 
 # ------------------------------------------------------------
 # Typed wrapper helpers
@@ -102,6 +110,34 @@ def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
 	box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
 	box.value <- value
 	return box
+
+def mutex() -> Mutex:
+	can Memory.Allocate:
+		out: Mutex = zeroed
+		mutex_init(out.ref[mutable Mutex&])
+		return move out
+
+def mutex_dispose(mu: mutable Mutex&):
+	can Memory.Release:
+		mutex_destroy(mu)
+
+def condvar() -> CondVar:
+	can Memory.Allocate:
+		out: CondVar = zeroed
+		condvar_init(out.ref[mutable CondVar&])
+		return move out
+
+def condvar_dispose(cv: mutable CondVar&):
+	can Memory.Release:
+		condvar_destroy(cv)
+
+def yield_thread():
+	can Thread.Yield:
+		thread_yield()
+
+def sleep_usec(usec: u64):
+	can Thread.Sleep:
+		thread_sleep_usec(usec)
 
 def ctx_concurrency_join_handle(handle: uintptr):
 	can Thread.Join, Abort.Panic:

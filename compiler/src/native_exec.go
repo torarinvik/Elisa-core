@@ -232,7 +232,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 
 	objectPath := filepath.Join(tempDir, "elisacore_module.o")
 	objectStart := time.Now()
-	if err := backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, objectPath, optLevel, packedProfile); err != nil {
+	if err := writeNativeObjectViaClangIR(clangPath, result, objectPath, optLevel, packedProfile, stderr); err != nil {
 		cleanup()
 		return "", func() {}, timing, err
 	}
@@ -290,6 +290,25 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	timing.Link = time.Since(linkStart)
 	return exePath, cleanup, timing, nil
+}
+
+func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, objectPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) error {
+	ir, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfile(result, optLevel, packedProfile)
+	if err != nil {
+		return err
+	}
+	irPath := strings.TrimSuffix(objectPath, filepath.Ext(objectPath)) + ".ll"
+	if err := os.WriteFile(irPath, []byte(ir), 0o644); err != nil {
+		return err
+	}
+	compileArgs := []string{"-Wno-override-module", "-c", irPath, "-o", objectPath}
+	compileCmd := exec.Command(clangPath, compileArgs...)
+	compileCmd.Stdout = stderr
+	compileCmd.Stderr = stderr
+	if err := compileCmd.Run(); err != nil {
+		return fmt.Errorf("failed to compile LLVM IR object with clang: %w", err)
+	}
+	return nil
 }
 
 func resultNeedsLLVMCAPILinkage(result *semantic.Result) bool {

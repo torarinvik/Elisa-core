@@ -1,0 +1,4099 @@
+def fail(message: cstr):
+    can Abort.Panic:
+        panic(message)
+
+def assert_true(condition: bool):
+    can Abort.Panic:
+        if (not condition):
+            panic("assert_true failed")
+
+def assert_false(condition: bool):
+    can Abort.Panic:
+        if condition:
+            panic("assert_false failed")
+
+def assert_eq[T](actual: T, expected: T):
+    can Abort.Panic:
+        if (actual != expected):
+            panic("assert_eq failed")
+
+def assert_ne[T](actual: T, expected: T):
+    can Abort.Panic:
+        if (actual == expected):
+            panic("assert_ne failed")
+
+def id_invalid[T]() -> id[T]:
+    return 0.u32() as id[T]
+
+def id_valid[T](value: id[T]) -> bool:
+    return ((!value) != 0)
+
+def assert_id_valid[T](value: id[T]):
+    assert_true(id_valid[T](value)) can Abort.Panic
+
+def assert_id_invalid[T](value: id[T]):
+    assert_false(id_valid[T](value)) can Abort.Panic
+
+const ARENA_BACKEND_LIBC_MALLOC = 0
+
+const ARENA_BACKEND_LINUX_MMAP = 1
+
+const ARENA_BACKEND_WIN32_VIRTUALALLOC = 2
+
+const ARENA_BACKEND_WASM_HEAPBASE = 3
+
+const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
+
+const ARENA_REGION_DEFAULT_CAPACITY: usize = (8 * 1024)
+
+const ARENA_WASM_PAGE_SIZE: usize = (64 * 1024)
+
+error RuntimeError:
+    OutOfMemory
+
+struct Region:
+    next: mutable heap Region&?
+    count: mutable usize
+    capacity: mutable usize
+    owner_tag: mutable uintptr
+    owner_next: mutable heap Region&?
+    global_index: mutable usize
+    data: tail uintptr
+
+struct Arena:
+    begin: mutable heap Region&?
+    end: mutable heap Region&?
+    end_index: mutable usize
+
+struct ArenaMark:
+    region: heap Region&?
+    count: usize
+
+static if (ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC):
+    extern malloc(size: usize) -> mutable heap void&? effects[Memory.Allocate]
+    extern free(ptr: heap void&) effects[Memory.Release]
+static elif (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
+    const PROT_READ = 0x1
+    const PROT_WRITE = 0x2
+    const MAP_PRIVATE = 0x02
+    const MAP_ANONYMOUS = 0x20
+    extern mmap(addr: heap void&?, length: usize, prot: int, flags: int, fd: int, offset: isize) -> mutable heap void&?
+    extern munmap(addr: heap void&, length: usize) -> int
+    extern MAP_FAILED() -> mutable heap void&?
+static elif (ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC):
+    const MEM_COMMIT = 0x1000
+    const MEM_RESERVE = 0x2000
+    const MEM_RELEASE = 0x8000
+    const PAGE_READWRITE = 0x04
+    extern GetCurrentProcess() -> void&
+    extern VirtualAllocEx(process: void&, address: mutable heap void&?, size: usize, alloc_type: int, protect: int) -> mutable heap void&?
+    extern VirtualFreeEx(process: void&, address: heap void&, size: usize, free_type: int) -> bool
+static elif (ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE):
+    extern __heap_base: heap u8&
+    extern wasm_memory_size(index: int) -> int
+    extern wasm_memory_grow(index: int, pages: usize) -> int
+    global mutable bump_pointer: heap u8& = __heap_base
+
+def assert(condition: bool):
+    can Abort.Panic:
+        if (not condition):
+            panic("assert failed")
+
+def max(a: usize, b: usize) -> usize:
+    return (a if (a > b) else b)
+
+def inv_handle(ptr: heap void&?) -> bool:
+    return (ptr == null)
+
+@internal
+def arena_region_from_raw(raw: heap void&) -> mutable heap Region&:
+    trusted Unsafe.PointerCast:
+        return raw.cast[mutable heap Region&]
+
+@internal
+def arena_heap_void_from_region(r: heap Region&) -> heap void&:
+    trusted Unsafe.PointerCast:
+        return r.cast[heap void&]
+
+@internal
+def arena_heap_u8_from_region_data(r: heap Region&) -> mutable heap u8&:
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        return ((r.cast[heap u8&] + size_of(Region))).cast[mutable heap u8&]
+
+@internal
+def arena_heap_void_from_data_base(data_base: heap u8&, offset_bytes: usize) -> mutable heap void&:
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        return ((data_base + offset_bytes)).cast[mutable heap void&]
+
+@internal
+def arena_heap_void_from_mutable(ptr: mutable void&) -> mutable heap void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable heap void&]
+
+@internal
+def arena_heap_u8_from_void(ptr: heap void&) -> mutable heap u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable heap u8&]
+
+@internal
+def arena_heap_void_from_u8(ptr: heap u8&) -> heap void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[heap void&]
+
+@internal
+def arena_u8_from_void(ptr: void&) -> u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[u8&]
+
+@internal
+def arena_mutable_u8_from_void(ptr: mutable void&) -> mutable u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable u8&]
+
+@internal
+def arena_heap_u8_from_alloc(ptr: heap void&) -> mutable heap u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable heap u8&]
+
+@internal
+def arena_void_from_mutable_u8(ptr: mutable heap u8&) -> mutable void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable void&]
+
+@internal
+def arena_void_from_u8(ptr: u8&) -> void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[void&]
+
+@internal
+def arena_nullable_u8_from_heap(ptr: heap u8&) -> u8&?:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[u8&?]
+
+def sfree[T](ptr: heap T&) -> heap T!:
+    trusted Unsafe.PointerCast, Unsafe.RawExtern:
+        free(ptr.cast[heap void&]) can Memory.Release
+    return null
+
+def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&:
+    can Memory.Allocate, Abort.Panic:
+        size_bytes: usize = (size_of(Region) + (size_of(uintptr) * capacity))
+        static if (ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC):
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- malloc(size_bytes)
+            assert((raw != null))
+            r: heap Region& = arena_region_from_raw(raw)
+        static elif (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
+            raw: heap void&? = mmap(null, size_bytes, (PROT_READ | PROT_WRITE), (MAP_ANONYMOUS | MAP_PRIVATE), (-1), 0)
+            assert((raw != MAP_FAILED()))
+            r: heap Region& = arena_region_from_raw(raw)
+        static elif (ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC):
+            raw: heap void&? = VirtualAllocEx(GetCurrentProcess(), null, size_bytes, (MEM_COMMIT | MEM_RESERVE), PAGE_READWRITE)
+            assert((not inv_handle(raw)))
+            r: heap Region& = arena_region_from_raw(raw)
+        static elif (ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE):
+            r: heap Region& = arena_region_from_raw(arena_heap_void_from_u8(bump_pointer))
+            current_memory_size: mutable usize = 0
+            trusted Unsafe.RawExtern:
+                current_memory_size <- (ARENA_WASM_PAGE_SIZE * wasm_memory_size(0).usize())
+            desired_memory_size: usize = (bump_pointer.usize() + size_bytes)
+            if (desired_memory_size > current_memory_size):
+                delta_bytes: usize = (desired_memory_size - current_memory_size)
+                delta_pages: usize = (((delta_bytes + ((ARENA_WASM_PAGE_SIZE - 1)))) / ARENA_WASM_PAGE_SIZE)
+                grow_result: mutable int = (-1)
+                trusted Unsafe.RawExtern:
+                    grow_result <- wasm_memory_grow(0, delta_pages)
+                assert((grow_result >= 0))
+            bump_pointer <- (bump_pointer + size_bytes)
+        static else:
+            static error("Unknown arena backend")
+        r.next <- null
+        r.count <- 0
+        r.capacity <- capacity
+        r.owner_tag <- owner_tag
+        r.owner_next <- null
+        r.global_index <- 0
+        return r
+
+def new_region(capacity: usize) -> mutable heap Region&:
+    return new_region_with_owner(capacity, 0.uintptr()) can Memory.Allocate, Abort.Panic
+
+def free_region(r: heap Region&):
+    can Memory.Release, Abort.Panic:
+        static if (ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC):
+            trusted Unsafe.RawExtern:
+                free(arena_heap_void_from_region(r))
+        static elif (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
+            size_bytes: usize = (size_of(Region) + (size_of(uintptr) * r.capacity))
+            ret: int = munmap(arena_heap_void_from_region(r), size_bytes)
+            assert((ret == 0))
+        static elif (ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC):
+            ok: bool = VirtualFreeEx(GetCurrentProcess(), arena_heap_void_from_region(r), 0, MEM_RELEASE)
+            assert(ok)
+        static elif (ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE):
+            pass
+
+def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        size: usize = ((((size_bytes + size_of(uintptr)) - 1)) / size_of(uintptr))
+        if (a.end == null):
+            assert((a.begin == null))
+            capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+            if (capacity < size):
+                capacity <- size
+            a.end as & <- new_region(capacity)
+            a.begin <- a.end
+            a.end_index <- 0
+            a.end.global_index <- 0
+        assert((a.end != null))
+        trusted Unsafe.AssumeProgress:
+            while ((((a.end.owner_tag != 0.uintptr()) or ((a.end.count + size) > a.end.capacity))) and (a.end.next != null)):
+                a.end <- a.end.next
+                a.end_index <- (a.end_index + 1)
+        if ((a.end.owner_tag != 0.uintptr()) or ((a.end.count + size) > a.end.capacity)):
+            assert((a.end.next == null))
+            capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+            if (capacity < size):
+                capacity <- size
+            a.end.next as & <- new_region(capacity)
+            a.end <- a.end.next
+            a.end_index <- (a.end_index + 1)
+            a.end.global_index <- a.end_index
+        data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
+        offset_bytes: usize = (a.end.count * size_of(uintptr))
+        result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
+        a.end.count <- (a.end.count + size)
+        return result
+
+def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        if (newsz <= oldsz):
+            return arena_heap_void_from_mutable(oldptr)
+        newptr: heap void& = arena_alloc(a, newsz)
+        newptr_bytes: heap u8& = arena_heap_u8_from_void(newptr)
+        oldptr_bytes: u8& = arena_u8_from_void(oldptr)
+        trusted Unsafe.UncheckedIndex:
+            for i in 0 ..< oldsz:
+                newptr_bytes[i] <- oldptr_bytes[i]
+        return newptr
+
+def arena_strlen(s: u8&) -> usize:
+    n: mutable usize = 0
+    trusted Unsafe.UncheckedIndex:
+        trusted Unsafe.AssumeProgress:
+            while (s[n] != 0):
+                n <- (n + 1)
+    return n
+
+def arena_memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&:
+    d: mutable u8& = arena_mutable_u8_from_void(dest)
+    s: u8& = arena_u8_from_void(src)
+    trusted Unsafe.UncheckedIndex:
+        for i in 0 ..< n:
+            d[i] <- s[i]
+    return dest
+
+def arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool:
+    left: u8& = arena_u8_from_void(lhs)
+    right: u8& = arena_u8_from_void(rhs)
+    trusted Unsafe.UncheckedIndex:
+        for i in 0 ..< n:
+            if (left[i] != right[i]):
+                return false
+    return true
+
+def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&:
+    n: usize = arena_strlen(cstr)
+    dup: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, (n + 1))) can Memory.Allocate, Abort.Panic
+    arena_memcpy(arena_void_from_mutable_u8(dup), arena_void_from_u8(cstr), n)
+    trusted Unsafe.UncheckedIndex:
+        dup[n] <- 0
+    return dup
+
+def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void&:
+    dup: mutable heap void& = arena_alloc(a, size) can Memory.Allocate, Abort.Panic
+    _ = arena_memcpy(dup, data, size)
+    return dup
+
+def arena_snapshot(a: Arena&) -> ArenaMark:
+    if (a.end == null):
+        assert((a.begin == null))
+        return ArenaMark(null, 0)
+    return ArenaMark(a.end, a.end.count)
+
+def arena_reset(a: mutable Arena&):
+    r: mutable heap Region&? = a.begin
+    trusted Unsafe.AssumeProgress:
+        while (r != null):
+            r.count <- 0
+            r <- r.next
+    a.end <- a.begin
+    a.end_index <- 0
+
+def arena_rewind(a: mutable Arena&, m: ArenaMark):
+    if (m.region == null):
+        arena_reset(a)
+        return
+    region: heap Region& = m.region
+    region.count <- m.count
+    r: mutable heap Region&? = region.next
+    trusted Unsafe.AssumeProgress:
+        while (r != null):
+            r.count <- 0
+            r <- r.next
+    a.end as & <- region
+    region_index: mutable usize = 0
+    current: mutable heap Region&? = a.begin
+    trusted Unsafe.AssumeProgress:
+        while ((current != null) and (current != region)):
+            current <- current.next
+            region_index <- (region_index + 1)
+    assert((current != null))
+    a.end_index <- region_index
+
+def arena_free(a: mutable Arena&):
+    can Memory.Release, Abort.Panic:
+        r: mutable heap Region&? = a.begin
+        trusted Unsafe.AssumeProgress:
+            while (r != null):
+                r0: mutable heap Region& = r
+                r <- r.next
+                free_region(r0)
+        a.begin as ! <- null
+        a.end as ! <- null
+        a.end_index <- 0
+
+def arena_trim(a: mutable Arena&):
+    can Memory.Release, Abort.Panic:
+        if (a.end == null):
+            return
+        r: mutable heap Region&? = a.end.next
+        trusted Unsafe.AssumeProgress:
+            while (r != null):
+                r0: mutable heap Region& = r
+                r <- r.next
+                free_region(r0)
+        a.end.next as ! <- null
+
+extern va_list
+
+extern va_copy(args: va_list) -> va_list
+
+extern va_end(args: va_list)
+
+extern vsnprintf(buffer: u8&?, buffer_size: usize, format: u8&, args: va_list) -> int
+
+def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8&:
+    can Memory.Allocate, Console.Format, Abort.Panic:
+        args_copy: mutable va_list = args
+        n: mutable int = (-1)
+        trusted Unsafe.RawExtern:
+            args_copy <- va_copy(args)
+            n <- vsnprintf(null, 0, format, args_copy)
+            va_end(args_copy)
+        assert((n >= 0))
+        result: heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, (n.usize() + 1)))
+        trusted Unsafe.RawExtern:
+            _ = vsnprintf(arena_nullable_u8_from_heap(result), (n.usize() + 1), format, args)
+        return result
+
+const ARENA_DEQUE_INIT_CAP: usize = 16
+
+struct Deque[T]:
+    items: mutable T&?
+    head: mutable usize
+    count: mutable usize
+    capacity: mutable usize
+
+@internal
+def deque_items_from_alloc[T](ptr: heap void&) -> mutable T&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable T&]
+
+@internal
+def deque_mutable_void_from_items[T](items: mutable T&) -> mutable void&:
+    trusted Unsafe.PointerCast:
+        return items.cast[mutable void&]
+
+@internal
+def deque_void_from_items[T](items: T&) -> void&:
+    trusted Unsafe.PointerCast:
+        return items.cast[void&]
+
+@internal
+def deque_void_from_items_at[T](items: T&, index: usize) -> void&:
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        return ((items + index)).cast[void&]
+
+@internal
+def deque_mutable_void_from_items_at[T](items: mutable T&, index: usize) -> mutable void&:
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        return ((items + index)).cast[mutable void&]
+
+def arena_deque_init[T]() -> Deque[T]:
+    out: mutable Deque[T] = zeroed
+    return out
+
+def arena_deque_init_buffer[T](buffer: T&, capacity: usize) -> Deque[T]:
+    out: mutable Deque[T] = zeroed
+    out.items as & <- buffer
+    out.head <- 0
+    out.count <- 0
+    out.capacity <- capacity
+    return out
+
+def arena_deque_with_capacity[T](a: mutable Arena&, capacity: usize) -> Deque[T]:
+    can Memory.Allocate, Abort.Panic:
+        if (capacity == 0):
+            out0: mutable Deque[T] = zeroed
+            return out0
+        out: mutable Deque[T] = zeroed
+        out.items as & <- deque_items_from_alloc[T](arena_alloc(a, (capacity * size_of(T))))
+        out.head <- 0
+        out.count <- 0
+        out.capacity <- capacity
+        return out
+
+def arena_deque_len[T](d: Deque[T]&) -> usize:
+    return d.count
+
+def arena_deque_capacity[T](d: Deque[T]&) -> usize:
+    return d.capacity
+
+def arena_deque_is_empty[T](d: Deque[T]&) -> bool:
+    return (d.count == 0)
+
+def arena_deque_clear[T](d: mutable Deque[T]&):
+    d.head <- 0
+    d.count <- 0
+
+def arena_deque_buffer_index[T](d: Deque[T]&, logical_index: usize) -> usize:
+    can Abort.Panic:
+        assert((d.capacity > 0))
+        assert((logical_index < d.capacity))
+        head_len: usize = (d.capacity - d.head)
+        return (((d.head + logical_index)) if (logical_index < head_len) else (logical_index - head_len))
+
+def arena_deque_copy_linearized[T](d: Deque[T]&, dst: mutable T&):
+    if (d.count == 0):
+        return
+    assert((d.items != null))
+    if (d.head <= (d.capacity - d.count)):
+        arena_memcpy(deque_mutable_void_from_items[T](dst), deque_void_from_items_at[T](d.items, d.head), (d.count * size_of(T)))
+        return
+    head_count: usize = (d.capacity - d.head)
+    tail_count: usize = (d.count - head_count)
+    arena_memcpy(deque_mutable_void_from_items[T](dst), deque_void_from_items_at[T](d.items, d.head), (head_count * size_of(T)))
+    arena_memcpy(deque_mutable_void_from_items_at[T](dst, head_count), deque_void_from_items[T](d.items), (tail_count * size_of(T)))
+
+def arena_deque_reserve[T](a: mutable Arena&, d: mutable Deque[T]&, needed: usize) -> mutable Deque[T]&:
+    can Memory.Allocate, Abort.Panic:
+        if (needed <= d.capacity):
+            return d
+        new_capacity: mutable usize = d.capacity
+        if (new_capacity == 0):
+            new_capacity <- ARENA_DEQUE_INIT_CAP
+        trusted Unsafe.AssumeProgress:
+            while (needed > new_capacity):
+                new_capacity <- (new_capacity * 2)
+        new_items: mutable T& = deque_items_from_alloc[T](arena_alloc(a, (new_capacity * size_of(T))))
+        arena_deque_copy_linearized(d, new_items)
+        d.items as & <- new_items
+        d.head <- 0
+        d.capacity <- new_capacity
+        return d
+
+def arena_deque_ensure_unused[T](a: mutable Arena&, d: mutable Deque[T]&, additional: usize) -> mutable Deque[T]&:
+    can Memory.Allocate, Abort.Panic:
+        needed: usize = (d.count + additional)
+        assert((needed >= d.count))
+        return arena_deque_reserve(a, d, needed)
+
+def arena_deque_push_front_assume_capacity[T](d: mutable Deque[T]&, item: T):
+    can Abort.Panic:
+        assert((d.items != null))
+        assert((d.count < d.capacity))
+        if (d.head == 0):
+            d.head <- d.capacity
+        d.head <- (d.head - 1)
+        d.items[d.head] <- item
+        d.count <- (d.count + 1)
+
+def arena_deque_push_back_assume_capacity[T](d: mutable Deque[T]&, item: T):
+    can Abort.Panic:
+        assert((d.items != null))
+        assert((d.count < d.capacity))
+        physical_index: usize = arena_deque_buffer_index(d, d.count)
+        d.items[physical_index] <- item
+        d.count <- (d.count + 1)
+
+def arena_deque_push_front_bounded[T](d: mutable Deque[T]&, item: T) -> bool:
+    can Abort.Panic:
+        if (d.count >= d.capacity):
+            return false
+        arena_deque_push_front_assume_capacity(d, item)
+        return true
+
+def arena_deque_push_back_bounded[T](d: mutable Deque[T]&, item: T) -> bool:
+    can Abort.Panic:
+        if (d.count >= d.capacity):
+            return false
+        arena_deque_push_back_assume_capacity(d, item)
+        return true
+
+def arena_deque_push_front[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -> mutable Deque[T]&:
+    can Memory.Allocate, Abort.Panic:
+        _ = arena_deque_ensure_unused(a, d, 1)
+        arena_deque_push_front_assume_capacity(d, item)
+        return d
+
+def arena_deque_push_back[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -> mutable Deque[T]&:
+    can Memory.Allocate, Abort.Panic:
+        _ = arena_deque_ensure_unused(a, d, 1)
+        arena_deque_push_back_assume_capacity(d, item)
+        return d
+
+def arena_deque_front[T](d: Deque[T]&) -> T&?:
+    return (null if ((d.count == 0) or (d.items == null)) else &d.items[d.head])
+
+def arena_deque_back[T](d: Deque[T]&) -> T&?:
+    can Abort.Panic:
+        if ((d.count == 0) or (d.items == null)):
+            return null
+        physical_index: usize = arena_deque_buffer_index(d, (d.count - 1))
+        return &d.items[physical_index]
+
+def arena_deque_at[T](d: Deque[T]&, index: usize) -> T&:
+    can Abort.Panic:
+        assert((index < d.count))
+        assert((d.items != null))
+        physical_index: usize = arena_deque_buffer_index(d, index)
+        return &d.items[physical_index]
+
+def arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool:
+    can Abort.Panic:
+        if ((d.count == 0) or (d.items == null)):
+            return false
+        out[0] <- d.items[d.head]
+        if (d.count == 1):
+            d.count <- 0
+            d.head <- 0
+            return true
+        d.head <- arena_deque_buffer_index(d, 1)
+        d.count <- (d.count - 1)
+        return true
+
+def arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool:
+    can Abort.Panic:
+        if ((d.count == 0) or (d.items == null)):
+            return false
+        physical_index: usize = arena_deque_buffer_index(d, (d.count - 1))
+        out[0] <- d.items[physical_index]
+        d.count <- (d.count - 1)
+        if (d.count == 0):
+            d.head <- 0
+        return true
+
+const ARENA_DA_INIT_CAP: usize = 256
+
+const DICT_INIT_CAP: usize = 8
+
+struct DynArray[T]:
+    items: mutable T&?
+    count: mutable usize
+    capacity: mutable usize
+
+struct DynArrayView:
+    data: mutable void&?
+    len: mutable usize
+    elem_size: mutable usize
+
+struct DictBucket[K, T]:
+    key: mutable K
+    value: mutable T
+
+struct DynDict[K, T]:
+    items: mutable DictBucket[K, T]&?
+    count: mutable usize
+    used: mutable usize
+    capacity: mutable usize
+    arena: mutable Arena&?
+
+struct DictProbeResult:
+    index: mutable usize
+    found: mutable bool
+
+extern SymbolTableSlot
+
+type SymbolTableId = id[SymbolTableSlot]
+
+def __cast__(value: u32) -> SymbolTableId:
+    return value.cast[SymbolTableId]
+
+global SYMBOL_TABLE_INVALID_ID: SymbolTableId = 0.u32().SymbolTableId()
+
+struct SymbolEntry[K, T]:
+    key: mutable K
+    value: mutable T
+
+struct IndexMapEntry[K, T]:
+    key: mutable K
+    value: mutable T
+
+struct IndexMap[K, T]:
+    owner: mutable Arena&?
+    entries: mutable darray[IndexMapEntry[K, T]]
+    by_key: mutable dict[K, usize]
+
+struct SymbolTable[K, T]:
+    items: mutable IndexMap[K, T]
+
+struct InlineVec[T, N: usize]:
+    owner: mutable Arena&?
+    inline_items: mutable T[N]
+    overflow: mutable darray[T]
+    len: mutable usize
+    is_spilled: mutable bool
+
+struct DArrayBuilder[T]:
+    owner: mutable Arena&?
+    items: mutable darray[T]
+
+struct Flags[T]:
+    bits: mutable u64
+
+struct IndexMapNamespace:
+    _unused: u8
+
+struct SymbolTableNamespace:
+    _unused: u8
+
+struct InlineVecNamespace:
+    _unused: u8
+
+struct DArrayBuilderNamespace:
+    _unused: u8
+
+struct FlagsNamespace:
+    _unused: u8
+
+global indexmap: IndexMapNamespace = IndexMapNamespace(0)
+
+global symtab: SymbolTableNamespace = SymbolTableNamespace(0)
+
+global inlinevec: InlineVecNamespace = InlineVecNamespace(0)
+
+global arraybuilder: DArrayBuilderNamespace = DArrayBuilderNamespace(0)
+
+global flags: FlagsNamespace = FlagsNamespace(0)
+
+@internal
+def collections_items_from_alloc[T](ptr: heap void&) -> mutable T&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable T&]
+
+@internal
+def collections_void_from_items[T](items: T&) -> void&:
+    trusted Unsafe.PointerCast:
+        return items.cast[void&]
+
+@internal
+def collections_mutable_void_from_items[T](items: mutable T&) -> mutable void&:
+    trusted Unsafe.PointerCast:
+        return items.cast[mutable void&]
+
+@internal
+def collections_void_from_items_at[T](items: T&, index: usize) -> void&:
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        return ((items + index)).cast[void&]
+
+@internal
+def collections_mutable_void_from_items_at[T](items: mutable T&, index: usize) -> mutable void&:
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        return ((items + index)).cast[mutable void&]
+
+@internal
+def collections_void_from_data_at(data: void&, offset: usize) -> void&:
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        return ((data.cast[u8&] + offset)).cast[void&]
+
+@internal
+def collections_items_from_data_at[T](data: void&, offset: usize) -> T&:
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        return ((data.cast[u8&] + offset)).cast[T&]
+
+@internal
+def collections_items_from_data[T](data: void&) -> T&:
+    trusted Unsafe.PointerCast:
+        return data.cast[T&]
+
+@internal
+def collections_mutable_items_from_data[T](data: mutable void&) -> mutable T&:
+    trusted Unsafe.PointerCast:
+        return data.cast[mutable T&]
+
+def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, needed: usize) -> mutable darray[T, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        if (needed <= da.capacity):
+            return da
+        new_capacity: mutable usize = da.capacity
+        if (new_capacity == 0):
+            new_capacity <- ARENA_DA_INIT_CAP
+        trusted Unsafe.AssumeProgress:
+            while (needed > new_capacity):
+                new_capacity <- (new_capacity * 2)
+        old_size: usize = (da.capacity * size_of(T))
+        new_size: usize = (new_capacity * size_of(T))
+        if (da.items == null):
+            da.items as & <- collections_items_from_alloc[T](arena_alloc(a, new_size))
+        else:
+            resized: heap void& = arena_realloc(a, collections_mutable_void_from_items[T](da.items), old_size, new_size)
+            da.items as & <- collections_items_from_alloc[T](resized)
+        da.capacity <- new_capacity
+        return da
+
+def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+    elem_size: usize = size_of(T)
+    if ((da.items == null) or (da.count == 0)):
+        return DynArrayView(null, 0, elem_size)
+    lo: mutable usize = (start if (start < da.count) else da.count)
+    hi: mutable usize = (end if (end < da.count) else da.count)
+    if (hi < lo):
+        hi <- lo
+    if (hi == lo):
+        return DynArrayView(null, 0, elem_size)
+    return DynArrayView(collections_void_from_items_at[T](da.items, lo), (hi - lo), elem_size)
+
+def arena_da_view_len[T](view: dview[T]) -> usize:
+    return view.len
+
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+    if ((view.data == null) or (view.len == 0)):
+        return DynArrayView(null, 0, view.elem_size)
+    lo: mutable usize = (start if (start < view.len) else view.len)
+    hi: mutable usize = (end if (end < view.len) else view.len)
+    if (hi < lo):
+        hi <- lo
+    if (hi == lo):
+        return DynArrayView(null, 0, view.elem_size)
+    offset: usize = (lo * view.elem_size)
+    return DynArrayView(collections_void_from_data_at(view.data, offset), (hi - lo), view.elem_size)
+
+def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
+    return arena_da_view_slice(view, 0, end)
+
+def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+    return arena_da_view_slice(view, start, view.len)
+
+def arena_da_view_get[T](view: dview[T], index: usize) -> T:
+    assert((index < view.len))
+    assert((view.data != null))
+    offset: usize = (index * view.elem_size)
+    base: T& = collections_items_from_data_at[T](view.data, offset)
+    return base[0]
+
+def arena_da_fill[T](dst: dview[T], value: T):
+    if (dst.len == 0):
+        return
+    assert((dst.data != null))
+    out: mutable T& = collections_mutable_items_from_data[T](dst.data)
+    for i in 0 ..< dst.len:
+        out[i] <- value
+
+def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
+    assert((dst.len == src.len))
+    if (dst.len == 0):
+        return
+    assert((dst.data != null))
+    assert((src.data != null))
+    out: mutable T& = collections_mutable_items_from_data[T](dst.data)
+    src_items: T& = collections_items_from_data[T](src.data)
+    for i in 0 ..< dst.len:
+        out[i] <- src_items[i]
+
+def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
+    assert((left.len == right.len))
+    assert((left.elem_size == right.elem_size))
+    if (left.len == 0):
+        return true
+    assert((left.data != null))
+    assert((right.data != null))
+    byte_count: usize = (left.len * left.elem_size)
+    return arena_memeq(left.data, right.data, byte_count)
+
+def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_out]:
+    can Memory.Allocate, Abort.Panic:
+        if (view.len == 0):
+            return zeroed
+        items: mutable T& = collections_items_from_alloc[T](arena_alloc(a, (view.len * size_of(T))))
+        assert((view.data != null))
+        arena_memcpy(collections_mutable_void_from_items[T](items), view.data, (view.len * view.elem_size))
+        out: mutable darray[T, shape_out] = zeroed
+        out.items as & <- items
+        out.count <- view.len
+        out.capacity <- view.len
+        return out
+
+def darray_view[T](da: darray[T]) -> dview[T]:
+    elem_size: usize = size_of(T)
+    if ((da.items == null) or (da.count == 0)):
+        return DynArrayView(null, 0, elem_size)
+    return DynArrayView(collections_void_from_items[T](da.items), da.count, elem_size)
+
+@ufcs_only
+def view[T](da: darray[T]) -> dview[T]:
+    return darray_view[T](da)
+
+@ufcs_only
+def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
+    return FilteredView[S, T](source, predicate)
+
+def darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
+    result: mutable DArrayBuilder[T] = zeroed
+    result.owner as & <- owner
+    return result
+
+def new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[T]:
+    _ = api
+    return darray_builder[T](owner)
+
+@ufcs_only
+def builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
+    return darray_builder[T](owner)
+
+def darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize:
+    return builder.items.count
+
+@ufcs_only
+def count[T](builder: DArrayBuilder[T]&) -> usize:
+    return darray_builder_count[T](builder)
+
+def darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool:
+    return (builder.items.count == 0)
+
+@ufcs_only
+def is_empty[T](builder: DArrayBuilder[T]&) -> bool:
+    return darray_builder_is_empty[T](builder)
+
+def darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
+    assert((index < builder.items.count))
+    return builder.items[index]
+
+@ufcs_only
+def get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
+    return darray_builder_get[T](builder, index)
+
+def darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize):
+    can Memory.Allocate, Abort.Panic:
+        assert((builder.owner != null))
+        owner: mutable Arena& = builder.owner
+        in owner:
+            _ = builder.items.reserve(capacity)
+
+@ufcs_only
+def reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize):
+    darray_builder_reserve[T](builder, capacity) can Memory.Allocate, Abort.Panic
+
+def darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        assert((builder.owner != null))
+        owner: mutable Arena& = builder.owner
+        in owner:
+            builder.items.push(item)
+
+@ufcs_only
+def push[T](builder: mutable DArrayBuilder[T]&, item: T):
+    darray_builder_push[T](builder, item) can Memory.Allocate, Abort.Panic
+
+def darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]:
+    elem_size: usize = size_of(T)
+    if ((builder.items.items == null) or (builder.items.count == 0)):
+        return DynArrayView(null, 0, elem_size)
+    return DynArrayView(collections_void_from_items[T](builder.items.items), builder.items.count, elem_size)
+
+@ufcs_only
+def view[T](builder: DArrayBuilder[T]&) -> dview[T]:
+    return darray_builder_view[T](builder)
+
+def darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
+    return builder.items
+
+@ufcs_only
+def finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
+    return darray_builder_finish[T](builder)
+
+def darray_builder_clear[T](builder: mutable DArrayBuilder[T]&):
+    builder.items.count <- 0
+
+@ufcs_only
+def clear[T](builder: mutable DArrayBuilder[T]&):
+    darray_builder_clear[T](builder)
+
+def inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]:
+    out: mutable InlineVec[T, N] = zeroed
+    out.owner as & <- owner
+    return out
+
+def new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> InlineVec[T, N]:
+    _ = api
+    return inline_vec[T, N](owner)
+
+def inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
+    return vec.len
+
+@ufcs_only
+def count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
+    return inline_vec_count[T, N](vec)
+
+def inline_vec_is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return (vec.len == 0)
+
+@ufcs_only
+def is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return inline_vec_is_empty[T, N](vec)
+
+def inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return vec.is_spilled
+
+@ufcs_only
+def spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return inline_vec_spilled[T, N](vec)
+
+def inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
+    assert((index < vec.len))
+    if vec.is_spilled:
+        trusted Unsafe.UncheckedIndex:
+            return vec.overflow[index]
+    trusted Unsafe.UncheckedIndex:
+        return vec.inline_items[index]
+
+@ufcs_only
+def get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
+    return inline_vec_get[T, N](vec, index)
+
+def inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
+    assert((index < vec.len))
+    if vec.is_spilled:
+        trusted Unsafe.UncheckedIndex:
+            vec.overflow[index] <- item
+    else:
+        trusted Unsafe.UncheckedIndex:
+            vec.inline_items[index] <- item
+
+@ufcs_only
+def set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
+    inline_vec_set[T, N](vec, index, item)
+
+def inline_vec_spill[T, N: usize](vec: mutable InlineVec[T, N]&):
+    can Memory.Allocate, Abort.Panic:
+        if vec.is_spilled:
+            return
+        assert((vec.owner != null))
+        owner: mutable Arena& = vec.owner
+        in owner:
+            _ = vec.overflow.reserve((N * 2))
+            for index in 0 ..< vec.len:
+                trusted Unsafe.UncheckedIndex:
+                    vec.overflow.push(vec.inline_items[index])
+        vec.is_spilled <- true
+
+def inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        if vec.is_spilled:
+            assert((vec.owner != null))
+            owner: mutable Arena& = vec.owner
+            in owner:
+                vec.overflow.push(item)
+            vec.len <- (vec.len + 1)
+            return
+        if (vec.len < N):
+            trusted Unsafe.UncheckedIndex:
+                vec.inline_items[vec.len] <- item
+            vec.len <- (vec.len + 1)
+            return
+        inline_vec_spill[T, N](vec)
+        assert((vec.owner != null))
+        owner: mutable Arena& = vec.owner
+        in owner:
+            vec.overflow.push(item)
+        vec.len <- (vec.len + 1)
+
+@ufcs_only
+def push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
+    inline_vec_push[T, N](vec, item) can Memory.Allocate, Abort.Panic
+
+def inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
+    assert((vec.len > 0))
+    vec.len <- (vec.len - 1)
+    if vec.is_spilled:
+        vec.overflow.count <- vec.len
+        trusted Unsafe.UncheckedIndex:
+            return vec.overflow[vec.len]
+    trusted Unsafe.UncheckedIndex:
+        return vec.inline_items[vec.len]
+
+@ufcs_only
+def pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
+    return inline_vec_pop[T, N](vec)
+
+def inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T:
+    assert((vec.len > 0))
+    return inline_vec_get[T, N](vec, (vec.len - 1))
+
+@ufcs_only
+def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
+    return inline_vec_last[T, N](vec)
+
+def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
+    elem_size: usize = size_of(T)
+    if (vec.len == 0):
+        return DynArrayView(null, 0, elem_size)
+    if vec.is_spilled:
+        assert((vec.overflow.items != null))
+        return DynArrayView(collections_void_from_items[T](vec.overflow.items), vec.len, elem_size)
+    trusted Unsafe.UncheckedIndex:
+        return DynArrayView(collections_void_from_items[T](vec.inline_items[0].ref[T&]), vec.len, elem_size)
+
+@ufcs_only
+def view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
+    return inline_vec_view[T, N](vec)
+
+def inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&):
+    if vec.is_spilled:
+        vec.overflow.count <- 0
+    vec.len <- 0
+    vec.is_spilled <- false
+
+@ufcs_only
+def clear[T, N: usize](vec: mutable InlineVec[T, N]&):
+    inline_vec_clear[T, N](vec)
+
+def flags_new[T](api: FlagsNamespace) -> Flags[T]:
+    _ = api
+    result: Flags[T] = zeroed
+    return result
+
+def new[T](api: FlagsNamespace) -> Flags[T]:
+    return flags_new[T](api)
+
+def flags_empty[T]() -> Flags[T]:
+    result: Flags[T] = zeroed
+    return result
+
+def flags_from_bits[T](bits: u64) -> Flags[T]:
+    result: mutable Flags[T] = zeroed
+    result.bits <- bits
+    return result
+
+def flags_bits[T](items: Flags[T]&) -> u64:
+    return items.bits
+
+def bits[T](items: Flags[T]&) -> u64:
+    return flags_bits[T](items)
+
+def flags_mask[T](value: T) -> u64:
+    index: u64 = value.u64()
+    assert((index < 64))
+    return (1.u64() << index.u32())
+
+def flags_has[T](items: Flags[T]&, value: T) -> bool:
+    return (((items.bits & flags_mask[T](value))) != 0)
+
+def has[T](items: Flags[T]&, value: T) -> bool:
+    return flags_has[T](items, value)
+
+def flags_add[T](items: mutable Flags[T]&, value: T):
+    items.bits <- (items.bits | flags_mask[T](value))
+
+def add[T](items: mutable Flags[T]&, value: T):
+    flags_add[T](items, value)
+
+def flags_remove[T](items: mutable Flags[T]&, value: T):
+    items.bits <- (items.bits & (~flags_mask[T](value)))
+
+def remove[T](items: mutable Flags[T]&, value: T):
+    flags_remove[T](items, value)
+
+def flags_set[T](items: mutable Flags[T]&, value: T, enabled: bool):
+    if enabled:
+        items.add(value)
+    else:
+        items.remove(value)
+
+def flags_clear[T](items: mutable Flags[T]&):
+    items.bits <- 0
+
+def flags_any[T](items: Flags[T]&) -> bool:
+    return (items.bits != 0)
+
+def flags_union[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T]((left.bits | right.bits))
+
+def flags_intersection[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T]((left.bits & right.bits))
+
+def flags_difference[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T]((left.bits & (~right.bits)))
+
+def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        in a:
+            _ = da.reserve((da.count + 1))
+        assert((da.items != null))
+        da.items[da.count] <- item
+        da.count <- (da.count + 1)
+        return da
+
+def darray_pop[T](da: mutable darray[T]&) -> T:
+    can Abort.Panic:
+        assert((da.count > 0))
+        da.count <- (da.count - 1)
+        return da[da.count]
+
+@ufcs_only
+def pop[T](da: mutable darray[T]&) -> T:
+    return darray_pop[T](da) can Abort.Panic
+
+def darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T:
+    can Abort.Panic:
+        assert((index < da.count))
+        removed: T = da[index]
+        next: mutable usize = (index + 1)
+        trusted Unsafe.AssumeProgress:
+            while (next < da.count):
+                da[(next - 1)] <- da[next]
+                next <- (next + 1)
+        da.count <- (da.count - 1)
+        return removed
+
+@ufcs_only
+def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
+    return darray_remove_at[T](da, index) can Abort.Panic
+
+def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        needed: usize = (da.count + new_items_count)
+        if (needed > da.capacity):
+            new_capacity: mutable usize = da.capacity
+            if (new_capacity == 0):
+                new_capacity <- ARENA_DA_INIT_CAP
+            trusted Unsafe.AssumeProgress:
+                while (needed > new_capacity):
+                    new_capacity <- (new_capacity * 2)
+            old_size: usize = (da.capacity * size_of(T))
+            new_size: usize = (new_capacity * size_of(T))
+            if (da.items == null):
+                da.items as & <- collections_items_from_alloc[T](arena_alloc(a, new_size))
+            else:
+                resized: heap void& = arena_realloc(a, collections_mutable_void_from_items[T](da.items), old_size, new_size)
+                da.items as & <- collections_items_from_alloc[T](resized)
+            da.capacity <- new_capacity
+        assert((da.items != null))
+        arena_memcpy(collections_mutable_void_from_items_at[T](da.items, da.count), collections_void_from_items[T](new_items), (new_items_count * size_of(T)))
+        da.count <- (da.count + new_items_count)
+        return da
+
+def arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&:
+    return arena_da_append_many(a, sb, buf, n) can Memory.Allocate, Abort.Panic
+
+def arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, cstr: u8&) -> mutable darray[u8, shape_out]&:
+    n: usize = arena_strlen(cstr)
+    return arena_da_append_many(a, sb, cstr, n) can Memory.Allocate, Abort.Panic
+
+def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        in a:
+            return sb.extend([0.u8()])
+
+def arena_dict_next_capacity(min_capacity: usize) -> usize:
+    if (min_capacity == 0):
+        return 0
+    cap: mutable usize = DICT_INIT_CAP
+    trusted Unsafe.AssumeProgress:
+        while (cap < min_capacity):
+            cap <- (cap * 2)
+    return cap
+
+def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
+    if ((m.count == 0) or (m.items == null)):
+        return DictProbeResult(0, false)
+    assert((m.items != null))
+    items: DictBucket[K, T]& = m.items
+    for index in 0 ..< m.count:
+        if (items[index].key == key):
+            return DictProbeResult(index, true)
+    return DictProbeResult(m.count, false)
+
+def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
+    view: dview[DictBucket[K, T]] = DynArrayView(collections_void_from_items[DictBucket[K, T]](items), capacity, size_of(DictBucket[K, T]))
+    arena_da_fill(view, zeroed)
+
+def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable dict[K, T] = zeroed
+        out.arena as & <- a
+        capacity: usize = arena_dict_next_capacity(initial_capacity)
+        if (capacity == 0):
+            return out
+        items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(a, (capacity * size_of(DictBucket[K, T]))))
+        arena_dict_zero_buckets(items, capacity)
+        out.items as & <- items
+        out.capacity <- capacity
+        return out
+
+def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        target_capacity: usize = arena_dict_next_capacity(min_capacity)
+        if (target_capacity == 0):
+            return
+        if (target_capacity <= m.capacity):
+            return
+        owner: mutable Arena& = (m.arena if (m.arena != null) else a)
+        new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(owner, (target_capacity * size_of(DictBucket[K, T]))))
+        arena_dict_zero_buckets(new_items, target_capacity)
+        if ((m.items != null) and (m.count > 0)):
+            assert((m.items != null))
+            old_items: mutable DictBucket[K, T]& = m.items
+            for i in 0 ..< m.count:
+                new_items[i] <- old_items[i]
+        m.items as & <- new_items
+        m.used <- m.count
+        m.capacity <- target_capacity
+        m.arena as & <- owner
+        return
+
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
+    if ((m.count == 0) or (m.items == null)):
+        return null
+    probe: DictProbeResult = arena_dict_find_index(m, key)
+    if (not probe.found):
+        return null
+    assert((m.items != null))
+    items: mutable DictBucket[K, T]& = m.items
+    return &items[probe.index].value
+
+def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        owner: mutable Arena& = (m.arena if (m.arena != null) else a)
+        if (m.arena == null):
+            m.arena as & <- owner
+        probe: DictProbeResult = arena_dict_find_index(m, key)
+        if probe.found:
+            assert((m.items != null))
+            items: mutable DictBucket[K, T]& = m.items
+            items[probe.index].value <- value
+            return &items[probe.index].value
+        if ((m.capacity == 0) or (m.count == m.capacity)):
+            target_capacity: mutable usize = (DICT_INIT_CAP if (m.capacity == 0) else (m.capacity * 2))
+            if (target_capacity < (m.count + 1)):
+                target_capacity <- (m.count + 1)
+            try arena_dict_reserve(owner, m, target_capacity)
+        assert((m.items != null))
+        assert((m.capacity > 0))
+        items: mutable DictBucket[K, T]& = m.items
+        insert_index: usize = m.count
+        items[insert_index].key <- key
+        items[insert_index].value <- value
+        m.count <- (insert_index + 1)
+        m.used <- m.count
+        return &items[insert_index].value
+
+def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        existing: mutable T&? = arena_dict_get(m, key)
+        if (existing != null):
+            return existing
+        return try arena_dict_put(a, m, key, value)
+
+def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
+    return (arena_dict_get(m, key) != null)
+
+def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
+    if ((m.count == 0) or (m.items == null)):
+        return false
+    probe: DictProbeResult = arena_dict_find_index(m, key)
+    if (not probe.found):
+        return false
+    assert((m.items != null))
+    items: mutable DictBucket[K, T]& = m.items
+    last_index: usize = (m.count - 1)
+    if (probe.index != last_index):
+        items[probe.index] <- items[last_index]
+    items[last_index] <- zeroed
+    m.count <- last_index
+    m.used <- m.count
+    return true
+
+def arena_dict_clear[K, T](m: mutable dict[K, T]&):
+    if ((m.items == null) or (m.capacity == 0)):
+        m.count <- 0
+        m.used <- 0
+        return
+    assert((m.items != null))
+    items: DictBucket[K, T]& = m.items
+    arena_dict_zero_buckets(items, m.capacity)
+    m.count <- 0
+    m.used <- 0
+
+def arena_dict_new__i64(a: mutable Arena&, initial_capacity: usize) -> dict[cstr[key_shape], i64]:
+    return arena_dict_new[cstr[key_shape], i64](a, initial_capacity) can Memory.Allocate, Abort.Panic
+
+def arena_dict_reserve__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError]:
+    (try arena_dict_reserve[cstr[key_shape], i64](a, m, min_capacity)) can Memory.Allocate, Abort.Panic
+
+def arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> mutable i64&?:
+    return arena_dict_get[cstr[key_shape], i64](m, key)
+
+def arena_dict_put__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
+    return (try arena_dict_put[cstr[key_shape], i64](a, m, key, value)) can Memory.Allocate, Abort.Panic
+
+def arena_dict_get_or_insert__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
+    return (try arena_dict_get_or_insert[cstr[key_shape], i64](a, m, key, value)) can Memory.Allocate, Abort.Panic
+
+def arena_dict_contains__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool:
+    return arena_dict_contains[cstr[key_shape], i64](m, key)
+
+def arena_dict_remove__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool:
+    return arena_dict_remove[cstr[key_shape], i64](m, key)
+
+def arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&):
+    arena_dict_clear[cstr[key_shape], i64](m)
+
+def index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        map: mutable IndexMap[K, T] = zeroed
+        map.owner as & <- owner
+        map.by_key <- arena_dict_new[K, usize](owner, initial_capacity)
+        in owner:
+            _ = map.entries.reserve(initial_capacity)
+        return map
+
+def index_map_new[K, T](owner: mutable Arena&) -> IndexMap[K, T]:
+    return index_map[K, T](owner, 32) can Memory.Allocate, Abort.Panic
+
+def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        _ = api
+        return index_map_new[K, T](owner)
+
+def index_map_with_capacity[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    return index_map[K, T](owner, initial_capacity) can Memory.Allocate, Abort.Panic
+
+def with_capacity[K, T](api: IndexMapNamespace, owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        _ = api
+        return index_map_with_capacity[K, T](owner, initial_capacity)
+
+def index_map_count[K, T](map: IndexMap[K, T]&) -> usize:
+    return map.entries.count
+
+def count[K, T](map: IndexMap[K, T]&) -> usize:
+    return index_map_count[K, T](map)
+
+def index_map_valid_index[K, T](map: IndexMap[K, T]&, index: usize) -> bool:
+    return (index < map.entries.count)
+
+def index_map_find_index[K, T](map: IndexMap[K, T]&, key: K) -> usize?:
+    found: mutable usize&? = arena_dict_get[K, usize](map.by_key, key)
+    if (found == null):
+        return null
+    trusted Unsafe.UncheckedIndex:
+        return found[0]
+
+def index_map_contains[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return (index_map_find_index[K, T](map, key) != null)
+
+def index_map_entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
+    assert((index < map.entries.count))
+    return map.entries[index]
+
+def index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    return index_map_entry[K, T](map, index).value
+
+def index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
+    return map.entries.view()
+
+@ufcs_only
+def entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
+    return index_map_entry[K, T](map, index)
+
+@ufcs_only
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    return index_map_value[K, T](map, index)
+
+@ufcs_only
+def entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
+    return index_map_entries[K, T](map)
+
+def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        match index_map_find_index[K, T](map, key):
+            null:
+                pass
+            existing_index:
+                assert((existing_index < map.entries.count))
+                map.entries[existing_index].value <- value
+                return existing_index
+        assert((map.owner != null))
+        owner: mutable Arena& = map.owner
+        index: usize = map.entries.count
+        in owner:
+            map.entries.push(IndexMapEntry[K, T]{key, value})
+        _ = try arena_dict_put[K, usize](owner, map.by_key, key, index) else null
+        return index
+
+def put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    return index_map_put[K, T](map, key, value) can Memory.Allocate, Abort.Panic
+
+def index_map_set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    return index_map_put[K, T](map, key, value) can Memory.Allocate, Abort.Panic
+
+def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    return index_map_set[K, T](map, key, value) can Memory.Allocate, Abort.Panic
+
+def index_map_get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
+    index: usize = index_map_find_index[K, T](map, key) else return null
+    value: T = index_map_value[K, T](map, index)
+    return value
+
+def get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
+    return index_map_get[K, T](map, key)
+
+def index_map_has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return index_map_contains[K, T](map, key)
+
+def has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return index_map_has[K, T](map, key)
+
+def update_at[K, T](map: mutable IndexMap[K, T]&, index: usize, value: T) -> bool:
+    if (not index_map_valid_index[K, T](map, index)):
+        return false
+    assert((index < map.entries.count))
+    map.entries[index].value <- value
+    return true
+
+def clear[K, T](map: mutable IndexMap[K, T]&):
+    map.entries.count <- 0
+    arena_dict_clear[K, usize](map.by_key)
+
+def symbol_table_index(symbol_id: SymbolTableId) -> usize:
+    assert((symbol_id != SYMBOL_TABLE_INVALID_ID))
+    return (((!symbol_id)).usize() - 1)
+
+def symbol_table_id_from_index(index: usize) -> SymbolTableId:
+    return ((index + 1)).u32().SymbolTableId()
+
+def symbol_table[K, T](owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        table: mutable SymbolTable[K, T] = zeroed
+        table.items <- index_map[K, T](owner, initial_capacity)
+        return table
+
+def new[K, T](api: SymbolTableNamespace, owner: mutable Arena&) -> SymbolTable[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        _ = api
+        return symbol_table[K, T](owner, 32)
+
+def with_capacity[K, T](api: SymbolTableNamespace, owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]:
+    can Memory.Allocate, Abort.Panic:
+        _ = api
+        return symbol_table[K, T](owner, initial_capacity)
+
+def symbol_table_count[K, T](table: SymbolTable[K, T]&) -> usize:
+    return index_map_count[K, T](table.items)
+
+def count[K, T](table: SymbolTable[K, T]&) -> usize:
+    return symbol_table_count[K, T](table)
+
+def symbol_table_valid_id[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> bool:
+    if (symbol_id == SYMBOL_TABLE_INVALID_ID):
+        return false
+    return index_map_valid_index[K, T](table.items, symbol_table_index(symbol_id))
+
+def symbol_table_find_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
+    index: usize = index_map_find_index[K, T](table.items, key) else return SYMBOL_TABLE_INVALID_ID
+    return symbol_table_id_from_index(index)
+
+def symbol_table_contains[K, T](table: SymbolTable[K, T]&, key: K) -> bool:
+    return (symbol_table_find_id[K, T](table, key) != SYMBOL_TABLE_INVALID_ID)
+
+def has[K, T](table: SymbolTable[K, T]&, key: K) -> bool:
+    return symbol_table_contains[K, T](table, key)
+
+def symbol_table_entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
+    assert(symbol_table_valid_id[K, T](table, symbol_id))
+    entry: IndexMapEntry[K, T] = index_map_entry[K, T](table.items, symbol_table_index(symbol_id))
+    return SymbolEntry[K, T]{key: entry.key, value: entry.value}
+
+def symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+    return symbol_table_entry[K, T](table, symbol_id).value
+
+def symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]:
+    return index_map_entries[K, T](table.items)
+
+@ufcs_only
+def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
+    return symbol_table_entry[K, T](table, symbol_id)
+
+@ufcs_only
+def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+    return symbol_table_value[K, T](table, symbol_id)
+
+@ufcs_only
+def entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]:
+    return symbol_table_entries[K, T](table)
+
+def symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
+    can Memory.Allocate, Abort.Panic:
+        index: usize = index_map_put[K, T](table.items, key, value)
+        return symbol_table_id_from_index(index)
+
+def declare[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
+    return symbol_table_put[K, T](table, key, value) can Memory.Allocate, Abort.Panic
+
+def lookup_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
+    return symbol_table_find_id[K, T](table, key)
+
+def get[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+    return symbol_table_value[K, T](table, symbol_id)
+
+def lookup[K, T](table: SymbolTable[K, T]&, key: K) -> T?:
+    symbol_id: SymbolTableId = symbol_table_find_id[K, T](table, key)
+    if (symbol_id == SYMBOL_TABLE_INVALID_ID):
+        return null
+    value: T = symbol_table_value[K, T](table, symbol_id)
+    return value
+
+def symbol_table_replace[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
+    if (not symbol_table_valid_id[K, T](table, symbol_id)):
+        return false
+    return update_at[K, T](table.items, symbol_table_index(symbol_id), value)
+
+def update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
+    return symbol_table_replace[K, T](table, symbol_id, value)
+
+def symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&):
+    clear[K, T](table.items)
+
+struct FixedBufferAllocator:
+    data: mutable u8&?
+    capacity: mutable usize
+    end_index: mutable usize
+
+struct FixedBufferMark:
+    end_index: usize
+
+struct MemoryPoolFreeNode:
+    next: mutable heap MemoryPoolFreeNode&?
+
+struct MemoryPool[T]:
+    arena: mutable Arena
+    free_list: mutable heap MemoryPoolFreeNode&?
+
+def fixed_buffer_allocator_init(buffer: u8&, size: usize) -> FixedBufferAllocator:
+    return FixedBufferAllocator(buffer, size, 0)
+
+def fixed_buffer_align_forward(value: usize, alignment: usize) -> usize:
+    if (alignment <= 1):
+        return value
+    remainder: usize = (value % alignment)
+    return (value if (remainder == 0) else (value + ((alignment - remainder))))
+
+def fixed_buffer_owns_ptr(a: FixedBufferAllocator&, ptr: void&) -> bool:
+    if (a.data == null):
+        return false
+    trusted Unsafe.PointerCast:
+        base: uintptr = a.data.cast[u8&].uintptr()
+        raw: uintptr = ptr.cast[u8&].uintptr()
+        limit: uintptr = (base + a.capacity.uintptr())
+        return ((raw >= base) and (raw < limit))
+
+def fixed_buffer_owns_range(a: FixedBufferAllocator&, ptr: void&, size_bytes: usize) -> bool:
+    if (a.data == null):
+        return false
+    trusted Unsafe.PointerCast:
+        base: uintptr = a.data.cast[u8&].uintptr()
+        raw: uintptr = ptr.cast[u8&].uintptr()
+        limit: uintptr = (base + a.capacity.uintptr())
+        end_raw: uintptr = (raw + size_bytes.uintptr())
+        return ((raw >= base) and (end_raw <= limit))
+
+def fixed_buffer_is_last_allocation(a: FixedBufferAllocator&, ptr: void&, size_bytes: usize) -> bool:
+    if (a.data == null):
+        return false
+    trusted Unsafe.PointerCast:
+        base: uintptr = a.data.cast[u8&].uintptr()
+        raw: uintptr = ptr.cast[u8&].uintptr()
+        end_raw: uintptr = (raw + size_bytes.uintptr())
+        return (end_raw == (base + a.end_index.uintptr()))
+
+def fixed_buffer_snapshot(a: FixedBufferAllocator&) -> FixedBufferMark:
+    return FixedBufferMark(a.end_index)
+
+def fixed_buffer_rewind(a: mutable FixedBufferAllocator&, mark: FixedBufferMark):
+    can Abort.Panic:
+        assert((mark.end_index <= a.capacity))
+        a.end_index <- mark.end_index
+
+def fixed_buffer_reset(a: mutable FixedBufferAllocator&):
+    a.end_index <- 0
+
+def fixed_buffer_alloc_align(a: mutable FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> mutable void&?:
+    if (a.data == null):
+        return null
+    trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+        base: u8& = a.data.cast[u8&]
+        adjusted_addr: usize = fixed_buffer_align_forward(((base + a.end_index)).uintptr().usize(), alignment)
+        adjusted_index: usize = ((adjusted_addr.uintptr() - base.uintptr())).usize()
+        if (adjusted_index > a.capacity):
+            return null
+        if (size_bytes > (a.capacity - adjusted_index)):
+            return null
+        result: void& = ((base + adjusted_index)).cast[void&]
+        a.end_index <- (adjusted_index + size_bytes)
+        return result
+
+def fixed_buffer_alloc(a: mutable FixedBufferAllocator&, size_bytes: usize) -> mutable void&?:
+    return fixed_buffer_alloc_align(a, size_bytes, size_of(uintptr))
+
+def fixed_buffer_alloc_align_or_panic(a: mutable FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> mutable void&:
+    can Abort.Panic:
+        raw: void&? = fixed_buffer_alloc_align(a, size_bytes, alignment)
+        assert((raw != null))
+        trusted Unsafe.PointerCast:
+            return raw.cast[void&]
+
+def fixed_buffer_alloc_or_panic(a: mutable FixedBufferAllocator&, size_bytes: usize) -> mutable void&:
+    can Abort.Panic:
+        raw: void&? = fixed_buffer_alloc(a, size_bytes)
+        assert((raw != null))
+        trusted Unsafe.PointerCast:
+            return raw.cast[void&]
+
+def fixed_buffer_resize(a: mutable FixedBufferAllocator&, ptr: void&, old_size: usize, new_size: usize) -> bool:
+    if (not fixed_buffer_owns_range(a, ptr, old_size)):
+        return false
+    if (not fixed_buffer_is_last_allocation(a, ptr, old_size)):
+        return (new_size <= old_size)
+    if (a.data == null):
+        return false
+    if (new_size <= old_size):
+        a.end_index <- (a.end_index - ((old_size - new_size)))
+        return true
+    trusted Unsafe.PointerCast:
+        base: uintptr = a.data.cast[u8&].uintptr()
+        start_index: usize = ((ptr.cast[u8&].uintptr() - base)).usize()
+        if ((start_index + new_size) > a.capacity):
+            return false
+        a.end_index <- (start_index + new_size)
+        return true
+
+def fixed_buffer_release(a: mutable FixedBufferAllocator&, ptr: void&, size_bytes: usize):
+    if fixed_buffer_is_last_allocation(a, ptr, size_bytes):
+        a.end_index <- (a.end_index - size_bytes)
+
+def memory_pool_init[T]() -> MemoryPool[T]:
+    return zeroed
+
+def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T]:
+    out: mutable MemoryPool[T] = zeroed
+    memory_pool_add_capacity(out.ref[MemoryPool[T]&], count) can Memory.Allocate, Abort.Panic
+    return out
+
+def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
+    can Memory.Allocate, Abort.Panic:
+        item_size: mutable usize = size_of(T)
+        if (item_size < size_of(MemoryPoolFreeNode)):
+            item_size <- size_of(MemoryPoolFreeNode)
+        for i in 0 ..< count:
+            raw: heap void& = arena_alloc(pool.arena.ref[Arena&], item_size)
+            trusted Unsafe.PointerCast:
+                node: heap MemoryPoolFreeNode& = raw.cast[heap MemoryPoolFreeNode&]
+                node.next <- pool.free_list
+                pool.free_list as & <- node
+
+def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T&:
+    can Memory.Allocate, Abort.Panic:
+        if (pool.free_list != null):
+            node: heap MemoryPoolFreeNode& = pool.free_list
+            pool.free_list <- node.next
+            trusted Unsafe.PointerCast:
+                item: heap T& = node.cast[heap T&]
+                item[0] <- zeroed
+                return item
+        item_size: mutable usize = size_of(T)
+        if (item_size < size_of(MemoryPoolFreeNode)):
+            item_size <- size_of(MemoryPoolFreeNode)
+        raw: heap void& = arena_alloc(pool.arena.ref[Arena&], item_size)
+        trusted Unsafe.PointerCast:
+            item: heap T& = raw.cast[heap T&]
+            item[0] <- zeroed
+            return item
+
+def memory_pool_destroy[T](pool: mutable MemoryPool[T]&, ptr: mutable heap T&):
+    ptr[0] <- zeroed
+    trusted Unsafe.PointerCast:
+        node: heap MemoryPoolFreeNode& = ptr.cast[heap MemoryPoolFreeNode&]
+        node.next <- pool.free_list
+        pool.free_list as & <- node
+
+def memory_pool_reset[T](pool: mutable MemoryPool[T]&):
+    arena_reset(pool.arena.ref[Arena&])
+    pool.free_list <- null
+
+def memory_pool_deinit[T](pool: mutable MemoryPool[T]&):
+    arena_free(pool.arena.ref[Arena&]) can Memory.Release, Abort.Panic
+    pool.arena <- zeroed
+    pool.free_list <- null
+
+const PACKED_STORE_MIN_ROWS_PER_REGION: usize = 64
+
+@inline(always)
+def packed_store_region_data(r: heap Region&) -> heap u8&:
+    return ((r.cast[heap u8&] + size_of(Region))).cast[heap u8&]
+
+def packed_store_region_table(state: mutable PackedStoreState&) -> mutable darray[heap Region&?]&:
+    return state.regions.ref[darray[heap Region&?]&]
+
+def packed_store_index_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
+    return state.indices.ref[darray[u32]&]
+
+def packed_store_variant_slot_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
+    return state.variant_slots.ref[darray[u32]&]
+
+def packed_store_prefix_column_table(state: mutable PackedStoreState&) -> mutable darray[uintptr]&:
+    return state.prefix_columns.ref[darray[uintptr]&]
+
+def packed_store_side_column_table(state: mutable PackedStoreState&) -> mutable darray[uintptr]&:
+    return state.side_columns.ref[darray[uintptr]&]
+
+def packed_store_ensure_metadata_capacity(a: mutable Arena&, state: mutable PackedStoreState&, needed_rows: usize):
+    can Memory.Allocate, Abort.Panic:
+        handles: mutable darray[uintptr]& = packed_store_handle_table(state)
+        indices: mutable darray[u32]& = packed_store_index_table(state)
+        tags: mutable darray[u32]& = packed_store_tag_table(state)
+        variant_slots: mutable darray[u32]& = packed_store_variant_slot_table(state)
+        in a:
+            _ = handles.reserve(needed_rows)
+            _ = indices.reserve(needed_rows)
+            _ = tags.reserve(needed_rows)
+            _ = variant_slots.reserve(needed_rows)
+        packed_store_ensure_prefix_columns(a, state, needed_rows)
+        packed_store_ensure_side_columns(a, state, needed_rows)
+
+def packed_store_append_index(a: mutable Arena&, state: mutable PackedStoreState&, index: u32):
+    can Memory.Allocate, Abort.Panic:
+        indices: mutable darray[u32]& = packed_store_index_table(state)
+        in a:
+            indices.push(index)
+
+def packed_store_append_variant_slot(a: mutable Arena&, state: mutable PackedStoreState&, slot: u32):
+    can Memory.Allocate, Abort.Panic:
+        variant_slots: mutable darray[u32]& = packed_store_variant_slot_table(state)
+        in a:
+            variant_slots.push(slot)
+
+def packed_store_ensure_prefix_columns(a: mutable Arena&, state: mutable PackedStoreState&, needed_rows: usize):
+    can Memory.Allocate, Abort.Panic:
+        if (state.prefix_words == 0):
+            return
+        columns: mutable darray[uintptr]& = packed_store_prefix_column_table(state)
+        in a:
+            for column_index in columns.count ..< state.prefix_words:
+                columns.push(0.uintptr())
+        if (state.prefix_column_capacity >= needed_rows):
+            return
+        new_capacity: mutable usize = (ARENA_DA_INIT_CAP if (state.prefix_column_capacity == 0) else (state.prefix_column_capacity * 2))
+        trusted Unsafe.AssumeProgress:
+            while (new_capacity < needed_rows):
+                new_capacity <- (new_capacity * 2)
+        old_size: usize = (state.prefix_column_capacity * size_of(uintptr))
+        new_size: usize = (new_capacity * size_of(uintptr))
+        assert((columns.items != null))
+        column_ptrs: uintptr& = columns.items
+        for i in 0 ..< state.prefix_words:
+            if (column_ptrs[i] == 0.uintptr()):
+                column_ptrs[i] <- arena_alloc(a, new_size).cast[heap uintptr&].cast[heap u8&].uintptr()
+            else:
+                current_ptr: heap uintptr& = column_ptrs[i].cast[heap u8&].cast[heap uintptr&]
+                column_ptrs[i] <- arena_realloc(a, current_ptr.cast[mutable void&], old_size, new_size).cast[heap uintptr&].cast[heap u8&].uintptr()
+        state.prefix_column_capacity <- new_capacity
+
+def packed_store_ensure_side_columns(a: mutable Arena&, state: mutable PackedStoreState&, needed_rows: usize):
+    can Memory.Allocate, Abort.Panic:
+        if (state.side_words == 0):
+            return
+        columns: mutable darray[uintptr]& = packed_store_side_column_table(state)
+        in a:
+            for column_index in columns.count ..< state.side_words:
+                columns.push(0.uintptr())
+        if (state.side_column_capacity >= needed_rows):
+            return
+        new_capacity: mutable usize = (ARENA_DA_INIT_CAP if (state.side_column_capacity == 0) else (state.side_column_capacity * 2))
+        trusted Unsafe.AssumeProgress:
+            while (new_capacity < needed_rows):
+                new_capacity <- (new_capacity * 2)
+        old_size: usize = (state.side_column_capacity * size_of(uintptr))
+        new_size: usize = (new_capacity * size_of(uintptr))
+        assert((columns.items != null))
+        column_ptrs: uintptr& = columns.items
+        for i in 0 ..< state.side_words:
+            if (column_ptrs[i] == 0.uintptr()):
+                column_ptrs[i] <- arena_alloc(a, new_size).cast[heap uintptr&].cast[heap u8&].uintptr()
+            else:
+                current_ptr: heap uintptr& = column_ptrs[i].cast[heap u8&].cast[heap uintptr&]
+                column_ptrs[i] <- arena_realloc(a, current_ptr.cast[mutable void&], old_size, new_size).cast[heap uintptr&].cast[heap u8&].uintptr()
+        state.side_column_capacity <- new_capacity
+
+def packed_store_register_region(a: mutable Arena&, state: mutable PackedStoreState&, r: heap Region&?, global_index: usize):
+    can Memory.Allocate, Abort.Panic:
+        assert((r != null))
+        regions: mutable darray[heap Region&?]& = packed_store_region_table(state)
+        in a:
+            for region_slot in regions.count ..< ((global_index + 1)):
+                regions.push(null)
+        assert((regions.items != null))
+        regions.items[global_index] <- r
+
+@inline(always)
+def packed_store_lookup_region(state: mutable PackedStoreState&, global_index: usize) -> heap Region&?:
+    if (state.regions.items == null):
+        return null
+    return (null if (global_index >= state.regions.count) else state.regions.items[global_index])
+
+def ctx_packed_store_state_new(a: mutable Arena&, row_bytes: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        state: heap PackedStoreState& = arena_alloc(a, size_of(PackedStoreState)).cast[heap PackedStoreState&]
+        row_words: usize = ((((row_bytes + size_of(uintptr)) - 1)) / size_of(uintptr))
+        preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+        hinted_capacity: usize = (row_words * PACKED_STORE_MIN_ROWS_PER_REGION)
+        if (preferred_region_capacity < hinted_capacity):
+            preferred_region_capacity <- hinted_capacity
+        if (preferred_region_capacity < row_words):
+            preferred_region_capacity <- row_words
+        state.head_region <- null
+        state.alloc_region <- null
+        state.alloc_region_index <- 0
+        state.decode_region <- null
+        state.decode_region_index <- 0
+        state.tail_region <- null
+        state.regions <- zeroed
+        state.handles <- zeroed
+        state.indices <- zeroed
+        state.tags <- zeroed
+        state.variant_slots <- zeroed
+        state.variant_rows <- zeroed
+        state.prefix_words <- row_words
+        state.prefix_columns <- zeroed
+        state.prefix_column_capacity <- 0
+        state.side_words <- 0
+        state.side_columns <- zeroed
+        state.side_column_capacity <- 0
+        state.row_words <- row_words
+        state.preferred_region_capacity <- preferred_region_capacity
+        return state.cast[heap void&]
+
+def ctx_packed_store_alloc_result_slow(a: mutable Arena&, size: usize, owner_tag: uintptr, state: mutable PackedStoreState&):
+    can Memory.Allocate, Abort.Panic:
+        if (state.alloc_region == null):
+            capacity: mutable usize = state.preferred_region_capacity
+            if (capacity < size):
+                capacity <- size
+            if (a.end == null):
+                assert((a.begin == null))
+                a.end as & <- new_region_with_owner(capacity, owner_tag)
+                a.begin <- a.end
+                a.end_index <- 0
+                a.end.global_index <- 0
+            else:
+                a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+                a.end <- a.end.next
+                a.end_index <- (a.end_index + 1)
+                a.end.global_index <- a.end_index
+            state.head_region <- a.end
+            state.alloc_region <- a.end
+            state.alloc_region_index <- a.end_index
+            state.tail_region <- a.end
+            packed_store_register_region(a, state, a.end, a.end_index)
+            return
+        assert((state.alloc_region != null))
+        assert((state.tail_region != null))
+        cursor: mutable heap Region&? = state.alloc_region.owner_next
+        found_region: mutable heap Region&? = null
+        found_region_index: mutable usize = 0
+        trusted Unsafe.AssumeProgress:
+            while (cursor != null):
+                if ((cursor.count + size) <= cursor.capacity):
+                    found_region <- cursor
+                    found_region_index <- cursor.global_index
+                    cursor <- null
+                else:
+                    cursor <- cursor.owner_next
+        if (found_region != null):
+            state.alloc_region <- found_region
+            state.alloc_region_index <- found_region_index
+            return
+        capacity: mutable usize = state.preferred_region_capacity
+        grown_capacity: usize = (state.alloc_region.capacity * 2)
+        if (capacity < grown_capacity):
+            capacity <- grown_capacity
+        if (capacity < size):
+            capacity <- size
+        assert((a.end != null))
+        a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+        a.end <- a.end.next
+        a.end_index <- (a.end_index + 1)
+        a.end.global_index <- a.end_index
+        state.tail_region.owner_next as & <- a.end
+        state.tail_region <- a.end
+        state.alloc_region <- a.end
+        state.alloc_region_index <- a.end_index
+        packed_store_register_region(a, state, a.end, a.end_index)
+
+def ctx_packed_store_alloc_fixed_result_slow(a: mutable Arena&, owner_tag: uintptr, state: mutable PackedStoreState&):
+    can Memory.Allocate, Abort.Panic:
+        size: usize = state.row_words
+        assert((size > 0))
+        if (state.alloc_region == null):
+            capacity: mutable usize = state.preferred_region_capacity
+            if (capacity < size):
+                capacity <- size
+            if (a.end == null):
+                assert((a.begin == null))
+                a.end as & <- new_region_with_owner(capacity, owner_tag)
+                a.begin <- a.end
+                a.end_index <- 0
+                a.end.global_index <- 0
+            else:
+                a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+                a.end <- a.end.next
+                a.end_index <- (a.end_index + 1)
+                a.end.global_index <- a.end_index
+            state.head_region <- a.end
+            state.alloc_region <- a.end
+            state.alloc_region_index <- a.end_index
+            state.tail_region <- a.end
+            packed_store_register_region(a, state, a.end, a.end_index)
+            return
+        assert((state.alloc_region != null))
+        assert((state.tail_region != null))
+        capacity: mutable usize = state.preferred_region_capacity
+        grown_capacity: usize = (state.alloc_region.capacity * 2)
+        if (capacity < grown_capacity):
+            capacity <- grown_capacity
+        if (capacity < size):
+            capacity <- size
+        assert((a.end != null))
+        a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+        a.end <- a.end.next
+        a.end_index <- (a.end_index + 1)
+        a.end.global_index <- a.end_index
+        state.tail_region.owner_next as & <- a.end
+        state.tail_region <- a.end
+        state.alloc_region <- a.end
+        state.alloc_region_index <- a.end_index
+        packed_store_register_region(a, state, a.end, a.end_index)
+
+def ctx_packed_store_alloc_fixed_result(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        owner_tag: uintptr = state_bits.cast[u8&].uintptr()
+        size: usize = state.row_words
+        assert((size > 0))
+        if ((state.alloc_region == null) or ((state.alloc_region.count + size) > state.alloc_region.capacity)):
+            ctx_packed_store_alloc_fixed_result_slow(a, owner_tag, state)
+        assert((state.alloc_region != null))
+        data_base: heap u8& = packed_store_region_data(state.alloc_region)
+        offset_bytes: uintptr = ((state.alloc_region.count * size_of(uintptr))).uintptr()
+        ptr: heap void& = ((data_base + (state.alloc_region.count * size_of(uintptr)))).cast[heap void&]
+        state.alloc_region.count <- (state.alloc_region.count + size)
+        state.decode_region <- state.alloc_region
+        state.decode_region_index <- state.alloc_region_index
+        if (a.end == null):
+            a.end as & <- state.alloc_region
+            a.end_index <- state.alloc_region_index
+        offset_words: uintptr = (offset_bytes / size_of(uintptr).uintptr())
+        handle: uintptr = (((state.alloc_region_index.uintptr() << 32.uintptr())) | ((((offset_words + 1.uintptr())) << 1.uintptr())))
+        global_index: u32 = state.handles.count.u32()
+        needed_rows: usize = (state.handles.count + 1)
+        packed_store_ensure_metadata_capacity(a, state, needed_rows)
+        in a:
+            state.handles.push(handle)
+            state.indices.push(global_index)
+        return PackedStoreAllocResult(ptr, handle)
+
+def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&) -> PackedStoreAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        owner_tag: uintptr = state_bits.cast[u8&].uintptr()
+        size: usize = ((((size_bytes + size_of(uintptr)) - 1)) / size_of(uintptr))
+        if (size > state.row_words):
+            state.row_words <- size
+            hinted_capacity: usize = (state.row_words * PACKED_STORE_MIN_ROWS_PER_REGION)
+            if (state.preferred_region_capacity < hinted_capacity):
+                state.preferred_region_capacity <- hinted_capacity
+            if (state.preferred_region_capacity < state.row_words):
+                state.preferred_region_capacity <- state.row_words
+        if ((state.alloc_region == null) or ((state.alloc_region.count + size) > state.alloc_region.capacity)):
+            ctx_packed_store_alloc_result_slow(a, size, owner_tag, state)
+        assert((state.alloc_region != null))
+        data_base: heap u8& = packed_store_region_data(state.alloc_region)
+        offset_bytes: uintptr = ((state.alloc_region.count * size_of(uintptr))).uintptr()
+        ptr: heap void& = ((data_base + (state.alloc_region.count * size_of(uintptr)))).cast[heap void&]
+        state.alloc_region.count <- (state.alloc_region.count + size)
+        state.decode_region <- state.alloc_region
+        state.decode_region_index <- state.alloc_region_index
+        if (a.end == null):
+            a.end as & <- state.alloc_region
+            a.end_index <- state.alloc_region_index
+        offset_words: uintptr = (offset_bytes / size_of(uintptr).uintptr())
+        handle: uintptr = (((state.alloc_region_index.uintptr() << 32.uintptr())) | ((((offset_words + 1.uintptr())) << 1.uintptr())))
+        global_index: u32 = state.handles.count.u32()
+        needed_rows: usize = (state.handles.count + 1)
+        packed_store_ensure_metadata_capacity(a, state, needed_rows)
+        in a:
+            state.handles.push(handle)
+            state.indices.push(global_index)
+        return PackedStoreAllocResult(ptr, handle)
+
+def ctx_packed_store_alloc_fixed_index_result(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits)
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        assert((state.indices.items != null))
+        assert((state.indices.count > 0))
+        indices: u32& = state.indices.items
+        return PackedStoreIndexAllocResult(result.row, indices[(state.indices.count - 1)])
+
+def ctx_packed_store_alloc_index_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        assert((state.indices.items != null))
+        assert((state.indices.count > 0))
+        indices: u32& = state.indices.items
+        return PackedStoreIndexAllocResult(result.row, indices[(state.indices.count - 1)])
+
+def ctx_packed_store_count(state_bits: mutable void&) -> usize:
+    assert((state_bits != null))
+    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+    return state.handles.count
+
+def ctx_packed_store_index_at(state_bits: mutable void&, index: usize) -> u32:
+    assert((state_bits != null))
+    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+    assert((state.indices.items != null))
+    assert((index < state.indices.count))
+    indices: u32& = state.indices.items
+    return indices[index]
+
+def ctx_packed_store_view(state_bits: mutable void&, start: usize, end: usize) -> dview[uintptr]:
+    assert((state_bits != null))
+    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+    handles: darray[uintptr]& = packed_store_handle_table(state)
+    return arena_da_view(handles, start, end)
+
+def ctx_packed_store_indices_view[T](state_bits: mutable void&, start: usize, end: usize) -> dview[T]:
+    assert((state_bits != null))
+    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+    indices: darray[u32]& = packed_store_index_table(state)
+    return arena_da_view(indices.cast[darray[T]&], start, end)
+
+def ctx_packed_store_alloc(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&) -> uintptr:
+    can Memory.Allocate, Abort.Panic:
+        result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
+        return result.handle
+
+struct PackedStoreAllocResult:
+    row: mutable heap void&?
+    handle: mutable uintptr
+
+struct PackedStoreIndexAllocResult:
+    row: mutable heap void&?
+    index: mutable u32
+
+struct PackedStoreVariantRows:
+    tag: mutable u32
+    rows: mutable darray[uintptr]
+
+struct PackedStoreState:
+    head_region: mutable heap Region&?
+    alloc_region: mutable heap Region&?
+    alloc_region_index: mutable usize
+    decode_region: mutable heap Region&?
+    decode_region_index: mutable usize
+    tail_region: mutable heap Region&?
+    regions: mutable darray[heap Region&?]
+    handles: mutable darray[uintptr]
+    indices: mutable darray[u32]
+    tags: mutable darray[u32]
+    variant_slots: mutable darray[u32]
+    variant_rows: mutable darray[PackedStoreVariantRows]
+    prefix_words: mutable usize
+    prefix_columns: mutable darray[uintptr]
+    prefix_column_capacity: mutable usize
+    side_words: mutable usize
+    side_columns: mutable darray[uintptr]
+    side_column_capacity: mutable usize
+    row_words: mutable usize
+    preferred_region_capacity: mutable usize
+
+def packed_store_handle_table(state: mutable PackedStoreState&) -> mutable darray[uintptr]&:
+    return state.handles.ref[darray[uintptr]&]
+
+def packed_store_append_handle(a: mutable Arena&, state: mutable PackedStoreState&, handle: uintptr):
+    can Memory.Allocate, Abort.Panic:
+        handles: mutable darray[uintptr]& = packed_store_handle_table(state)
+        in a:
+            handles.push(handle)
+
+def ctx_packed_store_encode(a: mutable Arena&, ptr: void&, state_bits: mutable void&) -> uintptr:
+    can Abort.Panic:
+        raw: uintptr = ptr.cast[u8&].uintptr()
+        if (state_bits != null):
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            if (state.alloc_region != null):
+                alloc_data_base: heap u8& = packed_store_region_data(state.alloc_region)
+                alloc_data_begin: uintptr = alloc_data_base.uintptr()
+                alloc_data_end: uintptr = (alloc_data_begin + ((state.alloc_region.capacity * size_of(uintptr))).uintptr())
+                if ((raw >= alloc_data_begin) and (raw < alloc_data_end)):
+                    alloc_offset_bytes: uintptr = (raw - alloc_data_begin)
+                    alloc_offset_words: uintptr = (alloc_offset_bytes / size_of(uintptr).uintptr())
+                    return (((state.alloc_region_index.uintptr() << 32.uintptr())) | ((((alloc_offset_words + 1.uintptr())) << 1.uintptr())))
+            if (state.decode_region != null):
+                decode_data_base: heap u8& = packed_store_region_data(state.decode_region)
+                decode_data_begin: uintptr = decode_data_base.uintptr()
+                decode_data_end: uintptr = (decode_data_begin + ((state.decode_region.capacity * size_of(uintptr))).uintptr())
+                if ((raw >= decode_data_begin) and (raw < decode_data_end)):
+                    decode_offset_bytes: uintptr = (raw - decode_data_begin)
+                    decode_offset_words: uintptr = (decode_offset_bytes / size_of(uintptr).uintptr())
+                    return (((state.decode_region_index.uintptr() << 32.uintptr())) | ((((decode_offset_words + 1.uintptr())) << 1.uintptr())))
+            owner_cursor: mutable heap Region&? = state.head_region
+            trusted Unsafe.AssumeProgress:
+                while (owner_cursor != null):
+                    owner_data_base: heap u8& = packed_store_region_data(owner_cursor)
+                    owner_data_begin: uintptr = owner_data_base.uintptr()
+                    owner_data_end: uintptr = (owner_data_begin + ((owner_cursor.capacity * size_of(uintptr))).uintptr())
+                    if ((raw >= owner_data_begin) and (raw < owner_data_end)):
+                        owner_offset_bytes: uintptr = (raw - owner_data_begin)
+                        owner_offset_words: uintptr = (owner_offset_bytes / size_of(uintptr).uintptr())
+                        return (((owner_cursor.global_index.uintptr() << 32.uintptr())) | ((((owner_offset_words + 1.uintptr())) << 1.uintptr())))
+                    owner_cursor <- owner_cursor.owner_next
+        if (a.end != null):
+            end_data_base: heap u8& = packed_store_region_data(a.end)
+            end_data_begin: uintptr = end_data_base.uintptr()
+            end_data_end: uintptr = (end_data_begin + ((a.end.capacity * size_of(uintptr))).uintptr())
+            if ((raw >= end_data_begin) and (raw < end_data_end)):
+                end_offset_bytes: uintptr = (raw - end_data_begin)
+                end_offset_words: uintptr = (end_offset_bytes / size_of(uintptr).uintptr())
+                return (((a.end_index.uintptr() << 32.uintptr())) | ((((end_offset_words + 1.uintptr())) << 1.uintptr())))
+        r: mutable heap Region&? = a.begin
+        trusted Unsafe.AssumeProgress:
+            while (r != null):
+                data_base: heap u8& = packed_store_region_data(r)
+                data_begin: uintptr = data_base.uintptr()
+                data_end: uintptr = (data_begin + ((r.capacity * size_of(uintptr))).uintptr())
+                if ((raw >= data_begin) and (raw < data_end)):
+                    offset_bytes: uintptr = (raw - data_begin)
+                    offset_words: uintptr = (offset_bytes / size_of(uintptr).uintptr())
+                    return (((r.global_index.uintptr() << 32.uintptr())) | ((((offset_words + 1.uintptr())) << 1.uintptr())))
+                r <- r.next
+        panic("packed store encode pointer outside arena")
+
+def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: mutable void&) -> mutable void&:
+    can Abort.Panic:
+        assert((handle != 0.uintptr()))
+        if ((handle & 1.uintptr()) != 0.uintptr()):
+            panic("packed store decode cannot materialize inline word handles")
+        region_index: usize = ((handle >> 32.uintptr())).usize()
+        offset_words_plus_one: usize = ((((handle & 0xffffffff.u64().uintptr())) >> 1.uintptr())).usize()
+        assert((offset_words_plus_one > 0))
+        if (state_bits != null):
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            if ((state.alloc_region != null) and (state.alloc_region_index == region_index)):
+                offset_words: usize = (offset_words_plus_one - 1)
+                assert((offset_words < state.alloc_region.capacity))
+                data_base: heap u8& = packed_store_region_data(state.alloc_region)
+                return ((data_base + (offset_words * size_of(uintptr)))).cast[mutable void&]
+            if ((state.decode_region != null) and (state.decode_region_index == region_index)):
+                offset_words: usize = (offset_words_plus_one - 1)
+                assert((offset_words < state.decode_region.capacity))
+                data_base: heap u8& = packed_store_region_data(state.decode_region)
+                return ((data_base + (offset_words * size_of(uintptr)))).cast[mutable void&]
+            indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
+            if (indexed_region != null):
+                offset_words: usize = (offset_words_plus_one - 1)
+                assert((offset_words < indexed_region.capacity))
+                state.decode_region <- indexed_region
+                state.decode_region_index <- region_index
+                data_base: heap u8& = packed_store_region_data(indexed_region)
+                return ((data_base + (offset_words * size_of(uintptr)))).cast[mutable void&]
+        r: mutable heap Region&? = a.begin
+        i: mutable usize = 0
+        if (state_bits != null):
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            owner_cursor: mutable heap Region&? = null
+            owner_cursor_index: mutable usize = 0
+            if ((state.head_region != null) and (state.head_region.global_index <= region_index)):
+                owner_cursor <- state.head_region
+                owner_cursor_index <- state.head_region.global_index
+                r <- state.head_region
+                i <- state.head_region.global_index
+            if ((state.alloc_region != null) and (state.alloc_region_index <= region_index)):
+                if ((owner_cursor == null) or (state.alloc_region_index > owner_cursor_index)):
+                    owner_cursor <- state.alloc_region
+                    owner_cursor_index <- state.alloc_region_index
+                if ((r == null) or (state.alloc_region_index > i)):
+                    r <- state.alloc_region
+                    i <- state.alloc_region_index
+            if ((state.decode_region != null) and (state.decode_region_index <= region_index)):
+                if ((owner_cursor == null) or (state.decode_region_index > owner_cursor_index)):
+                    owner_cursor <- state.decode_region
+                    owner_cursor_index <- state.decode_region_index
+                if ((r == null) or (state.decode_region_index > i)):
+                    r <- state.decode_region
+                    i <- state.decode_region_index
+            if (owner_cursor != null):
+                trusted Unsafe.AssumeProgress:
+                    while ((owner_cursor != null) and (owner_cursor.global_index < region_index)):
+                        owner_cursor <- owner_cursor.owner_next
+                if ((owner_cursor != null) and (owner_cursor.global_index == region_index)):
+                    offset_words: usize = (offset_words_plus_one - 1)
+                    assert((offset_words < owner_cursor.capacity))
+                    state.decode_region <- owner_cursor
+                    state.decode_region_index <- region_index
+                    data_base: heap u8& = packed_store_region_data(owner_cursor)
+                    return ((data_base + (offset_words * size_of(uintptr)))).cast[mutable void&]
+        trusted Unsafe.AssumeProgress:
+            while ((i < region_index) and (r != null)):
+                r <- r.next
+                i <- (i + 1)
+        assert((r != null))
+        offset_words: usize = (offset_words_plus_one - 1)
+        assert((offset_words < r.capacity))
+        if (state_bits != null):
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            state.decode_region <- r
+            state.decode_region_index <- region_index
+        data_base: heap u8& = packed_store_region_data(r)
+        return ((data_base + (offset_words * size_of(uintptr)))).cast[mutable void&]
+
+def ctx_packed_store_encode_index(a: mutable Arena&, ptr: void&, state_bits: mutable void&) -> u32:
+    can Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        encoded: uintptr = ctx_packed_store_encode(a, ptr, state_bits)
+        assert((state.handles.items != null))
+        handles: uintptr& = state.handles.items
+        for i, handle in state.handles.enumerate():
+            if (handle == encoded):
+                return i.u32()
+        panic("packed store encode index missing handle")
+
+def ctx_packed_store_decode_index(a: mutable Arena&, index: u32, state_bits: mutable void&) -> mutable void&:
+    can Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        index_usize: usize = index.usize()
+        assert((index_usize < state.handles.count))
+        assert((state.handles.items != null))
+        handles: uintptr& = state.handles.items
+        return ctx_packed_store_decode(a, handles[index_usize], state_bits)
+
+def packed_store_tag_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
+    return state.tags.ref[darray[u32]&]
+
+def packed_store_append_tag(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32):
+    can Memory.Allocate, Abort.Panic:
+        tags: mutable darray[u32]& = packed_store_tag_table(state)
+        in a:
+            tags.push(tag)
+
+def packed_store_append_prefix_words(a: mutable Arena&, state: mutable PackedStoreState&, row: void&):
+    can Memory.Allocate, Abort.Panic:
+        if (state.prefix_words == 0):
+            return
+        needed_rows: usize = state.handles.count
+        assert((state.prefix_column_capacity >= needed_rows))
+        assert((state.prefix_columns.items != null))
+        column_ptrs: uintptr& = state.prefix_columns.items
+        row_words: uintptr& = row.cast[uintptr&]
+        row_index: usize = (needed_rows - 1)
+        assert((state.prefix_columns.count >= state.prefix_words))
+        if (state.prefix_words == 1):
+            assert((column_ptrs[0] != 0.uintptr()))
+            column0: mutable uintptr& = column_ptrs[0].cast[heap u8&].cast[uintptr&]
+            column0[row_index] <- row_words[0]
+            return
+        if (state.prefix_words == 2):
+            assert((column_ptrs[0] != 0.uintptr()))
+            assert((column_ptrs[1] != 0.uintptr()))
+            column0: mutable uintptr& = column_ptrs[0].cast[heap u8&].cast[uintptr&]
+            column1: mutable uintptr& = column_ptrs[1].cast[heap u8&].cast[uintptr&]
+            column0[row_index] <- row_words[0]
+            column1[row_index] <- row_words[1]
+            return
+        if (state.prefix_words == 3):
+            assert((column_ptrs[0] != 0.uintptr()))
+            assert((column_ptrs[1] != 0.uintptr()))
+            assert((column_ptrs[2] != 0.uintptr()))
+            column0: mutable uintptr& = column_ptrs[0].cast[heap u8&].cast[uintptr&]
+            column1: mutable uintptr& = column_ptrs[1].cast[heap u8&].cast[uintptr&]
+            column2: mutable uintptr& = column_ptrs[2].cast[heap u8&].cast[uintptr&]
+            column0[row_index] <- row_words[0]
+            column1[row_index] <- row_words[1]
+            column2[row_index] <- row_words[2]
+            return
+        for i in 0 ..< state.prefix_words:
+            assert((column_ptrs[i] != 0.uintptr()))
+            column: mutable uintptr& = column_ptrs[i].cast[heap u8&].cast[uintptr&]
+            column[row_index] <- row_words[i]
+
+def packed_store_append_side_words(a: mutable Arena&, state: mutable PackedStoreState&, words: void&):
+    can Memory.Allocate, Abort.Panic:
+        if (state.side_words == 0):
+            return
+        needed_rows: usize = state.handles.count
+        assert((state.side_column_capacity >= needed_rows))
+        assert((state.side_columns.items != null))
+        column_ptrs: uintptr& = state.side_columns.items
+        source_words: uintptr& = words.cast[uintptr&]
+        row_index: usize = (needed_rows - 1)
+        assert((state.side_columns.count >= state.side_words))
+        if (state.side_words == 1):
+            assert((column_ptrs[0] != 0.uintptr()))
+            column0: mutable uintptr& = column_ptrs[0].cast[heap u8&].cast[uintptr&]
+            column0[row_index] <- source_words[0]
+            return
+        if (state.side_words == 2):
+            assert((column_ptrs[0] != 0.uintptr()))
+            assert((column_ptrs[1] != 0.uintptr()))
+            column0: mutable uintptr& = column_ptrs[0].cast[heap u8&].cast[uintptr&]
+            column1: mutable uintptr& = column_ptrs[1].cast[heap u8&].cast[uintptr&]
+            column0[row_index] <- source_words[0]
+            column1[row_index] <- source_words[1]
+            return
+        if (state.side_words == 3):
+            assert((column_ptrs[0] != 0.uintptr()))
+            assert((column_ptrs[1] != 0.uintptr()))
+            assert((column_ptrs[2] != 0.uintptr()))
+            column0: mutable uintptr& = column_ptrs[0].cast[heap u8&].cast[uintptr&]
+            column1: mutable uintptr& = column_ptrs[1].cast[heap u8&].cast[uintptr&]
+            column2: mutable uintptr& = column_ptrs[2].cast[heap u8&].cast[uintptr&]
+            column0[row_index] <- source_words[0]
+            column1[row_index] <- source_words[1]
+            column2[row_index] <- source_words[2]
+            return
+        for i in 0 ..< state.side_words:
+            assert((column_ptrs[i] != 0.uintptr()))
+            column: mutable uintptr& = column_ptrs[i].cast[heap u8&].cast[uintptr&]
+            column[row_index] <- source_words[i]
+
+def ctx_packed_store_state_new_with_prefix_words(a: mutable Arena&, row_bytes: usize, prefix_words: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        state_bits: heap void& = ctx_packed_store_state_new(a, row_bytes)
+        state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+        if (prefix_words < state.row_words):
+            state.prefix_words <- prefix_words
+        else:
+            state.prefix_words <- state.row_words
+        return state_bits
+
+def ctx_packed_store_state_new_with_side_words(a: mutable Arena&, row_bytes: usize, side_words: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        state_bits: heap void& = ctx_packed_store_state_new(a, row_bytes)
+        state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+        state.side_words <- side_words
+        return state_bits
+
+def ctx_packed_store_state_new_with_prefix_and_side_words(a: mutable Arena&, row_bytes: usize, prefix_words: usize, side_words: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        state_bits: heap void& = ctx_packed_store_state_new_with_prefix_words(a, row_bytes, prefix_words)
+        state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+        state.side_words <- side_words
+        return state_bits
+
+def ctx_packed_store_alloc_fixed_tagged_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits)
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        needed_rows: mutable usize = (state.tags.count + 1)
+        if (needed_rows < state.handles.count):
+            needed_rows <- state.handles.count
+        packed_store_ensure_metadata_capacity(a, state, needed_rows)
+        in a:
+            state.tags.push(tag)
+        return result
+
+def ctx_packed_store_alloc_fixed_tagged_index_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_tagged_result(a, state_bits, tag)
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        assert((state.indices.items != null))
+        assert((state.indices.count > 0))
+        indices: u32& = state.indices.items
+        return PackedStoreIndexAllocResult(result.row, indices[(state.indices.count - 1)])
+
+def ctx_packed_store_record_side_words(a: mutable Arena&, words: void&, state_bits: mutable void&):
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        packed_store_append_side_words(a, state, words)
+
+def ctx_packed_store_read_side_word(state_bits: mutable void&, index: u32, word_offset: usize) -> uintptr:
+    can Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        index_usize: usize = index.usize()
+        assert((index_usize < state.handles.count))
+        assert((word_offset < state.side_words))
+        assert((state.side_columns.items != null))
+        column_ptrs: uintptr& = state.side_columns.items
+        assert((column_ptrs[word_offset] != 0.uintptr()))
+        column: uintptr& = column_ptrs[word_offset].cast[heap u8&].cast[uintptr&]
+        return column[index_usize]
+
+def ctx_packed_store_word_handle_at(state_bits: mutable void&, index: usize) -> uintptr:
+    assert((state_bits != null))
+    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+    assert((state.handles.items != null))
+    assert((index < state.handles.count))
+    handles: uintptr& = state.handles.items
+    return handles[index]
+
+def ctx_packed_store_tags_view[T](state_bits: mutable void&, start: usize, end: usize) -> dview[T]:
+    assert((state_bits != null))
+    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+    tags: darray[u32]& = packed_store_tag_table(state)
+    return arena_da_view(tags.cast[darray[T]&], start, end)
+
+def ctx_packed_store_record_prefix_words(a: mutable Arena&, row: void&, state_bits: mutable void&):
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        packed_store_append_prefix_words(a, state_bits.cast[PackedStoreState&], row)
+
+def ctx_packed_store_record_tag(a: mutable Arena&, tag: u32, state_bits: mutable void&):
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        needed_rows: mutable usize = (state.tags.count + 1)
+        if (needed_rows < state.handles.count):
+            needed_rows <- state.handles.count
+        packed_store_ensure_metadata_capacity(a, state, needed_rows)
+        in a:
+            state.tags.push(tag)
+
+def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mutable void&) -> u32:
+    assert((handle != 0.uintptr()))
+    if ((handle & 1.uintptr()) != 0.uintptr()):
+        return ((handle >> 49.uintptr())).u32()
+    region_index: usize = ((handle >> 32.uintptr())).usize()
+    offset_words_plus_one: usize = ((((handle & 0xffffffff.u64().uintptr())) >> 1.uintptr())).usize()
+    assert((offset_words_plus_one > 0))
+    if (state_bits != null):
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        if ((state.alloc_region != null) and (state.alloc_region_index == region_index)):
+            offset_words: usize = (offset_words_plus_one - 1)
+            assert((offset_words < state.alloc_region.capacity))
+            data_base: heap u8& = packed_store_region_data(state.alloc_region)
+            row_tag: u32& = ((data_base + (offset_words * size_of(uintptr)))).cast[u32&]
+            return row_tag[0]
+        if ((state.decode_region != null) and (state.decode_region_index == region_index)):
+            offset_words: usize = (offset_words_plus_one - 1)
+            assert((offset_words < state.decode_region.capacity))
+            data_base: heap u8& = packed_store_region_data(state.decode_region)
+            row_tag: u32& = ((data_base + (offset_words * size_of(uintptr)))).cast[u32&]
+            return row_tag[0]
+        indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
+        if (indexed_region != null):
+            offset_words: usize = (offset_words_plus_one - 1)
+            assert((offset_words < indexed_region.capacity))
+            state.decode_region <- indexed_region
+            state.decode_region_index <- region_index
+            data_base: heap u8& = packed_store_region_data(indexed_region)
+            row_tag: u32& = ((data_base + (offset_words * size_of(uintptr)))).cast[u32&]
+            return row_tag[0]
+    r: mutable heap Region&? = a.begin
+    i: mutable usize = 0
+    if (state_bits != null):
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        owner_cursor: mutable heap Region&? = null
+        owner_cursor_index: mutable usize = 0
+        if ((state.head_region != null) and (state.head_region.global_index <= region_index)):
+            owner_cursor <- state.head_region
+            owner_cursor_index <- state.head_region.global_index
+            r <- state.head_region
+            i <- state.head_region.global_index
+        if ((state.alloc_region != null) and (state.alloc_region_index <= region_index)):
+            if ((owner_cursor == null) or (state.alloc_region_index > owner_cursor_index)):
+                owner_cursor <- state.alloc_region
+                owner_cursor_index <- state.alloc_region_index
+            if ((r == null) or (state.alloc_region_index > i)):
+                r <- state.alloc_region
+                i <- state.alloc_region_index
+        if ((state.decode_region != null) and (state.decode_region_index <= region_index)):
+            if ((owner_cursor == null) or (state.decode_region_index > owner_cursor_index)):
+                owner_cursor <- state.decode_region
+                owner_cursor_index <- state.decode_region_index
+            if ((r == null) or (state.decode_region_index > i)):
+                r <- state.decode_region
+                i <- state.decode_region_index
+        if (owner_cursor != null):
+            trusted Unsafe.AssumeProgress:
+                while ((owner_cursor != null) and (owner_cursor.global_index < region_index)):
+                    owner_cursor <- owner_cursor.owner_next
+            if ((owner_cursor != null) and (owner_cursor.global_index == region_index)):
+                offset_words: usize = (offset_words_plus_one - 1)
+                assert((offset_words < owner_cursor.capacity))
+                state.decode_region <- owner_cursor
+                state.decode_region_index <- region_index
+                data_base: heap u8& = packed_store_region_data(owner_cursor)
+                row_tag: u32& = ((data_base + (offset_words * size_of(uintptr)))).cast[u32&]
+                return row_tag[0]
+    trusted Unsafe.AssumeProgress:
+        while ((i < region_index) and (r != null)):
+            r <- r.next
+            i <- (i + 1)
+    assert((r != null))
+    offset_words: usize = (offset_words_plus_one - 1)
+    assert((offset_words < r.capacity))
+    if (state_bits != null):
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        state.decode_region <- r
+        state.decode_region_index <- region_index
+    data_base: heap u8& = packed_store_region_data(r)
+    row_tag: u32& = ((data_base + (offset_words * size_of(uintptr)))).cast[u32&]
+    return row_tag[0]
+
+def ctx_packed_store_read_index_tag(state_bits: mutable void&, index: u32) -> u32:
+    assert((state_bits != null))
+    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+    index_usize: usize = index.usize()
+    assert((index_usize < state.tags.count))
+    assert((state.tags.items != null))
+    tags: u32& = state.tags.items
+    return tags[index_usize]
+
+def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: mutable void&, word_offset: usize) -> uintptr:
+    can Abort.Panic:
+        assert((handle != 0.uintptr()))
+        if ((handle & 1.uintptr()) != 0.uintptr()):
+            panic("packed store read_word cannot read inline word handles")
+        region_index: usize = ((handle >> 32.uintptr())).usize()
+        offset_words_plus_one: usize = ((((handle & 0xffffffff.u64().uintptr())) >> 1.uintptr())).usize()
+        assert((offset_words_plus_one > 0))
+        if (state_bits != null):
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            if ((state.alloc_region != null) and (state.alloc_region_index == region_index)):
+                offset_words: usize = (offset_words_plus_one - 1)
+                assert(((offset_words + word_offset) < state.alloc_region.capacity))
+                data_base: heap u8& = packed_store_region_data(state.alloc_region)
+                row_words: uintptr& = ((data_base + (offset_words * size_of(uintptr)))).cast[uintptr&]
+                return row_words[word_offset]
+            if ((state.decode_region != null) and (state.decode_region_index == region_index)):
+                offset_words: usize = (offset_words_plus_one - 1)
+                assert(((offset_words + word_offset) < state.decode_region.capacity))
+                data_base: heap u8& = packed_store_region_data(state.decode_region)
+                row_words: uintptr& = ((data_base + (offset_words * size_of(uintptr)))).cast[uintptr&]
+                return row_words[word_offset]
+            indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
+            if (indexed_region != null):
+                offset_words: usize = (offset_words_plus_one - 1)
+                assert(((offset_words + word_offset) < indexed_region.capacity))
+                state.decode_region <- indexed_region
+                state.decode_region_index <- region_index
+                data_base: heap u8& = packed_store_region_data(indexed_region)
+                row_words: uintptr& = ((data_base + (offset_words * size_of(uintptr)))).cast[uintptr&]
+                return row_words[word_offset]
+        r: mutable heap Region&? = a.begin
+        i: mutable usize = 0
+        if (state_bits != null):
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            owner_cursor: mutable heap Region&? = null
+            owner_cursor_index: mutable usize = 0
+            if ((state.head_region != null) and (state.head_region.global_index <= region_index)):
+                owner_cursor <- state.head_region
+                owner_cursor_index <- state.head_region.global_index
+                r <- state.head_region
+                i <- state.head_region.global_index
+            if ((state.alloc_region != null) and (state.alloc_region_index <= region_index)):
+                if ((owner_cursor == null) or (state.alloc_region_index > owner_cursor_index)):
+                    owner_cursor <- state.alloc_region
+                    owner_cursor_index <- state.alloc_region_index
+                if ((r == null) or (state.alloc_region_index > i)):
+                    r <- state.alloc_region
+                    i <- state.alloc_region_index
+            if ((state.decode_region != null) and (state.decode_region_index <= region_index)):
+                if ((owner_cursor == null) or (state.decode_region_index > owner_cursor_index)):
+                    owner_cursor <- state.decode_region
+                    owner_cursor_index <- state.decode_region_index
+                if ((r == null) or (state.decode_region_index > i)):
+                    r <- state.decode_region
+                    i <- state.decode_region_index
+            if (owner_cursor != null):
+                trusted Unsafe.AssumeProgress:
+                    while ((owner_cursor != null) and (owner_cursor.global_index < region_index)):
+                        owner_cursor <- owner_cursor.owner_next
+                if ((owner_cursor != null) and (owner_cursor.global_index == region_index)):
+                    offset_words: usize = (offset_words_plus_one - 1)
+                    assert(((offset_words + word_offset) < owner_cursor.capacity))
+                    state.decode_region <- owner_cursor
+                    state.decode_region_index <- region_index
+                    data_base: heap u8& = packed_store_region_data(owner_cursor)
+                    row_words: uintptr& = ((data_base + (offset_words * size_of(uintptr)))).cast[uintptr&]
+                    return row_words[word_offset]
+        trusted Unsafe.AssumeProgress:
+            while ((i < region_index) and (r != null)):
+                r <- r.next
+                i <- (i + 1)
+        assert((r != null))
+        offset_words: usize = (offset_words_plus_one - 1)
+        assert(((offset_words + word_offset) < r.capacity))
+        if (state_bits != null):
+            state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+            state.decode_region <- r
+            state.decode_region_index <- region_index
+        data_base: heap u8& = packed_store_region_data(r)
+        row_words: uintptr& = ((data_base + (offset_words * size_of(uintptr)))).cast[uintptr&]
+        return row_words[word_offset]
+
+@inline(always)
+def ctx_packed_store_read_index_word(a: mutable Arena&, index: u32, state_bits: mutable void&, word_offset: usize) -> uintptr:
+    can Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        index_usize: usize = index.usize()
+        assert((index_usize < state.handles.count))
+        if (word_offset < state.prefix_words):
+            assert((state.prefix_columns.items != null))
+            columns: uintptr& = state.prefix_columns.items
+            assert((word_offset < state.prefix_columns.count))
+            assert((columns[word_offset] != 0.uintptr()))
+            column: uintptr& = columns[word_offset].cast[heap u8&].cast[uintptr&]
+            return column[index_usize]
+        assert((state.handles.items != null))
+        handles: uintptr& = state.handles.items
+        return ctx_packed_store_read_word(a, handles[index_usize], state_bits, word_offset)
+
+def packed_store_variant_rows_table(state: mutable PackedStoreState&) -> mutable darray[PackedStoreVariantRows]&:
+    return state.variant_rows.ref[darray[PackedStoreVariantRows]&]
+
+def packed_store_find_variant_rows(state: mutable PackedStoreState&, tag: u32) -> mutable PackedStoreVariantRows&?:
+    variants: darray[PackedStoreVariantRows]& = packed_store_variant_rows_table(state)
+    if (variants.items == null):
+        return null
+    for i in 0 ..< variants.count:
+        if (variants.items[i].tag == tag):
+            return &variants.items[i]
+    return null
+
+def packed_store_get_or_create_variant_rows(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32) -> mutable PackedStoreVariantRows&:
+    can Memory.Allocate, Abort.Panic:
+        found: PackedStoreVariantRows&? = packed_store_find_variant_rows(state, tag)
+        if (found != null):
+            return found
+        variants: mutable darray[PackedStoreVariantRows]& = packed_store_variant_rows_table(state)
+        created: mutable PackedStoreVariantRows = zeroed
+        created.tag <- tag
+        in a:
+            variants.push(created)
+        assert((variants.items != null))
+        return &variants.items[(variants.count - 1)]
+
+def packed_store_append_variant_row(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32, row: void&) -> u32:
+    can Memory.Allocate, Abort.Panic:
+        variant_rows: PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
+        rows: mutable darray[uintptr]& = variant_rows.rows.ref[mutable darray[uintptr]&]
+        slot: u32 = rows.count.u32()
+        in a:
+            rows.push(row.cast[u8&].uintptr())
+        return slot
+
+def packed_store_variant_row_ptr(state: mutable PackedStoreState&, tag: u32, slot: u32) -> mutable void&:
+    can Abort.Panic:
+        variant_rows: PackedStoreVariantRows&? = packed_store_find_variant_rows(state, tag)
+        assert((variant_rows != null))
+        rows: darray[uintptr]& = variant_rows.rows.ref[darray[uintptr]&]
+        slot_index: usize = slot.usize()
+        assert((rows.items != null))
+        assert((slot_index < rows.count))
+        row_ptrs: uintptr& = rows.items
+        return row_ptrs[slot_index].cast[heap u8&].cast[mutable void&]
+
+def ctx_packed_store_reserve(a: mutable Arena&, needed_rows: usize, state_bits: mutable void&):
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        if (needed_rows <= state.handles.capacity):
+            return
+        packed_store_ensure_metadata_capacity(a, state, needed_rows)
+
+def ctx_packed_store_row_ptr_at(state_bits: mutable void&, index: usize) -> mutable void&:
+    handle: uintptr = ctx_packed_store_word_handle_at(state_bits, index)
+    assert((handle != 0.uintptr()))
+    return handle.cast[u8&].cast[mutable void&]
+
+def ctx_packed_store_record_row_ptr(a: mutable Arena&, row: void&, state_bits: mutable void&):
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        packed_store_append_handle(a, state_bits.cast[PackedStoreState&], row.cast[u8&].uintptr())
+
+def ctx_packed_store_state_new_variant_sparse(a: mutable Arena&, row_bytes: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        state: heap PackedStoreState& = arena_alloc(a, size_of(PackedStoreState)).cast[heap PackedStoreState&]
+        row_words: usize = ((((row_bytes + size_of(uintptr)) - 1)) / size_of(uintptr))
+        preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+        hinted_capacity: usize = (row_words * PACKED_STORE_MIN_ROWS_PER_REGION)
+        if (preferred_region_capacity < hinted_capacity):
+            preferred_region_capacity <- hinted_capacity
+        if (preferred_region_capacity < row_words):
+            preferred_region_capacity <- row_words
+        state.head_region <- null
+        state.alloc_region <- null
+        state.alloc_region_index <- 0
+        state.decode_region <- null
+        state.decode_region_index <- 0
+        state.tail_region <- null
+        state.regions <- zeroed
+        state.handles <- zeroed
+        state.indices <- zeroed
+        state.tags <- zeroed
+        state.variant_slots <- zeroed
+        state.variant_rows <- zeroed
+        state.prefix_words <- 0
+        state.prefix_columns <- zeroed
+        state.prefix_column_capacity <- 0
+        state.side_words <- 0
+        state.side_columns <- zeroed
+        state.side_column_capacity <- 0
+        state.row_words <- row_words
+        state.preferred_region_capacity <- preferred_region_capacity
+        return state.cast[heap void&]
+
+def ctx_packed_store_state_new_variant_sparse_with_side_words(a: mutable Arena&, row_bytes: usize, side_words: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        state_bits: heap void& = ctx_packed_store_state_new_variant_sparse(a, row_bytes)
+        state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+        state.side_words <- side_words
+        return state_bits
+
+def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        row_words: mutable usize = ((((size_bytes + size_of(uintptr)) - 1)) / size_of(uintptr))
+        if (row_words == 0):
+            row_words <- 1
+        if (row_words > state.row_words):
+            state.row_words <- row_words
+        row_size_bytes: usize = (row_words * size_of(uintptr))
+        row: heap void& = arena_alloc(a, row_size_bytes)
+        global_index: u32 = state.handles.count.u32()
+        needed_rows: usize = (state.handles.count + 1)
+        packed_store_ensure_metadata_capacity(a, state, needed_rows)
+        slot: u32 = packed_store_append_variant_row(a, state, tag, row.cast[void&])
+        in a:
+            state.handles.push(row.cast[u8&].uintptr())
+            state.indices.push(global_index)
+            state.tags.push(tag)
+            state.variant_slots.push(slot)
+        return PackedStoreIndexAllocResult(row, global_index)
+
+def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        return ctx_packed_store_alloc_tagged_variant_sparse_result(a, (state.row_words * size_of(uintptr)), state_bits, tag)
+
+def ctx_packed_store_encode_variant_sparse(ptr: void&, state_bits: mutable void&) -> u32:
+    can Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        raw: uintptr = ptr.cast[u8&].uintptr()
+        assert((state.handles.items != null))
+        handles: uintptr& = state.handles.items
+        for i, handle in state.handles.enumerate():
+            if (handle == raw):
+                return i.u32()
+        panic("variant-sparse packed store encode missing row pointer")
+
+def ctx_packed_store_decode_variant_sparse(index: u32, state_bits: mutable void&) -> mutable void&:
+    can Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        index_usize: usize = index.usize()
+        assert((index_usize < state.handles.count))
+        assert((state.handles.items != null))
+        handles: uintptr& = state.handles.items
+        return handles[index_usize].cast[heap u8&].cast[mutable void&]
+
+def ctx_packed_store_read_variant_sparse_tag(state_bits: mutable void&, index: u32) -> u32:
+    assert((state_bits != null))
+    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+    index_usize: usize = index.usize()
+    assert((index_usize < state.tags.count))
+    assert((state.tags.items != null))
+    tags: u32& = state.tags.items
+    return tags[index_usize]
+
+def ctx_packed_store_read_variant_sparse_word(index: u32, state_bits: mutable void&, word_offset: usize) -> uintptr:
+    can Abort.Panic:
+        assert((state_bits != null))
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        index_usize: usize = index.usize()
+        assert((index_usize < state.tags.count))
+        assert((state.tags.items != null))
+        assert((state.variant_slots.items != null))
+        tags: u32& = state.tags.items
+        slots: u32& = state.variant_slots.items
+        row_words: uintptr& = packed_store_variant_row_ptr(state, tags[index_usize], slots[index_usize]).cast[uintptr&]
+        return row_words[word_offset]
+
+extern strlen(s: u8&) -> usize
+
+extern strcmp(lhs: u8&, rhs: u8&) -> int
+
+extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
+
+extern memmove(dest: mutable void&, src: void&, n: usize) -> mutable void&
+
+extern memcmp(lhs: void&, rhs: void&, n: usize) -> int
+
+extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
+
+extern puts(s: u8&) -> int effects[Console.Write]
+
+extern fprintf(stream: void&, fmt: u8&, ...) -> int effects[Console]
+
+extern exit(code: int) effects[Abort.Exit]
+
+extern stderr: void&
+
+const CTX_SMALL_STRING_CACHE_BUCKETS: usize = 1024
+
+const CTX_STRING_LEN_CACHE_BUCKETS: usize = 4096
+
+const CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT: bool = false
+
+global mutable perm_arena: Arena = Arena(null, null, 0)
+
+global mutable scratch_arena: Arena = Arena(null, null, 0)
+
+struct SmallStringCacheEntry:
+    next: mutable heap SmallStringCacheEntry&?
+    len: mutable usize
+    text: mutable tail u8
+
+struct StringLenCacheEntry:
+    next: mutable heap StringLenCacheEntry&?
+    ptr: mutable u8&
+    len: mutable usize
+
+struct StringBuilder:
+    len: mutable i64
+    cap: mutable i64
+    data: mutable heap u8&?
+
+struct StringView:
+    data: mutable u8&
+    len: mutable i64
+
+struct ProgressBudget:
+    remaining_steps: mutable i64
+    max_depth: mutable i64
+    current_depth: mutable i64
+    cancelled: mutable bool
+
+global mutable small_string_cache: heap SmallStringCacheEntry&?[CTX_SMALL_STRING_CACHE_BUCKETS] = zeroed
+
+global mutable string_len_cache: heap StringLenCacheEntry&?[CTX_STRING_LEN_CACHE_BUCKETS] = zeroed
+
+def progress_budget_steps(steps: i64) -> ProgressBudget:
+    budget: ProgressBudget = zeroed
+    budget.remaining_steps <- steps
+    budget.max_depth <- 0
+    budget.current_depth <- 0
+    budget.cancelled <- false
+    return budget
+
+def progress_budget_steps_and_depth(steps: i64, max_depth: i64) -> ProgressBudget:
+    budget: ProgressBudget = progress_budget_steps(steps)
+    budget.max_depth <- max_depth
+    return budget
+
+def progress_cancel(budget: mutable ProgressBudget&):
+    budget.cancelled <- true
+
+def progress_check_cancel(budget: mutable ProgressBudget&):
+    can Progress.CheckCancel, Abort.Panic:
+        if budget.cancelled:
+            panic("progress budget cancelled")
+
+def progress_tick(budget: mutable ProgressBudget&):
+    can Progress.Tick, Progress.CheckCancel, Abort.Panic:
+        progress_check_cancel(budget)
+        if (budget.remaining_steps <= 0):
+            panic("progress budget exhausted")
+        budget.remaining_steps <- (budget.remaining_steps - 1)
+
+def progress_enter_recursion(budget: mutable ProgressBudget&):
+    can Progress.EnterRecursion, Progress.CheckCancel, Abort.Panic:
+        progress_check_cancel(budget)
+        if ((budget.max_depth > 0) and (budget.current_depth >= budget.max_depth)):
+            panic("progress recursion depth exhausted")
+        budget.current_depth <- (budget.current_depth + 1)
+
+def progress_leave_recursion(budget: mutable ProgressBudget&):
+    can Progress.LeaveRecursion:
+        if (budget.current_depth > 0):
+            budget.current_depth <- (budget.current_depth - 1)
+
+def alloc_perm(size: i64) -> mutable heap void&:
+    resolved: usize = (size.usize() if (size > 0) else 1)
+    return arena_alloc(perm_arena.ref[Arena&], resolved) can Memory.Allocate, Abort.Panic
+
+def alloc_scratch(size: i64) -> mutable heap void&:
+    resolved: usize = (size.usize() if (size > 0) else 1)
+    return arena_alloc(scratch_arena.ref[Arena&], resolved) can Memory.Allocate, Abort.Panic
+
+def reset_scratch():
+    arena_reset(scratch_arena.ref[Arena&])
+
+def string_len_bucket(ptr: u8&) -> usize:
+    bits: mutable uintptr = ptr.uintptr()
+    bits ^= ((bits >> 33))
+    bits *= 0xff51afd7ed558ccd.uintptr()
+    bits ^= ((bits >> 33))
+    return ((bits & ((CTX_STRING_LEN_CACHE_BUCKETS - 1)).uintptr())).usize()
+
+def register_perm_string_len(ptr: u8&?, len: usize):
+    can Memory.Allocate, Abort.Panic:
+        if ((ptr == null) or (len == 0)):
+            return
+        bucket: usize = string_len_bucket(ptr.cast[u8&])
+        entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
+        trusted Unsafe.AssumeProgress:
+            while (entry != null):
+                if (entry.ptr == ptr.cast[u8&]):
+                    entry.len <- len
+                    return
+                entry <- entry.next
+        new_entry: heap StringLenCacheEntry& = alloc_perm(size_of(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
+        new_entry.next <- string_len_cache[bucket]
+        new_entry.ptr <- ptr.cast[u8&]
+        new_entry.len <- len
+        string_len_cache[bucket] <- new_entry
+
+def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
+    if (ptr == null):
+        return 0
+    bucket: usize = string_len_bucket(ptr.cast[u8&])
+    prev: mutable heap StringLenCacheEntry&? = null
+    entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
+    trusted Unsafe.AssumeProgress:
+        while (entry != null):
+            if (entry.ptr == ptr.cast[u8&]):
+                if (prev != null):
+                    prev.next <- entry.next
+                    entry.next <- string_len_cache[bucket]
+                    string_len_cache[bucket] <- entry
+                len_out <- entry.len
+                return 1
+            prev <- entry
+            entry <- entry.next
+    return 0
+
+def runtime_strlen(value: u8&?) -> usize:
+    src: u8& = (value if (value != null) else "")
+    if (src[0] == 0):
+        return 0
+    return strlen(src)
+
+def intern_small_string(src: u8&, len: usize) -> heap u8&:
+    can Memory.Allocate, Abort.Panic:
+        out: heap u8& = alloc_perm(((len + 1)).i64()).cast[heap u8&]
+        if (len > 0):
+            memcpy(out.cast[mutable void&], src.cast[void&], len)
+        out[len] <- 0
+        register_perm_string_len(out.cast[u8&], len)
+        return out
+
+def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
+    can Memory.Allocate, Console.Format, Abort.Panic:
+        len: int = snprintf(null, 0, "%lld", value)
+        if ((len > 0) and (len <= 8)):
+            text: u8[9]
+            snprintf(text[0].ref[u8&], (len.usize() + 1), "%lld", value)
+            return intern_small_string(text[0].ref[u8&], len.usize())
+        out: heap u8& = arena_alloc(arena, (len.usize() + 1)).cast[heap u8&]
+        snprintf(out.cast[u8&?], (len.usize() + 1), "%lld", value)
+        if (arena == perm_arena.ref[Arena&]):
+            register_perm_string_len(out.cast[u8&], len.usize())
+        return out
+
+def bool_to_string_into(arena: Arena&, value: int) -> u8&:
+    _ = arena
+    return ("True" if (value != 0) else "False")
+
+def char_to_string_into(arena: Arena&, value: i64) -> heap u8&:
+    can Memory.Allocate, Abort.Panic:
+        _ = arena
+        text: u8[2]
+        text[0] <- value.u8()
+        text[1] <- 0
+        return intern_small_string(text[0].ref[u8&], 1)
+
+def string_builder_next_cap(min_cap: i64) -> i64:
+    cap: mutable i64 = 16
+    trusted Unsafe.AssumeProgress:
+        while (cap < min_cap):
+            cap *= 2
+    return cap
+
+def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
+    can Memory.Allocate, Abort.Panic:
+        src: u8& = (initial if (initial != null) else "")
+        len: usize = runtime_strlen(src)
+        builder: heap StringBuilder& = alloc_perm(size_of(StringBuilder).i64()).cast[heap StringBuilder&]
+        builder.len <- len.i64()
+        builder.cap <- string_builder_next_cap((len.i64() + 1))
+        builder.data <- alloc_perm(builder.cap).cast[heap u8&]
+        if (len > 0):
+            memcpy(builder.data.cast[mutable void&], src.cast[void&], len)
+        builder.data[len] <- 0
+        return builder
+
+def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
+    can Memory.Allocate, Abort.Panic:
+        src: u8& = (suffix if (suffix != null) else "")
+        suffix_len: usize = runtime_strlen(src)
+        if (builder == null):
+            return string_builder_new(src)
+        if (suffix_len == 0):
+            return builder
+        b: heap StringBuilder& = builder
+        needed: i64 = ((b.len + suffix_len.i64()) + 1)
+        if (needed > b.cap):
+            new_cap: i64 = string_builder_next_cap(needed)
+            new_data: heap u8& = alloc_perm(new_cap).cast[heap u8&]
+            if (b.len > 0):
+                assert((b.data != null))
+                memcpy(new_data.cast[mutable void&], b.data.cast[void&], b.len.usize())
+            b.data <- new_data
+            b.cap <- new_cap
+        assert((b.data != null))
+        memmove(((b.data + b.len.usize())).cast[mutable void&], src.cast[void&], suffix_len)
+        b.len += suffix_len.i64()
+        b.data[b.len.usize()] <- 0
+        return b
+
+def string_builder_finish(builder: heap StringBuilder&?) -> heap u8&:
+    can Memory.Allocate, Abort.Panic:
+        if (builder == null):
+            return intern_small_string("", 0)
+        b: heap StringBuilder& = builder
+        if (b.len <= 0):
+            return intern_small_string("", 0)
+        assert((b.data != null))
+        if (b.len <= 8):
+            return intern_small_string(b.data.cast[u8&], b.len.usize())
+        register_perm_string_len(b.data.cast[u8&], b.len.usize())
+        return b.data
+
+struct Thread[T, S]:
+    handle: mutable uintptr
+    state: mutable void&?
+
+struct Task[T, S]:
+    handle: mutable uintptr
+    state: mutable void&?
+
+struct ThreadPool:
+    handle: mutable void&?
+
+struct TaskGroup:
+    handle: mutable void&?
+    cleanup: mutable void&?
+
+struct Mutex:
+    handle: mutable void&?
+
+struct MutexGuard[S]:
+    handle: mutable void&?
+
+struct CondVar:
+    handle: mutable void&?
+
+struct atomic[T]:
+    value: mutable T
+
+struct ConcurrencyBox[T]:
+    value: mutable T
+
+struct ConcurrencyWorkStart1:
+    fn_bits: mutable uintptr
+    arg_bits: mutable void&
+    result_bits: mutable void&
+    refs: mutable atomic[i64]
+
+struct ConcurrencyTaskGroupNode:
+    next: mutable heap ConcurrencyTaskGroupNode&?
+    state_bits: mutable void&
+
+struct ConcurrencyRawTaskNode:
+    next: mutable heap ConcurrencyRawTaskNode&?
+    handle: mutable uintptr
+
+struct ConcurrencyPoolState:
+    worker_count: mutable usize
+
+enum MemoryOrder:
+    Relaxed
+    Acquire
+    Release
+    AcqRel
+    SeqCst
+
+extern pthread_create(thread: mutable uintptr&, attr: void&?, start_routine: void&, arg: void&?) -> int effects[Thread.Spawn]
+
+extern pthread_join(thread: uintptr, retval: mutable void&?) -> int effects[Thread.Join]
+
+extern pthread_detach(thread: uintptr) -> int effects[Thread.Detach]
+
+extern pthread_mutex_lock(mutex: void&) -> int effects[Sync.Lock]
+
+extern pthread_mutex_unlock(mutex: void&) -> int effects[Sync.Unlock]
+
+extern pthread_cond_wait(cond: void&, mutex: void&) -> int effects[Sync.Wait]
+
+extern pthread_cond_signal(cond: void&) -> int effects[Sync.Notify]
+
+extern pthread_cond_broadcast(cond: void&) -> int effects[Sync.Notify]
+
+extern mutex_lock(mu: mutable Mutex&) -> MutexGuard[Held] effects[Sync.Lock]
+
+extern mutex_unlock(g: MutexGuard[Held]) -> void effects[Sync.Unlock]
+
+extern cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held] effects[Sync.Wait]
+
+extern notify_one(cv: mutable CondVar&) -> void effects[Sync.Notify]
+
+extern notify_all(cv: mutable CondVar&) -> void effects[Sync.Notify]
+
+def ctx_concurrency_alloc(size: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        raw: heap void&? = malloc(size)
+        if (raw == null):
+            panic("concurrency allocation failed")
+        ptr: heap void& = raw.cast[heap void&]
+        return ptr
+
+def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
+    raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyBox[T])) can Memory.Allocate, Abort.Panic
+    box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
+    box.value <- value
+    return box
+
+def ctx_concurrency_join_handle(handle: uintptr):
+    can Thread.Join, Abort.Panic:
+        status: int = pthread_join(handle, null)
+        if (status != 0):
+            panic("pthread_join failed")
+
+def spawn_raw(entry: void&, arg: void&?) -> Thread[void&?, Joinable]:
+    can Thread.Spawn, Abort.Panic:
+        out: Thread[void&?, Joinable] = zeroed
+        status: int = pthread_create(out.handle.ref[mutable uintptr&], null, entry, arg)
+        if (status != 0):
+            panic("pthread_create failed")
+        out.state <- arg
+        return move out
+
+def join_raw(thread: Thread[void&?, Joinable]) -> void&?:
+    can Thread.Join, Abort.Panic:
+        handle: uintptr = thread.handle
+        state_bits: void&? = thread.state
+        _ = move thread
+        ctx_concurrency_join_handle(handle)
+        return state_bits
+
+def detach_raw(thread: Thread[void&?, Joinable]):
+    can Thread.Detach, Abort.Panic:
+        handle: uintptr = thread.handle
+        _ = move thread
+        status: int = pthread_detach(handle)
+        if (status != 0):
+            panic("pthread_detach failed")
+
+def pool_new(threads: usize) -> ThreadPool:
+    can Pool.Create, Memory.Allocate, Abort.Panic:
+        raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyPoolState))
+        state: heap ConcurrencyPoolState& = raw.cast[heap ConcurrencyPoolState&]
+        state.worker_count <- threads
+        out: ThreadPool = zeroed
+        out.handle <- state.cast[void&]
+        return move out
+
+def pool_shutdown(pool: mutable ThreadPool&):
+    can Pool.Shutdown, Memory.Release:
+        if (pool.handle != null):
+            free(pool.handle.cast[heap void&])
+            pool.handle <- null
+
+def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Task[void&?, Pending]:
+    can Pool.Submit, Thread.Spawn, Abort.Panic:
+        _ = pool
+        thread: Thread[void&?, Joinable] = spawn_raw(entry, arg)
+        out: Task[void&?, Pending] = zeroed
+        out.handle <- thread.handle
+        out.state <- thread.state
+        _ = move thread
+        return move out
+
+def pool_await_raw(task: Task[void&?, Pending]) -> void&?:
+    can Pool.Await, Thread.Join, Abort.Panic:
+        handle: uintptr = task.handle
+        state_bits: void&? = task.state
+        _ = move task
+        ctx_concurrency_join_handle(handle)
+        return state_bits
+
+def task_group_new_raw() -> TaskGroup:
+    out: TaskGroup = zeroed
+    return move out
+
+def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending]):
+    can Memory.Allocate, Abort.Panic:
+        handle: uintptr = task.handle
+        _ = move task
+        raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
+        node: heap ConcurrencyRawTaskNode& = raw.cast[heap ConcurrencyRawTaskNode&]
+        node.handle <- handle
+        if (group.handle == null):
+            node.next <- null
+        else:
+            node.next <- group.handle.cast[heap ConcurrencyRawTaskNode&]
+        group.handle <- node.cast[void&]
+
+def task_group_wait_all_raw(group: mutable TaskGroup&):
+    can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic:
+        current: mutable heap ConcurrencyRawTaskNode&? = group.handle.cast[heap ConcurrencyRawTaskNode&?]
+        group.handle <- null
+        trusted Unsafe.AssumeProgress:
+            while (current != null):
+                next: mutable heap ConcurrencyRawTaskNode&? = current.next
+                ctx_concurrency_join_handle(current.handle)
+                free(current.cast[heap void&])
+                current <- next
+
+def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64:
+    trusted Unsafe.AssumeProgress:
+        while true:
+            current: i64 = load(slot, MemoryOrder.Acquire) can Atomics.Load
+            next: i64 = (current - 1)
+            if compare_exchange(slot, current, next, MemoryOrder.AcqRel, MemoryOrder.Acquire) can Atomics.CompareExchange:
+                return next
+    return 0
+
+def ctx_concurrency_work1_release(state_bits: mutable void&?):
+    can Memory.Release, Atomics.Load, Atomics.CompareExchange:
+        if (state_bits == null):
+            return
+        live_bits: void& = state_bits.cast[void&]
+        state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
+        remaining: i64 = ctx_concurrency_ref_release(state.refs.ref[atomic[i64]&])
+        if (remaining == 0):
+            free(state.arg_bits.cast[heap void&])
+            free(state.result_bits.cast[heap void&])
+            free(state.cast[heap void&])
+
+def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> mutable heap ConcurrencyWorkStart1&:
+    can Memory.Allocate, Abort.Panic:
+        arg_box: heap ConcurrencyBox[A]& = ctx_concurrency_box_new(arg)
+        result_seed: R = zeroed
+        result_box: heap ConcurrencyBox[R]& = ctx_concurrency_box_new(result_seed)
+        raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyWorkStart1))
+        state: heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]
+        state.fn_bits <- fn as uintptr
+        state.arg_bits <- arg_box.cast[void&]
+        state.result_bits <- result_box.cast[void&]
+        state.refs.value <- 2
+        return state
+
+def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -> void&:
+    can P, Memory.Release, Atomics.Load, Atomics.CompareExchange:
+        state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]
+        fn: func(A) -> R effects[P] = state.fn_bits.cast[func(A) -> R effects[P]]
+        arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]
+        result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
+        result_box.value <- fn(arg_box.value)
+        ctx_concurrency_work1_release(state.cast[mutable void&])
+        return state.cast[void&]
+
+def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
+    can Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+        if (state_bits == null):
+            panic("concurrency work returned no state")
+        live_bits: void& = state_bits.cast[void&]
+        state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
+        result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
+        result: R = result_box.value
+        ctx_concurrency_work1_release(state.cast[mutable void&])
+        return result
+
+def ctx_thread_from_raw[R, S](raw: Thread[void&?, S]) -> Thread[R, S]:
+    out: Thread[R, S] = zeroed
+    out.handle <- raw.handle
+    out.state <- raw.state
+    return move out
+
+def ctx_thread_to_raw[R, S](thread: Thread[R, S]) -> Thread[void&?, S]:
+    out: Thread[void&?, S] = zeroed
+    out.handle <- thread.handle
+    out.state <- thread.state
+    return move out
+
+def ctx_task_from_raw[R, S](raw: Task[void&?, S]) -> Task[R, S]:
+    out: Task[R, S] = zeroed
+    out.handle <- raw.handle
+    out.state <- raw.state
+    return move out
+
+def ctx_task_to_raw[R, S](task: Task[R, S]) -> Task[void&?, S]:
+    out: Task[void&?, S] = zeroed
+    out.handle <- task.handle
+    out.state <- task.state
+    return move out
+
+def task_group_new() -> TaskGroup:
+    group: TaskGroup = task_group_new_raw()
+    group.cleanup <- null
+    return move group
+
+def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
+    can Memory.Allocate, Abort.Panic:
+        if (state_bits == null):
+            return
+        raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyTaskGroupNode))
+        node: heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]
+        if (group.cleanup == null):
+            node.next <- null
+        else:
+            node.next <- group.cleanup.cast[heap ConcurrencyTaskGroupNode&]
+        node.state_bits <- state_bits.cast[void&]
+        group.cleanup <- node.cast[void&]
+
+def ctx_task_group_release_all(group: mutable TaskGroup&):
+    can Memory.Release, Atomics.Load, Atomics.CompareExchange:
+        if (group.cleanup == null):
+            return
+        current: mutable heap ConcurrencyTaskGroupNode&? = group.cleanup.cast[heap ConcurrencyTaskGroupNode&?]
+        group.cleanup <- null
+        trusted Unsafe.AssumeProgress:
+            while (current != null):
+                next: mutable heap ConcurrencyTaskGroupNode&? = current.next
+                ctx_concurrency_work1_release(current.state_bits.cast[mutable void&])
+                free(current.cast[heap void&])
+                current <- next
+
+def spawn1[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> Thread[R, Joinable]:
+    can Thread.Spawn, Memory.Allocate, Abort.Panic:
+        from_raw: func(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw[R, Joinable]
+        state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
+        raw: Thread[void&?, Joinable] = spawn_raw(ctx_concurrency_work1_entry[A, R].cast[void&], state.cast[void&])
+        raw.state <- state.cast[void&]
+        return from_raw(move raw)
+
+def join[R](thread: Thread[R, Joinable]) -> R:
+    can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+        take_result: func(void&?) -> R effects[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
+        state_bits: void&? = thread.state
+        raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
+        _ = join_raw(move raw)
+        result: R = take_result(state_bits)
+        return result
+
+def detach[R](thread: Thread[R, Joinable]):
+    can Thread.Detach, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+        state_bits: void&? = thread.state
+        raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
+        detach_raw(move raw)
+        ctx_concurrency_work1_release(state_bits)
+
+def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R effects[P], arg: A) -> Task[R, Pending]:
+    can Pool.Submit, Thread.Spawn, Memory.Allocate, Abort.Panic:
+        from_raw: func(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw[R, Pending]
+        state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
+        raw: Task[void&?, Pending] = pool_submit_raw(pool, ctx_concurrency_work1_entry[A, R].cast[void&], state.cast[void&])
+        raw.state <- state.cast[void&]
+        return from_raw(move raw)
+
+def pool_await[R](task: Task[R, Pending]) -> R:
+    can Pool.Await, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+        take_result: func(void&?) -> R effects[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
+        state_bits: void&? = task.state
+        raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
+        _ = pool_await_raw(move raw)
+        result: R = take_result(state_bits)
+        return result
+
+def task_group_add[R](group: mutable TaskGroup&, task: Task[R, Pending]):
+    can Memory.Allocate, Abort.Panic:
+        state_bits: void&? = task.state
+        raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
+        task_group_add_raw(group, move raw)
+        ctx_task_group_push_state(group, state_bits)
+
+def task_group_wait_all(group: mutable TaskGroup&):
+    can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+        task_group_wait_all_raw(group)
+        ctx_task_group_release_all(group)
+
+def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
+    can Atomics.Load:
+        _ = order
+        return slot.value
+
+def store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder):
+    can Atomics.Store:
+        _ = order
+        slot.value <- value
+
+def exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T:
+    can Atomics.Exchange:
+        _ = order
+        old_value: T = slot.value
+        slot.value <- value
+        return old_value
+
+def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool:
+    can Atomics.CompareExchange:
+        _ = success
+        _ = failure
+        if (slot.value == expected):
+            slot.value <- desired
+            return true
+        return false
+
+def fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- (old_value + value)
+        return old_value
+
+def fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- (old_value - value)
+        return old_value
+
+def fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- (old_value | value)
+        return old_value
+
+def fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- (old_value & value)
+        return old_value
+
+def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- (old_value ^ value)
+        return old_value
+
+def fence(order: MemoryOrder):
+    _ = order can Atomics.Fence
+
+def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
+    can Memory.Allocate, Abort.Panic:
+        left: u8& = (lhs.cast[u8&] if (lhs != null) else "")
+        right: u8& = (rhs.cast[u8&] if (rhs != null) else "")
+        left_len: usize = runtime_strlen(left)
+        right_len: usize = runtime_strlen(right)
+        if (left_len == 0):
+            return right
+        if (right_len == 0):
+            return left
+        if ((left_len + right_len) <= 8):
+            text: u8[9]
+            memcpy(text[0].ref[mutable void&], left.cast[void&], left_len)
+            memcpy(((&text[0] + left_len)).cast[mutable void&], right.cast[void&], right_len)
+            text[(left_len + right_len)] <- 0
+            return intern_small_string(text[0].ref[u8&], (left_len + right_len)).cast[u8&]
+        out: u8& = alloc_perm((((left_len + right_len) + 1)).i64()).cast[u8&]
+        memcpy(out.cast[mutable void&], left.cast[void&], left_len)
+        memcpy(((out + left_len)).cast[mutable void&], right.cast[void&], right_len)
+        out[(left_len + right_len)] <- 0
+        register_perm_string_len(out, (left_len + right_len))
+        return out
+
+def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
+    can Memory.Allocate, Abort.Panic:
+        left: u8& = (lhs.cast[u8&] if (lhs != null) else "")
+        right: u8& = (rhs.cast[u8&] if (rhs != null) else "")
+        left_len: usize = runtime_strlen(left)
+        right_len: usize = runtime_strlen(right)
+        if (left_len == 0):
+            return right
+        if (right_len == 0):
+            return left
+        if ((left_len + right_len) <= 8):
+            text: u8[9]
+            memcpy(text[0].ref[mutable void&], left.cast[void&], left_len)
+            memcpy(((&text[0] + left_len)).cast[mutable void&], right.cast[void&], right_len)
+            text[(left_len + right_len)] <- 0
+            return intern_small_string(text[0].ref[u8&], (left_len + right_len)).cast[u8&]
+        out: u8& = alloc_scratch((((left_len + right_len) + 1)).i64()).cast[u8&]
+        memcpy(out.cast[mutable void&], left.cast[void&], left_len)
+        memcpy(((out + left_len)).cast[mutable void&], right.cast[void&], right_len)
+        out[(left_len + right_len)] <- 0
+        return out
+
+def string_index(value: u8&?, index: i64) -> i64:
+    src: u8& = (value if (value != null) else "")
+    len: usize = runtime_strlen(src)
+    return (0 if ((index < 0) or (index.usize() >= len)) else src[index.usize()].i64())
+
+def string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
+    src: u8& = (value if (value != null) else "")
+    rhs: u8& = (other if (other != null) else "")
+    len: usize = runtime_strlen(src)
+    lo: mutable usize = 0
+    hi: mutable usize = len
+    if (start > 0):
+        lo <- start.usize()
+        if (lo > len):
+            lo <- len
+    if (end >= 0):
+        hi <- end.usize()
+        if (hi > len):
+            hi <- len
+    if (hi < lo):
+        hi <- lo
+    slice_len: usize = (hi - lo)
+    rhs_len: usize = runtime_strlen(rhs)
+    if (slice_len != rhs_len):
+        return 0
+    if ((slice_len == 0) or ((src + lo) == rhs)):
+        return 1
+    return (1 if (memcmp(((src + lo)).cast[void&], rhs.cast[void&], slice_len) == 0) else 0)
+
+def string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_start: i64, rhs_end: i64) -> int:
+    left: u8& = (lhs if (lhs != null) else "")
+    right: u8& = (rhs if (rhs != null) else "")
+    left_len: usize = runtime_strlen(left)
+    right_len: usize = runtime_strlen(right)
+    left_lo: mutable usize = 0
+    left_hi: mutable usize = left_len
+    right_lo: mutable usize = 0
+    right_hi: mutable usize = right_len
+    if (lhs_start > 0):
+        left_lo <- lhs_start.usize()
+        if (left_lo > left_len):
+            left_lo <- left_len
+    if (lhs_end >= 0):
+        left_hi <- lhs_end.usize()
+        if (left_hi > left_len):
+            left_hi <- left_len
+    if (left_hi < left_lo):
+        left_hi <- left_lo
+    if (rhs_start > 0):
+        right_lo <- rhs_start.usize()
+        if (right_lo > right_len):
+            right_lo <- right_len
+    if (rhs_end >= 0):
+        right_hi <- rhs_end.usize()
+        if (right_hi > right_len):
+            right_hi <- right_len
+    if (right_hi < right_lo):
+        right_hi <- right_lo
+    left_slice_len: usize = (left_hi - left_lo)
+    right_slice_len: usize = (right_hi - right_lo)
+    if (left_slice_len != right_slice_len):
+        return 0
+    if ((left_slice_len == 0) or ((left + left_lo) == (right + right_lo))):
+        return 1
+    return (1 if (memcmp(((left + left_lo)).cast[void&], ((right + right_lo)).cast[void&], left_slice_len) == 0) else 0)
+
+def string_slice(value: u8&?, start: i64, end: i64) -> u8&:
+    can Memory.Allocate, Abort.Panic:
+        src: u8& = (value if (value != null) else "")
+        len: usize = runtime_strlen(src)
+        lo: mutable usize = 0
+        hi: mutable usize = len
+        if (start > 0):
+            lo <- start.usize()
+            if (lo > len):
+                lo <- len
+        if (end >= 0):
+            hi <- end.usize()
+            if (hi > len):
+                hi <- len
+        if (hi < lo):
+            hi <- lo
+        if ((lo == 0) and (hi == len)):
+            return src
+        out_len: usize = (hi - lo)
+        if (out_len == 0):
+            return ""
+        if (out_len <= 8):
+            return intern_small_string((src + lo), out_len).cast[u8&]
+        out: u8& = alloc_perm(((out_len + 1)).i64()).cast[u8&]
+        memcpy(out.cast[mutable void&], ((src + lo)).cast[void&], out_len)
+        out[out_len] <- 0
+        register_perm_string_len(out, out_len)
+        return out
+
+def sview(value: u8&?, start: i64, end: i64) -> sview:
+    src: u8& = (value if (value != null) else "")
+    len: usize = runtime_strlen(src)
+    lo: mutable usize = 0
+    hi: mutable usize = len
+    if (start > 0):
+        lo <- start.usize()
+        if (lo > len):
+            lo <- len
+    if (end >= 0):
+        hi <- end.usize()
+        if (hi > len):
+            hi <- len
+    if (hi < lo):
+        hi <- lo
+    return StringView((src + lo), ((hi - lo)).i64())
+
+def string_view_len(view: sview) -> i64:
+    return view.len
+
+def string_view_slice(view: sview, start: i64, end: i64) -> sview:
+    lo: mutable i64 = (start if (start > 0) else 0)
+    hi: mutable i64 = (end if (end >= 0) else view.len)
+    if (lo > view.len):
+        lo <- view.len
+    if (hi > view.len):
+        hi <- view.len
+    if (hi < lo):
+        hi <- lo
+    return StringView((view.data + lo.usize()), (hi - lo))
+
+def string_view_prefix(view: sview, end: i64) -> sview:
+    return string_view_slice(view, 0, end)
+
+def string_view_suffix(view: sview, start: i64) -> sview:
+    return string_view_slice(view, start, view.len)
+
+def string_view_index(view: sview, index: i64) -> i64:
+    if ((index < 0) or (index >= view.len)):
+        return 0
+    return view.data[index.usize()].i64()
+
+def string_view_eq(view: sview, other: u8&?) -> int:
+    rhs: u8& = (other if (other != null) else "")
+    rhs_len: usize = runtime_strlen(rhs)
+    if ((view.len < 0) or (view.len.usize() != rhs_len)):
+        return 0
+    if ((view.len == 0) or (view.data == rhs)):
+        return 1
+    return (1 if (memcmp(view.data.cast[void&], rhs.cast[void&], view.len.usize()) == 0) else 0)
+
+def string_views_eq(lhs: sview, rhs: sview) -> int:
+    if (lhs.len != rhs.len):
+        return 0
+    if ((lhs.len == 0) or (lhs.data == rhs.data)):
+        return 1
+    return (1 if (memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs.len.usize()) == 0) else 0)
+
+def string_view_copy(view: sview) -> heap u8&:
+    can Memory.Allocate, Abort.Panic:
+        if (view.len <= 0):
+            return intern_small_string("", 0)
+        if (view.len <= 8):
+            return intern_small_string(view.data, view.len.usize())
+        out: heap u8& = alloc_perm(((view.len + 1)).usize()).cast[heap u8&]
+        memcpy(out.cast[mutable void&], view.data.cast[void&], view.len.usize())
+        out[view.len.usize()] <- 0
+        register_perm_string_len(out.cast[u8&], view.len.usize())
+        return out
+
+def int_to_string(value: i64) -> heap u8&:
+    return int_to_string_into(perm_arena.ref[Arena&], value) can Memory.Allocate, Console.Format, Abort.Panic
+
+def int_to_string_scratch(value: i64) -> heap u8&:
+    return int_to_string_into(scratch_arena.ref[Arena&], value) can Memory.Allocate, Console.Format, Abort.Panic
+
+def bool_to_string(value: int) -> u8&:
+    return bool_to_string_into(perm_arena.ref[Arena&], value)
+
+def bool_to_string_scratch(value: int) -> u8&:
+    return bool_to_string_into(scratch_arena.ref[Arena&], value)
+
+def char_to_string(value: i64) -> heap u8&:
+    return char_to_string_into(perm_arena.ref[Arena&], value) can Memory.Allocate, Abort.Panic
+
+def char_to_string_scratch(value: i64) -> heap u8&:
+    return char_to_string_into(scratch_arena.ref[Arena&], value) can Memory.Allocate, Abort.Panic
+
+def __cast__(value: static u8&) -> u8&:
+    return value.cast[u8&]
+
+def string_len(value: u8&?) -> i64:
+    return runtime_strlen(value).i64()
+
+def streq(lhs: u8&?, rhs: u8&?) -> int:
+    left: u8& = (lhs if (lhs != null) else "")
+    right: u8& = (rhs if (rhs != null) else "")
+    return (1 if ((left == right) or (strcmp(left, right) == 0)) else 0)
+
+def rt_concat2(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_result]:
+    return concat2(lhs, rhs) can Memory.Allocate, Abort.Panic
+
+def rt_concat2_scratch(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_result]:
+    return concat2_scratch(lhs, rhs) can Memory.Allocate, Abort.Panic
+
+def rt_string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
+    return string_builder_new(initial) can Memory.Allocate, Abort.Panic
+
+def rt_string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
+    return string_builder_append(builder, suffix) can Memory.Allocate, Abort.Panic
+
+def rt_string_builder_finish(builder: heap StringBuilder&?) -> cstr[shape_out]:
+    return string_builder_finish(builder).cast[u8&] can Memory.Allocate, Abort.Panic
+
+def rt_int_to_string(value: i64) -> cstr[shape_out]:
+    return int_to_string(value) can Memory.Allocate, Console.Format, Abort.Panic
+
+def rt_int_to_string_scratch(value: i64) -> cstr[shape_out]:
+    return int_to_string_scratch(value) can Memory.Allocate, Console.Format, Abort.Panic
+
+def rt_bool_to_string(value: int) -> cstr[shape_out]:
+    return bool_to_string(value)
+
+def rt_bool_to_string_scratch(value: int) -> cstr[shape_out]:
+    return bool_to_string_scratch(value)
+
+def rt_char_to_string(value: i64) -> cstr[shape_out]:
+    return char_to_string(value) can Memory.Allocate, Abort.Panic
+
+def rt_char_to_string_scratch(value: i64) -> cstr[shape_out]:
+    return char_to_string_scratch(value) can Memory.Allocate, Abort.Panic
+
+def ctx_strlen(value: cstr[shape_in]) -> i64:
+    return string_len(value)
+
+def ctx_streq(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> int:
+    return streq(lhs, rhs)
+
+def ctx_string_slice_eq(value: cstr[shape_in], start: i64, end: i64, other: cstr[shape_other]) -> int:
+    return string_slice_eq(value, start, end, other)
+
+def ctx_string_slices_eq(lhs: cstr[shape_left], lhs_start: i64, lhs_end: i64, rhs: cstr[shape_right], rhs_start: i64, rhs_end: i64) -> int:
+    return string_slices_eq(lhs, lhs_start, lhs_end, rhs, rhs_start, rhs_end)
+
+def ctx_string_index(value: cstr[shape_in], index: i64) -> i64:
+    return string_index(value, index)
+
+def ctx_string_slice(value: cstr[shape_in], start: i64, end: i64) -> cstr[shape_out]:
+    return string_slice(value, start, end) can Memory.Allocate, Abort.Panic
+
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> sview:
+    return sview(value, start, end)
+
+def ctx_string_view_len(view: sview) -> i64:
+    return string_view_len(view)
+
+def ctx_string_view_slice(view: sview, start: i64, end: i64) -> sview:
+    return string_view_slice(view, start, end)
+
+def ctx_string_view_prefix(view: sview, end: i64) -> sview:
+    return string_view_prefix(view, end)
+
+def ctx_string_view_suffix(view: sview, start: i64) -> sview:
+    return string_view_suffix(view, start)
+
+def ctx_string_view_index(view: sview, index: i64) -> i64:
+    return string_view_index(view, index)
+
+def ctx_string_view_eq(view: sview, other: cstr[shape_other]) -> int:
+    return string_view_eq(view, other)
+
+def ctx_string_views_eq(lhs: sview, rhs: sview) -> int:
+    return string_views_eq(lhs, rhs)
+
+def ctx_string_from_view(view: sview) -> cstr[shape_out]:
+    return string_view_copy(view).cast[u8&] can Memory.Allocate, Abort.Panic
+
+def rt_reset_scratch():
+    reset_scratch()
+
+def rt_puts(value: u8&?) -> int:
+    return puts((value if (value != null) else "")) can Console.Write
+
+def ctx_llvm_codegen_fatal(msg: u8&?):
+    can Console, Abort.Exit:
+        actual_msg: u8& = (msg if (msg != null) else "<null>")
+        puts("ctx_llvm_codegen_fatal:")
+        puts(actual_msg)
+        exit(1)
+
+struct ByteBuffer:
+    data: mutable heap u8&?
+    len: mutable usize
+    capacity: mutable usize
+
+struct HeapByteBuffer:
+    data: mutable heap u8&?
+    len: mutable usize
+    capacity: mutable usize
+
+struct CxxU32MapEntry[T]:
+    key: mutable u32
+    value: mutable T
+
+struct CxxU32Map[T]:
+    entries: mutable darray[CxxU32MapEntry[T]]
+
+def cxx_min_usize(a: usize, b: usize) -> usize:
+    return (a if (a < b) else b)
+
+def cxx_clamp_f32(value: f32, lo: f32, hi: f32) -> f32:
+    if (value < lo):
+        return lo
+    if (value > hi):
+        return hi
+    return value
+
+def cxx_memset(dest: mutable void&, value: u8, n: usize) -> mutable void&:
+    bytes: mutable u8& = arena_mutable_u8_from_void(dest)
+    trusted Unsafe.UncheckedIndex:
+        for i in 0 ..< n:
+            bytes[i] <- value
+    return dest
+
+def cxx_zero_memory(dest: mutable void&, n: usize) -> mutable void&:
+    return cxx_memset(dest, 0.u8(), n)
+
+def cxx_byte_buffer_empty() -> ByteBuffer:
+    out: ByteBuffer = zeroed
+    return out
+
+def cxx_byte_buffer_alloc(a: mutable Arena&, size: usize) -> ByteBuffer:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable ByteBuffer = zeroed
+        if (size == 0):
+            return out
+        raw: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, size))
+        _ = cxx_zero_memory(arena_void_from_mutable_u8(raw), size)
+        out.data as & <- raw
+        out.len <- size
+        out.capacity <- size
+        return out
+
+def cxx_byte_buffer_from(a: mutable Arena&, src: void&, size: usize) -> ByteBuffer:
+    can Memory.Allocate, Abort.Panic:
+        out: ByteBuffer = cxx_byte_buffer_alloc(a, size)
+        if (size == 0):
+            return out
+        assert((out.data != null))
+        _ = arena_memcpy(arena_void_from_mutable_u8(out.data), src, size)
+        return out
+
+def cxx_byte_buffer_resize_zeroed(a: mutable Arena&, buffer: mutable ByteBuffer&, size: usize):
+    can Memory.Allocate, Abort.Panic:
+        if (size <= buffer.capacity):
+            return
+        old_data: mutable heap u8&? = buffer.data
+        old_len: usize = buffer.len
+        raw: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, size))
+        _ = cxx_zero_memory(arena_void_from_mutable_u8(raw), size)
+        if ((old_data != null) and (old_len > 0)):
+            _ = arena_memcpy(arena_void_from_mutable_u8(raw), arena_void_from_u8(old_data), old_len)
+        buffer.data as & <- raw
+        buffer.capacity <- size
+        buffer.len <- size
+
+def cxx_byte_buffer_clear(buffer: mutable ByteBuffer&):
+    buffer.len <- 0
+
+def cxx_byte_buffer_view(buffer: ByteBuffer&) -> dview[u8]:
+    return (DynArrayView(null, 0, size_of(u8)) if ((buffer.data == null) or (buffer.len == 0)) else DynArrayView(arena_void_from_u8(buffer.data), buffer.len, size_of(u8)))
+
+def cxx_heap_byte_buffer_alloc(size: usize) -> HeapByteBuffer:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable HeapByteBuffer = zeroed
+        if (size == 0):
+            return out
+        raw_void: mutable heap void&? = null
+        trusted Unsafe.RawExtern:
+            raw_void <- malloc(size)
+        assert((raw_void != null))
+        raw: mutable heap u8& = arena_heap_u8_from_alloc(raw_void)
+        _ = cxx_zero_memory(arena_void_from_mutable_u8(raw), size)
+        out.data as & <- raw
+        out.len <- size
+        out.capacity <- size
+        return out
+
+def cxx_heap_byte_buffer_from(src: void&, size: usize) -> HeapByteBuffer:
+    can Memory.Allocate, Abort.Panic:
+        out: HeapByteBuffer = cxx_heap_byte_buffer_alloc(size)
+        if (size == 0):
+            return out
+        assert((out.data != null))
+        _ = arena_memcpy(arena_void_from_mutable_u8(out.data), src, size)
+        return out
+
+def cxx_heap_byte_buffer_free(buffer: mutable HeapByteBuffer&):
+    can Memory.Release:
+        if (buffer.data == null):
+            return
+        trusted Unsafe.RawExtern:
+            free(buffer.data.cast[heap void&])
+        buffer.data as ! <- null
+        buffer.len <- 0
+        buffer.capacity <- 0
+
+def cxx_read_value[T](ptr: void&?) -> T:
+    can Abort.Panic:
+        assert((ptr != null))
+        trusted Unsafe.PointerCast:
+            value: T& = ptr.cast[T&]
+            return value[0]
+
+def cxx_write_value[T](ptr: mutable void&?, value: T):
+    can Abort.Panic:
+        assert((ptr != null))
+        trusted Unsafe.PointerCast:
+            out: mutable T& = ptr.cast[mutable T&]
+            out[0] <- value
+
+def cxx_copy_value_to[T](ptr: mutable void&?, value: T):
+    cxx_write_value[T](ptr, value) can Abort.Panic
+
+def cxx_read_array_at[T](ptr: void&?, index: usize) -> T:
+    can Abort.Panic:
+        assert((ptr != null))
+        trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+            items: T& = ptr.cast[T&]
+            return items[index]
+
+def cxx_array_ref_at[T](ptr: mutable void&?, index: usize) -> mutable T&:
+    can Abort.Panic:
+        assert((ptr != null))
+        trusted Unsafe.PointerCast, Unsafe.PointerArithmetic:
+            items: mutable T& = ptr.cast[mutable T&]
+            return &items[index]
+
+def cxx_vector_new[T](a: mutable Arena&, initial_capacity: usize) -> darray[T]:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable darray[T] = zeroed
+        in a:
+            _ = out.reserve(initial_capacity)
+        return out
+
+def cxx_vector_push[T](a: mutable Arena&, vec: mutable darray[T]&, value: T):
+    _ = arena_da_append(a, vec, value) can Memory.Allocate, Abort.Panic
+
+def cxx_vector_assign_bytes(a: mutable Arena&, vec: mutable darray[u8]&, src: void&, size: usize):
+    can Memory.Allocate, Abort.Panic:
+        vec.count <- 0
+        if (size == 0):
+            return
+        bytes: u8& = arena_u8_from_void(src)
+        _ = arena_da_append_many(a, vec, bytes, size)
+
+def cxx_deque_new[T](a: mutable Arena&, initial_capacity: usize) -> Deque[T]:
+    return arena_deque_with_capacity[T](a, initial_capacity) can Memory.Allocate, Abort.Panic
+
+def cxx_deque_push_back[T](a: mutable Arena&, deque: mutable Deque[T]&, item: T):
+    _ = arena_deque_push_back[T](a, deque, item) can Memory.Allocate, Abort.Panic
+
+def cxx_deque_pop_front[T](deque: mutable Deque[T]&, out: mutable T&) -> bool:
+    return arena_deque_pop_front[T](deque, out) can Abort.Panic
+
+def cxx_hash_map_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
+    return arena_dict_new[K, T](a, initial_capacity) can Memory.Allocate, Abort.Panic
+
+def cxx_hash_map_put[K, T](a: mutable Arena&, map: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
+    return (try arena_dict_put[K, T](a, map, key, value)) can Memory.Allocate, Abort.Panic
+
+def cxx_hash_map_get[K, T](map: dict[K, T]&, key: K) -> mutable T&?:
+    return arena_dict_get[K, T](map, key)
+
+def cxx_hash_map_contains[K, T](map: dict[K, T]&, key: K) -> bool:
+    return arena_dict_contains[K, T](map, key)
+
+def cxx_hash_map_remove[K, T](map: mutable dict[K, T]&, key: K) -> bool:
+    return arena_dict_remove[K, T](map, key)
+
+def cxx_hash_map_clear[K, T](map: mutable dict[K, T]&):
+    arena_dict_clear[K, T](map)
+
+def cxx_u32_map_new[T](a: mutable Arena&, initial_capacity: usize) -> CxxU32Map[T]:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable CxxU32Map[T] = zeroed
+        in a:
+            _ = out.entries.reserve(initial_capacity)
+        return out
+
+def cxx_u32_map_count[T](map: CxxU32Map[T]&) -> usize:
+    return map.entries.count
+
+def cxx_u32_map_find_index[T](map: CxxU32Map[T]&, key: u32) -> usize:
+    i: mutable usize = 0
+    while (i < map.entries.count):
+        if (map.entries[i].key == key):
+            return i
+        i <- (i + 1)
+    return map.entries.count
+
+def cxx_u32_map_get[T](map: CxxU32Map[T]&, key: u32) -> mutable T&?:
+    index: usize = cxx_u32_map_find_index[T](map, key)
+    if (index >= map.entries.count):
+        return null
+    return map.entries[index].value.ref[mutable T&]
+
+def cxx_u32_map_contains[T](map: CxxU32Map[T]&, key: u32) -> bool:
+    return (cxx_u32_map_find_index[T](map, key) < map.entries.count)
+
+def cxx_u32_map_put[T](a: mutable Arena&, map: mutable CxxU32Map[T]&, key: u32, value: T) -> bool:
+    can Memory.Allocate, Abort.Panic:
+        index: usize = cxx_u32_map_find_index[T](map, key)
+        if (index < map.entries.count):
+            map.entries[index].value <- value
+            return true
+        entry: CxxU32MapEntry[T] = zeroed
+        entry.key <- key
+        entry.value <- value
+        _ = arena_da_append[CxxU32MapEntry[T]](a, map.entries.ref[darray[CxxU32MapEntry[T]]&], entry)
+        return true
+
+def cxx_u32_map_remove[T](map: mutable CxxU32Map[T]&, key: u32) -> bool:
+    can Abort.Panic:
+        index: usize = cxx_u32_map_find_index[T](map, key)
+        if (index >= map.entries.count):
+            return false
+        _ = darray_remove_at[CxxU32MapEntry[T]](map.entries.ref[darray[CxxU32MapEntry[T]]&], index)
+        return true
+
+def cxx_u32_map_clear[T](map: mutable CxxU32Map[T]&):
+    map.entries.count <- 0
+
+const X: u64 = 0xffffffffffffffff
+
+const Y: u64 = ((-1)).u64()
+
+def id(x: u64) -> u64:
+    return x

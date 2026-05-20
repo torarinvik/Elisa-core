@@ -322,16 +322,45 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 	}
 
 	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
 
 	var body []ast.Stmt
 	if isStatic {
-		body = p.withStaticFunctionBody(p.parseBlock)
+		body = p.withStaticFunctionBody(p.parseFuncBodyAfterColon)
 	} else {
-		body = p.parseBlock()
+		body = p.parseFuncBodyAfterColon()
 	}
 	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 }
+
+func (p *Parser) parseFuncBodyAfterColon() []ast.Stmt {
+	if p.match(lexer.TOKEN_NEWLINE) {
+		return p.parseBlock()
+	}
+	stmts := make([]ast.Stmt, 0, 1)
+	inlineLine := p.cur().Pos.Line
+	for p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT && (p.cur().Pos.Line == inlineLine || p.cur().Pos.Line == 0) {
+		stmt := p.parseContextualStmt()
+		if stmt != nil {
+			stmts = append(stmts, stmt)
+		}
+	}
+	if p.peek() == lexer.TOKEN_NEWLINE {
+		p.advance()
+	}
+	return stmts
+}
+
+func (p *Parser) parseStmtBodyAfterColon() []ast.Stmt {
+	if p.match(lexer.TOKEN_NEWLINE) {
+		return p.parseBlock()
+	}
+	stmt := p.parseContextualStmt()
+	if stmt == nil {
+		return nil
+	}
+	return []ast.Stmt{stmt}
+}
+
 func (p *Parser) parseParamList(allowDefault bool) []ast.ParamDecl {
 	params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.peek() == lexer.TOKEN_RPAREN {

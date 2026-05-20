@@ -179,6 +179,31 @@ struct Plain:
 	}
 }
 
+func TestAnalyzeStructCBindAnnotation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "struct_c_bind.elisa", `@c_bind(stddef.h, Header)
+struct Header layout c:
+	tag: u32
+	count: usize
+`)
+	header, ok := result.NamedTypes["Header"].(*StructType)
+	if !ok {
+		t.Fatalf("expected Header struct, got %T", result.NamedTypes["Header"])
+	}
+	if header.CBindHeader != "stddef.h" || header.CBindName != "Header" {
+		t.Fatalf("expected c bind metadata, got header=%q name=%q", header.CBindHeader, header.CBindName)
+	}
+}
+
+func TestAnalyzeStructCBindRequiresCLayout(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_c_bind_requires_c_layout.elisa", `@c_bind(stddef.h, Header)
+struct Header:
+	tag: u32
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "requires `layout c`") {
+		t.Fatalf("expected c_bind layout diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func TestAnalyzeStructRegionOwnerScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_scope.elisa", `struct Expr in owner:
 	left: owner Expr&?

@@ -2,6 +2,9 @@
 
 This document proposes an explicit `export` feature for Elisa core so concrete functions and C-compatible struct layouts can be exposed to C with stable names and predictable calling conventions.
 
+For inbound native calls and checked bindings to existing C headers, see
+`08-ffi-and-c-bindings.md`.
+
 The main goal is:
 
 > let Elisa core code compile into object files that can be linked into C programs **without** relying on mangled internal specialization names as the public interface.

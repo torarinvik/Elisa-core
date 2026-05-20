@@ -20,6 +20,20 @@ type hostABILayout struct {
 	Align int
 }
 
+type HostABIFieldLayout struct {
+	Name   string
+	Size   int
+	Align  int
+	Offset int
+}
+
+type HostABIStructLayout struct {
+	Name   string
+	Size   int
+	Align  int
+	Fields []HostABIFieldLayout
+}
+
 type structLayoutField struct {
 	Name  string
 	Size  int
@@ -160,18 +174,26 @@ func (a *Analyzer) hostABILayoutForType(t Type, seen map[string]bool) (hostABILa
 }
 
 func (a *Analyzer) hostABILayoutForStructType(st *StructType, bindings map[string]Type, regionBindings map[string]string, seen map[string]bool) (hostABILayout, bool) {
-	if st == nil || st.Decl == nil {
+	layout, ok := a.hostABIStructLayoutForStructType(st, bindings, regionBindings, seen)
+	if !ok {
 		return hostABILayout{}, false
 	}
+	return hostABILayout{Size: layout.Size, Align: layout.Align}, true
+}
+
+func (a *Analyzer) hostABIStructLayoutForStructType(st *StructType, bindings map[string]Type, regionBindings map[string]string, seen map[string]bool) (HostABIStructLayout, bool) {
+	if st == nil || st.Decl == nil {
+		return HostABIStructLayout{}, false
+	}
 	if st.HasPackedGroups || st.PackedLayout {
-		return hostABILayout{}, false
+		return HostABIStructLayout{}, false
 	}
 	key := st.Name
 	if key == "" {
 		key = fmt.Sprintf("%p", st)
 	}
 	if seen[key] {
-		return hostABILayout{}, false
+		return HostABIStructLayout{}, false
 	}
 	seen[key] = true
 	defer delete(seen, key)
@@ -179,7 +201,7 @@ func (a *Analyzer) hostABILayoutForStructType(st *StructType, bindings map[strin
 	for i, fieldDecl := range st.Decl.Fields {
 		field, ok := st.Fields[fieldDecl.Name]
 		if !ok {
-			return hostABILayout{}, false
+			return HostABIStructLayout{}, false
 		}
 		fieldType := field.Type
 		if len(bindings) != 0 {
@@ -187,13 +209,13 @@ func (a *Analyzer) hostABILayoutForStructType(st *StructType, bindings map[strin
 		}
 		layout, ok := a.hostABILayoutForType(fieldType, seen)
 		if !ok || layout.Align <= 0 {
-			return hostABILayout{}, false
+			return HostABIStructLayout{}, false
 		}
 		fields = append(fields, structLayoutField{Name: fieldDecl.Name, Size: layout.Size, Align: layout.Align, Index: i})
 	}
 	requestedAlign, _ := RequestedAlignment(st)
-	size, align := hostABIStructSizeForFieldOrder(fields, requestedAlign)
-	return hostABILayout{Size: size, Align: align}, true
+	size, align, laidOutFields := hostABIStructLayoutForFieldOrder(fields, requestedAlign)
+	return HostABIStructLayout{Name: st.Name, Size: size, Align: align, Fields: laidOutFields}, true
 }
 
 func hostABIBuiltinLayout(name string) (hostABILayout, bool) {
@@ -222,19 +244,34 @@ func hostPointerLayout() hostABILayout {
 }
 
 func hostABIStructSizeForFieldOrder(fields []structLayoutField, requestedAlign int) (int, int) {
+	size, align, _ := hostABIStructLayoutForFieldOrder(fields, requestedAlign)
+	return size, align
+}
+
+func hostABIStructLayoutForFieldOrder(fields []structLayoutField, requestedAlign int) (int, int, []HostABIFieldLayout) {
 	offset := 0
 	maxAlign := 1
 	if requestedAlign > maxAlign {
 		maxAlign = requestedAlign
 	}
+	laidOut := make([]HostABIFieldLayout, 0, len(fields))
 	for _, field := range fields {
 		if field.Align > maxAlign {
 			maxAlign = field.Align
 		}
 		offset = alignUp(offset, field.Align)
+		laidOut = append(laidOut, HostABIFieldLayout{Name: field.Name, Size: field.Size, Align: field.Align, Offset: offset})
 		offset += field.Size
 	}
-	return alignUp(offset, maxAlign), maxAlign
+	return alignUp(offset, maxAlign), maxAlign, laidOut
+}
+
+func (r *Result) HostABIStructLayout(st *StructType) (HostABIStructLayout, bool) {
+	if r == nil || st == nil {
+		return HostABIStructLayout{}, false
+	}
+	analyzer := &Analyzer{namedTypes: r.NamedTypes}
+	return analyzer.hostABIStructLayoutForStructType(st, nil, nil, map[string]bool{})
 }
 
 func alignUp(value int, align int) int {

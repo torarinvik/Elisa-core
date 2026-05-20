@@ -1,0 +1,43 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+include "./core/libraries/ulobjmgr/ulobjmgr.elisa"
+
+const POSIX_EINVAL: int = 22
+
+@test
+def ulobjmgr_register_contracts() -> void:
+    can Abort.Panic:
+        out: mutable u32 = 123u32
+        assert _sceUlobjmgrRegisterObject(1u64, 1, out.ref[mutable u32&]) == ORBIS_OK
+        assert out == 0u32
+
+        assert _sceUlobjmgrRegisterObject(0u64, 1, out.ref[mutable u32&]) == POSIX_EINVAL
+        assert _sceUlobjmgrRegisterObject(1u64, 0, out.ref[mutable u32&]) == POSIX_EINVAL
+        assert _sceUlobjmgrRegisterObject(1u64, 1, null) == POSIX_EINVAL
+
+@test
+def ulobjmgr_unregister_contracts() -> void:
+    can Abort.Panic:
+        assert _sceUlobjmgrUnregisterObject(0u32) == ORBIS_OK
+        assert _sceUlobjmgrUnregisterObject(0x3fffu32) == ORBIS_OK
+        assert _sceUlobjmgrUnregisterObject(0x4000u32) == POSIX_EINVAL
+
+@test
+def ulobjmgr_misc_contracts() -> void:
+    can Abort.Panic:
+        assert Func_1D9F50D9CFB8054E() == ORBIS_OK
+        assert Func_4B07893BBB77A649(1u64) == ORBIS_OK
+        assert Func_4B07893BBB77A649(0u64) == POSIX_EINVAL
+
+def main() -> int:
+    out: mutable u32 = 99u32
+    if _sceUlobjmgrRegisterObject(1u64, 1, out.ref[mutable u32&]) != ORBIS_OK:
+        return 1
+    if out != 0u32:
+        return 2
+    if _sceUlobjmgrUnregisterObject(0x4000u32) != POSIX_EINVAL:
+        return 3
+    if Func_4B07893BBB77A649(0u64) != POSIX_EINVAL:
+        return 4
+    if Func_1D9F50D9CFB8054E() != ORBIS_OK:
+        return 5
+    return 0

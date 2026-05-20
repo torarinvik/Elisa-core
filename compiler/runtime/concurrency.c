@@ -1,6 +1,8 @@
 #include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <time.h>
 
 #if defined(__clang__) || defined(__GNUC__)
 #define CTX_RUNTIME_WEAK __attribute__((weak))
@@ -18,6 +20,18 @@ typedef struct {
 typedef struct {
     void *handle;
 } ctx_thread_pool;
+
+typedef struct {
+    void *handle;
+} ctx_mutex;
+
+typedef struct {
+    void *handle;
+} ctx_mutex_guard;
+
+typedef struct {
+    void *handle;
+} ctx_condvar;
 
 typedef struct {
     void *handle;
@@ -67,6 +81,119 @@ static ctx_task_group_state *ctx_ensure_group_state(ctx_task_group *group) {
     state->tail = NULL;
     group->handle = state;
     return state;
+}
+
+CTX_RUNTIME_WEAK ctx_mutex mutex_new(void) {
+    pthread_mutex_t *mutex = (pthread_mutex_t *)ctx_xmalloc(sizeof(*mutex));
+    if (pthread_mutex_init(mutex, NULL) != 0) {
+        free(mutex);
+        abort();
+    }
+    return (ctx_mutex){.handle = mutex};
+}
+
+CTX_RUNTIME_WEAK void mutex_init(ctx_mutex *out) {
+    if (out == NULL) {
+        abort();
+    }
+    *out = mutex_new();
+}
+
+CTX_RUNTIME_WEAK void mutex_destroy(ctx_mutex *mutex) {
+    if (mutex == NULL || mutex->handle == NULL) {
+        return;
+    }
+    if (pthread_mutex_destroy((pthread_mutex_t *)mutex->handle) != 0) {
+        abort();
+    }
+    free(mutex->handle);
+    mutex->handle = NULL;
+}
+
+CTX_RUNTIME_WEAK ctx_mutex_guard mutex_lock(ctx_mutex *mutex) {
+    if (mutex == NULL || mutex->handle == NULL) {
+        abort();
+    }
+    if (pthread_mutex_lock((pthread_mutex_t *)mutex->handle) != 0) {
+        abort();
+    }
+    return (ctx_mutex_guard){.handle = mutex->handle};
+}
+
+CTX_RUNTIME_WEAK void mutex_unlock(ctx_mutex_guard guard) {
+    if (guard.handle == NULL) {
+        abort();
+    }
+    if (pthread_mutex_unlock((pthread_mutex_t *)guard.handle) != 0) {
+        abort();
+    }
+}
+
+CTX_RUNTIME_WEAK ctx_condvar condvar_new(void) {
+    pthread_cond_t *cond = (pthread_cond_t *)ctx_xmalloc(sizeof(*cond));
+    if (pthread_cond_init(cond, NULL) != 0) {
+        free(cond);
+        abort();
+    }
+    return (ctx_condvar){.handle = cond};
+}
+
+CTX_RUNTIME_WEAK void condvar_init(ctx_condvar *out) {
+    if (out == NULL) {
+        abort();
+    }
+    *out = condvar_new();
+}
+
+CTX_RUNTIME_WEAK void condvar_destroy(ctx_condvar *cond) {
+    if (cond == NULL || cond->handle == NULL) {
+        return;
+    }
+    if (pthread_cond_destroy((pthread_cond_t *)cond->handle) != 0) {
+        abort();
+    }
+    free(cond->handle);
+    cond->handle = NULL;
+}
+
+CTX_RUNTIME_WEAK ctx_mutex_guard cond_wait(ctx_condvar *cond, ctx_mutex_guard guard) {
+    if (cond == NULL || cond->handle == NULL || guard.handle == NULL) {
+        abort();
+    }
+    if (pthread_cond_wait((pthread_cond_t *)cond->handle, (pthread_mutex_t *)guard.handle) != 0) {
+        abort();
+    }
+    return guard;
+}
+
+CTX_RUNTIME_WEAK void notify_one(ctx_condvar *cond) {
+    if (cond == NULL || cond->handle == NULL) {
+        abort();
+    }
+    if (pthread_cond_signal((pthread_cond_t *)cond->handle) != 0) {
+        abort();
+    }
+}
+
+CTX_RUNTIME_WEAK void notify_all(ctx_condvar *cond) {
+    if (cond == NULL || cond->handle == NULL) {
+        abort();
+    }
+    if (pthread_cond_broadcast((pthread_cond_t *)cond->handle) != 0) {
+        abort();
+    }
+}
+
+CTX_RUNTIME_WEAK void thread_yield(void) {
+    sched_yield();
+}
+
+CTX_RUNTIME_WEAK void thread_sleep_usec(uint64_t usec) {
+    struct timespec requested;
+    requested.tv_sec = (time_t)(usec / 1000000u);
+    requested.tv_nsec = (long)((usec % 1000000u) * 1000u);
+    while (nanosleep(&requested, &requested) != 0) {
+    }
 }
 
 CTX_RUNTIME_WEAK ctx_thread_pool pool_new(uint64_t threads) {

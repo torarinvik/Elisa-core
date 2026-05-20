@@ -12,6 +12,13 @@ struct HeapByteBuffer:
     len: mutable usize
     capacity: mutable usize
 
+struct CxxU32MapEntry[T]:
+    key: mutable u32
+    value: mutable T
+
+struct CxxU32Map[T]:
+    entries: mutable darray[CxxU32MapEntry[T]]
+
 def cxx_min_usize(a: usize, b: usize) -> usize:
     return a if a < b else b
 
@@ -196,3 +203,53 @@ def cxx_hash_map_remove[K, T](map: mutable dict[K, T]&, key: K) -> bool:
 
 def cxx_hash_map_clear[K, T](map: mutable dict[K, T]&):
     arena_dict_clear[K, T](map)
+
+def cxx_u32_map_new[T](a: mutable Arena&, initial_capacity: usize) -> CxxU32Map[T]:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable CxxU32Map[T] = zeroed
+        in a:
+            _ = out.entries.reserve(initial_capacity)
+        return out
+
+def cxx_u32_map_count[T](map: CxxU32Map[T]&) -> usize:
+    return map.entries.count
+
+def cxx_u32_map_find_index[T](map: CxxU32Map[T]&, key: u32) -> usize:
+    i: mutable usize = 0
+    while i < map.entries.count:
+        if map.entries[i].key == key:
+            return i
+        i <- i + 1
+    return map.entries.count
+
+def cxx_u32_map_get[T](map: CxxU32Map[T]&, key: u32) -> mutable T&?:
+    index: usize = cxx_u32_map_find_index[T](map, key)
+    if index >= map.entries.count:
+        return null
+    return map.entries[index].value.ref[mutable T&]
+
+def cxx_u32_map_contains[T](map: CxxU32Map[T]&, key: u32) -> bool:
+    return cxx_u32_map_find_index[T](map, key) < map.entries.count
+
+def cxx_u32_map_put[T](a: mutable Arena&, map: mutable CxxU32Map[T]&, key: u32, value: T) -> bool:
+    can Memory.Allocate, Abort.Panic:
+        index: usize = cxx_u32_map_find_index[T](map, key)
+        if index < map.entries.count:
+            map.entries[index].value <- value
+            return true
+        entry: CxxU32MapEntry[T] = zeroed
+        entry.key <- key
+        entry.value <- value
+        _ = arena_da_append[CxxU32MapEntry[T]](a, map.entries.ref[darray[CxxU32MapEntry[T]]&], entry)
+        return true
+
+def cxx_u32_map_remove[T](map: mutable CxxU32Map[T]&, key: u32) -> bool:
+    can Abort.Panic:
+        index: usize = cxx_u32_map_find_index[T](map, key)
+        if index >= map.entries.count:
+            return false
+        _ = darray_remove_at[CxxU32MapEntry[T]](map.entries.ref[darray[CxxU32MapEntry[T]]&], index)
+        return true
+
+def cxx_u32_map_clear[T](map: mutable CxxU32Map[T]&):
+    map.entries.count <- 0

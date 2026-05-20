@@ -598,7 +598,7 @@ func (p *Parser) parseRecordUpdateFields() ([]ast.Expr, []string) {
 	return args, argNames
 }
 func (p *Parser) expectNewline() {
-	if p.peek() == lexer.TOKEN_NEWLINE {
+	if p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_SEMICOLON {
 		p.advance()
 	} else if p.peek() == lexer.TOKEN_EOF || p.peek() == lexer.TOKEN_DEDENT {
 		// OK at end of file or block

@@ -1,0 +1,7 @@
+include "compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+include "elisa-shad-ps4-from-scratch/core/libraries/gnmdriver/gnmdriver.elisa"
+
+@test
+def t() -> void:
+    can Abort.Panic:
+        assert sceGnmAreSubmitsAllowed() == 1

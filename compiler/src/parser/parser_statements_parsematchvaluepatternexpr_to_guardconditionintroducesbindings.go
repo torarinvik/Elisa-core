@@ -406,16 +406,14 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 		p.pos = headStart
 		cond := p.withAsCastDisabled(p.parseExpr)
 		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		body := p.parseBlock()
+		body := p.parseStmtBodyAfterColon()
 		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
 	}
 	if p.notInMembershipAhead() {
 		p.pos = headStart
 		cond := p.withAsCastDisabled(p.parseExpr)
 		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		body := p.parseBlock()
+		body := p.parseStmtBodyAfterColon()
 		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
 	}
 	if p.match(lexer.TOKEN_AS) {
@@ -428,8 +426,7 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 		}
 		patterns := p.parseTopLevelMatchPatterns()
 		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		body := p.parseBlock()
+		body := p.parseStmtBodyAfterColon()
 		return ifClause{Position: pos, Hint: hint, Value: head, Patterns: patterns, Body: body}
 	}
 	if p.match(lexer.TOKEN_IN) {
@@ -451,13 +448,11 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 		p.pos = headStart
 		cond := p.withAsCastDisabled(p.parseExpr)
 		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		body := p.parseBlock()
+		body := p.parseStmtBodyAfterColon()
 		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
 	}
 	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	body := p.parseBlock()
+	body := p.parseStmtBodyAfterColon()
 	return ifClause{Position: pos, Hint: hint, Cond: head, Body: body}
 }
 func (p *Parser) parseIfLetClause(pos lexer.Pos, hint ast.BranchHint, isElif bool) ifClause {

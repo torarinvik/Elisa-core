@@ -451,6 +451,9 @@ type StructType struct {
 	HasPackedGroups  bool
 	Alignment        int
 	HasAlignment     bool
+	CBindHeader      string
+	CBindName        string
+	CBindPrefix      bool
 	Decl             *ast.StructDecl
 	StoreDecl        *ast.StoreDecl
 	Store            bool

@@ -101,7 +101,7 @@ def scoped() -> void:
 	}
 }
 func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
-	src := `def use() -> void can[Thread.Spawn, Thread.Join, Thread.Detach, Pool.Create, Pool.Submit, Pool.Await, Pool.WaitAll, Pool.Shutdown, Sync.Lock, Sync.Unlock, Sync.Wait, Sync.Notify, Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence]:
+	src := `def use() -> void can[Thread.Spawn, Thread.Join, Thread.Detach, Thread.Yield, Thread.Sleep, Pool.Create, Pool.Submit, Pool.Await, Pool.WaitAll, Pool.Shutdown, Sync.Lock, Sync.Unlock, Sync.Wait, Sync.Notify, Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence]:
 	pass
 `
 	result, errs := parseAndAnalyze(t, "builtin_concurrency_permissions_ok.elisa", src)
@@ -125,7 +125,9 @@ func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
 		"Sync.Wait",
 		"Thread.Detach",
 		"Thread.Join",
+		"Thread.Sleep",
 		"Thread.Spawn",
+		"Thread.Yield",
 	)
 }
 func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {

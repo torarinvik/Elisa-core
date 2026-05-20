@@ -431,7 +431,7 @@ func (p *Parser) parseFuncAnnotations() []ast.Annotation {
 }
 func annotationArgCanStart(kind lexer.TokenKind) bool {
 	switch kind {
-	case lexer.TOKEN_INT_LIT, lexer.TOKEN_HEX_LIT, lexer.TOKEN_IDENT:
+	case lexer.TOKEN_INT_LIT, lexer.TOKEN_HEX_LIT, lexer.TOKEN_STRING_LIT, lexer.TOKEN_IDENT:
 		return true
 	default:
 		return false
@@ -445,6 +445,8 @@ func (p *Parser) parseAnnotationArg() string {
 			return tok.Text + tok.Suffix
 		}
 		return tok.Text
+	case lexer.TOKEN_STRING_LIT:
+		return p.advance().Text
 	case lexer.TOKEN_IDENT:
 		// handled below
 	default:

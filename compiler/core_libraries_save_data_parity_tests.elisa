@@ -1,0 +1,57 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+include "./core/libraries/save_data/savedata.elisa"
+
+const SAVE_DATA_OK: int = 0
+const SAVE_DATA_PARAMETER: int = 0x809F0000
+
+@test
+def save_data_preinit_error_contracts() -> void:
+    can Abort.Panic:
+        assert sceSaveDataClearProgress() != SAVE_DATA_OK
+        assert sceSaveDataGetProgress(null) != SAVE_DATA_OK
+        assert sceSaveDataTerminate() != SAVE_DATA_OK
+
+@test
+def save_data_stubbed_ok_contracts() -> void:
+    can Abort.Panic:
+        assert sceSaveDataDebug() == SAVE_DATA_OK
+        assert sceSaveDataDebugCleanMount() == SAVE_DATA_OK
+        assert sceSaveDataDebugCompiledSdkVersion() == SAVE_DATA_OK
+        assert sceSaveDataDebugCreateSaveDataRoot() == SAVE_DATA_OK
+        assert sceSaveDataDebugGetThreadId() == SAVE_DATA_OK
+        assert sceSaveDataDebugRemoveSaveDataRoot() == SAVE_DATA_OK
+        assert sceSaveDataDebugTarget() == SAVE_DATA_OK
+        assert sceSaveDataUpload() == SAVE_DATA_OK
+        assert sceSaveDataDownload() == SAVE_DATA_OK
+        assert sceSaveDataRegisterEventCallback() == SAVE_DATA_OK
+        assert sceSaveDataUnregisterEventCallback() == SAVE_DATA_OK
+        assert Func_02E4C4D201716422() == SAVE_DATA_OK
+
+@test
+def save_data_init_progress_terminate_contracts() -> void:
+    can Abort.Panic:
+        assert sceSaveDataInitialize(null) == SAVE_DATA_OK
+        progress: mutable i64 = 0
+        assert sceSaveDataGetProgress(progress.ref[mutable i64&].cast[void&?]) == SAVE_DATA_OK
+        assert sceSaveDataGetProgress(null) == SAVE_DATA_PARAMETER
+        assert sceSaveDataTerminate() == SAVE_DATA_OK
+
+def main() -> int:
+    if sceSaveDataInitialize(null) != SAVE_DATA_OK:
+        return 1
+
+    progress: mutable i64 = 0
+    if sceSaveDataGetProgress(progress.ref[mutable i64&].cast[void&?]) != SAVE_DATA_OK:
+        return 2
+    if sceSaveDataGetProgress(null) != SAVE_DATA_PARAMETER:
+        return 3
+
+    if sceSaveDataDebug() != SAVE_DATA_OK:
+        return 4
+    if sceSaveDataUpload() != SAVE_DATA_OK:
+        return 5
+
+    if sceSaveDataTerminate() != SAVE_DATA_OK:
+        return 6
+
+    return 0

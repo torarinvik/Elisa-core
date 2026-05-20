@@ -178,7 +178,7 @@ func isSupportedEnumAnnotation(name string) bool {
 
 func isSupportedStructAnnotation(name string) bool {
 	switch name {
-	case "align", "cacheline_aligned", "fixed_layout":
+	case "align", "cacheline_aligned", "fixed_layout", "c_bind", "c_bind_prefix":
 		return true
 	default:
 		return false
@@ -338,6 +338,28 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 				a.errorf(annotation.Position, "@fixed_layout on struct %q does not take arguments", structDecl.Name)
 				continue
 			}
+		case "c_bind", "c_bind_prefix":
+			if len(annotation.Args) != 2 {
+				a.errorf(annotation.Position, "@%s on struct %q expects exactly two arguments: header and C type name", annotation.Name, structDecl.Name)
+				continue
+			}
+			header := strings.Trim(strings.TrimSpace(annotation.Args[0]), "\"")
+			cName := strings.Trim(strings.TrimSpace(annotation.Args[1]), "\"")
+			if header == "" || cName == "" {
+				a.errorf(annotation.Position, "@%s on struct %q requires non-empty header and C type name arguments", annotation.Name, structDecl.Name)
+				continue
+			}
+			if !structDecl.ReprC {
+				a.errorf(annotation.Position, "@%s on struct %q requires `layout c` so Elisa and C agree on ABI layout rules", annotation.Name, structDecl.Name)
+				continue
+			}
+			if len(structDecl.TypeParams) != 0 || len(structDecl.GenericParams) != 0 {
+				a.errorf(annotation.Position, "@%s on struct %q does not support generic structs", annotation.Name, structDecl.Name)
+				continue
+			}
+			structType.CBindHeader = header
+			structType.CBindName = cName
+			structType.CBindPrefix = annotation.Name == "c_bind_prefix"
 		}
 	}
 	if hasAlignment {

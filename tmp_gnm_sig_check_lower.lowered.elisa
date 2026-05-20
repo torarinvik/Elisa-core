@@ -1,0 +1,1482 @@
+const ORBIS_OK: int = 0x00000000
+
+const ORBIS_FAIL: int = 0xFFFFFFFF
+
+const ORBIS_GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT: int = 0x80D11000
+
+const ORBIS_GNM_ERROR_SUBMISSION_NOT_ENOUGH_RESOURCES: int = 0x80D11001
+
+const ORBIS_GNM_ERROR_SUBMISSION_AND_FLIP_FAILED_INVALID_COMMAND_BUFFER: int = 0x80D11080
+
+const ORBIS_GNM_ERROR_SUBMISSION_AND_FLIP_FAILED_INVALID_QUEUE_FULL: int = 0x80D11081
+
+const ORBIS_GNM_ERROR_SUBMISSION_AND_FLIP_FAILED_REQUEST_FAILED: int = 0x80D11082
+
+const ORBIS_GNM_ERROR_SUBMISSION_FAILED_INTERNAL_ERROR: int = 0x80D110FF
+
+const ORBIS_GNM_ERROR_VALIDATION_WARNING: int = 0x80D12000
+
+const ORBIS_GNM_ERROR_VALIDATION_WARNING_RWBUFFER_ROTYPE: int = 0x80D12001
+
+const ORBIS_GNM_ERROR_VALIDATION_WARNING_BLENDING: int = 0x80D12002
+
+const ORBIS_GNM_ERROR_VALIDATION_WARNING_DRAW_CU_MASK: int = 0x80D12003
+
+const ORBIS_GNM_ERROR_VALIDATION_WARNING_MRT_SETUP: int = 0x80D12004
+
+const ORBIS_GNM_ERROR_VALIDATION_WARNING_DEPTH_RT_SETUP: int = 0x80D12005
+
+const ORBIS_GNM_ERROR_VALIDATION_WARNING_PS_AND_MRT_FORMAT: int = 0x80D1200F
+
+const ORBIS_GNM_ERROR_VALIDATION_ERROR: int = 0x80D13000
+
+const ORBIS_GNM_ERROR_VALIDATION_VSHARP: int = 0x80D13001
+
+const ORBIS_GNM_ERROR_VALIDATION_TSHARP: int = 0x80D13002
+
+const ORBIS_GNM_ERROR_VALIDATION_RESOURCE: int = 0x80D13003
+
+const ORBIS_GNM_ERROR_VALIDATION_TABLE_MEMORY: int = 0x80D13004
+
+const ORBIS_GNM_ERROR_VALIDATION_WRITE_EVENT_OP: int = 0x80D13005
+
+const ORBIS_GNM_ERROR_VALIDATION_INDEX_BUFFER: int = 0x80D13006
+
+const ORBIS_GNM_ERROR_VALIDATION_TESS_FACTOR_BUFFER: int = 0x80D13007
+
+const ORBIS_GNM_ERROR_VALIDATION_SCRATCH_RING: int = 0x80D13008
+
+const ORBIS_GNM_ERROR_VALIDATION_PRIMITIVE_TYPE: int = 0x80D13009
+
+const ORBIS_GNM_ERROR_VALIDATION_INDEX_SIZE: int = 0x80D1300A
+
+const ORBIS_GNM_ERROR_VALIDATION_INLINE_DRAW_SIZE: int = 0x80D1300B
+
+const ORBIS_GNM_ERROR_VALIDATION_NUM_INPUT_PATCHES: int = 0x80D1300C
+
+const ORBIS_GNM_ERROR_VALIDATION_GS_MODE: int = 0x80D1300D
+
+const ORBIS_GNM_ERROR_VALIDATION_SHADER_ADDRESS: int = 0x80D1300E
+
+const ORBIS_GNM_ERROR_VALIDATION_BORDER_COLOR_TABLE: int = 0x80D1300F
+
+const ORBIS_GNM_ERROR_VALIDATION_SSHARP: int = 0x80D13010
+
+const ORBIS_GNM_ERROR_VALIDATION_DISPATCH_DRAW: int = 0x80D13011
+
+const ORBIS_GNM_ERROR_VALIDATION_ACTIVE_SHADER_STAGE: int = 0x80D13012
+
+const ORBIS_GNM_ERROR_VALIDATION_DCB: int = 0x80D13013
+
+const ORBIS_GNM_ERROR_VALIDATION_MISMATCH_SHADER_STAGE: int = 0x80D13014
+
+const ORBIS_GNM_ERROR_VALIDATION_MRT_SETUP: int = 0x80D13015
+
+const ORBIS_GNM_ERROR_VALIDATION_BAD_OP_CODE: int = 0x80D13016
+
+const ORBIS_GNM_ERROR_VALIDATION_DEPTH_RT_SETUP: int = 0x80D13017
+
+const ORBIS_GNM_ERROR_VALIDATION_NUM_INSTANCES: int = 0x80D13018
+
+const ORBIS_GNM_ERROR_VALIDATION_SRT: int = 0x80D13019
+
+const ORBIS_GNM_ERROR_VALIDATION_INVALID_ARGUMENT: int = 0x80D13FFD
+
+const ORBIS_GNM_ERROR_VALIDATION_FAILED_INTERNAL_ERROR: int = 0x80D13FFE
+
+const ORBIS_GNM_ERROR_VALIDATION_NOT_ENABLED: int = 0x80D13FFF
+
+const ORBIS_GNM_ERROR_CAPTURE_FILE_IO: int = 0x80D15000
+
+const ORBIS_GNM_ERROR_CAPTURE_RAZOR_NOT_LOADED: int = 0x80D15001
+
+const ORBIS_GNM_ERROR_CAPTURE_NOTHING_TO_CAPTURE: int = 0x80D15002
+
+const ORBIS_GNM_ERROR_CAPTURE_FAILED_INTERNAL: int = 0x80D1500F
+
+const ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_PIPE_ID: int = 0x80D17000
+
+const ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_QUEUE_ID: int = 0x80D17001
+
+const ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_RING_SIZE: int = 0x80D17002
+
+const ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_RING_BASE_ADDR: int = 0x80D17003
+
+const ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_READ_PTR_ADDR: int = 0x80D17004
+
+const ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_PIPE_PRIORITY: int = 0x80D17005
+
+const ORBIS_GNM_ERROR_COMPUTEQUEUE_INTERNAL: int = 0x80D170FF
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_INVALID_ARGUMENT: int = 0x80D19000
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_INVALID_SHADER: int = 0x80D19001
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_STALE_HANDLE: int = 0x80D19002
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_FULL: int = 0x80D19003
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_NOT_PERMITTED: int = 0x80D19004
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_OUTPUT_ARGUMENT_IS_NULL: int = 0x80D19005
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_OWNER_HANDLE_INVALID: int = 0x80D19006
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_RESOURCE_HANDLE_INVALID: int = 0x80D19007
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_RESOURCE_TYPE_INVALID: int = 0x80D19008
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_GDS_RESOURCE_TYPE_INVALID: int = 0x80D19009
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_RESOURCE_SIZE_INVALID: int = 0x80D1900A
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_RESOURCE_ADDRESS_IS_NULL: int = 0x80D1900B
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_GDS_OFFSET_INVALID: int = 0x80D1900C
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_RESOURCE_NAME_IS_NULL: int = 0x80D1900D
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_OWNER_NAME_IS_NULL: int = 0x80D1900E
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_FIND_CALLBACK_IS_NULL: int = 0x80D1900F
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_RESOURCE_IS_NOT_SHADER: int = 0x80D19010
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_USER_MEMORY_PARAM_IS_NULL: int = 0x80D19011
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_USER_MEMORY_PARAM_NOT_ALIGNED: int = 0x80D19012
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_INVALID_NAME_LENGTH_PARAM: int = 0x80D19013
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_INVALID_SIZE_PARAM: int = 0x80D19014
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_INVALID_NUM_RESOURCES_PARAM: int = 0x80D19015
+
+const ORBIS_GNM_ERROR_RESOURCE_REGISTRATION_INTERNAL: int = 0x80D19FFF
+
+const ORBIS_GNM_ERROR_GET_GPU_INFO_PARAMETER_NULL: int = 0x80D1B000
+
+const ORBIS_GNM_ERROR_GET_GPU_INFO_FAILED: int = 0x80D1B001
+
+const ORBIS_GNM_ERROR_GET_GPU_INFO_PARAMETER_INVALID: int = 0x80D1B002
+
+const ORBIS_GNM_ERROR_FAILURE: int = 0x8EEE00FF
+
+const ORBIS_KERNEL_ERROR_UNKNOWN: int = 0x80020000
+
+const ORBIS_KERNEL_ERROR_EPERM: int = 0x80020001
+
+const ORBIS_KERNEL_ERROR_ENOENT: int = 0x80020002
+
+const ORBIS_KERNEL_ERROR_ESRCH: int = 0x80020003
+
+const ORBIS_KERNEL_ERROR_EINTR: int = 0x80020004
+
+const ORBIS_KERNEL_ERROR_EIO: int = 0x80020005
+
+const ORBIS_KERNEL_ERROR_ENXIO: int = 0x80020006
+
+const ORBIS_KERNEL_ERROR_E2BIG: int = 0x80020007
+
+const ORBIS_KERNEL_ERROR_ENOEXEC: int = 0x80020008
+
+const ORBIS_KERNEL_ERROR_EBADF: int = 0x80020009
+
+const ORBIS_KERNEL_ERROR_ECHILD: int = 0x8002000A
+
+const ORBIS_KERNEL_ERROR_EDEADLK: int = 0x8002000B
+
+const ORBIS_KERNEL_ERROR_ENOMEM: int = 0x8002000C
+
+const ORBIS_KERNEL_ERROR_EACCES: int = 0x8002000D
+
+const ORBIS_KERNEL_ERROR_EFAULT: int = 0x8002000E
+
+const ORBIS_KERNEL_ERROR_ENOTBLK: int = 0x8002000F
+
+const ORBIS_KERNEL_ERROR_EBUSY: int = 0x80020010
+
+const ORBIS_KERNEL_ERROR_EEXIST: int = 0x80020011
+
+const ORBIS_KERNEL_ERROR_EXDEV: int = 0x80020012
+
+const ORBIS_KERNEL_ERROR_ENODEV: int = 0x80020013
+
+const ORBIS_KERNEL_ERROR_ENOTDIR: int = 0x80020014
+
+const ORBIS_KERNEL_ERROR_EISDIR: int = 0x80020015
+
+const ORBIS_KERNEL_ERROR_EINVAL: int = 0x80020016
+
+const ORBIS_KERNEL_ERROR_ENFILE: int = 0x80020017
+
+const ORBIS_KERNEL_ERROR_EMFILE: int = 0x80020018
+
+const ORBIS_KERNEL_ERROR_ENOTTY: int = 0x80020019
+
+const ORBIS_KERNEL_ERROR_ETXTBSY: int = 0x8002001A
+
+const ORBIS_KERNEL_ERROR_EFBIG: int = 0x8002001B
+
+const ORBIS_KERNEL_ERROR_ENOSPC: int = 0x8002001C
+
+const ORBIS_KERNEL_ERROR_ESPIPE: int = 0x8002001D
+
+const ORBIS_KERNEL_ERROR_EROFS: int = 0x8002001E
+
+const ORBIS_KERNEL_ERROR_EMLINK: int = 0x8002001F
+
+const ORBIS_KERNEL_ERROR_EPIPE: int = 0x80020020
+
+const ORBIS_KERNEL_ERROR_EDOM: int = 0x80020021
+
+const ORBIS_KERNEL_ERROR_ERANGE: int = 0x80020022
+
+const ORBIS_KERNEL_ERROR_EAGAIN: int = 0x80020023
+
+const ORBIS_KERNEL_ERROR_EWOULDBLOCK: int = 0x80020023
+
+const ORBIS_KERNEL_ERROR_EINPROGRESS: int = 0x80020024
+
+const ORBIS_KERNEL_ERROR_EALREADY: int = 0x80020025
+
+const ORBIS_KERNEL_ERROR_ENOTSOCK: int = 0x80020026
+
+const ORBIS_KERNEL_ERROR_EDESTADDRREQ: int = 0x80020027
+
+const ORBIS_KERNEL_ERROR_EMSGSIZE: int = 0x80020028
+
+const ORBIS_KERNEL_ERROR_EPROTOTYPE: int = 0x80020029
+
+const ORBIS_KERNEL_ERROR_ENOPROTOOPT: int = 0x8002002A
+
+const ORBIS_KERNEL_ERROR_EPROTONOSUPPORT: int = 0x8002002B
+
+const ORBIS_KERNEL_ERROR_ESOCKTNOSUPPORT: int = 0x8002002C
+
+const ORBIS_KERNEL_ERROR_ENOTSUP: int = 0x8002002D
+
+const ORBIS_KERNEL_ERROR_EOPNOTSUPP: int = 0x8002002D
+
+const ORBIS_KERNEL_ERROR_EPFNOSUPPORT: int = 0x8002002E
+
+const ORBIS_KERNEL_ERROR_EAFNOSUPPORT: int = 0x8002002F
+
+const ORBIS_KERNEL_ERROR_EADDRINUSE: int = 0x80020030
+
+const ORBIS_KERNEL_ERROR_EADDRNOTAVAIL: int = 0x80020031
+
+const ORBIS_KERNEL_ERROR_ENETDOWN: int = 0x80020032
+
+const ORBIS_KERNEL_ERROR_ENETUNREACH: int = 0x80020033
+
+const ORBIS_KERNEL_ERROR_ENETRESET: int = 0x80020034
+
+const ORBIS_KERNEL_ERROR_ECONNABORTED: int = 0x80020035
+
+const ORBIS_KERNEL_ERROR_ECONNRESET: int = 0x80020036
+
+const ORBIS_KERNEL_ERROR_ENOBUFS: int = 0x80020037
+
+const ORBIS_KERNEL_ERROR_EISCONN: int = 0x80020038
+
+const ORBIS_KERNEL_ERROR_ENOTCONN: int = 0x80020039
+
+const ORBIS_KERNEL_ERROR_ESHUTDOWN: int = 0x8002003A
+
+const ORBIS_KERNEL_ERROR_ETOOMANYREFS: int = 0x8002003B
+
+const ORBIS_KERNEL_ERROR_ETIMEDOUT: int = 0x8002003C
+
+const ORBIS_KERNEL_ERROR_ECONNREFUSED: int = 0x8002003D
+
+const ORBIS_KERNEL_ERROR_ELOOP: int = 0x8002003E
+
+const ORBIS_KERNEL_ERROR_ENAMETOOLONG: int = 0x8002003F
+
+const ORBIS_KERNEL_ERROR_EHOSTDOWN: int = 0x80020040
+
+const ORBIS_KERNEL_ERROR_EHOSTUNREACH: int = 0x80020041
+
+const ORBIS_KERNEL_ERROR_ENOTEMPTY: int = 0x80020042
+
+const ORBIS_KERNEL_ERROR_EPROCLIM: int = 0x80020043
+
+const ORBIS_KERNEL_ERROR_EUSERS: int = 0x80020044
+
+const ORBIS_KERNEL_ERROR_EDQUOT: int = 0x80020045
+
+const ORBIS_KERNEL_ERROR_ESTALE: int = 0x80020046
+
+const ORBIS_KERNEL_ERROR_EREMOTE: int = 0x80020047
+
+const ORBIS_KERNEL_ERROR_EBADRPC: int = 0x80020048
+
+const ORBIS_KERNEL_ERROR_ERPCMISMATCH: int = 0x80020049
+
+const ORBIS_KERNEL_ERROR_EPROGUNAVAIL: int = 0x8002004A
+
+const ORBIS_KERNEL_ERROR_EPROGMISMATCH: int = 0x8002004B
+
+const ORBIS_KERNEL_ERROR_EPROCUNAVAIL: int = 0x8002004C
+
+const ORBIS_KERNEL_ERROR_ENOLCK: int = 0x8002004D
+
+const ORBIS_KERNEL_ERROR_ENOSYS: int = 0x8002004E
+
+const ORBIS_KERNEL_ERROR_EFTYPE: int = 0x8002004F
+
+const ORBIS_KERNEL_ERROR_EAUTH: int = 0x80020050
+
+const ORBIS_KERNEL_ERROR_ENEEDAUTH: int = 0x80020051
+
+const ORBIS_KERNEL_ERROR_EIDRM: int = 0x80020052
+
+const ORBIS_KERNEL_ERROR_ENOMSG: int = 0x80020053
+
+const ORBIS_KERNEL_ERROR_EOVERFLOW: int = 0x80020054
+
+const ORBIS_KERNEL_ERROR_ECANCELED: int = 0x80020055
+
+const ORBIS_KERNEL_ERROR_EILSEQ: int = 0x80020056
+
+const ORBIS_KERNEL_ERROR_ENOATTR: int = 0x80020057
+
+const ORBIS_KERNEL_ERROR_EDOOFUS: int = 0x80020058
+
+const ORBIS_KERNEL_ERROR_EBADMSG: int = 0x80020059
+
+const ORBIS_KERNEL_ERROR_EMULTIHOP: int = 0x8002005A
+
+const ORBIS_KERNEL_ERROR_ENOLINK: int = 0x8002005B
+
+const ORBIS_KERNEL_ERROR_EPROTO: int = 0x8002005C
+
+const ORBIS_KERNEL_ERROR_ENOTCAPABLE: int = 0x8002005D
+
+const ORBIS_KERNEL_ERROR_ECAPMODE: int = 0x8002005E
+
+const ORBIS_KERNEL_ERROR_ENOBLK: int = 0x8002005F
+
+const ORBIS_KERNEL_ERROR_EICV: int = 0x80020060
+
+const ORBIS_KERNEL_ERROR_ENOPLAYGOENT: int = 0x80020061
+
+const ORBIS_KERNEL_ERROR_ESDKVERSION: int = 0x80020063
+
+const ORBIS_KERNEL_ERROR_ESTART: int = 0x80020064
+
+type s32 = i32
+
+type s64 = i64
+
+type OrbisKernelEqueue = s64
+
+type VAddr = u64
+
+@fixed_layout
+struct OrbisKernelEvent:
+    ident: mutable u64
+    filter: mutable i16
+    flags: mutable u16
+    fflags: mutable u32
+    data: mutable u64
+    udata: mutable void&?
+
+const GNM_MAX_COMPUTE_QUEUES: int = 64
+
+const GNM_NUM_COMPUTE_PIPES: int = 4
+
+const GNM_QUEUES_PER_PIPE: int = 16
+
+const GNM_INVALID_QUEUE_ADDR: u64 = ((-1)).u64()
+
+const ORBIS_GNM_TESSELLATION_FALLBACK_ADDR: u64 = 0x100000000000
+
+const GNM_TESSELLATION_OFFCHIP_SIZE: int = 0x800000
+
+@fixed_layout
+struct GnmComputeQueue:
+    used: mutable bool
+    pipe_id: mutable u32
+    queue_id: mutable u32
+    ring_base_addr: mutable VAddr
+    ring_size_dw: mutable u32
+    read_ptr_addr: mutable u32&?
+    next_offs_dw: mutable u32
+
+global mutable g_submissions_lock: u32 = 0
+
+global mutable g_frames_submitted: u64 = 0u64
+
+global mutable g_send_init_packet: bool = true
+
+global mutable g_sdk_version: s32 = 0
+
+global mutable g_tessellation_factors_ring_addr: u64 = GNM_INVALID_QUEUE_ADDR
+
+global mutable g_compute_queues: array[GnmComputeQueue, GNM_MAX_COMPUTE_QUEUES] = zeroed
+
+def gnm_is_power_of_two(value: u32) -> bool:
+    if (value == 0u32):
+        return false
+    return (((value & ((value - 1u32)))) == 0u32)
+
+def gnm_next_compute_queue_slot() -> int:
+    i: mutable int = 0
+    while (i < GNM_MAX_COMPUTE_QUEUES):
+        if (not g_compute_queues[i].used):
+            return i
+        i <- (i + 1)
+    return (-1)
+
+def sceGnmAddEqEvent(eq: OrbisKernelEqueue, id: u64, udata: void&?) -> s32:
+    if (eq == 0):
+        return ORBIS_KERNEL_ERROR_EBADF
+    _ = id
+    _ = udata
+    return 0
+
+def sceGnmAreSubmitsAllowed() -> int:
+    return (1 if (g_submissions_lock == 0) else 0)
+
+def sceGnmBeginWorkload(workload_stream: u32, workload: u64&?) -> int:
+    if (workload == null):
+        return 3
+    workload[0] <- (0u64 if (workload_stream >= 0x10u32) else 1u64)
+    return (1 if (workload_stream > 0x0fu32) else 0)
+
+def sceGnmComputeWaitOnAddress(cmdbuf: u32&?, size: u32, addr: u64, mask: u32, cmp_func: u32, ref: u32) -> s32:
+    if ((cmdbuf == null) or (size != 0xeu32)):
+        return (-1)
+    cmdbuf[0] <- 0xc0000000u32
+    cmdbuf[1] <- size
+    cmdbuf[2] <- addr as u32
+    cmdbuf[3] <- ((addr >> 32)).u32()
+    cmdbuf[4] <- mask
+    cmdbuf[5] <- ref
+    cmdbuf[6] <- cmp_func
+    cmdbuf[7] <- (((0x1u32 if (addr > 0xffffu32) else 0u32)) | 0x30u32)
+    cmdbuf[8] <- 0u32
+    cmdbuf[9] <- 0u32
+    cmdbuf[10] <- 0u32
+    cmdbuf[11] <- 0u32
+    cmdbuf[12] <- 0u32
+    cmdbuf[13] <- 0u32
+    return ORBIS_OK
+
+def sceGnmComputeWaitSemaphore() -> int:
+    return 0
+
+def sceGnmCreateWorkloadStream(param1: u64, workload_stream: u32&?) -> int:
+    if ((param1 == 0) or (workload_stream == null)):
+        return 3
+    workload_stream[0] <- 1u32
+    return 0
+
+def sceGnmDebuggerGetAddressWatch() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebuggerHaltWavefront() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebuggerReadGds() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebuggerReadSqIndirectRegister() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebuggerResumeWavefront() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebuggerResumeWavefrontCreation() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebuggerSetAddressWatch() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebuggerWriteGds() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebuggerWriteSqIndirectRegister() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebugHardwareStatus() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDeleteEqEvent(eq: OrbisKernelEqueue, id: u64) -> s32:
+    if (eq == 0):
+        return ORBIS_KERNEL_ERROR_EBADF
+    _ = id
+    return 0
+
+def sceGnmDestroyWorkloadStream() -> int:
+    return 0
+
+def sceGnmDingDong(gnm_vqid: u32, next_offs_dw: u32) -> void:
+    if (gnm_vqid == 0):
+        return
+    i: mutable int = ((gnm_vqid - 1u32)).i32()
+    if (((i < 0) or (i >= GNM_MAX_COMPUTE_QUEUES)) or (not g_compute_queues[i].used)):
+        return
+    g_compute_queues[i].next_offs_dw <- next_offs_dw
+    if (g_compute_queues[i].read_ptr_addr != null):
+        g_compute_queues[i].read_ptr_addr[0] <- 0u32
+    return
+
+def sceGnmDingDongForWorkload(gnm_vqid: u32, next_offs_dw: u32, workload_id: u64) -> void:
+    _ = workload_id
+    sceGnmDingDong(gnm_vqid, next_offs_dw)
+    return
+
+def sceGnmDisableMipStatsReport() -> int:
+    return 0
+
+def sceGnmDispatchDirect(cmdbuf: u32&?, size: u32, threads_x: u32, threads_y: u32, threads_z: u32, flags: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = threads_x
+    _ = threads_y
+    _ = threads_z
+    _ = flags
+    return 0
+
+def sceGnmDispatchIndirect(cmdbuf: u32&?, size: u32, data_offset: u32, flags: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = data_offset
+    _ = flags
+    return 0
+
+def sceGnmDispatchIndirectOnMec(cmdbuf: u32&?, size: u32, args: u64, modifier: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = args
+    _ = modifier
+    return 0
+
+def sceGnmDispatchInitDefaultHardwareState(cmdbuf: u32&?, size: u32) -> u32:
+    _ = cmdbuf
+    _ = size
+    return 0u32
+
+def sceGnmDrawIndex(cmdbuf: u32&?, size: u32, index_count: u32, index_addr: u64, flags: u32, type: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = index_count
+    _ = index_addr
+    _ = flags
+    _ = type
+    return 0
+
+def sceGnmDrawIndexAuto(cmdbuf: u32&?, size: u32, index_count: u32, flags: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = index_count
+    _ = flags
+    return 0
+
+def sceGnmDrawIndexIndirect(cmdbuf: u32&?, size: u32, data_offset: u32, shader_stage: u32, vertex_sgpr_offset: u32, instance_sgpr_offset: u32, flags: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = data_offset
+    _ = shader_stage
+    _ = vertex_sgpr_offset
+    _ = instance_sgpr_offset
+    _ = flags
+    return 0
+
+def sceGnmDrawIndexIndirectCountMulti(cmdbuf: u32&?, size: u32, data_offset: u32, max_count: u32, count_addr: u64, shader_stage: u32, vertex_sgpr_offset: u32, instance_sgpr_offset: u32, flags: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = data_offset
+    _ = max_count
+    _ = count_addr
+    _ = shader_stage
+    _ = vertex_sgpr_offset
+    _ = instance_sgpr_offset
+    _ = flags
+    return 0
+
+def sceGnmDrawIndexIndirectMulti(cmdbuf: u32&?, size: u32, data_offset: u32, max_count: u32, shader_stage: u32, vertex_sgpr_offset: u32, instance_sgpr_offset: u32, flags: u32) -> int:
+    _ = cmdbuf
+    _ = size
+    _ = data_offset
+    _ = max_count
+    _ = shader_stage
+    _ = vertex_sgpr_offset
+    _ = instance_sgpr_offset
+    _ = flags
+    return 0
+
+def sceGnmDrawIndexMultiInstanced() -> int:
+    return 0
+
+def sceGnmDrawIndexOffset(cmdbuf: u32&?, size: u32, index_offset: u32, index_count: u32, flags: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = index_offset
+    _ = index_count
+    _ = flags
+    return 0
+
+def sceGnmDrawIndirect(cmdbuf: u32&?, size: u32, data_offset: u32, shader_stage: u32, vertex_sgpr_offset: u32, instance_sgpr_offset: u32, flags: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = data_offset
+    _ = shader_stage
+    _ = vertex_sgpr_offset
+    _ = instance_sgpr_offset
+    _ = flags
+    return 0
+
+def sceGnmDrawIndirectCountMulti() -> int:
+    return 0
+
+def sceGnmDrawIndirectMulti(cmdbuf: u32&?, size: u32, data_offset: u32, max_count: u32, shader_stage: u32, vertex_sgpr_offset: u32, instance_sgpr_offset: u32, flags: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = data_offset
+    _ = max_count
+    _ = shader_stage
+    _ = vertex_sgpr_offset
+    _ = instance_sgpr_offset
+    _ = flags
+    return 0
+
+def sceGnmDrawInitDefaultHardwareState(cmdbuf: u32&?, size: u32) -> u32:
+    _ = cmdbuf
+    _ = size
+    return 0u32
+
+def sceGnmDrawInitDefaultHardwareState175(cmdbuf: u32&?, size: u32) -> u32:
+    _ = cmdbuf
+    _ = size
+    return 0u32
+
+def sceGnmDrawInitDefaultHardwareState200(cmdbuf: u32&?, size: u32) -> u32:
+    _ = cmdbuf
+    _ = size
+    return 0u32
+
+def sceGnmDrawInitDefaultHardwareState350(cmdbuf: u32&?, size: u32) -> u32:
+    _ = cmdbuf
+    _ = size
+    return 0u32
+
+def sceGnmDrawInitToDefaultContextState(cmdbuf: u32&?, size: u32) -> u32:
+    _ = cmdbuf
+    _ = size
+    return 0u32
+
+def sceGnmDrawInitToDefaultContextState400(cmdbuf: u32&?, size: u32) -> u32:
+    _ = cmdbuf
+    _ = size
+    return 0u32
+
+def sceGnmDrawOpaqueAuto() -> int:
+    return 0
+
+def sceGnmDriverCaptureInProgress() -> bool:
+    return false
+
+def sceGnmDriverInternalRetrieveGnmInterface() -> u32:
+    return 0x80000000u32
+
+def sceGnmDriverInternalRetrieveGnmInterfaceForGpuDebugger() -> u32:
+    return 0x80000000u32
+
+def sceGnmDriverInternalRetrieveGnmInterfaceForGpuException() -> u32:
+    return 0x80000000u32
+
+def sceGnmDriverInternalRetrieveGnmInterfaceForHDRScopes() -> u32:
+    return 0x80000000u32
+
+def sceGnmDriverInternalRetrieveGnmInterfaceForReplay() -> u32:
+    return 0x80000000u32
+
+def sceGnmDriverInternalRetrieveGnmInterfaceForResourceRegistration() -> u32:
+    return 0x80000000u32
+
+def sceGnmDriverInternalRetrieveGnmInterfaceForValidation() -> u32:
+    return 0x80000000u32
+
+def sceGnmDriverInternalVirtualQuery() -> int:
+    return 0
+
+def sceGnmDriverTraceInProgress() -> bool:
+    return false
+
+def sceGnmDriverTriggerCapture() -> int:
+    return ORBIS_GNM_ERROR_CAPTURE_FAILED_INTERNAL
+
+def sceGnmEndWorkload(workload: u64) -> int:
+    if (workload != 0u64):
+        return (((((0xf < ((((workload >> 0x38u64)) & 0xffu64)))).i32()) * 2))
+    return 2
+
+def sceGnmFindResourcesPublic() -> s32:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmFlushGarlic() -> void:
+    return
+
+def sceGnmGetCoredumpAddress() -> int:
+    return 0
+
+def sceGnmGetCoredumpMode() -> int:
+    return 0
+
+def sceGnmGetCoredumpProtectionFaultTimestamp() -> int:
+    return 0
+
+def sceGnmGetDbgGcHandle() -> int:
+    return 0
+
+def sceGnmGetDebugTimestamp() -> int:
+    return 0
+
+def sceGnmGetEqEventType(ev: OrbisKernelEvent&?) -> int:
+    if (ev == null):
+        return 0
+    return ev.data.i32()
+
+def sceGnmGetEqTimeStamp() -> int:
+    return 0
+
+def sceGnmGetGpuBlockStatus() -> int:
+    return 0
+
+def sceGnmGetGpuCoreClockFrequency() -> u32:
+    return 800000000u32
+
+def sceGnmGetGpuInfoStatus() -> int:
+    return 0
+
+def sceGnmGetLastWaitedAddress() -> int:
+    return 0
+
+def sceGnmGetNumTcaUnits() -> int:
+    return 0
+
+def sceGnmGetOffChipTessellationBufferSize() -> int:
+    return GNM_TESSELLATION_OFFCHIP_SIZE
+
+def sceGnmGetOwnerName() -> int:
+    return 0
+
+def sceGnmGetPhysicalCounterFromVirtualized() -> int:
+    return 0
+
+def sceGnmGetProtectionFaultTimeStamp() -> u32:
+    return 0u32
+
+def sceGnmGetResourceBaseAddressAndSizeInBytes() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmGetResourceName() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmGetResourceShaderGuid() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmGetResourceType() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmGetResourceUserData() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmGetShaderProgramBaseAddress() -> int:
+    return 0
+
+def sceGnmGetShaderStatus() -> int:
+    return 0
+
+def sceGnmGetTheTessellationFactorRingBufferBaseAddress() -> u64:
+    if (g_tessellation_factors_ring_addr == GNM_INVALID_QUEUE_ADDR):
+        g_tessellation_factors_ring_addr <- ORBIS_GNM_TESSELLATION_FALLBACK_ADDR
+    return g_tessellation_factors_ring_addr
+
+def sceGnmGpuPaDebugEnter() -> void:
+    return
+
+def sceGnmGpuPaDebugLeave() -> void:
+    return
+
+def sceGnmInsertDingDongMarker(cmdbuf: u32&?, size: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    return 0
+
+def sceGnmInsertPopMarker(cmdbuf: u32&?, size: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    return 0
+
+def sceGnmInsertPushColorMarker(cmdbuf: u32&?, size: u32, marker: void&?, color: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = marker
+    _ = color
+    return 0
+
+def sceGnmInsertPushMarker(cmdbuf: u32&?, size: u32, marker: void&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = marker
+    return 0
+
+def sceGnmInsertSetColorMarker() -> int:
+    return 0
+
+def sceGnmInsertSetMarker(cmdbuf: u32&?, size: u32, marker: void&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = marker
+    return 0
+
+def sceGnmInsertThreadTraceMarker() -> int:
+    return 0
+
+def sceGnmInsertWaitFlipDone(cmdbuf: u32&?, size: u32, vo_handle: s32, buf_idx: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = vo_handle
+    _ = buf_idx
+    return 0
+
+def sceGnmIsCoredumpValid() -> int:
+    return 0
+
+def sceGnmIsUserPaEnabled() -> bool:
+    return false
+
+def sceGnmLogicalCuIndexToPhysicalCuIndex() -> int:
+    return 0
+
+def sceGnmLogicalCuMaskToPhysicalCuMask(arg: void&?, logical_cu_mask: s32) -> s32:
+    _ = arg
+    _ = logical_cu_mask
+    return 0
+
+def sceGnmLogicalTcaUnitToPhysical() -> int:
+    return 0
+
+def sceGnmMapComputeQueue(pipe_id: u32, queue_id: u32, ring_base_addr: u64, ring_size_dw: u32, read_ptr_addr: u32&?) -> int:
+    if (pipe_id >= GNM_NUM_COMPUTE_PIPES):
+        return ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_PIPE_ID
+    if (queue_id >= GNM_QUEUES_PER_PIPE):
+        return ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_QUEUE_ID
+    if (((ring_base_addr % 0x100u)) != 0u64):
+        return ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_RING_BASE_ADDR
+    if (not gnm_is_power_of_two(ring_size_dw)):
+        return ORBIS_GNM_ERROR_COMPUTEQUEUE_INVALID_RING_SIZE
+    if (read_ptr_addr != null):
+        _ = read_ptr_addr
+    slot: mutable int = gnm_next_compute_queue_slot()
+    if (slot == (-1)):
+        return ORBIS_GNM_ERROR_COMPUTEQUEUE_INTERNAL
+    g_compute_queues[slot].used <- true
+    g_compute_queues[slot].pipe_id <- pipe_id
+    g_compute_queues[slot].queue_id <- queue_id
+    g_compute_queues[slot].ring_base_addr <- ring_base_addr
+    g_compute_queues[slot].ring_size_dw <- ring_size_dw
+    g_compute_queues[slot].read_ptr_addr <- read_ptr_addr
+    g_compute_queues[slot].next_offs_dw <- 0u32
+    if (read_ptr_addr != null):
+        read_ptr_addr[0] <- 0u32
+    return (slot + 1)
+
+def sceGnmMapComputeQueueWithPriority(pipe_id: u32, queue_id: u32, ring_base_addr: u64, ring_size_dw: u32, read_ptr_addr: u32&?, pipePriority: u32) -> int:
+    _ = pipePriority
+    return sceGnmMapComputeQueue(pipe_id, queue_id, ring_base_addr, ring_size_dw, read_ptr_addr)
+
+def sceGnmPaDisableFlipCallbacks() -> int:
+    return 0
+
+def sceGnmPaEnableFlipCallbacks() -> int:
+    return 0
+
+def sceGnmPaHeartbeat() -> int:
+    return 0
+
+def sceGnmQueryResourceRegistrationUserMemoryRequirements() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmRaiseUserExceptionEvent() -> int:
+    return 0
+
+def sceGnmRegisterGdsResource() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmRegisterGnmLiveCallbackConfig() -> void:
+    return
+
+def sceGnmRegisterOwner(handle: void&?, name: void&?) -> s32:
+    _ = handle
+    _ = name
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmRegisterResource(res_handle: void&?, owner_handle: void&?, addr: void&?, size: usize, name: void&?, res_type: int, user_data: u64) -> s32:
+    _ = res_handle
+    _ = owner_handle
+    _ = addr
+    _ = size
+    _ = name
+    _ = res_type
+    _ = user_data
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmRequestFlipAndSubmitDone() -> int:
+    return 0
+
+def sceGnmRequestFlipAndSubmitDoneForWorkload() -> int:
+    return 0
+
+def sceGnmRequestMipStatsReportAndReset() -> int:
+    return 0
+
+def sceGnmResetVgtControl(cmdbuf: u32&?, size: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    return 0
+
+def sceGnmSdmaClose() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSdmaConstFill() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSdmaCopyLinear() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSdmaCopyTiled() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSdmaCopyWindow() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSdmaFlush() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSdmaGetMinCmdSize() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSdmaOpen() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSetCsShader(cmdbuf: u32&?, size: u32, cs_regs: u32&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = cs_regs
+    return 0
+
+def sceGnmSetCsShaderWithModifier(cmdbuf: u32&?, size: u32, cs_regs: u32&?, modifier: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = cs_regs
+    _ = modifier
+    return 0
+
+def sceGnmSetEmbeddedPsShader(cmdbuf: u32&?, size: u32, shader_id: u32, shader_modifier: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = shader_id
+    _ = shader_modifier
+    return 0
+
+def sceGnmSetEmbeddedVsShader(cmdbuf: u32&?, size: u32, shader_id: u32, modifier: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = shader_id
+    _ = modifier
+    return 0
+
+def sceGnmSetEsShader(cmdbuf: u32&?, size: u32, es_regs: u32&?, shader_modifier: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = es_regs
+    _ = shader_modifier
+    return 0
+
+def sceGnmSetGsRingSizes() -> int:
+    return 0
+
+def sceGnmSetGsShader(cmdbuf: u32&?, size: u32, gs_regs: u32&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = gs_regs
+    return 0
+
+def sceGnmSetHsShader(cmdbuf: u32&?, size: u32, hs_regs: u32&?, param4: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = hs_regs
+    _ = param4
+    return 0
+
+def sceGnmSetLsShader(cmdbuf: u32&?, size: u32, ls_regs: u32&?, shader_modifier: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = ls_regs
+    _ = shader_modifier
+    return 0
+
+def sceGnmSetPsShader(cmdbuf: u32&?, size: u32, ps_regs: u32&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = ps_regs
+    return 0
+
+def sceGnmSetPsShader350(cmdbuf: u32&?, size: u32, ps_regs: u32&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = ps_regs
+    return 0
+
+def sceGnmSetResourceRegistrationUserMemory() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSetResourceUserData() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSetSpiEnableSqCounters() -> int:
+    return 0
+
+def sceGnmSetSpiEnableSqCountersForUnitInstance() -> int:
+    return 0
+
+def sceGnmSetupMipStatsReport() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSetVgtControl(cmdbuf: u32&?, size: u32, prim_group_sz_minus_one: u32, partial_vs_wave_mode: u32, wd_switch_only_on_eop_mode: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = prim_group_sz_minus_one
+    _ = partial_vs_wave_mode
+    _ = wd_switch_only_on_eop_mode
+    return 0
+
+def sceGnmSetVsShader(cmdbuf: u32&?, size: u32, vs_regs: u32&?, shader_modifier: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = vs_regs
+    _ = shader_modifier
+    return 0
+
+def sceGnmSetWaveLimitMultiplier() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSetWaveLimitMultipliers() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmEndSpm() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmInit() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmInit2() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmSetDelay() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmSetMuxRam() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmSetMuxRam2() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmSetSelectCounter() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmSetSpmSelects() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmSetSpmSelects2() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSpmStartSpm() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttFini() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttFinishTrace() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetBcInfo() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetGpuClocks() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetHiWater() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetStatus() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetTraceCounter() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetTraceWptr() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetWrapCounts() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetWrapCounts2() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttGetWritebackLabels() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttInit() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSelectMode() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSelectTarget() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSelectTokens() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSetCuPerfMask() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSetDceEventWrite() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSetHiWater() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSetTraceBuffer2() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSetTraceBuffers() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSetUserData() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSetUserdataTimer() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttStartTrace() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttStopTrace() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSwitchTraceBuffer() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttSwitchTraceBuffer2() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSqttWaitForEvent() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmSubmitAndFlipCommandBuffers(count: u32, dcb_gpu_addrs: u32&?, dcb_sizes_in_bytes: u32&?, ccb_gpu_addrs: u32&?, ccb_sizes_in_bytes: u32&?, vo_handle: u32, buf_idx: u32, flip_mode: u32, flip_arg: s64) -> s32:
+    return sceGnmSubmitAndFlipCommandBuffersForWorkload(count, count, dcb_gpu_addrs, dcb_sizes_in_bytes, ccb_gpu_addrs, ccb_sizes_in_bytes, vo_handle, buf_idx, flip_mode, flip_arg)
+
+def sceGnmSubmitAndFlipCommandBuffersForWorkload(workload: u32, count: u32, dcb_gpu_addrs: u32&?, dcb_sizes_in_bytes: u32&?, ccb_gpu_addrs: u32&?, ccb_sizes_in_bytes: u32&?, vo_handle: u32, buf_idx: u32, flip_mode: u32, flip_arg: s64) -> int:
+    if (((count == 0) or (dcb_gpu_addrs == null)) or (dcb_sizes_in_bytes == null)):
+        return ORBIS_GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT
+    let final_buffer = dcb_gpu_addrs[(count - 1u)]
+    let final_size_in_bytes = dcb_sizes_in_bytes[(count - 1u)]
+    if ((final_buffer == null) or (final_size_in_bytes == 0u32)):
+        return ORBIS_GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT
+    _ = vo_handle
+    _ = buf_idx
+    _ = flip_mode
+    _ = flip_arg
+    return sceGnmSubmitCommandBuffersForWorkload(count, count, dcb_gpu_addrs, dcb_sizes_in_bytes, ccb_gpu_addrs, ccb_sizes_in_bytes)
+
+def sceGnmSubmitCommandBuffers(count: u32, dcb_gpu_addrs: u32&?, dcb_sizes_in_bytes: u32&?, ccb_gpu_addrs: u32&?, ccb_sizes_in_bytes: u32&?) -> s32:
+    return sceGnmSubmitCommandBuffersForWorkload(count, count, dcb_gpu_addrs, dcb_sizes_in_bytes, ccb_gpu_addrs, ccb_sizes_in_bytes)
+
+def sceGnmSubmitCommandBuffersForWorkload(workload: u32, count: u32, dcb_gpu_addrs: u32&?, dcb_sizes_in_bytes: u32&?, ccb_gpu_addrs: u32&?, ccb_sizes_in_bytes: u32&?) -> int:
+    _ = workload
+    if ((dcb_gpu_addrs == null) or (dcb_sizes_in_bytes == null)):
+        return ORBIS_GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT
+    i: mutable u32 = 0u
+    while (i < count):
+        let dcb_size = dcb_sizes_in_bytes[i]
+        if (dcb_size == 0u32):
+            return ORBIS_GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT
+        if (dcb_size > 0x3ffffcu32):
+            return ORBIS_GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT
+        if (ccb_sizes_in_bytes != null):
+            let ccb_size = ccb_sizes_in_bytes[i]
+            if (ccb_size > 0x3ffffcu32):
+                return ORBIS_GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT
+        if (dcb_gpu_addrs[i] == null):
+            return ORBIS_GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT
+        i <- (i + 1u)
+    g_send_init_packet <- false
+    return ORBIS_OK
+
+def sceGnmSubmitDone() -> int:
+    g_send_init_packet <- true
+    g_submissions_lock <- 0u
+    g_frames_submitted <- (g_frames_submitted + 1u64)
+    return ORBIS_OK
+
+def sceGnmUnmapComputeQueue(vqid: u32) -> int:
+    if (vqid == 0u32):
+        return ORBIS_OK
+    let queue_index = ((vqid - 1u32)).i32()
+    if ((queue_index < 0) or (queue_index >= GNM_MAX_COMPUTE_QUEUES)):
+        return ORBIS_OK
+    g_compute_queues[queue_index].used <- false
+    g_compute_queues[queue_index].pipe_id <- 0u32
+    g_compute_queues[queue_index].queue_id <- 0u32
+    g_compute_queues[queue_index].ring_base_addr <- GNM_INVALID_QUEUE_ADDR
+    g_compute_queues[queue_index].ring_size_dw <- 0u32
+    g_compute_queues[queue_index].read_ptr_addr <- null
+    g_compute_queues[queue_index].next_offs_dw <- 0u32
+    return 0
+
+def sceGnmUnregisterAllResourcesForOwner() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmUnregisterOwnerAndResources() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmUnregisterResource() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmUpdateGsShader(cmdbuf: u32&?, size: u32, gs_regs: u32&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = gs_regs
+    return 0
+
+def sceGnmUpdateHsShader(cmdbuf: u32&?, size: u32, ps_regs: u32&?, ls_hs_config: u32) -> int:
+    _ = cmdbuf
+    _ = size
+    _ = ps_regs
+    _ = ls_hs_config
+    return 0
+
+def sceGnmUpdatePsShader(cmdbuf: u32&?, size: u32, ps_regs: u32&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = ps_regs
+    return 0
+
+def sceGnmUpdatePsShader350(cmdbuf: u32&?, size: u32, ps_regs: u32&?) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = ps_regs
+    return 0
+
+def sceGnmUpdateVsShader(cmdbuf: u32&?, size: u32, vs_regs: u32&?, shader_modifier: u32) -> s32:
+    _ = cmdbuf
+    _ = size
+    _ = vs_regs
+    _ = shader_modifier
+    return 0
+
+def sceGnmValidateCommandBuffers() -> s32:
+    return 0
+
+def sceGnmValidateDisableDiagnostics() -> int:
+    return 0
+
+def sceGnmValidateDisableDiagnostics2() -> int:
+    return 0
+
+def sceGnmValidateDispatchCommandBuffers() -> int:
+    return 0
+
+def sceGnmValidateDrawCommandBuffers() -> int:
+    return 0
+
+def sceGnmValidateGetDiagnosticInfo() -> int:
+    return 0
+
+def sceGnmValidateGetDiagnostics() -> int:
+    return 0
+
+def sceGnmValidateGetVersion() -> int:
+    return 0
+
+def sceGnmValidateOnSubmitEnabled() -> bool:
+    return false
+
+def sceGnmValidateResetState() -> int:
+    return 0
+
+def sceGnmValidationRegisterMemoryCheckCallback() -> int:
+    return 0
+
+def sceRazorCaptureCommandBuffersOnlyImmediate() -> int:
+    return ORBIS_GNM_ERROR_CAPTURE_FAILED_INTERNAL
+
+def sceRazorCaptureCommandBuffersOnlySinceLastFlip() -> int:
+    return ORBIS_GNM_ERROR_CAPTURE_FAILED_INTERNAL
+
+def sceRazorCaptureImmediate() -> int:
+    return ORBIS_GNM_ERROR_CAPTURE_FAILED_INTERNAL
+
+def sceRazorCaptureSinceLastFlip() -> int:
+    return ORBIS_GNM_ERROR_CAPTURE_FAILED_INTERNAL
+
+def sceRazorIsLoaded() -> bool:
+    return false
+
+def Func_063D065A2D6359C3() -> int:
+    return 0
+
+def Func_0CABACAFB258429D() -> int:
+    return 0
+
+def Func_150CF336FC2E99A3() -> int:
+    return 0
+
+def Func_17CA687F9EE52D49() -> int:
+    return 0
+
+def Func_1870B89F759C6B45() -> int:
+    return 0
+
+def Func_26F9029EF68A955E() -> int:
+    return 0
+
+def Func_301E3DBBAB092DB0() -> int:
+    return 0
+
+def Func_30BAFE172AF17FEF() -> int:
+    return 0
+
+def Func_3E6A3E8203D95317() -> int:
+    return 0
+
+def Func_40FEEF0C6534C434() -> int:
+    return 0
+
+def Func_416B9079DE4CBACE() -> int:
+    return 0
+
+def Func_4774D83BB4DDBF9A() -> int:
+    return 0
+
+def Func_50678F1CCEEB9A00() -> int:
+    return 0
+
+def Func_54A2EC5FA4C62413() -> int:
+    return 0
+
+def Func_5A9C52C83138AE6B() -> int:
+    return 0
+
+def Func_5D22193A31EA1142() -> int:
+    return 0
+
+def Func_725A36DEBB60948D() -> int:
+    return 0
+
+def Func_8021A502FA61B9BB() -> int:
+    return 0
+
+def Func_9D002FE0FA40F0E6() -> int:
+    return 0
+
+def Func_9D297F36A7028B71() -> int:
+    return 0
+
+def Func_A2D7EC7A7BCF79B3() -> int:
+    return 0
+
+def Func_AA12A3CB8990854A() -> int:
+    return 0
+
+def Func_ADC8DDC005020BC6() -> int:
+    return 0
+
+def Func_B0A8688B679CB42D() -> int:
+    return 0
+
+def Func_B489020B5157A5FF() -> int:
+    return 0
+
+def Func_BADE7B4C199140DD() -> int:
+    return 0
+
+def Func_D1511B9DCFFB3DD9() -> int:
+    return 0
+
+def Func_D53446649B02E58E() -> int:
+    return 0
+
+def Func_D8B6E8E28E1EF0A3() -> int:
+    return 0
+
+def Func_D93D733A19DD7454() -> int:
+    return 0
+
+def Func_DE995443BC2A8317() -> int:
+    return 0
+
+def Func_DF6E9528150C23FF() -> int:
+    return 0
+
+def Func_ECB4C6BA41FE3350() -> int:
+    return 0
+
+def sceGnmDebugModuleReset() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def sceGnmDebugReset() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def Func_C4C328B7CF3B4171() -> int:
+    return 0
+
+def sceGnmDrawInitToDefaultContextStateInternalCommand(cmdbuf: u32&?, size: u32) -> int:
+    _ = cmdbuf
+    _ = size
+    return 0
+
+def sceGnmDrawInitToDefaultContextStateInternalSize() -> int:
+    return 0
+
+def sceGnmFindResources() -> int:
+    return 0
+
+def sceGnmGetResourceRegistrationBuffers() -> int:
+    return 0
+
+def sceGnmRegisterOwnerForSystem() -> int:
+    return ORBIS_GNM_ERROR_FAILURE
+
+def Func_1C43886B16EE5530() -> int:
+    return 0
+
+def Func_81037019ECCD0E01() -> int:
+    return 0
+
+def Func_BFB41C057478F0BF() -> int:
+    return 0
+
+def Func_E51D44DB8151238C() -> int:
+    return 0
+
+def Func_F916890425496553() -> int:
+    return 0
+
+def GnmDriver_RegisterLib(sym: void&?) -> void:
+    _ = sym
+    return
+
+def probe() -> void:
+    w: mutable u64 = 0u64
+    _ = sceGnmBeginWorkload(0u32, w.ref[mutable u64&])
+    _ = sceGnmCreateWorkloadStream(1u64, w.ref[mutable u32&])
+    _ = w

@@ -8,6 +8,113 @@ import (
 	"elisacore/src/unparse"
 )
 
+func TestParseOneLineFunctionBodies(t *testing.T) {
+	file, errs := parseSourceFile(t, "def answer() -> int: return 42\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	if len(decl.Body) != 1 {
+		t.Fatalf("expected one inline statement, got %d", len(decl.Body))
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return statement, got %T", decl.Body[0])
+	}
+	if lit, ok := ret.Value.(*ast.IntLit); !ok || lit.Value != "42" {
+		t.Fatalf("expected return 42, got %#v", ret.Value)
+	}
+}
+
+func TestParseOneLineFunctionBodiesWithSemicolonSeparatedStatements(t *testing.T) {
+	file, errs := parseSourceFile(t, "def answer(x: int) -> int: _ = x; return 42\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	if len(decl.Body) != 2 {
+		t.Fatalf("expected two inline statements, got %d", len(decl.Body))
+	}
+	if _, ok := decl.Body[0].(*ast.DiscardStmt); !ok {
+		t.Fatalf("expected assignment statement, got %T", decl.Body[0])
+	}
+	if _, ok := decl.Body[1].(*ast.ReturnStmt); !ok {
+		t.Fatalf("expected return statement, got %T", decl.Body[1])
+	}
+}
+
+func TestParseOneLineIfBodyInsideOneLineFunction(t *testing.T) {
+	file, errs := parseSourceFile(t, "def clamp(flag: bool, value: mutable int&) -> int: if flag: value <- 1; return value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	if len(decl.Body) != 2 {
+		t.Fatalf("expected inline if plus return, got %d statements", len(decl.Body))
+	}
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected inline if statement, got %T", decl.Body[0])
+	}
+	if len(ifStmt.Then) != 1 {
+		t.Fatalf("expected one inline if body statement, got %d", len(ifStmt.Then))
+	}
+	if _, ok := decl.Body[1].(*ast.ReturnStmt); !ok {
+		t.Fatalf("expected outer return statement, got %T", decl.Body[1])
+	}
+}
+
+func TestParseOneLineImplMethodBodies(t *testing.T) {
+	file, errs := parseSourceFile(t, "interface Box:\n    def get() -> int\n\nimpl Box for int:\n    def get() -> int: return 1\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	implDecl, ok := file.Decls[1].(*ast.ImplDecl)
+	if !ok {
+		t.Fatalf("expected impl decl, got %T", file.Decls[1])
+	}
+	method, ok := implDecl.Members[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected impl method func decl, got %T", implDecl.Members[0])
+	}
+	ret, ok := method.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return statement, got %T", method.Body[0])
+	}
+	if lit, ok := ret.Value.(*ast.IntLit); !ok || lit.Value != "1" {
+		t.Fatalf("expected return 1, got %#v", ret.Value)
+	}
+}
+
+func TestParseOneLineStaticFunctionBodies(t *testing.T) {
+	file, errs := parseSourceFile(t, "static def yes() -> bool: assert true\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	if _, ok := decl.Body[0].(*ast.StaticAssertStmt); !ok {
+		t.Fatalf("expected static assert statement, got %T", decl.Body[0])
+	}
+	if !decl.Static {
+		t.Fatalf("expected static function")
+	}
+	if decl.Body[0].Pos().Line != 1 {
+		t.Fatalf("expected inline static stmt to stay on line 1, got %s", decl.Body[0].Pos())
+	}
+}
+
 func TestParseExplicitArgErgonomicsAndDestructuring(t *testing.T) {
 	file, errs := parseSourceFile(t, `bundle Pair explicit:
     left: i64

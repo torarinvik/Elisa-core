@@ -165,6 +165,7 @@ const (
 	emitTestRunner = "test-runner"
 	emitLLVM       = "llvm"
 	emitPacked     = "packed"
+	emitCBindCheck = "c-bind-check"
 	emitHeader     = "header"
 	emitBitcode    = "bc"
 	emitObject     = "obj"
@@ -327,7 +328,7 @@ func parseArgs(args []string) (cliOptions, error) {
 	return options, nil
 }
 func printUsage(w io.Writer) {
-	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject, emitCArchive}
+	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitHeader, emitBitcode, emitObject, emitCArchive}
 	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
@@ -402,6 +403,8 @@ func normalizeEmitMode(value string) string {
 		return emitLLVM
 	case emitPacked, "packed-info", "packedinfo":
 		return emitPacked
+	case emitCBindCheck, "cbind-check", "c-bind", "cbind":
+		return emitCBindCheck
 	case emitHeader:
 		return emitHeader
 	case emitBitcode, "bitcode":
@@ -437,26 +440,34 @@ func outputPathForEmit(inputPath string, explicit string, ext string) string {
 }
 func readSourceWithIncludes(filename string, seen map[string]bool) ([]byte, error) {
 	var out bytes.Buffer
-	if err := writeSourceWithIncludes(&out, filename, seen); err != nil {
+	if err := writeSourceWithIncludesActive(&out, filename, seen, map[string]bool{}); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
 }
 func writeSourceWithIncludes(out *bytes.Buffer, filename string, seen map[string]bool) error {
+	return writeSourceWithIncludesActive(out, filename, seen, map[string]bool{})
+}
+
+func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool) error {
 	abs, err := filepath.Abs(filename)
 	if err != nil {
 		return err
 	}
-	if seen[abs] {
+	if active[abs] {
 		return fmt.Errorf("cyclic include detected for %s", abs)
 	}
-	seen[abs] = true
-	defer delete(seen, abs)
+	if included[abs] {
+		return nil
+	}
+	active[abs] = true
+	defer delete(active, abs)
 
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return err
 	}
+	included[abs] = true
 
 	out.Grow(len(raw))
 	start := 0
@@ -471,7 +482,7 @@ func writeSourceWithIncludes(out *bytes.Buffer, filename string, seen map[string
 		line := raw[start:end]
 		if includePath, ok := parseIncludeDirectiveBytes(bytes.TrimSpace(line)); ok {
 			outLenBefore := out.Len()
-			if err := writeSourceWithIncludes(out, filepath.Join(filepath.Dir(abs), includePath), seen); err != nil {
+			if err := writeSourceWithIncludesActive(out, filepath.Join(filepath.Dir(abs), includePath), included, active); err != nil {
 				return err
 			}
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {

@@ -285,6 +285,16 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprint(stdout, output)
 		}
 		return 0
+	case emitCBindCheck:
+		if options.output != "" {
+			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitCBindCheck)
+			return 1
+		}
+		if err := runCBindLayoutCheck(result, stdout); err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		return 0
 	case emitHeader:
 		output, err := backend.GenerateCHeader(result)
 		if err != nil {

@@ -26,7 +26,7 @@ func (a *Analyzer) registerBuiltinPermissions() {
 	a.registerBuiltinPermission("Memory", []string{"Allocate", "Release"})
 	a.registerBuiltinPermission("Console", []string{"Format", "Write"})
 	a.registerBuiltinPermission("Abort", []string{"Exit", "Panic"})
-	a.registerBuiltinPermission("Thread", []string{"Spawn", "Join", "Detach"})
+	a.registerBuiltinPermission("Thread", []string{"Spawn", "Join", "Detach", "Yield", "Sleep"})
 	a.registerBuiltinPermission("Pool", []string{"Create", "Submit", "Await", "WaitAll", "Shutdown"})
 	a.registerBuiltinPermission("Sync", []string{"Lock", "Unlock", "Wait", "Notify"})
 	a.registerBuiltinPermission("Atomics", []string{"Load", "Store", "Exchange", "CompareExchange", "Rmw", "Fence"})

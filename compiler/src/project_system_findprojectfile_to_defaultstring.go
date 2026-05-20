@@ -412,26 +412,34 @@ func buildProjectLoadedProgram(target *resolvedProjectTarget) (*loadedProgram, e
 }
 func readSourceWithIncludesWithOptions(filename string, seen map[string]bool, options sourceExpandOptions) ([]byte, error) {
 	var out bytes.Buffer
-	if err := writeSourceWithIncludesWithOptions(&out, filename, seen, options); err != nil {
+	if err := writeSourceWithIncludesWithOptionsActive(&out, filename, seen, map[string]bool{}, options); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
 }
 func writeSourceWithIncludesWithOptions(out *bytes.Buffer, filename string, seen map[string]bool, options sourceExpandOptions) error {
+	return writeSourceWithIncludesWithOptionsActive(out, filename, seen, map[string]bool{}, options)
+}
+
+func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options sourceExpandOptions) error {
 	abs, err := filepath.Abs(filename)
 	if err != nil {
 		return err
 	}
-	if seen[abs] {
+	if active[abs] {
 		return fmt.Errorf("cyclic include detected for %s", abs)
 	}
-	seen[abs] = true
-	defer delete(seen, abs)
+	if included[abs] {
+		return nil
+	}
+	active[abs] = true
+	defer delete(active, abs)
 
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return err
 	}
+	included[abs] = true
 	out.Grow(len(raw))
 	start := 0
 	for start <= len(raw) {
@@ -449,7 +457,7 @@ func writeSourceWithIncludesWithOptions(out *bytes.Buffer, filename string, seen
 				return err
 			}
 			outLenBefore := out.Len()
-			if err := writeSourceWithIncludesWithOptions(out, resolved, seen, options); err != nil {
+			if err := writeSourceWithIncludesWithOptionsActive(out, resolved, included, active, options); err != nil {
 				return err
 			}
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
