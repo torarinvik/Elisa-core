@@ -113,6 +113,8 @@ type Analyzer struct {
 	lambdaInfo                        map[*ast.LambdaExpr]*LambdaInfo
 	symbolFacts                       map[*Symbol]OptimizationFacts
 	funcDeclSymbols                   map[*ast.FuncDecl]*Symbol
+	declVisibility                    map[ast.Decl]string
+	privateTypeNames                  map[string]bool
 	castHooksByName                   map[string]map[castHookSignature]*Symbol
 	initHooksByName                   map[string]map[initHookSignature]*Symbol
 	typeParamScopes                   []map[string]Type
@@ -401,6 +403,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		parallelForInfo:                   make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
+		declVisibility:                    activeFile.DeclVisibility,
+		privateTypeNames:                  map[string]bool{},
 		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
 		enforceUnsafePermissions:          options.EnforceUnsafePermissions,
 		enforceProgressSafety:             options.EnforceProgressSafety,
@@ -432,7 +436,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	generatedDecls := make(map[ast.Decl]bool)
 	expandedDecls := a.expandActiveAndGeneratedDecls(activeFile.Decls, generatedDecls)
 	if len(generatedDecls) != 0 {
-		activeFile = &ast.File{Filename: activeFile.Filename, Decls: expandedDecls}
+		activeFile = &ast.File{Filename: activeFile.Filename, Decls: expandedDecls, DeclVisibility: activeFile.DeclVisibility}
 		if loweredFile != nil {
 			loweredFile = activeFile
 		}

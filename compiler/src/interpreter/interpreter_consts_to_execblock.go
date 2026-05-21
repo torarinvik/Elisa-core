@@ -71,9 +71,47 @@ type Interpreter struct {
 	nextLambdaID int
 }
 type frame struct {
-	locals map[string]Value
-	parent *frame
+	locals    map[string]Value
+	parent    *frame
+	namespace string
 }
+
+func qualifiedInterpreterName(namespace string, name string) string {
+	name = strings.TrimSpace(name)
+	namespace = strings.TrimSpace(namespace)
+	if name == "" || strings.Contains(name, ".") {
+		return name
+	}
+	if namespace == "" {
+		return name
+	}
+	return namespace + "." + name
+}
+
+func interpreterNamespaceFromName(name string) string {
+	name = strings.TrimSpace(name)
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		return name[:idx]
+	}
+	return ""
+}
+
+func interpreterVisibleNames(frame *frame, name string) []string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	if strings.Contains(name, ".") {
+		return []string{name}
+	}
+	for current := frame; current != nil; current = current.parent {
+		if current.namespace != "" {
+			return []string{current.namespace + "." + name, name}
+		}
+	}
+	return []string{name}
+}
+
 type signalKind int
 
 const (
@@ -283,16 +321,21 @@ func constValueToValue(value semantic.ConstValue) Value {
 	}
 }
 func (i *Interpreter) initializeGlobalsFromDecl(decl ast.Decl) error {
+	return i.initializeGlobalsFromDeclInNamespace(decl, "")
+}
+
+func (i *Interpreter) initializeGlobalsFromDeclInNamespace(decl ast.Decl, namespace string) error {
 	switch n := decl.(type) {
 	case *ast.GlobalDecl:
 		value, err := i.evaluateInitializer(nil, n.Type, n.Value)
 		if err != nil {
 			return err
 		}
-		i.globals[n.Name] = value
+		i.globals[qualifiedInterpreterName(namespace, n.Name)] = value
 	case *ast.NamespaceDecl:
+		childNamespace := qualifiedInterpreterName(namespace, n.Name)
 		for _, nested := range n.Decls {
-			if err := i.initializeGlobalsFromDecl(nested); err != nil {
+			if err := i.initializeGlobalsFromDeclInNamespace(nested, childNamespace); err != nil {
 				return err
 			}
 		}
@@ -354,7 +397,7 @@ func (i *Interpreter) callFunctionByName(name string, args []Value) (Value, erro
 	if !ok || fn == nil {
 		return VoidValue(), fmt.Errorf("interpreter does not know function %q", name)
 	}
-	return i.callFunction(fn, args, nil)
+	return i.callFunction(name, fn, args, nil)
 }
 func cloneArgs(args []Value) []Value {
 	cloned := make([]Value, len(args))
@@ -363,12 +406,12 @@ func cloneArgs(args []Value) []Value {
 	}
 	return cloned
 }
-func (i *Interpreter) loweredFuncParams(fn *ast.FuncDecl) []ast.ParamDecl {
+func (i *Interpreter) loweredFuncParams(name string, fn *ast.FuncDecl) []ast.ParamDecl {
 	params := append([]ast.ParamDecl(nil), fn.Params...)
 	if i == nil || i.result == nil || i.result.GlobalScope == nil {
 		return params
 	}
-	if sym, ok := i.result.GlobalScope.Lookup(fn.Name); ok && sym != nil {
+	if sym, ok := i.result.GlobalScope.Lookup(name); ok && sym != nil {
 		if fnType, ok := sym.Type.(*semantic.FuncType); ok {
 			for _, name := range fnType.ImplicitParamNames {
 				params = append(params, ast.ParamDecl{Name: name})
@@ -377,9 +420,9 @@ func (i *Interpreter) loweredFuncParams(fn *ast.FuncDecl) []ast.ParamDecl {
 	}
 	return params
 }
-func (i *Interpreter) callFunction(fn *ast.FuncDecl, positional []Value, named map[string]Value) (Value, error) {
-	frame := &frame{locals: map[string]Value{}}
-	if err := bindCallArgs(frame.locals, i.loweredFuncParams(fn), positional, named); err != nil {
+func (i *Interpreter) callFunction(name string, fn *ast.FuncDecl, positional []Value, named map[string]Value) (Value, error) {
+	frame := &frame{locals: map[string]Value{}, namespace: interpreterNamespaceFromName(name)}
+	if err := bindCallArgs(frame.locals, i.loweredFuncParams(name, fn), positional, named); err != nil {
 		return VoidValue(), fmt.Errorf("%s: %w", fn.Pos(), err)
 	}
 	signal, err := i.execBlock(frame, fn.Body)

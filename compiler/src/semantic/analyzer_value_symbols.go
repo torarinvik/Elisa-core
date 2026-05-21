@@ -36,7 +36,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						declType = a.inferLiteralType(n.Value)
 					}
 				}
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: declType, Node: n, Mutable: false, Private: scoped.Private}, n.Pos())
 			case *ast.TokenSetDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				var expected Type
@@ -48,10 +48,10 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					}
 				}
 				declType := a.analyzeListLitExprWithExpected(n.Value, expected)
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: declType, Node: n, Mutable: false, Private: scoped.Private}, n.Pos())
 			case *ast.CharsetDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: invalidType, Node: n, Mutable: false}, n.Pos())
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: invalidType, Node: n, Mutable: false, Private: scoped.Private}, n.Pos())
 			case *ast.ConstEnumDecl:
 			case *ast.GlobalDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
@@ -59,7 +59,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				if a.containsAffineHandleValues(declType, map[string]bool{}) {
 					a.errorf(n.Pos(), "global %q cannot store affine handle values of type %s", n.Name, declType)
 				}
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable, Private: scoped.Private}, n.Pos())
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
@@ -77,7 +77,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						symbolName = initHookSymbolName(qualifiedName, fnType, n.Pos())
 					}
 				}
-				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, UFCSOnly: funcHasAnnotation(n, "ufcs_only")}
+				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, UFCSOnly: funcHasAnnotation(n, "ufcs_only"), Private: scoped.Private}
 				a.functionTypes[symbolName] = fnType
 				a.funcDeclSymbols[n] = sym
 				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {
@@ -167,7 +167,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 				a.functionTypes[qualifiedName] = fnType
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
-				sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(n, "ufcs_only")}
+				sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(n, "ufcs_only"), Private: scoped.Private}
 				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {
 					a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
 				}
@@ -180,7 +180,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 				a.applyExternVarAnnotations(n)
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, LinkName: linkName, Mutable: true}, n.Pos())
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, LinkName: linkName, Mutable: true, Private: scoped.Private}, n.Pos())
 			case *ast.TreeDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:

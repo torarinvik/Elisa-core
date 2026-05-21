@@ -481,10 +481,13 @@ func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included 
 		}
 		line := raw[start:end]
 		if includePath, ok := parseIncludeDirectiveBytes(bytes.TrimSpace(line)); ok {
+			indent := leadingWhitespaceBytes(line)
+			var includeBuf bytes.Buffer
 			outLenBefore := out.Len()
-			if err := writeSourceWithIncludesActive(out, filepath.Join(filepath.Dir(abs), includePath), included, active); err != nil {
+			if err := writeSourceWithIncludesActive(&includeBuf, filepath.Join(filepath.Dir(abs), includePath), included, active); err != nil {
 				return err
 			}
+			writeIndentedInclude(out, includeBuf.Bytes(), indent)
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
 				out.WriteByte('\n')
 			}
@@ -500,6 +503,42 @@ func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included 
 		start = end + 1
 	}
 	return nil
+}
+
+func leadingWhitespaceBytes(line []byte) []byte {
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	return line[:i]
+}
+
+func writeIndentedInclude(out *bytes.Buffer, data []byte, indent []byte) {
+	if len(indent) == 0 || len(data) == 0 {
+		out.Write(data)
+		return
+	}
+	start := 0
+	for start <= len(data) {
+		end := bytes.IndexByte(data[start:], '\n')
+		hasNewline := end >= 0
+		if hasNewline {
+			end += start
+		} else {
+			end = len(data)
+		}
+		if end > start {
+			out.Write(indent)
+			out.Write(data[start:end])
+		}
+		if hasNewline {
+			out.WriteByte('\n')
+		}
+		if !hasNewline {
+			break
+		}
+		start = end + 1
+	}
 }
 func parseIncludeDirective(line string) (string, bool) {
 	for _, prefix := range []string{"# include ", "include "} {

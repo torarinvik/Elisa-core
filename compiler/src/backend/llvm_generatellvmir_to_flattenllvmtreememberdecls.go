@@ -496,7 +496,7 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 			return err
 		}
 		if globalDecl, ok := decl.(*ast.GlobalDecl); ok {
-			return g.defineGlobal(globalDecl, sym.Type, globalValue)
+			return g.defineGlobal(sym.Name, globalDecl, sym.Type, globalValue)
 		}
 		return nil
 	case *ast.InterfaceDecl:

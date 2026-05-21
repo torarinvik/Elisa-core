@@ -7,8 +7,9 @@ type Node interface {
 	nodeTag()
 }
 type File struct {
-	Filename string
-	Decls    []Decl
+	Filename       string
+	Decls          []Decl
+	DeclVisibility map[Decl]string
 }
 type Decl interface {
 	Node
@@ -95,6 +96,7 @@ type NamespaceDecl struct {
 	Decls    []Decl
 	Module   bool
 	Const    bool
+	Private  bool
 }
 type UsingDecl struct {
 	Position lexer.Pos

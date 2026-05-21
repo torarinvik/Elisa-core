@@ -279,3 +279,68 @@ def run() -> i32:
 		t.Fatal("expected qualified function symbol LaunchPipeline.normalize_exit")
 	}
 }
+
+func TestPrivateModuleMemberVisibleInsideModuleOnly(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "private_module_member.elisa", `
+private module Secret:
+    def hidden() -> i32:
+        return 7
+
+    def inside() -> i32:
+        return hidden()
+
+def outside() -> i32:
+    return Secret::hidden()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "undefined name \"Secret.hidden\"") && !strings.Contains(all, "unknown function \"Secret.hidden\"") {
+		t.Fatalf("expected private module member to be hidden from outside, got:\n%s", all)
+	}
+	if _, ok := result.GlobalScope.Lookup("Secret.hidden"); !ok {
+		t.Fatal("expected private symbol to still be collected under its qualified name")
+	}
+}
+
+func TestVisibilitySectionsInsideModule(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "visibility_sections.elisa", `
+module Api:
+    private:
+    def hidden() -> i32:
+        return 1
+
+    public:
+    def visible() -> i32:
+        return hidden()
+
+def outside() -> i32:
+    return Api::visible() + Api::hidden()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "undefined name \"Api.hidden\"") && !strings.Contains(all, "unknown function \"Api.hidden\"") {
+		t.Fatalf("expected private section member to be hidden from outside, got:\n%s", all)
+	}
+	if sym, ok := result.GlobalScope.Lookup("Api.visible"); !ok || sym.Private {
+		t.Fatalf("expected Api.visible to be public, got %#v", sym)
+	}
+	if sym, ok := result.GlobalScope.Lookup("Api.hidden"); !ok || !sym.Private {
+		t.Fatalf("expected Api.hidden to be private, got %#v", sym)
+	}
+}
+
+func TestExplicitPrivateDefInsidePublicModule(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "private_def.elisa", `
+module Api:
+    private def hidden() -> i32:
+        return 1
+
+    def visible() -> i32:
+        return hidden()
+
+def outside() -> i32:
+    return Api::hidden()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "undefined name \"Api.hidden\"") && !strings.Contains(all, "unknown function \"Api.hidden\"") {
+		t.Fatalf("expected private def to be hidden from outside, got:\n%s", all)
+	}
+}

@@ -258,6 +258,7 @@ type Symbol struct {
 	ParamIndex int
 	Mutable    bool
 	UFCSOnly   bool
+	Private    bool
 }
 
 func symbolAliasRoot(sym *Symbol) *Symbol {

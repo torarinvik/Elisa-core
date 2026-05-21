@@ -10,6 +10,7 @@ type scopedDecl struct {
 	Decl      ast.Decl
 	Namespace string
 	Usings    []string
+	Private   bool
 }
 
 func joinQualifiedName(namespace string, name string) string {
@@ -41,7 +42,27 @@ func dedupeQualifiedNames(values []string) []string {
 	return out
 }
 
+func (a *Analyzer) declIsPrivate(decl ast.Decl, inheritedPrivate bool) bool {
+	if inheritedPrivate {
+		return true
+	}
+	if a == nil || decl == nil {
+		return false
+	}
+	if ns, ok := decl.(*ast.NamespaceDecl); ok && ns.Private {
+		return true
+	}
+	if a.declVisibility == nil {
+		return false
+	}
+	return a.declVisibility[decl] == "private"
+}
+
 func (a *Analyzer) flattenScopedDecls(decls []ast.Decl, namespace string, inheritedUsings []string) []scopedDecl {
+	return a.flattenScopedDeclsWithVisibility(decls, namespace, inheritedUsings, false)
+}
+
+func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace string, inheritedUsings []string, inheritedPrivate bool) []scopedDecl {
 	blockUsings := make([]string, 0)
 	for _, decl := range decls {
 		usingDecl, ok := decl.(*ast.UsingDecl)
@@ -55,15 +76,16 @@ func (a *Analyzer) flattenScopedDecls(decls []ast.Decl, namespace string, inheri
 	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.StaticIfDecl:
-			out = append(out, a.flattenScopedDecls(a.activeDeclBranch(n), namespace, effectiveUsings)...)
+			out = append(out, a.flattenScopedDeclsWithVisibility(a.activeDeclBranch(n), namespace, effectiveUsings, inheritedPrivate)...)
 		case *ast.NamespaceDecl:
 			childNamespace := joinQualifiedName(namespace, n.Name)
-			out = append(out, a.flattenScopedDecls(n.Decls, childNamespace, effectiveUsings)...)
+			childPrivate := a.declIsPrivate(n, inheritedPrivate)
+			out = append(out, a.flattenScopedDeclsWithVisibility(n.Decls, childNamespace, effectiveUsings, childPrivate)...)
 		case *ast.UsingDecl:
 			continue
 		default:
 			a.primeScopedConstValues(decl, namespace, effectiveUsings)
-			out = append(out, scopedDecl{Decl: decl, Namespace: namespace, Usings: append([]string(nil), effectiveUsings...)})
+			out = append(out, scopedDecl{Decl: decl, Namespace: namespace, Usings: append([]string(nil), effectiveUsings...), Private: a.declIsPrivate(decl, inheritedPrivate)})
 		}
 	}
 	return out
@@ -114,8 +136,14 @@ func (a *Analyzer) visibleNameCandidates(name string) []string {
 		return nil
 	}
 	candidates := make([]string, 0, len(a.currentUsings)+2)
-	if a.currentNamespace != "" {
-		candidates = append(candidates, joinQualifiedName(a.currentNamespace, name))
+	namespace := a.currentNamespace
+	if namespace == "" && a.currentFuncType != nil {
+		if idx := strings.LastIndex(a.currentFuncType.Name, "."); idx >= 0 {
+			namespace = a.currentFuncType.Name[:idx]
+		}
+	}
+	if namespace != "" {
+		candidates = append(candidates, joinQualifiedName(namespace, name))
 	}
 	if !strings.Contains(name, ".") {
 		for _, usingName := range a.currentUsings {
@@ -129,6 +157,9 @@ func (a *Analyzer) visibleNameCandidates(name string) []string {
 func (a *Analyzer) lookupVisibleType(name string) (Type, string, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if t, ok := a.namedTypes[candidate]; ok {
+			if a.privateTypeNames[candidate] && !a.canAccessPrivateName(candidate) {
+				continue
+			}
 			return t, candidate, true
 		}
 	}
@@ -171,14 +202,39 @@ func (a *Analyzer) lookupVisibleParamPack(name string) (*ParamPack, string, bool
 func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if sym, ok := a.globalScope.Lookup(candidate); ok {
+			if sym != nil && sym.Private && !a.canAccessPrivateName(candidate) {
+				continue
+			}
 			return sym, candidate, true
 		}
 	}
 	return nil, "", false
 }
 
+func privateOwnerNamespace(name string) string {
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		return name[:idx]
+	}
+	return ""
+}
+
+func (a *Analyzer) canAccessPrivateName(name string) bool {
+	owner := privateOwnerNamespace(name)
+	if owner == "" {
+		return true
+	}
+	current := a.currentNamespace
+	if current == "" && a.currentFuncType != nil {
+		current = privateOwnerNamespace(a.currentFuncType.Name)
+	}
+	return current == owner || strings.HasPrefix(current, owner+".")
+}
+
 func (a *Analyzer) lookupVisibleConst(name string) (ConstValue, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
+		if sym, ok := a.globalScope.Lookup(candidate); ok && sym != nil && sym.Private && !a.canAccessPrivateName(candidate) {
+			continue
+		}
 		if value, ok := a.constValues[candidate]; ok {
 			return value, true
 		}

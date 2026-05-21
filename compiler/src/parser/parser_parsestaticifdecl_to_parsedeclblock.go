@@ -187,13 +187,25 @@ func (p *Parser) parseStaticAssertItemBlock() []ast.StaticAssertItem {
 func (p *Parser) parseDeclBlock() []ast.Decl {
 	p.expect(lexer.TOKEN_INDENT)
 	decls := make([]ast.Decl, 0, p.estimateIndentedItemCount())
+	savedVisibility := p.currentVisibility
+	defer func() {
+		p.currentVisibility = savedVisibility
+	}()
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
+		if (p.peekIdentText("public") || p.peekIdentText("private")) && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			p.currentVisibility = p.cur().Text
+			p.advance()
+			p.expect(lexer.TOKEN_COLON)
+			p.expectNewline()
+			continue
+		}
 		decl := p.parseDecl()
 		if decl != nil {
+			p.markDeclVisibility(decl, "")
 			decls = append(decls, decl)
 		}
 	}

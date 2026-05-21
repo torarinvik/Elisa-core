@@ -91,6 +91,91 @@ func TestReadSourceWithIncludesAcceptsPascalIncludeDirectives(t *testing.T) {
 		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
 	}
 }
+
+func TestReadSourceWithIncludesPreservesIndentedIncludeContext(t *testing.T) {
+	dir := t.TempDir()
+	leafPath := filepath.Join(dir, "leaf.elisa")
+	rootPath := filepath.Join(dir, "root.elisa")
+
+	if err := os.WriteFile(leafPath, []byte("def foo() -> int:\n    return 7"), 0o644); err != nil {
+		t.Fatalf("write leaf fixture: %v", err)
+	}
+	if err := os.WriteFile(rootPath, []byte("module M:\n    include \"leaf.elisa\"\n\ndef main() -> int:\n    return M::foo()"), 0o644); err != nil {
+		t.Fatalf("write root fixture: %v", err)
+	}
+
+	expanded, err := readSourceWithIncludes(rootPath, map[string]bool{})
+	if err != nil {
+		t.Fatalf("readSourceWithIncludes: %v", err)
+	}
+
+	got := string(expanded)
+	want := "module M:\n    def foo() -> int:\n        return 7\n\ndef main() -> int:\n    return M::foo()"
+	if got != want {
+		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
+	}
+}
+
+func TestRunCLICompilesIndentedIncludeInsideModule(t *testing.T) {
+	dir := t.TempDir()
+	leafPath := filepath.Join(dir, "leaf.elisa")
+	rootPath := filepath.Join(dir, "root.elisa")
+
+	if err := os.WriteFile(leafPath, []byte("def foo() -> int:\n    return 7"), 0o644); err != nil {
+		t.Fatalf("write leaf fixture: %v", err)
+	}
+	if err := os.WriteFile(rootPath, []byte("module M:\n    include \"leaf.elisa\"\n\ndef main() -> int:\n    return M::foo()"), 0o644); err != nil {
+		t.Fatalf("write root fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", rootPath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstdout:\n%s\nstderr:\n%s", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 7") {
+		t.Fatalf("expected module-qualified include program to print 7, got stdout:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLICompilesModuleLocalConstLookup(t *testing.T) {
+	dir := t.TempDir()
+	rootPath := filepath.Join(dir, "module_const.elisa")
+	src := "module M:\n    const ANSWER: int = 7\n\n    def answer() -> int:\n        return ANSWER\n\ndef main() -> int:\n    return M::answer()\n"
+	if err := os.WriteFile(rootPath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write module const fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", rootPath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstdout:\n%s\nstderr:\n%s", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 7") {
+		t.Fatalf("expected module-local const program to print 7, got stdout:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLICompilesModuleLocalGlobalLookup(t *testing.T) {
+	dir := t.TempDir()
+	rootPath := filepath.Join(dir, "module_global.elisa")
+	src := "module M:\n    global mutable counter: int = 5\n\n    def value() -> int:\n        return counter\n\ndef main() -> int:\n    return M::value()\n"
+	if err := os.WriteFile(rootPath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write module global fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", rootPath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstdout:\n%s\nstderr:\n%s", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 5") {
+		t.Fatalf("expected module-local global program to print 5, got stdout:\n%s", stdout.String())
+	}
+}
 func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.elisa")

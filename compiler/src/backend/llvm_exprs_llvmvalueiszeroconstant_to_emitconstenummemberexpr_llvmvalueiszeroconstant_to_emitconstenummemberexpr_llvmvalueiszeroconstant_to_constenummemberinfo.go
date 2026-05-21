@@ -456,30 +456,30 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		value, err := s.loadValue(binding.ptr, binding.typ, expr.Name)
 		return value, binding.typ, err
 	}
-	if sym, ok := s.g.result.GlobalScope.Lookup(expr.Name); ok {
+	if sym, resolvedName, ok := s.lookupVisibleGlobalSymbol(expr.Name); ok {
 		switch sym.Kind {
 		case semantic.SymbolFunc, semantic.SymbolExternFunc:
 			fnType, ok := sym.Type.(*semantic.FuncType)
 			if !ok {
 				return nil, nil, fmt.Errorf("global function %s is missing function type", expr.Name)
 			}
-			value, err := s.g.ensureFunctionDeclared(expr.Name, fnType)
+			value, err := s.g.ensureFunctionDeclared(resolvedName, fnType)
 			return value, fnType, err
 		case semantic.SymbolGlobal, semantic.SymbolExternVar:
-			global, err := s.g.ensureGlobalDeclared(expr.Name, sym.Type, sym.Kind == semantic.SymbolExternVar)
+			global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, sym.Kind == semantic.SymbolExternVar)
 			if err != nil {
 				return nil, nil, err
 			}
 			value, err := s.loadValue(global, sym.Type, expr.Name)
 			return value, sym.Type, err
 		case semantic.SymbolConst:
-			if value, ok := s.g.constValue(expr.Name); ok {
+			if value, _, ok := s.visibleConstValue(expr.Name); ok {
 				llvmValue, llvmType, err := s.emitConstValueWithType(value, sym.Type)
 				return llvmValue, llvmType, err
 			}
 		}
 	}
-	if value, ok := s.g.constValue(expr.Name); ok {
+	if value, _, ok := s.visibleConstValue(expr.Name); ok {
 		llvmValue, llvmType, err := s.emitConstValue(value)
 		return llvmValue, llvmType, err
 	}

@@ -12,6 +12,8 @@ type Parser struct {
 	pos                 int
 	errors              []string
 	poolScopes          []string
+	declVisibility      map[ast.Decl]string
+	currentVisibility   string
 	allowAsCast         bool
 	allowInMembership   bool
 	allowTernary        bool
@@ -20,7 +22,7 @@ type Parser struct {
 }
 
 func New(tokens []lexer.Token) *Parser {
-	return &Parser{tokens: tokens, allowAsCast: true, allowInMembership: true, allowTernary: true, allowWhereExpr: true}
+	return &Parser{tokens: tokens, declVisibility: map[ast.Decl]string{}, currentVisibility: "public", allowAsCast: true, allowInMembership: true, allowTernary: true, allowWhereExpr: true}
 }
 func (p *Parser) Errors() []string { return p.errors }
 func (p *Parser) activePoolName() string {
@@ -155,7 +157,7 @@ func (p *Parser) skipNewlines() {
 	}
 }
 func (p *Parser) ParseFile(filename string) *ast.File {
-	file := &ast.File{Filename: filename, Decls: make([]ast.Decl, 0, p.estimateTopLevelItemCount())}
+	file := &ast.File{Filename: filename, Decls: make([]ast.Decl, 0, p.estimateTopLevelItemCount()), DeclVisibility: p.declVisibility}
 	p.skipNewlines()
 	for p.peek() != lexer.TOKEN_EOF {
 		decl := p.parseDecl()
@@ -166,7 +168,49 @@ func (p *Parser) ParseFile(filename string) *ast.File {
 	}
 	return file
 }
+
+func (p *Parser) markDeclVisibility(decl ast.Decl, visibility string) ast.Decl {
+	if decl == nil {
+		return nil
+	}
+	if p.declVisibility == nil {
+		p.declVisibility = map[ast.Decl]string{}
+	}
+	if visibility == "" {
+		visibility = p.currentVisibility
+	}
+	if visibility == "" {
+		visibility = "public"
+	}
+	if _, exists := p.declVisibility[decl]; !exists {
+		p.declVisibility[decl] = visibility
+	}
+	return decl
+}
+
+func (p *Parser) parseVisibilityPrefixedDecl() ast.Decl {
+	visibility := p.cur().Text
+	p.advance()
+	if p.peekIdentText("module") {
+		module := p.parseNamespaceDecl()
+		module.Private = visibility == "private"
+		return p.markDeclVisibility(module, visibility)
+	}
+	decl := p.parseDecl()
+	return p.markDeclVisibility(decl, visibility)
+}
+
 func (p *Parser) parseDecl() ast.Decl {
+	if p.peekIdentText("public") || p.peekIdentText("private") {
+		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			p.errorf("visibility section %q is only valid inside declaration blocks", p.cur().Text+":")
+			p.advance()
+			p.advance()
+			p.expectNewline()
+			return nil
+		}
+		return p.parseVisibilityPrefixedDecl()
+	}
 	if p.peekIdentText("protocol") {
 		return p.parseInterfaceDecl()
 	}

@@ -14,6 +14,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"strings"
 	"unsafe"
 )
 
@@ -87,6 +88,86 @@ type functionState struct {
 	cleanupDepth                 int
 	scopePool                    []*codegenScope
 }
+
+func (s *functionState) currentNamespace() string {
+	if s == nil {
+		return ""
+	}
+	name := ""
+	if s.fnType != nil {
+		name = strings.TrimSpace(s.fnType.Name)
+	}
+	if name == "" && s.g != nil && s.decl != nil && s.g.symbolsByNode != nil {
+		if sym, ok := s.g.symbolsByNode[s.decl]; ok && sym != nil {
+			name = strings.TrimSpace(sym.Name)
+		}
+	}
+	if name == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		return name[:idx]
+	}
+	return ""
+}
+
+func (s *functionState) visibleGlobalNames(name string) []string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	if strings.Contains(name, ".") || strings.Contains(name, "::") {
+		return []string{strings.ReplaceAll(name, "::", ".")}
+	}
+	namespace := s.currentNamespace()
+	if namespace == "" {
+		return []string{name}
+	}
+	return []string{namespace + "." + name, name}
+}
+
+func (s *functionState) lookupVisibleGlobalSymbol(name string) (*semantic.Symbol, string, bool) {
+	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
+		return nil, "", false
+	}
+	for _, candidate := range s.visibleGlobalNames(name) {
+		if sym, ok := s.g.result.GlobalScope.Lookup(candidate); ok && sym != nil {
+			return sym, candidate, true
+		}
+	}
+	if !strings.Contains(name, ".") && !strings.Contains(name, "::") {
+		suffix := "." + strings.TrimSpace(name)
+		var resolvedName string
+		var resolvedSym *semantic.Symbol
+		for candidate, sym := range s.g.result.GlobalScope.Symbols {
+			if !strings.HasSuffix(candidate, suffix) || sym == nil {
+				continue
+			}
+			if resolvedSym != nil {
+				return nil, "", false
+			}
+			resolvedName = candidate
+			resolvedSym = sym
+		}
+		if resolvedSym != nil {
+			return resolvedSym, resolvedName, true
+		}
+	}
+	return nil, "", false
+}
+
+func (s *functionState) visibleConstValue(name string) (semantic.ConstValue, string, bool) {
+	if s == nil || s.g == nil {
+		return semantic.ConstValue{}, "", false
+	}
+	for _, candidate := range s.visibleGlobalNames(name) {
+		if value, ok := s.g.constValue(candidate); ok {
+			return value, candidate, true
+		}
+	}
+	return semantic.ConstValue{}, "", false
+}
+
 type scopedCleanupKind int
 
 const (

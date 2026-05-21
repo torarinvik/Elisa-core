@@ -190,7 +190,7 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 		return runtimeFn.fn(ordered)
 	}
 	if decl, ok := i.functions[name]; ok && decl != nil {
-		return i.callFunction(decl, positional, named)
+		return i.callFunction(name, decl, positional, named)
 	}
 	if decl, ok := i.lookupStructDecl(name); ok && decl != nil {
 		if len(named) != 0 {
@@ -374,20 +374,22 @@ func (i *Interpreter) lookupValue(frame *frame, name string) (Value, error) {
 			return value.Clone(), nil
 		}
 	}
-	if value, ok := i.globals[name]; ok {
-		return value.Clone(), nil
-	}
-	if value, ok := i.consts[name]; ok {
-		return value.Clone(), nil
-	}
-	if _, ok := i.runtimeFuncs[name]; ok {
-		return FunctionValue(name), nil
-	}
-	if _, ok := i.functions[name]; ok {
-		return FunctionValue(name), nil
-	}
-	if _, ok := i.lookupStructDecl(name); ok {
-		return FunctionValue(name), nil
+	for _, candidate := range interpreterVisibleNames(frame, name) {
+		if value, ok := i.globals[candidate]; ok {
+			return value.Clone(), nil
+		}
+		if value, ok := i.consts[candidate]; ok {
+			return value.Clone(), nil
+		}
+		if _, ok := i.runtimeFuncs[candidate]; ok {
+			return FunctionValue(candidate), nil
+		}
+		if _, ok := i.functions[candidate]; ok {
+			return FunctionValue(candidate), nil
+		}
+		if _, ok := i.lookupStructDecl(candidate); ok {
+			return FunctionValue(candidate), nil
+		}
 	}
 	return VoidValue(), fmt.Errorf("undefined name %q", name)
 }
@@ -402,6 +404,18 @@ func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, erro
 					get: func() Value { return scopeFrame.locals[name].Clone() },
 					set: func(value Value) error {
 						scopeFrame.locals[name] = value.Clone()
+						return nil
+					},
+				}, nil
+			}
+		}
+		for _, candidate := range interpreterVisibleNames(frame, name) {
+			if _, ok := i.globals[candidate]; ok {
+				globalName := candidate
+				return &valueSlot{
+					get: func() Value { return i.globals[globalName].Clone() },
+					set: func(value Value) error {
+						i.globals[globalName] = value.Clone()
 						return nil
 					},
 				}, nil

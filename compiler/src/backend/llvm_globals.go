@@ -11,13 +11,37 @@ import "C"
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 )
 
-func (g *llvmGenerator) defineGlobal(decl *ast.GlobalDecl, typ semantic.Type, global C.LLVMValueRef) error {
+func llvmNamespaceFromName(name string) string {
+	name = strings.TrimSpace(name)
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		return name[:idx]
+	}
+	return ""
+}
+
+func llvmVisibleGlobalNames(namespace string, name string) []string {
+	name = strings.TrimSpace(name)
+	namespace = strings.TrimSpace(namespace)
+	if name == "" {
+		return nil
+	}
+	if strings.Contains(name, ".") || strings.Contains(name, "::") {
+		return []string{strings.ReplaceAll(name, "::", ".")}
+	}
+	if namespace == "" {
+		return []string{name}
+	}
+	return []string{namespace + "." + name, name}
+}
+
+func (g *llvmGenerator) defineGlobal(name string, decl *ast.GlobalDecl, typ semantic.Type, global C.LLVMValueRef) error {
 	if decl == nil || global == nil {
 		return nil
 	}
@@ -29,7 +53,7 @@ func (g *llvmGenerator) defineGlobal(decl *ast.GlobalDecl, typ semantic.Type, gl
 		C.LLVMSetInitializer(global, zero)
 		return nil
 	}
-	value, err := g.constExprValue(decl.Value, typ)
+	value, err := g.constExprValueInNamespace(decl.Value, typ, llvmNamespaceFromName(name))
 	if err != nil {
 		return err
 	}
@@ -38,6 +62,10 @@ func (g *llvmGenerator) defineGlobal(decl *ast.GlobalDecl, typ semantic.Type, gl
 }
 
 func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C.LLVMValueRef, error) {
+	return g.constExprValueInNamespace(expr, expected, "")
+}
+
+func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semantic.Type, namespace string) (C.LLVMValueRef, error) {
 	actual := expected
 	if actual == nil {
 		actual = g.exprType(expr)
@@ -49,7 +77,7 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		if coercedType == nil {
 			coercedType = resolvedType
 		}
-		return g.constExprValue(resolvedExpr, coercedType)
+		return g.constExprValueInNamespace(resolvedExpr, coercedType, namespace)
 	}
 	switch n := expr.(type) {
 	case *ast.IntLit:
@@ -103,6 +131,20 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		}
 		return C.LLVMConstInt(llvmType, C.ulonglong(value), 0), nil
 	case *ast.Ident:
+		for _, candidate := range llvmVisibleGlobalNames(namespace, n.Name) {
+			if value, ok := g.constValue(candidate); ok {
+				coercedType := expected
+				if coercedType == nil && g.result != nil && g.result.GlobalScope != nil {
+					if sym, ok := g.result.GlobalScope.Lookup(candidate); ok && sym.Kind == semantic.SymbolConst {
+						coercedType = sym.Type
+					}
+				}
+				if coercedType == nil {
+					coercedType = constValueType(g.result, value)
+				}
+				return g.constValueAsLLVM(value, coercedType)
+			}
+		}
 		if value, ok := g.constValue(n.Name); ok {
 			coercedType := expected
 			if coercedType == nil && g.result != nil && g.result.GlobalScope != nil {
@@ -115,8 +157,10 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 			}
 			return g.constValueAsLLVM(value, coercedType)
 		}
-		if global, ok := g.globals[n.Name]; ok {
-			return global, nil
+		for _, candidate := range llvmVisibleGlobalNames(namespace, n.Name) {
+			if global, ok := g.globals[candidate]; ok {
+				return global, nil
+			}
 		}
 		return nil, fmt.Errorf("identifier %s is not a constant global initializer", n.Name)
 	case *ast.StructLitExpr:
@@ -141,7 +185,7 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 			if arg == nil {
 				return nil, fmt.Errorf("global struct literal field %d was not resolved", i)
 			}
-			fieldValue, err := g.constExprValue(arg, fields[i].Type)
+			fieldValue, err := g.constExprValueInNamespace(arg, fields[i].Type, namespace)
 			if err != nil {
 				return nil, err
 			}
@@ -163,7 +207,7 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		}
 		values := make([]C.LLVMValueRef, 0, len(n.Elems))
 		for _, elem := range n.Elems {
-			elemValue, err := g.constExprValue(elem, fixedArray.Elem)
+			elemValue, err := g.constExprValueInNamespace(elem, fixedArray.Elem, namespace)
 			if err != nil {
 				return nil, err
 			}
@@ -182,7 +226,7 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		if err != nil {
 			return nil, err
 		}
-		inner, err := g.constExprValue(n.Operand, g.exprType(n.Operand))
+		inner, err := g.constExprValueInNamespace(n.Operand, g.exprType(n.Operand), namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -194,9 +238,9 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		}
 		return inner, nil
 	case *ast.ParenExpr:
-		return g.constExprValue(n.Inner, expected)
+		return g.constExprValueInNamespace(n.Inner, expected, namespace)
 	case *ast.MoveExpr:
-		return g.constExprValue(n.Operand, expected)
+		return g.constExprValueInNamespace(n.Operand, expected, namespace)
 	default:
 		if value, ok := g.evalConstExpr(expr); ok {
 			coercedType := expected

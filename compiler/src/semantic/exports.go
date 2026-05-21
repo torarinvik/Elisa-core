@@ -29,6 +29,9 @@ func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
 				return
 			}
 			a.namedTypes[qualifiedName] = resolved
+			if scoped.Private {
+				a.privateTypeNames[qualifiedName] = true
+			}
 		})
 	}
 }

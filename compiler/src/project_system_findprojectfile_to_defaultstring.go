@@ -466,10 +466,13 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 			if err != nil {
 				return err
 			}
+			indent := leadingWhitespaceBytes(line)
+			var includeBuf bytes.Buffer
 			outLenBefore := out.Len()
-			if err := writeSourceWithIncludesWithOptionsActive(out, resolved, included, active, options); err != nil {
+			if err := writeSourceWithIncludesWithOptionsActive(&includeBuf, resolved, included, active, options); err != nil {
 				return err
 			}
+			writeIndentedInclude(out, includeBuf.Bytes(), indent)
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
 				out.WriteByte('\n')
 			}

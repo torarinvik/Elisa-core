@@ -67,9 +67,9 @@ func (s *functionState) emitIdentValueAddress(expr *ast.Ident) (C.LLVMValueRef, 
 	if binding, ok := s.lookupBinding(expr.Name); ok {
 		return s.refinedOptionalPayloadAddress(binding.ptr, binding.typ, valueType, expr.Name)
 	}
-	if sym, ok := s.g.result.GlobalScope.Lookup(expr.Name); ok {
+	if sym, resolvedName, ok := s.lookupVisibleGlobalSymbol(expr.Name); ok {
 		if sym.Kind == semantic.SymbolGlobal || sym.Kind == semantic.SymbolExternVar {
-			global, err := s.g.ensureGlobalDeclared(expr.Name, sym.Type, sym.Kind == semantic.SymbolExternVar)
+			global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, sym.Kind == semantic.SymbolExternVar)
 			if err != nil {
 				return nil, nil, err
 			}

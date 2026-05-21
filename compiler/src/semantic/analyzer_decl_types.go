@@ -122,6 +122,11 @@ func (a *Analyzer) activeStmtBranch(n *ast.StaticIfStmt) []ast.Stmt {
 func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 	for _, scoped := range decls {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			markPrivate := func(name string) {
+				if scoped.Private {
+					a.privateTypeNames[name] = true
+				}
+			}
 			switch n := scoped.Decl.(type) {
 			case *ast.StructDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
@@ -155,6 +160,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					StoreFieldOrder:  make([]string, 0, len(n.Fields)),
 				}
 				a.namedTypes[qualifiedName] = st
+				markPrivate(qualifiedName)
 			case *ast.StoreDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
@@ -187,6 +193,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					ReprC:           true,
 				}
 				a.namedTypes[qualifiedName] = st
+				markPrivate(qualifiedName)
 			case *ast.ConstEnumDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
@@ -194,6 +201,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					return
 				}
 				a.namedTypes[qualifiedName] = &ConstEnumType{Name: qualifiedName, MemberMap: map[string]*ConstEnumMember{}, Decl: n}
+				markPrivate(qualifiedName)
 			case *ast.EnumDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
@@ -202,6 +210,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				}
 				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n}
 				a.namedTypes[qualifiedName] = enumType
+				markPrivate(qualifiedName)
 				if n.Packed {
 					tagName := packedEnumTagTypeName(qualifiedName)
 					if _, exists := a.namedTypes[tagName]; exists {
@@ -211,6 +220,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					tagType := &ConstEnumType{Name: tagName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
 					enumType.TagType = tagType
 					a.namedTypes[tagName] = tagType
+					markPrivate(tagName)
 					storeName := packedEnumStoreTypeName(qualifiedName)
 					if _, exists := a.namedTypes[storeName]; exists {
 						a.errorf(n.Pos(), "%s", DuplicateTypeMessage(storeName))
@@ -219,6 +229,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					storeType := &PackedEnumStoreType{Name: storeName, Enum: enumType}
 					enumType.StoreType = storeType
 					a.namedTypes[storeName] = storeType
+					markPrivate(storeName)
 				}
 			case *ast.TreeDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
@@ -229,6 +240,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				layout, layoutExplicit := a.treeDeclLayout(n)
 				treeType := &TreeType{Name: qualifiedName, Layout: layout, LayoutExplicit: layoutExplicit, Indexes: a.treeIndexSpecs("tree", n.Name, n.Annotations), Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
 				a.namedTypes[qualifiedName] = treeType
+				markPrivate(qualifiedName)
 				nodeQualifiedName := treeMemberTypeName(qualifiedName, "Node")
 				if _, exists := a.namedTypes[nodeQualifiedName]; exists {
 					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(nodeQualifiedName))
@@ -245,6 +257,8 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				treeType.NodeType = nodeType
 				a.namedTypes[nodeQualifiedName] = nodeType
 				a.namedTypes[kindName] = kindType
+				markPrivate(nodeQualifiedName)
+				markPrivate(kindName)
 				treeType.MemberTypes["Node"] = nodeType
 				storeName := treeStoreTypeName(qualifiedName)
 				if _, exists := a.namedTypes[storeName]; exists {
@@ -254,6 +268,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				storeType := &TreeStoreType{Name: storeName, Family: treeType}
 				treeType.StoreType = storeType
 				a.namedTypes[storeName] = storeType
+				markPrivate(storeName)
 				treeType.MemberTypes["Store"] = storeType
 				a.registerTreeMemberTypes(qualifiedName, treeType, n.Members, treeType.Layout)
 			case *ast.ExternTypeDecl:
@@ -265,6 +280,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				opaque := &OpaqueType{Name: qualifiedName}
 				a.applyExternTypeAnnotations(n, opaque)
 				a.namedTypes[qualifiedName] = opaque
+				markPrivate(qualifiedName)
 			case *ast.ErrorDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
@@ -291,6 +307,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					}
 				}
 				a.namedTypes[qualifiedName] = &ErrorSetType{Name: qualifiedName, Tags: resolvedTags, Payloads: payloads}
+				markPrivate(qualifiedName)
 			case *ast.PermissionDecl:
 			case *ast.EffectDecl:
 			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"strings"
 )
 
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
@@ -216,6 +217,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	savedSuppressDiagnostics := a.suppressDiagnostics
 	savedSuppressOptimizationFacts := a.suppressOptimizationFacts
+	savedNamespace := a.currentNamespace
+	savedUsings := a.currentUsings
 
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = fnType.Return
@@ -241,6 +244,14 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentConservativeCallWidenings = nil
 	a.suppressDiagnostics = true
 	a.suppressOptimizationFacts = true
+	if fnType != nil {
+		if idx := strings.LastIndex(fnType.Name, "."); idx >= 0 {
+			a.currentNamespace = fnType.Name[:idx]
+		} else {
+			a.currentNamespace = ""
+		}
+		a.currentUsings = nil
+	}
 
 	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
@@ -313,6 +324,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
 	a.suppressDiagnostics = savedSuppressDiagnostics
 	a.suppressOptimizationFacts = savedSuppressOptimizationFacts
+	a.currentNamespace = savedNamespace
+	a.currentUsings = savedUsings
 }
 
 func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *FuncType) {
@@ -349,6 +362,8 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	savedSuppressDiagnostics := a.suppressDiagnostics
 	savedSuppressOptimizationFacts := a.suppressOptimizationFacts
+	savedNamespace := a.currentNamespace
+	savedUsings := a.currentUsings
 
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = fnType.Return
@@ -374,6 +389,14 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentConservativeCallWidenings = nil
 	a.suppressDiagnostics = true
 	a.suppressOptimizationFacts = true
+	if fnType != nil {
+		if idx := strings.LastIndex(fnType.Name, "."); idx >= 0 {
+			a.currentNamespace = fnType.Name[:idx]
+		} else {
+			a.currentNamespace = ""
+		}
+		a.currentUsings = nil
+	}
 
 	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
@@ -440,4 +463,6 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
 	a.suppressDiagnostics = savedSuppressDiagnostics
 	a.suppressOptimizationFacts = savedSuppressOptimizationFacts
+	a.currentNamespace = savedNamespace
+	a.currentUsings = savedUsings
 }
