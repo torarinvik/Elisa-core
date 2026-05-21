@@ -277,6 +277,11 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		}
 		foreignFiles = append([]string{shimPath}, foreignFiles...)
 	}
+	foreignFiles, linkFlags, err = compileCxxForeignFiles(clangPath, foreignFiles, linkFlags, tempDir, stderr)
+	if err != nil {
+		cleanup()
+		return "", func() {}, timing, err
+	}
 
 	linkArgs := make([]string, 0, 5+len(foreignFiles))
 	linkArgs = append(linkArgs, "-I", tempDir)
@@ -307,6 +312,66 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	timing.Link = time.Since(linkStart)
 	return exePath, cleanup, timing, nil
+}
+
+func compileCxxForeignFiles(clangPath string, foreignFiles []string, linkFlags []string, tempDir string, stderr io.Writer) ([]string, []string, error) {
+	cxxFlags, filteredLinkFlags := cxxCompileAndFilteredLinkFlags(linkFlags)
+	if len(cxxFlags) == 0 {
+		return foreignFiles, linkFlags, nil
+	}
+	compiledForeign := make([]string, 0, len(foreignFiles))
+	for index, foreignFile := range foreignFiles {
+		if !isCxxForeignFile(foreignFile) {
+			compiledForeign = append(compiledForeign, foreignFile)
+			continue
+		}
+		objectPath := filepath.Join(tempDir, fmt.Sprintf("foreign_cxx_%d.o", index))
+		compileArgs := append([]string{"-c", foreignFile, "-o", objectPath}, cxxFlags...)
+		compileCmd := exec.Command(clangPath, compileArgs...)
+		compileCmd.Stdout = stderr
+		compileCmd.Stderr = stderr
+		if err := compileCmd.Run(); err != nil {
+			return nil, nil, fmt.Errorf("failed to compile C++ foreign source %s: %w", foreignFile, err)
+		}
+		compiledForeign = append(compiledForeign, objectPath)
+	}
+	return compiledForeign, filteredLinkFlags, nil
+}
+
+func isCxxForeignFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(path))) {
+	case ".cc", ".cpp", ".cxx", ".c++":
+		return true
+	default:
+		return false
+	}
+}
+
+func cxxCompileAndFilteredLinkFlags(linkFlags []string) ([]string, []string) {
+	cxxFlags := []string{}
+	filtered := make([]string, 0, len(linkFlags))
+	for index := 0; index < len(linkFlags); index++ {
+		flag := linkFlags[index]
+		switch {
+		case strings.HasPrefix(flag, "-std=c++"):
+			cxxFlags = append(cxxFlags, flag)
+		case flag == "-I" || flag == "-isystem" || flag == "-iquote":
+			filtered = append(filtered, flag)
+			if index+1 < len(linkFlags) {
+				index++
+				filtered = append(filtered, linkFlags[index])
+				cxxFlags = append(cxxFlags, flag, linkFlags[index])
+			}
+		case strings.HasPrefix(flag, "-I") || strings.HasPrefix(flag, "-D") ||
+			strings.HasPrefix(flag, "-U") || strings.HasPrefix(flag, "-isystem") ||
+			strings.HasPrefix(flag, "-iquote"):
+			filtered = append(filtered, flag)
+			cxxFlags = append(cxxFlags, flag)
+		default:
+			filtered = append(filtered, flag)
+		}
+	}
+	return cxxFlags, filtered
 }
 
 func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, objectPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) error {
