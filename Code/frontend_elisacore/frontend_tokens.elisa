@@ -25,6 +25,8 @@ enum FrontendTokenKind:
     Elif
     Else
     While
+    Break
+    Continue
     Return
     Any
     Heap

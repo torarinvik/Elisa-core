@@ -97,14 +97,14 @@ def typed_runtime_carrier_transfer(pool: mutable ThreadPool&, mu: Mutex, cv: Con
 		return join(move thread) + await task
 
 def typed_lock_scope(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> bool:
-	can Sync.Lock, Sync.Unlock, Sync.Wait:
+	can Sync.Lock, Sync.Unlock, Sync.Wait, Abort.Panic:
 		lock mu as g:
 			while not ready:
 				g <- cond_wait(cv.ref[CondVar&], move g)
 			return g.handle != null
 
 def typed_notify_scope(cv: mutable CondVar, broadcast: bool):
-	can Sync.Notify:
+	can Sync.Notify, Abort.Panic:
 		if broadcast:
 			notify all cv
 		else:

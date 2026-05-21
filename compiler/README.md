@@ -220,6 +220,27 @@ When propagating fallible results, a function may return a broader error set tha
 
 Current lowering in the backend uses integer error codes at runtime; `void | ErrorSet` lowers directly to an error code, while value-carrying fallible functions now return that code plus a hidden payload out-parameter. Inside expressions and locals, the backend still materializes compact `{err, value}` LLVM structs when it needs a first-class error-union value.
 
+## C FFI surface
+
+Elisa can call host C ABI symbols directly with `extern` declarations:
+
+```text
+extern strlen(s: u8&) -> usize
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
+```
+
+Supported FFI features:
+
+- C functions, globals, and opaque external types via `extern`
+- symbol remapping with `@link_name(name)`
+- explicit calling convention annotations with `@callconv(...)`, including `winapi`/`stdcall` paths for Windows APIs
+- C variadic declarations using `...`; variadic tail arguments use C default argument promotions before LLVM lowering, so `bool`, `u8`, `i8`, `u16`, and `i16` are passed as C `int`, and `f32` is passed as C `double`
+- project and target `foreign` source lists for compiling and linking C support files into `build`, `run`, `test`, and `bench` targets
+- project and target `link-flags` plus CLI `-link`, `-L`, and `-l` flags for external libraries
+- C ABI layout verification with `-emit c-bind-check`
+- C header/static archive emission with `-emit header` and `-emit c-archive`
+- opaque C allocation helpers in the standard runtime for SDK-sized structs that Elisa should own by pointer rather than inline layout
+
 ## Regular enums
 
 Regular `enum` values are inline tagged values. Constructors like `Expr.Int(1)` produce an `Expr` directly, so locals, returns, arrays, and optionals can store them without `new[...]`.
@@ -382,7 +403,6 @@ There is also now a self-hosted parser fixture at `../Code/test_programs/json_pa
 - `../Code/benchmarks/json_parser_bench.c` is a standalone checksum-parser benchmark executable for file-backed corpora
 - `../Code/benchmarks/json_parser_ast_bench.c` is the AST-building benchmark executable for the same corpora
 - `../Code/benchmarks/json_parser_parallel_bench.c` is a pool-driven parallel batch benchmark over the same parser exports
-- `runtime/concurrency.c` provides a small cross-platform C FFI shim for host thread/sync primitives; pool/task-group orchestration lives in Elisa std runtime code
 - `test/benchmarks/cmd/gen_synthetic_json` writes the same deterministic corpus family to disk for external benchmarking
 - `scripts/ensure_json_parser_bench_input.sh` creates the default large synthetic corpus on demand and prints the path, which keeps ignored local task runners usable without hand-creating `/tmp/zimdjson-dom-large.json`
 
@@ -394,7 +414,7 @@ go run ./src -O3 -emit header -o /tmp/json_parser.h ../Code/test_programs/json_p
 go run ./src -O3 -emit obj -o /tmp/json_parser.o ../Code/test_programs/json_parser.elisa
 clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_bench
 clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_ast_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_ast_bench
-clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_parallel_bench.c ../Code/benchmarks/json_parser_runtime_shims.c runtime/concurrency.c /tmp/json_parser.o -o /tmp/json_parser_parallel_bench
+clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_parallel_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_parallel_bench
 /tmp/json_parser_bench /tmp/elisacore-large.json 20
 /tmp/json_parser_ast_bench /tmp/elisacore-large.json 20 full
 /tmp/json_parser_parallel_bench /tmp/elisacore-large.json 20 4 checksum

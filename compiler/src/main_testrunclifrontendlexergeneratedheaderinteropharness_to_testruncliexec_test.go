@@ -68,7 +68,6 @@ func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser_generated_harness.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
-	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "json_parser.h")
 	objectPath := filepath.Join(outputDir, "json_parser.o")
@@ -93,7 +92,7 @@ func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 		}
 	}
 
-	compileArgs := []string{"-pthread", "-I", outputDir, harnessPath, shimPath, runtimePath, objectPath, "-o", exePath}
+	compileArgs := []string{"-pthread", "-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -113,7 +112,6 @@ func TestRunCLIJSONParserParallelBenchBuildSmoke(t *testing.T) {
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 	benchPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_parallel_bench.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
-	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "json_parser.h")
 	objectPath := filepath.Join(outputDir, "json_parser.o")
@@ -138,7 +136,7 @@ func TestRunCLIJSONParserParallelBenchBuildSmoke(t *testing.T) {
 		}
 	}
 
-	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, runtimePath, objectPath, "-o", exePath}
+	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, objectPath, "-o", exePath}
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -220,7 +218,6 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 	benchPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_dom_bench.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
-	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "json_parser.h")
 	objectPath := filepath.Join(outputDir, "json_parser.o")
@@ -246,7 +243,7 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 		}
 	}
 
-	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, runtimePath, objectPath, "-o", exePath}
+	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, objectPath, "-o", exePath}
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}

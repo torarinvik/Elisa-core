@@ -162,6 +162,7 @@ type Analyzer struct {
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	currentProgressSummary            *FunctionProgressSummary
+	loopDepth                         int
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentReturnProvenance           regionRefState

@@ -287,6 +287,12 @@ type ReturnStmt struct {
 	Position lexer.Pos
 	Value    Expr
 }
+type BreakStmt struct {
+	Position lexer.Pos
+}
+type ContinueStmt struct {
+	Position lexer.Pos
+}
 type IfStmt struct {
 	Position              lexer.Pos
 	Hint                  BranchHint

@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
@@ -79,7 +80,9 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, UFCSOnly: funcHasAnnotation(n, "ufcs_only")}
 				a.functionTypes[symbolName] = fnType
 				a.funcDeclSymbols[n] = sym
-				a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
+				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {
+					a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
+				}
 				a.functionTypes[sym.Name] = fnType
 				switch n.Name {
 				case "__cast__":
@@ -165,7 +168,9 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				a.functionTypes[qualifiedName] = fnType
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
 				sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(n, "ufcs_only")}
-				a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
+				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {
+					a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
+				}
 				a.functionTypes[sym.Name] = fnType
 			case *ast.ExternVarDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
@@ -185,6 +190,187 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
 		})
+	}
+}
+
+func (a *Analyzer) defineExternImplementationGlobal(visibleName string, sym *Symbol, pos lexer.Pos) bool {
+	if a == nil || a.globalScope == nil || sym == nil || sym.UFCSOnly {
+		return false
+	}
+	existing, ok := a.globalScope.Symbols[visibleName]
+	if !ok || existing == nil || existing.UFCSOnly {
+		return false
+	}
+	switch {
+	case sym.Kind == SymbolExternFunc && existing.Kind == SymbolExternFunc:
+		if !externDeclarationTypesCompatible(existing, sym) {
+			if externFunctionsCanOverload(existing, sym) {
+				return false
+			}
+			a.externDeclarationCompatible(existing, sym, pos)
+			return true
+		}
+		return true
+	case sym.Kind == SymbolFunc && existing.Kind == SymbolExternFunc:
+		if externFunctionCanOverloadWithImplementation(existing, sym) {
+			return false
+		}
+		if !externImplementationTypesCompatible(existing, sym) {
+			a.externImplementationCompatible(existing, sym, pos)
+			return true
+		}
+		a.mergeExternMetadataIntoImplementation(existing, sym)
+		a.globalScope.Symbols[visibleName] = sym
+		return true
+	case sym.Kind == SymbolExternFunc && existing.Kind == SymbolFunc:
+		if externFunctionCanOverloadWithImplementation(sym, existing) {
+			return false
+		}
+		if !externImplementationTypesCompatible(sym, existing) {
+			a.externImplementationCompatible(sym, existing, pos)
+			return true
+		}
+		a.mergeExternMetadataIntoImplementation(sym, existing)
+		a.functionTypes[existing.Name], _ = existing.Type.(*FuncType)
+		return true
+	default:
+		return false
+	}
+}
+
+func externFunctionsCanOverload(left, right *Symbol) bool {
+	leftReceiver, leftOK := receiverOverloadType(left)
+	rightReceiver, rightOK := receiverOverloadType(right)
+	return leftOK && rightOK && !SameType(leftReceiver, rightReceiver)
+}
+
+func externDeclarationTypesCompatible(existingSym, newSym *Symbol) bool {
+	existingFn, existingOK := existingSym.Type.(*FuncType)
+	newFn, newOK := newSym.Type.(*FuncType)
+	if !existingOK || !newOK || existingFn == nil || newFn == nil {
+		return false
+	}
+	return externFuncABICompatible(existingFn, newFn)
+}
+
+func (a *Analyzer) externDeclarationCompatible(existingSym, newSym *Symbol, pos lexer.Pos) bool {
+	existingFn, existingOK := existingSym.Type.(*FuncType)
+	newFn, newOK := newSym.Type.(*FuncType)
+	if !existingOK || !newOK || existingFn == nil || newFn == nil {
+		a.errorf(pos, "extern function %q declaration does not match implementation", existingSym.Name)
+		return false
+	}
+	if !externFuncABICompatible(existingFn, newFn) {
+		a.errorf(pos, "extern function %q declaration does not match implementation", existingSym.Name)
+		return false
+	}
+	return true
+}
+
+func externImplementationTypesCompatible(externSym, implSym *Symbol) bool {
+	externFn, externOK := externSym.Type.(*FuncType)
+	implFn, implOK := implSym.Type.(*FuncType)
+	if !externOK || !implOK || externFn == nil || implFn == nil {
+		return false
+	}
+	if externFn.IntrinsicName != "" {
+		return false
+	}
+	return SameType(externFn, implFn)
+}
+
+func (a *Analyzer) externImplementationCompatible(externSym, implSym *Symbol, pos lexer.Pos) bool {
+	externFn, externOK := externSym.Type.(*FuncType)
+	implFn, implOK := implSym.Type.(*FuncType)
+	if !externOK || !implOK || externFn == nil || implFn == nil {
+		a.errorf(pos, "extern function %q declaration does not match implementation", externSym.Name)
+		return false
+	}
+	if externFn.IntrinsicName != "" {
+		a.errorf(pos, "extern intrinsic function %q cannot be implemented in Elisa", externSym.Name)
+		return false
+	}
+	if !SameType(externFn, implFn) {
+		a.errorf(pos, "extern function %q declaration does not match implementation", externSym.Name)
+		return false
+	}
+	return true
+}
+
+func externFunctionCanOverloadWithImplementation(externSym, implSym *Symbol) bool {
+	externFn, externOK := externSym.Type.(*FuncType)
+	implFn, implOK := implSym.Type.(*FuncType)
+	if !externOK || !implOK || externFn == nil || implFn == nil {
+		return false
+	}
+	if SameType(externFn, implFn) {
+		return false
+	}
+	_, externReceiver := receiverOverloadType(externSym)
+	implReceiverType, implReceiver := receiverOverloadType(implSym)
+	if !externReceiver || !implReceiver {
+		return false
+	}
+	_, implRefReceiver := implReceiverType.(*RefType)
+	return implRefReceiver
+}
+
+func externFuncABICompatible(left, right *FuncType) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if len(left.Params) != len(right.Params) || left.Variadic != right.Variadic {
+		return false
+	}
+	if left.CallConv != "" && right.CallConv != "" && left.CallConv != right.CallConv {
+		return false
+	}
+	if !externTypeABICompatible(left.Return, right.Return) {
+		return false
+	}
+	for i := range left.Params {
+		if !externTypeABICompatible(left.Params[i], right.Params[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func externTypeABICompatible(left, right Type) bool {
+	if SameType(left, right) {
+		return true
+	}
+	leftRef, leftRefOK := left.(*RefType)
+	rightRef, rightRefOK := right.(*RefType)
+	if leftRefOK && rightRefOK {
+		if leftRef.State != rightRef.State {
+			return false
+		}
+		if isVoidType(leftRef.Elem) {
+			return true
+		}
+		if isVoidType(rightRef.Elem) {
+			return true
+		}
+		return SameType(leftRef.Elem, rightRef.Elem)
+	}
+	return false
+}
+
+func (a *Analyzer) mergeExternMetadataIntoImplementation(externSym, implSym *Symbol) {
+	if externSym == nil || implSym == nil {
+		return
+	}
+	if implSym.LinkName == "" {
+		implSym.LinkName = externSym.LinkName
+	}
+	externFn, externOK := externSym.Type.(*FuncType)
+	implFn, implOK := implSym.Type.(*FuncType)
+	if !externOK || !implOK || externFn == nil || implFn == nil {
+		return
+	}
+	if implFn.CallConv == "" {
+		implFn.CallConv = externFn.CallConv
 	}
 }
 

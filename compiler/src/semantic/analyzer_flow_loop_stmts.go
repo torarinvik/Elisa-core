@@ -124,7 +124,9 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	a.loopDepth++
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
+	a.loopDepth--
 	a.currentIndexBounds = savedIndexBounds
 	if !blockDefinitelyExits(stmt.Body) {
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
@@ -395,6 +397,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 	var bodySnapshot affineFlowSnapshot
+	a.loopDepth++
 	if stmt.Filter != nil {
 		bodySnapshot = a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.Filter, true)
 	} else if stmt.WhereFilter != nil {
@@ -402,6 +405,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	} else {
 		bodySnapshot = a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	}
+	a.loopDepth--
 	if !blockDefinitelyExits(stmt.Body) {
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)

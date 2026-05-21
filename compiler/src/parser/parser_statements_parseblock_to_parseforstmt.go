@@ -158,6 +158,16 @@ func (p *Parser) parseStmt() ast.Stmt {
 	switch p.peek() {
 	case lexer.TOKEN_RETURN:
 		return p.parseReturn()
+	case lexer.TOKEN_BREAK:
+		pos := p.cur().Pos
+		p.advance()
+		p.expectNewline()
+		return &ast.BreakStmt{Position: pos}
+	case lexer.TOKEN_CONTINUE:
+		pos := p.cur().Pos
+		p.advance()
+		p.expectNewline()
+		return &ast.ContinueStmt{Position: pos}
 	case lexer.TOKEN_PASS:
 		return p.parsePass()
 	case lexer.TOKEN_PANIC:

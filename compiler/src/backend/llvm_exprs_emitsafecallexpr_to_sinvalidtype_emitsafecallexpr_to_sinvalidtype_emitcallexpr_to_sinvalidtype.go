@@ -239,13 +239,48 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 			args = append(args, value)
 			continue
 		}
-		value, _, err := s.emitCallArg(arg, expected, funcType, i)
+		value, actual, err := s.emitCallArg(arg, expected, funcType, i)
 		if err != nil {
 			return nil, nil, err
+		}
+		if backendIsCVariadicTailArg(funcType, i) {
+			value, _, err = s.promoteCVariadicArg(value, actual)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 		args = append(args, value)
 	}
 	return s.emitResolvedCall(callee, funcType, s.directCallTarget(expr.Func), args)
+}
+
+func backendIsCVariadicTailArg(fnType *semantic.FuncType, index int) bool {
+	return fnType != nil && fnType.Variadic && index >= len(fnType.Params)
+}
+
+func (s *functionState) promoteCVariadicArg(value C.LLVMValueRef, actual semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if value == nil || actual == nil || s == nil || s.g == nil || s.g.result == nil {
+		return value, actual, nil
+	}
+	if semantic.IsBoolType(actual) {
+		i32Type := s.g.result.NamedTypes["i32"]
+		i32LLVM, err := s.g.lowerType(i32Type)
+		if err != nil {
+			return nil, nil, err
+		}
+		return C.LLVMBuildZExt(s.builder, value, i32LLVM, cStringFree("vararg.bool")), i32Type, nil
+	}
+	if builtin, ok := numericCastType(actual).(*semantic.BuiltinType); ok && builtin != nil && builtin.Name == "f32" {
+		f64Type := s.g.result.NamedTypes["f64"]
+		promoted, err := s.coerceValue(value, actual, f64Type)
+		return promoted, f64Type, err
+	}
+	if _, width, ok := semantic.BitIntInfo(numericCastType(actual)); ok && width < 32 {
+		i32Type := s.g.result.NamedTypes["i32"]
+		promoted, err := s.coerceValue(value, actual, i32Type)
+		return promoted, i32Type, err
+	}
+	return value, actual, nil
 }
 
 func backendLoweredCallArgsForFunc(expr *ast.CallExpr, funcType *semantic.FuncType) []ast.Expr {

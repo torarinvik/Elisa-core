@@ -66,15 +66,71 @@ enum MemoryOrder:
 # ------------------------------------------------------------
 
 static if ELISA_TARGET_OS_POSIX:
+	@c_opaque(pthread.h, pthread_mutex_t)
+	extern PthreadMutexT
+
+	@c_opaque(pthread.h, pthread_cond_t)
+	extern PthreadCondT
+
 	extern pthread_create(thread: mutable uintptr&, attr: void&?, start_routine: void&, arg: void&?) -> int effects[Thread.Spawn]
 	extern pthread_join(thread: uintptr, retval: mutable void&?) -> int effects[Thread.Join]
 	extern pthread_detach(thread: uintptr) -> int effects[Thread.Detach]
+	extern sched_yield() -> int effects[Thread.Yield]
+	extern usleep(usec: u32) -> int effects[Thread.Sleep]
 
+	extern pthread_mutex_init(mutex: mutable PthreadMutexT&, attr: void&?) -> int effects[Memory.Allocate]
+	extern pthread_mutex_destroy(mutex: mutable PthreadMutexT&) -> int effects[Memory.Release]
 	extern pthread_mutex_lock(mutex: void&) -> int effects[Sync.Lock]
 	extern pthread_mutex_unlock(mutex: void&) -> int effects[Sync.Unlock]
+	extern pthread_cond_init(cond: mutable PthreadCondT&, attr: void&?) -> int effects[Memory.Allocate]
+	extern pthread_cond_destroy(cond: mutable PthreadCondT&) -> int effects[Memory.Release]
 	extern pthread_cond_wait(cond: void&, mutex: void&) -> int effects[Sync.Wait]
 	extern pthread_cond_signal(cond: void&) -> int effects[Sync.Notify]
 	extern pthread_cond_broadcast(cond: void&) -> int effects[Sync.Notify]
+
+	def mutex_init(out: mutable Mutex&) -> void:
+		can Memory.Allocate, Memory.Release:
+			raw: mutable heap void&? = elisa_c_opaque_alloc("PthreadMutexT")
+			if raw == null:
+				out.handle <- null
+				return
+			status: int = pthread_mutex_init(raw.cast[mutable PthreadMutexT&], null)
+			if status != 0:
+				elisa_c_opaque_free(raw.cast[heap void&])
+				out.handle <- null
+				return
+			out.handle <- raw.cast[void&]
+
+	def mutex_destroy(mu: mutable Mutex&) -> void:
+		can Memory.Release:
+			if mu.handle == null:
+				return
+			raw: mutable heap void& = mu.handle.cast[mutable heap void&]
+			_ = pthread_mutex_destroy(raw.cast[mutable PthreadMutexT&])
+			elisa_c_opaque_free(raw.cast[heap void&])
+			mu.handle <- null
+
+	def condvar_init(out: mutable CondVar&) -> void:
+		can Memory.Allocate, Memory.Release:
+			raw: mutable heap void&? = elisa_c_opaque_alloc("PthreadCondT")
+			if raw == null:
+				out.handle <- null
+				return
+			status: int = pthread_cond_init(raw.cast[mutable PthreadCondT&], null)
+			if status != 0:
+				elisa_c_opaque_free(raw.cast[heap void&])
+				out.handle <- null
+				return
+			out.handle <- raw.cast[void&]
+
+	def condvar_destroy(cv: mutable CondVar&) -> void:
+		can Memory.Release:
+			if cv.handle == null:
+				return
+			raw: mutable heap void& = cv.handle.cast[mutable heap void&]
+			_ = pthread_cond_destroy(raw.cast[mutable PthreadCondT&])
+			elisa_c_opaque_free(raw.cast[heap void&])
+			cv.handle <- null
 
 	def ctx_platform_mutex_lock(handle: void&) -> int:
 		can Sync.Lock:
@@ -96,6 +152,36 @@ static if ELISA_TARGET_OS_POSIX:
 		can Sync.Notify:
 			return pthread_cond_broadcast(cond)
 
+	def ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> int:
+		can Thread.Spawn:
+			return pthread_create(thread, null, entry, arg)
+
+	def ctx_thread_join(thread: uintptr) -> int:
+		can Thread.Join:
+			ret: mutable void&? = null
+			return pthread_join(thread, ret.ref[mutable void&?])
+
+	def ctx_thread_detach(thread: uintptr) -> int:
+		can Thread.Detach:
+			return pthread_detach(thread)
+
+	def thread_yield() -> void:
+		can Thread.Yield:
+			_ = sched_yield()
+
+	def thread_sleep_usec(usec: u64) -> void:
+		can Thread.Sleep:
+			remaining: mutable u64 = usec
+			max_chunk32: u32 = 0xffffffff
+			max_chunk64: u64 = max_chunk32.u64()
+			trusted Unsafe.AssumeProgress:
+				while remaining > 0:
+					chunk: mutable u32 = max_chunk32
+					if remaining < max_chunk64:
+						chunk <- remaining.u32()
+					_ = usleep(chunk)
+					remaining <- remaining - chunk.u64()
+
 static elif ELISA_TARGET_OS_WINDOWS:
 	@c_opaque(windows.h, CRITICAL_SECTION)
 	extern Win32CriticalSection
@@ -104,6 +190,15 @@ static elif ELISA_TARGET_OS_WINDOWS:
 	extern Win32ConditionVariable
 
 	const WIN32_WAIT_INFINITE = 0xffffffffu32
+
+	@callconv(winapi)
+	extern InitializeCriticalSection(section: mutable Win32CriticalSection&) -> void effects[Memory.Allocate]
+
+	@callconv(winapi)
+	extern DeleteCriticalSection(section: mutable Win32CriticalSection&) -> void effects[Memory.Release]
+
+	@callconv(winapi)
+	extern InitializeConditionVariable(cond: mutable Win32ConditionVariable&) -> void effects[Memory.Allocate]
 
 	@callconv(winapi)
 	extern EnterCriticalSection(section: mutable Win32CriticalSection&) -> void effects[Sync.Lock]
@@ -119,6 +214,40 @@ static elif ELISA_TARGET_OS_WINDOWS:
 
 	@callconv(winapi)
 	extern WakeAllConditionVariable(cond: mutable Win32ConditionVariable&) -> void effects[Sync.Notify]
+
+	def mutex_init(out: mutable Mutex&) -> void:
+		can Memory.Allocate:
+			raw: mutable heap void&? = elisa_c_opaque_alloc("Win32CriticalSection")
+			if raw == null:
+				out.handle <- null
+				return
+			InitializeCriticalSection(raw.cast[mutable Win32CriticalSection&])
+			out.handle <- raw.cast[void&]
+
+	def mutex_destroy(mu: mutable Mutex&) -> void:
+		can Memory.Release:
+			if mu.handle == null:
+				return
+			raw: mutable heap void& = mu.handle.cast[mutable heap void&]
+			DeleteCriticalSection(raw.cast[mutable Win32CriticalSection&])
+			elisa_c_opaque_free(raw.cast[heap void&])
+			mu.handle <- null
+
+	def condvar_init(out: mutable CondVar&) -> void:
+		can Memory.Allocate:
+			raw: mutable heap void&? = elisa_c_opaque_alloc("Win32ConditionVariable")
+			if raw == null:
+				out.handle <- null
+				return
+			InitializeConditionVariable(raw.cast[mutable Win32ConditionVariable&])
+			out.handle <- raw.cast[void&]
+
+	def condvar_destroy(cv: mutable CondVar&) -> void:
+		can Memory.Release:
+			if cv.handle == null:
+				return
+			elisa_c_opaque_free(cv.handle.cast[heap void&])
+			cv.handle <- null
 
 	def ctx_platform_mutex_lock(handle: void&) -> int:
 		can Sync.Lock:
@@ -153,24 +282,30 @@ static elif ELISA_TARGET_OS_WINDOWS:
 # Cross-platform runtime FFI handles
 # ------------------------------------------------------------
 
-extern ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> int effects[Thread.Spawn]
-extern ctx_thread_join(thread: uintptr) -> int effects[Thread.Join]
-extern ctx_thread_detach(thread: uintptr) -> int effects[Thread.Detach]
+static if ELISA_TARGET_OS_WINDOWS:
+	extern ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> int effects[Thread.Spawn]
+	extern ctx_thread_join(thread: uintptr) -> int effects[Thread.Join]
+	extern ctx_thread_detach(thread: uintptr) -> int effects[Thread.Detach]
+extern elisa_native_callback_ptr(name: u8&) -> void&?
+extern elisa_native_callback_call_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32
+extern elisa_native_callback_call_i32_voidp(name: u8&, arg: void&?, fallback: i32) -> i32
+extern elisa_native_callback_call_usize_voidp(name: u8&, arg: void&?, fallback: usize) -> usize
+extern elisa_native_callback_call_isize_voidp(name: u8&, arg: void&?, fallback: isize) -> isize
+extern elisa_native_callback_spawn_join_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32 effects[Thread.Spawn, Thread.Join]
+extern elisa_native_callback_context_new_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> mutable heap void&? effects[Memory.Allocate]
+extern elisa_native_callback_context_entry_u32_voidp() -> void&?
+extern elisa_native_callback_context_start_u32_voidp(ctx: mutable heap void&?, thread: mutable uintptr&) -> int effects[Thread.Spawn]
+extern elisa_native_callback_context_join_u32_voidp(handle: uintptr, ctx: mutable heap void&?, fallback: u32) -> u32 effects[Thread.Join]
+extern elisa_native_callback_context_spawn_join_u32_voidp(ctx: mutable heap void&?, fallback: u32) -> u32 effects[Thread.Spawn, Thread.Join]
+extern elisa_native_callback_context_result_u32(ctx: mutable heap void&?, fallback: u32) -> u32
+extern elisa_native_callback_context_free(ctx: mutable heap void&?) -> void effects[Memory.Release]
 extern elisa_c_opaque_alloc(type_name: u8&) -> mutable heap void&? effects[Memory.Allocate]
 extern elisa_c_opaque_free(ptr: heap void&) -> void effects[Memory.Release]
 extern elisa_c_opaque_size(type_name: u8&) -> usize
 extern elisa_c_opaque_align(type_name: u8&) -> usize
-extern mutex_init(out: mutable Mutex&) -> void effects[Memory.Allocate]
-extern mutex_destroy(mu: mutable Mutex&) -> void effects[Memory.Release]
-extern ctx_mutex_lock(mutex: void&) -> int effects[Sync.Lock]
-extern ctx_mutex_unlock(mutex: void&) -> int effects[Sync.Unlock]
-extern condvar_init(out: mutable CondVar&) -> void effects[Memory.Allocate]
-extern condvar_destroy(cv: mutable CondVar&) -> void effects[Memory.Release]
-extern ctx_cond_wait(cond: void&, mutex: void&) -> int effects[Sync.Wait]
-extern ctx_cond_signal(cond: void&) -> int effects[Sync.Notify]
-extern ctx_cond_broadcast(cond: void&) -> int effects[Sync.Notify]
-extern thread_yield() -> void effects[Thread.Yield]
-extern thread_sleep_usec(usec: u64) -> void effects[Thread.Sleep]
+static if ELISA_TARGET_OS_WINDOWS:
+	extern thread_yield() -> void effects[Thread.Yield]
+	extern thread_sleep_usec(usec: u64) -> void effects[Thread.Sleep]
 
 # ------------------------------------------------------------
 # Typed wrapper helpers
@@ -191,7 +326,7 @@ def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
 	return box
 
 def mutex() -> Mutex:
-	can Memory.Allocate:
+	can Memory.Allocate, Memory.Release:
 		out: Mutex = zeroed
 		mutex_init(out.ref[mutable Mutex&])
 		return move out
@@ -222,7 +357,7 @@ def mutex_unlock(g: MutexGuard[Held]):
 			panic("mutex unlock failed")
 
 def condvar() -> CondVar:
-	can Memory.Allocate:
+	can Memory.Allocate, Memory.Release:
 		out: CondVar = zeroed
 		condvar_init(out.ref[mutable CondVar&])
 		return move out
@@ -290,6 +425,73 @@ def join_raw(thread: Thread[void&?, Joinable]) -> void&?:
 		_ = move thread
 		ctx_concurrency_join_handle(handle)
 		return state_bits
+
+def native_callback_ptr(name: u8&) -> void&?:
+	return elisa_native_callback_ptr(name)
+
+def native_callback_call_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32:
+	return elisa_native_callback_call_u32_voidp(name, arg, fallback)
+
+def native_callback_call_i32_voidp(name: u8&, arg: void&?, fallback: i32) -> i32:
+	return elisa_native_callback_call_i32_voidp(name, arg, fallback)
+
+def native_callback_call_usize_voidp(name: u8&, arg: void&?, fallback: usize) -> usize:
+	return elisa_native_callback_call_usize_voidp(name, arg, fallback)
+
+def native_callback_call_isize_voidp(name: u8&, arg: void&?, fallback: isize) -> isize:
+	return elisa_native_callback_call_isize_voidp(name, arg, fallback)
+
+def native_callback_spawn_join_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32:
+	can Thread.Spawn, Thread.Join:
+		return elisa_native_callback_spawn_join_u32_voidp(name, arg, fallback)
+
+def native_callback_context_new_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> mutable heap void&?:
+	can Memory.Allocate:
+		return elisa_native_callback_context_new_u32_voidp(name, arg, fallback)
+
+def native_callback_context_entry_u32_voidp() -> void&?:
+	return elisa_native_callback_context_entry_u32_voidp()
+
+def native_callback_context_start_u32_voidp(ctx: mutable heap void&?, thread: mutable uintptr&) -> int:
+	can Thread.Spawn:
+		return elisa_native_callback_context_start_u32_voidp(ctx, thread)
+
+def native_callback_context_join_u32_voidp(handle: uintptr, ctx: mutable heap void&?, fallback: u32) -> u32:
+	can Thread.Join:
+		return elisa_native_callback_context_join_u32_voidp(handle, ctx, fallback)
+
+def native_callback_context_spawn_join_u32_voidp(ctx: mutable heap void&?, fallback: u32) -> u32:
+	can Thread.Spawn, Thread.Join:
+		return elisa_native_callback_context_spawn_join_u32_voidp(ctx, fallback)
+
+def native_callback_context_result_u32(ctx: mutable heap void&?, fallback: u32) -> u32:
+	return elisa_native_callback_context_result_u32(ctx, fallback)
+
+def native_callback_context_free(ctx: mutable heap void&?):
+	can Memory.Release:
+		elisa_native_callback_context_free(ctx)
+
+def spawn_native_callback_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> Thread[u32, Joinable]:
+	can Thread.Spawn, Memory.Allocate, Memory.Release, Abort.Panic:
+		ctx: mutable heap void&? = native_callback_context_new_u32_voidp(name, arg, fallback)
+		if ctx == null:
+			panic("native callback context allocation failed")
+		out: Thread[u32, Joinable] = zeroed
+		status: int = native_callback_context_start_u32_voidp(ctx, out.handle.ref[mutable uintptr&])
+		if status != 0:
+			native_callback_context_free(ctx)
+			panic("native callback context start failed")
+		out.state <- ctx.cast[void&]
+		return move out
+
+def join_native_callback_u32(thread: Thread[u32, Joinable], fallback: u32) -> u32:
+	can Thread.Join, Memory.Release, Abort.Panic:
+		handle: uintptr = thread.handle
+		state_bits: void&? = thread.state
+		_ = move thread
+		result: u32 = native_callback_context_join_u32_voidp(handle, state_bits.cast[mutable heap void&?], fallback)
+		native_callback_context_free(state_bits.cast[mutable heap void&?])
+		return result
 
 def detach_raw(thread: Thread[void&?, Joinable]):
 	can Thread.Detach, Abort.Panic:

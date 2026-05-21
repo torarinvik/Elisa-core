@@ -220,6 +220,8 @@ func registerBundleTypes() {
 		gob.Register(&ast.MoveBindStmt{})
 		gob.Register(&ast.DeferStmt{})
 		gob.Register(&ast.ReturnStmt{})
+		gob.Register(&ast.BreakStmt{})
+		gob.Register(&ast.ContinueStmt{})
 		gob.Register(&ast.IfStmt{})
 		gob.Register(&ast.WhileStmt{})
 		gob.Register(&ast.ForStmt{})

@@ -66,18 +66,19 @@ type projectDefinition struct {
 	Targets               map[string]projectTargetDefinition `json:"targets"`
 }
 type projectTargetDefinition struct {
-	Entry        string   `json:"entry"`
-	Emit         string   `json:"emit,omitempty"`
-	RunEmit      string   `json:"run-emit,omitempty"`
-	Output       string   `json:"output,omitempty"`
-	Dependencies []string `json:"dependencies,omitempty"`
-	IncludeDirs  []string `json:"include-dirs,omitempty"`
-	Foreign      []string `json:"foreign,omitempty"`
-	LinkFlags    []string `json:"link-flags,omitempty"`
-	Exec         []string `json:"exec,omitempty"`
-	Opt          string   `json:"opt,omitempty"`
-	TargetTriple string   `json:"target-triple,omitempty"`
-	PackedABI    string   `json:"packed-abi,omitempty"`
+	Entry                string   `json:"entry"`
+	Emit                 string   `json:"emit,omitempty"`
+	RunEmit              string   `json:"run-emit,omitempty"`
+	Output               string   `json:"output,omitempty"`
+	Dependencies         []string `json:"dependencies,omitempty"`
+	IncludeDirs          []string `json:"include-dirs,omitempty"`
+	Foreign              []string `json:"foreign,omitempty"`
+	LinkFlags            []string `json:"link-flags,omitempty"`
+	InheritProjectNative *bool    `json:"inherit-project-native,omitempty"`
+	Exec                 []string `json:"exec,omitempty"`
+	Opt                  string   `json:"opt,omitempty"`
+	TargetTriple         string   `json:"target-triple,omitempty"`
+	PackedABI            string   `json:"packed-abi,omitempty"`
 }
 type manifestDefinition struct {
 	Provides     string   `json:"provides"`

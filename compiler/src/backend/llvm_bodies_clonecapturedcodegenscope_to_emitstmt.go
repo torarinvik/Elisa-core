@@ -392,13 +392,30 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return fmt.Errorf("unknown region %q during LLVM lowering", n.Name)
 		}
 		return s.emitArenaFree(binding.ptr, binding.typ)
-	case *ast.AssignStmt:
-		if n.Optional {
-			return s.emitOptionalAssignStmt(n)
-		}
-		if fieldTarget, ok := n.Target.(*ast.FieldExpr); ok {
-			if handled, err := s.emitBitGroupMemberAssign(fieldTarget, n.Value); handled {
-				if err != nil {
+		case *ast.AssignStmt:
+			if n.Optional {
+				return s.emitOptionalAssignStmt(n)
+			}
+			if identTarget, ok := n.Target.(*ast.Ident); ok {
+				if binding, ok := s.lookupBinding(identTarget.Name); ok && !binding.mutable {
+					if _, ok := binding.typ.(*semantic.RefType); ok {
+						slotPtr, err := s.loadValue(binding.ptr, binding.typ, identTarget.Name+".ref.slot")
+						if err != nil {
+							return err
+						}
+						value, _, err := s.emitExpr(n.Value, binding.typ)
+						if err != nil {
+							return err
+						}
+						C.LLVMBuildStore(s.builder, value, slotPtr)
+						s.invalidatePackedReadCaches()
+						return nil
+					}
+				}
+			}
+			if fieldTarget, ok := n.Target.(*ast.FieldExpr); ok {
+				if handled, err := s.emitBitGroupMemberAssign(fieldTarget, n.Value); handled {
+					if err != nil {
 					return err
 				}
 				s.invalidatePackedReadCaches()
@@ -498,6 +515,28 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		return s.emitFunctionReturn(value, valueType)
+	case *ast.BreakStmt:
+		if len(s.breakTargets) == 0 {
+			return fmt.Errorf("break outside loop during LLVM lowering")
+		}
+		if err := s.emitActiveScopedCleanup(); err != nil {
+			return err
+		}
+		if !s.currentBlockTerminated() {
+			C.LLVMBuildBr(s.builder, s.breakTargets[len(s.breakTargets)-1])
+		}
+		return nil
+	case *ast.ContinueStmt:
+		if len(s.continueTargets) == 0 {
+			return fmt.Errorf("continue outside loop during LLVM lowering")
+		}
+		if err := s.emitActiveScopedCleanup(); err != nil {
+			return err
+		}
+		if !s.currentBlockTerminated() {
+			C.LLVMBuildBr(s.builder, s.continueTargets[len(s.continueTargets)-1])
+		}
+		return nil
 	case *ast.IfStmt:
 		return s.emitIf(n)
 	case *ast.MatchStmt:

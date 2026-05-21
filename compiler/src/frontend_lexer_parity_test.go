@@ -196,7 +196,7 @@ func TestRunCLIFrontendLexerChecksumMatchesGoLexer(t *testing.T) {
 		{name: "string-and-comment", path: writeCase("string_comment.elisa", "\"hello\\nworld\" # comment\n")},
 		{name: "char-literals", path: writeCase("char_literals.elisa", "'a' '\\n' '\\x41' '\\u0041'\n")},
 		{name: "scope-qualified", path: writeCase("scope_qualified.elisa", "const module OS:\n    WIN = 1\nreturn OS::WIN\n")},
-		{name: "all-keywords", path: writeCase("all_keywords.elisa", "as if in or and def not to try catch elif else enum heap null pass repr tail true with const error false match panic raise stack while export extern global packed return sizeof alignof offsetof static struct zeroed aligned mutable context region new destroy\n")},
+			{name: "all-keywords", path: writeCase("all_keywords.elisa", "as if in or and def not to try catch elif else enum heap null pass repr tail true with break const error false match panic raise stack while export extern global packed return sizeof continue alignof offsetof static struct zeroed aligned mutable context region new destroy\n")},
 		{name: "self-hosted-source", path: filepath.Join(repoRoot, "Code", "frontend_elisacore", "frontend_lexer.elisa")},
 	}
 

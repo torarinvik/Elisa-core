@@ -10,11 +10,10 @@ import (
 func TestRunCLIStdThreadingRuntimeSmoke(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_threading_smoke.elisa")
-	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "concurrency.c")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "test", fixturePath, "-link", runtimePath}, &stdout, &stderr)
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("std threading runtime smoke failed with exit code %d\nstdout:\n%s\nstderr:\n%s", exitCode, stdout.String(), stderr.String())
 	}

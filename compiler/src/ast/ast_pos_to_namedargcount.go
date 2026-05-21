@@ -150,6 +150,8 @@ func (n *TupleBindStmt) Pos() lexer.Pos                { return n.Position }
 func (n *MoveBindStmt) Pos() lexer.Pos                 { return n.Position }
 func (n *DeferStmt) Pos() lexer.Pos                    { return n.Position }
 func (n *ReturnStmt) Pos() lexer.Pos                   { return n.Position }
+func (n *BreakStmt) Pos() lexer.Pos                    { return n.Position }
+func (n *ContinueStmt) Pos() lexer.Pos                 { return n.Position }
 func (n *IfStmt) Pos() lexer.Pos                       { return n.Position }
 func (n *WhileStmt) Pos() lexer.Pos                    { return n.Position }
 func (n *ForStmt) Pos() lexer.Pos                      { return n.Position }
@@ -351,6 +353,8 @@ func (*TupleBindStmt) nodeTag()                        {}
 func (*MoveBindStmt) nodeTag()                         {}
 func (*DeferStmt) nodeTag()                            {}
 func (*ReturnStmt) nodeTag()                           {}
+func (*BreakStmt) nodeTag()                            {}
+func (*ContinueStmt) nodeTag()                         {}
 func (*IfStmt) nodeTag()                               {}
 func (*WhileStmt) nodeTag()                            {}
 func (*ForStmt) nodeTag()                              {}
@@ -553,6 +557,8 @@ func (*TupleBindStmt) stmtTag()                        {}
 func (*MoveBindStmt) stmtTag()                         {}
 func (*DeferStmt) stmtTag()                            {}
 func (*ReturnStmt) stmtTag()                           {}
+func (*BreakStmt) stmtTag()                            {}
+func (*ContinueStmt) stmtTag()                         {}
 func (*IfStmt) stmtTag()                               {}
 func (*WhileStmt) stmtTag()                            {}
 func (*ForStmt) stmtTag()                              {}

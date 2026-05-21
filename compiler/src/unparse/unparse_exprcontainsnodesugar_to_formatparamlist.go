@@ -179,6 +179,10 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			return
 		}
 		f.writePrefixedMultiline(level, "return ", formatExpr(n.Value))
+	case *ast.BreakStmt:
+		f.writeLine(level, "break")
+	case *ast.ContinueStmt:
+		f.writeLine(level, "continue")
 	case *ast.IfStmt:
 		f.writeLine(level, formatIfHeader("if", n.Hint, n.Cond))
 		for _, stmt := range n.Then {

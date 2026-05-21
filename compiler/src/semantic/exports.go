@@ -13,12 +13,15 @@ func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			qualifiedName := joinQualifiedName(scoped.Namespace, aliasDecl.Name)
-			if _, exists := a.namedTypes[qualifiedName]; exists {
-				a.errorf(aliasDecl.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
-				return
-			}
 			resolved := a.resolveType(aliasDecl.Target)
 			if IsInvalidType(resolved) {
+				return
+			}
+			if existing, exists := a.namedTypes[qualifiedName]; exists {
+				if SameType(existing, resolved) {
+					return
+				}
+				a.errorf(aliasDecl.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 				return
 			}
 			if containsTypeParam(resolved) {

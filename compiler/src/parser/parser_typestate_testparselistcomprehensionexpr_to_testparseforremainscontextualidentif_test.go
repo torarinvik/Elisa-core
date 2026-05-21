@@ -180,6 +180,29 @@ func TestParsePostfixShorthandCastFormatsAsPostfixShorthand(t *testing.T) {
 		t.Fatalf("expected unparse to preserve postfix cast shorthand, got:\n%s", formatted)
 	}
 }
+
+func TestParseSignedPostfixShorthandCastFormatsAsPostfixShorthand(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: u64) -> s64:\n    return value.s64()\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cast, ok := ret.Value.(*ast.CastExpr)
+	if !ok {
+		t.Fatalf("expected cast expr, got %T", ret.Value)
+	}
+	if cast.Origin != ast.CastExprOriginPostfixShorthand {
+		t.Fatalf("expected postfix shorthand cast origin, got %v", cast.Origin)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "return value.s64()") {
+		t.Fatalf("expected unparse to preserve signed postfix cast shorthand, got:\n%s", formatted)
+	}
+}
+
 func TestParsePostfixOptionalShorthandCastFormatsAsPostfixShorthand(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(value: i64) -> u32?:\n    return value.u32?()\n")
 	if len(errs) != 0 {

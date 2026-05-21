@@ -202,10 +202,16 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.scope = condScope
+		s.breakTargets = append(s.breakTargets, exitBB)
+		s.continueTargets = append(s.continueTargets, condBB)
 		if err := s.emitBlock(stmt.Body, true); err != nil {
+			s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+			s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
 			s.scope = parentScope
 			return err
 		}
+		s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+		s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
 		if !s.currentBlockTerminated() {
 			C.LLVMBuildBr(s.builder, condBB)
 		}
@@ -235,9 +241,15 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 	s.buildCondBrWithHint(condValue, bodyBB, exitBB, stmt.Hint)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	s.breakTargets = append(s.breakTargets, exitBB)
+	s.continueTargets = append(s.continueTargets, condBB)
 	if err := s.emitBlock(stmt.Body, true); err != nil {
+		s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+		s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
 		return err
 	}
+	s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+	s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
 	if !s.currentBlockTerminated() {
 		C.LLVMBuildBr(s.builder, condBB)
 	}
@@ -298,6 +310,7 @@ func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
 
 	condBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("for.cond"))
 	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("for.body"))
+	stepBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("for.step"))
 	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("for.end"))
 
 	C.LLVMBuildCondBr(s.builder, hasStep, condBB, exitBB)
@@ -322,11 +335,22 @@ func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
 	s.pushScope()
 	s.defineBinding(stmt.Name, valueBinding{ptr: loopVarAlloca, typ: loopType})
 	C.LLVMBuildStore(s.builder, currentValue, loopVarAlloca)
+	s.breakTargets = append(s.breakTargets, exitBB)
+	s.continueTargets = append(s.continueTargets, stepBB)
 	if err := s.emitBlock(stmt.Body, true); err != nil {
+		s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+		s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
 		s.popScope()
 		return err
 	}
+	s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+	s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
 	s.popScope()
+	if !s.currentBlockTerminated() {
+		C.LLVMBuildBr(s.builder, stepBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, stepBB)
 	if !s.currentBlockTerminated() {
 		nextAscending := C.LLVMBuildAdd(s.builder, currentValue, stepValue, cStringFree("for.next.asc"))
 		nextDescending := C.LLVMBuildSub(s.builder, currentValue, stepValue, cStringFree("for.next.desc"))

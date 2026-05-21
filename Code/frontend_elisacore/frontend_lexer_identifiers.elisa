@@ -42,7 +42,8 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
         return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 10, text)
 
     if text.len == 5:
-        entries: FrontendKeywordEntry[9] = [
+        entries: FrontendKeywordEntry[10] = [
+            FrontendKeywordEntry("break", FrontendTokenKind.Break),
             FrontendKeywordEntry("catch", FrontendTokenKind.Catch),
             FrontendKeywordEntry("const", FrontendTokenKind.Const),
             FrontendKeywordEntry("error", FrontendTokenKind.Error),
@@ -53,7 +54,7 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
             FrontendKeywordEntry("stack", FrontendTokenKind.Stack),
             FrontendKeywordEntry("while", FrontendTokenKind.While)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 9, text)
+        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 10, text)
 
     if text.len == 6:
         entries: FrontendKeywordEntry[9] = [
@@ -79,12 +80,13 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
         return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 4, text)
 
     if text.len == 8:
-        entries: FrontendKeywordEntry[1] = [
+        entries: FrontendKeywordEntry[2] = [
+            FrontendKeywordEntry("continue", FrontendTokenKind.Continue),
             FrontendKeywordEntry("offsetof", FrontendTokenKind.Offsetof)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 1, text)
+        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 2, text)
 
     return FrontendTokenKind.Ident
 @inline(always)
 def frontend_maybe_keyword_first_char(ch: i64) -> bool:
-    return ch in {97, 99, 100, 101, 102, 103, 104, 105, 109, 110, 111, 112, 114, 115, 116, 119, 122}
+    return ch in {97, 98, 99, 100, 101, 102, 103, 104, 105, 109, 110, 111, 112, 114, 115, 116, 119, 122}

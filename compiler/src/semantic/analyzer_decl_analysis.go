@@ -120,6 +120,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionNoRecurseAnnotation(annotation, fn, signature)
 			case "hot", "cold":
 				a.applyFunctionTemperatureAnnotation(annotation, fn, signature)
+			case "callconv", "c_abi", "stdcall":
+				a.applyFunctionCallConvAnnotation(annotation, fn, signature)
 			case "guard_nonnull", "guard_variant":
 				a.applyFunctionGuardAnnotation(annotation, fn, signature)
 			case "internal":
@@ -177,6 +179,28 @@ func (a *Analyzer) applyFunctionTemperatureAnnotation(annotation ast.Annotation,
 	}
 	signature.TemperatureMode = mode
 	signature.HasTemperatureMode = true
+}
+
+func (a *Analyzer) applyFunctionCallConvAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil {
+		return
+	}
+	switch annotation.Name {
+	case "callconv", "c_abi":
+		if len(annotation.Args) != 1 {
+			return
+		}
+		callConv, ok := normalizeExternCallConvAnnotationArg(annotation.Args[0])
+		if !ok {
+			return
+		}
+		signature.CallConv = callConv
+	case "stdcall":
+		if len(annotation.Args) != 0 {
+			return
+		}
+		signature.CallConv = "stdcall"
+	}
 }
 
 func (a *Analyzer) applyFunctionGuardAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
@@ -281,6 +305,24 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	if annotation.Name == "hot" || annotation.Name == "cold" {
 		if len(annotation.Args) != 0 {
 			a.errorf(annotation.Position, "@%s on function %q does not take arguments", annotation.Name, fn.Name)
+			return false
+		}
+		return true
+	}
+	if annotation.Name == "callconv" || annotation.Name == "c_abi" {
+		if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
+			a.errorf(annotation.Position, "@%s on function %q expects exactly one calling convention name", annotation.Name, fn.Name)
+			return false
+		}
+		if _, ok := normalizeExternCallConvAnnotationArg(annotation.Args[0]); !ok {
+			a.errorf(annotation.Position, "unsupported calling convention %q on function %q", strings.TrimSpace(annotation.Args[0]), fn.Name)
+			return false
+		}
+		return true
+	}
+	if annotation.Name == "stdcall" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@stdcall on function %q does not take arguments", fn.Name)
 			return false
 		}
 		return true
@@ -533,7 +575,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init":
 		return true
 	default:
 		return false

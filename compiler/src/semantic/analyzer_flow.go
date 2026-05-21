@@ -323,6 +323,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.validateCurrentFuncPoststatesForReturnValue(n.Value)
 		a.consumeAffineValueExpr(n.Value, expectedReturn, "return")
+	case *ast.BreakStmt:
+		if a.loopDepth == 0 {
+			a.errorf(n.Pos(), "break is only valid inside a loop")
+		}
+	case *ast.ContinueStmt:
+		if a.loopDepth == 0 {
+			a.errorf(n.Pos(), "continue is only valid inside a loop")
+		}
 	case *ast.IfStmt:
 		if n.DeprecatedSyntax != "" {
 			if n.DeprecatedReplacement != "" {
@@ -427,7 +435,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedFunctionValues := a.cloneFunctionValueBindings()
 		mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 		mergedStorageViewDeps := a.cloneStorageViewDeps()
+		a.loopDepth++
 		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
+		a.loopDepth--
 		a.finishProgressLoopObligation(progressObligationIndex, a.currentFunctionUsedPermissionRefs[bodyPermissionRefStart:])
 		if !blockDefinitelyExits(n.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)

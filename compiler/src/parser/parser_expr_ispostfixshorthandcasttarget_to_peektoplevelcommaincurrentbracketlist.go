@@ -9,6 +9,7 @@ func isPostfixShorthandCastTarget(name string) bool {
 	switch name {
 	case "void", "bool", "char", "int",
 		"i8", "i16", "i32", "i64", "isize",
+		"s8", "s16", "s32", "s64",
 		"u8", "u16", "u32", "u64", "usize", "uintptr",
 		"f32", "f64":
 		return true
@@ -19,6 +20,30 @@ func isPostfixShorthandCastTarget(name string) bool {
 	first := name[0]
 	return first >= 'A' && first <= 'Z'
 }
+
+func isConstantStyleArraySizeIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	hasUnderscore := false
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c == '_':
+			hasUnderscore = true
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return hasUnderscore
+}
+
+func isSingleUppercaseIdentifier(name string) bool {
+	return len(name) == 1 && name[0] >= 'A' && name[0] <= 'Z'
+}
+
 func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	if p.match(lexer.TOKEN_MUTABLE) {
 		elem := p.parseTypeExpr()
@@ -527,7 +552,8 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 					afterIdent != lexer.TOKEN_BANG && afterIdent != lexer.TOKEN_COMMA &&
 					afterIdent != lexer.TOKEN_LBRACKET && afterIdent != lexer.TOKEN_PIPE && afterIdent != lexer.TOKEN_DOT
 				if afterIdent == lexer.TOKEN_RBRACKET {
-					isArray = len(name) == 1 && name[0] >= 'A' && name[0] <= 'Z'
+					argName := p.tokens[p.pos+1].Text
+					isArray = isSingleUppercaseIdentifier(name) || isConstantStyleArraySizeIdentifier(argName)
 				}
 			}
 			if hasTopLevelComma {

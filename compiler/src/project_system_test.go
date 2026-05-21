@@ -347,6 +347,55 @@ func TestRunCLIProjectTestLinksForeignSources(t *testing.T) {
 	}
 }
 
+func TestRunCLIProjectTargetCanOptOutOfProjectNativeInputs(t *testing.T) {
+	projectRoot := writeNativeForeignProjectFixture(t)
+	projectJSON := `{
+  "version": "0.1.0",
+  "foreign": ["native/runtime.c"],
+  "link-flags": ["-lprojectwide"],
+  "targets": {
+    "isolated": {
+      "entry": "test/project_tests.elisa",
+      "inherit-project-native": false,
+      "foreign": ["native/isolated.c"],
+      "link-flags": ["-ltargetlocal"],
+      "emit": "llvm"
+    }
+  }
+}
+`
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "isolated.c"), "int isolated_value(void) { return 7; }\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"project", "deps", "isolated", "--project", projectRoot, "--json"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected project deps to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during project deps, got:\n%s", stderr.String())
+	}
+	var report projectDependencyReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("expected json deps report: %v\n%s", err, stdout.String())
+	}
+	foreign := strings.Join(report.Foreign, "\n")
+	if strings.Contains(foreign, "runtime.c") {
+		t.Fatalf("expected project-wide foreign source to be excluded, got:\n%s", foreign)
+	}
+	if !strings.Contains(foreign, "isolated.c") {
+		t.Fatalf("expected target-local foreign source to remain, got:\n%s", foreign)
+	}
+	linkFlags := strings.Join(report.LinkFlags, "\n")
+	if strings.Contains(linkFlags, "-lprojectwide") {
+		t.Fatalf("expected project-wide link flag to be excluded, got:\n%s", linkFlags)
+	}
+	if !strings.Contains(linkFlags, "-ltargetlocal") {
+		t.Fatalf("expected target-local link flag to remain, got:\n%s", linkFlags)
+	}
+}
+
 type projectFixtureOptions struct {
 	targetHook string
 }

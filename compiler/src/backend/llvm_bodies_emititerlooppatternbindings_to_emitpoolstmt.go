@@ -688,10 +688,16 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		}
 		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
+	s.breakTargets = append(s.breakTargets, exitBB)
+	s.continueTargets = append(s.continueTargets, stepBB)
 	if err := s.emitBlock(stmt.Body, true); err != nil {
+		s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+		s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
 		s.popScope()
 		return err
 	}
+	s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+	s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
 	s.popScope()
 	if !s.currentBlockTerminated() {
 		C.LLVMBuildBr(s.builder, stepBB)

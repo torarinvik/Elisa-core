@@ -52,6 +52,7 @@ func formatPostfixShorthandCastTarget(typ ast.TypeExpr) (string, bool) {
 		switch n.Name {
 		case "void", "bool", "char", "int",
 			"i8", "i16", "i32", "i64", "isize",
+			"s8", "s16", "s32", "s64",
 			"u8", "u16", "u32", "u64", "usize", "uintptr",
 			"f32", "f64":
 			return n.Name, true

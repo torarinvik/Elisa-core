@@ -107,12 +107,22 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	for _, dir := range append(append([]string{}, project.config.IncludeDirs...), definition.IncludeDirs...) {
 		includeDirs = append(includeDirs, projectRelativePath(project.root, dir))
 	}
-	foreignFiles := make([]string, 0, len(project.config.Foreign)+len(definition.Foreign))
-	for _, path := range append(append([]string{}, project.config.Foreign...), definition.Foreign...) {
+	inheritProjectNative := true
+	if definition.InheritProjectNative != nil {
+		inheritProjectNative = *definition.InheritProjectNative
+	}
+	projectForeign := project.config.Foreign
+	projectLinkFlags := project.config.LinkFlags
+	if !inheritProjectNative {
+		projectForeign = nil
+		projectLinkFlags = nil
+	}
+	foreignFiles := make([]string, 0, len(projectForeign)+len(definition.Foreign))
+	for _, path := range append(append([]string{}, projectForeign...), definition.Foreign...) {
 		foreignFiles = append(foreignFiles, projectRelativePath(project.root, path))
 	}
-	linkFlags := make([]string, 0, len(project.config.LinkFlags)+len(definition.LinkFlags)+len(options.linkFlags))
-	linkFlags = append(linkFlags, project.config.LinkFlags...)
+	linkFlags := make([]string, 0, len(projectLinkFlags)+len(definition.LinkFlags)+len(options.linkFlags))
+	linkFlags = append(linkFlags, projectLinkFlags...)
 	linkFlags = append(linkFlags, definition.LinkFlags...)
 	linkFlags = append(linkFlags, options.linkFlags...)
 	for _, manifest := range dependencyOrder {

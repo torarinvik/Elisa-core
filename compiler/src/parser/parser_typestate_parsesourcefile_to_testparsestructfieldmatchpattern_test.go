@@ -558,6 +558,30 @@ func TestParseStructDeclWithValueGenericParam(t *testing.T) {
 		t.Fatalf("expected array size to remain value param identifier, got %T", arrayType.Size)
 	}
 }
+
+func TestParseNamedStructArrayWithConstantSize(t *testing.T) {
+	file, errs := parseSourceFile(t, "const MAX_ITEMS: usize = 4\nstruct Item:\n    value: u32\nstruct Holder:\n    items: Item[MAX_ITEMS]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[2].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected holder struct decl, got %T", file.Decls[2])
+	}
+	arrayType, ok := decl.Fields[0].Type.(*ast.ArrayType)
+	if !ok {
+		t.Fatalf("expected Item[MAX_ITEMS] to parse as array type, got %T", decl.Fields[0].Type)
+	}
+	named, ok := arrayType.Elem.(*ast.NamedType)
+	if !ok || named.Name != "Item" {
+		t.Fatalf("expected array element type Item, got %#v", arrayType.Elem)
+	}
+	size, ok := arrayType.Size.(*ast.Ident)
+	if !ok || size.Name != "MAX_ITEMS" {
+		t.Fatalf("expected array size MAX_ITEMS, got %#v", arrayType.Size)
+	}
+}
+
 func TestParseNamedRefStateAttachesToNearestRef(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Holder[refstate s]:\n    value: i32&&[s]\n")
 	if len(errs) != 0 {

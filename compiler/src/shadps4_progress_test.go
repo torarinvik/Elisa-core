@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,6 +26,12 @@ func TestShadPS4ElisaHarnessProgressClean(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if _, err := os.Stat(tc.path); err != nil {
+				if os.IsNotExist(err) {
+					t.Skipf("legacy shadPS4 Elisa harness path is not present: %s", tc.path)
+				}
+				t.Fatalf("failed to stat %s: %v", tc.path, err)
+			}
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
 			exitCode := runCLI([]string{"-emit", "progress", tc.path}, &stdout, &stderr)

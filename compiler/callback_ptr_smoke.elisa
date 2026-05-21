@@ -1,0 +1,51 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+
+@callconv(c)
+def native_thread_entry(arg: void&) -> u32:
+    _ = arg
+    return 7
+
+@callconv(c)
+def native_i32_entry(arg: void&) -> i32:
+    _ = arg
+    return -12
+
+@callconv(c)
+def native_usize_entry(arg: void&) -> usize:
+    _ = arg
+    return 123
+
+@callconv(c)
+def native_isize_entry(arg: void&) -> isize:
+    _ = arg
+    return -45
+
+@test
+def native_callback_ptr_smoke():
+    can Abort.Panic, Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release:
+        ptr: void&? = native_callback_ptr("native_thread_entry")
+        assert ptr != null
+        result: u32 = native_callback_call_u32_voidp("native_thread_entry", null, 99)
+        assert result == 7
+        i32_result: i32 = native_callback_call_i32_voidp("native_i32_entry", null, 99)
+        assert i32_result == -12
+        usize_result: usize = native_callback_call_usize_voidp("native_usize_entry", null, 99)
+        assert usize_result == 123
+        isize_result: isize = native_callback_call_isize_voidp("native_isize_entry", null, 99)
+        assert isize_result == -45
+        threaded: u32 = native_callback_spawn_join_u32_voidp("native_thread_entry", null, 99)
+        assert threaded == 7
+        ctx: mutable heap void&? = native_callback_context_new_u32_voidp("native_thread_entry", null, 99)
+        assert ctx != null
+        context_result: u32 = native_callback_context_spawn_join_u32_voidp(ctx, 99)
+        assert context_result == 7
+        assert native_callback_context_result_u32(ctx, 99) == 7
+        native_callback_context_free(ctx)
+        thread: Thread[u32, Joinable] = spawn_native_callback_u32_voidp("native_thread_entry", null, 99)
+        async_result: u32 = join_native_callback_u32(move thread, 99)
+        assert async_result == 7
+        missing: void&? = native_callback_ptr("missing_callback")
+        assert missing == null
+        fallback: u32 = native_callback_call_u32_voidp("missing_callback", null, 99)
+        assert fallback == 99

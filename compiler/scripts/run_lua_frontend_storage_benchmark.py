@@ -174,7 +174,6 @@ def build_benchmark_executable(
     bench_path = out_dir / harness_path.stem
     benchmarks_dir = harness_path.parent
     runtime_shims_path = benchmarks_dir / "json_parser_runtime_shims.c"
-    concurrency_runtime_path = compiler_dir / "runtime" / "concurrency.c"
 
     run(["go", "run", "./src", opt_level, "-emit", "header", "-o", str(header_path), str(source_path)], cwd=compiler_dir)
     run(["go", "run", "./src", opt_level, "-emit", "obj", "-o", str(object_path), str(source_path)], cwd=compiler_dir)
@@ -188,7 +187,6 @@ def build_benchmark_executable(
             str(out_dir),
             str(harness_path),
             str(runtime_shims_path),
-            str(concurrency_runtime_path),
             str(object_path),
             "-o",
             str(bench_path),

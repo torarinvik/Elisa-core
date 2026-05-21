@@ -68,6 +68,16 @@ type NameId = usize
 	}
 }
 
+func TestTypeAliasDuplicateSameTargetIsAllowed(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_duplicate_same_target.elisa", `
+type NameId = u32
+type NameId = u32
+`)
+	if errors := strings.Join(result.Errors(), "\n"); strings.Contains(errors, DuplicateTypeMessage("NameId")) {
+		t.Fatalf("did not expect duplicate type alias diagnostic for same target, got:\n%s", errors)
+	}
+}
+
 func TestTypeAliasUnknownTargetTypeErrors(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_unknown_target.elisa", `
 type NameId = MissingType

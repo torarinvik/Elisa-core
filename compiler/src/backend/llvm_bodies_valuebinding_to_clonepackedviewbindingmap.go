@@ -82,6 +82,8 @@ type functionState struct {
 	scopedCleanups               []scopedCleanupBinding
 	checkpoints                  map[string]checkpointBinding
 	poolScopes                   []activePoolBinding
+	breakTargets                 []C.LLVMBasicBlockRef
+	continueTargets              []C.LLVMBasicBlockRef
 	cleanupDepth                 int
 	scopePool                    []*codegenScope
 }

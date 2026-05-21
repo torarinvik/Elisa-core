@@ -72,6 +72,134 @@ extern bad_callconv(value: i32) -> i32
 	}
 }
 
+func TestFunctionABIAnnotationsPopulateFunctionType(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "function_abi_annotations.elisa", `
+@callconv(winapi)
+def winapi_callback(arg: void&) -> u32:
+	_ = arg
+	return 0u32
+
+@c_abi(c)
+def c_callback(arg: void&) -> u32:
+	_ = arg
+	return 1u32
+
+@stdcall
+def stdcall_callback(arg: void&) -> u32:
+	_ = arg
+	return 2u32
+`)
+
+	tests := map[string]string{
+		"winapi_callback":  "winapi",
+		"c_callback":       "c",
+		"stdcall_callback": "stdcall",
+	}
+	for name, want := range tests {
+		sym, ok := result.GlobalScope.Lookup(name)
+		if !ok {
+			t.Fatalf("expected %s symbol", name)
+		}
+		fnType, ok := sym.Type.(*FuncType)
+		if !ok {
+			t.Fatalf("expected %s function type, got %T", name, sym.Type)
+		}
+		if fnType.CallConv != want {
+			t.Fatalf("expected %s calling convention %q, got %q", name, want, fnType.CallConv)
+		}
+	}
+}
+
+func TestFunctionABIAnnotationsRejectInvalidValues(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "function_abi_annotations_invalid.elisa", `
+@callconv(vectorcall)
+def bad_callconv(arg: void&) -> u32:
+	_ = arg
+	return 0u32
+
+@stdcall(extra)
+def bad_stdcall(arg: void&) -> u32:
+	_ = arg
+	return 0u32
+`)
+
+	allErrors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(allErrors, "unsupported calling convention \"vectorcall\" on function \"bad_callconv\"") {
+		t.Fatalf("expected invalid function calling convention error, got:\n%s", allErrors)
+	}
+	if !strings.Contains(allErrors, "@stdcall on function \"bad_stdcall\" does not take arguments") {
+		t.Fatalf("expected invalid stdcall arity error, got:\n%s", allErrors)
+	}
+}
+
+func TestExternFunctionCanBeSatisfiedByLaterElisaDefinition(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "extern_satisfied_later.elisa", `
+@c_abi(c)
+extern bridge(value: i32) -> i32
+
+def bridge(value: i32) -> i32:
+	return value + 1
+`)
+
+	sym, ok := result.GlobalScope.Lookup("bridge")
+	if !ok {
+		t.Fatal("expected bridge symbol")
+	}
+	if sym.Kind != SymbolFunc {
+		t.Fatalf("expected bridge implementation to be canonical function, got %s", sym.Kind)
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected bridge function type, got %T", sym.Type)
+	}
+	if fnType.CallConv != "c" {
+		t.Fatalf("expected extern c calling convention to carry onto implementation, got %q", fnType.CallConv)
+	}
+}
+
+func TestExternFunctionCanBeSatisfiedByEarlierElisaDefinition(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "extern_satisfied_earlier.elisa", `
+def bridge(value: i32) -> i32:
+	return value + 1
+
+@link_name(native_bridge)
+@c_abi(c)
+extern bridge(value: i32) -> i32
+`)
+
+	sym, ok := result.GlobalScope.Lookup("bridge")
+	if !ok {
+		t.Fatal("expected bridge symbol")
+	}
+	if sym.Kind != SymbolFunc {
+		t.Fatalf("expected bridge implementation to remain canonical function, got %s", sym.Kind)
+	}
+	if sym.LinkName != "native_bridge" {
+		t.Fatalf("expected extern link name to carry onto implementation, got %q", sym.LinkName)
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected bridge function type, got %T", sym.Type)
+	}
+	if fnType.CallConv != "c" {
+		t.Fatalf("expected extern c calling convention to carry onto implementation, got %q", fnType.CallConv)
+	}
+}
+
+func TestExternFunctionSatisfiedByElisaDefinitionRequiresMatchingSignature(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "extern_satisfied_mismatch.elisa", `
+extern bridge(value: i32) -> i32
+
+def bridge(value: u32) -> i32:
+	return 1
+`)
+
+	allErrors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(allErrors, "extern function \"bridge\" declaration does not match implementation") {
+		t.Fatalf("expected extern implementation mismatch error, got:\n%s", allErrors)
+	}
+}
+
 func TestWindowsFFIModelCanBeGuardedByTargetStaticIf(t *testing.T) {
 	src := `
 static if ELISA_TARGET_OS_WINDOWS:
@@ -115,6 +243,28 @@ static if ELISA_TARGET_OS_WINDOWS:
 	}
 	if _, ok := posix.GlobalScope.Lookup("EnterCriticalSection"); ok {
 		t.Fatal("did not expect guarded Win32 extern on POSIX target")
+	}
+}
+
+func TestDuplicateIdenticalExternFunctionDeclarationsCoalesce(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_identical_extern.elisa", `
+extern puts(text: u8&) -> int
+extern puts(text: u8&) -> int
+`)
+	errors := strings.Join(result.Errors(), "\n")
+	if strings.Contains(errors, DuplicateDeclarationMessage("puts", SymbolExternFunc)) {
+		t.Fatalf("did not expect duplicate extern diagnostic for identical declaration, got:\n%s", errors)
+	}
+}
+
+func TestDuplicateConflictingExternFunctionDeclarationsError(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_conflicting_extern.elisa", `
+extern puts(text: u8&) -> int
+extern puts(text: u8&) -> u64
+`)
+	errors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errors, "extern function \"puts\" declaration does not match implementation") {
+		t.Fatalf("expected conflicting extern diagnostic, got:\n%s", errors)
 	}
 }
 

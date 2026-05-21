@@ -1,0 +1,269 @@
+# ============================================================
+# Test/runtime bridge exports for PS4 system service smoke tests.
+# ============================================================
+#
+# These are host-side helper symbols consumed through @link_name declarations
+# in the shadPS4 Elisa ports. They are not guest PS4 exports; keeping them in
+# Elisa avoids a permanent compiler/runtime C shim.
+
+const ELISACORE_BRIDGE_ORBIS_OK: int = 0
+const ELISACORE_BRIDGE_USER_INVALID_ARGUMENT: int = 0x80960005
+const ELISACORE_BRIDGE_USER_NO_EVENT: int = 0x80960007
+const ELISACORE_BRIDGE_USER_BUFFER_TOO_SHORT: int = 0x8096000A
+const ELISACORE_BRIDGE_SYSTEM_PARAMETER: int = 0x80A10003
+const ELISACORE_BRIDGE_SYSTEM_NO_EVENT: int = 0x80A10004
+const ELISACORE_BRIDGE_USER_CAP: int = 4
+const ELISACORE_BRIDGE_USER_EVENT_CAP: int = 64
+const ELISACORE_BRIDGE_SYSTEM_EVENT_CAP: int = 64
+
+global mutable elisacore_bridge_user_ids: int[4] = [1, 2, -1, -1]
+global mutable elisacore_bridge_user_colors: u32[4] = [0, 1, 0, 0]
+global mutable elisacore_bridge_user_event_kind_q: u32[64] = zeroed
+global mutable elisacore_bridge_user_event_uid_q: int[64] = zeroed
+global mutable elisacore_bridge_user_event_head: int = 0
+global mutable elisacore_bridge_user_event_tail: int = 0
+global mutable elisacore_bridge_user_event_count: int = 0
+global mutable elisacore_bridge_user_last_event_kind: u32 = 0
+global mutable elisacore_bridge_user_last_event_uid: int = 0
+
+global mutable elisacore_bridge_system_event_q: int[64] = zeroed
+global mutable elisacore_bridge_system_event_head: int = 0
+global mutable elisacore_bridge_system_event_tail: int = 0
+global mutable elisacore_bridge_system_event_count: int = 0
+global mutable elisacore_bridge_system_last_event_type: int = 0
+global mutable elisacore_bridge_system_load_exec_calls: int = 0
+
+def elisacore_bridge_resolve_user_slot(user_id_in: int) -> int:
+    user_id: mutable int = user_id_in
+    if user_id == 0xFF:
+        user_id <- elisacore_bridge_user_ids[0]
+    i: mutable int = 0
+    while i < ELISACORE_BRIDGE_USER_CAP:
+        if elisacore_bridge_user_ids[i.usize()] == user_id:
+            return i
+        i <- i + 1
+    return -1
+
+def elisacore_bridge_user_name_len(slot: int) -> usize:
+    _ = slot
+    return 5
+
+def elisacore_bridge_user_name_byte(slot: int, index: usize) -> u32:
+    if index == 0:
+        return 'U'.u32()
+    if index == 1:
+        return 's'.u32()
+    if index == 2:
+        return 'e'.u32()
+    if index == 3:
+        return 'r'.u32()
+    if index == 4:
+        if slot == 1:
+            return '2'.u32()
+        return '1'.u32()
+    return 0.u32()
+
+def elisacore_bridge_userservice_get_initial_user(out_user_id: mutable int&?) -> int:
+    if out_user_id == null:
+        return ELISACORE_BRIDGE_USER_INVALID_ARGUMENT
+    out_user_id <- elisacore_bridge_user_ids[0]
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_userservice_get_initial_user_value() -> int:
+    return elisacore_bridge_user_ids[0]
+
+def elisacore_bridge_userservice_get_login_user_id_at(index: int) -> int:
+    if index < 0 or index >= ELISACORE_BRIDGE_USER_CAP:
+        return -1
+    return elisacore_bridge_user_ids[index.usize()]
+
+def elisacore_bridge_userservice_get_user_color_status(user_id: int) -> int:
+    if elisacore_bridge_resolve_user_slot(user_id) < 0:
+        return ELISACORE_BRIDGE_USER_INVALID_ARGUMENT
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_userservice_get_user_color_value(user_id: int) -> u32:
+    slot: int = elisacore_bridge_resolve_user_slot(user_id)
+    if slot < 0:
+        return 0.u32()
+    return elisacore_bridge_user_colors[slot.usize()]
+
+def elisacore_bridge_userservice_get_user_name_status(user_id: int, cap: usize) -> int:
+    slot: int = elisacore_bridge_resolve_user_slot(user_id)
+    if slot < 0:
+        return ELISACORE_BRIDGE_USER_INVALID_ARGUMENT
+    if cap <= elisacore_bridge_user_name_len(slot):
+        return ELISACORE_BRIDGE_USER_BUFFER_TOO_SHORT
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_userservice_get_user_name_byte(user_id: int, index: usize) -> u32:
+    slot: int = elisacore_bridge_resolve_user_slot(user_id)
+    if slot < 0 or index > 16:
+        return 0.u32()
+    return elisacore_bridge_user_name_byte(slot, index)
+
+def elisacore_bridge_userservice_get_event(out_event_kind: mutable u32&?, out_user_id: mutable int&?) -> int:
+    if elisacore_bridge_user_event_count == 0:
+        return ELISACORE_BRIDGE_USER_NO_EVENT
+    if out_event_kind == null or out_user_id == null:
+        return ELISACORE_BRIDGE_USER_INVALID_ARGUMENT
+    head: usize = elisacore_bridge_user_event_head.usize()
+    out_event_kind <- elisacore_bridge_user_event_kind_q[head]
+    out_user_id <- elisacore_bridge_user_event_uid_q[head]
+    elisacore_bridge_user_event_head <- (elisacore_bridge_user_event_head + 1) % ELISACORE_BRIDGE_USER_EVENT_CAP
+    elisacore_bridge_user_event_count <- elisacore_bridge_user_event_count - 1
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_userservice_get_event_status() -> int:
+    if elisacore_bridge_user_event_count == 0:
+        return ELISACORE_BRIDGE_USER_NO_EVENT
+    head: usize = elisacore_bridge_user_event_head.usize()
+    elisacore_bridge_user_last_event_kind <- elisacore_bridge_user_event_kind_q[head]
+    elisacore_bridge_user_last_event_uid <- elisacore_bridge_user_event_uid_q[head]
+    elisacore_bridge_user_event_head <- (elisacore_bridge_user_event_head + 1) % ELISACORE_BRIDGE_USER_EVENT_CAP
+    elisacore_bridge_user_event_count <- elisacore_bridge_user_event_count - 1
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_userservice_get_event_kind_value() -> u32:
+    return elisacore_bridge_user_last_event_kind
+
+def elisacore_bridge_userservice_get_event_user_id_value() -> int:
+    return elisacore_bridge_user_last_event_uid
+
+def elisacore_bridge_userservice_test_push_event(event_kind: u32, user_id: int) -> int:
+    if elisacore_bridge_user_event_count >= ELISACORE_BRIDGE_USER_EVENT_CAP:
+        return ELISACORE_BRIDGE_ORBIS_OK
+    tail_index: usize = elisacore_bridge_user_event_tail.usize()
+    elisacore_bridge_user_event_kind_q[tail_index] <- event_kind
+    elisacore_bridge_user_event_uid_q[tail_index] <- user_id
+    elisacore_bridge_user_event_tail <- (elisacore_bridge_user_event_tail + 1) % ELISACORE_BRIDGE_USER_EVENT_CAP
+    elisacore_bridge_user_event_count <- elisacore_bridge_user_event_count + 1
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_systemservice_load_exec(path: mutable u8&?, argv: mutable void&?) -> int:
+    _ = argv
+    elisacore_bridge_system_load_exec_calls <- elisacore_bridge_system_load_exec_calls + 1
+    if path == null:
+        return ELISACORE_BRIDGE_SYSTEM_PARAMETER
+    if path[0] == 0.u8():
+        return ELISACORE_BRIDGE_SYSTEM_PARAMETER
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_systemservice_receive_event(out_event_type: mutable int&?) -> int:
+    if out_event_type == null:
+        return ELISACORE_BRIDGE_SYSTEM_PARAMETER
+    if elisacore_bridge_system_event_count == 0:
+        return ELISACORE_BRIDGE_SYSTEM_NO_EVENT
+    head: usize = elisacore_bridge_system_event_head.usize()
+    out_event_type <- elisacore_bridge_system_event_q[head]
+    elisacore_bridge_system_event_head <- (elisacore_bridge_system_event_head + 1) % ELISACORE_BRIDGE_SYSTEM_EVENT_CAP
+    elisacore_bridge_system_event_count <- elisacore_bridge_system_event_count - 1
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_systemservice_receive_event_status() -> int:
+    if elisacore_bridge_system_event_count == 0:
+        return ELISACORE_BRIDGE_SYSTEM_NO_EVENT
+    head: usize = elisacore_bridge_system_event_head.usize()
+    elisacore_bridge_system_last_event_type <- elisacore_bridge_system_event_q[head]
+    elisacore_bridge_system_event_head <- (elisacore_bridge_system_event_head + 1) % ELISACORE_BRIDGE_SYSTEM_EVENT_CAP
+    elisacore_bridge_system_event_count <- elisacore_bridge_system_event_count - 1
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_systemservice_receive_event_type_value() -> int:
+    return elisacore_bridge_system_last_event_type
+
+def elisacore_bridge_systemservice_get_status_event_count(out_count: mutable int&?) -> int:
+    if out_count == null:
+        return ELISACORE_BRIDGE_SYSTEM_PARAMETER
+    out_count <- elisacore_bridge_system_event_count
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_systemservice_get_status_event_count_value() -> int:
+    return elisacore_bridge_system_event_count
+
+def elisacore_bridge_systemservice_get_display_safe_area_ratio(out_ratio: mutable f32&?) -> int:
+    if out_ratio == null:
+        return ELISACORE_BRIDGE_SYSTEM_PARAMETER
+    out_ratio <- 1.0
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_systemservice_get_display_safe_area_ratio_value() -> f32:
+    return 1.0
+
+def elisacore_bridge_systemservice_test_push_event(event_type: int) -> int:
+    if elisacore_bridge_system_event_count >= ELISACORE_BRIDGE_SYSTEM_EVENT_CAP:
+        return ELISACORE_BRIDGE_ORBIS_OK
+    tail_index: usize = elisacore_bridge_system_event_tail.usize()
+    elisacore_bridge_system_event_q[tail_index] <- event_type
+    elisacore_bridge_system_event_tail <- (elisacore_bridge_system_event_tail + 1) % ELISACORE_BRIDGE_SYSTEM_EVENT_CAP
+    elisacore_bridge_system_event_count <- elisacore_bridge_system_event_count + 1
+    return ELISACORE_BRIDGE_ORBIS_OK
+
+def elisacore_bridge_systemservice_test_get_load_exec_call_count() -> int:
+    return elisacore_bridge_system_load_exec_calls
+
+def ffi_userservice_get_initial_user(out_user_id: mutable int&?) -> int:
+    return elisacore_bridge_userservice_get_initial_user(out_user_id)
+
+def ffi_userservice_get_initial_user_value() -> int:
+    return elisacore_bridge_userservice_get_initial_user_value()
+
+def ffi_userservice_get_login_user_id_at(index: int) -> int:
+    return elisacore_bridge_userservice_get_login_user_id_at(index)
+
+def ffi_userservice_get_user_color_status(user_id: int) -> int:
+    return elisacore_bridge_userservice_get_user_color_status(user_id)
+
+def ffi_userservice_get_user_color_value(user_id: int) -> u32:
+    return elisacore_bridge_userservice_get_user_color_value(user_id)
+
+def ffi_userservice_get_user_name_status(user_id: int, cap: usize) -> int:
+    return elisacore_bridge_userservice_get_user_name_status(user_id, cap)
+
+def ffi_userservice_get_user_name_byte(user_id: int, index: usize) -> u32:
+    return elisacore_bridge_userservice_get_user_name_byte(user_id, index)
+
+def ffi_userservice_get_event(out_event_kind: mutable u32&?, out_user_id: mutable int&?) -> int:
+    return elisacore_bridge_userservice_get_event(out_event_kind, out_user_id)
+
+def ffi_userservice_get_event_status() -> int:
+    return elisacore_bridge_userservice_get_event_status()
+
+def ffi_userservice_get_event_kind_value() -> u32:
+    return elisacore_bridge_userservice_get_event_kind_value()
+
+def ffi_userservice_get_event_user_id_value() -> int:
+    return elisacore_bridge_userservice_get_event_user_id_value()
+
+def ffi_userservice_test_push_event(event_kind: u32, user_id: int) -> int:
+    return elisacore_bridge_userservice_test_push_event(event_kind, user_id)
+
+def ffi_systemservice_load_exec(path: mutable u8&?, argv: mutable void&?) -> int:
+    return elisacore_bridge_systemservice_load_exec(path, argv)
+
+def ffi_systemservice_receive_event(out_event_type: mutable int&?) -> int:
+    return elisacore_bridge_systemservice_receive_event(out_event_type)
+
+def ffi_systemservice_receive_event_status() -> int:
+    return elisacore_bridge_systemservice_receive_event_status()
+
+def ffi_systemservice_receive_event_type_value() -> int:
+    return elisacore_bridge_systemservice_receive_event_type_value()
+
+def ffi_systemservice_get_status_event_count(out_count: mutable int&?) -> int:
+    return elisacore_bridge_systemservice_get_status_event_count(out_count)
+
+def ffi_systemservice_get_status_event_count_value() -> int:
+    return elisacore_bridge_systemservice_get_status_event_count_value()
+
+def ffi_systemservice_get_display_safe_area_ratio(out_ratio: mutable f32&?) -> int:
+    return elisacore_bridge_systemservice_get_display_safe_area_ratio(out_ratio)
+
+def ffi_systemservice_get_display_safe_area_ratio_value() -> f32:
+    return elisacore_bridge_systemservice_get_display_safe_area_ratio_value()
+
+def ffi_systemservice_test_push_event(event_type: int) -> int:
+    return elisacore_bridge_systemservice_test_push_event(event_type)
+
+def ffi_systemservice_test_get_load_exec_call_count() -> int:
+    return elisacore_bridge_systemservice_test_get_load_exec_call_count()

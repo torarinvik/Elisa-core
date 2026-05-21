@@ -22,6 +22,8 @@ Ready today:
 - symbol-name remapping with `@link_name(...)`
 - calling-convention annotations with `@c_abi(...)`, `@callconv(...)`, and `@stdcall`
 - WinAPI modeling through `@callconv(winapi)` on Windows-only declarations
+- C variadic function declarations with `...`
+- C default argument promotion for variadic tail arguments
 - blocking/progress annotations with `@blocking` and `@nonblocking`
 - C-compatible Elisa structs with `layout c`
 - layout introspection with `size_of`, `align_of`, and `offset_of`
@@ -92,6 +94,30 @@ extern avformat_open_input_raw(ps: mutable void&?&, url: i8&?, fmt: void&?, opti
 Keep raw native declarations close to the binding file and expose a smaller
 Elisa wrapper API to the rest of the codebase.
 
+## C Variadic Functions
+
+Use `...` at the end of an `extern` parameter list for C varargs such as
+`printf`, `fprintf`, and `snprintf`.
+
+```elisa
+@c_abi(c)
+extern snprintf(buf: mutable u8&?, size: usize, fmt: u8&, ...) -> int effects[Console.Format]
+```
+
+Arguments after the declared fixed parameters are lowered with the C default
+argument promotions expected by `va_arg`:
+
+- `bool` is passed as C `int`
+- `i8`, `u8`, `i16`, and `u16` are passed as C `int`
+- `f32` is passed as C `double`
+- `i32`, `u32`, `i64`, `u64`, `f64`, pointer/reference values, and opaque
+  handles keep their natural ABI representation
+
+Prefer typed C wrapper functions when the format string is fixed or when the
+native API has a complicated platform-specific vararg contract. Raw varargs are
+available for ordinary C ABI calls, but they are intentionally explicit at the
+binding site.
+
 ## Native Variables
 
 Use `extern name: Type` for symbols exported as data rather than functions.
@@ -148,6 +174,10 @@ Supported spelling includes:
 - `stdcall`
 - `winapi`
 
+`@callconv(...)`, `@c_abi(...)`, and `@stdcall` work on both extern
+declarations and Elisa-defined functions. Use the function form for raw native
+callbacks whose entry function can be represented directly in Elisa.
+
 `@stdcall` is accepted as shorthand for `@callconv(stdcall)`.
 
 `winapi` maps to the platform-appropriate ABI. On 32-bit x86 Windows it lowers
@@ -157,9 +187,81 @@ to stdcall; on modern 64-bit Windows it uses the platform C/Win64 convention.
 static if ELISA_TARGET_OS_WINDOWS:
     @callconv(winapi)
     extern Sleep(milliseconds: u32) -> void effects[Thread.Sleep]
+
+    @callconv(winapi)
+    def thread_entry(arg: void&) -> u32:
+        _ = arg
+        return 0
 ```
 
 Prefer `@c_abi(c)` for portable C libraries.
+
+Native test/executable builds also generate a callback lookup shim for
+Elisa-defined functions with explicit calling-convention metadata. The std
+concurrency runtime exposes thin wrappers around that generated surface so Elisa
+code and platform wrappers can request the raw entry pointer by Elisa name:
+
+```elisa
+def native_callback_ptr(name: u8&) -> void&?
+def native_callback_call_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32
+def native_callback_call_i32_voidp(name: u8&, arg: void&?, fallback: i32) -> i32
+def native_callback_call_usize_voidp(name: u8&, arg: void&?, fallback: usize) -> usize
+def native_callback_call_isize_voidp(name: u8&, arg: void&?, fallback: isize) -> isize
+def native_callback_spawn_join_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32
+def native_callback_context_new_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> mutable heap void&?
+def native_callback_context_spawn_join_u32_voidp(ctx: mutable heap void&?, fallback: u32) -> u32
+def native_callback_context_join_u32_voidp(handle: uintptr, ctx: mutable heap void&?, fallback: u32) -> u32
+def native_callback_context_result_u32(ctx: mutable heap void&?, fallback: u32) -> u32
+def native_callback_context_free(ctx: mutable heap void&?) -> void
+def spawn_native_callback_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> Thread[u32, Joinable]
+def join_native_callback_u32(thread: Thread[u32, Joinable], fallback: u32) -> u32
+
+@callconv(c)
+def native_thread_entry(arg: void&) -> u32:
+    _ = arg
+    return 7
+
+def get_entry() -> void&?:
+    return native_callback_ptr("native_thread_entry")
+
+def smoke_call() -> u32:
+    return native_callback_call_u32_voidp("native_thread_entry", null, 0)
+
+def smoke_i32_call() -> i32:
+    return native_callback_call_i32_voidp("native_i32_entry", null, 0)
+
+def smoke_thread_call() -> u32:
+    can Thread.Spawn, Thread.Join:
+        return native_callback_spawn_join_u32_voidp("native_thread_entry", null, 0)
+
+def smoke_context_call() -> u32:
+    can Memory.Allocate, Memory.Release, Thread.Spawn, Thread.Join, Abort.Panic:
+        ctx: mutable heap void&? = native_callback_context_new_u32_voidp("native_thread_entry", null, 0)
+        assert ctx != null
+        result: u32 = native_callback_context_spawn_join_u32_voidp(ctx, 0)
+        native_callback_context_free(ctx)
+        return result
+
+def smoke_async_thread_call() -> u32:
+    can Memory.Allocate, Memory.Release, Thread.Spawn, Thread.Join, Abort.Panic:
+        thread: Thread[u32, Joinable] = spawn_native_callback_u32_voidp("native_thread_entry", null, 0)
+        return join_native_callback_u32(move thread, 0)
+```
+
+The generated direct-call lookup currently covers simple scalar callback shapes
+with a `void&` argument and `u32`, `i32`, `usize`, or `isize` return values. The
+async thread-entry adapter is currently implemented for `void& -> u32`, which is
+the shape needed for the first thread-entry path. The
+`native_callback_call_u32_voidp`,
+`native_callback_spawn_join_u32_voidp`, and the context helpers exist primarily
+for smoke tests and generated adapter checks. The context helpers
+model the lifecycle needed by generated trampolines: allocate callback state,
+execute it on a real host thread, read the result, and release the state.
+The `spawn_native_callback_u32_voidp` and `join_native_callback_u32` wrappers
+use the generated typed start/join pair and return a normal Elisa `Thread`
+handle for the supported callback shape. Captured closures still need broader
+typed trampoline/context generation before this is a full high-level threading
+surface.
 
 ## Progress And Blocking
 
@@ -396,7 +498,7 @@ Recommended C mappings:
 | nullable typed pointer | `T&?` |
 | mutable out pointer | `mutable T&` or `mutable T&?&` depending on shape |
 | C string input | `i8&?` or `u8&?` according to API convention |
-| callback pointer | `func(...) -> ...` when ABI-compatible, otherwise use a C trampoline shim |
+| callback pointer | `func(...) -> ...`; put `@callconv(...)` on Elisa-defined callback entry functions when ABI-specific |
 | SDK-owned opaque struct | `@c_opaque(...) extern TypeName` plus references |
 
 Be conservative with:
@@ -407,7 +509,8 @@ Be conservative with:
 - unions, because Elisa does not yet have a direct checked C union binding story
 - flexible array members, because tail storage needs a separate ownership model
 - varargs, because wrapper functions are usually safer and easier to type-check
-- callbacks that require platform-specific calling conventions or closure state
+- callbacks that require closure state, because those still need an explicit
+  trampoline/context adapter
 
 ## C Library Pattern
 
@@ -492,6 +595,7 @@ We are set for:
 - platform-specific declarations guarded by target `static if`
 - WinAPI-style declarations using `@callconv(winapi)`
 - native library integration without a custom C++ bridge for simple C APIs
+- C varargs declarations with default argument promotion for the variadic tail
 - opaque native handles and opaque C type metadata
 - generated alloc/free/size/align helpers for active `@c_opaque` types
 - layout-checked C-compatible structs when manually declared in Elisa
@@ -504,8 +608,8 @@ We still need future work for:
 - union and bitfield modeling
 - richer linker/include flag plumbing for `c-bind-check`
 - generated safe wrappers around common C patterns
-- direct closure/callback trampoline generation for APIs that need native thread
-  entry or callback adapter functions
+- direct closure/callback trampoline generation for APIs that need captured
+  callback state or per-call adapter functions
 
 The important thing is that the foundation now fails closed: once a struct is
 declared with `@c_bind`, layout mismatches are detected by the same C compiler

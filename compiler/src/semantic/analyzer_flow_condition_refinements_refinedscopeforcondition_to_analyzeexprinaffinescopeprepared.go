@@ -416,7 +416,7 @@ func blockDefinitelyExits(stmts []ast.Stmt) bool {
 }
 func stmtDefinitelyExits(stmt ast.Stmt) bool {
 	switch n := stmt.(type) {
-	case *ast.ReturnStmt, *ast.PanicStmt, *ast.StaticErrorStmt:
+	case *ast.ReturnStmt, *ast.BreakStmt, *ast.ContinueStmt, *ast.PanicStmt, *ast.StaticErrorStmt:
 		return true
 	case *ast.ExprStmt:
 		_, ok := n.Expr.(*ast.RaiseExpr)

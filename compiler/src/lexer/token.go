@@ -32,6 +32,8 @@ const (
 	TOKEN_ELIF
 	TOKEN_ELSE
 	TOKEN_WHILE
+	TOKEN_BREAK
+	TOKEN_CONTINUE
 	TOKEN_RETURN
 	TOKEN_ANY
 	TOKEN_HEAP
@@ -123,13 +125,13 @@ const (
 	TOKEN_TILDE  // ~
 
 	// Surface-only and compatibility tokens appended here to preserve legacy token numbering.
-	TOKEN_CHAR_LIT // 'a'
-	TOKEN_IS       // is
-	TOKEN_FATARROW // =>
-	TOKEN_TO       // to
-	TOKEN_LBRACE   // {
-	TOKEN_RBRACE   // }
-	TOKEN_PIPEGT   // |>
+	TOKEN_CHAR_LIT  // 'a'
+	TOKEN_IS        // is
+	TOKEN_FATARROW  // =>
+	TOKEN_TO        // to
+	TOKEN_LBRACE    // {
+	TOKEN_RBRACE    // }
+	TOKEN_PIPEGT    // |>
 	TOKEN_SEMICOLON // ;
 )
 
@@ -159,6 +161,8 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_ELIF:     "elif",
 	TOKEN_ELSE:     "else",
 	TOKEN_WHILE:    "while",
+	TOKEN_BREAK:    "break",
+	TOKEN_CONTINUE: "continue",
 	TOKEN_RETURN:   "return",
 	TOKEN_ANY:      "any",
 	TOKEN_HEAP:     "heap",
@@ -243,12 +247,12 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_SLASH:   "/",
 	TOKEN_PERCENT: "%",
 
-	TOKEN_PIPE:   "|",
-	TOKEN_CARET:  "^",
-	TOKEN_LSHIFT: "<<",
-	TOKEN_RSHIFT: ">>",
-	TOKEN_TILDE:  "~",
-	TOKEN_PIPEGT: "|>",
+	TOKEN_PIPE:      "|",
+	TOKEN_CARET:     "^",
+	TOKEN_LSHIFT:    "<<",
+	TOKEN_RSHIFT:    ">>",
+	TOKEN_TILDE:     "~",
+	TOKEN_PIPEGT:    "|>",
 	TOKEN_SEMICOLON: ";",
 }
 
@@ -266,6 +270,8 @@ var keywords = map[string]TokenKind{
 	"elif":      TOKEN_ELIF,
 	"else":      TOKEN_ELSE,
 	"while":     TOKEN_WHILE,
+	"break":     TOKEN_BREAK,
+	"continue":  TOKEN_CONTINUE,
 	"return":    TOKEN_RETURN,
 	"heap":      TOKEN_HEAP,
 	"stack":     TOKEN_STACK,

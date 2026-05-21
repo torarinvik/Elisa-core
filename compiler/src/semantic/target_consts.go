@@ -14,6 +14,15 @@ func (a *Analyzer) populateTargetConstValues(targetTriple string) {
 	a.setTargetConstBool("ELISA_TARGET_OS_WINDOWS", osName == "windows")
 	a.setTargetConstBool("ELISA_TARGET_OS_FREEBSD", osName == "freebsd")
 	a.setTargetConstBool("ELISA_TARGET_OS_POSIX", osName == "macos" || osName == "linux" || osName == "freebsd")
+	a.setTargetConstBool("ELISA_TARGET_ARCH_X86_64", archName == "x86_64")
+	a.setTargetConstBool("ELISA_TARGET_ARCH_ARM64", archName == "arm64" || archName == "aarch64")
+	a.setTargetConstAliasBool("PLATFORM_WINDOWS", osName == "windows")
+	a.setTargetConstAliasBool("PLATFORM_APPLE", osName == "macos")
+	a.setTargetConstAliasBool("PLATFORM_DARWIN", osName == "macos")
+	a.setTargetConstAliasBool("PLATFORM_LINUX", osName == "linux")
+	a.setTargetConstAliasBool("PLATFORM_FREEBSD", osName == "freebsd")
+	a.setTargetConstAliasBool("ARCH_X86_64", archName == "x86_64")
+	a.setTargetConstAliasBool("ARCH_ARM64", archName == "arm64" || archName == "aarch64")
 	a.setTargetConstString("target.os", osName)
 	a.setTargetConstString("target.arch", archName)
 	a.setTargetConstString("target.compiler", compilerName)
@@ -50,6 +59,10 @@ func (a *Analyzer) setTargetConstBool(name string, value bool) {
 		Type:    a.namedTypes["bool"],
 		Mutable: false,
 	})
+}
+
+func (a *Analyzer) setTargetConstAliasBool(name string, value bool) {
+	a.constValues[name] = ConstValue{Kind: ConstBool, Bool: value}
 }
 
 func (a *Analyzer) setTargetConstString(name string, value string) {

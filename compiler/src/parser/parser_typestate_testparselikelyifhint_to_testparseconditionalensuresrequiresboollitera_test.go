@@ -47,6 +47,38 @@ func TestParseUnlikelyWhileHint(t *testing.T) {
 		t.Fatalf("expected raw condition ident value, got %T %#v", stmt.Cond, stmt.Cond)
 	}
 }
+func TestParseBreakAndContinueStatements(t *testing.T) {
+	file, errs := parseSourceFile(t, "def fold(limit: int) -> int:\n    i: mutable int = 0\n    while i < limit:\n        i <- i + 1\n        if i == 2:\n            continue\n        if i == 4:\n            break\n    return i\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	loop, ok := decl.Body[1].(*ast.WhileStmt)
+	if !ok {
+		t.Fatalf("expected second stmt to be while, got %T", decl.Body[1])
+	}
+	firstIf, ok := loop.Body[1].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected first loop branch to be if, got %T", loop.Body[1])
+	}
+	if _, ok := firstIf.Then[0].(*ast.ContinueStmt); !ok {
+		t.Fatalf("expected continue stmt, got %T", firstIf.Then[0])
+	}
+	secondIf, ok := loop.Body[2].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected second loop branch to be if, got %T", loop.Body[2])
+	}
+	if _, ok := secondIf.Then[0].(*ast.BreakStmt); !ok {
+		t.Fatalf("expected break stmt, got %T", secondIf.Then[0])
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "continue") || !strings.Contains(formatted, "break") {
+		t.Fatalf("expected unparse to preserve break/continue, got:\n%s", formatted)
+	}
+}
 func TestParsePackedViewSurfaceType(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef keep(view_value: packedview[Expr.Lit]) -> packedview[Expr.Lit]:\n    return view_value\n")
 	if len(errs) != 0 {
