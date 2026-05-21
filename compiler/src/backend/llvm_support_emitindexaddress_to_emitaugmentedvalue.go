@@ -354,6 +354,19 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		return C.LLVMBuildPtrToInt(s.builder, value, expectedLLVM, cStringFree("ptrtoint")), nil
 	}
 	if isNumericCastType(actual) && isPointerLikeType(expected) {
+		// LLVM requires integer-typed input for inttoptr; float->ptr must lower
+		// through an explicit float->uintptr conversion first.
+		if isFloatType(actual) {
+			uintptrType := s.g.result.NamedTypes["uintptr"]
+			if uintptrType == nil {
+				return nil, fmt.Errorf("missing builtin uintptr type for float-to-pointer cast")
+			}
+			coerced, err := s.coerceNumericValue(value, actual, uintptrType)
+			if err != nil {
+				return nil, err
+			}
+			return C.LLVMBuildIntToPtr(s.builder, coerced, expectedLLVM, cStringFree("inttoptr")), nil
+		}
 		return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("inttoptr")), nil
 	}
 	return value, nil
