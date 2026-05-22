@@ -290,7 +290,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitCBindCheck)
 			return 1
 		}
-		if err := runCBindLayoutCheck(result, stdout); err != nil {
+		if err := runCBindLayoutCheck(result, options.targetTriple, stdout); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}

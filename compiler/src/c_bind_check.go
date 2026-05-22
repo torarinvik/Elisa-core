@@ -35,7 +35,7 @@ type cBindCLayout struct {
 	Offsets map[string]int
 }
 
-func runCBindLayoutCheck(result *semantic.Result, stdout io.Writer) error {
+func runCBindLayoutCheck(result *semantic.Result, targetTriple string, stdout io.Writer) error {
 	checks, err := collectCBindChecks(result)
 	if err != nil {
 		return err
@@ -44,7 +44,7 @@ func runCBindLayoutCheck(result *semantic.Result, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "c-bind-check: no @c_bind structs")
 		return nil
 	}
-	cLayouts, err := probeCBindLayouts(checks)
+	cLayouts, err := probeCBindLayouts(checks, targetTriple)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func collectCBindChecks(result *semantic.Result) ([]cBindStructCheck, error) {
 	return checks, nil
 }
 
-func probeCBindLayouts(checks []cBindStructCheck) (map[string]cBindCLayout, error) {
+func probeCBindLayouts(checks []cBindStructCheck, targetTriple string) (map[string]cBindCLayout, error) {
 	tmpDir, err := os.MkdirTemp("", "elisa-c-bind-check-*")
 	if err != nil {
 		return nil, err
@@ -137,7 +137,8 @@ func probeCBindLayouts(checks []cBindStructCheck) (map[string]cBindCLayout, erro
 	if cc == "" {
 		cc = "cc"
 	}
-	args := append([]string{"-std=c11"}, shellFields(os.Getenv("CPPFLAGS"))...)
+	args := append([]string{"-std=c11"}, targetClangArgs(targetTriple)...)
+	args = append(args, shellFields(os.Getenv("CPPFLAGS"))...)
 	args = append(args, shellFields(os.Getenv("CFLAGS"))...)
 	args = append(args, sourcePath, "-o", exePath)
 	compile := exec.Command(cc, args...)
@@ -146,7 +147,7 @@ func probeCBindLayouts(checks []cBindStructCheck) (map[string]cBindCLayout, erro
 	if err := compile.Run(); err != nil {
 		return nil, fmt.Errorf("failed to compile C binding probe with %s: %v\n%s", cc, err, strings.TrimSpace(compileErr.String()))
 	}
-	run := exec.Command(exePath)
+	run := nativeExecCommand(exePath, targetTriple)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	run.Stdout = &stdout
@@ -196,7 +197,50 @@ func shellFields(value string) []string {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
-	return strings.Fields(value)
+	fields := make([]string, 0)
+	var current strings.Builder
+	var quote rune
+	escaped := false
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		fields = append(fields, current.String())
+		current.Reset()
+	}
+	for _, ch := range value {
+		if escaped {
+			current.WriteRune(ch)
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			} else {
+				current.WriteRune(ch)
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
+		}
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+			flush()
+			continue
+		}
+		current.WriteRune(ch)
+	}
+	if escaped {
+		current.WriteRune('\\')
+	}
+	flush()
+	return fields
 }
 
 func parseCBindProbeOutput(output string) (map[string]cBindCLayout, error) {
