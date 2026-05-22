@@ -41,8 +41,8 @@ func debugTestRunnerCache(stderr io.Writer, status string, artifact testRunnerCa
 	fmt.Fprintf(stderr, "[ cache    ] %s key=%s exe=%s\n", status, prefix, artifact.executable)
 }
 
-func locateCachedTestRunner(runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile) (testRunnerCacheArtifact, bool, error) {
-	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, foreignFiles, linkFlags, optLevel, packedProfile)
+func locateCachedTestRunner(runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, bool, error) {
+	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple)
 	if err != nil {
 		return testRunnerCacheArtifact{}, false, err
 	}
@@ -90,13 +90,14 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 	return nil
 }
 
-func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile) (testRunnerCacheArtifact, error) {
+func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, error) {
 	hash := sha256.New()
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
 	testRunnerCacheWriteString(hash, fmt.Sprintf("opt=%d", optLevel))
 	testRunnerCacheWriteString(hash, "packedProfile="+packedProfile.SelectionKey())
+	testRunnerCacheWriteString(hash, "targetTriple="+strings.TrimSpace(targetTriple))
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		return testRunnerCacheArtifact{}, err

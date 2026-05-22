@@ -36,7 +36,11 @@ func GenerateLLVMIRWithOpt(result *semantic.Result, optLevel OptimizationLevel) 
 	return GenerateLLVMIRWithOptAndPackedLoweringProfile(result, optLevel, DefaultPackedLoweringProfile())
 }
 func GenerateLLVMIRWithOptAndPackedLoweringProfile(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile) (string, error) {
-	g, err := compileLLVMModule(result, optLevel, profile)
+	return GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result, optLevel, profile, "")
+}
+
+func GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string) (string, error) {
+	g, err := compileLLVMModuleWithTarget(result, optLevel, profile, targetTriple)
 	if err != nil {
 		return "", err
 	}

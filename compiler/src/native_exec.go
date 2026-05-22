@@ -46,12 +46,12 @@ type nativeBuildTiming struct {
 	CacheHit     bool
 }
 
-func buildNativeExecutable(result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), error) {
+func buildNativeExecutable(result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), error) {
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("clang is required to build native executables: %w", err)
 	}
-	exePath, cleanup, _, err := buildNativeExecutableWithClang(clangPath, result, foreignFiles, linkFlags, outputPath, optLevel, packedProfile, stderr)
+	exePath, cleanup, _, err := buildNativeExecutableWithClang(clangPath, result, foreignFiles, linkFlags, outputPath, optLevel, packedProfile, targetTriple, stderr)
 	return exePath, cleanup, err
 }
 
@@ -205,7 +205,7 @@ func exportedTypeNames(result *semantic.Result) []string {
 	return names
 }
 
-func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
+func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
 	if result == nil {
 		return "", func() {}, nativeBuildTiming{}, fmt.Errorf("semantic result is nil")
 	}
@@ -233,7 +233,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 
 	objectPath := filepath.Join(tempDir, "elisacore_module.o")
 	objectStart := time.Now()
-	if err := writeNativeObjectViaClangIR(clangPath, result, objectPath, optLevel, packedProfile, stderr); err != nil {
+	if err := writeNativeObjectViaClangIR(clangPath, result, objectPath, optLevel, packedProfile, targetTriple, stderr); err != nil {
 		cleanup()
 		return "", func() {}, timing, err
 	}
@@ -241,7 +241,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	runtimeObjectPath := ""
 	if !resultDefinesDefaultElisaCoreRuntime(result) {
 		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
-		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, "", stderr); err != nil {
+		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, targetTriple, stderr); err != nil {
 			cleanup()
 			return "", func() {}, timing, err
 		}
@@ -277,13 +277,14 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		}
 		foreignFiles = append([]string{shimPath}, foreignFiles...)
 	}
-	foreignFiles, linkFlags, err = compileCxxForeignFiles(clangPath, foreignFiles, linkFlags, tempDir, stderr)
+	foreignFiles, linkFlags, err = compileCxxForeignFiles(clangPath, foreignFiles, linkFlags, tempDir, targetTriple, stderr)
 	if err != nil {
 		cleanup()
 		return "", func() {}, timing, err
 	}
 
-	linkArgs := make([]string, 0, 5+len(foreignFiles))
+	linkArgs := make([]string, 0, 7+len(foreignFiles))
+	linkArgs = append(linkArgs, targetClangArgs(targetTriple)...)
 	linkArgs = append(linkArgs, "-I", tempDir)
 	if nativeExecutableNeedsPThread(foreignFiles) && runtime.GOOS != "windows" {
 		linkArgs = append(linkArgs, "-pthread")
@@ -314,7 +315,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	return exePath, cleanup, timing, nil
 }
 
-func compileCxxForeignFiles(clangPath string, foreignFiles []string, linkFlags []string, tempDir string, stderr io.Writer) ([]string, []string, error) {
+func compileCxxForeignFiles(clangPath string, foreignFiles []string, linkFlags []string, tempDir string, targetTriple string, stderr io.Writer) ([]string, []string, error) {
 	cxxFlags, filteredLinkFlags := cxxCompileAndFilteredLinkFlags(linkFlags)
 	if len(cxxFlags) == 0 {
 		return foreignFiles, linkFlags, nil
@@ -326,7 +327,9 @@ func compileCxxForeignFiles(clangPath string, foreignFiles []string, linkFlags [
 			continue
 		}
 		objectPath := filepath.Join(tempDir, fmt.Sprintf("foreign_cxx_%d.o", index))
-		compileArgs := append([]string{"-c", foreignFile, "-o", objectPath}, cxxFlags...)
+		compileArgs := append([]string{}, targetClangArgs(targetTriple)...)
+		compileArgs = append(compileArgs, "-c", foreignFile, "-o", objectPath)
+		compileArgs = append(compileArgs, cxxFlags...)
 		compileCmd := exec.Command(clangPath, compileArgs...)
 		compileCmd.Stdout = stderr
 		compileCmd.Stderr = stderr
@@ -374,8 +377,45 @@ func cxxCompileAndFilteredLinkFlags(linkFlags []string) ([]string, []string) {
 	return cxxFlags, filtered
 }
 
-func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, objectPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) error {
-	ir, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfile(result, optLevel, packedProfile)
+func targetClangArgs(targetTriple string) []string {
+	triple := strings.ToLower(strings.TrimSpace(targetTriple))
+	if triple == "" {
+		return nil
+	}
+	if strings.Contains(triple, "darwin") || strings.Contains(triple, "macos") {
+		switch {
+		case strings.Contains(triple, "x86_64") || strings.Contains(triple, "amd64"):
+			return []string{"-arch", "x86_64"}
+		case strings.Contains(triple, "aarch64") || strings.Contains(triple, "arm64"):
+			return []string{"-arch", "arm64"}
+		}
+	}
+	return []string{"-target", strings.TrimSpace(targetTriple)}
+}
+
+func targetRunPrefix(targetTriple string) []string {
+	triple := strings.ToLower(strings.TrimSpace(targetTriple))
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" &&
+		(strings.Contains(triple, "darwin") || strings.Contains(triple, "macos")) &&
+		(strings.Contains(triple, "x86_64") || strings.Contains(triple, "amd64")) {
+		return []string{"/usr/bin/arch", "-x86_64"}
+	}
+	return nil
+}
+
+func nativeExecCommand(exePath string, targetTriple string, args ...string) *exec.Cmd {
+	prefix := targetRunPrefix(targetTriple)
+	if len(prefix) == 0 {
+		return exec.Command(exePath, args...)
+	}
+	cmdArgs := append([]string{}, prefix[1:]...)
+	cmdArgs = append(cmdArgs, exePath)
+	cmdArgs = append(cmdArgs, args...)
+	return exec.Command(prefix[0], cmdArgs...)
+}
+
+func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, objectPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
+	ir, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result, optLevel, packedProfile, targetTriple)
 	if err != nil {
 		return err
 	}
@@ -383,14 +423,53 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 	if err := os.WriteFile(irPath, []byte(ir), 0o644); err != nil {
 		return err
 	}
-	compileArgs := []string{"-Wno-override-module", "-c", irPath, "-o", objectPath}
-	compileCmd := exec.Command(clangPath, compileArgs...)
-	compileCmd.Stdout = stderr
-	compileCmd.Stderr = stderr
-	if err := compileCmd.Run(); err != nil {
-		return fmt.Errorf("failed to compile LLVM IR object with clang: %w", err)
+	_ = clangPath
+	if err := writeLLVMIRObjectViaLLC(irPath, objectPath, targetTriple, stderr); err == nil {
+		return nil
+	} else if strings.TrimSpace(targetTriple) != "" {
+		return err
+	}
+	_ = stderr
+	return backend.WriteLLVMObjectFileWithOptions(result, objectPath, backend.LLVMObjectEmitOptions{
+		OptLevel:      optLevel,
+		PackedProfile: packedProfile,
+		TargetTriple:  targetTriple,
+	})
+}
+
+func writeLLVMIRObjectViaLLC(irPath string, objectPath string, targetTriple string, stderr io.Writer) error {
+	llcPath, err := findLLC()
+	if err != nil {
+		return err
+	}
+	args := []string{"-filetype=obj", "-O0"}
+	if strings.TrimSpace(targetTriple) != "" {
+		args = append(args, "-mtriple="+strings.TrimSpace(targetTriple))
+	}
+	args = append(args, irPath, "-o", objectPath)
+	cmd := exec.Command(llcPath, args...)
+	cmd.Stdout = stderr
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to compile LLVM IR object with llc: %w", err)
 	}
 	return nil
+}
+
+func findLLC() (string, error) {
+	if path, err := exec.LookPath("llc"); err == nil {
+		return path, nil
+	}
+	candidates := []string{
+		"/opt/homebrew/opt/llvm/bin/llc",
+		"/usr/local/opt/llvm/bin/llc",
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("llc is required for cross-target native object emission")
 }
 
 type cOpaqueRuntimeBinding struct {
@@ -952,6 +1031,13 @@ func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend
 			fmt.Fprintf(stderr, "%s\n", w)
 		}
 	}
+	if clangPath, err := exec.LookPath("clang"); err == nil {
+		if err := writeNativeObjectViaClangIR(clangPath, runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, stderr); err == nil {
+			return nil
+		} else if strings.TrimSpace(targetTriple) != "" {
+			return err
+		}
+	}
 	return backend.WriteLLVMObjectFileWithOptions(runtimeResult, outputPath, backend.LLVMObjectEmitOptions{
 		OptLevel:      backend.OptimizationLevel3,
 		PackedProfile: packedProfile,
@@ -975,10 +1061,10 @@ func resultDefinesDefaultElisaCoreRuntime(result *semantic.Result) bool {
 	return true
 }
 
-func runNativeExecutable(exePath string, stdout io.Writer, stderr io.Writer) error {
+func runNativeExecutable(exePath string, targetTriple string, stdout io.Writer, stderr io.Writer) error {
 	var runStdout bytes.Buffer
 	var runStderr bytes.Buffer
-	cmd := exec.Command(exePath)
+	cmd := nativeExecCommand(exePath, targetTriple)
 	cmd.Stdout = &runStdout
 	cmd.Stderr = &runStderr
 	err := cmd.Run()

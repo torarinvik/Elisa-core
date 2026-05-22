@@ -17,11 +17,16 @@ func GenerateLLVMIRWithOpt(result *semantic.Result, optLevel OptimizationLevel) 
 }
 
 func GenerateLLVMIRWithOptAndPackedLoweringProfile(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile) (string, error) {
+	return GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result, optLevel, profile, "")
+}
+
+func GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string) (string, error) {
 	if result == nil {
 		return "", fmt.Errorf("backend requires a semantic result")
 	}
 	_ = optLevel
 	_ = profile
+	_ = targetTriple
 	return "", fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
 }
 

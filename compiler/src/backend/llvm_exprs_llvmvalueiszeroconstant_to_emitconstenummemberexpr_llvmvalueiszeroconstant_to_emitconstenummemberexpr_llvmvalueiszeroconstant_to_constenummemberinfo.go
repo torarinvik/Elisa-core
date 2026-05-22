@@ -88,6 +88,64 @@ import (
 func llvmValueIsZeroConstant(value C.LLVMValueRef) bool {
 	return value != nil && C.elisacoreLLVMIsZeroValue(value) != 0
 }
+
+const largeZeroStoreMemsetThresholdBytes = 128
+
+func (s *functionState) storeValue(ptr C.LLVMValueRef, value C.LLVMValueRef, typ semantic.Type, name string) error {
+	if ptr == nil || value == nil {
+		return fmt.Errorf("cannot store nil LLVM value")
+	}
+	if typ != nil && llvmValueIsZeroConstant(value) {
+		sizeBytes, err := s.g.abiSizeOfType(typ)
+		if err != nil {
+			return err
+		}
+		if sizeBytes >= largeZeroStoreMemsetThresholdBytes {
+			return s.emitZeroMemset(ptr, sizeBytes, name)
+		}
+	}
+	C.LLVMBuildStore(s.builder, value, ptr)
+	return nil
+}
+
+func (s *functionState) emitZeroMemset(ptr C.LLVMValueRef, sizeBytes uint64, name string) error {
+	if sizeBytes == 0 {
+		return nil
+	}
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	memsetValueType := s.g.result.NamedTypes["int"]
+	usizeType := s.g.result.NamedTypes["usize"]
+	if voidType == nil || memsetValueType == nil || usizeType == nil {
+		return fmt.Errorf("missing builtin types for memset lowering")
+	}
+	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, usizeType}, Return: voidRefType}
+	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
+	if err != nil {
+		return err
+	}
+	memsetLLVMType, err := s.g.lowerFunctionType(memsetType)
+	if err != nil {
+		return err
+	}
+	usizeLLVMType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return err
+	}
+	intLLVMType, err := s.g.lowerBuiltin("int")
+	if err != nil {
+		return err
+	}
+	fillValue := C.LLVMConstInt(intLLVMType, 0, 0)
+	sizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(sizeBytes), 0)
+	callName := "store.zero.memset"
+	if name != "" {
+		callName = name + ".memset"
+	}
+	_ = s.buildCall(memsetLLVMType, memsetCallee, []C.LLVMValueRef{ptr, fillValue, sizeValue}, callName)
+	return nil
+}
+
 func (s *functionState) addCallSiteEnumAttribute(call C.LLVMValueRef, index C.uint, name string) {
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))
@@ -372,7 +430,9 @@ func (s *functionState) emitMovedValue(operand ast.Expr, expected semantic.Type)
 		if err != nil {
 			return nil, nil, err
 		}
-		C.LLVMBuildStore(s.builder, zero, binding.ptr)
+		if err := s.storeValue(binding.ptr, zero, binding.typ, binding.name+".move.zero"); err != nil {
+			return nil, nil, err
+		}
 		return value, binding.typ, nil
 	}
 	return s.emitExpr(operand, expected)

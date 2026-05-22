@@ -392,30 +392,40 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return fmt.Errorf("unknown region %q during LLVM lowering", n.Name)
 		}
 		return s.emitArenaFree(binding.ptr, binding.typ)
-		case *ast.AssignStmt:
-			if n.Optional {
-				return s.emitOptionalAssignStmt(n)
-			}
-			if identTarget, ok := n.Target.(*ast.Ident); ok {
-				if binding, ok := s.lookupBinding(identTarget.Name); ok && !binding.mutable {
-					if _, ok := binding.typ.(*semantic.RefType); ok {
-						slotPtr, err := s.loadValue(binding.ptr, binding.typ, identTarget.Name+".ref.slot")
-						if err != nil {
-							return err
-						}
-						value, _, err := s.emitExpr(n.Value, binding.typ)
-						if err != nil {
-							return err
-						}
-						C.LLVMBuildStore(s.builder, value, slotPtr)
-						s.invalidatePackedReadCaches()
-						return nil
+	case *ast.AssignStmt:
+		if n.Optional {
+			return s.emitOptionalAssignStmt(n)
+		}
+		if identTarget, ok := n.Target.(*ast.Ident); ok {
+			if binding, ok := s.lookupBinding(identTarget.Name); ok && !binding.mutable {
+				if refType, ok := binding.typ.(*semantic.RefType); ok {
+					slotPtr, err := s.loadValue(binding.ptr, binding.typ, identTarget.Name+".ref.slot")
+					if err != nil {
+						return err
 					}
+					storeType := refType.Elem
+					valueType := s.exprType(n.Value)
+					if _, valueIsRef := valueType.(*semantic.RefType); semantic.SameType(valueType, binding.typ) || valueIsRef {
+						storeType = binding.typ
+					}
+					if _, valueIsStringLiteral := n.Value.(*ast.StringLit); valueIsStringLiteral {
+						storeType = binding.typ
+					}
+					value, _, err := s.emitExpr(n.Value, storeType)
+					if err != nil {
+						return err
+					}
+					if err := s.storeValue(slotPtr, value, storeType, identTarget.Name+".ref.assign"); err != nil {
+						return err
+					}
+					s.invalidatePackedReadCaches()
+					return nil
 				}
 			}
-			if fieldTarget, ok := n.Target.(*ast.FieldExpr); ok {
-				if handled, err := s.emitBitGroupMemberAssign(fieldTarget, n.Value); handled {
-					if err != nil {
+		}
+		if fieldTarget, ok := n.Target.(*ast.FieldExpr); ok {
+			if handled, err := s.emitBitGroupMemberAssign(fieldTarget, n.Value); handled {
+				if err != nil {
 					return err
 				}
 				s.invalidatePackedReadCaches()
@@ -434,7 +444,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, value, ptr)
+		if err := s.storeValue(ptr, value, targetType, "assign"); err != nil {
+			return err
+		}
 		s.bindPackedStoreValue(targetType, value)
 		if path, ok := s.packedEnumStoragePath(n.Target); ok {
 			if err := s.bindPackedStoreOriginsForExprPath(path, n.Value, targetType); err != nil {
@@ -456,7 +468,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, value, ptr)
+		if err := s.storeValue(ptr, value, targetType, "asref.assign"); err != nil {
+			return err
+		}
 		s.bindPackedStoreValue(targetType, value)
 		if path, ok := s.packedEnumStoragePath(n.Target); ok {
 			if err := s.bindPackedStoreOriginsForExprPath(path, n.Value, targetType); err != nil {

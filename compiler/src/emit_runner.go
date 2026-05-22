@@ -237,7 +237,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			return 1
 		}
 		writeTestPhaseLine(stderr, "emit_test", "selected_test_execution")
-		return executeSelectedTests(program.filename, result, options.filter, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, stdout, stderr)
+		return executeSelectedTests(program.filename, result, options.filter, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, stdout, stderr)
 	case emitInterpret:
 		if options.output != "" {
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitInterpret)
@@ -326,7 +326,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			if options.runNative {
 				exeOutputPath = ""
 			}
-			exePath, cleanup, err := buildNativeExecutable(result, options.foreignFiles, options.linkFlags, exeOutputPath, effectiveOptimizationLevel(options), options.packedProfile, stderr)
+			exePath, cleanup, err := buildNativeExecutable(result, options.foreignFiles, options.linkFlags, exeOutputPath, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, stderr)
 			if err != nil {
 				cleanup()
 				fmt.Fprintf(stderr, "error: %s\n", err)
@@ -334,7 +334,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			}
 			defer cleanup()
 			if options.runNative {
-				if err := runNativeExecutable(exePath, stdout, stderr); err != nil {
+				if err := runNativeExecutable(exePath, options.targetTriple, stdout, stderr); err != nil {
 					fmt.Fprintf(stderr, "error: %s\n", err)
 					return 1
 				}
