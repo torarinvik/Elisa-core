@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -114,7 +115,7 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 		if trimmed == "" {
 			continue
 		}
-		if err := testRunnerCacheHashFile(hash, trimmed); err != nil {
+		if err := testRunnerCacheHashForeignFile(hash, trimmed, map[string]bool{}); err != nil {
 			return testRunnerCacheArtifact{}, err
 		}
 	}
@@ -148,6 +149,38 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 	key := hex.EncodeToString(hash.Sum(nil))
 	artifactDir := filepath.Join(cacheRoot, key)
 	return testRunnerCacheArtifact{key: key, dir: artifactDir, executable: filepath.Join(artifactDir, "runner")}, nil
+}
+
+var testRunnerCacheQuotedIncludePattern = regexp.MustCompile(`(?m)^\s*#\s*include\s+"([^"]+)"`)
+
+func testRunnerCacheHashForeignFile(hash io.Writer, path string, seen map[string]bool) error {
+	cleaned, err := filepath.Abs(strings.TrimSpace(path))
+	if err != nil {
+		return err
+	}
+	if seen[cleaned] {
+		return nil
+	}
+	seen[cleaned] = true
+	data, err := os.ReadFile(cleaned)
+	if err != nil {
+		return err
+	}
+	testRunnerCacheWriteString(hash, "foreign="+cleaned)
+	testRunnerCacheWriteBytes(hash, "foreign-body", data)
+	for _, match := range testRunnerCacheQuotedIncludePattern.FindAllSubmatch(data, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		includePath := filepath.Clean(filepath.Join(filepath.Dir(cleaned), string(match[1])))
+		if _, statErr := os.Stat(includePath); statErr != nil {
+			continue
+		}
+		if err := testRunnerCacheHashForeignFile(hash, includePath, seen); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func compilerSourceRootForCache() (string, error) {
