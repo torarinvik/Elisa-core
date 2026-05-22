@@ -166,6 +166,7 @@ const (
 	emitLLVM       = "llvm"
 	emitPacked     = "packed"
 	emitCBindCheck = "c-bind-check"
+	emitCBindJSON  = "c-bind-check-json"
 	emitHeader     = "header"
 	emitBitcode    = "bc"
 	emitObject     = "obj"
@@ -328,7 +329,7 @@ func parseArgs(args []string) (cliOptions, error) {
 	return options, nil
 }
 func printUsage(w io.Writer) {
-	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitHeader, emitBitcode, emitObject, emitCArchive}
+	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitCBindJSON, emitHeader, emitBitcode, emitObject, emitCArchive}
 	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
@@ -405,6 +406,8 @@ func normalizeEmitMode(value string) string {
 		return emitPacked
 	case emitCBindCheck, "cbind-check", "c-bind", "cbind":
 		return emitCBindCheck
+	case emitCBindJSON, "cbind-check-json", "c-bind-json", "cbind-json", "ffi-manifest", "abi-manifest":
+		return emitCBindJSON
 	case emitHeader:
 		return emitHeader
 	case emitBitcode, "bitcode":

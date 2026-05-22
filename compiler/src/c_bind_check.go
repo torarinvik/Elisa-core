@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -35,12 +36,52 @@ type cBindCLayout struct {
 	Offsets map[string]int
 }
 
+type cBindManifest struct {
+	Version      int                   `json:"version"`
+	TargetTriple string                `json:"target_triple"`
+	Structs      []cBindManifestStruct `json:"structs"`
+}
+
+type cBindManifestStruct struct {
+	ElisaName string               `json:"elisa_name"`
+	CName     string               `json:"c_name"`
+	Header    string               `json:"header"`
+	Prefix    bool                 `json:"prefix"`
+	Elisa     cBindManifestLayout  `json:"elisa"`
+	C         cBindManifestLayout  `json:"c"`
+	Fields    []cBindManifestField `json:"fields"`
+}
+
+type cBindManifestLayout struct {
+	Size  int `json:"size"`
+	Align int `json:"align"`
+}
+
+type cBindManifestField struct {
+	Name        string `json:"name"`
+	ElisaOffset int    `json:"elisa_offset"`
+	COffset     int    `json:"c_offset"`
+}
+
 func runCBindLayoutCheck(result *semantic.Result, targetTriple string, stdout io.Writer) error {
+	return runCBindLayoutCheckWithFormat(result, targetTriple, false, stdout)
+}
+
+func runCBindLayoutCheckJSON(result *semantic.Result, targetTriple string, stdout io.Writer) error {
+	return runCBindLayoutCheckWithFormat(result, targetTriple, true, stdout)
+}
+
+func runCBindLayoutCheckWithFormat(result *semantic.Result, targetTriple string, jsonOutput bool, stdout io.Writer) error {
 	checks, err := collectCBindChecks(result)
 	if err != nil {
 		return err
 	}
 	if len(checks) == 0 {
+		if jsonOutput {
+			encoder := json.NewEncoder(stdout)
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(cBindManifest{Version: 1, TargetTriple: strings.TrimSpace(targetTriple), Structs: []cBindManifestStruct{}})
+		}
 		fmt.Fprintln(stdout, "c-bind-check: no @c_bind structs")
 		return nil
 	}
@@ -75,6 +116,12 @@ func runCBindLayoutCheck(result *semantic.Result, targetTriple string, stdout io
 	if len(mismatches) != 0 {
 		return fmt.Errorf("C binding layout check failed:\n%s", strings.Join(mismatches, "\n"))
 	}
+	if jsonOutput {
+		manifest := buildCBindManifest(checks, cLayouts, targetTriple)
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(manifest)
+	}
 	for _, check := range checks {
 		if check.Prefix {
 			fmt.Fprintf(stdout, "c-bind-check: %s prefix matches %s from %s (fields=%d)\n", check.ElisaName, check.CName, check.Header, len(check.Fields))
@@ -83,6 +130,35 @@ func runCBindLayoutCheck(result *semantic.Result, targetTriple string, stdout io
 		}
 	}
 	return nil
+}
+
+func buildCBindManifest(checks []cBindStructCheck, cLayouts map[string]cBindCLayout, targetTriple string) cBindManifest {
+	manifest := cBindManifest{
+		Version:      1,
+		TargetTriple: strings.TrimSpace(targetTriple),
+		Structs:      make([]cBindManifestStruct, 0, len(checks)),
+	}
+	for _, check := range checks {
+		cLayout := cLayouts[check.ElisaName]
+		fields := make([]cBindManifestField, 0, len(check.Fields))
+		for _, field := range check.Fields {
+			fields = append(fields, cBindManifestField{
+				Name:        field.Name,
+				ElisaOffset: field.Offset,
+				COffset:     cLayout.Offsets[field.Name],
+			})
+		}
+		manifest.Structs = append(manifest.Structs, cBindManifestStruct{
+			ElisaName: check.ElisaName,
+			CName:     check.CName,
+			Header:    check.Header,
+			Prefix:    check.Prefix,
+			Elisa:     cBindManifestLayout{Size: check.Size, Align: check.Align},
+			C:         cBindManifestLayout{Size: cLayout.Size, Align: cLayout.Align},
+			Fields:    fields,
+		})
+	}
+	return manifest
 }
 
 func collectCBindChecks(result *semantic.Result) ([]cBindStructCheck, error) {

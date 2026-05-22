@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,6 +122,77 @@ struct HeaderPrefix layout c:
 	}
 	if !strings.Contains(stdout.String(), "c-bind-check: HeaderPrefix prefix matches struct Header") {
 		t.Fatalf("expected c-bind prefix success, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLIEmitsCBindLayoutManifestJSON(t *testing.T) {
+	if _, err := exec.LookPath("cc"); err != nil {
+		t.Skip("cc not available")
+	}
+	tmpDir := t.TempDir()
+	headerPath := filepath.Join(tmpDir, "fixture.h")
+	if err := os.WriteFile(headerPath, []byte(`#include <stdint.h>
+
+struct Header {
+	uint8_t tag;
+	uint32_t count;
+};
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(tmpDir, "fixture.elisa")
+	source := `@c_bind("` + headerPath + `", "struct Header")
+struct Header layout c:
+	tag: u8
+	count: u32
+`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	targetTriple := runtime.GOARCH + "-unknown-" + runtime.GOOS
+	if runtime.GOOS == "darwin" {
+		targetTriple = "x86_64-apple-darwin"
+	}
+	exitCode := runCLI([]string{"-emit", "c-bind-check-json", "-target-triple", targetTriple, sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstdout:\n%s\nstderr:\n%s", exitCode, stdout.String(), stderr.String())
+	}
+	var manifest struct {
+		Version      int    `json:"version"`
+		TargetTriple string `json:"target_triple"`
+		Structs      []struct {
+			ElisaName string `json:"elisa_name"`
+			CName     string `json:"c_name"`
+			Elisa     struct {
+				Size int `json:"size"`
+			} `json:"elisa"`
+			C struct {
+				Size int `json:"size"`
+			} `json:"c"`
+			Fields []struct {
+				Name        string `json:"name"`
+				ElisaOffset int    `json:"elisa_offset"`
+				COffset     int    `json:"c_offset"`
+			} `json:"fields"`
+		} `json:"structs"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &manifest); err != nil {
+		t.Fatalf("expected JSON manifest, got error %v\n%s", err, stdout.String())
+	}
+	if manifest.Version != 1 || manifest.TargetTriple != targetTriple {
+		t.Fatalf("unexpected manifest header: %#v", manifest)
+	}
+	if len(manifest.Structs) != 1 || manifest.Structs[0].ElisaName != "Header" || manifest.Structs[0].CName != "struct Header" {
+		t.Fatalf("unexpected structs: %#v", manifest.Structs)
+	}
+	if manifest.Structs[0].Elisa.Size != manifest.Structs[0].C.Size {
+		t.Fatalf("expected Elisa/C sizes to match: %#v", manifest.Structs[0])
+	}
+	if len(manifest.Structs[0].Fields) != 2 || manifest.Structs[0].Fields[1].Name != "count" || manifest.Structs[0].Fields[1].ElisaOffset != manifest.Structs[0].Fields[1].COffset {
+		t.Fatalf("unexpected fields: %#v", manifest.Structs[0].Fields)
 	}
 }
 

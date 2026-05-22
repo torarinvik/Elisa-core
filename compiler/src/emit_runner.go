@@ -295,6 +295,12 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			return 1
 		}
 		return 0
+	case emitCBindJSON:
+		if err := runCBindLayoutCheckJSON(result, options.targetTriple, stdout); err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		return 0
 	case emitHeader:
 		output, err := backend.GenerateCHeader(result)
 		if err != nil {
