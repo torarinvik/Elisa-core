@@ -60,7 +60,31 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 	if len(missing) == 0 {
 		return
 	}
-	a.warnf(pos, effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing)))
+	msg := effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing))
+	// Memory-safety opt-outs (the Unsafe.* family) are HARD ERRORS under
+	// enforcement: a memory-unsafe operation must not compile unless the author
+	// explicitly grants the corresponding Unsafe permission (the "guaranteed
+	// memory safety unless you explicitly opt out" contract, docs/26). Effect
+	// authority (Abort/Memory/...) stays a warning.
+	if a.enforceUnsafePermissions && allUnsafeFamilies(missing) {
+		a.errorf(pos, "%s", msg)
+		return
+	}
+	a.warnf(pos, msg)
+}
+
+// allUnsafeFamilies reports whether every missing permission family is the
+// Unsafe family, i.e. the missing grants are all memory-safety opt-outs.
+func allUnsafeFamilies(families []string) bool {
+	if len(families) == 0 {
+		return false
+	}
+	for _, family := range families {
+		if family != "Unsafe" {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *Analyzer) warnOnRedundantLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {

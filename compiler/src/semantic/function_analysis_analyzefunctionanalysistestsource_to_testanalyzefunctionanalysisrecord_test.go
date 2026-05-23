@@ -31,6 +31,32 @@ func analyzeFunctionAnalysisTestSourceWithOptions(t *testing.T, filename string,
 	}
 	return result
 }
+// analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics runs analysis
+// with the given options WITHOUT failing on semantic errors, so tests can assert
+// on error-level diagnostics (e.g. Unsafe.* memory-safety gates, which are hard
+// errors under EnforceUnsafePermissions).
+func analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t *testing.T, filename string, src string, options AnalyzeOptions) *Result {
+	t.Helper()
+	l := lexer.New(filename, []byte(src))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lex errors: %v", errs)
+	}
+	p := parser.New(tokens)
+	file := p.ParseFile(filename)
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	return AnalyzeWithOptions(file, options)
+}
+
+// allDiagnostics joins errors and warnings into one string, so assertions about
+// whether a diagnostic is present/absent are robust to its severity (Unsafe.*
+// gates are now errors; effect-authority diagnostics remain warnings).
+func allDiagnostics(result *Result) string {
+	return strings.Join(append(append([]string{}, result.Errors()...), result.Warnings()...), "\n")
+}
+
 func analyzeFunctionAnalysisTestSourceWithSemanticErrors(t *testing.T, filename string, src string) *Result {
 	t.Helper()
 	l := lexer.New(filename, []byte(src))

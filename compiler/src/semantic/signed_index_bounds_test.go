@@ -9,12 +9,12 @@ import (
 // negative value also satisfies i < count and indexes out of bounds. It must now
 // require the Unsafe.UncheckedIndex opt-out.
 func TestSignedIndexUpperBoundOnlyRequiresUncheckedIndex(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "signed_index_upper_only.elisa", `def read_at(xs: darray[u8], i: int) -> u8:
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signed_index_upper_only.elisa", `def read_at(xs: darray[u8], i: int) -> u8:
     if i < xs.count:
         return xs[i]
     return 0
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, "unchecked index requires") {
 		t.Fatalf("expected signed upper-bound-only index to require UncheckedIndex, got:\n%s", all)
 	}

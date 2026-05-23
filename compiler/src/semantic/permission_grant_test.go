@@ -29,7 +29,7 @@ extern alloc_value() -> i64 can[Abort.Panic, Memory.Allocate]
 def build() -> i64:
 	return alloc_value()
 `)
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `call to "alloc_value" requires can[Abort, Memory] and has no explicit local effect grant; add  can[Abort.Panic, Memory.Allocate] or a surrounding can ...: block`) {
 		t.Fatalf("expected missing top-level grant warning on call, got:\n%s", all)
 	}
@@ -44,7 +44,7 @@ def build() -> i64:
         can Memory.Allocate:
             return alloc_value()
 `)
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `alloc_value`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected outer explicit grant to satisfy nested call, got:\n%s", all)
 	}
@@ -82,7 +82,7 @@ def build() -> i64:
     can Memory.Allocate:
         return alloc_value()
 `)
-	if all := strings.Join(result.Warnings(), "\n"); strings.Contains(all, `alloc_value`) || strings.Contains(all, `explicit local effect grant`) {
+	if all := allDiagnostics(result); strings.Contains(all, `alloc_value`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected no local grant warning, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("build")
@@ -106,7 +106,7 @@ def build() -> i64:
     trusted Unsafe.PointerCast:
         return raw_pointer_cast()
 `)
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `raw_pointer_cast`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted block to satisfy local unsafe grant, got:\n%s", all)
 	}
@@ -131,7 +131,7 @@ def build() -> i64:
     can Unsafe.PointerCast:
         return raw_pointer_cast()
 `)
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `raw_pointer_cast`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected explicit unsafe API grant to satisfy local call, got:\n%s", all)
 	}
@@ -149,11 +149,11 @@ def build() -> i64:
 }
 
 func TestPointerLikeCastRequiresUnsafePointerCastGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "pointer_cast_requires_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "pointer_cast_requires_unsafe.elisa", `
 def build(value: uintptr) -> heap u8&:
     return value.cast[heap u8&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `pointer cast requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.PointerCast or a surrounding can ...: block`) {
 		t.Fatalf("expected missing unsafe pointer cast grant warning, got:\n%s", all)
 	}
@@ -171,12 +171,12 @@ def build(value: uintptr) -> heap u8&:
 }
 
 func TestTrustedPointerLikeCastDoesNotInferCallerPermission(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "trusted_pointer_cast.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_pointer_cast.elisa", `
 def build(value: uintptr) -> heap u8&:
     trusted Unsafe.PointerCast:
         return value.cast[heap u8&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `pointer cast requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted block to satisfy pointer cast grant, got:\n%s", all)
 	}
@@ -194,11 +194,11 @@ def build(value: uintptr) -> heap u8&:
 }
 
 func TestPointerArithmeticRequiresUnsafePointerArithmeticGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "pointer_arithmetic_requires_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "pointer_arithmetic_requires_unsafe.elisa", `
 def advance(ptr: u8&, offset: usize) -> u8&:
     return ptr + offset
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `pointer arithmetic requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.PointerArithmetic or a surrounding can ...: block`) {
 		t.Fatalf("expected missing unsafe pointer arithmetic grant warning, got:\n%s", all)
 	}
@@ -216,11 +216,11 @@ def advance(ptr: u8&, offset: usize) -> u8&:
 }
 
 func TestCommutativePointerArithmeticRequiresUnsafePointerArithmeticGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "commutative_pointer_arithmetic_requires_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "commutative_pointer_arithmetic_requires_unsafe.elisa", `
 def advance(offset: usize, ptr: u8&) -> u8&:
     return offset + ptr
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `pointer arithmetic requires can[Unsafe]`) {
 		t.Fatalf("expected missing unsafe pointer arithmetic grant warning, got:\n%s", all)
 	}
@@ -238,12 +238,12 @@ def advance(offset: usize, ptr: u8&) -> u8&:
 }
 
 func TestTrustedPointerArithmeticDoesNotInferCallerPermission(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "trusted_pointer_arithmetic.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_pointer_arithmetic.elisa", `
 def advance(ptr: u8&, offset: usize) -> u8&:
     trusted Unsafe.PointerArithmetic:
         return ptr + offset
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `pointer arithmetic requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted block to satisfy pointer arithmetic grant, got:\n%s", all)
 	}
@@ -261,12 +261,12 @@ def advance(ptr: u8&, offset: usize) -> u8&:
 }
 
 func TestPointerCastGrantDoesNotCoverPointerArithmetic(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "pointer_cast_grant_not_arithmetic.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "pointer_cast_grant_not_arithmetic.elisa", `
 def advance(ptr: u8&, offset: usize) -> u8&:
     trusted Unsafe.PointerCast:
         return ptr + offset
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `pointer arithmetic requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.PointerArithmetic or a surrounding can ...: block`) {
 		t.Fatalf("expected pointer cast grant not to satisfy pointer arithmetic, got:\n%s", all)
 	}
@@ -284,13 +284,13 @@ def advance(ptr: u8&, offset: usize) -> u8&:
 }
 
 func TestRawExternCallRequiresUnsafeRawExternGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "raw_extern_requires_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "raw_extern_requires_unsafe.elisa", `
 extern c_puts(text: u8&) -> int
 
 def write(text: u8&) -> int:
     return c_puts(text)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `call to "c_puts" requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.RawExtern or a surrounding can ...: block`) {
 		t.Fatalf("expected missing raw extern grant warning, got:\n%s", all)
 	}
@@ -308,14 +308,14 @@ def write(text: u8&) -> int:
 }
 
 func TestTrustedRawExternCallDoesNotInferCallerPermission(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "trusted_raw_extern.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_raw_extern.elisa", `
 extern c_puts(text: u8&) -> int
 
 def write(text: u8&) -> int:
     trusted Unsafe.RawExtern:
         return c_puts(text)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `c_puts`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted raw extern grant to satisfy call, got:\n%s", all)
 	}
@@ -333,7 +333,7 @@ def write(text: u8&) -> int:
 }
 
 func TestRawExternPreservesDeclaredPermissions(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "raw_extern_preserves_declared_permissions.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "raw_extern_preserves_declared_permissions.elisa", `
 extern c_puts(text: u8&) -> int can[Console.Write]
 
 def write(text: u8&) -> int:
@@ -341,7 +341,7 @@ def write(text: u8&) -> int:
         trusted Unsafe.RawExtern:
             return c_puts(text)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `c_puts`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected raw extern grant to be satisfied by trusted block, got:\n%s", all)
 	}
@@ -359,13 +359,13 @@ def write(text: u8&) -> int:
 }
 
 func TestMutableGlobalAccessRequiresUnsafeMutableGlobalGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "mutable_global_requires_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "mutable_global_requires_unsafe.elisa", `
 global mutable counter: int = 0
 
 def read_counter() -> int:
     return counter
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable global access requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.MutableGlobal or a surrounding can ...: block`) {
 		t.Fatalf("expected missing mutable global grant warning, got:\n%s", all)
 	}
@@ -383,14 +383,14 @@ def read_counter() -> int:
 }
 
 func TestTrustedMutableGlobalAccessDoesNotInferCallerPermission(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "trusted_mutable_global.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_mutable_global.elisa", `
 global mutable counter: int = 0
 
 def read_counter() -> int:
     trusted Unsafe.MutableGlobal:
         return counter
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable global access requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted mutable global grant to satisfy access, got:\n%s", all)
 	}
@@ -408,13 +408,13 @@ def read_counter() -> int:
 }
 
 func TestMutableGlobalAssignmentRequiresUnsafeMutableGlobalGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "mutable_global_assignment_requires_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "mutable_global_assignment_requires_unsafe.elisa", `
 global mutable counter: int = 0
 
 def set_counter(value: int) -> void:
     counter <- value
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable global access requires can[Unsafe]`) {
 		t.Fatalf("expected missing mutable global grant warning for assignment, got:\n%s", all)
 	}
@@ -432,11 +432,11 @@ def set_counter(value: int) -> void:
 }
 
 func TestRefIndexRequiresUnsafeUncheckedIndexGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "ref_index_requires_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ref_index_requires_unsafe.elisa", `
 def read_at(ptr: u8&, index: usize) -> u8:
     return ptr[index]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `unchecked index requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.UncheckedIndex or a surrounding can ...: block`) {
 		t.Fatalf("expected missing unchecked index grant warning, got:\n%s", all)
 	}
@@ -454,12 +454,12 @@ def read_at(ptr: u8&, index: usize) -> u8:
 }
 
 func TestTrustedRefIndexDoesNotInferCallerPermission(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "trusted_ref_index.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_ref_index.elisa", `
 def read_at(ptr: u8&, index: usize) -> u8:
     trusted Unsafe.UncheckedIndex:
         return ptr[index]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `unchecked index requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted unchecked index grant to satisfy access, got:\n%s", all)
 	}
@@ -477,14 +477,14 @@ def read_at(ptr: u8&, index: usize) -> u8:
 }
 
 func TestStaleViewRequiresUnsafeStaleRefGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "stale_view_requires_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "stale_view_requires_unsafe.elisa", `
 def read_stale(items: mutable darray[i32]&) -> i32:
     view: dview[i32] = items[0:items.count]
     items.clear()
     trusted Unsafe.UncheckedIndex:
         return view[0u]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `stale reference requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.StaleRef or a surrounding can ...: block`) {
 		t.Fatalf("expected missing stale ref grant warning, got:\n%s", all)
 	}
@@ -502,7 +502,7 @@ def read_stale(items: mutable darray[i32]&) -> i32:
 }
 
 func TestTrustedStaleViewDoesNotInferCallerPermission(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "trusted_stale_view.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_stale_view.elisa", `
 def read_stale(items: mutable darray[i32]&) -> i32:
     view: dview[i32] = items[0:items.count]
     items.clear()
@@ -510,7 +510,7 @@ def read_stale(items: mutable darray[i32]&) -> i32:
         trusted Unsafe.UncheckedIndex:
             return view[0u]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `stale reference requires`) || strings.Contains(all, `unchecked index requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted stale ref and unchecked index grants to satisfy access, got:\n%s", all)
 	}
@@ -528,7 +528,7 @@ def read_stale(items: mutable darray[i32]&) -> i32:
 }
 
 func TestDuplicateMutableCallArgRequiresUnsafeAliasGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "duplicate_mutable_call_arg_requires_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "duplicate_mutable_call_arg_requires_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -538,7 +538,7 @@ def update_pair(left: mutable Node&, right: mutable Node&) -> void:
 def run(node: mutable Node&) -> void:
     update_pair(node, node)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable alias requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.Alias or a surrounding can ...: block`) {
 		t.Fatalf("expected missing unsafe alias grant warning, got:\n%s", all)
 	}
@@ -556,7 +556,7 @@ def run(node: mutable Node&) -> void:
 }
 
 func TestTrustedDuplicateMutableCallArgDoesNotInferCallerPermission(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "trusted_duplicate_mutable_call_arg.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_duplicate_mutable_call_arg.elisa", `
 struct Node:
     value: mutable i32
 
@@ -567,7 +567,7 @@ def run(node: mutable Node&) -> void:
     trusted Unsafe.Alias:
         update_pair(node, node)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable alias requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted alias grant to satisfy duplicate mutable call, got:\n%s", all)
 	}
@@ -585,7 +585,7 @@ def run(node: mutable Node&) -> void:
 }
 
 func TestSharedAndMutableCallArgsRequireUnsafeAliasGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "shared_and_mutable_call_args_require_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "shared_and_mutable_call_args_require_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -595,7 +595,7 @@ def inspect_and_update(shared: Node&, writable: mutable Node&) -> void:
 def run(node: mutable Node&) -> void:
     inspect_and_update(node, node)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable alias requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.Alias or a surrounding can ...: block`) {
 		t.Fatalf("expected shared+mutable call alias warning, got:\n%s", all)
 	}
@@ -613,7 +613,7 @@ def run(node: mutable Node&) -> void:
 }
 
 func TestDuplicateSharedCallArgsDoNotRequireUnsafeAliasGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "duplicate_shared_call_args_no_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "duplicate_shared_call_args_no_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -623,7 +623,7 @@ def inspect_pair(left: Node&, right: Node&) -> void:
 def run(node: Node&) -> void:
     inspect_pair(node, node)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable alias requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected duplicate shared refs to stay safe, got:\n%s", all)
 	}
@@ -641,7 +641,7 @@ def run(node: Node&) -> void:
 }
 
 func TestLocalMutableAliasRequiresUnsafeAliasGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "local_mutable_alias_requires_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "local_mutable_alias_requires_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -652,7 +652,7 @@ def run() -> void:
     _ = first
     _ = second
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable alias requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.Alias or a surrounding can ...: block`) {
 		t.Fatalf("expected missing unsafe alias grant warning, got:\n%s", all)
 	}
@@ -670,7 +670,7 @@ def run() -> void:
 }
 
 func TestTrustedLocalMutableAliasDoesNotInferCallerPermission(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "trusted_local_mutable_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_local_mutable_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -682,7 +682,7 @@ def run() -> void:
         _ = first
         _ = second
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable alias requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted alias grant to satisfy local mutable alias, got:\n%s", all)
 	}
@@ -700,7 +700,7 @@ def run() -> void:
 }
 
 func TestLocalSharedThenMutableAliasRequiresUnsafeAliasGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "local_shared_then_mutable_alias_requires_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "local_shared_then_mutable_alias_requires_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -711,7 +711,7 @@ def run() -> void:
     _ = shared
     _ = writable
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable alias requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.Alias or a surrounding can ...: block`) {
 		t.Fatalf("expected shared+mutable local alias warning, got:\n%s", all)
 	}
@@ -729,7 +729,7 @@ def run() -> void:
 }
 
 func TestDuplicateLocalSharedAliasesDoNotRequireUnsafeAliasGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "duplicate_local_shared_aliases_no_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "duplicate_local_shared_aliases_no_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -740,7 +740,7 @@ def run() -> void:
     _ = left
     _ = right
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable alias requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected duplicate local shared refs to stay safe, got:\n%s", all)
 	}
@@ -758,7 +758,7 @@ def run() -> void:
 }
 
 func TestInnerBlockSharedAliasDoesNotLeakPastScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "inner_block_shared_alias_no_leak.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "inner_block_shared_alias_no_leak.elisa", `
 struct Node:
     value: mutable i32
 
@@ -770,7 +770,7 @@ def run() -> void:
     writable: mutable stack Node& = &node
     _ = writable
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable alias requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected inner shared alias not to leak past scope, got:\n%s", all)
 	}
@@ -788,7 +788,7 @@ def run() -> void:
 }
 
 func TestOuterSharedAliasConflictsInsideNestedScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "outer_shared_alias_conflicts_in_nested_scope.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "outer_shared_alias_conflicts_in_nested_scope.elisa", `
 struct Node:
     value: mutable i32
 
@@ -800,7 +800,7 @@ def run() -> void:
         _ = writable
     _ = shared
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable alias requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.Alias or a surrounding can ...: block`) {
 		t.Fatalf("expected outer shared alias to conflict with nested mutable alias, got:\n%s", all)
 	}
@@ -818,7 +818,7 @@ def run() -> void:
 }
 
 func TestLiveSharedAliasConflictsWithMutableCallArg(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "live_shared_alias_conflicts_with_mutable_call_arg.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "live_shared_alias_conflicts_with_mutable_call_arg.elisa", `
 struct Node:
     value: mutable i32
 
@@ -831,7 +831,7 @@ def run() -> void:
     update(node)
     _ = shared
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable alias requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.Alias or a surrounding can ...: block`) {
 		t.Fatalf("expected live shared alias to conflict with mutable call arg, got:\n%s", all)
 	}
@@ -849,7 +849,7 @@ def run() -> void:
 }
 
 func TestLiveMutableAliasConflictsWithFreshMutableCallArg(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "live_mutable_alias_conflicts_with_fresh_mutable_call_arg.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "live_mutable_alias_conflicts_with_fresh_mutable_call_arg.elisa", `
 struct Node:
     value: mutable i32
 
@@ -862,7 +862,7 @@ def run() -> void:
     update(node)
     _ = writable
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable alias requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.Alias or a surrounding can ...: block`) {
 		t.Fatalf("expected live mutable alias to conflict with fresh mutable call arg, got:\n%s", all)
 	}
@@ -880,7 +880,7 @@ def run() -> void:
 }
 
 func TestPassingLiveMutableAliasItselfDoesNotRequireUnsafeAliasGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "passing_live_mutable_alias_itself_no_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "passing_live_mutable_alias_itself_no_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -892,7 +892,7 @@ def run() -> void:
     writable: mutable stack Node& = &node
     update(writable)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable alias requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected passing live mutable alias itself to stay safe, got:\n%s", all)
 	}
@@ -910,7 +910,7 @@ def run() -> void:
 }
 
 func TestAssignedMutableAliasRequiresUnsafeAliasGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "assigned_mutable_alias_requires_alias.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "assigned_mutable_alias_requires_alias.elisa", `
 struct Node:
     value: mutable i32
 
@@ -923,7 +923,7 @@ def run() -> void:
     _ = shared
     _ = slot
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `mutable alias requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.Alias or a surrounding can ...: block`) {
 		t.Fatalf("expected assigned mutable alias to require alias grant, got:\n%s", all)
 	}
@@ -941,7 +941,7 @@ def run() -> void:
 }
 
 func TestAliasAssignmentReleasesPreviousRoot(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "alias_assignment_releases_previous_root.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "alias_assignment_releases_previous_root.elisa", `
 struct Node:
     value: mutable i32
 
@@ -956,7 +956,7 @@ def run() -> void:
     update(left)
     _ = slot
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable alias requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected reassigned alias to release previous root, got:\n%s", all)
 	}
@@ -974,7 +974,7 @@ def run() -> void:
 }
 
 func TestAssignedMutableAliasItselfCanBePassedSafely(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "assigned_mutable_alias_itself_can_be_passed.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "assigned_mutable_alias_itself_can_be_passed.elisa", `
 struct Node:
     value: mutable i32
 
@@ -988,7 +988,7 @@ def run() -> void:
     slot <- &right
     update(slot)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `mutable alias requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected assigned alias itself to be passable, got:\n%s", all)
 	}
@@ -1006,11 +1006,11 @@ def run() -> void:
 }
 
 func TestUnprovenArrayIndexRequiresUnsafeUncheckedIndexGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "array_index_requires_bounds.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "array_index_requires_bounds.elisa", `
 def read_at(items: i32[4], index: usize) -> i32:
     return items[index]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `unchecked index requires can[Unsafe]`) {
 		t.Fatalf("expected unproven array index to require unchecked index grant, got:\n%s", all)
 	}
@@ -1028,14 +1028,14 @@ def read_at(items: i32[4], index: usize) -> i32:
 }
 
 func TestRangeLoopProvesFixedArrayIndexBounds(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "range_loop_proves_array_index.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "range_loop_proves_array_index.elisa", `
 def sum4(items: i32[4]) -> i32:
     total: mutable i32 = 0
     for i in 0..<4:
         total <- total + items[i]
     return total
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `unchecked index requires`) {
 		t.Fatalf("expected range loop bound to prove array indexing, got:\n%s", all)
 	}
@@ -1053,11 +1053,11 @@ def sum4(items: i32[4]) -> i32:
 }
 
 func TestUnprovenDArrayIndexRequiresUnsafeUncheckedIndexGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "darray_index_requires_bounds.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "darray_index_requires_bounds.elisa", `
 def read_at(items: darray[i32], index: usize) -> i32:
     return items[index]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `unchecked index requires can[Unsafe]`) {
 		t.Fatalf("expected unproven darray index to require unchecked index grant, got:\n%s", all)
 	}
@@ -1075,13 +1075,13 @@ def read_at(items: darray[i32], index: usize) -> i32:
 }
 
 func TestAssertProvesDArrayIndexBounds(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "assert_proves_darray_index.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "assert_proves_darray_index.elisa", `
 def read_at(items: darray[i32], index: usize) -> i32:
     can Abort.Panic:
         assert index < items.count
     return items[index]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `unchecked index requires`) {
 		t.Fatalf("expected assert bound to prove darray indexing, got:\n%s", all)
 	}
@@ -1099,13 +1099,13 @@ def read_at(items: darray[i32], index: usize) -> i32:
 }
 
 func TestIfBranchProvesDArrayIndexBounds(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "if_branch_proves_darray_index.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "if_branch_proves_darray_index.elisa", `
 def read_or_zero(items: darray[i32], index: usize) -> i32:
     if index < items.count:
         return items[index]
     return 0
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `unchecked index requires`) {
 		t.Fatalf("expected if branch bound to prove darray indexing, got:\n%s", all)
 	}
@@ -1123,13 +1123,13 @@ def read_or_zero(items: darray[i32], index: usize) -> i32:
 }
 
 func TestEarlyReturnGuardProvesDArrayIndexBounds(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "early_return_proves_darray_index.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "early_return_proves_darray_index.elisa", `
 def read_or_zero(items: darray[i32], index: usize) -> i32:
     if index >= items.count:
         return 0
     return items[index]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `unchecked index requires`) {
 		t.Fatalf("expected early-return guard to prove darray indexing, got:\n%s", all)
 	}
@@ -1147,12 +1147,12 @@ def read_or_zero(items: darray[i32], index: usize) -> i32:
 }
 
 func TestUncheckedIndexGrantDoesNotCoverPointerArithmetic(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "unchecked_index_grant_not_arithmetic.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "unchecked_index_grant_not_arithmetic.elisa", `
 def advance(ptr: u8&, offset: usize) -> u8&:
     trusted Unsafe.UncheckedIndex:
         return ptr + offset
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `pointer arithmetic requires can[Unsafe]`) {
 		t.Fatalf("expected unchecked index grant not to satisfy pointer arithmetic, got:\n%s", all)
 	}
@@ -1181,7 +1181,7 @@ def worker(cell: i32&) -> i64:
 def start(cell: i32&) -> Thread[i64, Joinable]:
     return spawn1(worker, cell)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `thread share requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.ThreadShare or a surrounding can ...: block`) {
 		t.Fatalf("expected missing thread share grant warning, got:\n%s", all)
 	}
@@ -1211,7 +1211,7 @@ def start(cell: i32&) -> Thread[i64, Joinable]:
     trusted Unsafe.ThreadShare:
         return spawn1(worker, cell)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `thread share requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected trusted thread share grant to satisfy transfer, got:\n%s", all)
 	}
@@ -1229,7 +1229,7 @@ def start(cell: i32&) -> Thread[i64, Joinable]:
 }
 
 func TestThreadTransferOfStaticRefDoesNotRequireUnsafeThreadShareGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "static_ref_thread_share_no_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "static_ref_thread_share_no_unsafe.elisa", `
 extern shared_cell() -> static i32&
 
 def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
@@ -1243,7 +1243,7 @@ def start() -> Thread[i64, Joinable]:
     trusted Unsafe.RawExtern:
         return spawn1(worker, shared_cell())
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `Unsafe.ThreadShare`) || strings.Contains(all, `thread share requires`) {
 		t.Fatalf("expected static ref transfer not to require unsafe thread share, got:\n%s", all)
 	}
@@ -1261,11 +1261,11 @@ def start() -> Thread[i64, Joinable]:
 }
 
 func TestNumericCastDoesNotRequireUnsafePointerCastGrant(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "numeric_cast_no_unsafe.elisa", `
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "numeric_cast_no_unsafe.elisa", `
 def build(value: i64) -> u64:
     return value.cast[u64]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `Unsafe.PointerCast`) || strings.Contains(all, `pointer cast requires`) {
 		t.Fatalf("expected numeric cast not to require unsafe pointer permission, got:\n%s", all)
 	}
@@ -1287,7 +1287,7 @@ func TestDeclaredPanicPermissionRequiresTopLevelGrant(t *testing.T) {
 def build() -> void:
     panic("boom")
 `)
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `panic requires can[Abort] and has no explicit local effect grant; add can Abort.Panic or a surrounding can ...: block`) {
 		t.Fatalf("expected missing top-level Abort grant warning, got:\n%s", all)
 	}
@@ -1300,7 +1300,7 @@ def build() -> void:
         can Memory.Allocate:
             panic("boom")
 `)
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `panic requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected outer explicit grant to satisfy nested panic, got:\n%s", all)
 	}
@@ -1326,7 +1326,7 @@ def build() -> void:
     can Abort.Panic:
         panic("boom")
 `)
-	if all := strings.Join(result.Warnings(), "\n"); strings.Contains(all, `panic requires`) || strings.Contains(all, `explicit local effect grant`) {
+	if all := allDiagnostics(result); strings.Contains(all, `panic requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected no panic local grant warning, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("build")
@@ -1350,7 +1350,7 @@ def build() -> i64:
     can Memory.Allocate:
         return alloc_value() can Memory.Allocate
 `)
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if !strings.Contains(all, `inline can grants can Memory.Allocate redundantly`) {
 		t.Fatalf("expected redundant inline grant warning, got:\n%s", all)
 	}
@@ -1367,7 +1367,7 @@ def build() -> i64:
     can Memory.Allocate:
         return write_value() can Console.Write
 `)
-	all := strings.Join(result.Warnings(), "\n")
+	all := allDiagnostics(result)
 	if strings.Contains(all, `redundantly`) {
 		t.Fatalf("expected no redundant grant warning for grant outside surrounding scope, got:\n%s", all)
 	}
