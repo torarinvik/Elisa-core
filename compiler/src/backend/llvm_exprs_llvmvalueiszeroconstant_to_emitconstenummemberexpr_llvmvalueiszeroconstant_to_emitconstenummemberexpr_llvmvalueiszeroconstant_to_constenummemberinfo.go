@@ -104,7 +104,63 @@ func (s *functionState) storeValue(ptr C.LLVMValueRef, value C.LLVMValueRef, typ
 			return s.emitZeroMemset(ptr, sizeBytes, name)
 		}
 	}
+	// Large aggregate copy: when `value` is a load of the aggregate from a source
+	// pointer, lower the copy as a memcpy (and drop the now-dead element-wise
+	// load) instead of materializing and storing a giant first-class aggregate
+	// value. Without this, copying multi-KB structs (e.g. the shader IR's
+	// inst/block/program types, which embed large fixed arrays) makes llc -O0
+	// emit thousands of element-wise loads/stores and dominates build time. Elisa
+	// aggregates are POD, so memcpy is semantically equivalent to load+store.
+	if typ != nil && C.LLVMIsALoadInst(value) != nil {
+		if sizeBytes, err := s.g.abiSizeOfType(typ); err == nil && sizeBytes >= largeAggregateCopyMemcpyThresholdBytes {
+			if srcPtr := C.LLVMGetOperand(value, 0); srcPtr != nil {
+				if memcpyErr := s.emitMemcpy(ptr, srcPtr, sizeBytes, name); memcpyErr == nil {
+					// Drop the dead element-wise load if nothing else uses it.
+					if C.LLVMGetFirstUse(value) == nil {
+						C.LLVMInstructionEraseFromParent(value)
+					}
+					return nil
+				}
+			}
+		}
+	}
 	C.LLVMBuildStore(s.builder, value, ptr)
+	return nil
+}
+
+// largeAggregateCopyMemcpyThresholdBytes is the size at/above which an aggregate
+// copy-from-pointer is lowered via memcpy rather than a first-class load+store.
+const largeAggregateCopyMemcpyThresholdBytes = 256
+
+func (s *functionState) emitMemcpy(dst C.LLVMValueRef, src C.LLVMValueRef, sizeBytes uint64, name string) error {
+	if sizeBytes == 0 {
+		return nil
+	}
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	usizeType := s.g.result.NamedTypes["usize"]
+	if voidType == nil || usizeType == nil {
+		return fmt.Errorf("missing builtin types for memcpy lowering")
+	}
+	memcpyType := &semantic.FuncType{Name: "memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	memcpyCallee, err := s.g.ensureFunctionDeclared("memcpy", memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return err
+	}
+	usizeLLVMType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return err
+	}
+	sizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(sizeBytes), 0)
+	callName := "store.copy.memcpy"
+	if name != "" {
+		callName = name + ".memcpy"
+	}
+	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dst, src, sizeValue}, callName)
 	return nil
 }
 
