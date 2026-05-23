@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -415,6 +418,35 @@ func nativeExecCommand(exePath string, targetTriple string, args ...string) *exe
 }
 
 func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, objectPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
+	_ = clangPath
+	// Optional textual IR dump for debugging. This regenerates the module and
+	// serializes it (slow for large modules), so it is opt-in.
+	if os.Getenv("ELISACORE_EMIT_LL") != "" {
+		if ir, gerr := backend.GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result, optLevel, packedProfile, targetTriple); gerr == nil {
+			irPath := strings.TrimSuffix(objectPath, filepath.Ext(objectPath)) + ".ll"
+			_ = os.WriteFile(irPath, []byte(ir), 0o644)
+		}
+	}
+	// Opt-in fast path: emit the object file directly from the in-memory LLVM
+	// module via the LLVM C API (LLVMTargetMachineEmitToFile). This avoids
+	// serializing the whole module to tens of MB of textual IR, writing it to
+	// disk, and having an external `llc` subprocess re-parse all of it -- which
+	// dominates build time for large modules. It is opt-in (ELISACORE_INPROCESS_EMIT)
+	// because in-process LLVM codegen runs on a cgo thread with a limited stack
+	// and can SIGSEGV on pathologically large functions, whereas `llc` runs in a
+	// separate process with a full stack. Once modules avoid such giant functions
+	// this can become the default.
+	if os.Getenv("ELISACORE_INPROCESS_EMIT") != "" {
+		if err := backend.WriteLLVMObjectFileWithOptions(result, objectPath, backend.LLVMObjectEmitOptions{
+			OptLevel:      optLevel,
+			PackedProfile: packedProfile,
+			TargetTriple:  targetTriple,
+		}); err == nil {
+			return nil
+		}
+		// Fall through to the textual IR + llc path on any in-process error.
+	}
+	// Default path: generate textual IR and compile it with llc.
 	ir, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result, optLevel, packedProfile, targetTriple)
 	if err != nil {
 		return err
@@ -423,7 +455,6 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 	if err := os.WriteFile(irPath, []byte(ir), 0o644); err != nil {
 		return err
 	}
-	_ = clangPath
 	if err := writeLLVMIRObjectViaLLC(irPath, objectPath, targetTriple, stderr); err == nil {
 		return nil
 	} else if strings.TrimSpace(targetTriple) != "" {
@@ -442,6 +473,18 @@ func writeLLVMIRObjectViaLLC(irPath string, objectPath string, targetTriple stri
 	if err != nil {
 		return err
 	}
+	// Content-hash object cache: compiling the (large, mostly-stable) module with
+	// llc -O0 dominates native build time. If an object compiled from byte-for-byte
+	// identical IR (and target/llc) already exists in the cache, reuse it and skip
+	// llc entirely. Disable with ELISACORE_NO_OBJCACHE.
+	cacheKey, cacheOK := llcObjectCacheKey(irPath, targetTriple, llcPath)
+	if cacheOK {
+		if cachedPath, hit := lookupCachedObject(cacheKey); hit {
+			if copyErr := copyFileContents(cachedPath, objectPath); copyErr == nil {
+				return nil
+			}
+		}
+	}
 	args := []string{"-filetype=obj", "-O0"}
 	if strings.TrimSpace(targetTriple) != "" {
 		args = append(args, "-mtriple="+strings.TrimSpace(targetTriple))
@@ -453,7 +496,108 @@ func writeLLVMIRObjectViaLLC(irPath string, objectPath string, targetTriple stri
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to compile LLVM IR object with llc: %w", err)
 	}
+	if cacheOK {
+		storeCachedObject(cacheKey, objectPath)
+	}
 	return nil
+}
+
+func objectCacheDir() (string, bool) {
+	if os.Getenv("ELISACORE_NO_OBJCACHE") != "" {
+		return "", false
+	}
+	base, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(base) == "" {
+		base = os.TempDir()
+	}
+	dir := filepath.Join(base, "elisacore", "objcache")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", false
+	}
+	return dir, true
+}
+
+// objCacheTempRunRE matches the per-run temp directory segment that the test
+// harness embeds in the IR (ModuleID, source_filename, and @panic.file string
+// constants). It is normalized away before hashing so re-runs of the same test
+// produce a stable cache key. (A reused object may therefore show a previous
+// run's temp path in a panic message; this is cosmetic only.)
+var objCacheTempRunRE = regexp.MustCompile(`elisacore-(test|native)-run-[0-9]+`)
+
+// llcObjectCacheKey hashes the IR content (with the per-run temp path
+// normalized) plus the target triple and llc binary so cached objects are
+// invalidated when any of those change.
+func llcObjectCacheKey(irPath string, targetTriple string, llcPath string) (string, bool) {
+	irBytes, err := os.ReadFile(irPath)
+	if err != nil {
+		return "", false
+	}
+	if objCacheTempRunRE != nil {
+		irBytes = objCacheTempRunRE.ReplaceAll(irBytes, []byte("elisacore-run-CACHED"))
+	}
+	h := sha256.New()
+	h.Write(irBytes)
+	h.Write([]byte("\x00llc\x00"))
+	h.Write([]byte(strings.TrimSpace(targetTriple)))
+	h.Write([]byte{0})
+	h.Write([]byte(llcPath))
+	// Mix in the llc binary's size+modtime as a cheap toolchain-version proxy.
+	if info, statErr := os.Stat(llcPath); statErr == nil {
+		fmt.Fprintf(h, "\x00%d\x00%d", info.Size(), info.ModTime().UnixNano())
+	}
+	return hex.EncodeToString(h.Sum(nil)), true
+}
+
+func lookupCachedObject(key string) (string, bool) {
+	dir, ok := objectCacheDir()
+	if !ok {
+		return "", false
+	}
+	path := filepath.Join(dir, key+".o")
+	if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+		return path, true
+	}
+	return "", false
+}
+
+func storeCachedObject(key string, objectPath string) {
+	dir, ok := objectCacheDir()
+	if !ok {
+		return
+	}
+	finalPath := filepath.Join(dir, key+".o")
+	// Write to a temp file then rename, so concurrent builds never observe a
+	// partially-written cache entry.
+	tmp, err := os.CreateTemp(dir, key+".*.tmp")
+	if err != nil {
+		return
+	}
+	tmpName := tmp.Name()
+	tmp.Close()
+	if copyErr := copyFileContents(objectPath, tmpName); copyErr != nil {
+		os.Remove(tmpName)
+		return
+	}
+	if renameErr := os.Rename(tmpName, finalPath); renameErr != nil {
+		os.Remove(tmpName)
+	}
+}
+
+func copyFileContents(src string, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func findLLC() (string, error) {

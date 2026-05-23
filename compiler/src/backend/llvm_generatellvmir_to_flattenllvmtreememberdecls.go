@@ -431,6 +431,24 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) error {
 	switch n := decl.(type) {
 	case *ast.ConstDecl:
+		// Scalar consts are folded inline at use sites, but aggregate (array)
+		// consts cannot be inlined at a dynamic-index use site. Emit those as
+		// private read-only LLVM globals so `CONST_ARRAY[i]` lowers to a GEP.
+		if sym, ok := g.symbolsByNode[decl]; ok && n.Value != nil {
+			if _, isArray := sym.Type.(*semantic.ArrayType); isArray {
+				globalValue, err := g.ensureGlobalDeclared(sym.Name, sym.Type, false)
+				if err != nil {
+					return err
+				}
+				initializer, err := g.constExprValueInNamespace(n.Value, sym.Type, llvmNamespaceFromName(sym.Name))
+				if err != nil {
+					return err
+				}
+				C.LLVMSetInitializer(globalValue, initializer)
+				C.LLVMSetGlobalConstant(globalValue, 1)
+				C.LLVMSetLinkage(globalValue, C.LLVMInternalLinkage)
+			}
+		}
 		return nil
 	case *ast.TokenSetDecl:
 		return nil

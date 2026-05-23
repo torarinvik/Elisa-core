@@ -75,6 +75,17 @@ func (s *functionState) emitIdentValueAddress(expr *ast.Ident) (C.LLVMValueRef, 
 			}
 			return s.refinedOptionalPayloadAddress(global, sym.Type, valueType, expr.Name)
 		}
+		// Aggregate (array) consts are materialized as read-only globals (see
+		// emitDeclInNamespace), so they are addressable for indexing.
+		if sym.Kind == semantic.SymbolConst {
+			if _, isArray := sym.Type.(*semantic.ArrayType); isArray {
+				global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, false)
+				if err != nil {
+					return nil, nil, err
+				}
+				return s.refinedOptionalPayloadAddress(global, sym.Type, valueType, expr.Name)
+			}
+		}
 	}
 	return nil, nil, fmt.Errorf("identifier %s is not addressable", expr.Name)
 }
