@@ -308,6 +308,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			return
 		}
 		a.checkLocalArenaEscape(n.Value, valueType, "return")
+		a.checkReturnBorrowEscapesLocal(n.Value, valueType)
 		if refState, ok := a.regionRefStateForExpr(n.Value); ok {
 			if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil {
 				if _, isRef := valueType.(*RefType); isRef {

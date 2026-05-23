@@ -82,6 +82,62 @@ func refStorageLifetimeRank(s RefStorage) int {
 	}
 }
 
+// checkReturnBorrowEscapesLocal rejects returning a borrow (ref / view / sview)
+// that points into FUNCTION-LOCAL or value-parameter storage: such storage lives
+// in the callee's frame and is gone the instant the function returns, so the
+// returned reference dangles (deep audit #4). Region-rooted escapes are reported
+// separately by the region machinery, so this only fires for plain stack/local
+// provenance. A borrow that forwards a reference parameter's pointee (caller
+// storage) has non-stack provenance and is correctly allowed.
+//
+// This is a guaranteed-dangle, not a maybe, so it is a hard error with no opt-out
+// (like Rust rejecting `&local` returns) rather than an Unsafe-gated operation.
+func (a *Analyzer) checkReturnBorrowEscapesLocal(value ast.Expr, valueType Type) {
+	if a == nil || value == nil || !isBorrowLikeType(valueType) {
+		return
+	}
+	// Only a FRESHLY-TAKEN borrow of a place (&x, x.ref[...], x.cast[...]) can
+	// capture local-frame storage. A plain value load of a reference-typed element
+	// or variable (e.g. xs[i] where xs: darray[u8&]) yields a stored reference that
+	// points elsewhere, not a borrow into the local frame — never an escape here.
+	if !isAddrOfRootedBorrow(value) {
+		return
+	}
+	// Region-rooted borrows are handled (and already errored) by the region
+	// escape machinery; don't double-report.
+	if refState, ok := a.regionRefStateForExpr(value); ok {
+		if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil {
+			return
+		}
+	}
+	if prov, known := a.borrowProvenanceStorage(value); known && prov == RefStorageStack {
+		a.errorf(value.Pos(), "returning a reference into function-local storage; it dangles once the function returns. Return the value/owner by value, or clone it into a caller-provided region (clone[dstr]/clone[darray[...]])")
+	}
+}
+
+// isAddrOfRootedBorrow reports whether an expression takes the address of a place
+// (directly via &, or via a .ref[...] / .cast[...] that wraps an address-of),
+// i.e. it materializes a fresh borrow rather than loading a stored reference.
+func isAddrOfRootedBorrow(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return isAddrOfRootedBorrow(n.Inner)
+	case *ast.AddrOfExpr:
+		return true
+	case *ast.CastExpr:
+		return isAddrOfRootedBorrow(n.Operand)
+	}
+	return false
+}
+
+func isBorrowLikeType(t Type) bool {
+	switch t.(type) {
+	case *RefType, *ViewType, *SViewType, *DArrayViewType:
+		return true
+	}
+	return false
+}
+
 // borrowProvenanceStorage reports the storage class of what an address-of /
 // reference operand ultimately points INTO (not where a ref variable's slot
 // lives). It returns (storage, known); known is false when provenance cannot be
