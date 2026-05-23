@@ -231,6 +231,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if a.lvalueStorageOutlivesFunction(n.Target) {
 			a.checkLocalArenaEscape(n.Value, valueType, "store")
 		}
+		a.checkStoredBorrowEscapesLocal(n.Target, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {
 				if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {

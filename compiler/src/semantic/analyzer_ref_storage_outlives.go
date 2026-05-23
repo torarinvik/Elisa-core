@@ -93,6 +93,23 @@ func refStorageLifetimeRank(s RefStorage) int {
 // This is a guaranteed-dangle, not a maybe, so it is a hard error with no opt-out
 // (like Rust rejecting `&local` returns) rather than an Unsafe-gated operation.
 func (a *Analyzer) checkReturnBorrowEscapesLocal(value ast.Expr, valueType Type) {
+	a.checkBorrowEscapesLocal(value, valueType, "returning a reference into function-local storage; it dangles once the function returns")
+}
+
+// checkStoredBorrowEscapesLocal rejects storing a freshly-taken borrow of
+// function-local storage into a destination that outlives the function (a struct
+// field reached through a parameter/global, a mutable global, etc.). This is the
+// assignment-side analog of the return-site check: the stored reference dangles
+// the instant the local frame is gone. Found by auditing the emulator, where
+// path/string builders store interior references into long-lived singletons.
+func (a *Analyzer) checkStoredBorrowEscapesLocal(target, value ast.Expr, valueType Type) {
+	if a == nil || target == nil || !a.lvalueStorageOutlivesFunction(target) {
+		return
+	}
+	a.checkBorrowEscapesLocal(value, valueType, "storing a reference to function-local storage into longer-lived storage; it dangles once the function returns")
+}
+
+func (a *Analyzer) checkBorrowEscapesLocal(value ast.Expr, valueType Type, message string) {
 	if a == nil || value == nil || !isBorrowLikeType(valueType) {
 		return
 	}
@@ -111,7 +128,7 @@ func (a *Analyzer) checkReturnBorrowEscapesLocal(value ast.Expr, valueType Type)
 		}
 	}
 	if prov, known := a.borrowProvenanceStorage(value); known && prov == RefStorageStack {
-		a.errorf(value.Pos(), "returning a reference into function-local storage; it dangles once the function returns. Return the value/owner by value, or clone it into a caller-provided region (clone[dstr]/clone[darray[...]])")
+		a.errorf(value.Pos(), "%s. Return/store the value or owner by value, or clone it into a longer-lived region (clone[dstr]/clone[darray[...]])", message)
 	}
 }
 

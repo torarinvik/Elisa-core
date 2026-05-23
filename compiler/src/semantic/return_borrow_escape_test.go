@@ -38,6 +38,35 @@ func TestReturnRefToValueParamIsRejected(t *testing.T) {
 	}
 }
 
+// Storing a freshly-taken reference to a function-local into a destination that
+// outlives the function (a struct field reached through a parameter) dangles once
+// the frame is gone — even without a lifetime-widening cast. (Emulator audit.)
+func TestStoreRefToLocalIntoOutlivingFieldIsRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_local_ref_field.elisa", `struct Box:
+    p: mutable u8&?
+
+def f(out: mutable Box&) -> void:
+    x: mutable u8 = 65
+    out.p <- x.ref[u8&]
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "dangles once the function returns") {
+		t.Fatalf("expected stored-local-ref escape error, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+// Storing a static-lived borrow into a field is fine (it does not dangle).
+func TestStoreStaticRefIntoFieldIsAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "store_static_ref_field.elisa", `struct Box:
+    p: mutable static u8&?
+
+def f(out: mutable Box&, s: static u8&) -> void:
+    out.p <- s
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected static-borrow field store to be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // Returning a stored reference element (a value load, pointing elsewhere) is NOT
 // an escape and must be accepted.
 func TestReturnStoredRefElementIsAccepted(t *testing.T) {
