@@ -331,3 +331,19 @@ def sview_dirname(view: sview, sep: u8) -> sview:
             return string_view_prefix(view, i - 1)
         i <- i - 1
     return string_view_prefix(view, 0)
+
+# A bounds-safe view over the live bytes of a darray[u8]. This is the bridge
+# that lets raw byte-buffer scanning (ELF string tables, parse buffers, ...) be
+# done through the bounds-checked sview helpers instead of unchecked indexing
+# with compound offsets. The single interior pointer is taken under `trusted`
+# here, ONCE, so every caller scans with zero Unsafe of its own.
+#
+# The returned view borrows the darray's storage: it is valid only while the
+# darray is alive and un-grown (a relocating push invalidates it — the compiler
+# tracks this for interior darray borrows).
+def bytes_view(buf: darray[u8]) -> sview:
+    n: usize = buf.count
+    if n == 0:
+        return sview("", 0, 0)
+    trusted Unsafe.UncheckedIndex:
+        return StringView(buf[0].ref[u8&], n.i64())
