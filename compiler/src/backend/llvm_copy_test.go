@@ -27,6 +27,27 @@ func TestGenerateLLVMIRLowersCopyBuiltinForFixedArray(t *testing.T) {
 	}
 }
 
+// A darray grow lowers an allocation-size overflow guard: count*elemSize is
+// checked against usize overflow and traps rather than under-allocating
+// (deep audit #3/#4 — a no-Unsafe OOB path).
+func TestGenerateLLVMIRDarrayGrowthHasOverflowGuard(t *testing.T) {
+	src := `def build(owner: mutable Arena&, n: usize) -> usize:
+    xs: mutable darray[u32] = []
+    in owner:
+        for i in 0..<n:
+            xs.push(7)
+    return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_overflow.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "size.overflow") {
+		t.Fatalf("expected darray growth to emit an allocation-size overflow guard, got:\n%s", output)
+	}
+}
+
 // clone[darray[u8]](sview) lowers to a region allocation plus a byte-copy loop
 // from the view's (ptr, len), producing an owned darray[u8] / dstr.
 func TestGenerateLLVMIRLowersCloneSViewIntoOwnedBytes(t *testing.T) {

@@ -163,7 +163,10 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 		if err != nil {
 			return nil, err
 		}
-		byteCount := C.LLVMBuildMul(s.builder, countValue, C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSizeBytes), 0), cStringFree(name+".bytes"))
+		byteCount, err := s.emitCheckedElemByteCount(countValue, elemSizeBytes, name)
+		if err != nil {
+			return nil, err
+		}
 		allocPtr, err := s.emitTreeOwnerAllocBytes(owner, byteCount, name)
 		if err != nil {
 			return nil, err

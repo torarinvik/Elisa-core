@@ -370,7 +370,10 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 		return nil, nil, true, err
 	}
 	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
-	byteCount := C.LLVMBuildMul(s.builder, countValue, elemSizeValue, cStringFree("node.table.bytes"))
+	byteCount, err := s.emitCheckedElemByteCount(countValue, elemSize, "node.table")
+	if err != nil {
+		return nil, nil, true, err
+	}
 	arenaType := s.g.result.NamedTypes["Arena"]
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidType := s.g.result.NamedTypes["void"]

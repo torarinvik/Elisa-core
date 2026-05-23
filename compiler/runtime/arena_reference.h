@@ -120,6 +120,9 @@ ARENA_API void arena_trim(Arena *a);
 // Append several items to a dynamic array
 #define arena_da_append_many(a, da, new_items, new_items_count)                                       \
     do {                                                                                              \
+        /* Overflow guard (deep audit #3): count + new_items must not wrap below   */                 \
+        /* capacity (which would skip the realloc and memcpy past the buffer).     */                 \
+        ARENA_ASSERT((new_items_count) <= ((size_t)-1) - (da)->count);                                 \
         if ((da)->count + (new_items_count) > (da)->capacity) {                                       \
             size_t new_capacity = (da)->capacity;                                                     \
             if (new_capacity == 0) new_capacity = ARENA_DA_INIT_CAP;                                  \
@@ -301,6 +304,10 @@ ARENA_API void free_region(Region *r)
 
 ARENA_API void *arena_alloc(Arena *a, size_t size_bytes)
 {
+    // Overflow guard (deep audit #3): the word-rounding below must not wrap, and
+    // an absurd request must not silently under-allocate. Aborting on overflow is
+    // memory-safe (a crash beats heap corruption / OOB).
+    ARENA_ASSERT(size_bytes <= ((size_t)-1) - (sizeof(uintptr_t) - 1));
     size_t size = (size_bytes + sizeof(uintptr_t) - 1)/sizeof(uintptr_t);
 
     if (a->end == NULL) {

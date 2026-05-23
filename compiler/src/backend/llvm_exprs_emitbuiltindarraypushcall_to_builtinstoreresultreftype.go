@@ -214,7 +214,10 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	byteCount := C.LLVMBuildMul(s.builder, sourceCount, C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSizeBytes), 0), cStringFree("darray.extend.bytes"))
+	byteCount, err := s.emitCheckedElemByteCount(sourceCount, elemSizeBytes, "darray.extend")
+	if err != nil {
+		return nil, nil, true, err
+	}
 	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
@@ -548,7 +551,10 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 	}
 	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSizeBytes), 0)
 	oldSize := C.LLVMBuildMul(s.builder, currentCapacity, elemSizeValue, cStringFree(name+".old.bytes"))
-	newSize := C.LLVMBuildMul(s.builder, newCapacity, elemSizeValue, cStringFree(name+".new.bytes"))
+	newSize, err := s.emitCheckedElemByteCount(newCapacity, elemSizeBytes, name+".new")
+	if err != nil {
+		return err
+	}
 	itemsPtr, err := s.emitBuiltinDArrayItemsPtr(darrayPtr, darrayType)
 	if err != nil {
 		return err
