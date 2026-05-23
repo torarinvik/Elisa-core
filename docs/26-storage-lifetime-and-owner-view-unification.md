@@ -235,13 +235,44 @@ covers the overwhelming majority of systems/compiler/emulator code.
   place when it sits at the region's bump cursor (zero copy); the relocation
   fallback still moves the buffer, so interior borrows across a non-tail grow must
   be invalidated by the front end (tracked).
-- **Step 3 — outlives check: FIRST SLICE DONE.** A cast that widens a borrow to a
-  longer-lived storage class (explicit `stack->static`, or a provably
+- **Step 3 — outlives check: DONE (first slice).** A cast that widens a borrow to
+  a longer-lived storage class (explicit `stack->static`, or a provably
   local/region-rooted borrow cast to `static`) requires the `Unsafe.PointerCast`
-  opt-out, integrated with the existing unsafe-cast warn + permission-inference
-  passes. Honest cases (string literal, `static`-param reborrow) are not flagged.
-  Enforcement runs in real builds (emit/native/server set
-  `EnforceUnsafePermissions`), currently at WARNING level + signature propagation,
-  not hard error. Remaining: graduate to error after the emulator migrates;
-  return-site outlives check; darray relocation borrow-invalidation;
-  signed-index lower-bound check (see audit follow-ups / task list).
+  opt-out. Honest cases (string literal, `static`-param reborrow) are not flagged.
+
+## Memory-safety hardening status (guarantee = safe unless explicit `Unsafe.*`)
+
+Two audits drove a sweep of soundness holes. Enforcement runs in all real build
+paths (emit/native/server set `EnforceUnsafePermissions`).
+
+DONE:
+- **Unsafe.* gates are HARD ERRORS** (not warnings) under enforcement: pointer
+  cast, pointer arithmetic, unchecked index, mutable-global access, mutable
+  alias, stale-ref use, thread share, lifetime-widening cast. Explicit opt-out is
+  `can Unsafe.*` / `trusted`. Effect authority (Abort/Memory) stays warning-level.
+- **Stale-storage-view regression fixed**: enforcement no longer downgrades a
+  stale-view use to a warning; it is a `Unsafe.StaleRef` error.
+- **Allocation-size overflow guarded**: `count * elemSize` traps on usize
+  overflow at all runtime-count allocation sites; C-runtime guards in
+  `arena_alloc` / `arena_da_append_many`.
+- **Index-bounds proofs invalidated** on container mutation and index
+  reassignment (no stale `i < arr.count` after `arr.truncate`/`i <- ...`).
+- **Signed-index lower bound**: an upper-bound proof is insufficient for a signed
+  index; non-negativity must be proven (0..< loop or `i >= 0` guard).
+- **Return-site outlives**: returning a freshly-taken borrow of function-local /
+  by-value-param storage is a hard error.
+- **Interior darray borrows invalidated on growth**: `xs[i].ref[T&]` used after a
+  relocating push is a stale-reference error; fixed-array interior refs (stable)
+  are unaffected.
+
+KNOWN RESIDUALS (design-scale, not quick fixes):
+- **Sendability through generic instantiation** (audit #8): the `spawn1` /
+  `pool_submit1` transfer seams are checked, but a generic wrapper forwarding a
+  type-parameter value into a thread does not re-check sendability at the
+  instantiation site. Doc 09 explicitly defers sendability-as-propagated-
+  obligation; closing this needs that feature (and a policy choice on whether
+  "unknown ⇒ require Unsafe.ThreadShare").
+- **`@borrows_return*` extern annotations** are trusted, unchecked lifetime
+  assertions at the FFI boundary (audit #7): an `extern` may assert it returns a
+  `static`-lived borrow of region/caller storage with no verification. FFI is the
+  raw boundary; verifying these is future work.
