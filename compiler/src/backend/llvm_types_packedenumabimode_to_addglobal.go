@@ -456,6 +456,7 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	if callConv, ok := g.llvmCallConvForFunc(fn); ok {
 		C.elisacoreSetFunctionCallConv(value, callConv)
 	}
+	g.applyAggregateAbiAttrs(value, fn)
 	return value, nil
 }
 

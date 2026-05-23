@@ -53,6 +53,7 @@ type functionState struct {
 	typeMap                      map[string]semantic.Type
 	specializedFuncTypes         map[*semantic.FuncType]*semantic.FuncType
 	resultSlot                   C.LLVMValueRef
+	sretReturn                   bool
 	regions                      []regionBinding
 	packedStores                 map[string]packedStoreBinding
 	treeAllocOwner               treeAllocOwnerBinding
@@ -404,10 +405,17 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		typeMap: typeBindings,
 	}
 
-	paramOffset := 0
-	if _, ok := nonVoidErrorUnion(fnType.Return); ok {
+	abiLayout, layoutErr := g.computeFuncAbiLayout(fnType)
+	if layoutErr != nil {
+		return layoutErr
+	}
+	paramOffset := abiLayout.paramBase()
+	if abiLayout.errorUnionOut {
 		state.resultSlot = C.LLVMGetParam(fnValue, 0)
-		paramOffset = 1
+	}
+	if abiLayout.sret {
+		state.resultSlot = C.LLVMGetParam(fnValue, C.unsigned(abiLayout.sretParamPos()))
+		state.sretReturn = true
 	}
 
 	explicitCount := backendExplicitParamCount(fnType, decl)
@@ -415,16 +423,24 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		if typeIndex < 0 || typeIndex >= len(fnType.Params) {
 			return nil
 		}
-		alloca, err := state.createEntryAlloca(name, fnType.Params[typeIndex])
+		paramType := fnType.Params[typeIndex]
+		paramValue := C.LLVMGetParam(fnValue, C.unsigned(llvmIndex+paramOffset))
+		if g.aggregateIsMemoryClass(paramType) {
+			// byval: the parameter is already a pointer to the callee's private
+			// copy of the aggregate, so use it directly as the binding's address
+			// (no entry alloca + giant element-wise store).
+			state.defineBinding(name, valueBinding{ptr: paramValue, typ: paramType, mutable: mutable})
+			return nil
+		}
+		alloca, err := state.createEntryAlloca(name, paramType)
 		if err != nil {
 			return err
 		}
-		paramValue := C.LLVMGetParam(fnValue, C.unsigned(llvmIndex+paramOffset))
 		C.LLVMBuildStore(builder, paramValue, alloca)
-		state.defineBinding(name, valueBinding{ptr: alloca, typ: fnType.Params[typeIndex], mutable: mutable})
-		state.bindPackedStoreValue(fnType.Params[typeIndex], paramValue)
-		state.bindImplicitTreeStoreValue(fnType.Params[typeIndex], paramValue)
-		state.bindImplicitTreeOwnerParam(name, fnType.Params[typeIndex], alloca, paramValue)
+		state.defineBinding(name, valueBinding{ptr: alloca, typ: paramType, mutable: mutable})
+		state.bindPackedStoreValue(paramType, paramValue)
+		state.bindImplicitTreeStoreValue(paramType, paramValue)
+		state.bindImplicitTreeOwnerParam(name, paramType, alloca, paramValue)
 		return nil
 	}
 
@@ -505,6 +521,18 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 	coerced, err := s.coerceValue(value, actual, s.fnType.Return)
 	if err != nil {
 		return err
+	}
+	if s.sretReturn {
+		// Large aggregate return: write the value through the sret out-pointer
+		// (memcpy-lowered when `coerced` is a load) and return void.
+		if s.resultSlot == nil {
+			return fmt.Errorf("function is missing the sret return slot")
+		}
+		if err := s.storeValue(s.resultSlot, coerced, s.fnType.Return, "sret.ret"); err != nil {
+			return err
+		}
+		C.LLVMBuildRetVoid(s.builder)
+		return nil
 	}
 	C.LLVMBuildRet(s.builder, coerced)
 	return nil

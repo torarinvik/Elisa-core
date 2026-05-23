@@ -440,6 +440,25 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	if err != nil {
 		return nil, nil, err
 	}
+	layout, err := s.g.computeFuncAbiLayout(funcType)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Convert any memory-class aggregate arguments into byval pointers
+	// (memcpy-filled stack temporaries) so they match the lowered pointer
+	// parameter type. byvalTypes maps explicit-arg index -> aggregate type.
+	args, byvalTypes, err := s.convertByvalArgs(funcType, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	base := layout.paramBase()
+	// applyByvalCallAttrs tags the byval pointer arguments on a built call.
+	applyByvalCallAttrs := func(call C.LLVMValueRef) {
+		for i, ty := range byvalTypes {
+			s.addCallByvalAttr(call, base+i, ty)
+		}
+	}
+
 	if retUnion, ok := nonVoidErrorUnion(funcType.Return); ok {
 		resultSlot, err := s.emitStackTempZeroed(retUnion.Value, "call.result")
 		if err != nil {
@@ -457,6 +476,7 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 				return nil, nil, err
 			}
 		}
+		applyByvalCallAttrs(call)
 		payload, err := s.loadValue(resultSlot, retUnion.Value, "call.payload")
 		if err != nil {
 			return nil, nil, err
@@ -467,6 +487,35 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 		}
 		return unionValue, funcType.Return, nil
 	}
+
+	if layout.sret {
+		// Large aggregate return: allocate a result slot, prepend it as the
+		// hidden sret out-pointer, call (returns void), then load the result.
+		resultSlot, err := s.createEntryAlloca("call.sret", funcType.Return)
+		if err != nil {
+			return nil, nil, err
+		}
+		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
+		callArgs = append(callArgs, resultSlot)
+		callArgs = append(callArgs, args...)
+		var call C.LLVMValueRef
+		if direct {
+			call = s.buildTypedCall(llvmFnType, callee, callArgs, "", funcType)
+		} else {
+			call, err = s.emitFunctionValueCall(callee, funcType, callArgs, "")
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		s.addCallSretAttr(call, layout.sretType)
+		applyByvalCallAttrs(call)
+		result, err := s.loadValue(resultSlot, funcType.Return, "call.sret.val")
+		if err != nil {
+			return nil, nil, err
+		}
+		return result, funcType.Return, nil
+	}
+
 	callName := ""
 	if !isVoidType(funcType.Return) {
 		callName = "calltmp"
@@ -480,6 +529,7 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 			return nil, nil, err
 		}
 	}
+	applyByvalCallAttrs(call)
 	return call, funcType.Return, nil
 }
 func (s *functionState) emitSafeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
