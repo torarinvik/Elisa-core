@@ -265,3 +265,69 @@ def string_view_copy(view: sview) -> heap u8&:
         out[view.len.usize()] <- 0
         register_perm_string_len(out.cast[u8&], view.len.usize())
         return out
+
+# ------------------------------------------------------------
+# Ergonomic, bounds-safe string-view helpers
+#
+# These compose the bounds-checked primitives above (string_view_index /
+# _prefix / _suffix / _eq), so they read no byte outside the view's length and
+# require NO Unsafe permission. They are the safe surface path/string code
+# should reach for instead of raw `static u8&` scanning with unchecked indexing.
+# ------------------------------------------------------------
+
+def sview_len(view: sview) -> usize:
+    return view.len.usize() if view.len > 0 else 0.usize()
+
+def sview_is_empty(view: sview) -> bool:
+    return view.len <= 0
+
+# Bounds-safe byte read; returns 0 for an out-of-range index.
+def sview_at(view: sview, index: usize) -> u8:
+    return string_view_index(view, index.i64()).u8()
+
+def sview_eq(lhs: sview, rhs: sview) -> bool:
+    return string_views_eq(lhs, rhs) == 1
+
+def sview_starts_with(view: sview, prefix: sview) -> bool:
+    false return if prefix.len > view.len
+    return string_views_eq(string_view_prefix(view, prefix.len), prefix) == 1
+
+def sview_ends_with(view: sview, suffix: sview) -> bool:
+    false return if suffix.len > view.len
+    return string_views_eq(string_view_suffix(view, view.len - suffix.len), suffix) == 1
+
+# Index of the first occurrence of `byte`, or -1 if absent.
+def sview_find_byte(view: sview, byte: u8) -> i64:
+    i: mutable i64 = 0
+    while i < view.len:
+        i return if string_view_index(view, i) == byte.i64()
+        i <- i + 1
+    return -1
+
+def sview_contains_byte(view: sview, byte: u8) -> bool:
+    return sview_find_byte(view, byte) >= 0
+
+# Drop a trailing byte (e.g. a path separator) without copying.
+def sview_trim_trailing(view: sview, byte: u8) -> sview:
+    hi: mutable i64 = view.len
+    while hi > 0 and string_view_index(view, hi - 1) == byte.i64():
+        hi <- hi - 1
+    return string_view_prefix(view, hi)
+
+# The basename: the slice after the last `sep`, or the whole view if none.
+def sview_basename(view: sview, sep: u8) -> sview:
+    i: mutable i64 = view.len
+    while i > 0:
+        if string_view_index(view, i - 1) == sep.i64():
+            return string_view_suffix(view, i)
+        i <- i - 1
+    return view
+
+# The dirname: the slice before the last `sep` (empty if none).
+def sview_dirname(view: sview, sep: u8) -> sview:
+    i: mutable i64 = view.len
+    while i > 0:
+        if string_view_index(view, i - 1) == sep.i64():
+            return string_view_prefix(view, i - 1)
+        i <- i - 1
+    return string_view_prefix(view, 0)
