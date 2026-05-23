@@ -84,6 +84,12 @@ func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDepen
 		return a.storageViewDependencyForExpr(n.Operand)
 	case *ast.CastExpr:
 		return a.storageViewDependencyForExpr(n.Operand)
+	case *ast.AddrOfExpr:
+		// A reference taken INTO a relocatable container (a darray) dangles if the
+		// container is later grown/relocated (deep audit #6). Record a dependency
+		// on the container so push/extend/reserve/clear/truncate invalidate the
+		// interior reference, turning a later use into a stale-ref error.
+		return a.storageViewDependencyForBorrowedPlace(n.Operand)
 	case *ast.Ident:
 		if a.currentScope == nil || a.currentStorageViewDeps == nil {
 			return storageViewDependencyState{}, false
@@ -104,6 +110,29 @@ func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDepen
 	default:
 		return storageViewDependencyState{}, false
 	}
+}
+
+// storageViewDependencyForBorrowedPlace returns a dependency on the container of
+// an interior reference (e.g. xs[i] in `xs[i].ref[T&]`) when that container is a
+// dynamic array, whose backing buffer can move on growth. Stable storage (fixed
+// arrays, struct fields, static/heap refs) does not relocate, so no dependency is
+// recorded and no false positive is raised.
+func (a *Analyzer) storageViewDependencyForBorrowedPlace(place ast.Expr) (storageViewDependencyState, bool) {
+	switch p := stripOptimizationParens(place).(type) {
+	case *ast.IndexExpr:
+		if a.borrowedPlaceContainerIsRelocatable(p.Object) {
+			return storageViewDependencyFromSource(p.Object)
+		}
+	}
+	return storageViewDependencyState{}, false
+}
+
+func (a *Analyzer) borrowedPlaceContainerIsRelocatable(obj ast.Expr) bool {
+	switch stripRefForBounds(a.exprTypes[obj]).(type) {
+	case *DArrayType:
+		return true
+	}
+	return false
 }
 
 func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageViewDependencyState, bool) {
