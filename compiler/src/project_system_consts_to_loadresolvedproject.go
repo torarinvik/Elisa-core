@@ -36,24 +36,26 @@ const (
 	projectCommandBench
 	projectCommandView
 	projectCommandDeps
+	projectCommandABILint
 )
 
 type projectCLIOptions struct {
-	command       projectCommand
-	targetName    string
-	projectPath   string
-	path          string
-	output        string
-	emitOverride  string
-	filter        string
-	linkFlags     []string
-	trust         trustLevel
-	targetTriple  string
-	optLevel      backend.OptimizationLevel
-	hasOptLevel   bool
-	initName      string
-	packedProfile backend.PackedLoweringProfile
-	jsonOutput    bool
+	command         projectCommand
+	targetName      string
+	projectPath     string
+	path            string
+	output          string
+	emitOverride    string
+	filter          string
+	linkFlags       []string
+	trust           trustLevel
+	targetTriple    string
+	optLevel        backend.OptimizationLevel
+	hasOptLevel     bool
+	initName        string
+	packedProfile   backend.PackedLoweringProfile
+	jsonOutput      bool
+	strictContracts bool
 }
 type projectDefinition struct {
 	Version               string                             `json:"version,omitempty"`
@@ -177,6 +179,9 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	if options.command == projectCommandDeps {
 		return runProjectDeps(project, options, stdout, stderr)
 	}
+	if options.command == projectCommandABILint {
+		return runProjectABILint(project, options, stdout, stderr)
+	}
 
 	target, err := resolveProjectTarget(project, options)
 	if err != nil {
@@ -259,13 +264,15 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			return projectCLIOptions{}, fmt.Errorf("missing project subcommand")
 		}
 		subcommand := strings.TrimSpace(args[1])
-		if subcommand != "view" && subcommand != "deps" {
+		if subcommand != "view" && subcommand != "deps" && subcommand != "abi-lint" {
 			return projectCLIOptions{}, fmt.Errorf("unsupported project subcommand %q", subcommand)
 		}
 		if subcommand == "view" {
 			options.command = projectCommandView
-		} else {
+		} else if subcommand == "deps" {
 			options.command = projectCommandDeps
+		} else {
+			options.command = projectCommandABILint
 		}
 		args = append([]string{args[0]}, args[2:]...)
 	default:
@@ -348,6 +355,8 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			options.output = strings.TrimSpace(strings.TrimPrefix(arg, "-o="))
 		case arg == "--json":
 			options.jsonOutput = true
+		case arg == "--strict-contracts":
+			options.strictContracts = true
 		case arg == "-o":
 			i++
 			if i >= len(args) {
@@ -409,7 +418,7 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 					return projectCLIOptions{}, fmt.Errorf("expected a single project or library name, got %q", arg)
 				}
 				options.initName = arg
-			case projectCommandBuild, projectCommandRun, projectCommandTest, projectCommandBench, projectCommandView, projectCommandDeps:
+			case projectCommandBuild, projectCommandRun, projectCommandTest, projectCommandBench, projectCommandView, projectCommandDeps, projectCommandABILint:
 				if options.targetName != "" {
 					return projectCLIOptions{}, fmt.Errorf("expected a single target name, got %q", arg)
 				}
@@ -450,6 +459,7 @@ func printProjectUsage(w io.Writer) {
 	fmt.Fprintln(w, "  elisacore bench [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>]")
 	fmt.Fprintln(w, "  elisacore project view [target] [--project <dir|project.json>]")
 	fmt.Fprintln(w, "  elisacore project deps [target] [--project <dir|project.json>] [--json]")
+	fmt.Fprintln(w, "  elisacore project abi-lint [target] [--project <dir|project.json>] [--json] [--strict-contracts]")
 }
 func scaffoldProject(options projectCLIOptions) error {
 	basePath := options.path

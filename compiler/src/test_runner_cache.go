@@ -115,9 +115,14 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 		if trimmed == "" {
 			continue
 		}
-		if err := testRunnerCacheHashForeignFile(hash, trimmed, map[string]bool{}); err != nil {
-			return testRunnerCacheArtifact{}, err
+		// Foreign bridge files often include the real implementation with quoted
+		// includes. Hash the expanded include graph so runtime changes do not hide
+		// behind stale cached test runners.
+		foreignSource, readErr := readSourceWithIncludes(trimmed, map[string]bool{})
+		if readErr != nil {
+			return testRunnerCacheArtifact{}, readErr
 		}
+		testRunnerCacheWriteBytes(hash, "foreign-with-includes:"+trimmed, foreignSource)
 	}
 	for _, linkFlag := range linkFlags {
 		trimmed := strings.TrimSpace(linkFlag)

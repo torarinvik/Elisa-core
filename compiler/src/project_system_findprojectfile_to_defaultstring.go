@@ -527,6 +527,7 @@ func runProjectView(project *resolvedProject, options projectCLIOptions, stdout 
 	fmt.Fprintf(stdout, "Entry: %s\n", selected.entryPath)
 	fmt.Fprintf(stdout, "Build emit: %s\n", selected.emit)
 	fmt.Fprintf(stdout, "Run emit: %s\n", selected.runEmit)
+	fmt.Fprintf(stdout, "Target triple: %s\n", defaultString(selected.targetTriple, "<host-default>"))
 	if selected.outputPath != "" {
 		fmt.Fprintf(stdout, "Output: %s\n", selected.outputPath)
 	}
@@ -587,6 +588,28 @@ func runProjectDeps(project *resolvedProject, options projectCLIOptions, stdout 
 		return 1
 	}
 	fmt.Fprint(stdout, payload)
+	return 0
+}
+func runProjectABILint(project *resolvedProject, options projectCLIOptions, stdout io.Writer, stderr io.Writer) int {
+	selected, err := resolveProjectTarget(project, options)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
+	}
+	report, err := buildNativeABILintReport(selected, nativeABILintOptions{StrictContracts: options.strictContracts})
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
+	}
+	payload, err := formatNativeABILintReport(report, options.jsonOutput)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, payload)
+	if nativeABILintHasErrors(report) {
+		return 1
+	}
 	return 0
 }
 func countDependencyHooks(manifests []*resolvedManifest) int {

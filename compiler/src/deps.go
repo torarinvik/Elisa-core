@@ -29,6 +29,10 @@ type projectDependencyReport struct {
 	Project               string                     `json:"project"`
 	Target                string                     `json:"target"`
 	Entry                 string                     `json:"entry"`
+	Emit                  string                     `json:"emit"`
+	RunEmit               string                     `json:"runEmit"`
+	Output                string                     `json:"output,omitempty"`
+	TargetTriple          string                     `json:"targetTriple,omitempty"`
 	IncludeDirs           []string                   `json:"includeDirs,omitempty"`
 	DependencySearchPaths []string                   `json:"dependencySearchPaths,omitempty"`
 	Sources               []string                   `json:"sources"`
@@ -145,6 +149,10 @@ func buildProjectDependencyReport(target *resolvedProjectTarget) (*projectDepend
 		Project:               target.project.filePath,
 		Target:                target.name,
 		Entry:                 target.entryPath,
+		Emit:                  target.emit,
+		RunEmit:               target.runEmit,
+		Output:                target.outputPath,
+		TargetTriple:          target.targetTriple,
 		IncludeDirs:           append([]string(nil), target.includeDirs...),
 		DependencySearchPaths: append([]string(nil), target.dependencySearchPaths...),
 		Foreign:               append([]string(nil), target.foreignFiles...),
@@ -210,6 +218,16 @@ func formatProjectDependencyReport(report *projectDependencyReport, jsonOutput b
 	out.WriteString(report.Target)
 	out.WriteString("\nEntry: ")
 	out.WriteString(report.Entry)
+	out.WriteString("\nEmit: ")
+	out.WriteString(report.Emit)
+	out.WriteString("\nRun emit: ")
+	out.WriteString(report.RunEmit)
+	out.WriteString("\nTarget triple: ")
+	out.WriteString(defaultString(report.TargetTriple, "<host-default>"))
+	if report.Output != "" {
+		out.WriteString("\nOutput: ")
+		out.WriteString(report.Output)
+	}
 	out.WriteString("\nSources:\n")
 	for _, source := range report.Sources {
 		out.WriteString("  - ")

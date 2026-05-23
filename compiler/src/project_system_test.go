@@ -229,6 +229,170 @@ func TestRunCLIProjectDepsReportsInterfacesAndForeignSources(t *testing.T) {
 	if len(report.Foreign) == 0 {
 		t.Fatal("expected project dependency report to include foreign sources")
 	}
+	if report.Emit == "" || report.RunEmit == "" {
+		t.Fatalf("expected project dependency report to include emit metadata, got %+v", report)
+	}
+}
+
+func TestRunCLIProjectABILintFlagsGuestEntryAsmHazards(t *testing.T) {
+	projectRoot := t.TempDir()
+	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "native")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), `{
+  "version": "0.1.0",
+  "targets": {
+    "app": {
+      "entry": "src/main.elisa",
+      "emit": "llvm",
+      "foreign": ["native/guest_entry.c"],
+      "target-triple": "x86_64-apple-darwin"
+    }
+  }
+}
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), "def main() -> int:\n    return 0\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "guest_entry.c"), `void ElisaGuestExec_RunMainEntry(void* params, void* exit_func) {
+    __asm__ volatile(
+        "andq $-16, %%rsp\n"
+        "subq $8, %%rsp\n"
+        "pushq 8(%1)\n"
+        "pushq 0(%1)\n"
+        "movq %1, %%rdi\n"
+        "movq %2, %%rsi\n"
+        "call *%0\n"
+        :
+        : "r"(params), "r"(params), "r"(exit_func)
+        : "rax", "rsi", "rdi");
+}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"project", "abi-lint", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected abi-lint to fail for guest-entry call trampoline, stdout:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during abi-lint, got:\n%s", stderr.String())
+	}
+	for _, check := range []string{"guest-entry-call-mangles-stack", "inline-asm-positional-abi-operands", "Target triple: x86_64-apple-darwin"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected abi-lint output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"project", "abi-lint", "app", "--project", projectRoot, "--json"}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected json abi-lint to fail for guest-entry call trampoline")
+	}
+	var report nativeABILintReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("expected abi-lint json to decode: %v\n%s", err, stdout.String())
+	}
+	if report.TargetTriple != "x86_64-apple-darwin" || len(report.Issues) == 0 {
+		t.Fatalf("expected abi-lint json metadata and issues, got %+v", report)
+	}
+	if len(report.Scanned) == 0 || !strings.Contains(strings.Join(report.Scanned, "\n"), "guest_entry.c") {
+		t.Fatalf("expected abi-lint json to list scanned native files, got %+v", report.Scanned)
+	}
+}
+
+func TestRunCLIProjectABILintScansQuotedNativeIncludes(t *testing.T) {
+	projectRoot := t.TempDir()
+	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "native")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), `{
+  "version": "0.1.0",
+  "targets": {
+    "app": {
+      "entry": "src/main.elisa",
+      "emit": "llvm",
+      "foreign": ["native/bridge.cpp"],
+      "target-triple": "x86_64-apple-darwin"
+    }
+  }
+}
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), "def main() -> int:\n    return 0\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "bridge.cpp"), "extern \"C\" {\n#include \"runtime.c\"\n}\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "runtime.c"), `void ElisaGuestExec_RunMainEntry(void* params, void* exit_func) {
+    __asm__ volatile(
+        "andq $-16, %%rsp\n"
+        "subq $8, %%rsp\n"
+        "pushq 8(%1)\n"
+        "pushq 0(%1)\n"
+        "movq %1, %%rdi\n"
+        "movq %2, %%rsi\n"
+        "call *%0\n"
+        :
+        : "r"(params), "r"(params), "r"(exit_func)
+        : "rax", "rsi", "rdi");
+}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"project", "abi-lint", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected abi-lint to fail for included native runtime, stdout:\n%s", stdout.String())
+	}
+	for _, check := range []string{"bridge.cpp", "runtime.c", "guest-entry-call-mangles-stack"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected abi-lint output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
+func TestRunCLIProjectABILintStrictContractsRequireGuestEntryIntent(t *testing.T) {
+	projectRoot := t.TempDir()
+	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "native")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), `{
+  "version": "0.1.0",
+  "targets": {
+    "app": {
+      "entry": "src/main.elisa",
+      "emit": "llvm",
+      "foreign": ["native/guest_exec_runtime.c"],
+      "target-triple": "x86_64-apple-darwin"
+    }
+  }
+}
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), "def main() -> int:\n    return 0\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "guest_exec_runtime.c"), "void helper(void) {}\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"project", "abi-lint", "app", "--project", projectRoot, "--strict-contracts"}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected strict abi-lint to require guest_entry contract, stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "missing-guest-entry-abi-contract") {
+		t.Fatalf("expected missing contract diagnostic, got:\n%s", stdout.String())
+	}
+
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "guest_exec_runtime.c"), "/* ELISA_ABI_CONTRACT guest_entry x86_64 ps4_process_entry noreturn */\nvoid helper(void) {}\n")
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"project", "abi-lint", "app", "--project", projectRoot, "--strict-contracts"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected strict abi-lint to accept declared guest_entry contract, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "guest_entry x86_64 ps4_process_entry noreturn") {
+		t.Fatalf("expected contract to be reported, got:\n%s", stdout.String())
+	}
 }
 
 func TestRunCLIProjectRunSupportsDirectLibraryLinkFlags(t *testing.T) {

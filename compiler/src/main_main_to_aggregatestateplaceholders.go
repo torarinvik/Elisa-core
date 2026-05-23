@@ -544,11 +544,15 @@ func writeIndentedInclude(out *bytes.Buffer, data []byte, indent []byte) {
 	}
 }
 func parseIncludeDirective(line string) (string, bool) {
-	for _, prefix := range []string{"# include ", "include "} {
-		if !strings.HasPrefix(line, prefix) {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "#") {
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+	}
+	for _, prefix := range []string{"include "} {
+		if !strings.HasPrefix(trimmed, prefix) {
 			continue
 		}
-		rest := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
 		if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
 			return "", false
 		}
