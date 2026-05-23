@@ -54,6 +54,26 @@ def f(out: mutable Box&) -> void:
 	}
 }
 
+// Rebinding a LOCAL reference variable to point at another local, then using it
+// within the function (e.g. passing it to a call), is safe and must NOT be
+// flagged: the local pointer slot dies with the function. (Regression for an
+// equeue.elisa false positive.)
+func TestRebindLocalRefToLocalIsAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rebind_local_ref.elisa", `def use(p: u32&?) -> u32:
+    return p else 0
+
+def f(have: bool) -> u32:
+    v: mutable u32 = 7
+    r: mutable u32&? = null
+    if have:
+        r <- v.ref[mutable u32&]
+    return use(r)
+`)
+	if strings.Contains(strings.Join(result.Errors(), "\n"), "dangles once the function returns") {
+		t.Fatalf("expected rebinding a local ref to a local to be accepted, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 // Storing a static-lived borrow into a field is fine (it does not dangle).
 func TestStoreStaticRefIntoFieldIsAccepted(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "store_static_ref_field.elisa", `struct Box:

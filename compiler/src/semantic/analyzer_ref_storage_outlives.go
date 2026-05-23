@@ -106,7 +106,32 @@ func (a *Analyzer) checkStoredBorrowEscapesLocal(target, value ast.Expr, valueTy
 	if a == nil || target == nil || !a.lvalueStorageOutlivesFunction(target) {
 		return
 	}
+	// Rebinding a local reference variable (e.g. `r <- &x` where r is a local
+	// `T&`) does NOT escape: the local pointer slot dies with the function, so
+	// pointing it at another local is fine. lvalueStorageOutlivesFunction reports
+	// such a local-ref target as "outliving" because writing THROUGH it can reach
+	// caller storage — but a direct rebind of the local variable is not a
+	// write-through. Only writes through a reference (field/index paths) and
+	// stores into globals/params can actually outlive the frame.
+	if a.assignTargetIsLocalRebind(target) {
+		return
+	}
 	a.checkBorrowEscapesLocal(value, valueType, "storing a reference to function-local storage into longer-lived storage; it dangles once the function returns")
+}
+
+// assignTargetIsLocalRebind reports whether an assignment target is a direct
+// local variable (rebinding it), as opposed to a write through a reference
+// (field/index path) or a store into a global/parameter.
+func (a *Analyzer) assignTargetIsLocalRebind(target ast.Expr) bool {
+	ident, ok := stripOptimizationParens(target).(*ast.Ident)
+	if !ok || ident == nil || a.currentScope == nil {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return false
+	}
+	return symbolAliasRoot(sym).Kind == SymbolLocal
 }
 
 func (a *Analyzer) checkBorrowEscapesLocal(value ast.Expr, valueType Type, message string) {
