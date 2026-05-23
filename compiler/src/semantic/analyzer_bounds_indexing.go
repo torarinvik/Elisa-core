@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -49,6 +50,64 @@ func (a *Analyzer) applyIndexBoundsFactsForCondition(cond ast.Expr, truthy bool)
 		}
 		a.currentIndexBounds[name] = existing
 	}
+}
+
+// invalidateIndexBoundsForAssignedTarget drops cached index-bounds proofs that a
+// reassignment could falsify (deep audit #5): reassigning the index variable
+// itself, or reassigning a container that some proof's upper bound refers to.
+// Without this, `if i < arr.count: ... i <- i + 99; arr[i]` keeps treating the
+// index as in-bounds.
+func (a *Analyzer) invalidateIndexBoundsForAssignedTarget(target ast.Expr) {
+	if a == nil || len(a.currentIndexBounds) == 0 || target == nil {
+		return
+	}
+	base := optimizationExprString(target)
+	if base == "" {
+		return
+	}
+	// If the index variable itself is reassigned, its upper-bound proof no longer
+	// holds for the new value.
+	delete(a.currentIndexBounds, base)
+	a.invalidateIndexBoundsReferencingBase(base)
+}
+
+// invalidateIndexBoundsForContainer drops proofs whose upper bound refers to a
+// container that was just mutated (push/extend/reserve/clear/truncate), since the
+// container's count/len changed (deep audit #5).
+func (a *Analyzer) invalidateIndexBoundsForContainer(container ast.Expr) {
+	if a == nil || len(a.currentIndexBounds) == 0 || container == nil {
+		return
+	}
+	a.invalidateIndexBoundsReferencingBase(optimizationExprString(container))
+}
+
+func (a *Analyzer) invalidateIndexBoundsReferencingBase(base string) {
+	if a == nil || len(a.currentIndexBounds) == 0 || base == "" {
+		return
+	}
+	for name, fact := range a.currentIndexBounds {
+		if indexBoundUpperReferencesBase(fact.Upper, base) {
+			delete(a.currentIndexBounds, name)
+		}
+	}
+}
+
+// indexBoundUpperReferencesBase reports whether an upper-bound string is derived
+// from a given container/index base, with an identifier boundary so that base
+// "arr" matches "arr.count" but not "array.count".
+func indexBoundUpperReferencesBase(upper, base string) bool {
+	if upper == "" || base == "" {
+		return false
+	}
+	if upper == base {
+		return true
+	}
+	if !strings.HasPrefix(upper, base) {
+		return false
+	}
+	c := upper[len(base)]
+	isIdentChar := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+	return !isIdentChar
 }
 
 func (a *Analyzer) indexExprRequiresUncheckedIndexPermission(expr *ast.IndexExpr) bool {

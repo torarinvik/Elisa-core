@@ -253,6 +253,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.bindActivePackedStoreType(targetType)
 		}
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
+		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
 		valueType := a.analyzeExpr(n.Value)
@@ -260,6 +261,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "augmented assignment requires numeric operands")
 		}
 		a.recordNamedStateAugAssignTarget(n.Target)
+		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 	case *ast.AsRefAssignStmt:
 		a.suppressUninitReadCheck++
 		targetType := a.asRefTargetType(n.Target, n.AsKind)
