@@ -152,6 +152,19 @@ def collections_mutable_items_from_data[T](data: mutable void&) -> mutable T&:
     trusted Unsafe.PointerCast:
         return data.cast[mutable T&]
 
+# Allocate a single zero-initialized T on an arena and return a heap reference
+# to it. This is the heap equivalent of `out: mutable T = zeroed`, but it never
+# materializes a T-sized value on the stack -- essential for very large
+# aggregate types (e.g. the shader IR program) whose by-value stack frame would
+# be enormous. The libc memset is used (not the byte-loop cxx_memset) so zeroing
+# stays O(1) syscalls rather than O(size) interpreted iterations.
+def arena_box_zeroed[T](a: mutable Arena&) -> mutable heap T&:
+    can Memory.Allocate, Abort.Panic:
+        raw: mutable heap void& = arena_alloc(a, size_of(T))
+        trusted Unsafe.RawExtern:
+            memset(raw, 0, size_of(T))
+        return collections_items_from_alloc[T](raw)
+
 # ------------------------------------------------------------
 # Dynamic array helpers (replacement for C macros)
 # ------------------------------------------------------------
