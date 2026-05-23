@@ -116,7 +116,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		if loopIndexBounds == nil {
 			loopIndexBounds = map[string]indexBoundFact{}
 		}
-		loopIndexBounds[stmt.Name] = indexBoundFact{Upper: optimizationExprString(stmt.End)}
+		loopIndexBounds[stmt.Name] = indexBoundFact{Upper: optimizationExprString(stmt.End), NonNeg: true}
 	}
 	a.currentIndexBounds = loopIndexBounds
 

@@ -9,6 +9,12 @@ import (
 
 type indexBoundFact struct {
 	Upper string
+	// NonNeg records that the index is provably >= 0. An upper-bound proof
+	// (i < count) is NOT sufficient for a SIGNED index, because a negative value
+	// still satisfies i < count and would index out of bounds. Unsigned index
+	// types are non-negative by construction; signed indices need this flag set
+	// by a `0..<` loop start or an explicit i >= 0 / i > -1 guard.
+	NonNeg bool
 }
 
 func cloneIndexBoundFacts(src map[string]indexBoundFact) map[string]indexBoundFact {
@@ -31,10 +37,17 @@ func (a *Analyzer) applyIndexBoundsFactsForCondition(cond ast.Expr, truthy bool)
 		a.currentIndexBounds = make(map[string]indexBoundFact, len(facts))
 	}
 	for name, fact := range facts {
-		if fact.Upper == "" {
+		existing := a.currentIndexBounds[name]
+		if fact.Upper != "" {
+			existing.Upper = fact.Upper
+		}
+		if fact.NonNeg {
+			existing.NonNeg = true
+		}
+		if existing.Upper == "" && !existing.NonNeg {
 			continue
 		}
-		a.currentIndexBounds[name] = fact
+		a.currentIndexBounds[name] = existing
 	}
 }
 
@@ -78,7 +91,52 @@ func (a *Analyzer) indexExprHasBoundsProof(expr *ast.IndexExpr, objType Type) bo
 	if !ok || fact.Upper == "" {
 		return false
 	}
-	return fact.Upper == indexableUpperBoundString(expr.Object, objType)
+	if fact.Upper != indexableUpperBoundString(expr.Object, objType) {
+		return false
+	}
+	// An upper-bound proof alone is unsound for a SIGNED index: a negative value
+	// also satisfies i < count and indexes out of bounds. Require a proven
+	// non-negativity (unsigned index type, a 0..< loop, or an i >= 0 guard).
+	if !indexTypeGuaranteedNonNegative(a.exprTypes[expr.Index]) && !fact.NonNeg {
+		return false
+	}
+	return true
+}
+
+// indexTypeGuaranteedNonNegative reports whether an index value cannot be
+// negative purely by its type (unsigned integers). Signed and unknown types need
+// a flow-derived non-negativity fact instead.
+func indexTypeGuaranteedNonNegative(t Type) bool {
+	b, ok := t.(*BuiltinType)
+	if !ok || b == nil {
+		return false
+	}
+	switch b.Name {
+	case "usize", "u8", "u16", "u32", "u64", "uintptr":
+		return true
+	}
+	return false
+}
+
+// boundConstIntValue evaluates a literal integer (optionally negated) used in a
+// comparison, so non-negativity guards like `i >= 0` / `i > -1` can be recognized
+// soundly. Non-literals return ok=false (conservative: no fact recorded).
+func boundConstIntValue(expr ast.Expr) (int64, bool) {
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.IntLit:
+		v, err := strconv.ParseInt(n.Value, 0, 64)
+		if err != nil {
+			return 0, false
+		}
+		return v, true
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_MINUS {
+			if v, ok := boundConstIntValue(n.Operand); ok {
+				return -v, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func indexableTypeRequiresBoundsProof(t Type) bool {
@@ -150,18 +208,32 @@ func collectIndexBoundsFacts(cond ast.Expr, truthy bool, facts map[string]indexB
 		case lexer.TOKEN_LT:
 			if truthy {
 				recordStrictUpperBoundFact(n.Left, n.Right, facts)
+				// `C < i` with C >= -1 proves i >= 0.
+				if c, ok := boundConstIntValue(n.Left); ok && c >= -1 {
+					recordNonNegFact(n.Right, facts)
+				}
 			}
 		case lexer.TOKEN_GT:
 			if truthy {
 				recordStrictUpperBoundFact(n.Right, n.Left, facts)
+				// `i > C` with C >= -1 proves i >= 0.
+				if c, ok := boundConstIntValue(n.Right); ok && c >= -1 {
+					recordNonNegFact(n.Left, facts)
+				}
 			}
 		case lexer.TOKEN_GTEQ:
 			if !truthy {
 				recordStrictUpperBoundFact(n.Left, n.Right, facts)
+			} else if c, ok := boundConstIntValue(n.Right); ok && c >= 0 {
+				// `i >= C` with C >= 0 proves i >= 0.
+				recordNonNegFact(n.Left, facts)
 			}
 		case lexer.TOKEN_LTEQ:
 			if !truthy {
 				recordStrictUpperBoundFact(n.Right, n.Left, facts)
+			} else if c, ok := boundConstIntValue(n.Left); ok && c >= 0 {
+				// `C <= i` with C >= 0 proves i >= 0.
+				recordNonNegFact(n.Right, facts)
 			}
 		}
 	}
@@ -176,7 +248,19 @@ func recordStrictUpperBoundFact(index ast.Expr, upper ast.Expr, facts map[string
 	if upperString == "" {
 		return
 	}
-	facts[name] = indexBoundFact{Upper: upperString}
+	fact := facts[name]
+	fact.Upper = upperString
+	facts[name] = fact
+}
+
+func recordNonNegFact(index ast.Expr, facts map[string]indexBoundFact) {
+	name, ok := boundIndexName(index)
+	if !ok {
+		return
+	}
+	fact := facts[name]
+	fact.NonNeg = true
+	facts[name] = fact
 }
 
 func boundIndexName(expr ast.Expr) (string, bool) {
