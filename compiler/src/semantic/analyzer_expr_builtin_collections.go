@@ -4,6 +4,226 @@ import (
 	"elisacore/src/ast"
 )
 
+// checkDarrayGrowthRegionEscape rejects growing a darray whose storage outlives
+// the current function while the ambient allocation arena is a function-local
+// `Arena` value. A darray records no "home" arena: each push/extend/reserve
+// grows the backing buffer from whatever `in <arena>:` scope is active. So
+// growing a longer-lived darray (a struct field reached through a reference, a
+// global, or a `mutable darray&` parameter) from a local `arena: Arena = zeroed`
+// allocates the new buffer in that local arena, which is freed when the function
+// returns — leaving the longer-lived darray pointing at freed memory. This was a
+// silent, ASLR-dependent use-after-free source. The fix is to allocate from a
+// persistent arena (a global `Arena`, or an `Arena&` parameter the caller owns).
+func (a *Analyzer) checkDarrayGrowthRegionEscape(receiver ast.Expr, op string) {
+	if a == nil || receiver == nil || a.staticContextDepth != 0 {
+		return
+	}
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		return
+	}
+	arenaName, ok := a.ambientArenaLocalValueName()
+	if !ok {
+		return
+	}
+	if a.lvalueStorageOutlivesFunction(receiver) {
+		a.errorf(receiver.Pos(), "darray %s grows a non-local darray from local arena %q; its backing buffer is freed when %q goes out of scope (use-after-free). Allocate from a persistent arena instead (a global Arena, or an Arena& parameter owned by the caller)", op, arenaName, arenaName)
+		return
+	}
+	// The receiver is a function-local collection grown in a function-local
+	// arena: its backing now lives in that arena. Record it so that returning it
+	// (or a pointer into it) or storing it into a longer-lived location is caught
+	// downstream as a use-after-free.
+	if sym := a.rootLocalValueSymbol(receiver); sym != nil {
+		if a.localArenaEscapeLocals == nil {
+			a.localArenaEscapeLocals = map[*Symbol]string{}
+		}
+		a.localArenaEscapeLocals[sym] = arenaName
+	}
+}
+
+// rootLocalValueSymbol walks an lvalue/path expression down to its root
+// identifier and returns that symbol when it is a by-value local of the current
+// function (the storage we own). It returns nil for parameters, globals, local
+// references (which point at storage owned elsewhere), or unresolved roots.
+func (a *Analyzer) rootLocalValueSymbol(expr ast.Expr) *Symbol {
+	for expr != nil {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.FieldExpr:
+			expr = n.Object
+		case *ast.IndexExpr:
+			expr = n.Object
+		case *ast.AddrOfExpr:
+			expr = n.Operand
+		case *ast.CastExpr:
+			expr = n.Operand
+		case *ast.Ident:
+			if a.currentScope == nil {
+				return nil
+			}
+			sym, ok := a.currentScope.Lookup(n.Name)
+			if !ok || sym == nil {
+				return nil
+			}
+			sym = symbolAliasRoot(sym)
+			if sym.Kind != SymbolLocal {
+				return nil
+			}
+			if _, isRef := sym.Type.(*RefType); isRef {
+				return nil
+			}
+			return sym
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// checkLocalArenaEscape flags returning or storing a value whose collection
+// backing was grown in a function-local arena (recorded in localArenaEscapeLocals).
+// Only values that actually alias the backing are flagged: a reference into it,
+// or the collection header itself. Scalar fields (e.g. `.count`) and by-value
+// element reads (`xs[i]`) are copies and cannot alias the freed buffer.
+func (a *Analyzer) checkLocalArenaEscape(value ast.Expr, valueType Type, verb string) {
+	if a == nil || value == nil || len(a.localArenaEscapeLocals) == 0 {
+		return
+	}
+	var sym *Symbol
+	switch valueType.(type) {
+	case *RefType:
+		// A reference result aliases storage: if it roots at a marked local it
+		// points into a buffer that the local arena will free.
+		sym = a.rootLocalValueSymbol(value)
+	case *DArrayType:
+		// A collection value carries the backing pointer; it escapes only when it
+		// IS the marked collection (reached via field/ident, never via an index
+		// which copies an element into a fresh value).
+		sym = a.collectionValueRoot(value)
+	default:
+		return
+	}
+	if sym == nil {
+		return
+	}
+	arenaName, ok := a.localArenaEscapeLocals[sym]
+	if !ok {
+		return
+	}
+	a.errorf(value.Pos(), "cannot %s %q: its backing was allocated in local arena %q, which is freed when the function returns (use-after-free). Build it in a persistent arena instead (a global Arena, or an Arena& parameter owned by the caller)", verb, sym.Name, arenaName)
+}
+
+// collectionValueRoot walks a collection-typed expression to the local it names,
+// following only field/paren steps (which preserve the collection-header alias)
+// and stopping at indexing (which yields an element copy) or other forms.
+func (a *Analyzer) collectionValueRoot(expr ast.Expr) *Symbol {
+	for expr != nil {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.FieldExpr:
+			expr = n.Object
+		case *ast.Ident:
+			if a.currentScope == nil {
+				return nil
+			}
+			sym, ok := a.currentScope.Lookup(n.Name)
+			if !ok || sym == nil {
+				return nil
+			}
+			sym = symbolAliasRoot(sym)
+			if sym.Kind != SymbolLocal {
+				return nil
+			}
+			if _, isRef := sym.Type.(*RefType); isRef {
+				return nil
+			}
+			return sym
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// ambientArenaLocalValueName returns the name of the active allocation arena
+// when it is a function-local `Arena` value (the transient case). It returns
+// false for a global Arena, an Arena& reference local/parameter (which points at
+// a longer-lived arena), or any non-trivial owner expression — i.e. cases that
+// are persistent or that we cannot prove transient, to avoid false positives.
+func (a *Analyzer) ambientArenaLocalValueName() (string, bool) {
+	if a.currentAllocExpr == nil {
+		return "", false
+	}
+	ident, ok := stripTreeAllocOwnerExpr(a.currentAllocExpr).(*ast.Ident)
+	if !ok || ident == nil || a.currentScope == nil {
+		return "", false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return "", false
+	}
+	sym = symbolAliasRoot(sym)
+	if sym.Kind != SymbolLocal {
+		return "", false
+	}
+	if _, isRef := sym.Type.(*RefType); isRef {
+		return "", false
+	}
+	return ident.Name, true
+}
+
+// lvalueStorageOutlivesFunction reports whether the storage referenced by an
+// lvalue expression lives beyond the current function: a global, a parameter,
+// a local reference (which points elsewhere), or any field/element reached
+// through a reference. A field/element of a by-value local is considered local.
+func (a *Analyzer) lvalueStorageOutlivesFunction(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.lvalueStorageOutlivesFunction(n.Inner)
+	case *ast.FieldExpr:
+		if a.exprObjectIsReference(n.Object) {
+			return true
+		}
+		return a.lvalueStorageOutlivesFunction(n.Object)
+	case *ast.IndexExpr:
+		if a.exprObjectIsReference(n.Object) {
+			return true
+		}
+		return a.lvalueStorageOutlivesFunction(n.Object)
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok || sym == nil {
+			return false
+		}
+		sym = symbolAliasRoot(sym)
+		switch sym.Kind {
+		case SymbolGlobal, SymbolParam:
+			return true
+		case SymbolLocal:
+			_, isRef := sym.Type.(*RefType)
+			return isRef
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) exprObjectIsReference(obj ast.Expr) bool {
+	if obj == nil {
+		return false
+	}
+	t := a.exprTypes[obj]
+	if t == nil {
+		t = a.analyzeExpr(obj)
+	}
+	_, ok := t.(*RefType)
+	return ok
+}
+
 func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool) {
 	if a == nil || expr == nil {
 		return nil, false
@@ -37,6 +257,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
 	}
+	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "push")
 	argType := a.analyzeValueExpr(expr.Args[0], darrayType.Elem)
 	if !AssignableTo(darrayType.Elem, argType) {
 		a.errorf(expr.Args[0].Pos(), "darray push expects %s, got %s", darrayType.Elem, argType)
@@ -95,6 +316,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 		a.errorf(expr.Pos(), "darray extend requires an active in <arena>: scope")
 	}
+	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "extend")
 	sourceType := a.analyzeValueExpr(expr.Args[0], nil)
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
 		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, dview, or array source of %s, got %s", darrayType.Elem, sourceType)
@@ -152,6 +374,7 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 		a.errorf(expr.Pos(), "darray reserve requires an active in <arena>: scope")
 	}
+	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "reserve")
 	usizeType := a.namedTypes["usize"]
 	argType := a.analyzeValueExpr(expr.Args[0], usizeType)
 	if !AssignableTo(usizeType, argType) {

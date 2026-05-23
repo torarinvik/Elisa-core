@@ -17,6 +17,8 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return &semantic.DStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "cstr"}, nil
 		case "sview":
 			return &semantic.SViewType{}, nil
+		case "dstr":
+			return &semantic.DArrayType{Elem: s.g.result.NamedTypes["u8"], Shape: &semantic.WildcardShape{}, SurfaceName: "dstr"}, nil
 		case "cstring":
 			return nil, legacyBuiltinReplacementError("cstring", "cstr")
 		case "DStr":

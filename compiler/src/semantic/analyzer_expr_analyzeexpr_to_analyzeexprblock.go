@@ -43,6 +43,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					a.errorf(n.Pos(), consumedFactUseMessage(affineHandleKind(sym.Type), n.Name, state.ConsumedBy))
 					return
 				}
+				if a.suppressUninitReadCheck == 0 && a.isZeroedUninitializedSymbol(sym) {
+					a.errorf(n.Pos(), "use of uninitialized variable %q: it was declared `= zeroed` and never assigned before this read; assign it (or a field of it) first", n.Name)
+					return
+				}
 				if ownerType, ok := borrowableOwnerRefElemType(result); ok {
 					if key, ok := a.lookupBorrowedOwnerRefKey(n); ok {
 						if state, ok := a.lookupAffineValueStateForKey(key); ok && state.ConsumedBy != "" {
@@ -483,6 +487,8 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				dst = cloned
 			}
 		}
+		a.checkBufferReinterpretCast(n, dst)
+		a.recordUnsafeLifetimeWiden(n, src, dst)
 		result = dst
 		return
 	case *ast.SizeofExpr:
@@ -532,7 +538,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = merged
 		return
 	case *ast.AddrOfExpr:
+		// Taking a (mutable) address of a `zeroed`-uninitialized local may
+		// initialize it through the pointer; clear the state and don't treat the
+		// operand as a value read.
+		a.suppressUninitReadCheck++
 		inner := a.analyzeExpr(n.Operand)
+		a.suppressUninitReadCheck--
+		a.clearZeroedUninitializedForExpr(n.Operand)
 		if fieldExpr, ok := stripMutationTargetExpr(n.Operand).(*ast.FieldExpr); ok {
 			if _, isTreeField := a.treeSurfaceFieldExprInfo(fieldExpr); isTreeField {
 				a.errorf(n.Pos(), "cannot take address of tree field %q; tree values are handle-lowered and fields are value-only", fieldExpr.Field)

@@ -38,6 +38,38 @@ func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (C.LLVMValueRef
 	return value, targetType, true, nil
 }
 
+// emitBuiltinCopyCall lowers copy[array[T, N]](src): a fixed-size, stack-owned
+// array materialized element-for-element from a fixed-size array source. The
+// semantic layer has already proven the size is a compile-time constant and the
+// elements are pure value data (no region owner needed), so this is a plain
+// elementwise value copy with no allocation.
+func (s *functionState) emitBuiltinCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil || callSpecializedIdentName(expr) != "copy" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("copy expects 1 argument, got %d", len(expr.Args))
+	}
+	targetType := s.exprType(expr)
+	sourceType := s.exprType(expr.Args[0])
+	if targetType == nil || sourceType == nil {
+		return nil, nil, true, fmt.Errorf("copy requires resolved source and target types")
+	}
+	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	arrayTarget, ok := semantic.StripAggregateStateType(targetType).(*semantic.ArrayType)
+	if !ok || arrayTarget == nil {
+		return nil, nil, true, fmt.Errorf("copy supports only fixed-size array targets in v1, got %s", targetType.String())
+	}
+	value, err := s.emitCloneArrayValue(sourceValue, semantic.StripAggregateStateType(sourceType), arrayTarget, "copy")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return value, targetType, true, nil
+}
+
 func (s *functionState) emitCloneValue(sourceValue C.LLVMValueRef, sourceType semantic.Type, targetType semantic.Type, name string) (C.LLVMValueRef, error) {
 	targetType = semantic.StripAggregateStateType(targetType)
 	sourceType = semantic.StripAggregateStateType(sourceType)
@@ -207,6 +239,16 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 		sourceData := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
 		countValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.len"))
 		return buildMaterializedFromDynamicSource(sourceData, st.Elem, countValue)
+	case *semantic.SViewType:
+		// sview = { data ptr (field 0), len i64 (field 1) }. Deep-copy the viewed
+		// u8 bytes into the region, producing an owned darray[u8] / dstr.
+		sourceData := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
+		lenValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.len"))
+		countValue, err := s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		if err != nil {
+			return nil, err
+		}
+		return buildMaterializedFromDynamicSource(sourceData, s.g.result.NamedTypes["u8"], countValue)
 	case *semantic.ArrayType:
 		if !st.HasConstSize {
 			return nil, fmt.Errorf("clone does not support non-constant array sources")

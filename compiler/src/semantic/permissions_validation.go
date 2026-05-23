@@ -296,6 +296,8 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		dst := a.exprTypes[n]
 		if a.enforceUnsafePermissions && castRequiresUnsafePointerCast(src, dst) {
 			a.warnOnMissingLocalGrant(n.Pos(), "pointer cast", unsafePointerCastRefs(n.Position), granted)
+		} else if a.enforceUnsafePermissions && a.unsafeLifetimeWidenCasts[n] {
+			a.warnOnMissingLocalGrant(n.Pos(), "lifetime-widening reference cast (a borrow cast to a longer-lived storage class; it can dangle when the storage is freed — persist via clone[dstr] instead)", unsafePointerCastRefs(n.Position), granted)
 		}
 		if sym, ok := a.resolvedCastHooks[n]; ok {
 			if fnType, ok := sym.Type.(*FuncType); ok {

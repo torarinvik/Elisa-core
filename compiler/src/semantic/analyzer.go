@@ -105,6 +105,7 @@ type Analyzer struct {
 	numericLiteralSuffixWarnings      map[ast.Expr]bool
 	treeConstructorCallees            map[ast.Expr]bool
 	resolvedCastHooks                 map[ast.Expr]*Symbol
+	unsafeLifetimeWidenCasts          map[*ast.CastExpr]bool
 	loweredInitCalls                  map[*ast.StructLitExpr]*ast.CallExpr
 	exprDenseNodeKeys                 map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables                    map[ast.Expr]NodeTableInfo
@@ -159,6 +160,19 @@ type Analyzer struct {
 	currentRewriteDefault             *rewriteDefaultContext
 	currentSequenceRewrite            *sequenceRewriteContext
 	currentAllocExpr                  ast.Expr
+	// localArenaEscapeLocals tracks local collection variables whose backing
+	// buffer was grown while a function-local Arena value was the active
+	// allocation owner. Such a buffer is freed when the local arena goes out of
+	// scope, so returning the collection (or a pointer into it) or storing it
+	// into a longer-lived location is a use-after-free. Keyed by the unique
+	// local *Symbol, so no per-function reset is required (symbols never alias
+	// across functions); the value is the offending arena's name for diagnostics.
+	localArenaEscapeLocals map[*Symbol]string
+	// suppressUninitReadCheck > 0 while analyzing an address-of operand or an
+	// assignment target, where naming a `zeroed`-uninitialized local is not a
+	// value read (it is being filled / had its address taken), so the
+	// definite-assignment read check must not fire.
+	suppressUninitReadCheck int
 	currentPoolScopes                 []poolScopeState
 	currentIndexBounds                map[string]indexBoundFact
 	currentFunctionUsedPermissions    map[string]bool
@@ -310,6 +324,11 @@ type affineValueState struct {
 	ConsumedBy              string
 	LiveProtocolType        Type
 	LiveProtocolDescription string
+	// Uninitialized marks a local declared with `= zeroed` that has not yet been
+	// assigned (definite-assignment tracking). Reading it before any assignment
+	// to it (or a field of it) is a use of uninitialized memory. Folded into the
+	// affine state so it inherits clone/merge/snapshot across control flow.
+	Uninitialized bool
 }
 
 type affineValueKey struct {
@@ -394,6 +413,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		numericLiteralSuffixWarnings:      make(map[ast.Expr]bool, exprCapacity/64+8),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
+		unsafeLifetimeWidenCasts:          make(map[*ast.CastExpr]bool),
 		loweredInitCalls:                  make(map[*ast.StructLitExpr]*ast.CallExpr, resolvedInitCallCapacity),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),

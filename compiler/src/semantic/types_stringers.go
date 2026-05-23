@@ -417,6 +417,9 @@ func (t *DArrayType) String() string {
 	if t == nil || t.Elem == nil {
 		return "<invalid-darray>"
 	}
+	if t.SurfaceName == "dstr" && isWildcardShape(t.Shape) {
+		return "dstr"
+	}
 	if isWildcardShape(t.Shape) {
 		return fmt.Sprintf("darray[%s]", t.Elem.String())
 	}

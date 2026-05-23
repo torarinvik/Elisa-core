@@ -13,6 +13,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "cstr"}
 		case "sview":
 			return &SViewType{}
+		case "dstr":
+			// dstr is an owned dynamic string: the u8 specialization of darray
+			// (docs/26). It shares darray's {ptr, count, capacity} representation
+			// and every darray operation; the distinct name carries string intent.
+			return &DArrayType{Elem: a.namedTypes["u8"], Shape: &WildcardShape{}, SurfaceName: "dstr"}
 		case "DStr":
 			a.errorLegacyBuiltinReplacement(n.Pos(), "DStr", "cstr")
 			return invalidType

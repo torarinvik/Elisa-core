@@ -107,6 +107,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinCloneCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinCopyCall(expr); handled {
+		return value, actualType, err
+	}
 	if errorType, qualifiedTag, ok := s.errorConstructorInfo(expr); ok {
 		return s.emitErrorConstructorValue(expr, errorType, qualifiedTag)
 	}

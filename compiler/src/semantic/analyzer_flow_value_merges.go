@@ -22,6 +22,11 @@ func mergeAffineValueStates(dst map[affineValueKey]affineValueState, src map[aff
 		if existing.LiveProtocolDescription == "" && state.LiveProtocolDescription != "" {
 			existing.LiveProtocolDescription = state.LiveProtocolDescription
 		}
+		// Definite-assignment meet: a local is uninitialized after a join if it
+		// is uninitialized on either incoming path.
+		if state.Uninitialized {
+			existing.Uninitialized = true
+		}
 		dst[key] = existing
 	}
 	return dst

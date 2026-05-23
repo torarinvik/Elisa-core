@@ -1,0 +1,48 @@
+//go:build cgo
+
+package backend
+
+import (
+	"strings"
+	"testing"
+)
+
+// copy[array[T, N]](src) lowers to a fixed-size, stack-owned array materialized
+// element-for-element from a fixed-size array source — no region allocation.
+func TestGenerateLLVMIRLowersCopyBuiltinForFixedArray(t *testing.T) {
+	src := `def dup(src: array[u8, 4]) -> array[u8, 4]:
+    return copy[array[u8, 4]](src)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_copy_builtin.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "define [4 x i8] @dup") {
+		t.Fatalf("expected fixed-array copy lowering to define [4 x i8] @dup, got:\n%s", output)
+	}
+	// Stack owner: must not call into the region/arena allocator.
+	if strings.Contains(output, "arena_alloc") || strings.Contains(output, "clone.alloc") {
+		t.Fatalf("expected copy to allocate no region storage, got:\n%s", output)
+	}
+}
+
+// clone[darray[u8]](sview) lowers to a region allocation plus a byte-copy loop
+// from the view's (ptr, len), producing an owned darray[u8] / dstr.
+func TestGenerateLLVMIRLowersCloneSViewIntoOwnedBytes(t *testing.T) {
+	src := `def persist(owner: mutable Arena&, text: sview) -> darray[u8]:
+    can Abort.Panic, Memory.Allocate:
+        in owner:
+            return clone[darray[u8]](text)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_clone_sview.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define", "@persist", "clone.alloc", "clone.body"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected sview clone lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}

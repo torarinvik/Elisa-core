@@ -331,6 +331,28 @@ ARENA_API void *arena_alloc(Arena *a, size_t size_bytes)
 ARENA_API void *arena_realloc(Arena *a, void *oldptr, size_t oldsz, size_t newsz)
 {
     if (newsz <= oldsz) return oldptr;
+    // Tail-growth fast path: if oldptr is the last allocation in the current
+    // region (its end coincides with the region's bump cursor) and the region
+    // has room for the delta, grow in place by advancing the cursor — zero copy.
+    // This is the "tail allocation of darrays in regions" optimization: a darray
+    // sitting at the region tip extends for free instead of relocating. The
+    // in-place extension itself is always safe (it only ever extends a block
+    // provably at the tip) and independent of statement order. NOTE: this fast
+    // path does not move the buffer, so interior borrows survive a *tail* grow;
+    // but the relocation fallback below DOES move the buffer, so any interior
+    // borrow taken before a non-tail grow dangles. The front end must invalidate
+    // interior borrows across any push/grow that is not provably tail-stable
+    // (see docs/26 Step 3); this fast path narrows, but does not remove, that need.
+    if (a != NULL && a->end != NULL && oldptr != NULL) {
+        size_t old_words = (oldsz + sizeof(uintptr_t) - 1)/sizeof(uintptr_t);
+        size_t new_words = (newsz + sizeof(uintptr_t) - 1)/sizeof(uintptr_t);
+        uintptr_t *block = (uintptr_t*)oldptr;
+        if (block + old_words == &a->end->data[a->end->count] &&
+            a->end->count - old_words + new_words <= a->end->capacity) {
+            a->end->count = a->end->count - old_words + new_words;
+            return oldptr;
+        }
+    }
     void *newptr = arena_alloc(a, newsz);
     char *newptr_char = (char*)newptr;
     char *oldptr_char = (char*)oldptr;

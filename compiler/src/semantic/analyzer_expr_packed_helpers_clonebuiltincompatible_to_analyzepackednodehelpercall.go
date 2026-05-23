@@ -21,6 +21,11 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 	seen[key] = true
 	switch tt := target.(type) {
 	case *BuiltinType, *ConstEnumType, *ErrorSetType, *NullType, *DStrType, *SViewType:
+		// An sview is a borrowed (ptr, len) into someone else's storage. Cloning
+		// it copies only the view header — the result still borrows the same
+		// bytes. It does NOT become an owner: persisting bytes into a region is
+		// the job of an owned string type, not of clone-on-a-view (which would
+		// silently turn a borrow into an owner while keeping the borrow's type).
 		return false, SameType(target, source)
 	case *TypeParamType, *RefType, *FuncType, *ViewType, *DArrayViewType, *PackedVariantViewType, *StoreRowsViewType, *StoreRowViewType, *DictType, *DictEntryType:
 		return false, false
@@ -44,6 +49,13 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 			sourceElem = ss.Elem
 		case *ArrayType:
 			sourceElem = ss.Elem
+		case *SViewType:
+			// A string view (sview) is a bounded (ptr, len) borrow of u8 bytes.
+			// Cloning it into a darray[u8] / dstr deep-copies those bytes into the
+			// active region, producing an owner independent of the source storage.
+			// This is the sanctioned, length-bounded way to persist a string — the
+			// cure the unbounded-cstr cast warning points at (docs/26).
+			sourceElem = a.namedTypes["u8"]
 		default:
 			return false, false
 		}

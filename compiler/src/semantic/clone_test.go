@@ -45,6 +45,46 @@ def clone_name_box(box: NameBox) -> NameBox:
 `)
 }
 
+// clone[darray[u8]](sview) deep-copies a bounded string view's bytes into the
+// active region, producing an owned darray[u8]. This is the sanctioned,
+// length-bounded way to persist a string (docs/26).
+func TestAnalyzeCloneBuiltinPersistsSViewIntoOwnedBytes(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "clone_sview_to_owned.elisa", `def persist(owner: mutable Arena&, text: sview) -> darray[u8]:
+    can Abort.Panic, Memory.Allocate:
+        in owner:
+            return clone[darray[u8]](text)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected no diagnostics for sview->darray clone, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// dstr is the owned-dynamic-string spelling of darray[u8]; clone[dstr](sview)
+// persists a bounded view into owned bytes exactly like clone[darray[u8]].
+func TestAnalyzeCloneBuiltinPersistsSViewIntoDStr(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "clone_sview_to_dstr.elisa", `def persist(owner: mutable Arena&, text: sview) -> dstr:
+    can Abort.Panic, Memory.Allocate:
+        in owner:
+            return clone[dstr](text)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected no diagnostics for sview->dstr clone, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// Cloning an sview into a non-u8 darray is a type mismatch and must be rejected.
+func TestAnalyzeCloneBuiltinRejectsSViewIntoNonByteDArray(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_sview_wrong_elem.elisa", `def persist(owner: mutable Arena&, text: sview) -> darray[u32]:
+    can Abort.Panic, Memory.Allocate:
+        in owner:
+            return clone[darray[u32]](text)
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "clone cannot clone") {
+		t.Fatalf("expected sview->darray[u32] rejection, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeCloneBuiltinRejectsReferences(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_rejects_refs.elisa", `def clone_ref(value: i64&) -> i64&:
 	return clone[i64&](value)

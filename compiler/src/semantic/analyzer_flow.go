@@ -43,6 +43,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
+		if n.Value != nil && isZeroedInitializer(n.Value) {
+			a.markZeroedUninitialized(sym)
+		}
 		a.recordSpecializedValueTypeBinding(sym, valueType)
 		a.recordValueBinding(sym, n.Value)
 		a.markCreatedProtocolSymbol(sym, n.Value)
@@ -204,11 +207,16 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordRegionInvalidateTransform(n.Pos(), n.Name, "", "destroy region", before, -1)
 	case *ast.AssignStmt:
 		var targetType Type
+		// Analyzing an assignment target reads the base of a field/index path as
+		// a location, not a value; don't trip the uninitialized-read check there
+		// (the assignment itself initializes it).
+		a.suppressUninitReadCheck++
 		if n.Optional {
 			targetType = a.optionalAssignmentTargetType(n.Target)
 		} else {
 			targetType = a.assignmentTargetType(n.Target)
 		}
+		a.suppressUninitReadCheck--
 		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
@@ -220,6 +228,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.recordRegionRefAssignment(n.Target, n.Value)
 			a.recordStorageViewAssignment(n.Target, n.Value)
 		}
+		if a.lvalueStorageOutlivesFunction(n.Target) {
+			a.checkLocalArenaEscape(n.Value, valueType, "store")
+		}
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {
 				if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
@@ -230,6 +241,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		if !n.Optional {
 			a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
+			a.clearZeroedUninitializedForExpr(n.Target)
 			a.clearAffineValueTarget(n.Target)
 			a.trackAffineValueTarget(n.Target, targetType)
 			a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
@@ -249,7 +261,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordNamedStateAugAssignTarget(n.Target)
 	case *ast.AsRefAssignStmt:
+		a.suppressUninitReadCheck++
 		targetType := a.asRefTargetType(n.Target, n.AsKind)
+		a.suppressUninitReadCheck--
 		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
@@ -261,6 +275,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordStorageViewAssignment(n.Target, n.Value)
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
+		a.clearZeroedUninitializedForExpr(n.Target)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
@@ -290,6 +305,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "unexpected return value")
 			return
 		}
+		a.checkLocalArenaEscape(n.Value, valueType, "return")
 		if refState, ok := a.regionRefStateForExpr(n.Value); ok {
 			if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil {
 				if _, isRef := valueType.(*RefType); isRef {
