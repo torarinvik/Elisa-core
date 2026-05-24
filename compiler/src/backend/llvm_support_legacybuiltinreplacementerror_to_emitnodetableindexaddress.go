@@ -30,10 +30,21 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 			}
 			return binding.ptr, binding.typ, nil
 		}
-		if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {
+		if sym, resolvedName, ok := s.lookupVisibleGlobalSymbol(n.Name); ok {
 			if sym.Kind == semantic.SymbolGlobal || sym.Kind == semantic.SymbolExternVar {
-				global, err := s.g.ensureGlobalDeclared(n.Name, sym.Type, sym.Kind == semantic.SymbolExternVar)
+				global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, sym.Kind == semantic.SymbolExternVar)
 				return global, sym.Type, err
+			}
+			// Aggregate (array) consts are materialized as read-only globals (see
+			// emitIdentValueAddress / emitDeclInNamespace), so their address can be
+			// taken — e.g. TABLE.ref[u32[N]&] to build a zero-copy dview over a
+			// static const table. Mutating through such a ref is rejected by the
+			// semantic layer (a const yields no writable ref).
+			if sym.Kind == semantic.SymbolConst {
+				if _, isArray := sym.Type.(*semantic.ArrayType); isArray {
+					global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, false)
+					return global, sym.Type, err
+				}
 			}
 		}
 		return nil, nil, fmt.Errorf("identifier %s is not addressable", n.Name)

@@ -135,6 +135,35 @@ func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
 		return false
 	}
 }
+// borrowPlaceRootsInConst reports whether the place being borrowed resolves to
+// a top-level const (read-only static storage), walking through index/field/
+// paren accessors to the root identifier. Used to reject mutable borrows of a
+// const, which would otherwise point into rodata.
+func (a *Analyzer) borrowPlaceRootsInConst(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.borrowPlaceRootsInConst(n.Inner)
+	case *ast.IndexExpr:
+		return a.borrowPlaceRootsInConst(n.Object)
+	case *ast.FieldExpr:
+		return a.borrowPlaceRootsInConst(n.Object)
+	case *ast.Ident:
+		var (
+			sym *Symbol
+			ok  bool
+		)
+		if a.currentScope != nil {
+			sym, ok = a.currentScope.Lookup(n.Name)
+		}
+		if !ok {
+			sym, _, ok = a.lookupVisibleGlobal(n.Name)
+		}
+		return ok && sym != nil && sym.Kind == SymbolConst
+	default:
+		return false
+	}
+}
+
 func (a *Analyzer) exprCanYieldAddressableValue(expr ast.Expr) bool {
 	stripped := stripMutationTargetExpr(expr)
 	if stripped == nil {

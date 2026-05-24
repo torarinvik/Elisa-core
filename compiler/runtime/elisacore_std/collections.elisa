@@ -301,12 +301,11 @@ def view[T](da: darray[T]) -> dview[T]:
     return darray_view[T](da)
 
 
-# Build a read-only dview over an addressable fixed-size array (T[N]) with no
-# copy and no arena. Useful for handing a mutable/stack buffer to APIs that take
-# a dview. Mirrors inline_vec_view's inline-buffer path.
-# NOTE: the receiver must be addressable, so pass `arr.ref[T[N]&]`. Top-level
-# `const` arrays are NOT addressable, so to feed a const table into a darray use
-# the copy path `out.extend(THE_CONST)` instead of a view.
+# Build a read-only dview over a fixed-size array (T[N]) with no copy and no
+# arena. Pass the array by reference, e.g. `array_view(TABLE.ref[u32[N]&])`.
+# Works for top-level `const` tables too (they are addressable as read-only
+# globals), so a static table can be handed out as a zero-copy slice. Mirrors
+# inline_vec_view's inline-buffer path.
 def array_view[T, N: usize](arr: T[N]&) -> dview[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if N == 0usize

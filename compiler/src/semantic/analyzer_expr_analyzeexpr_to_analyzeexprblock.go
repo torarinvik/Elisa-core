@@ -477,6 +477,25 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src, dst)
 		}
+		// Const-correctness: `const_place.ref[mutable T&]` parses to a cast of a
+		// freshly-taken borrow (AddrOfExpr) to a mutable ref. A const lives in
+		// read-only storage, so handing out a mutable pointer into it would
+		// crash on write. Reject mutable borrows rooted in a const. (Non-const
+		// places — including non-`mutable` stack locals borrowed for init — and
+		// reinterpret casts of plain pointer values are unaffected.)
+		if dstRef, ok := dst.(*RefType); ok && dstRef.Mutable {
+			operand := n.Operand
+			for {
+				if paren, ok := operand.(*ast.ParenExpr); ok {
+					operand = paren.Inner
+					continue
+				}
+				break
+			}
+			if addr, ok := operand.(*ast.AddrOfExpr); ok && a.borrowPlaceRootsInConst(addr.Operand) {
+				a.errorf(n.Pos(), "cannot take a mutable reference to a const (it lives in read-only storage); use a read-only reference instead")
+			}
+		}
 		if a.enforceUnsafePermissions && castRequiresUnsafePointerCast(src, dst) {
 			a.recordFunctionPermissionRefs(unsafePointerCastRefs(n.Position))
 		}
