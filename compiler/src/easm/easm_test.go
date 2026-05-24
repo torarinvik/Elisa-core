@@ -317,6 +317,24 @@ export def bad_write(ptr: uintptr) -> void abi c:
 	}
 }
 
+func TestVerifyRejectsIndexedMemoryWriteWithoutMemoryClobber(t *testing.T) {
+	src := `module memory
+target x86_64
+export def bad_indexed_write(ptr: uintptr, index: uintptr) -> void abi c:
+    inputs: ptr = rdi, index = rsi
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        movq %rax, 0(%rdi,%rsi,8)
+        ret
+`
+	_, issues := Parse("indexed_memory.easm", src)
+	if !containsIssue(issues, "memory-write-without-clobber") {
+		t.Fatalf("expected memory-write-without-clobber for indexed address, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsCallWithoutStackContract(t *testing.T) {
 	src := `module calls
 target x86_64
@@ -937,6 +955,39 @@ export def bad_contract() -> void abi mystery:
 		if !containsIssue(issues, code) {
 			t.Fatalf("expected %s, got %#v", code, issues)
 		}
+	}
+}
+
+func TestVerifyRejectsInvalidSignatureTypes(t *testing.T) {
+	src := `module sig
+target x86_64
+export def bad_sig(ptr: SomeStruct&) -> Vector128 abi c:
+    inputs: ptr = rdi
+    outputs: ret = rax
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("bad_sig.easm", src)
+	if !containsIssue(issues, "invalid-signature-type") {
+		t.Fatalf("expected invalid-signature-type, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsVoidParameterType(t *testing.T) {
+	src := `module sig
+target x86_64
+export def bad_void_param(value: void) -> void abi c:
+    inputs: value = rdi
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("bad_void_param.easm", src)
+	if !containsIssue(issues, "invalid-signature-type") {
+		t.Fatalf("expected invalid-signature-type, got %#v", issues)
 	}
 }
 

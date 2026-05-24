@@ -362,6 +362,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	}
 	issues = append(issues, verifyABI(path, fn)...)
 	issues = append(issues, verifyContractTokens(path, fn)...)
+	issues = append(issues, verifySignatureTypes(path, fn)...)
 	issues = append(issues, verifyBindings(path, fn)...)
 	if len(fn.Instructions) == 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "missing-body", File: path, Line: fn.Line, Message: "EASM export must contain a body"})
@@ -630,6 +631,28 @@ func verifyABI(path string, fn *Function) []Issue {
 		return nil
 	default:
 		return []Issue{{Severity: "error", Code: "unknown-abi", File: path, Line: fn.Line, Message: fmt.Sprintf("unknown EASM ABI %s", fn.ABI)}}
+	}
+}
+
+func verifySignatureTypes(path string, fn *Function) []Issue {
+	var issues []Issue
+	if !allowedSignatureType(fn.ReturnType) {
+		issues = append(issues, Issue{Severity: "error", Code: "invalid-signature-type", File: path, Line: fn.Line, Message: fmt.Sprintf("unsupported EASM return type %s", fn.ReturnType)})
+	}
+	for _, param := range fn.Params {
+		if !allowedSignatureType(param.Type) || param.Type == "void" {
+			issues = append(issues, Issue{Severity: "error", Code: "invalid-signature-type", File: path, Line: fn.Line, Message: fmt.Sprintf("unsupported EASM parameter type %s", param.Type)})
+		}
+	}
+	return issues
+}
+
+func allowedSignatureType(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "void", "bool", "char", "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "usize", "uintptr", "f32", "f64":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1075,7 +1098,38 @@ func splitInstructionOperands(text string) []string {
 		return nil
 	}
 	operandText := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
-	return splitCSV(operandText)
+	var out []string
+	var current strings.Builder
+	depth := 0
+	for _, r := range operandText {
+		switch r {
+		case '(':
+			depth++
+			current.WriteRune(r)
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			current.WriteRune(r)
+		case ',':
+			if depth == 0 {
+				part := strings.TrimSpace(current.String())
+				if part != "" {
+					out = append(out, part)
+				}
+				current.Reset()
+				continue
+			}
+			current.WriteRune(r)
+		default:
+			current.WriteRune(r)
+		}
+	}
+	part := strings.TrimSpace(current.String())
+	if part != "" {
+		out = append(out, part)
+	}
+	return out
 }
 
 func immediateValue(text string) int {
