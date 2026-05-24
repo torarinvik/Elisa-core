@@ -363,7 +363,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	issues = append(issues, verifyABI(path, fn)...)
 	issues = append(issues, verifyContractTokens(path, fn)...)
 	issues = append(issues, verifySignatureTypes(path, fn)...)
-	issues = append(issues, verifyBindings(path, fn)...)
+	issues = append(issues, verifyBindings(path, target, fn)...)
 	if len(fn.Instructions) == 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "missing-body", File: path, Line: fn.Line, Message: "EASM export must contain a body"})
 	}
@@ -702,7 +702,7 @@ func allowedControlToken(token string) bool {
 	}
 }
 
-func verifyBindings(path string, fn *Function) []Issue {
+func verifyBindings(path string, target string, fn *Function) []Issue {
 	var issues []Issue
 	paramNames := map[string]bool{}
 	for _, param := range fn.Params {
@@ -724,6 +724,8 @@ func verifyBindings(path string, fn *Function) []Issue {
 		seenInputs[name] = true
 		if reg := registerAfterEquals(input); reg == "" {
 			issues = append(issues, Issue{Severity: "error", Code: "invalid-register-binding", File: path, Line: fn.Line, Message: fmt.Sprintf("input binding %s must use = <register>", name)})
+		} else if !targetAllowsRegister(target, reg) {
+			issues = append(issues, Issue{Severity: "error", Code: "register-target-mismatch", File: path, Line: fn.Line, Message: fmt.Sprintf("input binding %s uses register %s outside target %s", name, reg, defaultString(target, "any"))})
 		}
 	}
 	for _, param := range fn.Params {
@@ -747,6 +749,13 @@ func verifyBindings(path string, fn *Function) []Issue {
 		seenOutputs[name] = true
 		if reg := registerAfterEquals(output); reg == "" {
 			issues = append(issues, Issue{Severity: "error", Code: "invalid-register-binding", File: path, Line: fn.Line, Message: fmt.Sprintf("output binding %s must use = <register>", name)})
+		} else {
+			if !targetAllowsRegister(target, reg) {
+				issues = append(issues, Issue{Severity: "error", Code: "register-target-mismatch", File: path, Line: fn.Line, Message: fmt.Sprintf("output binding %s uses register %s outside target %s", name, reg, defaultString(target, "any"))})
+			}
+			if name == "ret" && !returnTypeAllowsRegister(fn.ReturnType, reg) {
+				issues = append(issues, Issue{Severity: "error", Code: "return-register-mismatch", File: path, Line: fn.Line, Message: fmt.Sprintf("return type %s cannot use return register %s", fn.ReturnType, reg)})
+			}
 		}
 	}
 	return issues
@@ -785,6 +794,70 @@ func isRegisterName(value string) bool {
 	default:
 		return false
 	}
+}
+
+func targetAllowsRegister(target string, reg string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	reg = strings.ToLower(strings.TrimPrefix(reg, "%"))
+	if target == "" || target == "any" {
+		return true
+	}
+	switch {
+	case strings.Contains(target, "x86_64") || strings.Contains(target, "amd64"):
+		return isX86Register(reg)
+	case strings.Contains(target, "aarch64") || strings.Contains(target, "arm64"):
+		return isAArch64Register(reg)
+	default:
+		return true
+	}
+}
+
+func returnTypeAllowsRegister(returnType string, reg string) bool {
+	returnType = strings.TrimSpace(returnType)
+	reg = strings.ToLower(strings.TrimPrefix(reg, "%"))
+	switch returnType {
+	case "f32", "f64":
+		return strings.HasPrefix(reg, "xmm") || strings.HasPrefix(reg, "s") || strings.HasPrefix(reg, "d")
+	case "void":
+		return false
+	default:
+		return isIntegerReturnRegister(reg)
+	}
+}
+
+func isIntegerReturnRegister(reg string) bool {
+	switch reg {
+	case "rax", "eax", "ax", "al", "x0", "w0":
+		return true
+	default:
+		return false
+	}
+}
+
+func isX86Register(reg string) bool {
+	switch reg {
+	case "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+		"eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
+		"al", "ah", "ax", "bl", "bh", "bx", "cl", "ch", "cx", "dl", "dh", "dx":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAArch64Register(reg string) bool {
+	if reg == "sp" {
+		return true
+	}
+	if len(reg) < 2 {
+		return false
+	}
+	prefix := reg[0]
+	if prefix != 'x' && prefix != 'w' {
+		return false
+	}
+	n, err := strconv.Atoi(reg[1:])
+	return err == nil && n >= 0 && n <= 30
 }
 
 func writesStackPointer(text string) bool {

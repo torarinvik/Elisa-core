@@ -1045,6 +1045,58 @@ export def bad_outputs() -> u64 abi c:
 	}
 }
 
+func TestVerifyRejectsRegisterTargetMismatch(t *testing.T) {
+	x86Src := `module regs
+target x86_64
+export def bad_x86(value: i64) -> i64 abi c:
+    inputs: value = x0
+    outputs: ret = rax
+    stack: unchanged
+    control: returns
+    body:
+        movq %rdi, %rax
+        ret
+`
+	_, x86Issues := Parse("bad_x86_regs.easm", x86Src)
+	if !containsIssue(x86Issues, "register-target-mismatch") {
+		t.Fatalf("expected register-target-mismatch for x86 binding, got %#v", x86Issues)
+	}
+
+	aarch64Src := `module regs
+target aarch64
+export def bad_arm(value: i64) -> i64 abi c:
+    inputs: value = rdi
+    outputs: ret = x0
+    stack: unchanged
+    control: returns
+    body:
+        mov x0, x0
+        ret
+`
+	_, armIssues := Parse("bad_arm_regs.easm", aarch64Src)
+	if !containsIssue(armIssues, "register-target-mismatch") {
+		t.Fatalf("expected register-target-mismatch for aarch64 binding, got %#v", armIssues)
+	}
+}
+
+func TestVerifyRejectsReturnRegisterMismatch(t *testing.T) {
+	src := `module regs
+target x86_64
+export def bad_ret_reg() -> u64 abi c:
+    outputs: ret = rdx
+    clobbers: rdx
+    stack: unchanged
+    control: returns
+    body:
+        movq $1, %rdx
+        ret
+`
+	_, issues := Parse("bad_ret_reg.easm", src)
+	if !containsIssue(issues, "return-register-mismatch") {
+		t.Fatalf("expected return-register-mismatch, got %#v", issues)
+	}
+}
+
 func TestBuildReportRejectsDuplicateExportsAcrossFiles(t *testing.T) {
 	first := t.TempDir()
 	a := first + "/a.easm"
