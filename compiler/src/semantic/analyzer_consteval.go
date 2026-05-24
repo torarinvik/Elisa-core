@@ -2304,6 +2304,16 @@ func ParseIntLiteral(expr *ast.IntLit) (int64, bool) {
 	if expr.IsHex {
 		base = 0
 	}
+	// Unsigned-typed literals (u8/u16/u32/u64/usize) may have their top bit
+	// set, which overflows a signed parse. Parse them as unsigned and store
+	// the bit pattern in the int64 const value (consteval stores ints as
+	// int64, matching the representation produced by e.g. ~0u64).
+	if strings.HasPrefix(expr.Suffix, "u") {
+		if u, err := strconv.ParseUint(text, base, 64); err == nil {
+			return int64(u), true
+		}
+		return 0, false
+	}
 	v, err := strconv.ParseInt(text, base, 64)
 	if err != nil {
 		return 0, false
