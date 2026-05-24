@@ -161,13 +161,22 @@ func easmInlineAsmText(fn *easm.Function) string {
 
 func easmInlineAsmConstraints(fn *easm.Function) string {
 	var parts []string
+	boundRegisters := map[string]bool{}
 	if strings.TrimSpace(fn.ReturnType) == "void" {
 		parts = append(parts, "=r")
 	} else {
-		parts = append(parts, easmOutputConstraint(fn))
+		constraint, reg := easmOutputConstraint(fn)
+		parts = append(parts, constraint)
+		if reg != "" {
+			boundRegisters[reg] = true
+		}
 	}
 	for _, input := range fn.Inputs {
-		parts = append(parts, easmInputConstraint(input))
+		constraint, reg := easmInputConstraint(input)
+		parts = append(parts, constraint)
+		if reg != "" {
+			boundRegisters[reg] = true
+		}
 	}
 	if len(fn.Params) == 0 {
 		parts = append(parts, "r")
@@ -185,7 +194,11 @@ func easmInlineAsmConstraints(fn *easm.Function) string {
 				parts = append(parts, "~{"+item+"}")
 				continue
 			}
-			parts = append(parts, "~{"+strings.TrimPrefix(item, "%")+"}")
+			item = strings.TrimPrefix(item, "%")
+			if boundRegisters[item] {
+				continue
+			}
+			parts = append(parts, "~{"+item+"}")
 		}
 	}
 	return strings.Join(parts, ",")
@@ -195,27 +208,27 @@ func outputConstraintCount(fn *easm.Function) int {
 	return 1
 }
 
-func easmOutputConstraint(fn *easm.Function) string {
+func easmOutputConstraint(fn *easm.Function) (string, string) {
 	for _, output := range fn.Outputs {
 		if reg := registerAfterEquals(output); reg != "" {
-			return "={" + reg + "}"
+			return "={" + reg + "}", reg
 		}
 	}
-	return "=r"
+	return "=r", ""
 }
 
-func easmInputConstraint(input string) string {
+func easmInputConstraint(input string) (string, string) {
 	if reg := registerAfterEquals(input); reg != "" {
-		return "{" + reg + "}"
+		return "{" + reg + "}", reg
 	}
 	fields := strings.Fields(input)
 	if len(fields) > 0 {
 		last := strings.TrimPrefix(strings.ToLower(fields[len(fields)-1]), "%")
 		if isRegisterName(last) {
-			return "{" + last + "}"
+			return "{" + last + "}", last
 		}
 	}
-	return "r"
+	return "r", ""
 }
 
 func registerAfterEquals(value string) string {

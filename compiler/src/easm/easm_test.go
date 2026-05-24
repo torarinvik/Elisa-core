@@ -958,6 +958,22 @@ export def bad_inputs(a: i64) -> void abi c:
 	}
 }
 
+func TestVerifyRejectsMissingInputBinding(t *testing.T) {
+	src := `module bindings
+target x86_64
+export def missing_input(a: i64, b: i64) -> void abi c:
+    inputs: a = rdi
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("missing_input.easm", src)
+	if !containsIssue(issues, "missing-input-binding") {
+		t.Fatalf("expected missing-input-binding, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsBadOutputBindings(t *testing.T) {
 	src := `module bindings
 target x86_64

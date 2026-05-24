@@ -517,6 +517,11 @@ export def easm_identity(value: i64) -> i64 abi c:
 			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, stdout.String())
 		}
 	}
+	for _, bad := range []string{"~{rax}", "~{rdi}"} {
+		if strings.Contains(stdout.String(), bad) {
+			t.Fatalf("expected fixed EASM input/output registers not to be repeated as clobbers via %q, got:\n%s", bad, stdout.String())
+		}
+	}
 }
 
 func TestRunCLIProjectBuildEmitsShadPS4StyleEASMWrappers(t *testing.T) {

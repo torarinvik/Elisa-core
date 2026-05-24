@@ -703,6 +703,11 @@ func verifyBindings(path string, fn *Function) []Issue {
 			issues = append(issues, Issue{Severity: "error", Code: "invalid-register-binding", File: path, Line: fn.Line, Message: fmt.Sprintf("input binding %s must use = <register>", name)})
 		}
 	}
+	for _, param := range fn.Params {
+		if !seenInputs[param.Name] {
+			issues = append(issues, Issue{Severity: "error", Code: "missing-input-binding", File: path, Line: fn.Line, Message: fmt.Sprintf("parameter %s must be declared in inputs", param.Name)})
+		}
+	}
 	seenOutputs := map[string]bool{}
 	for _, output := range fn.Outputs {
 		name := bindingName(output)
