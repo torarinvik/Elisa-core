@@ -1,6 +1,9 @@
 package easm
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestParseAndVerifyAcceptsSimpleReturningVoidFunction(t *testing.T) {
 	src := `module smoke
@@ -554,6 +557,453 @@ export def bad_high_byte() -> void abi c:
 	}
 }
 
+func TestVerifyRejectsAmbiguousOperandSize(t *testing.T) {
+	src := `module size
+target x86_64
+export def bad_size(ptr: uintptr) -> void abi c:
+    inputs: ptr = rdi
+    clobbers: cc, memory
+    stack: unchanged
+    control: returns
+    body:
+        mov $1, 0(%rdi)
+        ret
+`
+	_, issues := Parse("size.easm", src)
+	if !containsIssue(issues, "ambiguous-operand-size") {
+		t.Fatalf("expected ambiguous-operand-size, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsImmediateTruncationWithoutIntent(t *testing.T) {
+	src := `module imm
+target x86_64
+export def bad_imm() -> void abi c:
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        movb $0x1ff, %al
+        ret
+`
+	_, issues := Parse("imm.easm", src)
+	if !containsIssue(issues, "immediate-truncation") {
+		t.Fatalf("expected immediate-truncation, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsSymbolRelocationWithoutIntent(t *testing.T) {
+	src := `module reloc
+target x86_64
+export def bad_symbol() -> u64 abi c:
+    outputs: ret = rax
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        lea global_counter(%rip), %rax
+        ret
+`
+	_, issues := Parse("reloc.easm", src)
+	if !containsIssue(issues, "symbol-relocation-intent-missing") {
+		t.Fatalf("expected symbol-relocation-intent-missing, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsSegmentAccessWithoutCapability(t *testing.T) {
+	src := `module tls
+target x86_64
+export def bad_tls() -> u64 abi c:
+    outputs: ret = rax
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        movq %fs:0x30, %rax
+        ret
+`
+	_, issues := Parse("tls.easm", src)
+	if !containsIssue(issues, "segment-access-intent-missing") {
+		t.Fatalf("expected segment-access-intent-missing, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsLargeStackAdjustWithoutProbe(t *testing.T) {
+	src := `module stack_probe
+target x86_64
+export def bad_large_stack() -> void abi c:
+    clobbers: rsp, cc, memory
+    stack: unchanged
+    control: returns
+    body:
+        subq $8192, %rsp
+        addq $8192, %rsp
+        ret
+`
+	_, issues := Parse("stack_probe.easm", src)
+	if !containsIssue(issues, "large-stack-adjust-without-probe") {
+		t.Fatalf("expected large-stack-adjust-without-probe, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsAArch64ReservedRegisterWithoutCapability(t *testing.T) {
+	src := `module reserved
+target aarch64
+export def bad_x18() -> void abi c:
+    clobbers: x18
+    stack: unchanged
+    control: returns
+    body:
+        mov x0, x18
+        ret
+`
+	_, issues := Parse("reserved.easm", src)
+	if !containsIssue(issues, "reserved-register-use") {
+		t.Fatalf("expected reserved-register-use, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsExplicitRelocationSegmentAndProbeIntent(t *testing.T) {
+	src := `module explicit
+target x86_64
+export def explicit_contract(ptr: uintptr) -> void abi c:
+    inputs: ptr = rdi
+    clobbers: rax, rsp, cc, memory
+    stack: unchanged, probed
+    control: returns
+    requires: operand_size.inferred, immediate.truncation, relocation.symbol, x86_64.segment.fs
+    body:
+        mov $1, 0(%rdi)
+        movb $0x1ff, %al
+        lea global_counter(%rip), %rax
+        movq %fs:0x30, %rax
+        subq $8192, %rsp
+        addq $8192, %rsp
+        ret
+`
+	_, issues := Parse("explicit.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected explicit low-level intent to verify, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsDuplicateExports(t *testing.T) {
+	src := `module dup
+target x86_64
+export def same() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        ret
+
+export def same() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("dup.easm", src)
+	if !containsIssue(issues, "duplicate-export") {
+		t.Fatalf("expected duplicate-export, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsNonVoidReturningFunctionMissingRet(t *testing.T) {
+	src := `module ret
+target x86_64
+export def bad_ret() -> u64 abi c:
+    outputs: ret = rax
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        movq $1, %rax
+`
+	_, issues := Parse("ret.easm", src)
+	if !containsIssue(issues, "returns-missing-ret") {
+		t.Fatalf("expected returns-missing-ret, got %#v", issues)
+	}
+}
+
+func TestVerifyDoesNotTreatSubstringSPAsStackRegister(t *testing.T) {
+	src := `module names
+target x86_64
+export def dispatch_symbol() -> void abi c:
+    clobbers: memory
+    stack: unchanged
+    control: returns
+    requires: relocation.symbol
+    body:
+        movq dispatch_table(%rip), %rax
+        ret
+`
+	_, issues := Parse("names.easm", src)
+	if containsIssue(issues, "stack-effect-undeclared") {
+		t.Fatalf("did not expect stack-effect-undeclared from dispatch substring, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsNegativeImmediateWithinExplicitWidth(t *testing.T) {
+	src := `module imm
+target x86_64
+export def good_negative_imm() -> void abi c:
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        movb $-1, %al
+        ret
+`
+	_, issues := Parse("negative_imm.easm", src)
+	if containsIssue(issues, "immediate-truncation") {
+		t.Fatalf("did not expect immediate-truncation for -1 byte immediate, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsEAXWriteForWideReturn(t *testing.T) {
+	src := `module partial
+target x86_64
+export def good_zero_extended_return() -> u64 abi c:
+    outputs: ret = rax
+    clobbers: rax, cc
+    stack: unchanged
+    control: returns
+    body:
+        xor %eax, %eax
+        ret
+`
+	_, issues := Parse("eax_return.easm", src)
+	if containsIssue(issues, "partial-register-return") {
+		t.Fatalf("did not expect partial-register-return for eax zero-extension, got %#v", issues)
+	}
+}
+
+func TestVerifyReservedRegisterUsesExactTokens(t *testing.T) {
+	src := `module reserved
+target aarch64
+export def not_x18() -> void abi c:
+    clobbers: x180
+    stack: unchanged
+    control: returns
+    body:
+        mov x0, x180
+        ret
+`
+	_, issues := Parse("reserved_token.easm", src)
+	if containsIssue(issues, "reserved-register-use") {
+		t.Fatalf("did not expect reserved-register-use for x180 token, got %#v", issues)
+	}
+}
+
+func TestParseRejectsDuplicateParameters(t *testing.T) {
+	src := `module params
+target x86_64
+export def bad_params(a: i64, a: i64) -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("params.easm", src)
+	if !containsIssue(issues, "duplicate-param") {
+		t.Fatalf("expected duplicate-param, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsMissingContractsAndBody(t *testing.T) {
+	src := `module contracts
+target x86_64
+export def no_contract() -> void abi c:
+`
+	_, issues := Parse("contracts.easm", src)
+	for _, code := range []string{"missing-body", "missing-stack-contract", "missing-control-contract"} {
+		if !containsIssue(issues, code) {
+			t.Fatalf("expected %s, got %#v", code, issues)
+		}
+	}
+}
+
+func TestVerifyRejectsConflictingControlContract(t *testing.T) {
+	src := `module control
+target x86_64
+export def bad_control() -> void abi c:
+    stack: unchanged
+    control: returns, noreturn
+    body:
+        ret
+`
+	_, issues := Parse("control.easm", src)
+	if !containsIssue(issues, "conflicting-control-contract") {
+		t.Fatalf("expected conflicting-control-contract, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsMissingReturnOutput(t *testing.T) {
+	src := `module output
+target x86_64
+export def bad_output() -> u64 abi c:
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        movq $1, %rax
+        ret
+`
+	_, issues := Parse("output.easm", src)
+	if !containsIssue(issues, "missing-return-output") {
+		t.Fatalf("expected missing-return-output, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsVoidReturnOutput(t *testing.T) {
+	src := `module output
+target x86_64
+export def bad_void_output() -> void abi c:
+    outputs: ret = rax
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("void_output.easm", src)
+	if !containsIssue(issues, "void-return-output") {
+		t.Fatalf("expected void-return-output, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsNonTerminalReturn(t *testing.T) {
+	src := `module terminal
+target x86_64
+export def bad_terminal() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        ret
+        movq %rax, %rax
+`
+	_, issues := Parse("terminal.easm", src)
+	if !containsIssue(issues, "return-not-terminal") {
+		t.Fatalf("expected return-not-terminal, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsNonTerminalNoreturn(t *testing.T) {
+	src := `module terminal
+target x86_64
+export def bad_noreturn(target: uintptr) -> void abi c:
+    inputs: target = rdi
+    clobbers: memory
+    stack: unchanged
+    control: noreturn
+    body:
+        jmp *%rdi
+        movq %rax, %rax
+`
+	_, issues := Parse("noreturn_terminal.easm", src)
+	if !containsIssue(issues, "noreturn-missing-terminal") {
+		t.Fatalf("expected noreturn-missing-terminal, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsHugeUnsignedImmediateTruncation(t *testing.T) {
+	src := `module imm
+target x86_64
+export def bad_huge_imm() -> void abi c:
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        movb $0xffffffffffffffff, %al
+        ret
+`
+	_, issues := Parse("huge_imm.easm", src)
+	if !containsIssue(issues, "immediate-truncation") {
+		t.Fatalf("expected immediate-truncation, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsUnknownABIAndContracts(t *testing.T) {
+	src := `module contracts
+target x86_64
+export def bad_contract() -> void abi mystery:
+    stack: unchanged, floating
+    control: returns, teleports
+    body:
+        ret
+`
+	_, issues := Parse("bad_contract.easm", src)
+	for _, code := range []string{"unknown-abi", "unknown-stack-contract", "unknown-control-contract"} {
+		if !containsIssue(issues, code) {
+			t.Fatalf("expected %s, got %#v", code, issues)
+		}
+	}
+}
+
+func TestVerifyRejectsBadInputBindings(t *testing.T) {
+	src := `module bindings
+target x86_64
+export def bad_inputs(a: i64) -> void abi c:
+    inputs: missing = rdi, a = nope, a = rsi
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("bad_inputs.easm", src)
+	for _, code := range []string{"unknown-input-binding", "invalid-register-binding", "duplicate-input-binding"} {
+		if !containsIssue(issues, code) {
+			t.Fatalf("expected %s, got %#v", code, issues)
+		}
+	}
+}
+
+func TestVerifyRejectsBadOutputBindings(t *testing.T) {
+	src := `module bindings
+target x86_64
+export def bad_outputs() -> u64 abi c:
+    outputs: value = rax, ret = nope, ret = rdx
+    clobbers: rax, rdx
+    stack: unchanged
+    control: returns
+    body:
+        movq $1, %rax
+        ret
+`
+	_, issues := Parse("bad_outputs.easm", src)
+	for _, code := range []string{"unknown-output-binding", "invalid-register-binding", "duplicate-output-binding"} {
+		if !containsIssue(issues, code) {
+			t.Fatalf("expected %s, got %#v", code, issues)
+		}
+	}
+}
+
+func TestBuildReportRejectsDuplicateExportsAcrossFiles(t *testing.T) {
+	first := t.TempDir()
+	a := first + "/a.easm"
+	b := first + "/b.easm"
+	writeEASMTestFile(t, a, `module a
+target x86_64
+export def same_symbol() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`)
+	writeEASMTestFile(t, b, `module b
+target x86_64
+export def same_symbol() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`)
+	report, _ := BuildReport([]string{a, b}, "x86_64")
+	if !containsIssue(report.Issues, "duplicate-export") {
+		t.Fatalf("expected duplicate-export across files, got %#v", report.Issues)
+	}
+}
+
 func containsIssue(issues []Issue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {
@@ -561,4 +1011,11 @@ func containsIssue(issues []Issue, code string) bool {
 		}
 	}
 	return false
+}
+
+func writeEASMTestFile(t *testing.T, path string, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
