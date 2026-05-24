@@ -96,7 +96,7 @@ export def shadps4_fenced_rdtsc() -> u64 abi c:
     clobbers: rax, rdx, memory
     stack: unchanged
     control: returns
-    requires: x86_64.rdtsc
+    requires: x86_64.rdtsc, x86_64.sse.lfence
     body:
         lfence
         rdtsc
@@ -502,6 +502,41 @@ export def bad_rdtsc() -> u64 abi c:
 	_, issues := Parse("implicit.easm", src)
 	if !containsIssue(issues, "implicit-clobber-missing") {
 		t.Fatalf("expected implicit-clobber-missing, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsRDTSCWithoutFence(t *testing.T) {
+	src := `module implicit
+target x86_64
+export def bad_unfenced_rdtsc() -> u64 abi c:
+    outputs: ret = rax
+    clobbers: rax, rdx
+    stack: unchanged
+    control: returns
+    requires: x86_64.rdtsc
+    body:
+        rdtsc
+        ret
+`
+	_, issues := Parse("unfenced_rdtsc.easm", src)
+	if !containsIssue(issues, "rdtsc-without-fence") {
+		t.Fatalf("expected rdtsc-without-fence, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsLFENCEWithoutCapability(t *testing.T) {
+	src := `module fence
+target x86_64
+export def bad_lfence() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        lfence
+        ret
+`
+	_, issues := Parse("lfence.easm", src)
+	if !containsIssue(issues, "missing-capability") {
+		t.Fatalf("expected missing-capability for lfence, got %#v", issues)
 	}
 }
 

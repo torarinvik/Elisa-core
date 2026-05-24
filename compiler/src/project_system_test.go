@@ -569,7 +569,7 @@ export def shadps4_fenced_rdtsc() -> u64 abi c:
     clobbers: rax, rdx, memory
     stack: unchanged
     control: returns
-    requires: x86_64.rdtsc
+    requires: x86_64.rdtsc, x86_64.sse.lfence
     body:
         lfence
         rdtsc

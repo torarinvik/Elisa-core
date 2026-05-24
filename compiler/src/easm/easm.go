@@ -94,7 +94,7 @@ var (
 		"vzeroall": true, "trap": true,
 	}
 	capabilityByOp = map[string]string{
-		"rdtsc": "x86_64.rdtsc", "pause": "x86_64.sse.pause", "yield": "aarch64.yield",
+		"rdtsc": "x86_64.rdtsc", "lfence": "x86_64.sse.lfence", "pause": "x86_64.sse.pause", "yield": "aarch64.yield",
 		"cpuid": "x86_64.cpuid",
 		"mrs":   "aarch64.cntvct", "isb": "aarch64.cntvct", "fldcw": "x86_64.fpu_control",
 		"fnstcw": "x86_64.fpu_control", "stmxcsr": "x86_64.fpu_control", "ldmxcsr": "x86_64.fpu_control",
@@ -256,6 +256,10 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	flagsLive := false
 	wrotePartialReturn := false
 	directionFlagSet := false
+	rdtscSeen := false
+	lfenceBeforeRDTSC := false
+	lfenceAfterRDTSC := false
+	lfenceSeen := false
 	for _, inst := range fn.Instructions {
 		op := normalizeOp(inst.Op)
 		if !allowedOps[op] && !isConditionalJump(op) {
@@ -350,6 +354,15 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			directionFlagSet = true
 		case op == "cld":
 			directionFlagSet = false
+		case op == "lfence":
+			if rdtscSeen {
+				lfenceAfterRDTSC = true
+			} else {
+				lfenceSeen = true
+			}
+		case op == "rdtsc":
+			rdtscSeen = true
+			lfenceBeforeRDTSC = lfenceSeen
 		case op == "cmp" || op == "cmpq" || op == "test" || op == "testq":
 			flagsLive = true
 		case isConditionalJump(op):
@@ -417,6 +430,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	}
 	if directionFlagSet && controlSet["returns"] {
 		issues = append(issues, Issue{Severity: "error", Code: "direction-flag-not-restored", File: path, Line: fn.Line, Message: "returning function leaves the x86 direction flag set; use cld before returning"})
+	}
+	if rdtscSeen && (!lfenceBeforeRDTSC || !lfenceAfterRDTSC) && !requireSet["x86_64.rdtsc.unordered"] {
+		issues = append(issues, Issue{Severity: "error", Code: "rdtsc-without-fence", File: path, Line: fn.Line, Message: "rdtsc requires lfence before and after, or explicit x86_64.rdtsc.unordered"})
 	}
 	if controlSet["returns"] && stackSet["unchanged"] && stackDelta != 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "returning-stack-leak", File: path, Line: fn.Line, Message: fmt.Sprintf("returning function leaves symbolic stack delta %d", stackDelta)})
