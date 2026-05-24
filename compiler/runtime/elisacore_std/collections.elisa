@@ -301,6 +301,19 @@ def view[T](da: darray[T]) -> dview[T]:
     return darray_view[T](da)
 
 
+# Build a read-only dview over an addressable fixed-size array (T[N]) with no
+# copy and no arena. Useful for handing a mutable/stack buffer to APIs that take
+# a dview. Mirrors inline_vec_view's inline-buffer path.
+# NOTE: the receiver must be addressable, so pass `arr.ref[T[N]&]`. Top-level
+# `const` arrays are NOT addressable, so to feed a const table into a darray use
+# the copy path `out.extend(THE_CONST)` instead of a view.
+def array_view[T, N: usize](arr: T[N]&) -> dview[T]:
+    elem_size: usize = size_of(T)
+    DynArrayView(null, 0, elem_size) return if N == 0usize
+    trusted Unsafe.UncheckedIndex:
+        return DynArrayView(collections_void_from_items[T](arr[0usize].ref[T&]), N, elem_size)
+
+
 @ufcs_only
 def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
     return FilteredView[S, T](source, predicate)
