@@ -251,6 +251,8 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	usesCall := false
 	usesJmp := false
 	usesRet := false
+	writesSP := false
+	mayFault := false
 	flagsLive := false
 	wrotePartialReturn := false
 	directionFlagSet := false
@@ -267,6 +269,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		}
 		if writesMemory(inst.Text) && !clobberSet["memory"] {
 			issues = append(issues, Issue{Severity: "error", Code: "memory-write-without-clobber", File: path, Line: inst.Line, Message: "memory write requires memory clobber"})
+		}
+		if hasMemoryOperand(inst.Text) || strings.HasPrefix(op, "call") || op == "trap" {
+			mayFault = true
 		}
 		if hasAmbiguousOperandSize(op, inst.Text) && !requireSet["operand_size.inferred"] {
 			issues = append(issues, Issue{Severity: "error", Code: "ambiguous-operand-size", File: path, Line: inst.Line, Message: fmt.Sprintf("instruction %q must use an explicit size suffix or require operand_size.inferred", inst.Op)})
@@ -332,6 +337,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		case op == "mov" || op == "movq" || op == "lea":
 			if writesStackPointer(inst.Text) {
 				mutatesStack = true
+				writesSP = true
 			}
 		case strings.HasPrefix(op, "call"):
 			usesCall = true
@@ -377,6 +383,12 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	if controlSet["returns"] && controlSet["noreturn"] {
 		issues = append(issues, Issue{Severity: "error", Code: "conflicting-control-contract", File: path, Line: fn.Line, Message: "EASM export cannot declare both returns and noreturn"})
 	}
+	if controlSet["tail_jumps"] && !usesJmp {
+		issues = append(issues, Issue{Severity: "error", Code: "tail-jumps-without-jump", File: path, Line: fn.Line, Message: "tail_jumps control contract requires a jmp instruction"})
+	}
+	if controlSet["may_fault"] && !mayFault {
+		issues = append(issues, Issue{Severity: "error", Code: "may-fault-without-faulting-op", File: path, Line: fn.Line, Message: "may_fault control contract requires memory, call, or trap behavior"})
+	}
 	if !returnsVoid && !hasReturnOutput(fn.Outputs) {
 		issues = append(issues, Issue{Severity: "error", Code: "missing-return-output", File: path, Line: fn.Line, Message: "non-void EASM export must declare outputs: ret = <register>"})
 	}
@@ -409,6 +421,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	if controlSet["returns"] && stackSet["unchanged"] && stackDelta != 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "returning-stack-leak", File: path, Line: fn.Line, Message: fmt.Sprintf("returning function leaves symbolic stack delta %d", stackDelta)})
 	}
+	if controlSet["returns"] && stackSet["unchanged"] && writesSP {
+		issues = append(issues, Issue{Severity: "error", Code: "stack-pointer-write-unchanged", File: path, Line: fn.Line, Message: "stack: unchanged function writes the stack pointer directly"})
+	}
 	if stackSet["synthetic"] && usesCall && !usesJmp {
 		issues = append(issues, Issue{Severity: "error", Code: "guest-entry-call-mangles-stack", File: path, Line: fn.Line, Message: "synthetic stack handoff must tail jump instead of call"})
 	}
@@ -417,6 +432,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	}
 	if controlSet["noreturn"] && !terminalOpIs(fn.Instructions, "jmp", "trap") {
 		issues = append(issues, Issue{Severity: "error", Code: "noreturn-missing-terminal", File: path, Line: fn.Line, Message: "noreturn function must end in jmp or trap"})
+	}
+	if controlSet["noreturn"] && terminalOpIs(fn.Instructions, "jmp") && !controlSet["tail_jumps"] {
+		issues = append(issues, Issue{Severity: "error", Code: "noreturn-jump-without-tail-contract", File: path, Line: fn.Line, Message: "noreturn jmp requires tail_jumps control contract"})
 	}
 	if controlSet["returns"] && usesJmp && !controlSet["tail_jumps"] {
 		issues = append(issues, Issue{Severity: "error", Code: "returning-unqualified-jump", File: path, Line: fn.Line, Message: "returning function contains jmp without tail_jumps control contract"})
@@ -1165,6 +1183,15 @@ func writesMemory(text string) bool {
 	}
 	dst := strings.TrimSpace(parts[len(parts)-1])
 	return strings.Contains(dst, "(") && strings.Contains(dst, ")")
+}
+
+func hasMemoryOperand(text string) bool {
+	for _, operand := range splitInstructionOperands(text) {
+		if strings.Contains(operand, "(") && strings.Contains(operand, ")") {
+			return true
+		}
+	}
+	return usesSegmentOverride(text)
 }
 
 func hasSuspiciousAbsoluteAddress(text string) bool {

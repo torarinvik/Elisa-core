@@ -1165,6 +1165,73 @@ export def bad_float_ret() -> f64 abi c:
 	}
 }
 
+func TestVerifyRejectsTailJumpsWithoutJump(t *testing.T) {
+	src := `module control
+target x86_64
+export def bad_tail_contract() -> void abi c:
+    stack: unchanged
+    control: returns, tail_jumps
+    body:
+        ret
+`
+	_, issues := Parse("tail_contract.easm", src)
+	if !containsIssue(issues, "tail-jumps-without-jump") {
+		t.Fatalf("expected tail-jumps-without-jump, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsMayFaultWithoutFaultingOperation(t *testing.T) {
+	src := `module control
+target x86_64
+export def bad_may_fault() -> void abi c:
+    clobbers: rax
+    stack: unchanged
+    control: returns, may_fault
+    body:
+        movq %rax, %rax
+        ret
+`
+	_, issues := Parse("may_fault.easm", src)
+	if !containsIssue(issues, "may-fault-without-faulting-op") {
+		t.Fatalf("expected may-fault-without-faulting-op, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsNoreturnJumpWithoutTailContract(t *testing.T) {
+	src := `module control
+target x86_64
+export def bad_noreturn_tail(target: uintptr) -> void abi c:
+    inputs: target = rdi
+    clobbers: memory
+    stack: unchanged
+    control: noreturn
+    body:
+        jmp *%rdi
+`
+	_, issues := Parse("noreturn_tail.easm", src)
+	if !containsIssue(issues, "noreturn-jump-without-tail-contract") {
+		t.Fatalf("expected noreturn-jump-without-tail-contract, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsDirectStackPointerWriteUnderUnchangedStack(t *testing.T) {
+	src := `module stack
+target x86_64
+export def bad_sp_write(value: uintptr) -> void abi c:
+    inputs: value = rdi
+    clobbers: rsp, memory
+    stack: unchanged
+    control: returns
+    body:
+        movq %rdi, %rsp
+        ret
+`
+	_, issues := Parse("sp_write.easm", src)
+	if !containsIssue(issues, "stack-pointer-write-unchanged") {
+		t.Fatalf("expected stack-pointer-write-unchanged, got %#v", issues)
+	}
+}
+
 func TestBuildReportRejectsDuplicateExportsAcrossFiles(t *testing.T) {
 	first := t.TempDir()
 	a := first + "/a.easm"
