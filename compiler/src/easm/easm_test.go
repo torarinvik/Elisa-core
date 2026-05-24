@@ -1097,6 +1097,74 @@ export def bad_ret_reg() -> u64 abi c:
 	}
 }
 
+func TestVerifyRejectsInvalidClobberAndPreserveRegisters(t *testing.T) {
+	src := `module regs
+target x86_64
+export def bad_lists() -> void abi c:
+    clobbers: nope, x0
+    preserves: mystery, x1
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("bad_lists.easm", src)
+	for _, code := range []string{"invalid-clobber-register", "invalid-preserve-register", "register-target-mismatch"} {
+		if !containsIssue(issues, code) {
+			t.Fatalf("expected %s, got %#v", code, issues)
+		}
+	}
+}
+
+func TestVerifyAcceptsFloatReturnRegisters(t *testing.T) {
+	x86Src := `module floatret
+target x86_64
+export def ret_f64() -> f64 abi c:
+    outputs: ret = xmm0
+    clobbers: xmm0
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, x86Issues := Parse("float_x86.easm", x86Src)
+	if len(x86Issues) != 0 {
+		t.Fatalf("expected x86 float return register to verify, got %#v", x86Issues)
+	}
+
+	armSrc := `module floatret
+target aarch64
+export def ret_f32() -> f32 abi c:
+    outputs: ret = s0
+    clobbers: s0
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, armIssues := Parse("float_arm.easm", armSrc)
+	if len(armIssues) != 0 {
+		t.Fatalf("expected aarch64 float return register to verify, got %#v", armIssues)
+	}
+}
+
+func TestVerifyRejectsFloatReturnIntegerRegister(t *testing.T) {
+	src := `module floatret
+target x86_64
+export def bad_float_ret() -> f64 abi c:
+    outputs: ret = rax
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("bad_float_ret.easm", src)
+	if !containsIssue(issues, "return-register-mismatch") {
+		t.Fatalf("expected return-register-mismatch, got %#v", issues)
+	}
+}
+
 func TestBuildReportRejectsDuplicateExportsAcrossFiles(t *testing.T) {
 	first := t.TempDir()
 	a := first + "/a.easm"

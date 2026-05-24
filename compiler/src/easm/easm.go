@@ -364,6 +364,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	issues = append(issues, verifyContractTokens(path, fn)...)
 	issues = append(issues, verifySignatureTypes(path, fn)...)
 	issues = append(issues, verifyBindings(path, target, fn)...)
+	issues = append(issues, verifyRegisterLists(path, target, fn)...)
 	if len(fn.Instructions) == 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "missing-body", File: path, Line: fn.Line, Message: "EASM export must contain a body"})
 	}
@@ -761,6 +762,37 @@ func verifyBindings(path string, target string, fn *Function) []Issue {
 	return issues
 }
 
+func verifyRegisterLists(path string, target string, fn *Function) []Issue {
+	var issues []Issue
+	for _, clobber := range contractFields(fn.Clobbers) {
+		if clobber == "memory" || clobber == "cc" || clobber == "flags" {
+			continue
+		}
+		reg := strings.TrimPrefix(clobber, "%")
+		if !isRegisterName(reg) {
+			issues = append(issues, Issue{Severity: "error", Code: "invalid-clobber-register", File: path, Line: fn.Line, Message: fmt.Sprintf("unknown clobber register %s", clobber)})
+			continue
+		}
+		if !targetAllowsRegister(target, reg) {
+			issues = append(issues, Issue{Severity: "error", Code: "register-target-mismatch", File: path, Line: fn.Line, Message: fmt.Sprintf("clobber register %s is outside target %s", reg, defaultString(target, "any"))})
+		}
+	}
+	for _, preserve := range contractFields(fn.Preserves) {
+		if preserve == "callee_saved" {
+			continue
+		}
+		reg := strings.TrimPrefix(preserve, "%")
+		if !isRegisterName(reg) {
+			issues = append(issues, Issue{Severity: "error", Code: "invalid-preserve-register", File: path, Line: fn.Line, Message: fmt.Sprintf("unknown preserve register %s", preserve)})
+			continue
+		}
+		if !targetAllowsRegister(target, reg) {
+			issues = append(issues, Issue{Severity: "error", Code: "register-target-mismatch", File: path, Line: fn.Line, Message: fmt.Sprintf("preserve register %s is outside target %s", reg, defaultString(target, "any"))})
+		}
+	}
+	return issues
+}
+
 func bindingName(value string) string {
 	pieces := strings.SplitN(value, "=", 2)
 	fields := strings.Fields(strings.TrimSpace(pieces[0]))
@@ -783,7 +815,11 @@ func registerAfterEquals(value string) string {
 }
 
 func isRegisterName(value string) bool {
-	switch strings.ToLower(strings.TrimPrefix(value, "%")) {
+	reg := strings.ToLower(strings.TrimPrefix(value, "%"))
+	if isXMMRegister(reg) || isAArch64SIMDRegister(reg) {
+		return true
+	}
+	switch reg {
 	case "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
 		"eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
 		"al", "ah", "ax", "bl", "bh", "bx", "cl", "ch", "cx", "dl", "dh", "dx",
@@ -817,7 +853,7 @@ func returnTypeAllowsRegister(returnType string, reg string) bool {
 	reg = strings.ToLower(strings.TrimPrefix(reg, "%"))
 	switch returnType {
 	case "f32", "f64":
-		return strings.HasPrefix(reg, "xmm") || strings.HasPrefix(reg, "s") || strings.HasPrefix(reg, "d")
+		return isXMMRegister(reg) || isAArch64SIMDRegister(reg)
 	case "void":
 		return false
 	default:
@@ -835,6 +871,9 @@ func isIntegerReturnRegister(reg string) bool {
 }
 
 func isX86Register(reg string) bool {
+	if isXMMRegister(reg) {
+		return true
+	}
 	switch reg {
 	case "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
 		"eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
@@ -849,6 +888,9 @@ func isAArch64Register(reg string) bool {
 	if reg == "sp" {
 		return true
 	}
+	if isAArch64SIMDRegister(reg) {
+		return true
+	}
 	if len(reg) < 2 {
 		return false
 	}
@@ -858,6 +900,26 @@ func isAArch64Register(reg string) bool {
 	}
 	n, err := strconv.Atoi(reg[1:])
 	return err == nil && n >= 0 && n <= 30
+}
+
+func isXMMRegister(reg string) bool {
+	if !strings.HasPrefix(reg, "xmm") {
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(reg, "xmm"))
+	return err == nil && n >= 0 && n <= 31
+}
+
+func isAArch64SIMDRegister(reg string) bool {
+	if len(reg) < 2 {
+		return false
+	}
+	prefix := reg[0]
+	if prefix != 's' && prefix != 'd' && prefix != 'v' && prefix != 'q' {
+		return false
+	}
+	n, err := strconv.Atoi(reg[1:])
+	return err == nil && n >= 0 && n <= 31
 }
 
 func writesStackPointer(text string) bool {
