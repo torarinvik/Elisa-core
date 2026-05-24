@@ -110,6 +110,7 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 	if err != nil {
 		return testRunnerCacheArtifact{}, err
 	}
+	foreignIncludeDirs := nativeIncludeDirsFromLinkFlags(linkFlags)
 	for _, foreignFile := range resolvedForeignFiles {
 		trimmed := strings.TrimSpace(foreignFile)
 		if trimmed == "" {
@@ -118,7 +119,7 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 		// Foreign bridge files often include the real implementation with quoted
 		// includes. Hash the expanded include graph so runtime changes do not hide
 		// behind stale cached test runners.
-		foreignSource, readErr := readSourceWithIncludes(trimmed, map[string]bool{})
+		foreignSource, readErr := readSourceWithIncludesWithOptions(trimmed, map[string]bool{}, sourceExpandOptions{includeDirs: foreignIncludeDirs})
 		if readErr != nil {
 			return testRunnerCacheArtifact{}, readErr
 		}
@@ -154,6 +155,48 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 	key := hex.EncodeToString(hash.Sum(nil))
 	artifactDir := filepath.Join(cacheRoot, key)
 	return testRunnerCacheArtifact{key: key, dir: artifactDir, executable: filepath.Join(artifactDir, "runner")}, nil
+}
+
+func nativeIncludeDirsFromLinkFlags(linkFlags []string) []string {
+	dirs := make([]string, 0, len(linkFlags))
+	for index := 0; index < len(linkFlags); index++ {
+		flag := strings.TrimSpace(linkFlags[index])
+		if flag == "" {
+			continue
+		}
+		switch flag {
+		case "-I", "-iquote", "-isystem":
+			if index+1 >= len(linkFlags) {
+				continue
+			}
+			index++
+			if dir := cleanNativeIncludeDir(linkFlags[index]); dir != "" {
+				dirs = append(dirs, dir)
+			}
+		default:
+			for _, prefix := range []string{"-I", "-iquote", "-isystem"} {
+				if strings.HasPrefix(flag, prefix) && len(flag) > len(prefix) {
+					if dir := cleanNativeIncludeDir(flag[len(prefix):]); dir != "" {
+						dirs = append(dirs, dir)
+					}
+					break
+				}
+			}
+		}
+	}
+	return dedupeStrings(dirs)
+}
+
+func cleanNativeIncludeDir(raw string) string {
+	dir := strings.TrimSpace(raw)
+	if dir == "" {
+		return ""
+	}
+	cleaned, err := filepath.Abs(dir)
+	if err != nil {
+		return filepath.Clean(dir)
+	}
+	return cleaned
 }
 
 var testRunnerCacheQuotedIncludePattern = regexp.MustCompile(`(?m)^\s*#\s*include\s+"([^"]+)"`)
