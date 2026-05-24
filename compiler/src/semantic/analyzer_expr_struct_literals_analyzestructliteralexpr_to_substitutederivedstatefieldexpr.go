@@ -8,6 +8,17 @@ import (
 )
 
 func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Type) Type {
+	// `Name[TypeArgs](args)` is parsed as a generic struct constructor, but when
+	// `Name` resolves to a generic *function* (which is visible even through
+	// transitive includes), it is actually a specialized call. Route it before
+	// type resolution so the type-args are preserved and no spurious
+	// "unknown type" is reported for the function name.
+	if call, ok := a.structLiteralAsGenericFunctionCall(expr); ok {
+		a.loweredInitCalls[expr] = call
+		result := a.analyzeCallExpr(call)
+		a.exprTypes[expr] = result
+		return result
+	}
 	targetType := a.structLiteralTargetType(expr, expected)
 	base, bindings, regionBindings, ok := structLiteralBaseAndBindings(targetType)
 	if !ok || base == nil {
@@ -61,6 +72,44 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		a.errorf(expr.Pos(), "struct literal %q does not satisfy derived state %s", expr.Name, desiredState)
 	}
 	return targetType
+}
+
+// structLiteralAsGenericFunctionCall detects `Name[TypeArgs](args)` where Name
+// is a generic function (not a type) and rewrites it to a specialized call,
+// preserving the type arguments. Brace literals and non-generic / type names
+// are left for the normal struct-literal path.
+func (a *Analyzer) structLiteralAsGenericFunctionCall(expr *ast.StructLitExpr) (*ast.CallExpr, bool) {
+	if a == nil || expr == nil || expr.Brace || expr.Name == "" || len(expr.TypeArgs) == 0 {
+		return nil, false
+	}
+	var sym *Symbol
+	if a.currentScope != nil {
+		if localSym, ok := a.currentScope.Lookup(expr.Name); ok {
+			sym = localSym
+		}
+	}
+	if sym == nil {
+		if globalSym, _, ok := a.lookupVisibleGlobal(expr.Name); ok {
+			sym = globalSym
+		}
+	}
+	if sym == nil || (sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc) {
+		return nil, false
+	}
+	ft, ok := sym.Type.(*FuncType)
+	if !ok || len(genericParamsForFuncType(ft)) == 0 {
+		return nil, false
+	}
+	return &ast.CallExpr{
+		Position: expr.Position,
+		Func: &ast.SpecializeExpr{
+			Position: expr.Position,
+			Operand:  &ast.Ident{Position: expr.Position, Name: expr.Name},
+			TypeArgs: append([]ast.TypeExpr(nil), expr.TypeArgs...),
+		},
+		Args:     append([]ast.Expr(nil), expr.Args...),
+		ArgNames: append([]string(nil), expr.ArgNames...),
+	}, true
 }
 
 func (a *Analyzer) structLiteralAsPascalCaseFunctionCall(expr *ast.StructLitExpr) (*ast.CallExpr, bool) {
