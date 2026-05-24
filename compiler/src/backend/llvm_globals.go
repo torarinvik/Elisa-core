@@ -467,5 +467,11 @@ func constValueType(result *semantic.Result, value semantic.ConstValue) semantic
 }
 
 func parseConstIntLiteral(expr *ast.IntLit) (int64, error) {
-	return strconv.ParseInt(expr.Value, 0, 64)
+	// Route through the semantic parser so unsigned-typed literals with the top
+	// bit set (e.g. 0xFFFFFFFFFFFFFFFFu64) are parsed with ParseUint and their
+	// bit pattern stored in the int64, rather than overflowing a signed parse.
+	if v, ok := semantic.ParseIntLiteral(expr); ok {
+		return v, nil
+	}
+	return 0, fmt.Errorf("invalid integer literal %q", expr.Value)
 }

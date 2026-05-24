@@ -285,8 +285,11 @@ func backendConstRecoveryClauseForExpr(recovery *ast.RecoveryClause, fallback as
 func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstValue, bool), call func(*ast.CallExpr) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:
-		value, err := strconv.ParseInt(n.Value, 0, 64)
-		if err != nil {
+		// Use the semantic parser so unsigned-typed literals with the top bit set
+		// (e.g. 0xFFFFFFFFFFFFFFFFu64) parse via ParseUint instead of overflowing
+		// a signed parse.
+		value, ok := semantic.ParseIntLiteral(n)
+		if !ok {
 			return semantic.ConstValue{}, false
 		}
 		return semantic.ConstValue{Kind: semantic.ConstInt, Int: value}, true
