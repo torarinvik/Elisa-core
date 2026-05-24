@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"elisacore/src/ast"
+	"elisacore/src/easm"
 	"elisacore/src/frontendir"
 	"elisacore/src/semantic"
 )
@@ -28,6 +29,7 @@ type loadedProgram struct {
 	filename string
 	source   []byte
 	file     *ast.File
+	easm     []*easm.Module
 }
 
 func loadProgramInput(filename string, stderr io.Writer) (*loadedProgram, bool) {
@@ -82,6 +84,7 @@ func analyzeLoadedProgramWithOptions(program *loadedProgram, stderr io.Writer, o
 	}
 	if program.file != nil {
 		result := semantic.AnalyzeWithOptions(program.file, options)
+		result.EASMModules = append([]*easm.Module(nil), program.easm...)
 		if warns := result.Notices(); len(warns) > 0 {
 			for _, w := range warns {
 				if shouldSuppressDeprecatedWarningsForTests(w) {
@@ -98,7 +101,11 @@ func analyzeLoadedProgramWithOptions(program *loadedProgram, stderr io.Writer, o
 		}
 		return program.file, result, true
 	}
-	return analyzeProgramWithOptions(program.filename, program.source, stderr, options)
+	file, result, ok := analyzeProgramWithOptions(program.filename, program.source, stderr, options)
+	if ok && result != nil {
+		result.EASMModules = append([]*easm.Module(nil), program.easm...)
+	}
+	return file, result, ok
 }
 
 func buildFrontendIRBundle(program *loadedProgram, file *ast.File) *frontendir.Bundle {

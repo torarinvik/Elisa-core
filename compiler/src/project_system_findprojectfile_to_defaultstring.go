@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"elisacore/src/backend"
+	"elisacore/src/easm"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -112,14 +113,20 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		inheritProjectNative = *definition.InheritProjectNative
 	}
 	projectForeign := project.config.Foreign
+	projectEASM := project.config.EASM
 	projectLinkFlags := project.config.LinkFlags
 	if !inheritProjectNative {
 		projectForeign = nil
+		projectEASM = nil
 		projectLinkFlags = nil
 	}
 	foreignFiles := make([]string, 0, len(projectForeign)+len(definition.Foreign))
 	for _, path := range append(append([]string{}, projectForeign...), definition.Foreign...) {
 		foreignFiles = append(foreignFiles, projectRelativePath(project.root, path))
+	}
+	easmFiles := make([]string, 0, len(projectEASM)+len(definition.EASM))
+	for _, path := range append(append([]string{}, projectEASM...), definition.EASM...) {
+		easmFiles = append(easmFiles, projectRelativePath(project.root, path))
 	}
 	linkFlags := make([]string, 0, len(projectLinkFlags)+len(definition.LinkFlags)+len(options.linkFlags))
 	linkFlags = append(linkFlags, projectLinkFlags...)
@@ -128,6 +135,7 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	for _, manifest := range dependencyOrder {
 		includeDirs = append(includeDirs, manifest.includeDirs...)
 		foreignFiles = append(foreignFiles, manifest.foreignFiles...)
+		easmFiles = append(easmFiles, manifest.easmFiles...)
 		linkFlags = append(linkFlags, manifest.linkFlags...)
 	}
 	emitMode := emitLLVM
@@ -177,6 +185,7 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		dependencySearchPaths: resolver.searchPaths,
 		dependencyOrder:       dependencyOrder,
 		foreignFiles:          dedupeStrings(foreignFiles),
+		easmFiles:             dedupeStrings(easmFiles),
 		linkFlags:             dedupeStrings(linkFlags),
 		projectExec:           append([]string{}, project.config.Exec...),
 		targetExec:            append([]string{}, definition.Exec...),
@@ -289,6 +298,7 @@ func (r *projectResolver) resolveManifest(name string) (*resolvedManifest, error
 		manifestPath: manifestPath,
 		includeDirs:  make([]string, 0, len(definition.IncludeDirs)),
 		foreignFiles: make([]string, 0, len(definition.Foreign)),
+		easmFiles:    make([]string, 0, len(definition.EASM)),
 		linkFlags:    append([]string{}, definition.LinkFlags...),
 		exec:         append([]string{}, definition.Exec...),
 	}
@@ -309,6 +319,9 @@ func (r *projectResolver) resolveManifest(name string) (*resolvedManifest, error
 	}
 	for _, path := range definition.Foreign {
 		resolved.foreignFiles = append(resolved.foreignFiles, projectRelativePath(manifestDir, path))
+	}
+	for _, path := range definition.EASM {
+		resolved.easmFiles = append(resolved.easmFiles, projectRelativePath(manifestDir, path))
 	}
 	r.cache[name] = resolved
 	for _, depName := range definition.Dependencies {
@@ -418,7 +431,12 @@ func buildProjectLoadedProgram(target *resolvedProjectTarget) (*loadedProgram, e
 			combined.WriteByte('\n')
 		}
 	}
-	return &loadedProgram{filename: target.entryPath, source: combined.Bytes()}, nil
+	report, modules := easm.BuildReport(target.easmFiles, target.targetTriple)
+	if easm.HasErrors(report) {
+		payload, _ := easm.FormatReport(report, false)
+		return nil, fmt.Errorf("EASM verification failed:\n%s", payload)
+	}
+	return &loadedProgram{filename: target.entryPath, source: combined.Bytes(), easm: modules}, nil
 }
 func readSourceWithIncludesWithOptions(filename string, seen map[string]bool, options sourceExpandOptions) ([]byte, error) {
 	var out bytes.Buffer
@@ -554,12 +572,21 @@ func runProjectView(project *resolvedProject, options projectCLIOptions, stdout 
 			if len(manifest.foreignFiles) != 0 {
 				fmt.Fprintf(stdout, "    foreign=%s\n", strings.Join(manifest.foreignFiles, ", "))
 			}
+			if len(manifest.easmFiles) != 0 {
+				fmt.Fprintf(stdout, "    easm=%s\n", strings.Join(manifest.easmFiles, ", "))
+			}
 		}
 	}
 	if len(selected.foreignFiles) != 0 {
 		fmt.Fprintf(stdout, "Foreign sources:\n")
 		for _, foreign := range selected.foreignFiles {
 			fmt.Fprintf(stdout, "  - %s\n", foreign)
+		}
+	}
+	if len(selected.easmFiles) != 0 {
+		fmt.Fprintf(stdout, "EASM sources:\n")
+		for _, source := range selected.easmFiles {
+			fmt.Fprintf(stdout, "  - %s\n", source)
 		}
 	}
 	if len(selected.linkFlags) != 0 {
@@ -608,6 +635,24 @@ func runProjectABILint(project *resolvedProject, options projectCLIOptions, stdo
 	}
 	fmt.Fprint(stdout, payload)
 	if nativeABILintHasErrors(report) {
+		return 1
+	}
+	return 0
+}
+func runProjectEASMLint(project *resolvedProject, options projectCLIOptions, stdout io.Writer, stderr io.Writer) int {
+	selected, err := resolveProjectTarget(project, options)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
+	}
+	report, _ := easm.BuildReport(selected.easmFiles, selected.targetTriple)
+	payload, err := easm.FormatReport(report, options.jsonOutput)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, payload)
+	if easm.HasErrors(report) {
 		return 1
 	}
 	return 0

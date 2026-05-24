@@ -37,6 +37,7 @@ const (
 	projectCommandView
 	projectCommandDeps
 	projectCommandABILint
+	projectCommandEASMLint
 )
 
 type projectCLIOptions struct {
@@ -63,6 +64,7 @@ type projectDefinition struct {
 	Dependencies          []string                           `json:"dependencies,omitempty"`
 	IncludeDirs           []string                           `json:"include-dirs,omitempty"`
 	Foreign               []string                           `json:"foreign,omitempty"`
+	EASM                  []string                           `json:"easm,omitempty"`
 	LinkFlags             []string                           `json:"link-flags,omitempty"`
 	Exec                  []string                           `json:"exec,omitempty"`
 	Targets               map[string]projectTargetDefinition `json:"targets"`
@@ -75,6 +77,7 @@ type projectTargetDefinition struct {
 	Dependencies         []string `json:"dependencies,omitempty"`
 	IncludeDirs          []string `json:"include-dirs,omitempty"`
 	Foreign              []string `json:"foreign,omitempty"`
+	EASM                 []string `json:"easm,omitempty"`
 	LinkFlags            []string `json:"link-flags,omitempty"`
 	InheritProjectNative *bool    `json:"inherit-project-native,omitempty"`
 	Exec                 []string `json:"exec,omitempty"`
@@ -89,6 +92,7 @@ type manifestDefinition struct {
 	Dependencies []string `json:"dependencies,omitempty"`
 	IncludeDirs  []string `json:"include-dirs,omitempty"`
 	Foreign      []string `json:"foreign,omitempty"`
+	EASM         []string `json:"easm,omitempty"`
 	LinkFlags    []string `json:"link-flags,omitempty"`
 	Exec         []string `json:"exec,omitempty"`
 }
@@ -105,6 +109,7 @@ type resolvedManifest struct {
 	interfacePath string
 	includeDirs   []string
 	foreignFiles  []string
+	easmFiles     []string
 	linkFlags     []string
 	dependencies  []*resolvedManifest
 	exec          []string
@@ -120,6 +125,7 @@ type resolvedProjectTarget struct {
 	dependencySearchPaths []string
 	dependencyOrder       []*resolvedManifest
 	foreignFiles          []string
+	easmFiles             []string
 	linkFlags             []string
 	projectExec           []string
 	targetExec            []string
@@ -181,6 +187,9 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	if options.command == projectCommandABILint {
 		return runProjectABILint(project, options, stdout, stderr)
+	}
+	if options.command == projectCommandEASMLint {
+		return runProjectEASMLint(project, options, stdout, stderr)
 	}
 
 	target, err := resolveProjectTarget(project, options)
@@ -264,15 +273,17 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			return projectCLIOptions{}, fmt.Errorf("missing project subcommand")
 		}
 		subcommand := strings.TrimSpace(args[1])
-		if subcommand != "view" && subcommand != "deps" && subcommand != "abi-lint" {
+		if subcommand != "view" && subcommand != "deps" && subcommand != "abi-lint" && subcommand != "easm-lint" {
 			return projectCLIOptions{}, fmt.Errorf("unsupported project subcommand %q", subcommand)
 		}
 		if subcommand == "view" {
 			options.command = projectCommandView
 		} else if subcommand == "deps" {
 			options.command = projectCommandDeps
-		} else {
+		} else if subcommand == "abi-lint" {
 			options.command = projectCommandABILint
+		} else {
+			options.command = projectCommandEASMLint
 		}
 		args = append([]string{args[0]}, args[2:]...)
 	default:
@@ -418,7 +429,7 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 					return projectCLIOptions{}, fmt.Errorf("expected a single project or library name, got %q", arg)
 				}
 				options.initName = arg
-			case projectCommandBuild, projectCommandRun, projectCommandTest, projectCommandBench, projectCommandView, projectCommandDeps, projectCommandABILint:
+			case projectCommandBuild, projectCommandRun, projectCommandTest, projectCommandBench, projectCommandView, projectCommandDeps, projectCommandABILint, projectCommandEASMLint:
 				if options.targetName != "" {
 					return projectCLIOptions{}, fmt.Errorf("expected a single target name, got %q", arg)
 				}
@@ -460,6 +471,7 @@ func printProjectUsage(w io.Writer) {
 	fmt.Fprintln(w, "  elisacore project view [target] [--project <dir|project.json>]")
 	fmt.Fprintln(w, "  elisacore project deps [target] [--project <dir|project.json>] [--json]")
 	fmt.Fprintln(w, "  elisacore project abi-lint [target] [--project <dir|project.json>] [--json] [--strict-contracts]")
+	fmt.Fprintln(w, "  elisacore project easm-lint [target] [--project <dir|project.json>] [--json]")
 }
 func scaffoldProject(options projectCLIOptions) error {
 	basePath := options.path

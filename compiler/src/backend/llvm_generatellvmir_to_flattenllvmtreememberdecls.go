@@ -224,6 +224,11 @@ func (g *llvmGenerator) emitModule() error {
 			return err
 		}
 	}
+	for _, module := range g.result.EASMModules {
+		if err := g.emitEASMModule(module); err != nil {
+			return err
+		}
+	}
 	for _, decl := range g.result.ActiveFile().Decls {
 		if err := g.emitDecl(decl); err != nil {
 			return err

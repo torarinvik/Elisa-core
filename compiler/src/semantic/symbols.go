@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"elisacore/src/ast"
+	"elisacore/src/easm"
 	"elisacore/src/lexer"
 )
 
@@ -61,6 +62,7 @@ type Result struct {
 	ExportedTypes           []*ExportedType
 	ExportedFuncs           []*ExportedFunc
 	ExportedGlobals         []*ExportedGlobal
+	EASMModules             []*easm.Module
 	Diagnostics             []Diagnostic
 }
 

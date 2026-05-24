@@ -21,6 +21,7 @@ type manifestDependencyReport struct {
 	Interface   string   `json:"interface,omitempty"`
 	IncludeDirs []string `json:"includeDirs,omitempty"`
 	Foreign     []string `json:"foreign,omitempty"`
+	EASM        []string `json:"easm,omitempty"`
 	LinkFlags   []string `json:"linkFlags,omitempty"`
 	Sources     []string `json:"sources,omitempty"`
 }
@@ -37,6 +38,7 @@ type projectDependencyReport struct {
 	DependencySearchPaths []string                   `json:"dependencySearchPaths,omitempty"`
 	Sources               []string                   `json:"sources"`
 	Foreign               []string                   `json:"foreign,omitempty"`
+	EASM                  []string                   `json:"easm,omitempty"`
 	LinkFlags             []string                   `json:"linkFlags,omitempty"`
 	Dependencies          []manifestDependencyReport `json:"dependencies,omitempty"`
 }
@@ -156,6 +158,7 @@ func buildProjectDependencyReport(target *resolvedProjectTarget) (*projectDepend
 		IncludeDirs:           append([]string(nil), target.includeDirs...),
 		DependencySearchPaths: append([]string(nil), target.dependencySearchPaths...),
 		Foreign:               append([]string(nil), target.foreignFiles...),
+		EASM:                  append([]string(nil), target.easmFiles...),
 		LinkFlags:             append([]string(nil), target.linkFlags...),
 	}
 	seen := map[string]bool{}
@@ -180,6 +183,7 @@ func buildProjectDependencyReport(target *resolvedProjectTarget) (*projectDepend
 			Interface:   manifest.interfacePath,
 			IncludeDirs: append([]string(nil), manifest.includeDirs...),
 			Foreign:     append([]string(nil), manifest.foreignFiles...),
+			EASM:        append([]string(nil), manifest.easmFiles...),
 			LinkFlags:   append([]string(nil), manifest.linkFlags...),
 		}
 		if manifest.entryPath != "" {
@@ -242,6 +246,14 @@ func formatProjectDependencyReport(report *projectDependencyReport, jsonOutput b
 			out.WriteByte('\n')
 		}
 	}
+	if len(report.EASM) != 0 {
+		out.WriteString("EASM sources:\n")
+		for _, source := range report.EASM {
+			out.WriteString("  - ")
+			out.WriteString(source)
+			out.WriteByte('\n')
+		}
+	}
 	if len(report.LinkFlags) != 0 {
 		out.WriteString("Link flags:\n")
 		for _, flag := range report.LinkFlags {
@@ -279,6 +291,14 @@ func formatProjectDependencyReport(report *projectDependencyReport, jsonOutput b
 				for _, foreign := range dep.Foreign {
 					out.WriteString("      - ")
 					out.WriteString(foreign)
+					out.WriteByte('\n')
+				}
+			}
+			if len(dep.EASM) != 0 {
+				out.WriteString("    easm:\n")
+				for _, source := range dep.EASM {
+					out.WriteString("      - ")
+					out.WriteString(source)
 					out.WriteByte('\n')
 				}
 			}
