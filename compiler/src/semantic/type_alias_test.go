@@ -293,7 +293,7 @@ def outside() -> i32:
     return Secret::hidden()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "undefined name \"Secret.hidden\"") && !strings.Contains(all, "unknown function \"Secret.hidden\"") {
+	if !strings.Contains(all, "undefined identifier \"Secret.hidden\"") && !strings.Contains(all, "undefined name \"Secret.hidden\"") && !strings.Contains(all, "unknown function \"Secret.hidden\"") {
 		t.Fatalf("expected private module member to be hidden from outside, got:\n%s", all)
 	}
 	if _, ok := result.GlobalScope.Lookup("Secret.hidden"); !ok {
@@ -316,7 +316,7 @@ def outside() -> i32:
     return Api::visible() + Api::hidden()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "undefined name \"Api.hidden\"") && !strings.Contains(all, "unknown function \"Api.hidden\"") {
+	if !strings.Contains(all, "undefined identifier \"Api.hidden\"") && !strings.Contains(all, "undefined name \"Api.hidden\"") && !strings.Contains(all, "unknown function \"Api.hidden\"") {
 		t.Fatalf("expected private section member to be hidden from outside, got:\n%s", all)
 	}
 	if sym, ok := result.GlobalScope.Lookup("Api.visible"); !ok || sym.Private {
@@ -340,7 +340,7 @@ def outside() -> i32:
     return Api::hidden()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "undefined name \"Api.hidden\"") && !strings.Contains(all, "unknown function \"Api.hidden\"") {
+	if !strings.Contains(all, "undefined identifier \"Api.hidden\"") && !strings.Contains(all, "undefined name \"Api.hidden\"") && !strings.Contains(all, "unknown function \"Api.hidden\"") {
 		t.Fatalf("expected private def to be hidden from outside, got:\n%s", all)
 	}
 }

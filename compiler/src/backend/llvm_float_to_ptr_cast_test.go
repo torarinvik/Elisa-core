@@ -9,7 +9,7 @@ import (
 
 func TestGenerateLLVMIRLowersFloatToPointerCastViaInteger(t *testing.T) {
 	src := `
-def cast_ptr(v: f64) -> heap u8& can Unsafe.PointerCast:
+def cast_ptr(v: f64) -> heap u8& can[Unsafe.PointerCast]:
     return v as heap u8&
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_float_to_ptr_cast.elisa", src)

@@ -62,13 +62,13 @@ func LowerFile(file *ast.File) *ast.File {
 	if file == nil {
 		return nil
 	}
-	return &ast.File{Filename: file.Filename, Decls: lowerDeclList(file.Decls)}
+	return &ast.File{Filename: file.Filename, Decls: lowerDeclList(file.Decls), DeclVisibility: file.DeclVisibility}
 }
 func LowerFileStandalone(file *ast.File) *ast.File {
 	if file == nil {
 		return nil
 	}
-	return &ast.File{Filename: file.Filename, Decls: lowerDeclListStandalone(file.Decls)}
+	return &ast.File{Filename: file.Filename, Decls: lowerDeclListStandalone(file.Decls), DeclVisibility: file.DeclVisibility}
 }
 func lowerDeclList(decls []ast.Decl) []ast.Decl {
 	return lowerDeclListInScope(decls, grammarDeclScope(decls), grammarEnvDeclScope(decls), structDeclScope(decls), true)
@@ -104,7 +104,7 @@ func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.Grammar
 		case *ast.KeywordMapDecl:
 			lowered = append(lowered, lowerKeywordMapDecl(n))
 		case *ast.NamespaceDecl:
-			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScopeForNamespace(n.Decls, n.Name), grammarEnvDeclScope(n.Decls), structDeclScope(n.Decls), preserveGrammarDecls), Module: n.Module, Const: n.Const}
+			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScopeForNamespace(n.Decls, n.Name), grammarEnvDeclScope(n.Decls), structDeclScope(n.Decls), preserveGrammarDecls), Module: n.Module, Const: n.Const, Private: n.Private}
 			lowered = append(lowered, cloned)
 		default:
 			lowered = append(lowered, decl)

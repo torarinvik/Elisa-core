@@ -15,7 +15,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		if a.currentScope != nil {
-			if sym, ok := a.currentScope.Lookup(n.Name); ok {
+			// A private global reachable through the scope chain must still respect
+			// visibility: skip it here so resolution falls through to the global
+			// lookup (which also filters it) and reports an undefined name when
+			// accessed from outside its owning module. Locals/params are never
+			// Private, so this only affects qualified globals.
+			if sym, ok := a.currentScope.Lookup(n.Name); ok && !(sym.Private && !a.canAccessPrivateName(n.Name)) {
 				result = promoteWritableRefType(sym.Type, sym.Mutable)
 				if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 					a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Position))
