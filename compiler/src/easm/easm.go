@@ -1128,6 +1128,9 @@ func usesSymbolAddress(text string) bool {
 	if len(fields) > 0 && (isConditionalJump(normalizeOp(fields[0])) || normalizeOp(fields[0]) == "jmp" || strings.HasPrefix(normalizeOp(fields[0]), "call")) {
 		return false
 	}
+	if len(fields) > 0 && normalizeOp(fields[0]) == "mrs" {
+		return false
+	}
 	for _, operand := range splitInstructionOperands(text) {
 		operand = strings.TrimSpace(strings.TrimPrefix(operand, "$"))
 		operand = strings.TrimPrefix(operand, "*")

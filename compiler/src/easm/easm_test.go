@@ -663,6 +663,27 @@ export def bad_symbol() -> u64 abi c:
 	}
 }
 
+func TestVerifyDoesNotTreatAArch64SystemRegisterAsSymbol(t *testing.T) {
+	src := `module cnt
+target aarch64
+export def counter() -> u64 abi c:
+    outputs: ret = x0
+    clobbers: x0, memory
+    stack: unchanged
+    control: returns
+    requires: aarch64.cntvct
+    body:
+        isb
+        mrs %x0, cntvct_el0
+        isb
+        ret
+`
+	_, issues := Parse("cnt.easm", src)
+	if containsIssue(issues, "symbol-relocation-intent-missing") {
+		t.Fatalf("did not expect symbol-relocation-intent-missing for mrs system register, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsSegmentAccessWithoutCapability(t *testing.T) {
 	src := `module tls
 target x86_64
