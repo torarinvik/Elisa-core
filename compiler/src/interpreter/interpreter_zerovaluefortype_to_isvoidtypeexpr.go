@@ -3,6 +3,7 @@ package interpreter
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/semantic"
 	"fmt"
 	"strconv"
 	"strings"
@@ -22,6 +23,17 @@ func (i *Interpreter) zeroValueForType(typ ast.TypeExpr) (Value, error) {
 			return FloatValue(0), nil
 		case "str", "string":
 			return StringValue(""), nil
+		case "Arena":
+			return StructInstanceValue("Arena", []string{"begin", "end", "end_index"}, map[string]Value{
+				"begin":     NullValue(),
+				"end":       NullValue(),
+				"end_index": IntValue(0),
+			}), nil
+		case "ArenaMark":
+			return StructInstanceValue("ArenaMark", []string{"region", "count"}, map[string]Value{
+				"region": NullValue(),
+				"count":  IntValue(0),
+			}), nil
 		case "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr":
 			return IntValue(0), nil
 		default:
@@ -38,7 +50,36 @@ func (i *Interpreter) zeroValueForType(typ ast.TypeExpr) (Value, error) {
 				}
 				return StructInstanceValue(decl.Name, order, fields), nil
 			}
+			if i != nil && i.result != nil && i.result.NamedTypes != nil {
+				if resolved, ok := i.result.NamedTypes[n.Name]; ok {
+					return i.zeroValueForSemanticType(resolved)
+				}
+			}
 			return VoidValue(), fmt.Errorf("no zero value rule for type %q", n.Name)
+		}
+	case *ast.BuiltinTypeExpr:
+		switch n.Name {
+		case "array":
+			if len(n.TypeArgs) == 0 || len(n.ValueArgs) == 0 {
+				return VoidValue(), fmt.Errorf("array zero-initialization requires element type and size")
+			}
+			size, err := i.constArraySize(n.ValueArgs[0])
+			if err != nil {
+				return VoidValue(), err
+			}
+			values := make([]Value, size)
+			for idx := 0; idx < size; idx++ {
+				zero, err := i.zeroValueForType(n.TypeArgs[0])
+				if err != nil {
+					return VoidValue(), err
+				}
+				values[idx] = zero
+			}
+			return ListValue(values), nil
+		case "darray":
+			return ListValue(nil), nil
+		default:
+			return i.zeroValueForType(&ast.NamedType{Position: n.Position, Name: n.Name})
 		}
 	case *ast.MutableType:
 		return i.zeroValueForType(n.Elem)
@@ -49,7 +90,7 @@ func (i *Interpreter) zeroValueForType(typ ast.TypeExpr) (Value, error) {
 	case *ast.RefType:
 		return NullValue(), nil
 	case *ast.ArrayType:
-		size, err := constArraySize(n.Size)
+		size, err := i.constArraySize(n.Size)
 		if err != nil {
 			return VoidValue(), err
 		}
@@ -66,14 +107,71 @@ func (i *Interpreter) zeroValueForType(typ ast.TypeExpr) (Value, error) {
 		return VoidValue(), fmt.Errorf("no zero value rule for type %T", typ)
 	}
 }
-func constArraySize(expr ast.Expr) (int, error) {
-	lit, ok := expr.(*ast.IntLit)
-	if !ok {
-		return 0, fmt.Errorf("array zero-initialization requires a constant integer size")
+func (i *Interpreter) zeroValueForSemanticType(typ semantic.Type) (Value, error) {
+	switch t := typ.(type) {
+	case nil:
+		return VoidValue(), fmt.Errorf("zeroed literal has no resolved semantic type")
+	case *semantic.BuiltinType:
+		return i.zeroValueForType(&ast.NamedType{Name: t.Name})
+	case *semantic.BitIntType, *semantic.EnumType, *semantic.ConstEnumType:
+		return IntValue(0), nil
+	case *semantic.RefType, *semantic.OptionalType, *semantic.NullType:
+		return NullValue(), nil
+	case *semantic.ArrayType:
+		if !t.HasConstSize || t.ConstSize < 0 {
+			return VoidValue(), fmt.Errorf("zeroed array requires a constant non-negative size")
+		}
+		values := make([]Value, int(t.ConstSize))
+		for idx := range values {
+			zero, err := i.zeroValueForSemanticType(t.Elem)
+			if err != nil {
+				return VoidValue(), err
+			}
+			values[idx] = zero
+		}
+		return ListValue(values), nil
+	case *semantic.DArrayType:
+		return ListValue(nil), nil
+	case *semantic.StructType:
+		if t.Decl != nil {
+			fields := make(map[string]Value, len(t.Decl.Fields))
+			order := make([]string, 0, len(t.Decl.Fields))
+			for _, fieldDecl := range t.Decl.Fields {
+				fieldType, ok := t.Fields[fieldDecl.Name]
+				if !ok {
+					return VoidValue(), fmt.Errorf("struct %s has no resolved field %q", t.Name, fieldDecl.Name)
+				}
+				zero, err := i.zeroValueForSemanticType(fieldType.Type)
+				if err != nil {
+					return VoidValue(), err
+				}
+				fields[fieldDecl.Name] = zero
+				order = append(order, fieldDecl.Name)
+			}
+			return StructInstanceValue(t.Name, order, fields), nil
+		}
+		return i.zeroValueForType(&ast.NamedType{Name: t.Name})
+	default:
+		return VoidValue(), fmt.Errorf("no zero value rule for semantic type %T (%s)", typ, typ.String())
 	}
-	value, err := parseIntLiteral(lit)
-	if err != nil {
-		return 0, err
+}
+func (i *Interpreter) constArraySize(expr ast.Expr) (int, error) {
+	var value Value
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		parsed, err := parseIntLiteral(n)
+		if err != nil {
+			return 0, err
+		}
+		value = parsed
+	case *ast.Ident:
+		resolved, err := i.lookupValue(nil, n.Name)
+		if err != nil {
+			return 0, fmt.Errorf("array zero-initialization requires a constant integer size: %w", err)
+		}
+		value = resolved
+	default:
+		return 0, fmt.Errorf("array zero-initialization requires a constant integer size, got %T", expr)
 	}
 	if value.kind != valueInt || value.int64Val < 0 {
 		return 0, fmt.Errorf("invalid array size %s", value.String())

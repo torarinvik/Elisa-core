@@ -62,6 +62,48 @@ func TestRunCLIInterpretsSimpleProgram(t *testing.T) {
 	}
 }
 
+func TestRunCLIInterpretsTypedZeroedValues(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "interpret_zeroed.elisa")
+	src := `type VAddr = uintptr
+const SLOT_COUNT: usize = 4
+
+enum Mode:
+	Off
+	On
+
+struct Payload:
+	addr: VAddr
+	mode: Mode
+	items: darray[i64]
+	slots: array[i64, SLOT_COUNT]
+
+def make_payload(payload: Payload) -> Payload:
+	return payload
+
+def main() -> i64:
+	payload: Payload = make_payload(zeroed)
+	if payload.addr != 0.uintptr():
+		return 1
+	if payload.slots[3] != 0:
+		return 4
+	return 42
+`
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write typed zeroed interpreter fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected interpreter to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 42") {
+		t.Fatalf("expected typed zeroed interpreter output to report result 42, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunCLIActivatesLoweredGrammarProductionsForInterpretAndIR(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "grammar_active.elisa")

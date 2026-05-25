@@ -154,6 +154,41 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 		return i.callLambda(calleeValue.lambdaVal, expr, frame, argExprs, prependNamed)
 	}
 	name := calleeValue.funcName
+	if runtimeFn, ok := i.runtimeFuncs[name]; ok {
+		positional, named, err := i.evalCallArgsForParams(frame, expr, argExprs, prependNamed, runtimeFn.params)
+		if err != nil {
+			return VoidValue(), err
+		}
+		if len(named) == 0 {
+			return runtimeFn.fn(positional)
+		}
+		bound := map[string]Value{}
+		if err := bindCallArgs(bound, runtimeFn.params, positional, named); err != nil {
+			return VoidValue(), fmt.Errorf("%s: %w", expr.Pos(), err)
+		}
+		ordered := make([]Value, 0, len(runtimeFn.params))
+		for _, param := range runtimeFn.params {
+			ordered = append(ordered, bound[param.Name].Clone())
+		}
+		return runtimeFn.fn(ordered)
+	}
+	if decl, ok := i.functions[name]; ok && decl != nil {
+		positional, named, err := i.evalCallArgsForParams(frame, expr, argExprs, prependNamed, i.loweredFuncParams(name, decl))
+		if err != nil {
+			return VoidValue(), err
+		}
+		return i.callFunction(name, decl, positional, named)
+	}
+	if decl, ok := i.lookupStructDecl(name); ok && decl != nil {
+		positional, named, err := i.evalCallArgsForStruct(frame, expr, argExprs, prependNamed, decl)
+		if err != nil {
+			return VoidValue(), err
+		}
+		if len(named) != 0 {
+			return i.constructStruct(decl, positional, named)
+		}
+		return i.constructStruct(decl, positional, nil)
+	}
 	positional := make([]Value, 0, len(argExprs))
 	named := map[string]Value{}
 	for index, argExpr := range argExprs {
@@ -175,30 +210,73 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 			positional = append(positional, value)
 		}
 	}
-	if runtimeFn, ok := i.runtimeFuncs[name]; ok {
-		if len(named) == 0 {
-			return runtimeFn.fn(positional)
-		}
-		bound := map[string]Value{}
-		if err := bindCallArgs(bound, runtimeFn.params, positional, named); err != nil {
-			return VoidValue(), fmt.Errorf("%s: %w", expr.Pos(), err)
-		}
-		ordered := make([]Value, 0, len(runtimeFn.params))
-		for _, param := range runtimeFn.params {
-			ordered = append(ordered, bound[param.Name].Clone())
-		}
-		return runtimeFn.fn(ordered)
-	}
-	if decl, ok := i.functions[name]; ok && decl != nil {
-		return i.callFunction(name, decl, positional, named)
-	}
-	if decl, ok := i.lookupStructDecl(name); ok && decl != nil {
-		if len(named) != 0 {
-			return i.constructStruct(decl, positional, named)
-		}
-		return i.constructStruct(decl, positional, nil)
-	}
 	return VoidValue(), fmt.Errorf("unknown callable %q", name)
+}
+func (i *Interpreter) evalCallArgsForParams(frame *frame, expr *ast.CallExpr, argExprs []ast.Expr, prependNamed bool, params []ast.ParamDecl) ([]Value, map[string]Value, error) {
+	positional := make([]Value, 0, len(argExprs))
+	named := map[string]Value{}
+	paramByName := map[string]ast.ParamDecl{}
+	for _, param := range params {
+		paramByName[param.Name] = param
+	}
+	for index, argExpr := range argExprs {
+		nameIndex := index
+		if prependNamed {
+			nameIndex = index + 1
+		}
+		argName := expr.ArgName(nameIndex)
+		var typ ast.TypeExpr
+		if argName != "" {
+			if param, ok := paramByName[argName]; ok {
+				typ = param.Type
+			}
+		} else if index < len(params) {
+			typ = params[index].Type
+		}
+		value, err := i.evaluateInitializer(frame, typ, argExpr)
+		if err != nil {
+			return nil, nil, err
+		}
+		if argName != "" {
+			named[argName] = value
+		} else {
+			positional = append(positional, value)
+		}
+	}
+	return positional, named, nil
+}
+func (i *Interpreter) evalCallArgsForStruct(frame *frame, expr *ast.CallExpr, argExprs []ast.Expr, prependNamed bool, decl *ast.StructDecl) ([]Value, map[string]Value, error) {
+	positional := make([]Value, 0, len(argExprs))
+	named := map[string]Value{}
+	fieldByName := map[string]ast.FieldDecl{}
+	for _, field := range decl.Fields {
+		fieldByName[field.Name] = field
+	}
+	for index, argExpr := range argExprs {
+		nameIndex := index
+		if prependNamed {
+			nameIndex = index + 1
+		}
+		argName := expr.ArgName(nameIndex)
+		var typ ast.TypeExpr
+		if argName != "" {
+			if field, ok := fieldByName[argName]; ok {
+				typ = field.Type
+			}
+		} else if index < len(decl.Fields) {
+			typ = decl.Fields[index].Type
+		}
+		value, err := i.evaluateInitializer(frame, typ, argExpr)
+		if err != nil {
+			return nil, nil, err
+		}
+		if argName != "" {
+			named[argName] = value
+		} else {
+			positional = append(positional, value)
+		}
+	}
+	return positional, named, nil
 }
 func (i *Interpreter) callLambda(lambda *lambdaValue, expr *ast.CallExpr, callerFrame *frame, argExprs []ast.Expr, prependNamed bool) (Value, error) {
 	if lambda == nil || lambda.expr == nil {

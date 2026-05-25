@@ -225,7 +225,12 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	case *ast.NullLit:
 		return NullValue(), nil
 	case *ast.ZeroedLit:
-		return VoidValue(), fmt.Errorf("zeroed literal requires typed context")
+		if i != nil && i.result != nil && i.result.ExprTypes != nil {
+			if typ, ok := i.result.ExprTypes[n]; ok {
+				return i.zeroValueForSemanticType(typ)
+			}
+		}
+		return VoidValue(), fmt.Errorf("%s: zeroed literal requires typed context", n.Pos())
 	case *ast.BinaryExpr:
 		if n.LoweredCall != nil {
 			return i.evalExpr(frame, n.LoweredCall)
