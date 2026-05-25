@@ -57,6 +57,10 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 		return "", func() {}, nativeBuildTiming{CacheLookup: time.Since(cacheLookupStart)}, 0, 0, err
 	}
 	cleanup := func() {
+		if os.Getenv("ELISACORE_KEEP_TEST_TEMP") != "" {
+			fmt.Fprintf(stderr, "[kept test temp] %s\n", tempDir)
+			return
+		}
 		_ = os.RemoveAll(tempDir)
 	}
 
