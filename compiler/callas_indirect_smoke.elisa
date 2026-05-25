@@ -1,0 +1,48 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+@c_abi(c)
+def callas_add(x: int, y: int) -> int:
+    return x + y
+
+@c_abi(c)
+def callas_neg(x: int) -> int:
+    return 0 - x
+
+@c_abi(c)
+def callas_noargs() -> int:
+    return 99
+
+# Exercises the typed, Unsafe-gated indirect-call primitive
+# `value.call_as[func(...)->T](args)`: a raw pointer-like value is invoked
+# through an asserted function signature, lowering to a native LLVM indirect
+# call. Replaces the old string-keyed, one-C-shim-per-signature callback path.
+@test
+def call_as_indirect_smoke():
+    can Abort.Panic:
+        # two-argument signature
+        f: mutable void&? = null
+        trusted Unsafe.PointerCast:
+            f <- callas_add as void&?
+        assert f != null
+        two: mutable int = 0
+        trusted Unsafe.IndirectCall:
+            two <- f.call_as[func(int, int) -> int](40, 2)
+        assert two == 42
+
+        # single-argument signature, negative return
+        g: mutable void&? = null
+        trusted Unsafe.PointerCast:
+            g <- callas_neg as void&?
+        one: mutable int = 0
+        trusted Unsafe.IndirectCall:
+            one <- g.call_as[func(int) -> int](7)
+        assert one == 0 - 7
+
+        # zero-argument signature
+        h: mutable void&? = null
+        trusted Unsafe.PointerCast:
+            h <- callas_noargs as void&?
+        zero: mutable int = 0
+        trusted Unsafe.IndirectCall:
+            zero <- h.call_as[func() -> int]()
+        assert zero == 99

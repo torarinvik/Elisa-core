@@ -258,6 +258,9 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		if c.analyzer.enforceUnsafePermissions && c.analyzer.exprRequiresUnsafeAlias(n) {
 			c.addRefs(unsafeAliasRefs(n.Position))
 		}
+		if c.analyzer.enforceUnsafePermissions && isIndirectCallTarget(n.Func) {
+			c.addRefs(unsafeIndirectCallRefs(n.Position))
+		}
 		if fnType, ok := c.analyzer.exprTypes[n.Func].(*FuncType); ok {
 			c.addRefs(functionPermissionRefs(fnType))
 			if c.analyzer.enforceUnsafePermissions {
@@ -298,7 +301,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Operand)
 		src := c.analyzer.exprTypes[n.Operand]
 		dst := c.analyzer.exprTypes[n]
-		if c.analyzer.enforceUnsafePermissions && (castRequiresUnsafePointerCast(src, dst) || c.analyzer.unsafeLifetimeWidenCasts[n]) {
+		if c.analyzer.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && (castRequiresUnsafePointerCast(src, dst) || c.analyzer.unsafeLifetimeWidenCasts[n]) {
 			c.addRefs(unsafePointerCastRefs(n.Position))
 		}
 		if sym, ok := c.analyzer.resolvedCastHooks[n]; ok {

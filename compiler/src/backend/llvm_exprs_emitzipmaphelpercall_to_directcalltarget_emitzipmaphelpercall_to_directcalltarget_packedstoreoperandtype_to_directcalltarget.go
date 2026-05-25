@@ -174,6 +174,14 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 	return callee, fnType, nil
 }
 func (s *functionState) directCallTarget(expr ast.Expr) bool {
+	// `value.call_as[func(...)->T](args)` lowers its receiver to a raw function
+	// pointer (an opaque `ptr`). Treat it as a "direct" callee so the call uses
+	// buildTypedCall (a plain LLVMBuildCall2 on the pointer) instead of the
+	// lambda function-value path, which would do an unnecessary — and for an
+	// unaligned address incorrect — closure-tag dispatch.
+	if cast, ok := expr.(*ast.CastExpr); ok && cast != nil && cast.Origin == ast.CastExprOriginIndirectCall {
+		return true
+	}
 	if fieldExpr, ok := expr.(*ast.FieldExpr); ok {
 		_, _, handled, err := s.resolveStaticInterfaceMethod(fieldExpr)
 		return handled && err == nil

@@ -13,6 +13,7 @@ import (
 var unsafeCapabilityOrder = []string{
 	"PointerCast",
 	"PointerArithmetic",
+	"IndirectCall",
 	"UncheckedIndex",
 	"RawExtern",
 	"MutableGlobal",

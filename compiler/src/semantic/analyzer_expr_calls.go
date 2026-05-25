@@ -182,6 +182,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		}
 		return invalidType
 	}
+	if a.enforceUnsafePermissions && isIndirectCallTarget(expr.Func) {
+		a.recordFunctionPermissionRefs(unsafeIndirectCallRefs(expr.Pos()))
+	}
 	orderedArgs, orderedOK := a.resolveFunctionCallArgs(expr, ft)
 	if !orderedOK {
 		return invalidType

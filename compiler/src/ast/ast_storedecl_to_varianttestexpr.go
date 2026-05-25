@@ -607,6 +607,13 @@ const (
 	CastExprOriginAsSyntax
 	CastExprOriginExplicitCast
 	CastExprOriginPostfixShorthand
+	// CastExprOriginIndirectCall marks the synthetic cast produced by the
+	// postfix `value.call_as[func(...)->T](args)` form: the operand (a raw
+	// pointer-like value) is reinterpreted as a function pointer with the given
+	// signature so the surrounding CallExpr lowers to a native indirect call.
+	// The cast itself does NOT require Unsafe.PointerCast; the call requires
+	// Unsafe.IndirectCall instead (the single capability gating the operation).
+	CastExprOriginIndirectCall
 )
 
 type CastExpr struct {

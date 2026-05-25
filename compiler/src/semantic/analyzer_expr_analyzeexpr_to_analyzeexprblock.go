@@ -501,7 +501,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				a.errorf(n.Pos(), "cannot take a mutable reference to a const (it lives in read-only storage); use a read-only reference instead")
 			}
 		}
-		if a.enforceUnsafePermissions && castRequiresUnsafePointerCast(src, dst) {
+		if a.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(src, dst) {
 			a.recordFunctionPermissionRefs(unsafePointerCastRefs(n.Position))
 		}
 		if srcRef, ok := src.(*RefType); ok {

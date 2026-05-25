@@ -57,6 +57,21 @@ func (p *Parser) parsePostfix() ast.Expr {
 				continue
 			}
 
+			if field == "call_as" && p.peek() == lexer.TOKEN_LBRACKET {
+				p.advance()
+				sig := p.parseTypeExpr()
+				p.expect(lexer.TOKEN_RBRACKET)
+				if _, ok := sig.(*ast.FuncTypeExpr); !ok {
+					p.errorAt(pos, "`.call_as[T]` requires a function-signature type, e.g. `.call_as[func(int) -> int]`")
+				}
+				castExpr := &ast.CastExpr{Position: pos, Operand: expr, Target: sig, Origin: ast.CastExprOriginIndirectCall}
+				p.expect(lexer.TOKEN_LPAREN)
+				args, argNames, argShorthand, paramPacks, argItems, hasArgForward, argForwardPos := p.parseCallArgs()
+				p.expect(lexer.TOKEN_RPAREN)
+				expr = &ast.CallExpr{Position: pos, Func: castExpr, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames, ArgShorthand: argShorthand, ParamPacks: paramPacks, ArgItemOrder: argItems}
+				continue
+			}
+
 			if field == "specialize" && p.peek() == lexer.TOKEN_LBRACKET {
 				p.advance()
 				typeArgs := make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))

@@ -207,6 +207,12 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return keyword + " " + binder + " in " + formatExpr(n.Source) + formatQueryFilter(n.Filter, n.PatternFilter, n.PatternFilterSubject) + formatQueryOwner(n.Owner)
 	case *ast.CastExpr:
+		if n.Origin == ast.CastExprOriginIndirectCall {
+			// The synthetic cast produced by `value.call_as[func(...)->T](args)`.
+			// Render it back as `.call_as[...]` (the enclosing CallExpr appends
+			// the `(args)`); `.cast[...]` would not re-parse with a trailing call.
+			return formatExpr(n.Operand) + ".call_as[" + formatTypeExpr(n.Target) + "]"
+		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
 			if target, ok := formatPostfixShorthandCastTarget(n.Target); ok {
 				return formatExpr(n.Operand) + "." + target + "()"
