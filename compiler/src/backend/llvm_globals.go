@@ -404,7 +404,12 @@ func (g *llvmGenerator) constGlobalStringPtr(value string) (C.LLVMValueRef, erro
 	arrayType := C.LLVMArrayType2(C.LLVMInt8TypeInContext(g.context), C.ulonglong(len(bytes)))
 	data := C.CBytes(bytes)
 	defer C.free(data)
-	initializer := C.LLVMConstStringInContext(g.context, (*C.char)(data), C.unsigned(len(bytes)-1), 1)
+	// `bytes` already includes the trailing NUL and `arrayType` is sized to len(bytes),
+	// so the constant data array must also span len(bytes) (DontNullTerminate=1, since the
+	// NUL is already present). Using len(bytes)-1 produced a [len-1 x i8] initializer for a
+	// [len x i8] global — an off-by-one that the verifier rejects (notably for "" -> [0 x i8]
+	// vs [1 x i8]).
+	initializer := C.LLVMConstStringInContext(g.context, (*C.char)(data), C.unsigned(len(bytes)), 1)
 	name := cString(".str")
 	defer C.free(unsafe.Pointer(name))
 	global := C.LLVMAddGlobal(g.module, arrayType, name)
