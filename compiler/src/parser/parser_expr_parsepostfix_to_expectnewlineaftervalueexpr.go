@@ -75,7 +75,13 @@ func (p *Parser) parsePostfix() ast.Expr {
 				continue
 			}
 
-			if p.peek() == lexer.TOKEN_AMPERSAND || p.peek() == lexer.TOKEN_BANG {
+			// Legacy reference-cast detection for `expr.Field!(operand)`. NOTE: do
+			// NOT include TOKEN_AMPERSAND here — `expr.field & (rhs)` is a valid
+			// bitwise-AND whose RHS is parenthesized, and `&` after a member access
+			// must fall through to the binary-operator parser. Treating `& (` as a
+			// legacy cast caused a spurious parse error (the legacy cast syntax is
+			// removed anyway; `.cast[T&]` is the replacement).
+			if p.peek() == lexer.TOKEN_BANG {
 				castPos := pos
 				savedCastPos := p.pos
 				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: field}
