@@ -180,6 +180,15 @@ func (i *Interpreter) constArraySize(expr ast.Expr) (int, error) {
 }
 func (i *Interpreter) castValue(value Value, target ast.TypeExpr) (Value, error) {
 	switch n := target.(type) {
+	case *ast.RefType, *ast.OptionalTypeExpr:
+		return value, nil
+	case *ast.MutableType:
+		return i.castValue(value, n.Elem)
+	case *ast.TailType:
+		return i.castValue(value, n.Elem)
+	}
+	value = derefValue(value)
+	switch n := target.(type) {
 	case *ast.NamedType:
 		switch n.Name {
 		case "void":
@@ -236,12 +245,6 @@ func (i *Interpreter) castValue(value Value, target ast.TypeExpr) (Value, error)
 			}
 			return value, nil
 		}
-	case *ast.RefType, *ast.OptionalTypeExpr:
-		return value, nil
-	case *ast.MutableType:
-		return i.castValue(value, n.Elem)
-	case *ast.TailType:
-		return i.castValue(value, n.Elem)
 	default:
 		return value, nil
 	}
@@ -269,6 +272,7 @@ func parseIntLiteral(lit *ast.IntLit) (Value, error) {
 	return IntValue(value), nil
 }
 func evalUnaryOp(op lexer.TokenKind, operand Value) (Value, error) {
+	operand = derefValue(operand)
 	switch op {
 	case lexer.TOKEN_NOT:
 		value, err := requireBool(operand)
@@ -329,6 +333,8 @@ func augAssignBaseOp(op lexer.TokenKind) lexer.TokenKind {
 	}
 }
 func evalBinaryOp(op lexer.TokenKind, left Value, right Value) (Value, error) {
+	left = derefValue(left)
+	right = derefValue(right)
 	switch op {
 	case lexer.TOKEN_AND:
 		l, err := requireBool(left)
@@ -451,12 +457,14 @@ func evalFloatBinaryOp(op lexer.TokenKind, left Value, right Value) (Value, erro
 	}
 }
 func requireBool(value Value) (bool, error) {
+	value = derefValue(value)
 	if value.kind != valueBool {
 		return false, fmt.Errorf("expected bool, got %s", value.String())
 	}
 	return value.boolVal, nil
 }
 func requireInt(value Value) (int64, error) {
+	value = derefValue(value)
 	if value.kind != valueInt {
 		return 0, fmt.Errorf("expected integer, got %s", value.String())
 	}
@@ -476,6 +484,7 @@ func indexValue(value Value, index int64) (Value, error) {
 	return indexValueAt(value, index)
 }
 func indexInRange(value Value, index int64) (bool, error) {
+	value = derefValue(value)
 	if index < 0 {
 		return false, nil
 	}
@@ -489,6 +498,7 @@ func indexInRange(value Value, index int64) (bool, error) {
 	}
 }
 func indexValueAt(value Value, index int64) (Value, error) {
+	value = derefValue(value)
 	if index < 0 {
 		return VoidValue(), fmt.Errorf("index %d out of range", index)
 	}
@@ -508,6 +518,7 @@ func indexValueAt(value Value, index int64) (Value, error) {
 	}
 }
 func sliceValue(value Value, start, end int64) (Value, error) {
+	value = derefValue(value)
 	if start < 0 || end < start {
 		return VoidValue(), fmt.Errorf("invalid slice [%d:%d]", start, end)
 	}

@@ -32,6 +32,7 @@ const (
 	valueList
 	valueStruct
 	valueFunction
+	valueRef
 )
 
 type Value struct {
@@ -44,6 +45,7 @@ type Value struct {
 	structVal *StructValue
 	funcName  string
 	lambdaVal *lambdaValue
+	refSlot   *valueSlot
 }
 type StructValue struct {
 	Name       string
@@ -110,6 +112,32 @@ func interpreterVisibleNames(frame *frame, name string) []string {
 		}
 	}
 	return []string{name}
+}
+
+func interpreterQualifiedFieldName(expr *ast.FieldExpr) (string, bool) {
+	if expr == nil || expr.Safe {
+		return "", false
+	}
+	parts := []string{expr.Field}
+	for current := expr.Object; current != nil; {
+		switch n := current.(type) {
+		case *ast.Ident:
+			parts = append(parts, n.Name)
+			for left, right := 0, len(parts)-1; left < right; left, right = left+1, right-1 {
+				parts[left], parts[right] = parts[right], parts[left]
+			}
+			return strings.Join(parts, "."), true
+		case *ast.FieldExpr:
+			if n.Safe {
+				return "", false
+			}
+			parts = append(parts, n.Field)
+			current = n.Object
+		default:
+			return "", false
+		}
+	}
+	return "", false
 }
 
 type signalKind int
@@ -215,6 +243,11 @@ func (v Value) String() string {
 			return "<func lambda>"
 		}
 		return "<func " + v.funcName + ">"
+	case valueRef:
+		if v.refSlot == nil {
+			return "<ref nil>"
+		}
+		return "<ref " + v.refSlot.get().String() + ">"
 	default:
 		return "<value>"
 	}
@@ -247,6 +280,8 @@ func (v Value) Clone() Value {
 			}
 			cloned.lambdaVal = &lambdaValue{id: v.lambdaVal.id, expr: v.lambdaVal.expr, captures: captures}
 		}
+	case valueRef:
+		cloned.refSlot = v.refSlot
 	}
 	return cloned
 }
@@ -257,6 +292,7 @@ func FloatValue(v float64) Value      { return Value{kind: valueFloat, floatVal:
 func BoolValue(v bool) Value          { return Value{kind: valueBool, boolVal: v} }
 func StringValue(v string) Value      { return Value{kind: valueString, strVal: v} }
 func FunctionValue(name string) Value { return Value{kind: valueFunction, funcName: name} }
+func RefValue(slot *valueSlot) Value  { return Value{kind: valueRef, refSlot: slot} }
 func LambdaFunctionValue(id int, expr *ast.LambdaExpr, captures map[string]Value) Value {
 	cloned := make(map[string]Value, len(captures))
 	for name, value := range captures {
@@ -277,6 +313,12 @@ func StructInstanceValue(name string, fieldOrder []string, fields map[string]Val
 		clonedFields[fieldName] = value.Clone()
 	}
 	return Value{kind: valueStruct, structVal: &StructValue{Name: name, FieldOrder: append([]string(nil), fieldOrder...), Fields: clonedFields}}
+}
+func derefValue(value Value) Value {
+	if value.kind == valueRef && value.refSlot != nil {
+		return value.refSlot.get()
+	}
+	return value
 }
 func (i *Interpreter) bootstrap() error {
 	if i.result.GlobalScope != nil {
@@ -327,7 +369,8 @@ func (i *Interpreter) initializeGlobalsFromDecl(decl ast.Decl) error {
 func (i *Interpreter) initializeGlobalsFromDeclInNamespace(decl ast.Decl, namespace string) error {
 	switch n := decl.(type) {
 	case *ast.GlobalDecl:
-		value, err := i.evaluateInitializer(nil, n.Type, n.Value)
+		initFrame := &frame{locals: map[string]Value{}, namespace: namespace}
+		value, err := i.evaluateInitializer(initFrame, n.Type, n.Value)
 		if err != nil {
 			return err
 		}
@@ -378,6 +421,7 @@ func (i *Interpreter) runtimeAssert(args []Value) (Value, error) {
 	return VoidValue(), nil
 }
 func stringifyValue(value Value) (string, error) {
+	value = derefValue(value)
 	switch value.kind {
 	case valueString:
 		return value.strVal, nil

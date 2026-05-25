@@ -104,6 +104,57 @@ def main() -> i64:
 	}
 }
 
+func TestRunCLIInterpretsModuleScopedConstantsAndGlobals(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "interpret_module_consts.elisa")
+	src := `module PlayGoHle:
+	type OrbisPlayGoInstallSpeed = i32
+	const ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE: OrbisPlayGoInstallSpeed = 1
+	const ORBIS_PLAYGO_INSTALL_SPEED_FULL: OrbisPlayGoInstallSpeed = 2
+	global mutable install_speed: OrbisPlayGoInstallSpeed = ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE
+
+	def write_speed(outSpeed: mutable OrbisPlayGoInstallSpeed&) -> void:
+		outSpeed <- install_speed
+
+	def reset_to_trickle() -> void:
+		install_speed <- ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE
+
+	def set_full() -> void:
+		install_speed <- PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_FULL
+
+	def current() -> OrbisPlayGoInstallSpeed:
+		return install_speed
+
+def main() -> i64:
+	if PlayGoHle::current() != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE:
+		return 1
+	PlayGoHle::set_full()
+	if PlayGoHle::current() != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_FULL:
+		return 2
+	PlayGoHle::reset_to_trickle()
+	if PlayGoHle::current() != 1:
+		return 3
+	value: mutable PlayGoHle::OrbisPlayGoInstallSpeed = 0
+	PlayGoHle::write_speed(value.ref[mutable PlayGoHle::OrbisPlayGoInstallSpeed&])
+	if value != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE:
+		return 4
+	return 42
+`
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write module constant interpreter fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected interpreter to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 42") {
+		t.Fatalf("expected module constant interpreter output to report result 42, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunCLIActivatesLoweredGrammarProductionsForInterpretAndIR(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "grammar_active.elisa")

@@ -191,7 +191,11 @@ func (i *Interpreter) evaluateInitializer(frame *frame, typ ast.TypeExpr, expr a
 func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	switch n := expr.(type) {
 	case *ast.Ident:
-		return i.lookupValue(frame, n.Name)
+		value, err := i.lookupValue(frame, n.Name)
+		if err != nil {
+			return VoidValue(), err
+		}
+		return derefValue(value), nil
 	case *ast.ShorthandMemberExpr:
 		if i != nil && i.result != nil && i.result.ExprTypes != nil {
 			if t, ok := i.result.ExprTypes[n]; ok {
@@ -259,11 +263,31 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	case *ast.CallExpr:
 		return i.evalCallExpr(frame, n)
 	case *ast.FieldExpr:
+		if name, ok := interpreterQualifiedFieldName(n); ok {
+			for _, candidate := range interpreterVisibleNames(frame, name) {
+				if value, ok := i.consts[candidate]; ok {
+					return value.Clone(), nil
+				}
+				if value, ok := i.globals[candidate]; ok {
+					return value.Clone(), nil
+				}
+				if _, ok := i.runtimeFuncs[candidate]; ok {
+					return FunctionValue(candidate), nil
+				}
+				if _, ok := i.functions[candidate]; ok {
+					return FunctionValue(candidate), nil
+				}
+				if _, ok := i.lookupStructDecl(candidate); ok {
+					return FunctionValue(candidate), nil
+				}
+			}
+		}
 		if n.Safe {
 			obj, err := i.evalExpr(frame, n.Object)
 			if err != nil {
 				return VoidValue(), err
 			}
+			obj = derefValue(obj)
 			if obj.IsNull() {
 				return NullValue(), nil
 			}
@@ -277,6 +301,7 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		if err != nil {
 			return VoidValue(), err
 		}
+		obj = derefValue(obj)
 		if obj.kind != valueStruct || obj.structVal == nil {
 			return VoidValue(), fmt.Errorf("field access requires a struct, got %s", obj.String())
 		}
@@ -290,6 +315,7 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		if err != nil {
 			return VoidValue(), err
 		}
+		obj = derefValue(obj)
 		index, err := i.evalExpr(frame, n.Index)
 		if err != nil {
 			return VoidValue(), err
@@ -349,6 +375,12 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 			return VoidValue(), err
 		}
 		return i.castValue(value, n.Target)
+	case *ast.AddrOfExpr:
+		slot, err := i.resolveSlot(frame, n.Operand)
+		if err != nil {
+			return VoidValue(), err
+		}
+		return RefValue(slot), nil
 	case *ast.TernaryExpr:
 		cond, err := i.evalExpr(frame, n.Cond)
 		if err != nil {

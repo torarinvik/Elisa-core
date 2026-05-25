@@ -336,6 +336,7 @@ func (i *Interpreter) lambdaReturnsVoid(expr *ast.LambdaExpr) bool {
 	return semantic.SameType(fnType.Return, i.result.NamedTypes["void"])
 }
 func interpreterFieldValue(obj Value, field string) (Value, error) {
+	obj = derefValue(obj)
 	if obj.kind != valueStruct || obj.structVal == nil {
 		return VoidValue(), fmt.Errorf("field access requires a struct, got %s", obj.String())
 	}
@@ -476,7 +477,10 @@ func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, erro
 	case *ast.Ident:
 		name := n.Name
 		for current := frame; current != nil; current = current.parent {
-			if _, ok := current.locals[name]; ok {
+			if value, ok := current.locals[name]; ok {
+				if value.kind == valueRef && value.refSlot != nil {
+					return value.refSlot, nil
+				}
 				scopeFrame := current
 				return &valueSlot{
 					get: func() Value { return scopeFrame.locals[name].Clone() },
@@ -510,20 +514,34 @@ func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, erro
 		}
 		return nil, fmt.Errorf("undefined assignable name %q", name)
 	case *ast.FieldExpr:
+		if name, ok := interpreterQualifiedFieldName(n); ok {
+			for _, candidate := range interpreterVisibleNames(frame, name) {
+				if _, ok := i.globals[candidate]; ok {
+					globalName := candidate
+					return &valueSlot{
+						get: func() Value { return i.globals[globalName].Clone() },
+						set: func(value Value) error {
+							i.globals[globalName] = value.Clone()
+							return nil
+						},
+					}, nil
+				}
+			}
+		}
 		parent, err := i.resolveSlot(frame, n.Object)
 		if err != nil {
 			return nil, err
 		}
 		return &valueSlot{
 			get: func() Value {
-				parentValue := parent.get()
+				parentValue := derefValue(parent.get())
 				if parentValue.kind != valueStruct || parentValue.structVal == nil {
 					return VoidValue()
 				}
 				return parentValue.structVal.Fields[n.Field].Clone()
 			},
 			set: func(value Value) error {
-				parentValue := parent.get()
+				parentValue := derefValue(parent.get())
 				if parentValue.kind != valueStruct || parentValue.structVal == nil {
 					return fmt.Errorf("field assignment requires a struct")
 				}
@@ -553,11 +571,11 @@ func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, erro
 		}
 		return &valueSlot{
 			get: func() Value {
-				value, _ := indexValueAt(parent.get(), index)
+				value, _ := indexValueAt(derefValue(parent.get()), index)
 				return value
 			},
 			set: func(value Value) error {
-				parentValue := parent.get()
+				parentValue := derefValue(parent.get())
 				if parentValue.kind != valueList {
 					return fmt.Errorf("index assignment requires a list")
 				}
