@@ -452,7 +452,13 @@ func (s *functionState) emitStackTempValue(value C.LLVMValueRef, t semantic.Type
 	if err != nil {
 		return nil, err
 	}
-	C.LLVMBuildStore(s.builder, value, alloca)
+	// Route through storeValue so large `zeroed` aggregates lower to llvm.memset
+	// (and large aggregate copies to memcpy) rather than a first-class
+	// `store <bigtype> zeroinitializer`, which llc -O0 expands into a giant
+	// per-element SelectionDAG (e.g. a 1MB struct took ~220s to compile).
+	if err := s.storeValue(alloca, value, t, name); err != nil {
+		return nil, err
+	}
 	return alloca, nil
 }
 func (s *functionState) emitBoolLiteral(expr *ast.BoolLit) (C.LLVMValueRef, semantic.Type, error) {

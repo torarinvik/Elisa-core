@@ -317,7 +317,12 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 				return err
 			}
 			initValue = value
-			C.LLVMBuildStore(s.builder, value, alloca)
+			// storeValue lowers large `zeroed` aggregates to llvm.memset and large
+			// aggregate copies to memcpy, avoiding `store <bigtype> zeroinitializer`
+			// (catastrophic for llc -O0 on multi-KB structs).
+			if err := s.storeValue(alloca, value, declType, n.Name); err != nil {
+				return err
+			}
 			s.bindPackedStoreValue(declType, value)
 			if err := s.bindPackedStoreOriginsForExprPath(n.Name, n.Value, declType); err != nil {
 				return err
