@@ -939,6 +939,25 @@ export def bad_fs_write(selector: u16) -> void abi c:
 	}
 }
 
+func TestVerifyRejectsWrongSpecificSegmentCapability(t *testing.T) {
+	src := `module tls
+target x86_64
+export def bad_gs_with_fs_cap() -> u64 abi c:
+    outputs: ret = rax
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs
+    body:
+        movq %gs:0x30, %rax
+        ret
+`
+	_, issues := Parse("wrong_segment.easm", src)
+	if !containsIssue(issues, "segment-access-intent-missing") {
+		t.Fatalf("expected segment-access-intent-missing for gs with fs-only capability, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsLargeStackAdjustWithoutProbe(t *testing.T) {
 	src := `module stack_probe
 target x86_64

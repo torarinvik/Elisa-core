@@ -295,11 +295,15 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if usesSymbolAddress(inst.Text) && !requireSet["relocation.symbol"] && !requireSet["pic"] {
 			issues = append(issues, Issue{Severity: "error", Code: "symbol-relocation-intent-missing", File: path, Line: inst.Line, Message: "symbol address/value use requires relocation.symbol or pic intent"})
 		}
-		if usesSegmentOverride(inst.Text) && !hasSegmentCapability(requireSet) {
-			issues = append(issues, Issue{Severity: "error", Code: "segment-access-intent-missing", File: path, Line: inst.Line, Message: "fs/gs segment access requires an explicit segment capability"})
+		for seg := range segmentOverridesUsed(inst.Text) {
+			if !hasSegmentCapability(requireSet, seg) {
+				issues = append(issues, Issue{Severity: "error", Code: "segment-access-intent-missing", File: path, Line: inst.Line, Message: fmt.Sprintf("%s segment access requires x86_64.segment.%s or x86_64.segment", seg, seg)})
+			}
 		}
-		if usesSegmentRegister(inst.Text) && !hasSegmentCapability(requireSet) {
-			issues = append(issues, Issue{Severity: "error", Code: "segment-register-intent-missing", File: path, Line: inst.Line, Message: "fs/gs segment register use requires an explicit segment capability"})
+		for seg := range segmentRegistersUsed(inst.Text) {
+			if !hasSegmentCapability(requireSet, seg) {
+				issues = append(issues, Issue{Severity: "error", Code: "segment-register-intent-missing", File: path, Line: inst.Line, Message: fmt.Sprintf("%s segment register use requires x86_64.segment.%s or x86_64.segment", seg, seg)})
+			}
 		}
 		if writesSegmentRegister(inst.Text) && !requireSet["x86_64.segment.write"] {
 			issues = append(issues, Issue{Severity: "error", Code: "segment-register-write-intent-missing", File: path, Line: inst.Line, Message: "writing fs/gs requires x86_64.segment.write intent"})
@@ -1390,18 +1394,38 @@ func usesSegmentOverride(text string) bool {
 	return strings.Contains(lower, "%fs:") || strings.Contains(lower, "%gs:") || strings.Contains(lower, "fs:") || strings.Contains(lower, "gs:")
 }
 
-func hasSegmentCapability(requireSet map[string]bool) bool {
-	return requireSet["x86_64.segment.fs"] || requireSet["x86_64.segment.gs"] || requireSet["x86_64.segment"]
+func segmentOverridesUsed(text string) map[string]bool {
+	lower := strings.ToLower(text)
+	used := map[string]bool{}
+	if strings.Contains(lower, "%fs:") || strings.Contains(lower, "fs:") {
+		used["fs"] = true
+	}
+	if strings.Contains(lower, "%gs:") || strings.Contains(lower, "gs:") {
+		used["gs"] = true
+	}
+	return used
+}
+
+func hasSegmentCapability(requireSet map[string]bool, seg string) bool {
+	return requireSet["x86_64.segment"] || requireSet["x86_64.segment."+seg]
 }
 
 func usesSegmentRegister(text string) bool {
+	return len(segmentRegistersUsed(text)) != 0
+}
+
+func segmentRegistersUsed(text string) map[string]bool {
+	used := map[string]bool{}
 	for _, operand := range splitInstructionOperands(text) {
 		reg := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(operand)), "%")
-		if reg == "fs" || reg == "gs" {
-			return true
+		if reg == "fs" {
+			used["fs"] = true
+		}
+		if reg == "gs" {
+			used["gs"] = true
 		}
 	}
-	return false
+	return used
 }
 
 func writesSegmentRegister(text string) bool {
