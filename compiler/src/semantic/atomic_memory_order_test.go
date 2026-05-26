@@ -60,3 +60,14 @@ def ok(slot: mutable atomic[i64]&):
 		t.Fatalf("expected valid memory orders to pass, got:\n%s", all)
 	}
 }
+
+func TestAtomicMemoryOrderRequiresCompileTimeConstant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "atomic_order_dynamic.elisa", atomicOrderTestPrelude+`
+def dynamic(slot: mutable atomic[i64]&, order: MemoryOrder):
+    _ = load(slot, order)
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "atomic load memory order must be a compile-time MemoryOrder constant") {
+		t.Fatalf("expected non-constant memory order diagnostic, got:\n%s", all)
+	}
+}

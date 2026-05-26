@@ -274,6 +274,7 @@ const (
 func (a *Analyzer) validateAtomicMemoryOrder(arg ast.Expr, callName string, context atomicOrderContext) {
 	order, ok := a.atomicMemoryOrderValue(arg)
 	if !ok {
+		a.errorf(arg.Pos(), "atomic %s memory order must be a compile-time MemoryOrder constant", callName)
 		return
 	}
 	switch context {
