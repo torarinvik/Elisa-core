@@ -512,6 +512,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 		}
 		a.checkBufferReinterpretCast(n, dst)
+		if a.enforceUnsafePermissions && a.unsafeBufferReinterpretCasts[n] {
+			a.recordFunctionPermissionRefs(unsafeBufferReinterpretRefs(n.Position))
+		}
 		a.recordUnsafeLifetimeWiden(n, src, dst)
 		result = dst
 		return

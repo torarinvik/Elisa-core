@@ -33,15 +33,16 @@ func TestRefStorageOutlivesFlagsExplicitStorageWidening(t *testing.T) {
 	}
 }
 
-// Explicitly opting out with `can Unsafe.PointerCast` (plus the unchecked-index
-// grant for the darray read) compiles cleanly: the author has acknowledged it.
+// Explicitly opting out with the precise unsafe grants compiles cleanly: the
+// author has acknowledged the lifetime widening, index, and byte-buffer
+// reinterpretation hazards.
 func TestRefStorageOutlivesOptOutSatisfiesGate(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "outlives_opt_out.elisa", `def build(owner: mutable Arena&) -> static u8&:
     out: mutable darray[u8] = []
     in owner:
         out.push(65)
         out.push(0)
-    can Unsafe.PointerCast, Unsafe.UncheckedIndex:
+    can Unsafe.PointerCast, Unsafe.UncheckedIndex, Unsafe.BufferReinterpret:
         return out[0].ref[static u8&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)

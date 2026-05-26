@@ -148,6 +148,10 @@ func unsafeAliasRefs(pos lexer.Pos) []ast.PermissionRef {
 	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "Alias"}}
 }
 
+func unsafeBufferReinterpretRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "BufferReinterpret"}}
+}
+
 func binaryExprRequiresUnsafePointerArithmetic(op lexer.TokenKind, left, right Type) bool {
 	if op != lexer.TOKEN_PLUS && op != lexer.TOKEN_MINUS {
 		return false

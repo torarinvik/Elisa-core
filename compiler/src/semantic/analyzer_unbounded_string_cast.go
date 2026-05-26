@@ -19,7 +19,8 @@ import (
 //
 // Emitted as a warning, not a hard error: a caller that has already bounds-checked
 // the index (the common loop pattern) is safe, but the cast erases that proof, so
-// every site is surfaced for audit rather than rejected.
+// every site is surfaced for audit rather than rejected. Under
+// EnforceUnsafePermissions, the same site also requires Unsafe.BufferReinterpret.
 func (a *Analyzer) checkBufferReinterpretCast(cast *ast.CastExpr, dst Type) {
 	if a == nil || cast == nil || cast.Operand == nil {
 		return
@@ -29,6 +30,7 @@ func (a *Analyzer) checkBufferReinterpretCast(cast *ast.CastExpr, dst Type) {
 		return
 	}
 	if isUnboundedStringRefType(dst) {
+		a.recordUnsafeBufferReinterpret(cast)
 		a.warnf(cast.Pos(), "casting an interior pointer of a sized %s to an unbounded string (%s) erases its length; a static_strlen / C-string scan can read past the %s into adjacent memory (out-of-bounds, nondeterministic). Prefer a length-bounded view (sview), or copy bounded bytes into a fresh allocation", bufKind, dst, bufKind)
 		return
 	}
@@ -40,8 +42,19 @@ func (a *Analyzer) checkBufferReinterpretCast(cast *ast.CastExpr, dst Type) {
 	// single-element bound. (Same-width reinterpretations stay within the
 	// indexed element and are not flagged.)
 	if isSingleByteType(bufElem) && typeWiderThanByte(dstRef.Elem) {
+		a.recordUnsafeBufferReinterpret(cast)
 		a.warnf(cast.Pos(), "casting an interior pointer of a byte %s to %s reinterprets %s as a wider value; reading it accesses more bytes than the index bounds and can read past the %s (out-of-bounds, nondeterministic). Bounds-check the offset against the buffer length, or copy the bytes into a properly typed value", bufKind, dst, bufKind, bufKind)
 	}
+}
+
+func (a *Analyzer) recordUnsafeBufferReinterpret(cast *ast.CastExpr) {
+	if a == nil || cast == nil {
+		return
+	}
+	if a.unsafeBufferReinterpretCasts == nil {
+		a.unsafeBufferReinterpretCasts = make(map[*ast.CastExpr]bool)
+	}
+	a.unsafeBufferReinterpretCasts[cast] = true
 }
 
 // isUnboundedStringRefType reports whether a type is an unbounded C-string

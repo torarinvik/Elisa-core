@@ -50,6 +50,41 @@ def header_at(self: Blob&, off: usize) -> Header&:
 	}
 }
 
+func TestBufferReinterpretRequiresUnsafeGrantInStrictMode(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "buffer_reinterpret_requires_unsafe.elisa", `struct Header:
+    a: u32
+    b: u32
+
+struct Blob:
+    data: mutable darray[u8]
+
+def header_at(self: Blob&, off: usize) -> Header&:
+    return self.data[off].ref[u8&].cast[Header&]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "buffer reinterpret cast requires can[Unsafe]") || !strings.Contains(all, "Unsafe.BufferReinterpret") {
+		t.Fatalf("expected buffer reinterpret to require Unsafe.BufferReinterpret, got:\n%s", all)
+	}
+}
+
+func TestTrustedBufferReinterpretGrantIsAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_buffer_reinterpret.elisa", `struct Header:
+    a: u32
+    b: u32
+
+struct Blob:
+    data: mutable darray[u8]
+
+def header_at(self: Blob&, off: usize) -> Header&:
+    trusted Unsafe.BufferReinterpret:
+        return self.data[off].ref[u8&].cast[Header&]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, "buffer reinterpret cast requires") {
+		t.Fatalf("expected trusted Unsafe.BufferReinterpret to satisfy the opt-out, got:\n%s", all)
+	}
+}
+
 // Reinterpreting a byte-darray element as a wider scalar (u32) is also flagged.
 func TestWideScalarReinterpretFromByteDArrayIsFlagged(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "u32_reinterpret_darray.elisa", `struct Blob:

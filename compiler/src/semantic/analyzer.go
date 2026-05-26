@@ -113,6 +113,7 @@ type Analyzer struct {
 	treeConstructorCallees        map[ast.Expr]bool
 	resolvedCastHooks             map[ast.Expr]*Symbol
 	unsafeLifetimeWidenCasts      map[*ast.CastExpr]bool
+	unsafeBufferReinterpretCasts  map[*ast.CastExpr]bool
 	loweredInitCalls              map[*ast.StructLitExpr]*ast.CallExpr
 	exprDenseNodeKeys             map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables                map[ast.Expr]NodeTableInfo
@@ -422,6 +423,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
 		unsafeLifetimeWidenCasts:          make(map[*ast.CastExpr]bool),
+		unsafeBufferReinterpretCasts:      make(map[*ast.CastExpr]bool),
 		loweredInitCalls:                  make(map[*ast.StructLitExpr]*ast.CallExpr, resolvedInitCallCapacity),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
