@@ -84,6 +84,7 @@ type FunctionSummary struct {
 	ABI        string   `json:"abi,omitempty"`
 	Params     []Param  `json:"params,omitempty"`
 	ReturnType string   `json:"returnType,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
 	Control    []string `json:"control,omitempty"`
 	Stack      []string `json:"stack,omitempty"`
 }
@@ -667,12 +668,16 @@ func BuildReport(paths []string, targetTriple string) (*Report, []*Module) {
 		summary := ModuleSummary{Path: module.Path, Name: module.Name, Target: module.Target}
 		reqs := map[string]bool{}
 		for _, fn := range module.Functions {
+			labels := make([]string, 0, len(fn.Labels))
+			for _, label := range fn.Labels {
+				labels = append(labels, formatLabelContract(label))
+			}
 			if previous, ok := seenExports[fn.Name]; ok && fn.Name != "" {
 				report.Issues = append(report.Issues, Issue{Severity: "error", Code: "duplicate-export", File: module.Path, Line: fn.Line, Message: fmt.Sprintf("EASM export %s duplicates export from %s", fn.Name, previous)})
 			} else {
 				seenExports[fn.Name] = module.Path
 			}
-			summary.Exports = append(summary.Exports, FunctionSummary{Name: fn.Name, ABI: fn.ABI, Params: fn.Params, ReturnType: fn.ReturnType, Control: fn.Control, Stack: fn.Stack})
+			summary.Exports = append(summary.Exports, FunctionSummary{Name: fn.Name, ABI: fn.ABI, Params: fn.Params, ReturnType: fn.ReturnType, Labels: labels, Control: fn.Control, Stack: fn.Stack})
 			for _, req := range fn.Requires {
 				reqs[req] = true
 			}
@@ -710,6 +715,9 @@ func FormatReport(report *Report, jsonOutput bool) (string, error) {
 		fmt.Fprintf(&out, "Module %s target=%s\n", module.Name, module.Target)
 		for _, exported := range module.Exports {
 			fmt.Fprintf(&out, "  export %s abi=%s control=%s stack=%s\n", exported.Name, defaultString(exported.ABI, "c"), strings.Join(exported.Control, ","), strings.Join(exported.Stack, ","))
+			for _, label := range exported.Labels {
+				fmt.Fprintf(&out, "    label %s\n", label)
+			}
 		}
 	}
 	if len(report.Issues) != 0 {
@@ -723,6 +731,13 @@ func FormatReport(report *Report, jsonOutput bool) (string, error) {
 		}
 	}
 	return out.String(), nil
+}
+
+func formatLabelContract(label LabelContract) string {
+	if len(label.Preconditions) == 0 {
+		return label.Name
+	}
+	return label.Name + ": " + strings.Join(label.Preconditions, ", ")
 }
 
 func HasErrors(report *Report) bool {

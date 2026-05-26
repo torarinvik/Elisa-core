@@ -2,6 +2,7 @@ package easm
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -1860,6 +1861,46 @@ export def same_symbol() -> void abi c:
 	report, _ := BuildReport([]string{a, b}, "x86_64")
 	if !containsIssue(report.Issues, "duplicate-export") {
 		t.Fatalf("expected duplicate-export across files, got %#v", report.Issues)
+	}
+}
+
+func TestBuildReportIncludesTypedLabelContracts(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/typed.easm"
+	writeEASMTestFile(t, path, `module typed
+target x86_64
+export def loop(value: uintptr) -> uintptr abi c:
+    inputs: value = rdi
+    outputs: ret = rax
+    labels:
+        again: rax
+    clobbers: rax, cc
+    stack: unchanged
+    control: returns
+    requires: compare.unsigned
+    body:
+        movq %rdi, %rax
+    again:
+        cmpq $0, %rax
+        je done
+        decq %rax
+        jmp again
+    done:
+        ret
+`)
+	report, _ := BuildReport([]string{path}, "x86_64")
+	if len(report.Modules) != 1 || len(report.Modules[0].Exports) != 1 {
+		t.Fatalf("expected one EASM export, got %#v", report.Modules)
+	}
+	if got := strings.Join(report.Modules[0].Exports[0].Labels, ","); got != "again: rax" {
+		t.Fatalf("expected label contract in report, got %q", got)
+	}
+	formatted, err := FormatReport(report, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(formatted, "label again: rax") {
+		t.Fatalf("expected formatted report to include label contract, got:\n%s", formatted)
 	}
 }
 
