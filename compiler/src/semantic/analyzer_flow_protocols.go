@@ -126,25 +126,43 @@ func joinAffinePath(base, suffix string) string {
 }
 
 func directProtocolLeakKind(t Type) string {
-	instance, ok := t.(*GenericInstanceType)
-	if !ok {
+	switch tt := t.(type) {
+	case *StructType:
+		// A user-declared `affine struct` is must-consume: it models a
+		// transaction/handle that has to be consumed exactly once (e.g.
+		// MapTxn -> commit or rollback). Builtin affine carriers
+		// (Thread/Task/MutexGuard) are handled below in their state-aware
+		// forms and must not be caught here.
+		if tt.Affine && !tt.Builtin {
+			return "affine value"
+		}
+		return ""
+	case *GenericInstanceType:
+		switch tt.Name {
+		case "Thread":
+			if len(tt.Args) >= 2 && tt.Args[1].String() == "Joinable" {
+				return "joinable thread handle"
+			}
+			return ""
+		case "Task":
+			if len(tt.Args) >= 2 && tt.Args[1].String() == "Pending" {
+				return "pending task handle"
+			}
+			return ""
+		case "MutexGuard":
+			if len(tt.Args) >= 1 && tt.Args[0].String() == "Held" {
+				return "held mutex guard"
+			}
+			return ""
+		}
+		// User-declared generic affine structs are also must-consume.
+		if base, ok := tt.Base.(*StructType); ok && base.Affine && !base.Builtin {
+			return "affine value"
+		}
+		return ""
+	default:
 		return ""
 	}
-	switch instance.Name {
-	case "Thread":
-		if len(instance.Args) >= 2 && instance.Args[1].String() == "Joinable" {
-			return "joinable thread handle"
-		}
-	case "Task":
-		if len(instance.Args) >= 2 && instance.Args[1].String() == "Pending" {
-			return "pending task handle"
-		}
-	case "MutexGuard":
-		if len(instance.Args) >= 1 && instance.Args[0].String() == "Held" {
-			return "held mutex guard"
-		}
-	}
-	return ""
 }
 
 func directProtocolCarrierType(t Type) bool {
