@@ -71,3 +71,15 @@ def dynamic(slot: mutable atomic[i64]&, order: MemoryOrder):
 		t.Fatalf("expected non-constant memory order diagnostic, got:\n%s", all)
 	}
 }
+
+func TestCompareExchangeFailureOrderingCannotBeStrongerThanSuccess(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "atomic_order_cmpxchg_strength.elisa", atomicOrderTestPrelude+`
+def bad(slot: mutable atomic[i64]&):
+    _ = compare_exchange(slot, 1, 2, MemoryOrder.Relaxed, MemoryOrder.Acquire)
+    _ = compare_exchange(slot, 1, 2, MemoryOrder.Release, MemoryOrder.Acquire)
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if got := strings.Count(all, "compare_exchange failure ordering cannot be stronger than success ordering"); got != 2 {
+		t.Fatalf("expected two failure-ordering strength diagnostics, got %d:\n%s", got, all)
+	}
+}

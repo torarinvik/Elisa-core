@@ -241,6 +241,7 @@ func (a *Analyzer) validateAtomicMemoryOrderArgs(callName string, args []ast.Exp
 		if len(args) >= 5 {
 			a.validateAtomicMemoryOrder(args[3], callName, atomicOrderContextReadModifyWrite)
 			a.validateAtomicMemoryOrder(args[4], callName, atomicOrderContextFailure)
+			a.validateCompareExchangeFailureOrdering(args[3], args[4])
 		}
 	case "exchange", "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
 		if len(args) >= 3 {
@@ -298,6 +299,35 @@ func (a *Analyzer) validateAtomicMemoryOrder(arg ast.Expr, callName string, cont
 		if order < atomicMemoryOrderRelaxed || order > atomicMemoryOrderSeqCst {
 			a.errorf(arg.Pos(), "atomic %s uses unknown memory ordering %d", callName, order)
 		}
+	}
+}
+
+func (a *Analyzer) validateCompareExchangeFailureOrdering(successArg ast.Expr, failureArg ast.Expr) {
+	success, successOK := a.atomicMemoryOrderValue(successArg)
+	failure, failureOK := a.atomicMemoryOrderValue(failureArg)
+	if !successOK || !failureOK {
+		return
+	}
+	if compareExchangeFailureOrderAllowed(success, failure) {
+		return
+	}
+	a.errorf(failureArg.Pos(), "compare_exchange failure ordering cannot be stronger than success ordering")
+}
+
+func compareExchangeFailureOrderAllowed(success int64, failure int64) bool {
+	switch success {
+	case atomicMemoryOrderRelaxed:
+		return failure == atomicMemoryOrderRelaxed
+	case atomicMemoryOrderAcquire:
+		return failure == atomicMemoryOrderRelaxed || failure == atomicMemoryOrderAcquire
+	case atomicMemoryOrderRelease:
+		return failure == atomicMemoryOrderRelaxed
+	case atomicMemoryOrderAcqRel:
+		return failure == atomicMemoryOrderRelaxed || failure == atomicMemoryOrderAcquire
+	case atomicMemoryOrderSeqCst:
+		return failure == atomicMemoryOrderRelaxed || failure == atomicMemoryOrderAcquire || failure == atomicMemoryOrderSeqCst
+	default:
+		return false
 	}
 }
 
