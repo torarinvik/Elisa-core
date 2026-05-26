@@ -164,6 +164,78 @@ def debug_referee_records_poison_and_noncanonical() -> void:
 	}
 }
 
+func TestRunCLIDebugTraceTapeFingerprint(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "debug_trace_tape_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	src := fmt.Sprintf(`# include %q
+
+def record_trace_variant(value: uintptr) -> u64:
+    can Debug.Trace:
+        debug_trace_reset()
+        debug_trace_set_enabled(true)
+        debug_trace_checkpoint("entry")
+        debug_trace_value("rdi", value)
+        debug_trace_boundary("hle", value, 7.uintptr(), 9.uintptr())
+        return debug_trace_fingerprint()
+
+@test
+def debug_trace_identical_tapes_have_identical_fingerprints() -> void:
+    can Abort.Panic, Debug.Trace:
+        first: u64 = record_trace_variant(0x100000.uintptr())
+        second: u64 = record_trace_variant(0x100000.uintptr())
+        assert_eq(first, second)
+        assert_eq(debug_trace_count(), 3.usize())
+        first_event: DebugTraceEvent = debug_trace_event_at(0.usize())
+        assert_eq(first_event.kind, DEBUG_TRACE_KIND_CHECKPOINT)
+        last_event: DebugTraceEvent = debug_trace_event_at(2.usize())
+        assert_eq(last_event.kind, DEBUG_TRACE_KIND_BOUNDARY)
+        assert_eq(last_event.a, 0x100000.uintptr())
+
+@test
+def debug_trace_value_divergence_changes_fingerprint() -> void:
+    can Abort.Panic, Debug.Trace:
+        first: u64 = record_trace_variant(0x100000.uintptr())
+        second: u64 = record_trace_variant(0x100008.uintptr())
+        assert_ne(first, second)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write debug trace tape fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected debug trace tape test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] debug_trace_identical_tapes_have_identical_fingerprints",
+		"[       OK ] debug_trace_identical_tapes_have_identical_fingerprints",
+		"[ RUN      ] debug_trace_value_divergence_changes_fingerprint",
+		"[       OK ] debug_trace_value_divergence_changes_fingerprint",
+		"[ SUMMARY  ] 2 test(s) selected; passed=2 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected debug trace tape output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLINativeRuntimeStringBuilderShortStringRegression(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

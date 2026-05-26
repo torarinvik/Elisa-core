@@ -3,9 +3,18 @@
 # ============================================================
 
 const DEBUG_REFEREE_TRACE_CAP: usize = 256
+const DEBUG_TRACE_TAPE_CAP: usize = 1024
 
 permission Debug:
     Referee
+    Trace
+
+const DEBUG_TRACE_KIND_CHECKPOINT: int = 1
+const DEBUG_TRACE_KIND_VALUE: int = 2
+const DEBUG_TRACE_KIND_BOUNDARY: int = 3
+
+const DEBUG_TRACE_HASH_INITIAL: u64 = 0x12345678.u64()
+const DEBUG_TRACE_HASH_PRIME: u64 = 16777619.u64()
 
 const DEBUG_REFEREE_KIND_CHECK_CALLABLE: int = 1
 const DEBUG_REFEREE_KIND_CHECK_POINTER: int = 2
@@ -31,12 +40,28 @@ struct DebugRefereeEvent:
     value: mutable uintptr
     label: mutable cstr
 
+struct DebugTraceEvent:
+    sequence: mutable u64
+    kind: mutable int
+    a: mutable uintptr
+    b: mutable uintptr
+    c: mutable uintptr
+    label: mutable cstr
+
 global mutable debug_referee_enabled: bool = false
 global mutable debug_referee_trace_enabled: bool = false
 global mutable debug_referee_sequence: u64 = 0
 global mutable debug_referee_event_count: usize = 0
 global mutable debug_referee_last_event: DebugRefereeEvent = zeroed
 global mutable debug_referee_events: DebugRefereeEvent[DEBUG_REFEREE_TRACE_CAP] = zeroed
+
+global mutable debug_trace_enabled: bool = false
+global mutable debug_trace_sequence: u64 = 0
+global mutable debug_trace_event_count: usize = 0
+global mutable debug_trace_overflowed: bool = false
+global mutable debug_trace_hash: u64 = DEBUG_TRACE_HASH_INITIAL
+global mutable debug_trace_last_event: DebugTraceEvent = zeroed
+global mutable debug_trace_events: DebugTraceEvent[DEBUG_TRACE_TAPE_CAP] = zeroed
 
 def debug_referee_set_enabled(enabled: bool) can[Debug.Referee]:
     debug_referee_enabled <- enabled
@@ -153,3 +178,71 @@ def debug_referee_assert_callable(label: cstr, value: uintptr) can[Debug.Referee
         if debug_referee_check_callable(label, value):
             return
         panic("debug referee stopped unsafe callable")
+
+def debug_trace_set_enabled(enabled: bool) can[Debug.Trace]:
+    debug_trace_enabled <- enabled
+
+def debug_trace_reset() can[Debug.Trace]:
+    debug_trace_sequence <- 0
+    debug_trace_event_count <- 0
+    debug_trace_overflowed <- false
+    debug_trace_hash <- DEBUG_TRACE_HASH_INITIAL
+    debug_trace_last_event <- DebugTraceEvent(0.u64(), 0, 0.uintptr(), 0.uintptr(), 0.uintptr(), "")
+
+def debug_trace_count() -> usize:
+    return debug_trace_event_count
+
+def debug_trace_fingerprint() -> u64:
+    return debug_trace_hash
+
+def debug_trace_did_overflow() -> bool:
+    return debug_trace_overflowed
+
+def debug_trace_event_at(index: usize) -> DebugTraceEvent:
+    if index >= DEBUG_TRACE_TAPE_CAP:
+        return DebugTraceEvent(0.u64(), 0, 0.uintptr(), 0.uintptr(), 0.uintptr(), "")
+    return debug_trace_events[index]
+
+def debug_trace_last_kind() -> int:
+    return debug_trace_last_event.kind
+
+def debug_trace_mix_word(word: uintptr) can[Debug.Trace]:
+    debug_trace_hash <- (debug_trace_hash ^ word.u64()) * DEBUG_TRACE_HASH_PRIME
+
+def debug_trace_record(kind: int, label: cstr, a: uintptr, b: uintptr, c: uintptr) can[Debug.Trace]:
+    can Debug.Trace:
+        if not debug_trace_enabled:
+            return
+
+        debug_trace_sequence <- debug_trace_sequence + 1
+        event: DebugTraceEvent = DebugTraceEvent(debug_trace_sequence, kind, a, b, c, label)
+        debug_trace_last_event <- event
+
+        debug_trace_mix_word(debug_trace_sequence.uintptr())
+        debug_trace_mix_word(kind.uintptr())
+        debug_trace_mix_word(a)
+        debug_trace_mix_word(b)
+        debug_trace_mix_word(c)
+
+        if debug_trace_event_count < DEBUG_TRACE_TAPE_CAP:
+            debug_trace_events[debug_trace_event_count] <- event
+        else:
+            debug_trace_overflowed <- true
+        debug_trace_event_count <- debug_trace_event_count + 1
+
+def debug_trace_checkpoint(label: cstr) can[Debug.Trace]:
+    can Debug.Trace:
+        debug_trace_record(DEBUG_TRACE_KIND_CHECKPOINT, label, 0.uintptr(), 0.uintptr(), 0.uintptr())
+
+def debug_trace_value(label: cstr, value: uintptr) can[Debug.Trace]:
+    can Debug.Trace:
+        debug_trace_record(DEBUG_TRACE_KIND_VALUE, label, value, 0.uintptr(), 0.uintptr())
+
+def debug_trace_boundary(label: cstr, a: uintptr, b: uintptr, c: uintptr) can[Debug.Trace]:
+    can Debug.Trace:
+        debug_trace_record(DEBUG_TRACE_KIND_BOUNDARY, label, a, b, c)
+
+def debug_trace_assert_fingerprint(expected: u64) can[Debug.Trace, Abort.Panic]:
+    can Abort.Panic:
+        if debug_trace_hash != expected:
+            panic("debug trace fingerprint mismatch")
