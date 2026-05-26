@@ -1184,6 +1184,50 @@ export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
 	}
 }
 
+func TestVerifyRejectsTailJumpFramePointerClobberWithoutEscape(t *testing.T) {
+	src := `module frame_handoff
+target x86_64
+export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
+    inputs: entry = rdi, stack_top = rsi
+    clobbers: r11, rsp, rbp, memory
+    preserves: callee_saved
+    stack: switches, owns, aligned 16, noreturn
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        movq %rdi, %r11
+        movq %rsi, %rsp
+        movq %rsi, %rbp
+        jmp *%r11
+`
+	_, issues := Parse("frame_handoff.easm", src)
+	if !containsIssue(issues, "tail-jump-frame-pointer-clobber") {
+		t.Fatalf("expected tail-jump-frame-pointer-clobber, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsTailJumpFramePointerHandoffEscape(t *testing.T) {
+	src := `module frame_handoff
+target x86_64
+export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
+    inputs: entry = rdi, stack_top = rsi
+    clobbers: r11, rsp, rbp, memory
+    preserves: callee_saved
+    stack: switches, owns, aligned 16, noreturn
+    control: noreturn, tail_jumps
+    requires: control.indirect, frame_pointer.handoff.unchecked
+    body:
+        movq %rdi, %r11
+        movq %rsi, %rsp
+        movq %rsi, %rbp
+        jmp *%r11
+`
+	_, issues := Parse("frame_handoff_ok.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected explicit frame handoff escape to verify, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsLargeStackAdjustWithoutProbe(t *testing.T) {
 	src := `module stack_probe
 target x86_64

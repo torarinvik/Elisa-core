@@ -697,6 +697,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	if controlSet["returns"] && hasCallImmediatelyBeforeRet(fn.Instructions) && !requireSet["call.return_address_choreography.unchecked"] {
 		issues = append(issues, Issue{Severity: "error", Code: "call-immediately-before-ret", File: path, Line: fn.Line, Message: "call followed immediately by ret requires explicit call.return_address_choreography.unchecked intent"})
 	}
+	if controlSet["tail_jumps"] && clobberSet["rbp"] && !requireSet["frame_pointer.handoff.unchecked"] {
+		issues = append(issues, Issue{Severity: "error", Code: "tail-jump-frame-pointer-clobber", File: path, Line: fn.Line, Message: "tail-jump handoff clobbers rbp; preserve the incoming frame chain or require frame_pointer.handoff.unchecked after ABI proof"})
+	}
 	for _, reg := range []string{"rbx", "rbp", "r12", "r13", "r14", "r15"} {
 		if clobberSet[reg] && !preserveSet[reg] && !preserveSet["callee_saved"] {
 			issues = append(issues, Issue{Severity: "error", Code: "callee-saved-not-preserved", File: path, Line: fn.Line, Message: fmt.Sprintf("callee-saved register %s is clobbered without preservation contract", reg)})
@@ -1108,6 +1111,7 @@ func allowedRequireToken(token string) bool {
 		"control.tiny_target.unchecked",
 		"debug.trap",
 		"fixed_address",
+		"frame_pointer.handoff.unchecked",
 		"input.unused",
 		"immediate.truncation",
 		"operand_size.inferred",
