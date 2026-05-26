@@ -67,7 +67,7 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 
 	runnerPath := filepath.Join(tempDir, "generated_runner.elisa")
 	analyzeStart := time.Now()
-	_, runnerResult, ok := analyzeProgramWithOptions(runnerPath, []byte(runnerSource), stderr, semantic.AnalyzeOptions{TargetTriple: targetTriple})
+	_, runnerResult, ok := analyzeProgramWithOptions(runnerPath, []byte(runnerSource), stderr, semantic.AnalyzeOptions{TargetTriple: targetTriple, TargetDebug: optLevel == backend.OptimizationLevel0})
 	analyzeElapsed := time.Since(analyzeStart)
 	if !ok {
 		return "", cleanup, nativeBuildTiming{CacheLookup: time.Since(cacheLookupStart)}, analyzeElapsed, 0, fmt.Errorf("failed to analyze generated test runner")

@@ -99,7 +99,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		}
 		return 0
 	case emitIR:
-		file, _, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple})
+		file, _, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple, TargetDebug: effectiveOptimizationLevel(options) == backend.OptimizationLevel0})
 		if !ok {
 			return 1
 		}
@@ -122,6 +122,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{
 			EnforceUnsafePermissions: true,
 			TargetTriple:             options.targetTriple,
+			TargetDebug:              effectiveOptimizationLevel(options) == backend.OptimizationLevel0,
 		})
 		if errs := result.Errors(); len(errs) > 0 {
 			for _, e := range errs {
@@ -152,6 +153,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{
 			EnforceProgressSafety: true,
 			TargetTriple:          options.targetTriple,
+			TargetDebug:           effectiveOptimizationLevel(options) == backend.OptimizationLevel0,
 		})
 		if errs := result.Errors(); len(errs) > 0 {
 			for _, e := range errs {
@@ -171,7 +173,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		return 0
 	}
 
-	_, result, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple})
+	_, result, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple, TargetDebug: effectiveOptimizationLevel(options) == backend.OptimizationLevel0})
 	if !ok {
 		return 1
 	}

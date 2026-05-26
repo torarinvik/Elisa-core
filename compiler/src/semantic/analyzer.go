@@ -358,6 +358,7 @@ type AnalyzeOptions struct {
 	EnforceUnsafePermissions bool
 	EnforceProgressSafety    bool
 	TargetTriple             string
+	TargetDebug              bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -455,7 +456,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
 	a.registerBuiltins()
-	a.populateTargetConstValues(options.TargetTriple)
+	a.populateTargetConstValues(options.TargetTriple, options.TargetDebug)
 	activeDecls := a.flattenScopedDecls(activeFile.Decls, "", nil)
 	a.collectConstValues(activeDecls)
 	a.collectPermissionDecls(activeDecls)

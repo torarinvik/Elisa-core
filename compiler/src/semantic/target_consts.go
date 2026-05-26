@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func (a *Analyzer) populateTargetConstValues(targetTriple string) {
+func (a *Analyzer) populateTargetConstValues(targetTriple string, targetDebug bool) {
 	osName := targetOSFromTriple(targetTriple)
 	archName := targetArchFromTriple(targetTriple)
 	compilerName := targetCompilerFromTriple(targetTriple)
@@ -23,9 +23,13 @@ func (a *Analyzer) populateTargetConstValues(targetTriple string) {
 	a.setTargetConstAliasBool("PLATFORM_FREEBSD", osName == "freebsd")
 	a.setTargetConstAliasBool("ARCH_X86_64", archName == "x86_64")
 	a.setTargetConstAliasBool("ARCH_ARM64", archName == "arm64" || archName == "aarch64")
+	a.setTargetConstAliasBool("DEBUG", targetDebug)
+	a.setTargetConstAliasBool("RELEASE", !targetDebug)
 	a.setTargetConstString("target.os", osName)
 	a.setTargetConstString("target.arch", archName)
 	a.setTargetConstString("target.compiler", compilerName)
+	a.setTargetConstBool("target.debug", targetDebug)
+	a.setTargetConstBool("target.release", !targetDebug)
 	a.setTargetConstBool("target.features.avx2", targetFeatureFromTriple(targetTriple, "avx2"))
 	a.setTargetConstBool("target.features.u128", compilerName != "msvc")
 	a.setTargetConstBool("target.features.posix", osName == "macos" || osName == "linux" || osName == "freebsd")
@@ -34,6 +38,8 @@ func (a *Analyzer) populateTargetConstValues(targetTriple string) {
 		"os":       {Kind: ConstString, String: osName},
 		"arch":     {Kind: ConstString, String: archName},
 		"compiler": {Kind: ConstString, String: compilerName},
+		"debug":    {Kind: ConstBool, Bool: targetDebug},
+		"release":  {Kind: ConstBool, Bool: !targetDebug},
 		"features": {Kind: ConstRecord, Fields: map[string]ConstValue{
 			"avx2":  {Kind: ConstBool, Bool: targetFeatureFromTriple(targetTriple, "avx2")},
 			"u128":  {Kind: ConstBool, Bool: compilerName != "msvc"},

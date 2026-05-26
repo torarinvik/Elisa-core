@@ -60,6 +60,28 @@ static else:
 	}
 }
 
+func TestTargetDebugConstsDriveStaticIf(t *testing.T) {
+	src := `
+static if target.debug:
+    const SELECTED: int = 1
+static elif DEBUG:
+    const SELECTED: int = 2
+static else:
+    const SELECTED: int = 3
+`
+	debug := analyzeFunctionAnalysisTestSourceWithOptions(t, "target_debug.elisa", src, AnalyzeOptions{TargetDebug: true})
+	if value, ok := debug.ConstValues["SELECTED"]; !ok || value.Kind != ConstInt || value.Int != 1 {
+		t.Fatalf("expected debug target static if to select 1, got %#v ok=%v", value, ok)
+	}
+	release := analyzeFunctionAnalysisTestSourceWithOptions(t, "target_release.elisa", src, AnalyzeOptions{TargetDebug: false})
+	if value, ok := release.ConstValues["SELECTED"]; !ok || value.Kind != ConstInt || value.Int != 3 {
+		t.Fatalf("expected release target static if to select 3, got %#v ok=%v", value, ok)
+	}
+	if value, ok := release.ConstValues["target.release"]; !ok || value.Kind != ConstBool || !value.Bool {
+		t.Fatalf("expected target.release const to be true in release mode, got %#v ok=%v", value, ok)
+	}
+}
+
 func TestTargetCompatibilityAliasesDriveStaticIf(t *testing.T) {
 	src := `
 static if PLATFORM_WINDOWS:

@@ -123,6 +123,7 @@ func buildCArchive(result *semantic.Result, sourcePath string, outputPath string
 	unsafeResult := semantic.AnalyzeWithOptions(result.File, semantic.AnalyzeOptions{
 		EnforceUnsafePermissions: true,
 		TargetTriple:             targetTriple,
+		TargetDebug:              optLevel == backend.OptimizationLevel0,
 	})
 	if errs := unsafeResult.Errors(); len(errs) != 0 {
 		for _, e := range errs {

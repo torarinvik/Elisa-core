@@ -268,7 +268,7 @@ func (a *Analyzer) validateFunctionBoundaryPointerArgsAnnotation(annotation ast.
 			continue
 		}
 		if !isBoundaryPointerCarrierType(signature.Params[paramIndex]) {
-			a.errorf(annotation.Position, "@boundary_pointer_args on function %q marks %q as an address-space pointer, but its type is %s; use an address carrier such as GuestVAddr[T] or uintptr at the unsafe boundary and resolve before host dereference", fn.Name, strings.TrimSpace(raw), signature.Params[paramIndex])
+			a.errorf(annotation.Position, "@boundary_pointer_args on function %q marks %q as an address-space pointer, but its type is %s; use a typed address-space carrier such as GuestVAddr[T], HostPtr[T], or NativeMappedGuestPtr[T] at the unsafe boundary and resolve before host dereference", fn.Name, strings.TrimSpace(raw), signature.Params[paramIndex])
 			ok = false
 		}
 	}
@@ -292,12 +292,8 @@ func (a *Analyzer) applyFunctionBoundaryPointerArgsAnnotation(annotation ast.Ann
 
 func isBoundaryPointerCarrierType(t Type) bool {
 	switch tt := t.(type) {
-	case *BuiltinType:
-		return tt.Name == "uintptr" || tt.Name == "u64"
-	case *BitIntType:
-		return !tt.Signed && tt.Width == 64
 	case *AddressSpaceType:
-		return tt.Space == "guest"
+		return tt.Space == "guest" || tt.Space == "host" || tt.Space == "native_mapped_guest"
 	case *InvalidType:
 		return true
 	default:

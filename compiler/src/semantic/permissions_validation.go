@@ -459,6 +459,10 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 			a.errorf(pos, "%s", effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), []string{"Unsafe"}, "can Unsafe.GuestSegmentInstall"))
 			return
 		}
+		if ref.Name == "Segment" && (ref.Member == "Host" || ref.Member == "Guest") {
+			a.errorf(pos, "%s", effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), []string{"Segment"}, "can Segment."+ref.Member))
+			return
+		}
 	}
 	missing := missingGrantedPermissionFamilies(functionPermissionRefs(fnType), granted)
 	if len(missing) == 0 {
