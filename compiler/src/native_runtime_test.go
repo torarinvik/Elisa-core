@@ -196,11 +196,9 @@ def debug_trace_identical_tapes_have_identical_fingerprints() -> void:
         second: u64 = record_trace_variant(0x100000.uintptr())
         assert_eq(first, second)
         assert_eq(debug_trace_count(), 3.usize())
-        first_event: DebugTraceEvent = debug_trace_event_at(0.usize())
-        assert_eq(first_event.kind, DEBUG_TRACE_KIND_CHECKPOINT)
-        last_event: DebugTraceEvent = debug_trace_event_at(2.usize())
-        assert_eq(last_event.kind, DEBUG_TRACE_KIND_BOUNDARY)
-        assert_eq(last_event.a, 0x100000.uintptr())
+        assert_eq(debug_trace_event_kind_at(0.usize()), DEBUG_TRACE_KIND_CHECKPOINT)
+        assert_eq(debug_trace_event_kind_at(2.usize()), DEBUG_TRACE_KIND_BOUNDARY)
+        assert_eq(debug_trace_event_a_at(2.usize()), 0x100000.uintptr())
 
 @test
 def debug_trace_value_divergence_changes_fingerprint() -> void:

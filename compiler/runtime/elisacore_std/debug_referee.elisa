@@ -203,6 +203,26 @@ def debug_trace_event_at(index: usize) -> DebugTraceEvent:
         return DebugTraceEvent(0.u64(), 0, 0.uintptr(), 0.uintptr(), 0.uintptr(), "")
     return debug_trace_events[index]
 
+def debug_trace_event_kind_at(index: usize) -> int:
+    if index >= DEBUG_TRACE_TAPE_CAP:
+        return 0
+    return debug_trace_events[index].kind
+
+def debug_trace_event_a_at(index: usize) -> uintptr:
+    if index >= DEBUG_TRACE_TAPE_CAP:
+        return 0.uintptr()
+    return debug_trace_events[index].a
+
+def debug_trace_event_b_at(index: usize) -> uintptr:
+    if index >= DEBUG_TRACE_TAPE_CAP:
+        return 0.uintptr()
+    return debug_trace_events[index].b
+
+def debug_trace_event_c_at(index: usize) -> uintptr:
+    if index >= DEBUG_TRACE_TAPE_CAP:
+        return 0.uintptr()
+    return debug_trace_events[index].c
+
 def debug_trace_last_kind() -> int:
     return debug_trace_last_event.kind
 
