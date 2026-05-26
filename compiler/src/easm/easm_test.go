@@ -62,6 +62,47 @@ export def ticks() -> u64 abi c:
 	}
 }
 
+func TestVerifyRequiresAtomicRMWCapability(t *testing.T) {
+	src := `module atomics
+target x86_64
+export def swap32(ptr: uintptr, value: u32) -> u32 abi c:
+    inputs: ptr = rdi, value = rsi
+    outputs: ret = rax
+    clobbers: rax, memory
+    stack: unchanged
+    control: returns
+    body:
+        movl %esi, %eax
+        xchgl %eax, (%rdi)
+        ret
+`
+	_, issues := Parse("atomic.easm", src)
+	if !containsIssue(issues, "missing-capability") {
+		t.Fatalf("expected missing-capability for atomic xchg, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsAtomicRMWWithIntent(t *testing.T) {
+	src := `module atomics
+target x86_64
+export def swap32(ptr: uintptr, value: u32) -> u32 abi c:
+    inputs: ptr = rdi, value = rsi
+    outputs: ret = rax
+    clobbers: rax, memory
+    stack: unchanged
+    control: returns
+    requires: x86_64.atomic.rmw
+    body:
+        movl %esi, %eax
+        xchgl %eax, (%rdi)
+        ret
+`
+	_, issues := Parse("atomic.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected atomic xchg with explicit intent to verify, got %#v", issues)
+	}
+}
+
 func TestVerifyAcceptsShadPS4GuestEntryTailJumpTrampoline(t *testing.T) {
 	src := `module shadps4_guest
 target x86_64

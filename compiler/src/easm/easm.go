@@ -85,6 +85,7 @@ var (
 	allowedOps     = map[string]bool{
 		"mov": true, "movq": true, "lea": true, "push": true, "pushq": true, "pop": true, "popq": true,
 		"movb": true, "movw": true, "movl": true, "movsx": true, "movsxd": true, "movzx": true,
+		"xchg": true, "xchgl": true, "xchgq": true,
 		"add": true, "addq": true, "sub": true, "subq": true, "and": true, "andq": true,
 		"cmp": true, "cmpq": true, "test": true, "testq": true, "inc": true, "incq": true, "dec": true, "decq": true,
 		"xor": true, "xorq": true, "call": true, "callq": true, "jmp": true, "ret": true,
@@ -96,6 +97,7 @@ var (
 	capabilityByOp = map[string]string{
 		"rdtsc": "x86_64.rdtsc", "lfence": "x86_64.sse.lfence", "pause": "x86_64.sse.pause", "yield": "aarch64.yield",
 		"cpuid": "x86_64.cpuid",
+		"xchg":  "x86_64.atomic.rmw", "xchgl": "x86_64.atomic.rmw", "xchgq": "x86_64.atomic.rmw",
 		"mrs":   "aarch64.cntvct", "isb": "aarch64.cntvct", "fldcw": "x86_64.fpu_control",
 		"fnstcw": "x86_64.fpu_control", "stmxcsr": "x86_64.fpu_control", "ldmxcsr": "x86_64.fpu_control",
 		"emms": "x86_64.fpu_control", "vzeroall": "x86_64.simd_state", "trap": "debug.trap",
