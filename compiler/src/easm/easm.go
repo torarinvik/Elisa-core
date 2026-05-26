@@ -59,6 +59,7 @@ type LabelContract struct {
 
 type machineFactState struct {
 	LiveRegs        map[string]bool
+	KnownUInt       map[string]uint64
 	FS              string
 	StackMod16      int
 	StackMod16Known bool
@@ -271,7 +272,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	labelContracts := labelContractMap(fn.Labels)
 	definedLabels := bodyLabelDefinitions(fn.Instructions)
 	seenLabelDefinitions := map[string]int{}
-	state := machineFactState{LiveRegs: map[string]bool{}}
+	state := machineFactState{LiveRegs: map[string]bool{}, KnownUInt: map[string]uint64{}}
 	for reg := range inputRegs {
 		state.LiveRegs[reg] = true
 	}
@@ -383,6 +384,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			canonical := canonicalX86GPR(written)
 			if isX86GPR(canonical) {
 				state.LiveRegs[canonical] = true
+				updateKnownRegisterValue(state, inst.Text, canonical)
 			}
 			if returnReg != "" && canonical == returnReg {
 				returnRegWritten = true
@@ -397,6 +399,13 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if isIndirectControlTransfer(op, inst.Text) && !requireSet["control.indirect"] {
 			issues = append(issues, Issue{Severity: "error", Code: "indirect-control-intent-missing", File: path, Line: inst.Line, Message: "indirect call/jmp requires control.indirect intent"})
 		}
+		if isIndirectControlTransfer(op, inst.Text) && !requireSet["control.tiny_target.unchecked"] {
+			if reg := indirectControlTargetRegister(inst.Text); reg != "" {
+				if value, ok := state.KnownUInt[reg]; ok && value > 0 && value < 0x10000 {
+					issues = append(issues, Issue{Severity: "error", Code: "tiny-indirect-control-target", File: path, Line: inst.Line, Message: fmt.Sprintf("indirect %s target %s is known tiny value 0x%x; require control.tiny_target.unchecked only for intentional sentinels", op, reg, value)})
+				}
+			}
+		}
 		if isDirectSymbolControlTransfer(op, inst.Text) && !definedLabels[directControlTarget(op, inst.Text)] && !requireSet["control.direct"] && !requireSet["relocation.symbol"] {
 			issues = append(issues, Issue{Severity: "error", Code: "direct-control-intent-missing", File: path, Line: inst.Line, Message: "direct symbolic call/jmp requires control.direct or relocation.symbol intent"})
 		}
@@ -407,7 +416,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			issues = append(issues, Issue{Severity: "error", Code: "reserved-register-use", File: path, Line: inst.Line, Message: "target-reserved register requires an explicit platform capability"})
 		}
 		for _, reg := range implicitClobbers(op) {
-			delete(state.LiveRegs, canonicalX86GPR(reg))
+			canonical := canonicalX86GPR(reg)
+			delete(state.LiveRegs, canonical)
+			delete(state.KnownUInt, canonical)
 			if returnReg != "" && canonicalX86GPR(reg) == returnReg {
 				returnRegWritten = true
 			}
@@ -508,6 +519,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			for _, reg := range callerSavedGPRs() {
 				clobberedByCall[reg] = inst.Line
 				delete(state.LiveRegs, reg)
+				delete(state.KnownUInt, reg)
 			}
 		case op == "jmp":
 			if target := directControlTarget(op, inst.Text); target != "" {
@@ -1075,6 +1087,7 @@ func allowedRequireToken(token string) bool {
 		"compare.unsigned",
 		"control.direct",
 		"control.indirect",
+		"control.tiny_target.unchecked",
 		"debug.trap",
 		"fixed_address",
 		"input.unused",
@@ -1310,9 +1323,12 @@ func canonicalRegisterPreconditionSet(preconditions []string) map[string]bool {
 }
 
 func applyMachineFactPreconditions(state machineFactState, preconditions []string) machineFactState {
-	out := machineFactState{LiveRegs: map[string]bool{}, FS: state.FS, StackMod16: state.StackMod16, StackMod16Known: state.StackMod16Known}
+	out := machineFactState{LiveRegs: map[string]bool{}, KnownUInt: map[string]uint64{}, FS: state.FS, StackMod16: state.StackMod16, StackMod16Known: state.StackMod16Known}
 	for reg := range state.LiveRegs {
 		out.LiveRegs[reg] = true
+	}
+	for reg, value := range state.KnownUInt {
+		out.KnownUInt[reg] = value
 	}
 	for _, pre := range preconditions {
 		if expected, ok := segmentFactPrecondition(pre); ok {
@@ -1334,6 +1350,9 @@ func applyMachineFactPreconditions(state machineFactState, preconditions []strin
 func applyMachineStateAssertion(state machineFactState, assertion string) machineFactState {
 	if state.LiveRegs == nil {
 		state.LiveRegs = map[string]bool{}
+	}
+	if state.KnownUInt == nil {
+		state.KnownUInt = map[string]uint64{}
 	}
 	if expected, ok := segmentFactPrecondition(assertion); ok {
 		state.FS = expected
@@ -1758,6 +1777,51 @@ func writtenRegister(text string) string {
 	return ""
 }
 
+func updateKnownRegisterValue(state machineFactState, text string, reg string) {
+	if state.KnownUInt == nil {
+		state.KnownUInt = map[string]uint64{}
+	}
+	delete(state.KnownUInt, reg)
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return
+	}
+	op := normalizeOp(fields[0])
+	parts := splitInstructionOperands(text)
+	if len(parts) < 2 {
+		return
+	}
+	if (op == "mov" || op == "movq" || op == "movl") && canonicalX86GPR(strings.TrimPrefix(strings.TrimSpace(parts[len(parts)-1]), "%")) == reg {
+		if value, ok := parseImmediateLiteral(parts[0]); ok {
+			state.KnownUInt[reg] = value
+		}
+		return
+	}
+	if (op == "xor" || op == "xorq") && len(parts) == 2 {
+		left := canonicalX86GPR(strings.TrimPrefix(strings.TrimSpace(parts[0]), "%"))
+		right := canonicalX86GPR(strings.TrimPrefix(strings.TrimSpace(parts[1]), "%"))
+		if left != "" && left == right && right == reg {
+			state.KnownUInt[reg] = 0
+		}
+	}
+}
+
+func parseImmediateLiteral(value string) (uint64, bool) {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "$")
+	value = strings.TrimPrefix(value, "#")
+	value = strings.TrimSuffix(value, ";")
+	value = strings.ReplaceAll(value, "_", "")
+	if value == "" || strings.HasPrefix(value, "-") {
+		return 0, false
+	}
+	parsed, err := strconv.ParseUint(value, 0, 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
+
 func calleeSavedPushPopProven(instructions []Instruction, reg string) bool {
 	reg = canonicalX86GPR(reg)
 	firstWrite := -1
@@ -1979,6 +2043,20 @@ func isIndirectControlTransfer(op string, text string) bool {
 		return false
 	}
 	return strings.HasPrefix(strings.TrimSpace(parts[0]), "*")
+}
+
+func indirectControlTargetRegister(text string) string {
+	parts := splitInstructionOperands(text)
+	if len(parts) == 0 {
+		return ""
+	}
+	target := strings.TrimSpace(parts[0])
+	target = strings.TrimPrefix(target, "*")
+	target = strings.TrimPrefix(target, "%")
+	if isRegisterName(target) {
+		return canonicalX86GPR(target)
+	}
+	return ""
 }
 
 func isDirectSymbolControlTransfer(op string, text string) bool {

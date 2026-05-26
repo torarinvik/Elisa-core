@@ -2000,6 +2000,42 @@ export def jump_when_call_aligned(value: uintptr) -> void abi c:
 	}
 }
 
+func TestVerifyRejectsKnownTinyIndirectControlTarget(t *testing.T) {
+	src := `module tiny
+target x86_64
+export def bad_target() -> void abi c:
+    clobbers: rax
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        movq $0x1f4, %rax
+        jmp *%rax
+`
+	_, issues := Parse("tiny_target.easm", src)
+	if !containsIssue(issues, "tiny-indirect-control-target") {
+		t.Fatalf("expected tiny-indirect-control-target, got %#v", issues)
+	}
+}
+
+func TestVerifyAllowsIntentionalTinyIndirectControlTarget(t *testing.T) {
+	src := `module tiny
+target x86_64
+export def sentinel_target() -> void abi c:
+    clobbers: rax
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: control.indirect, control.tiny_target.unchecked
+    body:
+        movq $0x1f4, %rax
+        jmp *%rax
+`
+	_, issues := Parse("tiny_target_allowed.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected intentional tiny target to verify, got %#v", issues)
+	}
+}
+
 func containsIssue(issues []Issue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {
