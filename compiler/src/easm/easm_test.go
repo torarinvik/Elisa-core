@@ -196,7 +196,7 @@ export def run_on_another_stack(arg: uintptr, entry: uintptr, stack: uintptr) ->
     inputs: arg = rdi, entry = rsi, stack = rdx
     clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r12, r13, rsp, rbp, cc, memory
     preserves: r12, r13, callee_saved
-    stack: switches
+    stack: switches, owns
     control: returns
     requires: control.indirect, stack.call_alignment.unchecked, callee_saved.preservation.unchecked, input.unused
     body:
@@ -1045,6 +1045,84 @@ export def bad_fs_write(selector: u16) -> void abi c:
 	_, issues := Parse("tls_write_no_memory.easm", src)
 	if !containsIssue(issues, "segment-register-write-without-memory-clobber") {
 		t.Fatalf("expected segment-register-write-without-memory-clobber, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsReturningSegmentRegisterWriteWithoutLifetimeContract(t *testing.T) {
+	src := `module tls
+target x86_64
+export def bad_fs_write(selector: u16) -> void abi c:
+    inputs: selector = rdi
+    clobbers: memory
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs, x86_64.segment.write
+    body:
+        movw %di, %fs
+        ret
+`
+	_, issues := Parse("tls_write_lifetime.easm", src)
+	if !containsIssue(issues, "segment-register-return-without-lifetime-contract") {
+		t.Fatalf("expected segment-register-return-without-lifetime-contract, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsPersistentSegmentRegisterWriteContract(t *testing.T) {
+	src := `module tls
+target x86_64
+export def load_fs(selector: u16) -> void abi c:
+    inputs: selector = rdi
+    clobbers: memory
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent
+    body:
+        movw %di, %fs
+        ret
+`
+	_, issues := Parse("tls_write_persistent.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected persistent segment write contract to verify, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsStackTopHandoffWithoutOwnershipContract(t *testing.T) {
+	src := `module stack_owner
+target x86_64
+export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
+    inputs: entry = rdi, stack_top = rsi
+    clobbers: r11, rsp, memory
+    stack: switches, aligned 16, noreturn
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        movq %rdi, %r11
+        movq %rsi, %rsp
+        jmp *%r11
+`
+	_, issues := Parse("stack_owner.easm", src)
+	if !containsIssue(issues, "stack-switch-without-ownership-contract") {
+		t.Fatalf("expected stack-switch-without-ownership-contract, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsStackTopHandoffWithOwnershipContract(t *testing.T) {
+	src := `module stack_owner
+target x86_64
+export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
+    inputs: entry = rdi, stack_top = rsi
+    clobbers: r11, rsp, memory
+    stack: switches, owns, aligned 16, noreturn
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        movq %rdi, %r11
+        movq %rsi, %rsp
+        jmp *%r11
+`
+	_, issues := Parse("stack_owner_ok.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected owned stack handoff to verify, got %#v", issues)
 	}
 }
 

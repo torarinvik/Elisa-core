@@ -98,7 +98,7 @@ var (
 		"rdtsc": "x86_64.rdtsc", "lfence": "x86_64.sse.lfence", "pause": "x86_64.sse.pause", "yield": "aarch64.yield",
 		"cpuid": "x86_64.cpuid",
 		"xchg":  "x86_64.atomic.rmw", "xchgl": "x86_64.atomic.rmw", "xchgq": "x86_64.atomic.rmw",
-		"mrs":   "aarch64.cntvct", "isb": "aarch64.cntvct", "fldcw": "x86_64.fpu_control",
+		"mrs": "aarch64.cntvct", "isb": "aarch64.cntvct", "fldcw": "x86_64.fpu_control",
 		"fnstcw": "x86_64.fpu_control", "stmxcsr": "x86_64.fpu_control", "ldmxcsr": "x86_64.fpu_control",
 		"emms": "x86_64.fpu_control", "vzeroall": "x86_64.simd_state", "trap": "debug.trap",
 	}
@@ -248,6 +248,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	outputSet := outputRegisterSet(fn.Outputs)
 	returnReg := returnOutputRegister(fn.Outputs)
 	inputRegs := inputRegisterSet(fn.Inputs)
+	inputRegNames := inputRegisterNameSet(fn.Inputs)
 	returnsVoid := strings.TrimSpace(fn.ReturnType) == "void"
 	stackDelta := 0
 	maxEntryStackPopDelta := 0
@@ -260,6 +261,8 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	usesJmp := false
 	usesRet := false
 	writesSP := false
+	writesSPFromOwnedInput := false
+	writesSegment := false
 	mayFault := false
 	flagsLive := false
 	wrotePartialReturn := false
@@ -316,6 +319,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		}
 		if writesSegmentRegister(inst.Text) && !clobberSet["memory"] {
 			issues = append(issues, Issue{Severity: "error", Code: "segment-register-write-without-memory-clobber", File: path, Line: inst.Line, Message: "writing fs/gs changes TLS addressing and requires memory clobber"})
+		}
+		if writesSegmentRegister(inst.Text) {
+			writesSegment = true
 		}
 		if written := writtenRegister(inst.Text); written != "" {
 			canonical := canonicalX86GPR(written)
@@ -425,6 +431,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			if writesStackPointer(inst.Text) {
 				mutatesStack = true
 				writesSP = true
+				if param := inputRegNames[stackPointerSourceRegister(inst.Text)]; strings.Contains(param, "stack") {
+					writesSPFromOwnedInput = true
+				}
 				stackMod16Known = false
 			}
 		case strings.HasPrefix(op, "call"):
@@ -549,6 +558,12 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	}
 	if controlSet["returns"] && stackSet["unchanged"] && writesSP {
 		issues = append(issues, Issue{Severity: "error", Code: "stack-pointer-write-unchanged", File: path, Line: fn.Line, Message: "stack: unchanged function writes the stack pointer directly"})
+	}
+	if writesSPFromOwnedInput && !stackSet["owns"] {
+		issues = append(issues, Issue{Severity: "error", Code: "stack-switch-without-ownership-contract", File: path, Line: fn.Line, Message: "writing rsp from a stack-like input requires stack: owns"})
+	}
+	if controlSet["returns"] && writesSegment && !requireSet["x86_64.segment.restore"] && !requireSet["x86_64.segment.persistent"] {
+		issues = append(issues, Issue{Severity: "error", Code: "segment-register-return-without-lifetime-contract", File: path, Line: fn.Line, Message: "returning after writing fs/gs requires x86_64.segment.restore or x86_64.segment.persistent intent"})
 	}
 	if stackSet["synthetic"] && usesCall && !usesJmp {
 		issues = append(issues, Issue{Severity: "error", Code: "guest-entry-call-mangles-stack", File: path, Line: fn.Line, Message: "synthetic stack handoff must tail jump instead of call"})
@@ -806,6 +821,17 @@ func inputRegisterSet(inputs []string) map[string]bool {
 	return out
 }
 
+func inputRegisterNameSet(inputs []string) map[string]string {
+	out := map[string]string{}
+	for _, input := range inputs {
+		name := bindingName(input)
+		if reg := registerAfterEquals(input); reg != "" && name != "" {
+			out[canonicalX86GPR(reg)] = name
+		}
+	}
+	return out
+}
+
 func outputRegisterSet(outputs []string) map[string]bool {
 	out := map[string]bool{}
 	for _, output := range outputs {
@@ -882,7 +908,7 @@ func contractFields(values []string) []string {
 
 func allowedStackToken(token string) bool {
 	switch token {
-	case "unchanged", "aligned", "16", "synthetic", "switches", "noreturn", "probed":
+	case "unchanged", "aligned", "16", "synthetic", "switches", "owns", "noreturn", "probed":
 		return true
 	default:
 		return false
@@ -930,6 +956,8 @@ func allowedRequireToken(token string) bool {
 		"x86_64.segment",
 		"x86_64.segment.fs",
 		"x86_64.segment.gs",
+		"x86_64.segment.persistent",
+		"x86_64.segment.restore",
 		"x86_64.segment.write",
 		"x86_64.simd_state",
 		"x86_64.sse.lfence",
@@ -1204,6 +1232,18 @@ func writesStackPointer(text string) bool {
 	dst := strings.TrimSpace(parts[len(parts)-1])
 	dst = strings.TrimPrefix(strings.ToLower(dst), "%")
 	return dst == "rsp" || dst == "esp" || dst == "sp"
+}
+
+func stackPointerSourceRegister(text string) string {
+	parts := splitInstructionOperands(text)
+	if len(parts) < 2 || !writesStackPointer(text) {
+		return ""
+	}
+	src := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(parts[0])), "%")
+	if isRegisterName(src) {
+		return canonicalX86GPR(src)
+	}
+	return ""
 }
 
 func usesStackRegister(text string) bool {
