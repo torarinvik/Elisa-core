@@ -119,7 +119,7 @@ export def run_on_another_stack(arg: uintptr, entry: uintptr, stack: uintptr) ->
     preserves: r12, r13, callee_saved
     stack: switches
     control: returns
-    requires: control.indirect, stack.call_alignment.unchecked
+    requires: control.indirect, stack.call_alignment.unchecked, callee_saved.preservation.unchecked
     body:
         pushq %r12
         pushq %r13
@@ -262,6 +262,44 @@ export def bad_callee_saved() -> void abi c:
 	}
 }
 
+func TestVerifyRejectsUnprovenCalleeSavedPreservation(t *testing.T) {
+	src := `module callee_saved
+target x86_64
+export def bad_callee_saved_proof() -> void abi c:
+    clobbers: r12, memory
+    preserves: r12
+    stack: unchanged
+    control: returns
+    body:
+        movq %rax, %r12
+        ret
+`
+	_, issues := Parse("callee_saved_proof.easm", src)
+	if !containsIssue(issues, "callee-saved-preservation-unproven") {
+		t.Fatalf("expected callee-saved-preservation-unproven, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsProvenCalleeSavedPreservation(t *testing.T) {
+	src := `module callee_saved
+target x86_64
+export def good_callee_saved_proof() -> void abi c:
+    clobbers: r12, memory
+    preserves: r12
+    stack: unchanged
+    control: returns
+    body:
+        pushq %r12
+        movq %rax, %r12
+        popq %r12
+        ret
+`
+	_, issues := Parse("callee_saved_proof_ok.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected proven callee-saved preservation to verify, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsUnsafeTargetCapabilityMismatch(t *testing.T) {
 	src := `module mixed_target
 target x86_64
@@ -387,6 +425,24 @@ export def bad_indirect(target: uintptr) -> void abi c:
 	_, issues := Parse("indirect.easm", src)
 	if !containsIssue(issues, "indirect-control-intent-missing") {
 		t.Fatalf("expected indirect-control-intent-missing, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsDirectSymbolControlWithoutIntent(t *testing.T) {
+	src := `module direct
+target x86_64
+export def bad_direct_call() -> void abi c:
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
+    stack: aligned 16
+    control: returns
+    requires: stack.call_alignment.unchecked
+    body:
+        call helper_symbol
+        ret
+`
+	_, issues := Parse("direct.easm", src)
+	if !containsIssue(issues, "direct-control-intent-missing") {
+		t.Fatalf("expected direct-control-intent-missing, got %#v", issues)
 	}
 }
 
@@ -898,6 +954,39 @@ export def same() -> void abi c:
 	_, issues := Parse("dup.easm", src)
 	if !containsIssue(issues, "duplicate-export") {
 		t.Fatalf("expected duplicate-export, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsDuplicateContractAtoms(t *testing.T) {
+	src := `module dup_contract
+target x86_64
+export def duplicate_contract() -> void abi c:
+    clobbers: rax, rax
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("dup_contract.easm", src)
+	if !containsIssue(issues, "duplicate-contract-atom") {
+		t.Fatalf("expected duplicate-contract-atom, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsPreserveWithoutClobber(t *testing.T) {
+	src := `module preserve
+target x86_64
+export def preserve_without_clobber() -> void abi c:
+    clobbers: memory
+    preserves: r12
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("preserve.easm", src)
+	if !containsIssue(issues, "preserve-without-clobber") {
+		t.Fatalf("expected preserve-without-clobber, got %#v", issues)
 	}
 }
 

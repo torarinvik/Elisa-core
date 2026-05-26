@@ -311,6 +311,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if isIndirectControlTransfer(op, inst.Text) && !requireSet["control.indirect"] {
 			issues = append(issues, Issue{Severity: "error", Code: "indirect-control-intent-missing", File: path, Line: inst.Line, Message: "indirect call/jmp requires control.indirect intent"})
 		}
+		if isDirectSymbolControlTransfer(op, inst.Text) && !requireSet["control.direct"] && !requireSet["relocation.symbol"] {
+			issues = append(issues, Issue{Severity: "error", Code: "direct-control-intent-missing", File: path, Line: inst.Line, Message: "direct symbolic call/jmp requires control.direct or relocation.symbol intent"})
+		}
 		if writesPartialReturnRegister(inst.Text) {
 			wrotePartialReturn = true
 		}
@@ -442,6 +445,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	issues = append(issues, verifySignatureTypes(path, fn)...)
 	issues = append(issues, verifyBindings(path, target, fn)...)
 	issues = append(issues, verifyRegisterLists(path, target, fn)...)
+	issues = append(issues, verifyDuplicateContractAtoms(path, fn)...)
 	if len(fn.Instructions) == 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "missing-body", File: path, Line: fn.Line, Message: "EASM export must contain a body"})
 	}
@@ -522,6 +526,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	for _, reg := range []string{"rbx", "rbp", "r12", "r13", "r14", "r15"} {
 		if clobberSet[reg] && !preserveSet[reg] && !preserveSet["callee_saved"] {
 			issues = append(issues, Issue{Severity: "error", Code: "callee-saved-not-preserved", File: path, Line: fn.Line, Message: fmt.Sprintf("callee-saved register %s is clobbered without preservation contract", reg)})
+		}
+		if controlSet["returns"] && clobberSet[reg] && (preserveSet[reg] || preserveSet["callee_saved"]) && !requireSet["callee_saved.preservation.unchecked"] && !calleeSavedPushPopProven(fn.Instructions, reg) {
+			issues = append(issues, Issue{Severity: "error", Code: "callee-saved-preservation-unproven", File: path, Line: fn.Line, Message: fmt.Sprintf("callee-saved register %s preservation must be proven by push/pop or require callee_saved.preservation.unchecked", reg)})
 		}
 	}
 	_ = target
@@ -895,6 +902,40 @@ func verifyRegisterLists(path string, target string, fn *Function) []Issue {
 	return issues
 }
 
+func verifyDuplicateContractAtoms(path string, fn *Function) []Issue {
+	var issues []Issue
+	sections := []struct {
+		name   string
+		values []string
+	}{
+		{name: "clobbers", values: fn.Clobbers},
+		{name: "preserves", values: fn.Preserves},
+		{name: "stack", values: fn.Stack},
+		{name: "control", values: fn.Control},
+		{name: "requires", values: fn.Requires},
+	}
+	for _, section := range sections {
+		seen := map[string]bool{}
+		for _, atom := range contractFields(section.values) {
+			if seen[atom] {
+				issues = append(issues, Issue{Severity: "error", Code: "duplicate-contract-atom", File: path, Line: fn.Line, Message: fmt.Sprintf("%s repeats %s", section.name, atom)})
+			}
+			seen[atom] = true
+		}
+	}
+	clobbers := setOf(fn.Clobbers)
+	for _, preserve := range contractFields(fn.Preserves) {
+		if preserve == "callee_saved" {
+			continue
+		}
+		if clobbers[preserve] {
+			continue
+		}
+		issues = append(issues, Issue{Severity: "error", Code: "preserve-without-clobber", File: path, Line: fn.Line, Message: fmt.Sprintf("preserves declares %s but clobbers does not", preserve)})
+	}
+	return issues
+}
+
 func bindingName(value string) string {
 	pieces := strings.SplitN(value, "=", 2)
 	fields := strings.Fields(strings.TrimSpace(pieces[0]))
@@ -1183,6 +1224,37 @@ func writtenRegister(text string) string {
 	return ""
 }
 
+func calleeSavedPushPopProven(instructions []Instruction, reg string) bool {
+	reg = canonicalX86GPR(reg)
+	firstWrite := -1
+	lastWrite := -1
+	firstPush := -1
+	lastPop := -1
+	for i, inst := range instructions {
+		op := normalizeOp(inst.Op)
+		parts := splitInstructionOperands(inst.Text)
+		if len(parts) == 1 {
+			operand := canonicalX86GPR(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(parts[0])), "%"))
+			if (op == "push" || op == "pushq") && operand == reg && firstPush < 0 {
+				firstPush = i
+			}
+			if (op == "pop" || op == "popq") && operand == reg {
+				lastPop = i
+			}
+		}
+		if op != "pop" && op != "popq" && canonicalX86GPR(writtenRegister(inst.Text)) == reg {
+			if firstWrite < 0 {
+				firstWrite = i
+			}
+			lastWrite = i
+		}
+	}
+	if firstWrite < 0 {
+		return true
+	}
+	return firstPush >= 0 && firstPush < firstWrite && lastPop > lastWrite
+}
+
 func canonicalX86GPR(reg string) string {
 	reg = strings.ToLower(strings.TrimPrefix(reg, "%"))
 	switch reg {
@@ -1348,6 +1420,21 @@ func isIndirectControlTransfer(op string, text string) bool {
 		return false
 	}
 	return strings.HasPrefix(strings.TrimSpace(parts[0]), "*")
+}
+
+func isDirectSymbolControlTransfer(op string, text string) bool {
+	if op != "jmp" && op != "call" && op != "callq" {
+		return false
+	}
+	parts := splitInstructionOperands(text)
+	if len(parts) == 0 {
+		return false
+	}
+	target := strings.TrimSpace(parts[0])
+	if target == "" || strings.HasPrefix(target, "*") || strings.HasPrefix(target, "%") || strings.HasPrefix(target, "$") || isNumericLiteral(target) {
+		return false
+	}
+	return isIdentifierLike(target)
 }
 
 func stackAndAlignsTo16(text string) bool {
