@@ -308,6 +308,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if writesSegmentRegister(inst.Text) && !requireSet["x86_64.segment.write"] {
 			issues = append(issues, Issue{Severity: "error", Code: "segment-register-write-intent-missing", File: path, Line: inst.Line, Message: "writing fs/gs requires x86_64.segment.write intent"})
 		}
+		if writesSegmentRegister(inst.Text) && !clobberSet["memory"] {
+			issues = append(issues, Issue{Severity: "error", Code: "segment-register-write-without-memory-clobber", File: path, Line: inst.Line, Message: "writing fs/gs changes TLS addressing and requires memory clobber"})
+		}
 		if written := writtenRegister(inst.Text); written != "" {
 			canonical := canonicalX86GPR(written)
 			if isX86GPR(canonical) && !clobberSet[canonical] && !outputSet[canonical] {

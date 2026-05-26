@@ -958,6 +958,24 @@ export def bad_gs_with_fs_cap() -> u64 abi c:
 	}
 }
 
+func TestVerifyRejectsSegmentRegisterWriteWithoutMemoryClobber(t *testing.T) {
+	src := `module tls
+target x86_64
+export def bad_fs_write(selector: u16) -> void abi c:
+    inputs: selector = rdi
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs, x86_64.segment.write
+    body:
+        movw %di, %fs
+        ret
+`
+	_, issues := Parse("tls_write_no_memory.easm", src)
+	if !containsIssue(issues, "segment-register-write-without-memory-clobber") {
+		t.Fatalf("expected segment-register-write-without-memory-clobber, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsLargeStackAdjustWithoutProbe(t *testing.T) {
 	src := `module stack_probe
 target x86_64
