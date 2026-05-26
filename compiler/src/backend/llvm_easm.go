@@ -39,6 +39,9 @@ func (g *llvmGenerator) emitEASMFunction(fn *easm.Function) error {
 	if err != nil {
 		return fmt.Errorf("EASM %s: %w", fn.Name, err)
 	}
+	if err := g.validateEASMFunctionEffects(fn); err != nil {
+		return fmt.Errorf("EASM %s: %w", fn.Name, err)
+	}
 	value, err := g.ensureFunctionDeclared(fn.Name, semanticType)
 	if err != nil {
 		return fmt.Errorf("EASM %s extern signature mismatch: %w", fn.Name, err)
@@ -121,6 +124,63 @@ func (g *llvmGenerator) lowerEASMFunctionType(fn *easm.Function) (C.LLVMTypeRef,
 	semanticType := &semantic.FuncType{Name: fn.Name, Params: params, Return: ret, CallConv: easmCallConv(fn.ABI)}
 	llvmType, err := g.lowerFunctionType(semanticType)
 	return llvmType, semanticType, err
+}
+
+func (g *llvmGenerator) validateEASMFunctionEffects(fn *easm.Function) error {
+	required := easmDeclaredEffectPermissions(fn)
+	if len(required) == 0 || g == nil || g.result == nil || g.result.GlobalScope == nil {
+		return nil
+	}
+	sym, ok := g.result.GlobalScope.Lookup(fn.Name)
+	if !ok || sym == nil {
+		return nil
+	}
+	fnType, ok := sym.Type.(*semantic.FuncType)
+	if !ok || fnType == nil {
+		return nil
+	}
+	declared := map[string]bool{}
+	for _, permission := range fnType.PermissionRefs {
+		name := strings.TrimSpace(permission.Name)
+		if permission.Member != "" {
+			name += "." + strings.TrimSpace(permission.Member)
+		}
+		if name != "" {
+			declared[name] = true
+		}
+	}
+	var missing []string
+	for _, permission := range required {
+		if !declared[permission] {
+			missing = append(missing, permission)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("declares effects[%s] but matching Elisa extern does not expose can[%s]", strings.Join(required, ", "), strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func easmDeclaredEffectPermissions(fn *easm.Function) []string {
+	if fn == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, effect := range fn.Effects {
+		effect = strings.TrimSpace(effect)
+		effect = strings.TrimPrefix(effect, "can ")
+		effect = strings.TrimPrefix(effect, "can[")
+		effect = strings.TrimSuffix(effect, "]")
+		if effect == "" || strings.HasPrefix(effect, "error") {
+			continue
+		}
+		if !seen[effect] {
+			seen[effect] = true
+			out = append(out, effect)
+		}
+	}
+	return out
 }
 
 func (g *llvmGenerator) easmSemanticType(name string) (semantic.Type, error) {

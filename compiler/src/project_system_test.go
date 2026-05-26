@@ -615,6 +615,64 @@ export def shadps4_debug_trap() -> void abi c:
 	}
 }
 
+func TestRunCLIProjectBuildRequiresEASMEffectsOnExternSurface(t *testing.T) {
+	projectRoot := t.TempDir()
+	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "easm")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), `{
+  "version": "0.1.0",
+  "easm": ["easm/guarded.easm"],
+  "targets": {
+    "app": {
+      "entry": "src/main.elisa",
+      "emit": "llvm"
+    }
+  }
+}
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "easm", "guarded.easm"), `module guarded
+target any
+export def guarded_asm() -> void abi c effects[Unsafe.Assembly]:
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern guarded_asm() -> void
+
+def main() -> int:
+    guarded_asm()
+    return 0
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"build", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected EASM effects to require extern permissions, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "matching Elisa extern does not expose can[Unsafe.Assembly]") {
+		t.Fatalf("expected missing Unsafe.Assembly diagnostic, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern guarded_asm() -> void can[Unsafe.Assembly]
+
+def main() -> int:
+    can Unsafe.Assembly:
+        guarded_asm()
+    return 0
+`)
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"build", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected EASM extern permission bridge to build, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
 func TestRunCLIProjectRunSupportsDirectLibraryLinkFlags(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
