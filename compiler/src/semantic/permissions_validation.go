@@ -431,6 +431,13 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	if a.permissionWarningsSuppressedByGenericContext(fnType, granted) {
 		return
 	}
+	missingRefs := missingGrantedPermissionRefs(functionPermissionRefs(fnType), granted)
+	for _, ref := range missingRefs {
+		if ref.Name == "Unsafe" && ref.Member == "SegmentMutation" {
+			a.errorf(pos, "%s", effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), []string{"Unsafe"}, "can Unsafe.SegmentMutation"))
+			return
+		}
+	}
 	missing := missingGrantedPermissionFamilies(functionPermissionRefs(fnType), granted)
 	if len(missing) == 0 {
 		return

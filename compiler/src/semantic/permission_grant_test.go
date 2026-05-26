@@ -148,6 +148,22 @@ def build() -> i64:
 	}
 }
 
+func TestSegmentMutationPermissionRequiresLocalGrantError(t *testing.T) {
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "segment_mutation_requires_grant.elisa", `
+extern load_fs(selector: u16) -> void can[Unsafe.SegmentMutation]
+
+def run() -> void:
+    load_fs(7u16)
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `call to "load_fs" requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.SegmentMutation or a surrounding can ...: block`) {
+		t.Fatalf("expected segment mutation to require local grant as an error, got:\n%s", all)
+	}
+	if len(result.Errors) == 0 {
+		t.Fatalf("expected missing segment mutation grant to be an error")
+	}
+}
+
 func TestPointerLikeCastRequiresUnsafePointerCastGrant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "pointer_cast_requires_unsafe.elisa", `
 def build(value: uintptr) -> heap u8&:

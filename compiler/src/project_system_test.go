@@ -484,7 +484,8 @@ func TestRunCLIProjectBuildEmitsEASMWrapper(t *testing.T) {
   "targets": {
     "app": {
       "entry": "src/main.elisa",
-      "emit": "llvm"
+      "emit": "llvm",
+      "target-triple": "x86_64-apple-darwin"
     }
   }
 }
@@ -629,9 +630,9 @@ func TestRunCLIProjectBuildRequiresEASMEffectsOnExternSurface(t *testing.T) {
     "app": {
       "entry": "src/main.elisa",
       "emit": "llvm"
-    }
-  }
-}
+	    }
+	  }
+	}
 `)
 	writeFixtureFile(t, filepath.Join(projectRoot, "easm", "guarded.easm"), `module guarded
 target any
@@ -670,6 +671,68 @@ def main() -> int:
 	exitCode = runCLI([]string{"build", "app", "--project", projectRoot}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("expected EASM extern permission bridge to build, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunCLIProjectBuildRequiresEASMSegmentMutationOnExternSurface(t *testing.T) {
+	projectRoot := t.TempDir()
+	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "easm")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), `{
+  "version": "0.1.0",
+  "easm": ["easm/segment.easm"],
+  "targets": {
+    "app": {
+      "entry": "src/main.elisa",
+      "emit": "llvm"
+    }
+  }
+}
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "easm", "segment.easm"), `module segment
+target x86_64-apple-darwin
+export def load_fs(selector: u16) -> void abi c:
+    inputs: selector = rdi
+    clobbers: memory
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent
+    body:
+        movw %di, %fs
+        ret
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern load_fs(selector: u16) -> void
+
+def main() -> int:
+    load_fs(0u16)
+    return 0
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"build", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected EASM segment mutation to require extern permissions, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "matching Elisa extern does not expose can[Unsafe.SegmentMutation]") {
+		t.Fatalf("expected missing Unsafe.SegmentMutation diagnostic, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern load_fs(selector: u16) -> void can[Unsafe.SegmentMutation]
+
+def main() -> int:
+    can Unsafe.SegmentMutation:
+        load_fs(0u16)
+    return 0
+`)
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"build", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected EASM segment mutation extern permission to satisfy build, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
 }
 

@@ -167,6 +167,13 @@ func easmDeclaredEffectPermissions(fn *easm.Function) []string {
 	}
 	seen := map[string]bool{}
 	var out []string
+	add := func(permission string) {
+		permission = strings.TrimSpace(permission)
+		if permission != "" && !seen[permission] {
+			seen[permission] = true
+			out = append(out, permission)
+		}
+	}
 	for _, effect := range fn.Effects {
 		effect = strings.TrimSpace(effect)
 		effect = strings.TrimPrefix(effect, "can ")
@@ -175,9 +182,12 @@ func easmDeclaredEffectPermissions(fn *easm.Function) []string {
 		if effect == "" || strings.HasPrefix(effect, "error") {
 			continue
 		}
-		if !seen[effect] {
-			seen[effect] = true
-			out = append(out, effect)
+		add(effect)
+	}
+	for _, req := range fn.Requires {
+		switch strings.TrimSpace(req) {
+		case "x86_64.segment.write":
+			add("Unsafe.SegmentMutation")
 		}
 	}
 	return out
