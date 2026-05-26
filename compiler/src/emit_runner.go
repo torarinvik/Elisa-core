@@ -129,7 +129,12 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			}
 			return 1
 		}
-		report := generateUnsafeReport(result)
+		summary := collectUnsafeSummary(result)
+		if err := checkUnsafeBudget(summary, options.unsafeBudget); err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		report := generateUnsafeReportFromSummary(summary)
 		if options.output != "" {
 			if err := writeOutputFile(options.output, []byte(report)); err != nil {
 				fmt.Fprintf(stderr, "error: %s\n", err)

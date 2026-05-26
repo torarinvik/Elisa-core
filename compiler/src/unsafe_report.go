@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"elisacore/src/ast"
@@ -73,6 +74,10 @@ var boundaryInvariantRegistry = []boundaryInvariant{
 
 func generateUnsafeReport(result *semantic.Result) string {
 	summary := collectUnsafeSummary(result)
+	return generateUnsafeReportFromSummary(summary)
+}
+
+func generateUnsafeReportFromSummary(summary unsafeSummary) string {
 	var out bytes.Buffer
 	out.WriteString("=== unsafe ===\n")
 	fmt.Fprintf(&out, "total: %d\n", summary.Total)
@@ -108,6 +113,65 @@ func generateUnsafeReport(result *semantic.Result) string {
 		}
 	}
 	return out.String()
+}
+
+func checkUnsafeBudget(summary unsafeSummary, spec string) error {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil
+	}
+	for _, rawItem := range strings.Split(spec, ",") {
+		item := strings.TrimSpace(rawItem)
+		if item == "" {
+			continue
+		}
+		key, limitText, ok := strings.Cut(item, "<=")
+		if !ok {
+			key, limitText, ok = strings.Cut(item, "=")
+		}
+		if !ok {
+			return fmt.Errorf("invalid unsafe budget item %q (expected name=N or name<=N)", item)
+		}
+		key = strings.TrimSpace(key)
+		limit, err := strconv.Atoi(strings.TrimSpace(limitText))
+		if err != nil || limit < 0 {
+			return fmt.Errorf("invalid unsafe budget limit in %q", item)
+		}
+		actual, ok := unsafeBudgetCount(summary, key)
+		if !ok {
+			return fmt.Errorf("unknown unsafe budget key %q", key)
+		}
+		if actual > limit {
+			return fmt.Errorf("unsafe budget exceeded for %s: %d > %d", key, actual, limit)
+		}
+	}
+	return nil
+}
+
+func unsafeBudgetCount(summary unsafeSummary, key string) (int, bool) {
+	switch key {
+	case "total":
+		return summary.Total, true
+	case "trusted-total":
+		return summary.TrustedTotal, true
+	}
+	if strings.HasPrefix(key, "Unsafe.") {
+		member := strings.TrimPrefix(key, "Unsafe.")
+		if count, ok := summary.Capabilities[member]; ok {
+			return count, true
+		}
+		if count, ok := summary.TrustedCounts[key]; ok {
+			return count, true
+		}
+		return 0, true
+	}
+	if count, ok := summary.Capabilities[key]; ok {
+		return count, true
+	}
+	if count, ok := summary.OtherCounts[key]; ok {
+		return count, true
+	}
+	return 0, false
 }
 
 type unsafeSummary struct {

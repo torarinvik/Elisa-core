@@ -179,6 +179,7 @@ type cliOptions struct {
 	output        string
 	addr          string
 	filter        string
+	unsafeBudget  string
 	foreignFiles  []string
 	linkFlags     []string
 	linkNative    bool
@@ -243,6 +244,14 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("missing value after -filter")
 			}
 			options.filter = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-unsafe-budget="):
+			options.unsafeBudget = strings.TrimSpace(strings.TrimPrefix(arg, "-unsafe-budget="))
+		case arg == "-unsafe-budget":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -unsafe-budget")
+			}
+			options.unsafeBudget = strings.TrimSpace(args[i])
 		case strings.HasPrefix(arg, "-target-triple="):
 			options.targetTriple = strings.TrimSpace(strings.TrimPrefix(arg, "-target-triple="))
 		case arg == "-target-triple":

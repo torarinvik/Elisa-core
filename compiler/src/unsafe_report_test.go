@@ -68,6 +68,35 @@ def safe_ffi_wrapper() -> i64:
 	}
 }
 
+func TestRunCLIEnforcesUnsafeBudget(t *testing.T) {
+	dir := t.TempDir()
+	fixturePath := filepath.Join(dir, "unsafe_budget.elisa")
+	src := `
+extern raw_cast(value: uintptr) -> heap u8& can[Unsafe.PointerCast]
+
+def safe_wrapper(value: uintptr) -> heap u8&:
+    trusted Unsafe.PointerCast:
+        return value.cast[heap u8&]
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "unsafe", "-unsafe-budget", "trusted-total=1,Unsafe.PointerCast=2", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected unsafe budget to pass, exit=%d\nstderr:\n%s", exitCode, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"-emit", "unsafe", "-unsafe-budget", "trusted-total=0", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 || !strings.Contains(stderr.String(), "unsafe budget exceeded for trusted-total: 1 > 0") {
+		t.Fatalf("expected unsafe budget failure, exit=%d\nstderr:\n%s", exitCode, stderr.String())
+	}
+}
+
 func TestUnsafeSummaryIncludesEASMExportsAndRequires(t *testing.T) {
 	report := generateUnsafeReport(&semantic.Result{
 		GlobalScope: semantic.NewScope(nil),
