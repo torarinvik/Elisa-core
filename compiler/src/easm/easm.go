@@ -1503,6 +1503,10 @@ func writesMemory(text string) bool {
 	if len(parts) < 2 {
 		return false
 	}
+	op := normalizeOp(strings.Fields(strings.TrimSpace(text))[0])
+	if op == "xchg" || op == "xchgl" || op == "xchgq" {
+		return hasMemoryOperand(text)
+	}
 	dst := strings.TrimSpace(parts[len(parts)-1])
 	return strings.Contains(dst, "(") && strings.Contains(dst, ")")
 }

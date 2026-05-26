@@ -103,6 +103,27 @@ export def swap32(ptr: uintptr, value: u32) -> u32 abi c:
 	}
 }
 
+func TestVerifyRejectsAtomicRMWMemoryFirstWithoutMemoryClobber(t *testing.T) {
+	src := `module atomics
+target x86_64
+export def swap32(ptr: uintptr, value: u32) -> u32 abi c:
+    inputs: ptr = rdi, value = rsi
+    outputs: ret = rax
+    clobbers: rax
+    stack: unchanged
+    control: returns
+    requires: x86_64.atomic.rmw
+    body:
+        movl %esi, %eax
+        xchgl (%rdi), %eax
+        ret
+`
+	_, issues := Parse("atomic_memory_first.easm", src)
+	if !containsIssue(issues, "memory-write-without-clobber") {
+		t.Fatalf("expected memory-write-without-clobber for memory-first xchg, got %#v", issues)
+	}
+}
+
 func TestVerifyAcceptsShadPS4GuestEntryTailJumpTrampoline(t *testing.T) {
 	src := `module shadps4_guest
 target x86_64
