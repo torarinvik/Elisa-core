@@ -248,6 +248,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	outputSet := outputRegisterSet(fn.Outputs)
 	returnsVoid := strings.TrimSpace(fn.ReturnType) == "void"
 	stackDelta := 0
+	maxEntryStackPopDelta := 0
 	stackMod16 := 8
 	stackMod16Known := strings.Contains(strings.ToLower(target), "x86_64") || strings.Contains(strings.ToLower(target), "amd64")
 	maxStackAllocation := 0
@@ -357,6 +358,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		case strings.HasPrefix(op, "pop"):
 			mutatesStack = true
 			stackDelta += 8
+			if stackDelta > maxEntryStackPopDelta {
+				maxEntryStackPopDelta = stackDelta
+			}
 			if stackMod16Known {
 				stackMod16 = mod16(stackMod16 + 8)
 			}
@@ -379,6 +383,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				mutatesStack = true
 				amount := immediateValue(inst.Text)
 				stackDelta += amount
+				if stackDelta > maxEntryStackPopDelta {
+					maxEntryStackPopDelta = stackDelta
+				}
 				if stackMod16Known {
 					stackMod16 = mod16(stackMod16 + amount)
 				}
@@ -507,6 +514,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	}
 	if controlSet["returns"] && stackSet["unchanged"] && stackDelta != 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "returning-stack-leak", File: path, Line: fn.Line, Message: fmt.Sprintf("returning function leaves symbolic stack delta %d", stackDelta)})
+	}
+	if maxEntryStackPopDelta > 0 && !stackSet["switches"] && !stackSet["synthetic"] && !requireSet["stack.entry_pop.unchecked"] {
+		issues = append(issues, Issue{Severity: "error", Code: "entry-stack-pop", File: path, Line: fn.Line, Message: fmt.Sprintf("function pops %d bytes above its entry stack before proving ownership; use stack.entry_pop.unchecked only after ABI proof", maxEntryStackPopDelta)})
 	}
 	if controlSet["returns"] && stackSet["unchanged"] && writesSP {
 		issues = append(issues, Issue{Severity: "error", Code: "stack-pointer-write-unchanged", File: path, Line: fn.Line, Message: "stack: unchanged function writes the stack pointer directly"})

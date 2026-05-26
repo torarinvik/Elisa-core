@@ -289,6 +289,24 @@ export def bad_stack() -> void abi c:
 	}
 }
 
+func TestVerifyRejectsEntryStackPopEvenWhenRebalanced(t *testing.T) {
+	src := `module stack
+target x86_64
+export def bad_entry_pop() -> void abi c:
+    clobbers: rax, memory
+    stack: unchanged
+    control: returns
+    body:
+        popq %rax
+        pushq %rax
+        ret
+`
+	_, issues := Parse("entry_pop.easm", src)
+	if !containsIssue(issues, "entry-stack-pop") {
+		t.Fatalf("expected entry-stack-pop, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsUnsafeUnsupportedSystemInstruction(t *testing.T) {
 	src := `module sys
 target x86_64
