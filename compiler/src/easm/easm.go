@@ -27,6 +27,7 @@ type Function struct {
 	Effects      []string
 	Inputs       []string
 	Outputs      []string
+	Labels       []LabelContract
 	Clobbers     []string
 	Preserves    []string
 	Stack        []string
@@ -42,9 +43,17 @@ type Param struct {
 }
 
 type Instruction struct {
-	Op   string
-	Text string
-	Line int
+	Op     string
+	Text   string
+	Line   int
+	Label  string
+	Pseudo bool
+}
+
+type LabelContract struct {
+	Name          string
+	Preconditions []string
+	Line          int
 }
 
 type Issue struct {
@@ -249,6 +258,13 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	returnReg := returnOutputRegister(fn.Outputs)
 	inputRegs := inputRegisterSet(fn.Inputs)
 	inputRegNames := inputRegisterNameSet(fn.Inputs)
+	labelContracts := labelContractMap(fn.Labels)
+	definedLabels := bodyLabelDefinitions(fn.Instructions)
+	seenLabelDefinitions := map[string]int{}
+	liveRegs := map[string]bool{}
+	for reg := range inputRegs {
+		liveRegs[reg] = true
+	}
 	returnsVoid := strings.TrimSpace(fn.ReturnType) == "void"
 	stackDelta := 0
 	maxEntryStackPopDelta := 0
@@ -277,6 +293,21 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	inputRegOverwritten := map[string]bool{}
 	for _, inst := range fn.Instructions {
 		op := normalizeOp(inst.Op)
+		if inst.Label != "" {
+			if firstLine, exists := seenLabelDefinitions[inst.Label]; exists {
+				issues = append(issues, Issue{Severity: "error", Code: "duplicate-label", File: path, Line: inst.Line, Message: fmt.Sprintf("label %s duplicates earlier label on line %d", inst.Label, firstLine)})
+			} else {
+				seenLabelDefinitions[inst.Label] = inst.Line
+			}
+			if contract, ok := labelContracts[inst.Label]; ok {
+				issues = append(issues, checkLabelPreconditions(path, inst.Line, "fallthrough", inst.Label, contract.Preconditions, liveRegs)...)
+				liveRegs = canonicalRegisterPreconditionSet(contract.Preconditions)
+			}
+			continue
+		}
+		if inst.Pseudo {
+			continue
+		}
 		if !allowedOps[op] && !isConditionalJump(op) {
 			issues = append(issues, Issue{Severity: "error", Code: "unsupported-instruction", File: path, Line: inst.Line, Message: fmt.Sprintf("unsupported EASM instruction %q", inst.Op)})
 		}
@@ -325,6 +356,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		}
 		if written := writtenRegister(inst.Text); written != "" {
 			canonical := canonicalX86GPR(written)
+			if isX86GPR(canonical) {
+				liveRegs[canonical] = true
+			}
 			if returnReg != "" && canonical == returnReg {
 				returnRegWritten = true
 			}
@@ -338,7 +372,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if isIndirectControlTransfer(op, inst.Text) && !requireSet["control.indirect"] {
 			issues = append(issues, Issue{Severity: "error", Code: "indirect-control-intent-missing", File: path, Line: inst.Line, Message: "indirect call/jmp requires control.indirect intent"})
 		}
-		if isDirectSymbolControlTransfer(op, inst.Text) && !requireSet["control.direct"] && !requireSet["relocation.symbol"] {
+		if isDirectSymbolControlTransfer(op, inst.Text) && !definedLabels[directControlTarget(op, inst.Text)] && !requireSet["control.direct"] && !requireSet["relocation.symbol"] {
 			issues = append(issues, Issue{Severity: "error", Code: "direct-control-intent-missing", File: path, Line: inst.Line, Message: "direct symbolic call/jmp requires control.direct or relocation.symbol intent"})
 		}
 		if writesPartialReturnRegister(inst.Text) {
@@ -348,6 +382,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			issues = append(issues, Issue{Severity: "error", Code: "reserved-register-use", File: path, Line: inst.Line, Message: "target-reserved register requires an explicit platform capability"})
 		}
 		for _, reg := range implicitClobbers(op) {
+			delete(liveRegs, canonicalX86GPR(reg))
 			if returnReg != "" && canonicalX86GPR(reg) == returnReg {
 				returnRegWritten = true
 			}
@@ -447,9 +482,19 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			flagsLive = false
 			for _, reg := range callerSavedGPRs() {
 				clobberedByCall[reg] = inst.Line
+				delete(liveRegs, reg)
 			}
 		case op == "jmp":
-			usesJmp = true
+			if target := directControlTarget(op, inst.Text); target != "" {
+				if contract, ok := labelContracts[target]; ok {
+					issues = append(issues, checkLabelPreconditions(path, inst.Line, "jmp", target, contract.Preconditions, liveRegs)...)
+				}
+				if !definedLabels[target] {
+					usesJmp = true
+				}
+			} else {
+				usesJmp = true
+			}
 		case op == "ret":
 			usesRet = true
 		case op == "std":
@@ -468,6 +513,11 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		case op == "cmp" || op == "cmpq" || op == "test" || op == "testq":
 			flagsLive = true
 		case isConditionalJump(op):
+			if target := directControlTarget(op, inst.Text); target != "" {
+				if contract, ok := labelContracts[target]; ok {
+					issues = append(issues, checkLabelPreconditions(path, inst.Line, op, target, contract.Preconditions, liveRegs)...)
+				}
+			}
 			if !flagsLive {
 				issues = append(issues, Issue{Severity: "error", Code: "stale-flags-branch", File: path, Line: inst.Line, Message: "conditional jump uses flags that are not known live from cmp/test"})
 			}
@@ -490,6 +540,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	issues = append(issues, verifyBindings(path, target, fn)...)
 	issues = append(issues, verifyRegisterLists(path, target, fn)...)
 	issues = append(issues, verifyDuplicateContractAtoms(path, fn)...)
+	issues = append(issues, verifyLabelContracts(path, fn, definedLabels)...)
 	if len(fn.Instructions) == 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "missing-body", File: path, Line: fn.Line, Message: "EASM export must contain a body"})
 	}
@@ -697,7 +748,7 @@ func lineWithIndent(line string) string { return stripComment(strings.TrimSpace(
 
 func isSection(s string) bool {
 	switch strings.ToLower(s) {
-	case "inputs", "outputs", "clobbers", "preserves", "stack", "control", "requires", "body":
+	case "inputs", "outputs", "labels", "clobbers", "preserves", "stack", "control", "requires", "body":
 		return true
 	default:
 		return false
@@ -713,6 +764,8 @@ func addSectionValue(fn *Function, section string, value string, line int) {
 		fn.Inputs = append(fn.Inputs, splitCSV(value)...)
 	case "outputs":
 		fn.Outputs = append(fn.Outputs, splitCSV(value)...)
+	case "labels":
+		fn.Labels = append(fn.Labels, parseLabelContract(value, line))
 	case "clobbers":
 		fn.Clobbers = append(fn.Clobbers, splitCSV(value)...)
 	case "preserves":
@@ -724,12 +777,36 @@ func addSectionValue(fn *Function, section string, value string, line int) {
 	case "requires":
 		fn.Requires = append(fn.Requires, splitCSV(value)...)
 	case "body":
+		if label, ok := parseBodyLabel(value); ok {
+			fn.Instructions = append(fn.Instructions, Instruction{Op: "label", Text: label + ":", Line: line, Label: label})
+			return
+		}
 		op := strings.Fields(value)
 		if len(op) == 0 {
 			return
 		}
 		fn.Instructions = append(fn.Instructions, Instruction{Op: op[0], Text: value, Line: line})
 	}
+}
+
+func parseLabelContract(value string, line int) LabelContract {
+	name, rest, ok := strings.Cut(value, ":")
+	if !ok {
+		return LabelContract{Name: strings.TrimSpace(value), Line: line}
+	}
+	return LabelContract{Name: strings.TrimSpace(name), Preconditions: splitCSV(rest), Line: line}
+}
+
+func parseBodyLabel(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if !strings.HasSuffix(value, ":") || strings.Contains(value, " ") || strings.Contains(value, "\t") {
+		return "", false
+	}
+	label := strings.TrimSuffix(value, ":")
+	if !isIdentifierLike(label) {
+		return "", false
+	}
+	return label, true
 }
 
 func splitCSV(value string) []string {
@@ -1090,6 +1167,115 @@ func verifyDuplicateContractAtoms(path string, fn *Function) []Issue {
 		issues = append(issues, Issue{Severity: "error", Code: "preserve-without-clobber", File: path, Line: fn.Line, Message: fmt.Sprintf("preserves declares %s but clobbers does not", preserve)})
 	}
 	return issues
+}
+
+func verifyLabelContracts(path string, fn *Function, definedLabels map[string]bool) []Issue {
+	var issues []Issue
+	seen := map[string]int{}
+	for _, contract := range fn.Labels {
+		if contract.Name == "" || !isIdentifierLike(contract.Name) {
+			issues = append(issues, Issue{Severity: "error", Code: "invalid-label-contract", File: path, Line: contract.Line, Message: "label contract must name an internal assembly label"})
+			continue
+		}
+		if firstLine, exists := seen[contract.Name]; exists {
+			issues = append(issues, Issue{Severity: "error", Code: "duplicate-label-contract", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s duplicates earlier contract on line %d", contract.Name, firstLine)})
+			continue
+		}
+		seen[contract.Name] = contract.Line
+		if _, ok := definedLabels[contract.Name]; !ok {
+			issues = append(issues, Issue{Severity: "error", Code: "label-contract-without-label", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s has no matching body label", contract.Name)})
+		}
+		if len(contract.Preconditions) == 0 {
+			issues = append(issues, Issue{Severity: "error", Code: "empty-label-precondition", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s must require at least one register precondition", contract.Name)})
+		}
+		for _, pre := range contract.Preconditions {
+			reg := canonicalRegisterPrecondition(pre)
+			if reg == "" || !isX86GPR(reg) {
+				issues = append(issues, Issue{Severity: "error", Code: "unsupported-label-precondition", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s uses unsupported register precondition %q", contract.Name, pre)})
+			}
+		}
+	}
+	return issues
+}
+
+func labelContractMap(contracts []LabelContract) map[string]LabelContract {
+	out := map[string]LabelContract{}
+	for _, contract := range contracts {
+		if contract.Name != "" {
+			out[contract.Name] = contract
+		}
+	}
+	return out
+}
+
+func bodyLabelDefinitions(instructions []Instruction) map[string]bool {
+	out := map[string]bool{}
+	for _, inst := range instructions {
+		if inst.Label != "" {
+			out[inst.Label] = true
+		}
+	}
+	return out
+}
+
+func canonicalRegisterPreconditionSet(preconditions []string) map[string]bool {
+	out := map[string]bool{}
+	for _, pre := range preconditions {
+		if reg := canonicalRegisterPrecondition(pre); reg != "" {
+			out[reg] = true
+		}
+	}
+	return out
+}
+
+func canonicalRegisterPrecondition(pre string) string {
+	pre = strings.TrimSpace(pre)
+	if pre == "" {
+		return ""
+	}
+	if before, _, ok := strings.Cut(pre, ":"); ok {
+		pre = before
+	}
+	if before, _, ok := strings.Cut(pre, "="); ok {
+		pre = before
+	}
+	pre = strings.TrimPrefix(strings.TrimSpace(pre), "%")
+	return canonicalX86GPR(pre)
+}
+
+func checkLabelPreconditions(path string, line int, transferKind string, label string, preconditions []string, liveRegs map[string]bool) []Issue {
+	var issues []Issue
+	for _, pre := range preconditions {
+		reg := canonicalRegisterPrecondition(pre)
+		if reg == "" {
+			continue
+		}
+		if !liveRegs[reg] {
+			issues = append(issues, Issue{Severity: "error", Code: "label-precondition-unsatisfied", File: path, Line: line, Message: fmt.Sprintf("%s to label %s does not satisfy required live register %s", transferKind, label, reg)})
+		}
+	}
+	return issues
+}
+
+func directControlTarget(op string, text string) string {
+	if op != "jmp" && !isConditionalJump(op) {
+		return ""
+	}
+	operands := splitInstructionOperands(text)
+	if len(operands) == 0 {
+		fields := strings.Fields(text)
+		if len(fields) < 2 {
+			return ""
+		}
+		operands = []string{fields[len(fields)-1]}
+	}
+	target := strings.TrimSpace(operands[len(operands)-1])
+	target = strings.TrimPrefix(target, "*")
+	target = strings.TrimSuffix(target, ";")
+	if !isIdentifierLike(target) {
+		return ""
+	}
+	return target
 }
 
 func bindingName(value string) string {

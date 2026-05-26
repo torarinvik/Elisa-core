@@ -62,6 +62,63 @@ export def ticks() -> u64 abi c:
 	}
 }
 
+func TestVerifyAcceptsTypedLabelPreconditions(t *testing.T) {
+	src := `module typed_labels
+target x86_64-apple-darwin
+
+export def count_down(value: uintptr) -> uintptr abi c:
+    inputs: value = rdi
+    outputs: ret = rax
+    labels:
+        loop: rax
+    clobbers: rax, cc
+    stack: unchanged
+    control: returns
+    requires: compare.unsigned
+    body:
+        movq %rdi, %rax
+    loop:
+        cmpq $0, %rax
+        je done
+        decq %rax
+        jmp loop
+    done:
+        ret
+`
+	_, issues := Parse("typed_labels.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected typed label preconditions to verify, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsUnsatisfiedTypedLabelPrecondition(t *testing.T) {
+	src := `module typed_labels
+target x86_64-apple-darwin
+
+export def bad_jump(value: uintptr) -> uintptr abi c:
+    inputs: value = rdi
+    outputs: ret = rax
+    labels:
+        loop: rax
+    clobbers: rax, cc
+    stack: unchanged
+    control: returns
+    requires: compare.unsigned
+    body:
+        jmp loop
+    loop:
+        cmpq $0, %rax
+        je done
+        movq %rdi, %rax
+    done:
+        ret
+`
+	_, issues := Parse("typed_labels_bad.easm", src)
+	if !containsIssue(issues, "label-precondition-unsatisfied") {
+		t.Fatalf("expected label-precondition-unsatisfied, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsUnknownRequireCapability(t *testing.T) {
 	src := `module typo
 target x86_64
