@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"elisacore/src/easm"
+	"elisacore/src/semantic"
 )
 
 func TestRunCLIEmitsUnsafeSummary(t *testing.T) {
@@ -54,5 +57,29 @@ def safe_ffi_wrapper() -> i64:
 	}
 	if strings.Contains(output, "safe_ffi_wrapper:") {
 		t.Fatalf("expected trusted raw extern wrapper not to appear in surface unsafe report, got:\n%s", output)
+	}
+}
+
+func TestUnsafeSummaryIncludesEASMExportsAndRequires(t *testing.T) {
+	report := generateUnsafeReport(&semantic.Result{
+		GlobalScope: semantic.NewScope(nil),
+		EASMModules: []*easm.Module{
+			{
+				Name: "asmguard",
+				Functions: []easm.Function{
+					{Name: "easm_load_fs", Requires: []string{"x86_64.segment.fs", "memory.raw_read"}},
+				},
+			},
+		},
+	})
+	for _, want := range []string{
+		"Unsafe.Assembly: 1",
+		"EASM.Requires.memory.raw_read: 1",
+		"EASM.Requires.x86_64.segment.fs: 1",
+		"easm:easm_load_fs: EASM.Requires.memory.raw_read, EASM.Requires.x86_64.segment.fs, Unsafe.Assembly",
+	} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("expected unsafe report to contain %q, got:\n%s", want, report)
+		}
 	}
 }

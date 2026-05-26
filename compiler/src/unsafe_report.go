@@ -20,6 +20,11 @@ var unsafeCapabilityOrder = []string{
 	"ThreadShare",
 	"StaleRef",
 	"Alias",
+	"BufferReinterpret",
+	"Assembly",
+	"NonProgress",
+	"BlockMain",
+	"AssumeProgress",
 }
 
 func generateUnsafeReport(result *semantic.Result) string {
@@ -100,11 +105,40 @@ func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 			summary.OtherCounts[permission]++
 		}
 	}
+	for _, module := range result.EASMModules {
+		if module == nil {
+			continue
+		}
+		for i := range module.Functions {
+			fn := &module.Functions[i]
+			permissions := []string{"Unsafe.Assembly"}
+			for _, req := range fn.Requires {
+				req = strings.TrimSpace(req)
+				if req == "" {
+					continue
+				}
+				permissions = append(permissions, "EASM.Requires."+req)
+			}
+			sort.Strings(permissions)
+			summary.Functions = append(summary.Functions, unsafeFunctionSummary{Name: "easm:" + fn.Name, Permissions: permissions})
+			for _, permission := range permissions {
+				summary.Total++
+				if permission == "Unsafe.Assembly" {
+					summary.Capabilities["Assembly"]++
+					continue
+				}
+				summary.OtherCounts[permission]++
+			}
+		}
+	}
 	summary.OtherCapabilities = make([]string, 0, len(summary.OtherCounts))
 	for capability := range summary.OtherCounts {
 		summary.OtherCapabilities = append(summary.OtherCapabilities, capability)
 	}
 	sort.Strings(summary.OtherCapabilities)
+	sort.Slice(summary.Functions, func(i, j int) bool {
+		return summary.Functions[i].Name < summary.Functions[j].Name
+	})
 	return summary
 }
 
