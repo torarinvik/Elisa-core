@@ -159,7 +159,7 @@ def run() -> void:
 	if !strings.Contains(all, `call to "load_fs" requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.SegmentMutation or a surrounding can ...: block`) {
 		t.Fatalf("expected segment mutation to require local grant as an error, got:\n%s", all)
 	}
-	if len(result.Errors) == 0 {
+	if len(result.Errors()) == 0 {
 		t.Fatalf("expected missing segment mutation grant to be an error")
 	}
 }
@@ -175,7 +175,7 @@ def run() -> void:
 	if !strings.Contains(all, `call to "install_guest_fs" requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.GuestSegmentInstall or a surrounding can ...: block`) {
 		t.Fatalf("expected guest segment install to require local grant as an error, got:\n%s", all)
 	}
-	if len(result.Errors) == 0 {
+	if len(result.Errors()) == 0 {
 		t.Fatalf("expected missing guest segment install grant to be an error")
 	}
 }
@@ -191,7 +191,7 @@ def posix_pthread_mutex_lock(mutex: mutable void&?&?) -> int:
 	if !strings.Contains(all, `@boundary_pointer_args on function "posix_pthread_mutex_lock" marks "mutex" as an address-space pointer, but its type is mutable void&?&?; use an address carrier such as GuestVAddr[T] or uintptr at the unsafe boundary and resolve before host dereference`) {
 		t.Fatalf("expected boundary pointer arg shape diagnostic, got:\n%s", all)
 	}
-	if len(result.Errors) == 0 {
+	if len(result.Errors()) == 0 {
 		t.Fatalf("expected host-reference boundary pointer arg to be an error")
 	}
 }
@@ -261,7 +261,7 @@ def posix_pthread_mutex_lock_hle(mutex: GuestVAddr[void]) -> int:
 	if !strings.Contains(all, `guest-host pointer cast requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.GuestHostPointerCast or a surrounding can ...: block`) {
 		t.Fatalf("expected guest-host pointer cast diagnostic, got:\n%s", all)
 	}
-	if len(result.Errors) == 0 {
+	if len(result.Errors()) == 0 {
 		t.Fatalf("expected guest-host pointer cast to require an explicit grant")
 	}
 }
