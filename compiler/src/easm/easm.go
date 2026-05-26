@@ -243,6 +243,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	clobberSet := setOf(fn.Clobbers)
 	requireSet := setOf(fn.Requires)
 	preserveSet := setOf(fn.Preserves)
+	outputSet := outputRegisterSet(fn.Outputs)
 	returnsVoid := strings.TrimSpace(fn.ReturnType) == "void"
 	stackDelta := 0
 	stackMod16 := 8
@@ -262,6 +263,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	lfenceBeforeRDTSC := false
 	lfenceAfterRDTSC := false
 	lfenceSeen := false
+	clobberedByCall := map[string]int{}
 	for _, inst := range fn.Instructions {
 		op := normalizeOp(inst.Op)
 		if !allowedOps[op] && !isConditionalJump(op) {
@@ -300,6 +302,12 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if writesSegmentRegister(inst.Text) && !requireSet["x86_64.segment.write"] {
 			issues = append(issues, Issue{Severity: "error", Code: "segment-register-write-intent-missing", File: path, Line: inst.Line, Message: "writing fs/gs requires x86_64.segment.write intent"})
 		}
+		if written := writtenRegister(inst.Text); written != "" {
+			canonical := canonicalX86GPR(written)
+			if isX86GPR(canonical) && !clobberSet[canonical] && !outputSet[canonical] {
+				issues = append(issues, Issue{Severity: "error", Code: "register-write-without-clobber", File: path, Line: inst.Line, Message: fmt.Sprintf("register %s is written but not declared as a clobber or output", canonical)})
+			}
+		}
 		if isIndirectControlTransfer(op, inst.Text) && !requireSet["control.indirect"] {
 			issues = append(issues, Issue{Severity: "error", Code: "indirect-control-intent-missing", File: path, Line: inst.Line, Message: "indirect call/jmp requires control.indirect intent"})
 		}
@@ -316,6 +324,13 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		}
 		if usesHighByteRegister(inst.Text) && !requireSet["x86_64.legacy_high_byte"] {
 			issues = append(issues, Issue{Severity: "error", Code: "high-byte-register", File: path, Line: inst.Line, Message: "high-byte registers require x86_64.legacy_high_byte because they interact poorly with modern x86-64 encodings"})
+		}
+		if len(clobberedByCall) != 0 && !requireSet["call.caller_saved_liveness.unchecked"] {
+			for _, reg := range callerSavedGPRs() {
+				if callLine, ok := clobberedByCall[reg]; ok && instructionReadsRegisterBeforeWriting(inst.Text, reg) {
+					issues = append(issues, Issue{Severity: "error", Code: "caller-saved-use-after-call", File: path, Line: inst.Line, Message: fmt.Sprintf("register %s is read after call on line %d; caller-saved registers must be reloaded or explicitly unchecked", reg, callLine)})
+				}
+			}
 		}
 		if instructionClobbersFlags(op) && !clobberSet["cc"] && !clobberSet["flags"] {
 			issues = append(issues, Issue{Severity: "error", Code: "cc-clobber-missing", File: path, Line: inst.Line, Message: fmt.Sprintf("instruction %q changes condition codes but clobbers does not include cc or flags", inst.Op)})
@@ -383,6 +398,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			}
 			usesCall = true
 			flagsLive = false
+			for _, reg := range callerSavedGPRs() {
+				clobberedByCall[reg] = inst.Line
+			}
 		case op == "jmp":
 			usesJmp = true
 		case op == "ret":
@@ -414,6 +432,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			}
 		case instructionClobbersFlags(op):
 			flagsLive = false
+		}
+		if written := writtenRegister(inst.Text); written != "" {
+			delete(clobberedByCall, canonicalX86GPR(written))
 		}
 	}
 	issues = append(issues, verifyABI(path, fn)...)
@@ -697,6 +718,16 @@ func hasReturnOutput(outputs []string) bool {
 	return false
 }
 
+func outputRegisterSet(outputs []string) map[string]bool {
+	out := map[string]bool{}
+	for _, output := range outputs {
+		if reg := registerAfterEquals(output); reg != "" {
+			out[canonicalX86GPR(reg)] = true
+		}
+	}
+	return out
+}
+
 func verifyABI(path string, fn *Function) []Issue {
 	switch strings.ToLower(strings.TrimSpace(fn.ABI)) {
 	case "", "c", "sysv", "sysv_x86_64", "ps4_sysv":
@@ -945,10 +976,13 @@ func isX86Register(reg string) bool {
 	if isXMMRegister(reg) {
 		return true
 	}
+	return isX86GPR(reg)
+}
+
+func isX86GPR(reg string) bool {
+	reg = canonicalX86GPR(reg)
 	switch reg {
-	case "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-		"eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
-		"al", "ah", "ax", "bl", "bh", "bx", "cl", "ch", "cx", "dl", "dh", "dx":
+	case "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15":
 		return true
 	default:
 		return false
@@ -1078,6 +1112,98 @@ func implicitClobbers(op string) []string {
 		return []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "cc"}
 	default:
 		return nil
+	}
+}
+
+func callerSavedGPRs() []string {
+	return []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
+}
+
+func instructionReadsRegisterBeforeWriting(text string, reg string) bool {
+	reg = canonicalX86GPR(reg)
+	parts := splitInstructionOperands(text)
+	if len(parts) == 0 {
+		return false
+	}
+	readOperands := parts
+	if len(parts) >= 2 {
+		dst := strings.TrimSpace(parts[len(parts)-1])
+		dstReg := canonicalX86GPR(strings.TrimPrefix(strings.ToLower(dst), "%"))
+		if dstReg == reg && instructionOverwritesDestination(text) {
+			readOperands = parts[:len(parts)-1]
+		}
+	}
+	for _, operand := range readOperands {
+		for _, token := range registerTokens(operand) {
+			if canonicalX86GPR(token) == reg {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func instructionOverwritesDestination(text string) bool {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return false
+	}
+	switch normalizeOp(fields[0]) {
+	case "mov", "movq", "movl", "movw", "movb", "movsx", "movsxd", "movzx", "lea", "pop", "popq":
+		return true
+	case "xor", "xorq":
+		parts := splitInstructionOperands(text)
+		return len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+	default:
+		return false
+	}
+}
+
+func writtenRegister(text string) string {
+	parts := splitInstructionOperands(text)
+	if len(parts) == 0 {
+		return ""
+	}
+	fields := strings.Fields(text)
+	op := ""
+	if len(fields) > 0 {
+		op = normalizeOp(fields[0])
+	}
+	if strings.HasPrefix(op, "push") || op == "call" || op == "callq" || op == "jmp" || op == "ret" {
+		return ""
+	}
+	if op == "cmp" || op == "cmpq" || op == "test" || op == "testq" || isConditionalJump(op) {
+		return ""
+	}
+	dst := strings.TrimSpace(parts[len(parts)-1])
+	dst = strings.TrimPrefix(strings.ToLower(dst), "%")
+	if isRegisterName(dst) {
+		return dst
+	}
+	return ""
+}
+
+func canonicalX86GPR(reg string) string {
+	reg = strings.ToLower(strings.TrimPrefix(reg, "%"))
+	switch reg {
+	case "eax", "ax", "al", "ah":
+		return "rax"
+	case "ebx", "bx", "bl", "bh":
+		return "rbx"
+	case "ecx", "cx", "cl", "ch":
+		return "rcx"
+	case "edx", "dx", "dl", "dh":
+		return "rdx"
+	case "esi":
+		return "rsi"
+	case "edi":
+		return "rdi"
+	case "esp":
+		return "rsp"
+	case "ebp":
+		return "rbp"
+	default:
+		return reg
 	}
 }
 

@@ -67,7 +67,7 @@ func TestVerifyAcceptsShadPS4GuestEntryTailJumpTrampoline(t *testing.T) {
 target x86_64
 export def shadps4_guest_entry(params: uintptr, exit_func: uintptr) -> void abi ps4_sysv:
     inputs: params = rdi, exit_func = rsi
-    clobbers: rax, r9, r10, r11, rsi, rdi, cc, memory
+    clobbers: rax, r9, r10, r11, rsi, rdi, rsp, cc, memory
     stack: synthetic, aligned 16, noreturn
     control: noreturn, tail_jumps
     requires: control.indirect
@@ -286,7 +286,7 @@ func TestVerifyRejectsUnsafeReturningUnqualifiedJump(t *testing.T) {
 target x86_64
 export def bad_jump(target: uintptr) -> void abi c:
     inputs: target = rdi
-    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, rsp, cc, memory
     stack: unchanged
     control: returns
     body:
@@ -316,6 +316,22 @@ export def bad_write(ptr: uintptr) -> void abi c:
 	_, issues := Parse("memory.easm", src)
 	if !containsIssue(issues, "memory-write-without-clobber") {
 		t.Fatalf("expected memory-write-without-clobber, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsRegisterWriteWithoutClobber(t *testing.T) {
+	src := `module regs
+target x86_64
+export def bad_reg_write() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        movq %rax, %r10
+        ret
+`
+	_, issues := Parse("regs.easm", src)
+	if !containsIssue(issues, "register-write-without-clobber") {
+		t.Fatalf("expected register-write-without-clobber, got %#v", issues)
 	}
 }
 
@@ -398,7 +414,7 @@ func TestVerifyAcceptsProvenAlignedIndirectCall(t *testing.T) {
 target x86_64
 export def good_alignment(target: uintptr) -> void abi c:
     inputs: target = rdi
-    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, rsp, cc, memory
     stack: unchanged, aligned 16
     control: returns
     requires: control.indirect
@@ -411,6 +427,30 @@ export def good_alignment(target: uintptr) -> void abi c:
 	_, issues := Parse("align_ok.easm", src)
 	if len(issues) != 0 {
 		t.Fatalf("expected proven call alignment to verify, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsCallerSavedUseAfterCall(t *testing.T) {
+	src := `module live
+target x86_64
+export def bad_live_after_call(target: uintptr, value: uintptr) -> uintptr abi c:
+    inputs: target = rdi, value = rsi
+    outputs: ret = rax
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
+    stack: unchanged, aligned 16
+    control: returns
+    requires: control.indirect
+    body:
+        movq %rsi, %r8
+        subq $8, %rsp
+        call *%rdi
+        addq $8, %rsp
+        movq %r8, %rax
+        ret
+`
+	_, issues := Parse("live_after_call.easm", src)
+	if !containsIssue(issues, "caller-saved-use-after-call") {
+		t.Fatalf("expected caller-saved-use-after-call, got %#v", issues)
 	}
 }
 
