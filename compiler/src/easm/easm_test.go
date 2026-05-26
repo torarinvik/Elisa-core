@@ -1904,6 +1904,57 @@ export def loop(value: uintptr) -> uintptr abi c:
 	}
 }
 
+func TestVerifyAcceptsSegmentLabelPrecondition(t *testing.T) {
+	src := `module segment
+target x86_64
+export def enter_host(selector: u16) -> void abi c:
+    facts:
+        fs: guest
+    inputs: selector = rdi
+    labels:
+        host_entry: fs: host
+    clobbers: memory
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent, control.indirect
+    body:
+        movw %di, %fs
+        state fs: host
+        jmp host_entry
+    host_entry:
+        jmp *%rax
+`
+	_, issues := Parse("segment_label.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected segment label precondition to verify, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsUnsatisfiedSegmentLabelPrecondition(t *testing.T) {
+	src := `module segment
+target x86_64
+export def enter_host(selector: u16) -> void abi c:
+    facts:
+        fs: guest
+    inputs: selector = rdi
+    labels:
+        host_entry: fs: host
+    clobbers: memory
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent, control.indirect
+    body:
+        movw %di, %fs
+        jmp host_entry
+    host_entry:
+        jmp *%rax
+`
+	_, issues := Parse("segment_label_bad.easm", src)
+	if !containsIssue(issues, "label-precondition-unsatisfied") {
+		t.Fatalf("expected label-precondition-unsatisfied for unknown fs state, got %#v", issues)
+	}
+}
+
 func containsIssue(issues []Issue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {

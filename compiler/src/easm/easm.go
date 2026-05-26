@@ -25,6 +25,7 @@ type Function struct {
 	ReturnType   string
 	ABI          string
 	Effects      []string
+	Facts        []string
 	Inputs       []string
 	Outputs      []string
 	Labels       []LabelContract
@@ -56,6 +57,11 @@ type LabelContract struct {
 	Line          int
 }
 
+type machineFactState struct {
+	LiveRegs map[string]bool
+	FS       string
+}
+
 type Issue struct {
 	Severity string `json:"severity"`
 	Code     string `json:"code"`
@@ -84,6 +90,7 @@ type FunctionSummary struct {
 	ABI        string   `json:"abi,omitempty"`
 	Params     []Param  `json:"params,omitempty"`
 	ReturnType string   `json:"returnType,omitempty"`
+	Facts      []string `json:"facts,omitempty"`
 	Labels     []string `json:"labels,omitempty"`
 	Control    []string `json:"control,omitempty"`
 	Stack      []string `json:"stack,omitempty"`
@@ -262,10 +269,11 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	labelContracts := labelContractMap(fn.Labels)
 	definedLabels := bodyLabelDefinitions(fn.Instructions)
 	seenLabelDefinitions := map[string]int{}
-	liveRegs := map[string]bool{}
+	state := machineFactState{LiveRegs: map[string]bool{}}
 	for reg := range inputRegs {
-		liveRegs[reg] = true
+		state.LiveRegs[reg] = true
 	}
+	state = applyMachineFactPreconditions(state, fn.Facts)
 	returnsVoid := strings.TrimSpace(fn.ReturnType) == "void"
 	stackDelta := 0
 	maxEntryStackPopDelta := 0
@@ -301,9 +309,13 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				seenLabelDefinitions[inst.Label] = inst.Line
 			}
 			if contract, ok := labelContracts[inst.Label]; ok {
-				issues = append(issues, checkLabelPreconditions(path, inst.Line, "fallthrough", inst.Label, contract.Preconditions, liveRegs)...)
-				liveRegs = canonicalRegisterPreconditionSet(contract.Preconditions)
+				issues = append(issues, checkLabelPreconditions(path, inst.Line, "fallthrough", inst.Label, contract.Preconditions, state)...)
+				state = applyMachineFactPreconditions(machineFactState{}, contract.Preconditions)
 			}
+			continue
+		}
+		if inst.Pseudo && normalizeOp(inst.Op) == "state" {
+			state = applyMachineStateAssertion(state, inst.Text)
 			continue
 		}
 		if inst.Pseudo {
@@ -354,11 +366,12 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		}
 		if writesSegmentRegister(inst.Text) {
 			writesSegment = true
+			state.FS = ""
 		}
 		if written := writtenRegister(inst.Text); written != "" {
 			canonical := canonicalX86GPR(written)
 			if isX86GPR(canonical) {
-				liveRegs[canonical] = true
+				state.LiveRegs[canonical] = true
 			}
 			if returnReg != "" && canonical == returnReg {
 				returnRegWritten = true
@@ -383,7 +396,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			issues = append(issues, Issue{Severity: "error", Code: "reserved-register-use", File: path, Line: inst.Line, Message: "target-reserved register requires an explicit platform capability"})
 		}
 		for _, reg := range implicitClobbers(op) {
-			delete(liveRegs, canonicalX86GPR(reg))
+			delete(state.LiveRegs, canonicalX86GPR(reg))
 			if returnReg != "" && canonicalX86GPR(reg) == returnReg {
 				returnRegWritten = true
 			}
@@ -483,12 +496,12 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			flagsLive = false
 			for _, reg := range callerSavedGPRs() {
 				clobberedByCall[reg] = inst.Line
-				delete(liveRegs, reg)
+				delete(state.LiveRegs, reg)
 			}
 		case op == "jmp":
 			if target := directControlTarget(op, inst.Text); target != "" {
 				if contract, ok := labelContracts[target]; ok {
-					issues = append(issues, checkLabelPreconditions(path, inst.Line, "jmp", target, contract.Preconditions, liveRegs)...)
+					issues = append(issues, checkLabelPreconditions(path, inst.Line, "jmp", target, contract.Preconditions, state)...)
 				}
 				if !definedLabels[target] {
 					usesJmp = true
@@ -516,7 +529,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		case isConditionalJump(op):
 			if target := directControlTarget(op, inst.Text); target != "" {
 				if contract, ok := labelContracts[target]; ok {
-					issues = append(issues, checkLabelPreconditions(path, inst.Line, op, target, contract.Preconditions, liveRegs)...)
+					issues = append(issues, checkLabelPreconditions(path, inst.Line, op, target, contract.Preconditions, state)...)
 				}
 			}
 			if !flagsLive {
@@ -541,6 +554,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	issues = append(issues, verifyBindings(path, target, fn)...)
 	issues = append(issues, verifyRegisterLists(path, target, fn)...)
 	issues = append(issues, verifyDuplicateContractAtoms(path, fn)...)
+	issues = append(issues, verifyEntryFacts(path, fn)...)
 	issues = append(issues, verifyLabelContracts(path, fn, definedLabels)...)
 	if len(fn.Instructions) == 0 {
 		issues = append(issues, Issue{Severity: "error", Code: "missing-body", File: path, Line: fn.Line, Message: "EASM export must contain a body"})
@@ -677,7 +691,7 @@ func BuildReport(paths []string, targetTriple string) (*Report, []*Module) {
 			} else {
 				seenExports[fn.Name] = module.Path
 			}
-			summary.Exports = append(summary.Exports, FunctionSummary{Name: fn.Name, ABI: fn.ABI, Params: fn.Params, ReturnType: fn.ReturnType, Labels: labels, Control: fn.Control, Stack: fn.Stack})
+			summary.Exports = append(summary.Exports, FunctionSummary{Name: fn.Name, ABI: fn.ABI, Params: fn.Params, ReturnType: fn.ReturnType, Facts: fn.Facts, Labels: labels, Control: fn.Control, Stack: fn.Stack})
 			for _, req := range fn.Requires {
 				reqs[req] = true
 			}
@@ -715,6 +729,9 @@ func FormatReport(report *Report, jsonOutput bool) (string, error) {
 		fmt.Fprintf(&out, "Module %s target=%s\n", module.Name, module.Target)
 		for _, exported := range module.Exports {
 			fmt.Fprintf(&out, "  export %s abi=%s control=%s stack=%s\n", exported.Name, defaultString(exported.ABI, "c"), strings.Join(exported.Control, ","), strings.Join(exported.Stack, ","))
+			for _, fact := range exported.Facts {
+				fmt.Fprintf(&out, "    fact %s\n", fact)
+			}
 			for _, label := range exported.Labels {
 				fmt.Fprintf(&out, "    label %s\n", label)
 			}
@@ -763,7 +780,7 @@ func lineWithIndent(line string) string { return stripComment(strings.TrimSpace(
 
 func isSection(s string) bool {
 	switch strings.ToLower(s) {
-	case "inputs", "outputs", "labels", "clobbers", "preserves", "stack", "control", "requires", "body":
+	case "facts", "inputs", "outputs", "labels", "clobbers", "preserves", "stack", "control", "requires", "body":
 		return true
 	default:
 		return false
@@ -775,6 +792,8 @@ func addSectionValue(fn *Function, section string, value string, line int) {
 		return
 	}
 	switch section {
+	case "facts":
+		fn.Facts = append(fn.Facts, splitCSV(value)...)
 	case "inputs":
 		fn.Inputs = append(fn.Inputs, splitCSV(value)...)
 	case "outputs":
@@ -792,6 +811,10 @@ func addSectionValue(fn *Function, section string, value string, line int) {
 	case "requires":
 		fn.Requires = append(fn.Requires, splitCSV(value)...)
 	case "body":
+		if state, ok := parseStateAssertion(value); ok {
+			fn.Instructions = append(fn.Instructions, Instruction{Op: "state", Text: state, Line: line, Pseudo: true})
+			return
+		}
 		if label, ok := parseBodyLabel(value); ok {
 			fn.Instructions = append(fn.Instructions, Instruction{Op: "label", Text: label + ":", Line: line, Label: label})
 			return
@@ -810,6 +833,17 @@ func parseLabelContract(value string, line int) LabelContract {
 		return LabelContract{Name: strings.TrimSpace(value), Line: line}
 	}
 	return LabelContract{Name: strings.TrimSpace(name), Preconditions: splitCSV(rest), Line: line}
+}
+
+func parseStateAssertion(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	lower := strings.ToLower(value)
+	for _, prefix := range []string{"state ", "fact ", "assume "} {
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimSpace(value[len(prefix):]), true
+		}
+	}
+	return "", false
 }
 
 func parseBodyLabel(value string) (string, bool) {
@@ -1156,6 +1190,7 @@ func verifyDuplicateContractAtoms(path string, fn *Function) []Issue {
 		name   string
 		values []string
 	}{
+		{name: "facts", values: fn.Facts},
 		{name: "clobbers", values: fn.Clobbers},
 		{name: "preserves", values: fn.Preserves},
 		{name: "stack", values: fn.Stack},
@@ -1184,6 +1219,21 @@ func verifyDuplicateContractAtoms(path string, fn *Function) []Issue {
 	return issues
 }
 
+func verifyEntryFacts(path string, fn *Function) []Issue {
+	var issues []Issue
+	for _, fact := range fn.Facts {
+		if !supportedMachineFact(fact) {
+			issues = append(issues, Issue{Severity: "error", Code: "unsupported-entry-fact", File: path, Line: fn.Line, Message: fmt.Sprintf("unsupported EASM entry fact %q", fact)})
+		}
+	}
+	for _, inst := range fn.Instructions {
+		if inst.Pseudo && normalizeOp(inst.Op) == "state" && !supportedMachineFact(inst.Text) {
+			issues = append(issues, Issue{Severity: "error", Code: "unsupported-state-assertion", File: path, Line: inst.Line, Message: fmt.Sprintf("unsupported EASM state assertion %q", inst.Text)})
+		}
+	}
+	return issues
+}
+
 func verifyLabelContracts(path string, fn *Function, definedLabels map[string]bool) []Issue {
 	var issues []Issue
 	seen := map[string]int{}
@@ -1201,12 +1251,15 @@ func verifyLabelContracts(path string, fn *Function, definedLabels map[string]bo
 			issues = append(issues, Issue{Severity: "error", Code: "label-contract-without-label", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s has no matching body label", contract.Name)})
 		}
 		if len(contract.Preconditions) == 0 {
-			issues = append(issues, Issue{Severity: "error", Code: "empty-label-precondition", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s must require at least one register precondition", contract.Name)})
+			issues = append(issues, Issue{Severity: "error", Code: "empty-label-precondition", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s must require at least one machine-state precondition", contract.Name)})
 		}
 		for _, pre := range contract.Preconditions {
+			if supportedMachineFact(pre) {
+				continue
+			}
 			reg := canonicalRegisterPrecondition(pre)
 			if reg == "" || !isX86GPR(reg) {
-				issues = append(issues, Issue{Severity: "error", Code: "unsupported-label-precondition", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s uses unsupported register precondition %q", contract.Name, pre)})
+				issues = append(issues, Issue{Severity: "error", Code: "unsupported-label-precondition", File: path, Line: contract.Line, Message: fmt.Sprintf("label contract %s uses unsupported machine-state precondition %q", contract.Name, pre)})
 			}
 		}
 	}
@@ -1243,6 +1296,53 @@ func canonicalRegisterPreconditionSet(preconditions []string) map[string]bool {
 	return out
 }
 
+func applyMachineFactPreconditions(state machineFactState, preconditions []string) machineFactState {
+	out := machineFactState{LiveRegs: map[string]bool{}, FS: state.FS}
+	for reg := range state.LiveRegs {
+		out.LiveRegs[reg] = true
+	}
+	for _, pre := range preconditions {
+		if expected, ok := segmentFactPrecondition(pre); ok {
+			out.FS = expected
+			continue
+		}
+		if reg := canonicalRegisterPrecondition(pre); reg != "" && isX86GPR(reg) {
+			out.LiveRegs[reg] = true
+		}
+	}
+	return out
+}
+
+func applyMachineStateAssertion(state machineFactState, assertion string) machineFactState {
+	if state.LiveRegs == nil {
+		state.LiveRegs = map[string]bool{}
+	}
+	if expected, ok := segmentFactPrecondition(assertion); ok {
+		state.FS = expected
+	}
+	return state
+}
+
+func supportedMachineFact(fact string) bool {
+	_, ok := segmentFactPrecondition(fact)
+	return ok
+}
+
+func segmentFactPrecondition(pre string) (string, bool) {
+	pre = strings.ToLower(strings.TrimSpace(pre))
+	pre = strings.ReplaceAll(pre, " ", "")
+	pre = strings.TrimPrefix(pre, "%")
+	for _, sep := range []string{":", "="} {
+		if before, after, ok := strings.Cut(pre, sep); ok {
+			before = strings.TrimPrefix(before, "%")
+			if before == "fs" && (after == "host" || after == "guest") {
+				return after, true
+			}
+		}
+	}
+	return "", false
+}
+
 func canonicalRegisterPrecondition(pre string) string {
 	pre = strings.TrimSpace(pre)
 	if pre == "" {
@@ -1258,14 +1358,21 @@ func canonicalRegisterPrecondition(pre string) string {
 	return canonicalX86GPR(pre)
 }
 
-func checkLabelPreconditions(path string, line int, transferKind string, label string, preconditions []string, liveRegs map[string]bool) []Issue {
+func checkLabelPreconditions(path string, line int, transferKind string, label string, preconditions []string, state machineFactState) []Issue {
 	var issues []Issue
 	for _, pre := range preconditions {
+		if expected, ok := segmentFactPrecondition(pre); ok {
+			if state.FS != expected {
+				actual := defaultString(state.FS, "unknown")
+				issues = append(issues, Issue{Severity: "error", Code: "label-precondition-unsatisfied", File: path, Line: line, Message: fmt.Sprintf("%s to label %s requires fs:%s but current fs state is %s", transferKind, label, expected, actual)})
+			}
+			continue
+		}
 		reg := canonicalRegisterPrecondition(pre)
 		if reg == "" {
 			continue
 		}
-		if !liveRegs[reg] {
+		if !state.LiveRegs[reg] {
 			issues = append(issues, Issue{Severity: "error", Code: "label-precondition-unsatisfied", File: path, Line: line, Message: fmt.Sprintf("%s to label %s does not satisfy required live register %s", transferKind, label, reg)})
 		}
 	}

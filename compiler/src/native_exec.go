@@ -425,6 +425,9 @@ func nativeEASMAssemblySource(modules []*easm.Module, targetTriple string) (stri
 			out.WriteString(symbol)
 			out.WriteString(":\n")
 			for _, inst := range fn.Instructions {
+				if inst.Pseudo {
+					continue
+				}
 				text := strings.TrimSpace(inst.Text)
 				if text == "" {
 					continue
