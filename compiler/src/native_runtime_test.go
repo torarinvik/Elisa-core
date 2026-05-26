@@ -87,6 +87,83 @@ def string_view_empty_slice_test() -> void:
 	}
 }
 
+func TestRunCLIDebugRefereeRuntimeChecksAndTrace(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "debug_referee_runtime_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	src := fmt.Sprintf(`# include %q
+
+@test
+def debug_referee_records_bad_callable() -> void:
+    can Abort.Panic:
+        debug_referee_reset()
+        debug_referee_set_trace_enabled(true)
+        debug_referee_checkpoint("before-call")
+        ok: bool = debug_referee_check_callable("bad-call", 0x1f4.uintptr())
+        assert_false(ok)
+        assert_eq(debug_referee_last_kind(), DEBUG_REFEREE_KIND_CHECK_CALLABLE)
+        assert_eq(debug_referee_last_reason(), DEBUG_REFEREE_REASON_NEAR_NULL)
+        assert_eq(debug_referee_last_value(), 0x1f4.uintptr())
+        assert_eq(debug_referee_trace_count(), 2.usize())
+        first_event: DebugRefereeEvent = debug_referee_trace_event_at(0.usize())
+        assert_eq(first_event.kind, DEBUG_REFEREE_KIND_CHECKPOINT)
+
+@test
+def debug_referee_accepts_zero_and_canonical_values() -> void:
+    can Abort.Panic:
+        debug_referee_reset()
+        assert_true(debug_referee_check_pointer("null-sentinel", 0.uintptr()))
+        assert_true(debug_referee_check_callable("normal", 0x100000.uintptr()))
+        assert_eq(debug_referee_last_reason(), DEBUG_REFEREE_REASON_OK)
+
+@test
+def debug_referee_records_poison_and_noncanonical() -> void:
+    can Abort.Panic:
+        debug_referee_reset()
+        assert_false(debug_referee_check_pointer("got", DEBUG_REFEREE_POISON_GOT))
+        assert_eq(debug_referee_last_reason(), DEBUG_REFEREE_REASON_POISON)
+        assert_false(debug_referee_check_callable("wild", DEBUG_REFEREE_POISON_GENERIC))
+        assert_eq(debug_referee_last_reason(), DEBUG_REFEREE_REASON_POISON)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write debug referee runtime fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected debug referee runtime test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] debug_referee_records_bad_callable",
+		"[       OK ] debug_referee_records_bad_callable",
+		"[ RUN      ] debug_referee_accepts_zero_and_canonical_values",
+		"[       OK ] debug_referee_accepts_zero_and_canonical_values",
+		"[ RUN      ] debug_referee_records_poison_and_noncanonical",
+		"[       OK ] debug_referee_records_poison_and_noncanonical",
+		"[ SUMMARY  ] 3 test(s) selected; passed=3 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected debug referee runtime output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLINativeRuntimeStringBuilderShortStringRegression(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

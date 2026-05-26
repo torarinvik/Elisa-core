@@ -1,0 +1,148 @@
+# ============================================================
+# Debug referee - opt-in runtime guardrails for dangerous values
+# ============================================================
+
+const DEBUG_REFEREE_TRACE_CAP: usize = 256
+
+const DEBUG_REFEREE_KIND_CHECK_CALLABLE: int = 1
+const DEBUG_REFEREE_KIND_CHECK_POINTER: int = 2
+const DEBUG_REFEREE_KIND_TRACE_VALUE: int = 3
+const DEBUG_REFEREE_KIND_CHECKPOINT: int = 4
+
+const DEBUG_REFEREE_REASON_OK: int = 0
+const DEBUG_REFEREE_REASON_POISON: int = 1
+const DEBUG_REFEREE_REASON_NEAR_NULL: int = 2
+const DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64: int = 3
+
+const DEBUG_REFEREE_NEAR_NULL_LIMIT: uintptr = 0x10000.uintptr()
+const DEBUG_REFEREE_POISON_GENERIC: uintptr = 0x0000800000000000.uintptr()
+const DEBUG_REFEREE_POISON_GOT: uintptr = 0x0000800000000001.uintptr()
+const DEBUG_REFEREE_POISON_TLS: uintptr = 0x0000800000000002.uintptr()
+const DEBUG_REFEREE_POISON_TCB: uintptr = 0x0000800000000003.uintptr()
+const DEBUG_REFEREE_POISON_DTV: uintptr = 0x0000800000000004.uintptr()
+
+struct DebugRefereeEvent:
+    sequence: mutable u64
+    kind: mutable int
+    reason: mutable int
+    value: mutable uintptr
+    label: mutable cstr
+
+global mutable debug_referee_enabled: bool = false
+global mutable debug_referee_trace_enabled: bool = false
+global mutable debug_referee_sequence: u64 = 0
+global mutable debug_referee_event_count: usize = 0
+global mutable debug_referee_last_event: DebugRefereeEvent = zeroed
+global mutable debug_referee_events: DebugRefereeEvent[DEBUG_REFEREE_TRACE_CAP] = zeroed
+
+def debug_referee_set_enabled(enabled: bool):
+    debug_referee_enabled <- enabled
+
+def debug_referee_set_trace_enabled(enabled: bool):
+    debug_referee_trace_enabled <- enabled
+
+def debug_referee_reset():
+    debug_referee_sequence <- 0
+    debug_referee_event_count <- 0
+    debug_referee_last_event <- DebugRefereeEvent(0.u64(), 0, 0, 0.uintptr(), "")
+
+def debug_referee_last_reason() -> int:
+    return debug_referee_last_event.reason
+
+def debug_referee_last_value() -> uintptr:
+    return debug_referee_last_event.value
+
+def debug_referee_last_kind() -> int:
+    return debug_referee_last_event.kind
+
+def debug_referee_trace_count() -> usize:
+    return debug_referee_event_count
+
+def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
+    if index >= DEBUG_REFEREE_TRACE_CAP:
+        return DebugRefereeEvent(0.u64(), 0, 0, 0.uintptr(), "")
+    return debug_referee_events[index]
+
+def debug_referee_is_poison(value: uintptr) -> bool:
+    if value == DEBUG_REFEREE_POISON_GENERIC:
+        return true
+    if value == DEBUG_REFEREE_POISON_GOT:
+        return true
+    if value == DEBUG_REFEREE_POISON_TLS:
+        return true
+    if value == DEBUG_REFEREE_POISON_TCB:
+        return true
+    if value == DEBUG_REFEREE_POISON_DTV:
+        return true
+    return false
+
+def debug_referee_is_near_null(value: uintptr) -> bool:
+    return value != 0.uintptr() and value < DEBUG_REFEREE_NEAR_NULL_LIMIT
+
+def debug_referee_is_noncanonical_x86_64(value: uintptr) -> bool:
+    high: uintptr = value >> 48.uintptr()
+    sign: uintptr = (value >> 47.uintptr()) & 1.uintptr()
+    if sign == 0.uintptr():
+        return high != 0.uintptr()
+    return high != 0xffff.uintptr()
+
+def debug_referee_pointer_reason(value: uintptr) -> int:
+    if debug_referee_is_poison(value):
+        return DEBUG_REFEREE_REASON_POISON
+    if debug_referee_is_near_null(value):
+        return DEBUG_REFEREE_REASON_NEAR_NULL
+    if debug_referee_is_noncanonical_x86_64(value):
+        return DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64
+    return DEBUG_REFEREE_REASON_OK
+
+def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr):
+    debug_referee_sequence <- debug_referee_sequence + 1
+    event: DebugRefereeEvent = DebugRefereeEvent(debug_referee_sequence, kind, reason, value, label)
+    debug_referee_last_event <- event
+
+    if debug_referee_trace_enabled:
+        slot: usize = debug_referee_event_count % DEBUG_REFEREE_TRACE_CAP
+        debug_referee_events[slot] <- event
+        debug_referee_event_count <- debug_referee_event_count + 1
+
+def debug_referee_trace_value(label: cstr, value: uintptr):
+    if debug_referee_trace_enabled:
+        debug_referee_record(DEBUG_REFEREE_KIND_TRACE_VALUE, DEBUG_REFEREE_REASON_OK, value, label)
+
+def debug_referee_checkpoint(label: cstr):
+    if debug_referee_trace_enabled:
+        debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0.uintptr(), label)
+
+def debug_referee_check_pointer(label: cstr, value: uintptr) -> bool:
+    reason: int = debug_referee_pointer_reason(value)
+    if reason != DEBUG_REFEREE_REASON_OK:
+        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, reason, value, label)
+        return false
+    if debug_referee_trace_enabled:
+        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, DEBUG_REFEREE_REASON_OK, value, label)
+    return true
+
+def debug_referee_check_callable(label: cstr, value: uintptr) -> bool:
+    reason: int = debug_referee_pointer_reason(value)
+    if reason != DEBUG_REFEREE_REASON_OK:
+        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, reason, value, label)
+        return false
+    if debug_referee_trace_enabled:
+        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, DEBUG_REFEREE_REASON_OK, value, label)
+    return true
+
+def debug_referee_assert_pointer(label: cstr, value: uintptr):
+    can Abort.Panic:
+        if not debug_referee_enabled:
+            return
+        if debug_referee_check_pointer(label, value):
+            return
+        panic("debug referee stopped unsafe pointer")
+
+def debug_referee_assert_callable(label: cstr, value: uintptr):
+    can Abort.Panic:
+        if not debug_referee_enabled:
+            return
+        if debug_referee_check_callable(label, value):
+            return
+        panic("debug referee stopped unsafe callable")
