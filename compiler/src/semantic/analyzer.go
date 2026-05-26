@@ -337,6 +337,12 @@ type affineValueState struct {
 	// to it (or a field of it) is a use of uninitialized memory. Folded into the
 	// affine state so it inherits clone/merge/snapshot across control flow.
 	Uninitialized bool
+	// ScheduledForDefer marks a linear value whose must-consume obligation will
+	// be discharged by a `defer function` body that consumes it. Such a value no
+	// longer reports "must be consumed" at scope exit (the deferred body runs at
+	// every function exit), may still be borrowed/read, but must NOT be consumed
+	// again inline (that would double-consume the resource at runtime).
+	ScheduledForDefer bool
 }
 
 type affineValueKey struct {

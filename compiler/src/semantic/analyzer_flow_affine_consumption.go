@@ -84,6 +84,10 @@ func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason s
 		if a.currentAffineValues == nil {
 			a.currentAffineValues = map[affineValueKey]affineValueState{}
 		}
+		if a.currentAffineValues[key].ScheduledForDefer {
+			a.errorf(expr.Pos(), "linear value %q is already scheduled for deferred consumption by a `defer function` body; it must not be consumed again inline", affineValueDisplayName(moved))
+			return
+		}
 		a.recordAffineConsumption(key, reason)
 		return
 	}

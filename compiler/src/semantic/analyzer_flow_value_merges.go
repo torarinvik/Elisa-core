@@ -27,6 +27,12 @@ func mergeAffineValueStates(dst map[affineValueKey]affineValueState, src map[aff
 		if state.Uninitialized {
 			existing.Uninitialized = true
 		}
+		// A value scheduled for deferred consumption on either path stays
+		// scheduled after the join (the deferred body still runs at function
+		// exit, so re-consuming it inline must remain blocked).
+		if state.ScheduledForDefer {
+			existing.ScheduledForDefer = true
+		}
 		dst[key] = existing
 	}
 	return dst

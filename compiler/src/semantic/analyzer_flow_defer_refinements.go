@@ -14,15 +14,46 @@ func (a *Analyzer) analyzeDeferStmt(stmt *ast.DeferStmt) {
 	a.validateDeferStmtBody(stmt.Body)
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
-	a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
+	snapshot := a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
+	if stmt.Mode == ast.DeferModeFunction {
+		a.dischargeDeferredLinearConsumes(snapshot.Affine)
+	}
 	collector := newDeferCaptureCollector(a, a.currentScope)
 	collector.collectStmts(stmt.Body)
 	if a.deferInfo == nil {
 		a.deferInfo = map[*ast.DeferStmt]*DeferInfo{}
 	}
 	a.deferInfo[stmt] = &DeferInfo{Mode: stmt.Mode, Captures: append([]string(nil), collector.captureOrder...)}
+}
+
+// dischargeDeferredLinearConsumes discharges the must-consume obligation of any
+// linear value that a `defer function` body consumes. The deferred body runs at
+// every function exit (after all other code), so a value it consumes is
+// guaranteed to be consumed exactly once at scope exit: clear its outstanding
+// obligation and mark it ScheduledForDefer so it stays borrowable/readable but
+// cannot be consumed again inline (which would double-consume at runtime).
+// `deferredAffine` is the affine state captured after analyzing the defer body
+// against a clone of the current state, so a key consumed by the body shows up
+// there with a non-empty ConsumedBy.
+func (a *Analyzer) dischargeDeferredLinearConsumes(deferredAffine map[affineValueKey]affineValueState) {
+	if a.currentAffineValues == nil || deferredAffine == nil {
+		return
+	}
+	for key, outer := range a.currentAffineValues {
+		if outer.LiveProtocolType == nil && outer.LiveProtocolDescription == "" {
+			continue
+		}
+		deferred, ok := deferredAffine[key]
+		if !ok || deferred.ConsumedBy == "" {
+			continue
+		}
+		outer.LiveProtocolType = nil
+		outer.LiveProtocolDescription = ""
+		outer.ScheduledForDefer = true
+		a.currentAffineValues[key] = outer
+	}
 }
 
 func (a *Analyzer) analyzeScopeStmt(stmt *ast.ScopeStmt) {
