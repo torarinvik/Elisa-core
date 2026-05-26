@@ -23,6 +23,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludes(t *testing.T) {
 	artifact1, err := testRunnerCacheArtifactFor(
 		"runner",
 		"shim",
+		nil,
 		[]string{bridgePath},
 		nil,
 		backend.OptimizationLevel0,
@@ -40,6 +41,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludes(t *testing.T) {
 	artifact2, err := testRunnerCacheArtifactFor(
 		"runner",
 		"shim",
+		nil,
 		[]string{bridgePath},
 		nil,
 		backend.OptimizationLevel0,
@@ -78,6 +80,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludesFromIncludeDirs(t 
 	artifact1, err := testRunnerCacheArtifactFor(
 		"runner",
 		"shim",
+		nil,
 		[]string{bridgePath},
 		[]string{"-I", includeRoot},
 		backend.OptimizationLevel0,
@@ -95,6 +98,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludesFromIncludeDirs(t 
 	artifact2, err := testRunnerCacheArtifactFor(
 		"runner",
 		"shim",
+		nil,
 		[]string{bridgePath},
 		[]string{"-I", includeRoot},
 		backend.OptimizationLevel0,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"elisacore/src/easm"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -42,8 +43,8 @@ func debugTestRunnerCache(stderr io.Writer, status string, artifact testRunnerCa
 	fmt.Fprintf(stderr, "[ cache    ] %s key=%s exe=%s\n", status, prefix, artifact.executable)
 }
 
-func locateCachedTestRunner(runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, bool, error) {
-	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple)
+func locateCachedTestRunner(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, bool, error) {
+	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple)
 	if err != nil {
 		return testRunnerCacheArtifact{}, false, err
 	}
@@ -91,7 +92,7 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 	return nil
 }
 
-func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, error) {
+func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, error) {
 	hash := sha256.New()
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
@@ -106,6 +107,20 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 	testRunnerCacheWriteString(hash, "clang="+clangPath)
 	testRunnerCacheWriteBytes(hash, "runner", []byte(runnerSource))
 	testRunnerCacheWriteBytes(hash, "shim", []byte(shimSource))
+	for _, module := range easmModules {
+		if module == nil {
+			continue
+		}
+		testRunnerCacheWriteString(hash, "easm="+module.Path)
+		if strings.TrimSpace(module.Path) == "" {
+			continue
+		}
+		source, err := os.ReadFile(module.Path)
+		if err != nil {
+			return testRunnerCacheArtifact{}, err
+		}
+		testRunnerCacheWriteBytes(hash, "easm-body", source)
+	}
 	resolvedForeignFiles, err := withDefaultNativeRuntimeForeignFiles(foreignFiles)
 	if err != nil {
 		return testRunnerCacheArtifact{}, err

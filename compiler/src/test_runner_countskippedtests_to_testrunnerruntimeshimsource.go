@@ -2,6 +2,7 @@ package main
 
 import (
 	"elisacore/src/backend"
+	"elisacore/src/easm"
 	"elisacore/src/semantic"
 	"errors"
 	"fmt"
@@ -32,14 +33,14 @@ func formatTestLine(status string, name string, detail string) string {
 	}
 	return fmt.Sprintf("[ "+width+" ] %s%s", status, name, detail)
 }
-func compileTestRunnerExecutable(clangPath string, runnerSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
-	return compileTestRunnerExecutableWithShim(clangPath, runnerSource, testRunnerRuntimeShimSource(), foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, stderr)
+func compileTestRunnerExecutable(clangPath string, runnerSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
+	return compileTestRunnerExecutableWithShim(clangPath, runnerSource, testRunnerRuntimeShimSource(), easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, stderr)
 }
-func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, shimSource string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
+func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
 	cacheLookupStart := time.Now()
 	cacheArtifact := testRunnerCacheArtifact{}
 	if testRunnerCacheEnabled() {
-		artifact, hit, err := locateCachedTestRunner(runnerSource, shimSource, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple)
+		artifact, hit, err := locateCachedTestRunner(runnerSource, shimSource, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple)
 		cacheArtifact = artifact
 		lookupElapsed := time.Since(cacheLookupStart)
 		if err != nil {
@@ -71,6 +72,7 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 	if !ok {
 		return "", cleanup, nativeBuildTiming{CacheLookup: time.Since(cacheLookupStart)}, analyzeElapsed, 0, fmt.Errorf("failed to analyze generated test runner")
 	}
+	runnerResult.EASMModules = append([]*easm.Module(nil), easmModules...)
 
 	shimPath := filepath.Join(tempDir, "test_runner_runtime_shims.c")
 	shimStart := time.Now()

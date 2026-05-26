@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -122,6 +123,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 							a.applyExternFuncAnnotations(fnDecl, fnType)
 							a.markRawExternFuncType(fnDecl, fnType)
 							linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
+							a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, fnDecl.Pos())
 							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(fnDecl, "ufcs_only")}
 							a.functionTypes[qualifiedName] = fnType
 							a.defineGlobal(sym, fnDecl.Pos())
@@ -149,6 +151,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						a.applyExternFuncAnnotations(fnDecl, fnType)
 						a.markRawExternFuncType(fnDecl, fnType)
 						linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
+						a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, fnDecl.Pos())
 						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(fnDecl, "ufcs_only")}
 						a.functionTypes[qualifiedName] = fnType
 						a.defineGlobal(sym, fnDecl.Pos())
@@ -167,6 +170,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 				a.functionTypes[qualifiedName] = fnType
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
+				a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, n.Pos())
 				sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(n, "ufcs_only"), Private: scoped.Private}
 				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {
 					a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
@@ -180,6 +184,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 				a.applyExternVarAnnotations(n)
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
+				a.validateExternLinkNameSignatureString(qualifiedName, linkName, externLinkNameVarSignatureString(declType), n.Pos())
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, LinkName: linkName, Mutable: true, Private: scoped.Private}, n.Pos())
 			case *ast.TreeDecl:
 			case *ast.EnumDecl:
@@ -191,6 +196,54 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			}
 		})
 	}
+}
+
+func (a *Analyzer) validateExternLinkNameSignature(symbolName string, linkName string, fnType *FuncType, pos lexer.Pos) {
+	if a == nil || fnType == nil {
+		return
+	}
+	a.validateExternLinkNameSignatureString(symbolName, linkName, externLinkNameSignatureString(fnType), pos)
+}
+
+func (a *Analyzer) validateExternLinkNameSignatureString(symbolName string, linkName string, signature string, pos lexer.Pos) {
+	if a == nil {
+		return
+	}
+	linkName = strings.TrimSpace(linkName)
+	if linkName == "" {
+		return
+	}
+	if a.externLinkNames == nil {
+		a.externLinkNames = map[string]externLinkNameSignature{}
+	}
+	if previous, ok := a.externLinkNames[linkName]; ok {
+		if previous.Signature != signature {
+			a.errorf(pos, "extern link_name %q for %q has signature %s, but previous declaration %q at %s has signature %s; use one shared declaration or matching wrapper to avoid native symbol splitting", linkName, symbolName, signature, previous.SymbolName, previous.Pos.String(), previous.Signature)
+		}
+		return
+	}
+	a.externLinkNames[linkName] = externLinkNameSignature{SymbolName: symbolName, Signature: signature, Pos: pos}
+}
+
+func externLinkNameSignatureString(fnType *FuncType) string {
+	if fnType == nil {
+		return "<invalid>"
+	}
+	parts := []string{fnType.String()}
+	if fnType.CallConv != "" {
+		parts = append(parts, "callconv="+fnType.CallConv)
+	}
+	if fnType.IntrinsicName != "" {
+		parts = append(parts, "intrinsic="+fnType.IntrinsicName)
+	}
+	return strings.Join(parts, " ")
+}
+
+func externLinkNameVarSignatureString(typ Type) string {
+	if typ == nil {
+		return "var <invalid>"
+	}
+	return "var " + typ.String()
 }
 
 func (a *Analyzer) defineExternImplementationGlobal(visibleName string, sym *Symbol, pos lexer.Pos) bool {

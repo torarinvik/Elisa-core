@@ -42,6 +42,12 @@ type ShapeTransformSpec struct {
 	FreshReturnShapeParams []string
 }
 
+type externLinkNameSignature struct {
+	SymbolName string
+	Signature  string
+	Pos        lexer.Pos
+}
+
 var shapeTransformTable = map[string]ShapeTransformSpec{
 	"resize":                    {FreshReturnShapeParams: []string{"shape_out"}},
 	"push":                      {FreshReturnShapeParams: []string{"shape_out"}},
@@ -75,91 +81,92 @@ const (
 )
 
 type Analyzer struct {
-	file                              *ast.File
-	diagnostics                       []Diagnostic
-	namedTypes                        map[string]Type
-	staticInterfaces                  map[string]*StaticInterface
-	staticImpls                       map[string]*StaticImpl
-	extensionMethodsByName            map[string][]*ExtensionMethod
-	ufcsFunctionsByName               map[string][]*Symbol
-	permissions                       map[string]*PermissionSet
-	effectAliases                     map[string]*EffectAlias
-	contextBundles                    map[string]*ContextBundle
-	paramPacks                        map[string]*ParamPack
-	globalScope                       *Scope
-	functionTypes                     map[string]*FuncType
-	constValues                       map[string]ConstValue
-	exprTypes                         map[ast.Expr]Type
-	treeAttributes                    map[string]map[string]*TreeAttribute
-	attributeFieldRefs                map[*ast.FieldExpr]*AttributeFieldRef
-	rewriteDefaults                   map[*ast.Ident]bool
-	optionalBindSourceTypes           map[*ast.OptionalBindExpr]Type
-	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
-	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
-	exprFacts                         map[ast.Expr]OptimizationFacts
-	indexBoundsProven                 map[*ast.IndexExpr]bool
-	storageViewStaleUses              map[ast.Expr]storageViewDependencyState
-	unsafeAliasExprs                  map[ast.Expr]bool
-	unsafeAliasStmts                  map[ast.Stmt]bool
-	progressSummaries                 map[*ast.FuncDecl]*FunctionProgressSummary
-	numericLiteralSuffixWarnings      map[ast.Expr]bool
-	treeConstructorCallees            map[ast.Expr]bool
-	resolvedCastHooks                 map[ast.Expr]*Symbol
-	unsafeLifetimeWidenCasts          map[*ast.CastExpr]bool
-	loweredInitCalls                  map[*ast.StructLitExpr]*ast.CallExpr
-	exprDenseNodeKeys                 map[ast.Expr]DenseNodeKeyInfo
-	exprNodeTables                    map[ast.Expr]NodeTableInfo
-	deferInfo                         map[*ast.DeferStmt]*DeferInfo
-	foldInfo                          map[*ast.FoldExpr]*FoldInfo
-	lambdaInfo                        map[*ast.LambdaExpr]*LambdaInfo
-	symbolFacts                       map[*Symbol]OptimizationFacts
-	funcDeclSymbols                   map[*ast.FuncDecl]*Symbol
-	declVisibility                    map[ast.Decl]string
-	privateTypeNames                  map[string]bool
-	castHooksByName                   map[string]map[castHookSignature]*Symbol
-	initHooksByName                   map[string]map[initHookSignature]*Symbol
-	typeParamScopes                   []map[string]Type
-	typeParamInterfaceScopes          []map[string]*StaticInterface
-	interfaceAssocTypeScopes          []map[string]Type
-	refStorageParamScopes             []map[string]Type
-	refStateParamScopes               []map[string]Type
-	constParamScopes                  []map[string]Type
-	constEvalScopes                   []map[string]ConstValue
-	staticContextDepth                int
-	staticCallDepth                   int
-	shapeParamScopes                  []map[string]Shape
-	regionParamScopes                 []map[string]bool
-	permissionParamScopes             []map[string]bool
-	freshShapeCounter                 int
-	returnFreshShapeStatus            map[string]freshReturnStatus
-	annotatedFuncs                    []*AnnotatedFunc
-	exportedTypes                     []*ExportedType
-	exportedFuncs                     []*ExportedFunc
-	exportedGlobals                   []*ExportedGlobal
-	currentScope                      *Scope
-	currentReturn                     Type
-	currentFuncDecl                   *ast.FuncDecl
-	currentFuncType                   *FuncType
-	currentRegions                    map[*Symbol]regionState
-	currentRegionMarks                map[*Symbol]regionMarkState
-	currentCheckpoints                map[*Symbol]checkpointState
-	currentRegionRefs                 map[*Symbol]regionRefState
-	currentAffineValues               map[affineValueKey]affineValueState
-	currentBorrowedOwnerRefs          map[*Symbol]borrowedOwnerRefState
-	currentFunctionValues             map[*Symbol]*FuncType
-	currentSpecializedValueTypes      map[*Symbol]Type
-	currentValueBindings              map[*Symbol]ast.Expr
-	currentStorageViewDeps            map[*Symbol]storageViewDependencyState
-	currentAliasAccesses              map[string]aliasAccessState
-	currentAliasBindings              map[*Symbol]aliasAccessBinding
-	currentPackedVariantViews         map[*Symbol]*PackedVariantViewType
-	currentPackedStores               map[string]*PackedEnumStoreType
-	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
-	currentTreeAllocOwner             treeAllocOwnerBinding
-	currentFunctionUsedTreeStores     map[string]*TreeStoreType
-	currentRewriteDefault             *rewriteDefaultContext
-	currentSequenceRewrite            *sequenceRewriteContext
-	currentAllocExpr                  ast.Expr
+	file                          *ast.File
+	diagnostics                   []Diagnostic
+	namedTypes                    map[string]Type
+	staticInterfaces              map[string]*StaticInterface
+	staticImpls                   map[string]*StaticImpl
+	extensionMethodsByName        map[string][]*ExtensionMethod
+	ufcsFunctionsByName           map[string][]*Symbol
+	permissions                   map[string]*PermissionSet
+	effectAliases                 map[string]*EffectAlias
+	contextBundles                map[string]*ContextBundle
+	paramPacks                    map[string]*ParamPack
+	globalScope                   *Scope
+	functionTypes                 map[string]*FuncType
+	externLinkNames               map[string]externLinkNameSignature
+	constValues                   map[string]ConstValue
+	exprTypes                     map[ast.Expr]Type
+	treeAttributes                map[string]map[string]*TreeAttribute
+	attributeFieldRefs            map[*ast.FieldExpr]*AttributeFieldRef
+	rewriteDefaults               map[*ast.Ident]bool
+	optionalBindSourceTypes       map[*ast.OptionalBindExpr]Type
+	interfaceMethodRefs           map[*ast.FieldExpr]*InterfaceMethodRef
+	safeCalls                     map[*ast.CallExpr]*SafeCallInfo
+	exprFacts                     map[ast.Expr]OptimizationFacts
+	indexBoundsProven             map[*ast.IndexExpr]bool
+	storageViewStaleUses          map[ast.Expr]storageViewDependencyState
+	unsafeAliasExprs              map[ast.Expr]bool
+	unsafeAliasStmts              map[ast.Stmt]bool
+	progressSummaries             map[*ast.FuncDecl]*FunctionProgressSummary
+	numericLiteralSuffixWarnings  map[ast.Expr]bool
+	treeConstructorCallees        map[ast.Expr]bool
+	resolvedCastHooks             map[ast.Expr]*Symbol
+	unsafeLifetimeWidenCasts      map[*ast.CastExpr]bool
+	loweredInitCalls              map[*ast.StructLitExpr]*ast.CallExpr
+	exprDenseNodeKeys             map[ast.Expr]DenseNodeKeyInfo
+	exprNodeTables                map[ast.Expr]NodeTableInfo
+	deferInfo                     map[*ast.DeferStmt]*DeferInfo
+	foldInfo                      map[*ast.FoldExpr]*FoldInfo
+	lambdaInfo                    map[*ast.LambdaExpr]*LambdaInfo
+	symbolFacts                   map[*Symbol]OptimizationFacts
+	funcDeclSymbols               map[*ast.FuncDecl]*Symbol
+	declVisibility                map[ast.Decl]string
+	privateTypeNames              map[string]bool
+	castHooksByName               map[string]map[castHookSignature]*Symbol
+	initHooksByName               map[string]map[initHookSignature]*Symbol
+	typeParamScopes               []map[string]Type
+	typeParamInterfaceScopes      []map[string]*StaticInterface
+	interfaceAssocTypeScopes      []map[string]Type
+	refStorageParamScopes         []map[string]Type
+	refStateParamScopes           []map[string]Type
+	constParamScopes              []map[string]Type
+	constEvalScopes               []map[string]ConstValue
+	staticContextDepth            int
+	staticCallDepth               int
+	shapeParamScopes              []map[string]Shape
+	regionParamScopes             []map[string]bool
+	permissionParamScopes         []map[string]bool
+	freshShapeCounter             int
+	returnFreshShapeStatus        map[string]freshReturnStatus
+	annotatedFuncs                []*AnnotatedFunc
+	exportedTypes                 []*ExportedType
+	exportedFuncs                 []*ExportedFunc
+	exportedGlobals               []*ExportedGlobal
+	currentScope                  *Scope
+	currentReturn                 Type
+	currentFuncDecl               *ast.FuncDecl
+	currentFuncType               *FuncType
+	currentRegions                map[*Symbol]regionState
+	currentRegionMarks            map[*Symbol]regionMarkState
+	currentCheckpoints            map[*Symbol]checkpointState
+	currentRegionRefs             map[*Symbol]regionRefState
+	currentAffineValues           map[affineValueKey]affineValueState
+	currentBorrowedOwnerRefs      map[*Symbol]borrowedOwnerRefState
+	currentFunctionValues         map[*Symbol]*FuncType
+	currentSpecializedValueTypes  map[*Symbol]Type
+	currentValueBindings          map[*Symbol]ast.Expr
+	currentStorageViewDeps        map[*Symbol]storageViewDependencyState
+	currentAliasAccesses          map[string]aliasAccessState
+	currentAliasBindings          map[*Symbol]aliasAccessBinding
+	currentPackedVariantViews     map[*Symbol]*PackedVariantViewType
+	currentPackedStores           map[string]*PackedEnumStoreType
+	currentPackedStoreResolutions map[*Symbol]packedStoreResolution
+	currentTreeAllocOwner         treeAllocOwnerBinding
+	currentFunctionUsedTreeStores map[string]*TreeStoreType
+	currentRewriteDefault         *rewriteDefaultContext
+	currentSequenceRewrite        *sequenceRewriteContext
+	currentAllocExpr              ast.Expr
 	// localArenaEscapeLocals tracks local collection variables whose backing
 	// buffer was grown while a function-local Arena value was the active
 	// allocation owner. Such a buffer is freed when the local arena goes out of
@@ -172,7 +179,7 @@ type Analyzer struct {
 	// assignment target, where naming a `zeroed`-uninitialized local is not a
 	// value read (it is being filled / had its address taken), so the
 	// definite-assignment read check must not fire.
-	suppressUninitReadCheck int
+	suppressUninitReadCheck           int
 	currentPoolScopes                 []poolScopeState
 	currentIndexBounds                map[string]indexBoundFact
 	currentFunctionUsedPermissions    map[string]bool
@@ -396,6 +403,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		paramPacks:                        map[string]*ParamPack{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
+		externLinkNames:                   map[string]externLinkNameSignature{},
 		constValues:                       map[string]ConstValue{},
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
 		treeAttributes:                    map[string]map[string]*TreeAttribute{},

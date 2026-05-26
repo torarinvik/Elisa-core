@@ -475,7 +475,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		var nativeTiming nativeBuildTiming
 		var analyzeTime time.Duration
 		var shimWriteTime time.Duration
-		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, stderr)
+		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, stderr)
 		compileTotal = time.Since(compileStart)
 		analyzeTotal = analyzeTime
 		nativeObjectTotal = nativeTiming.ObjectWrite

@@ -70,6 +70,7 @@ export def shadps4_guest_entry(params: uintptr, exit_func: uintptr) -> void abi 
     clobbers: rax, r9, r10, r11, rsi, rdi, cc, memory
     stack: synthetic, aligned 16, noreturn
     control: noreturn, tail_jumps
+    requires: control.indirect
     body:
         movq 272(%rdi), %r11
         movq %rdi, %r10
@@ -118,6 +119,7 @@ export def run_on_another_stack(arg: uintptr, entry: uintptr, stack: uintptr) ->
     preserves: r12, r13, callee_saved
     stack: switches
     control: returns
+    requires: control.indirect, stack.call_alignment.unchecked
     body:
         pushq %r12
         pushq %r13
@@ -163,7 +165,7 @@ export def sce_fiber_switch_entry(data: uintptr, set_fpu: i32) -> void abi ps4_s
     preserves: callee_saved
     stack: switches
     control: noreturn, may_fault
-    requires: x86_64.fpu_control, x86_64.simd_state, debug.trap
+    requires: x86_64.fpu_control, x86_64.simd_state, debug.trap, control.indirect, stack.call_alignment.unchecked
     body:
         movq %rdi, %r11
         movq 24(%r11), %rsp
@@ -350,6 +352,65 @@ export def bad_call(target: uintptr) -> void abi c:
 	_, issues := Parse("call.easm", src)
 	if !containsIssue(issues, "call-without-stack-contract") {
 		t.Fatalf("expected call-without-stack-contract, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsIndirectControlWithoutIntent(t *testing.T) {
+	src := `module indirect
+target x86_64
+export def bad_indirect(target: uintptr) -> void abi c:
+    inputs: target = rdi
+    clobbers: cc, memory
+    stack: unchanged, aligned 16
+    control: returns
+    requires: stack.call_alignment.unchecked
+    body:
+        call *%rdi
+        ret
+`
+	_, issues := Parse("indirect.easm", src)
+	if !containsIssue(issues, "indirect-control-intent-missing") {
+		t.Fatalf("expected indirect-control-intent-missing, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsMisalignedCall(t *testing.T) {
+	src := `module align
+target x86_64
+export def bad_alignment(target: uintptr) -> void abi c:
+    inputs: target = rdi
+    clobbers: cc, memory
+    stack: unchanged, aligned 16
+    control: returns
+    requires: control.indirect
+    body:
+        call *%rdi
+        ret
+`
+	_, issues := Parse("align.easm", src)
+	if !containsIssue(issues, "call-stack-misaligned") {
+		t.Fatalf("expected call-stack-misaligned, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsProvenAlignedIndirectCall(t *testing.T) {
+	src := `module align
+target x86_64
+export def good_alignment(target: uintptr) -> void abi c:
+    inputs: target = rdi
+    clobbers: cc, memory
+    stack: unchanged, aligned 16
+    control: returns
+    requires: control.indirect
+    body:
+        subq $8, %rsp
+        call *%rdi
+        addq $8, %rsp
+        ret
+`
+	_, issues := Parse("align_ok.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected proven call alignment to verify, got %#v", issues)
 	}
 }
 
@@ -699,6 +760,24 @@ export def bad_tls() -> u64 abi c:
 	_, issues := Parse("tls.easm", src)
 	if !containsIssue(issues, "segment-access-intent-missing") {
 		t.Fatalf("expected segment-access-intent-missing, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsSegmentRegisterWriteWithoutIntent(t *testing.T) {
+	src := `module tls
+target x86_64
+export def bad_fs_write(selector: u16) -> void abi c:
+    inputs: selector = rdi
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs
+    body:
+        movw %di, %fs
+        ret
+`
+	_, issues := Parse("tls_write.easm", src)
+	if !containsIssue(issues, "segment-register-write-intent-missing") {
+		t.Fatalf("expected segment-register-write-intent-missing, got %#v", issues)
 	}
 }
 

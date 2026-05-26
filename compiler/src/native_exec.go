@@ -20,6 +20,7 @@ import (
 
 	"elisacore/src/ast"
 	"elisacore/src/backend"
+	"elisacore/src/easm"
 	"elisacore/src/semantic"
 )
 
@@ -236,10 +237,14 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 
 	objectPath := filepath.Join(tempDir, "elisacore_module.o")
 	objectStart := time.Now()
+	easmModules := append([]*easm.Module(nil), result.EASMModules...)
+	result.EASMModules = nil
 	if err := writeNativeObjectViaClangIR(clangPath, result, objectPath, optLevel, packedProfile, targetTriple, stderr); err != nil {
+		result.EASMModules = easmModules
 		cleanup()
 		return "", func() {}, timing, err
 	}
+	result.EASMModules = easmModules
 	timing.ObjectWrite = time.Since(objectStart)
 	runtimeObjectPath := ""
 	if !resultDefinesDefaultElisaCoreRuntime(result) {
@@ -280,6 +285,21 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		}
 		foreignFiles = append([]string{shimPath}, foreignFiles...)
 	}
+	if len(easmModules) != 0 {
+		easmPath := filepath.Join(tempDir, "elisacore_easm.s")
+		easmSource, err := nativeEASMAssemblySource(easmModules, targetTriple)
+		if err != nil {
+			cleanup()
+			return "", func() {}, timing, err
+		}
+		if strings.TrimSpace(easmSource) != "" {
+			if err := os.WriteFile(easmPath, []byte(easmSource), 0o644); err != nil {
+				cleanup()
+				return "", func() {}, timing, err
+			}
+			foreignFiles = append([]string{easmPath}, foreignFiles...)
+		}
+	}
 	foreignFiles, linkFlags, err = compileCxxForeignFiles(clangPath, foreignFiles, linkFlags, tempDir, targetTriple, stderr)
 	if err != nil {
 		cleanup()
@@ -288,6 +308,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 
 	linkArgs := make([]string, 0, 7+len(foreignFiles))
 	linkArgs = append(linkArgs, targetClangArgs(targetTriple)...)
+	linkArgs = append(linkArgs, targetLinkerArgs(targetTriple)...)
 	linkArgs = append(linkArgs, "-I", tempDir)
 	if nativeExecutableNeedsPThread(foreignFiles) && runtime.GOOS != "windows" {
 		linkArgs = append(linkArgs, "-pthread")
@@ -380,6 +401,73 @@ func cxxCompileAndFilteredLinkFlags(linkFlags []string) ([]string, []string) {
 	return cxxFlags, filtered
 }
 
+func nativeEASMAssemblySource(modules []*easm.Module, targetTriple string) (string, error) {
+	var out strings.Builder
+	out.WriteString(".text\n")
+	prefix := nativeEASMSymbolPrefix(targetTriple)
+	for _, module := range modules {
+		if module == nil {
+			continue
+		}
+		if !nativeEASMModuleMatchesTarget(module, targetTriple) {
+			continue
+		}
+		for i := range module.Functions {
+			fn := &module.Functions[i]
+			name := strings.TrimSpace(fn.Name)
+			if name == "" {
+				continue
+			}
+			symbol := prefix + name
+			out.WriteString("\n.globl ")
+			out.WriteString(symbol)
+			out.WriteString("\n")
+			out.WriteString(symbol)
+			out.WriteString(":\n")
+			for _, inst := range fn.Instructions {
+				text := strings.TrimSpace(inst.Text)
+				if text == "" {
+					continue
+				}
+				if strings.EqualFold(text, "trap") {
+					text = "int3"
+				}
+				out.WriteString("\t")
+				out.WriteString(text)
+				out.WriteString("\n")
+			}
+		}
+	}
+	return out.String(), nil
+}
+
+func nativeEASMModuleMatchesTarget(module *easm.Module, targetTriple string) bool {
+	moduleTarget := strings.ToLower(strings.TrimSpace(module.Target))
+	if moduleTarget == "" {
+		return true
+	}
+	target := strings.ToLower(strings.TrimSpace(targetTriple))
+	if target == "" {
+		target = runtime.GOARCH
+	}
+	switch moduleTarget {
+	case "x86_64", "amd64":
+		return strings.Contains(target, "x86_64") || strings.Contains(target, "amd64")
+	case "aarch64", "arm64":
+		return strings.Contains(target, "aarch64") || strings.Contains(target, "arm64")
+	default:
+		return strings.Contains(target, moduleTarget)
+	}
+}
+
+func nativeEASMSymbolPrefix(targetTriple string) string {
+	triple := strings.ToLower(strings.TrimSpace(targetTriple))
+	if strings.Contains(triple, "darwin") || strings.Contains(triple, "macos") {
+		return "_"
+	}
+	return ""
+}
+
 func targetClangArgs(targetTriple string) []string {
 	triple := strings.ToLower(strings.TrimSpace(targetTriple))
 	if triple == "" {
@@ -394,6 +482,28 @@ func targetClangArgs(targetTriple string) []string {
 		}
 	}
 	return []string{"-target", strings.TrimSpace(targetTriple)}
+}
+
+func targetLinkerArgs(targetTriple string) []string {
+	triple := strings.ToLower(strings.TrimSpace(targetTriple))
+	if !(strings.Contains(triple, "darwin") || strings.Contains(triple, "macos")) {
+		return nil
+	}
+	if !(strings.Contains(triple, "x86_64") || strings.Contains(triple, "amd64")) {
+		return nil
+	}
+	return []string{
+		"-Wl,-ld_classic",
+		"-Wl,-no_pie",
+		"-Wl,-no_fixup_chains",
+		"-Wl,-no_huge",
+		"-Wl,-pagezero_size,0x4000",
+		"-Wl,-segaddr,TCB_SPACE,0x4000",
+		"-Wl,-segaddr,SYSTEM_MANAGED,0x400000",
+		"-Wl,-segaddr,SYSTEM_RESERVED,0x7FFFFC000",
+		"-Wl,-segaddr,USER_AREA,0x7000000000",
+		"-Wl,-image_base,0x700000000000",
+	}
 }
 
 func targetRunPrefix(targetTriple string) []string {

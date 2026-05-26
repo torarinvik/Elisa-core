@@ -200,6 +200,56 @@ def bridge(value: u32) -> i32:
 	}
 }
 
+func TestExternLinkNameAllowsMatchingAliasDeclarations(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "extern_link_name_matching_aliases.elisa", `
+@link_name(native_bridge)
+extern bridge_one(value: uintptr) -> int
+
+@link_name(native_bridge)
+extern bridge_two(value: uintptr) -> int
+`)
+
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected matching @link_name aliases to be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestExternLinkNameRejectsConflictingAliasDeclarations(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "extern_link_name_conflict.elisa", `
+@link_name(native_bridge)
+extern bridge_one(value: void&) -> int
+
+@link_name(native_bridge)
+extern bridge_two(value: uintptr) -> int
+`)
+
+	allErrors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(allErrors, "extern link_name \"native_bridge\"") {
+		t.Fatalf("expected conflicting @link_name diagnostic, got:\n%s", allErrors)
+	}
+	if !strings.Contains(allErrors, "avoid native symbol splitting") {
+		t.Fatalf("expected native symbol splitting guidance, got:\n%s", allErrors)
+	}
+}
+
+func TestExternLinkNameRejectsFunctionAndVariableCollision(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "extern_link_name_func_var_conflict.elisa", `
+@link_name(native_bridge)
+extern bridge_value: uintptr
+
+@link_name(native_bridge)
+extern bridge_call(value: uintptr) -> int
+`)
+
+	allErrors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(allErrors, "extern link_name \"native_bridge\"") {
+		t.Fatalf("expected function/variable @link_name collision diagnostic, got:\n%s", allErrors)
+	}
+	if !strings.Contains(allErrors, "var uintptr") {
+		t.Fatalf("expected variable signature in diagnostic, got:\n%s", allErrors)
+	}
+}
+
 func TestWindowsFFIModelCanBeGuardedByTargetStaticIf(t *testing.T) {
 	src := `
 static if ELISA_TARGET_OS_WINDOWS:

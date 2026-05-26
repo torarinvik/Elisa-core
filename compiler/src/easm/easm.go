@@ -245,6 +245,8 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	preserveSet := setOf(fn.Preserves)
 	returnsVoid := strings.TrimSpace(fn.ReturnType) == "void"
 	stackDelta := 0
+	stackMod16 := 8
+	stackMod16Known := strings.Contains(strings.ToLower(target), "x86_64") || strings.Contains(strings.ToLower(target), "amd64")
 	maxStackAllocation := 0
 	touchesStack := false
 	mutatesStack := false
@@ -292,6 +294,15 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if usesSegmentOverride(inst.Text) && !hasSegmentCapability(requireSet) {
 			issues = append(issues, Issue{Severity: "error", Code: "segment-access-intent-missing", File: path, Line: inst.Line, Message: "fs/gs segment access requires an explicit segment capability"})
 		}
+		if usesSegmentRegister(inst.Text) && !hasSegmentCapability(requireSet) {
+			issues = append(issues, Issue{Severity: "error", Code: "segment-register-intent-missing", File: path, Line: inst.Line, Message: "fs/gs segment register use requires an explicit segment capability"})
+		}
+		if writesSegmentRegister(inst.Text) && !requireSet["x86_64.segment.write"] {
+			issues = append(issues, Issue{Severity: "error", Code: "segment-register-write-intent-missing", File: path, Line: inst.Line, Message: "writing fs/gs requires x86_64.segment.write intent"})
+		}
+		if isIndirectControlTransfer(op, inst.Text) && !requireSet["control.indirect"] {
+			issues = append(issues, Issue{Severity: "error", Code: "indirect-control-intent-missing", File: path, Line: inst.Line, Message: "indirect call/jmp requires control.indirect intent"})
+		}
 		if writesPartialReturnRegister(inst.Text) {
 			wrotePartialReturn = true
 		}
@@ -313,15 +324,24 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		case strings.HasPrefix(op, "push"):
 			mutatesStack = true
 			stackDelta -= 8
+			if stackMod16Known {
+				stackMod16 = mod16(stackMod16 - 8)
+			}
 		case strings.HasPrefix(op, "pop"):
 			mutatesStack = true
 			stackDelta += 8
+			if stackMod16Known {
+				stackMod16 = mod16(stackMod16 + 8)
+			}
 		case op == "sub" || op == "subq":
 			flagsLive = false
 			if usesStackRegister(inst.Text) {
 				mutatesStack = true
 				amount := immediateValue(inst.Text)
 				stackDelta -= amount
+				if stackMod16Known {
+					stackMod16 = mod16(stackMod16 - amount)
+				}
 				if amount > maxStackAllocation {
 					maxStackAllocation = amount
 				}
@@ -330,20 +350,37 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			flagsLive = false
 			if usesStackRegister(inst.Text) {
 				mutatesStack = true
-				stackDelta += immediateValue(inst.Text)
+				amount := immediateValue(inst.Text)
+				stackDelta += amount
+				if stackMod16Known {
+					stackMod16 = mod16(stackMod16 + amount)
+				}
 			}
 		case op == "and" || op == "andq":
 			flagsLive = false
 			if usesStackRegister(inst.Text) {
 				mutatesStack = true
 				stackDelta = 0
+				if stackAndAlignsTo16(inst.Text) {
+					stackMod16 = 0
+					stackMod16Known = true
+				} else {
+					stackMod16Known = false
+				}
 			}
 		case op == "mov" || op == "movq" || op == "lea":
 			if writesStackPointer(inst.Text) {
 				mutatesStack = true
 				writesSP = true
+				stackMod16Known = false
 			}
 		case strings.HasPrefix(op, "call"):
+			if stackMod16Known && stackMod16 != 0 && !requireSet["stack.call_alignment.unchecked"] {
+				issues = append(issues, Issue{Severity: "error", Code: "call-stack-misaligned", File: path, Line: inst.Line, Message: fmt.Sprintf("call executes with symbolic rsp mod 16 = %d; SysV callers must align rsp to 16 before call", stackMod16)})
+			}
+			if !stackMod16Known && !requireSet["stack.call_alignment.unchecked"] {
+				issues = append(issues, Issue{Severity: "error", Code: "call-stack-alignment-unknown", File: path, Line: inst.Line, Message: "call executes after an untracked stack-pointer write; require stack.call_alignment.unchecked only after manual ABI proof"})
+			}
 			usesCall = true
 			flagsLive = false
 		case op == "jmp":
@@ -1155,6 +1192,57 @@ func usesSegmentOverride(text string) bool {
 
 func hasSegmentCapability(requireSet map[string]bool) bool {
 	return requireSet["x86_64.segment.fs"] || requireSet["x86_64.segment.gs"] || requireSet["x86_64.segment"]
+}
+
+func usesSegmentRegister(text string) bool {
+	for _, operand := range splitInstructionOperands(text) {
+		reg := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(operand)), "%")
+		if reg == "fs" || reg == "gs" {
+			return true
+		}
+	}
+	return false
+}
+
+func writesSegmentRegister(text string) bool {
+	parts := splitInstructionOperands(text)
+	if len(parts) < 2 {
+		return false
+	}
+	dst := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(parts[len(parts)-1])), "%")
+	return dst == "fs" || dst == "gs"
+}
+
+func isIndirectControlTransfer(op string, text string) bool {
+	if op != "jmp" && op != "call" && op != "callq" {
+		return false
+	}
+	parts := splitInstructionOperands(text)
+	if len(parts) == 0 {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(parts[0]), "*")
+}
+
+func stackAndAlignsTo16(text string) bool {
+	parts := splitInstructionOperands(text)
+	if len(parts) < 2 {
+		return false
+	}
+	dst := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(parts[len(parts)-1])), "%")
+	if dst != "rsp" && dst != "esp" {
+		return false
+	}
+	value, ok := parseImmediate(parts[0])
+	return ok && value == -16
+}
+
+func mod16(value int) int {
+	value %= 16
+	if value < 0 {
+		value += 16
+	}
+	return value
 }
 
 func usesReservedRegister(target string, text string, requireSet map[string]bool) bool {
