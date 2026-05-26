@@ -23,6 +23,15 @@ func isAffineHandleType(t Type) bool {
 }
 
 func isBorrowableAffineOwnerType(t Type) bool {
+	// User-declared `linear struct` values are borrowable owners: a `&value`
+	// borrow may be taken (e.g. to witness a held FsGuard at a guest call)
+	// without consuming the value, and the existing borrowed-owner escape /
+	// consume-ordering analysis keeps the must-consume obligation sound. The
+	// builtin handle types (Thread/Task/MutexGuard) are intentionally excluded
+	// (directProtocolLeakKind returns their specific kinds, not "linear value").
+	if directProtocolLeakKind(t) == "linear value" {
+		return true
+	}
 	return isBuiltinProtocolOwnerType(t, "ThreadPool") || isBuiltinProtocolOwnerType(t, "TaskGroup")
 }
 
