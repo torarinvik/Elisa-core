@@ -115,7 +115,7 @@ func TestVerifyAcceptsShadPS4StackSwitchEquivalent(t *testing.T) {
 target x86_64
 export def run_on_another_stack(arg: uintptr, entry: uintptr, stack: uintptr) -> void abi ps4_sysv:
     inputs: arg = rdi, entry = rsi, stack = rdx
-    clobbers: r12, r13, rsp, rbp, cc, memory
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r12, r13, rsp, rbp, cc, memory
     preserves: r12, r13, callee_saved
     stack: switches
     control: returns
@@ -161,7 +161,7 @@ export def sce_fiber_setjmp(ctx: uintptr) -> i32 abi ps4_sysv:
 
 export def sce_fiber_switch_entry(data: uintptr, set_fpu: i32) -> void abi ps4_sysv:
     inputs: data = rdi, set_fpu = rsi
-    clobbers: rax, rbx, rcx, rdx, r8, r9, r10, r11, r12, r13, r14, r15, rsp, rbp, cc, memory
+    clobbers: rax, rbx, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15, rsp, rbp, cc, memory
     preserves: callee_saved
     stack: switches
     control: noreturn, may_fault
@@ -286,7 +286,7 @@ func TestVerifyRejectsUnsafeReturningUnqualifiedJump(t *testing.T) {
 target x86_64
 export def bad_jump(target: uintptr) -> void abi c:
     inputs: target = rdi
-    clobbers: cc, memory
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
     stack: unchanged
     control: returns
     body:
@@ -398,7 +398,7 @@ func TestVerifyAcceptsProvenAlignedIndirectCall(t *testing.T) {
 target x86_64
 export def good_alignment(target: uintptr) -> void abi c:
     inputs: target = rdi
-    clobbers: cc, memory
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
     stack: unchanged, aligned 16
     control: returns
     requires: control.indirect

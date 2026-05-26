@@ -1075,7 +1075,7 @@ func implicitClobbers(op string) []string {
 	case "cpuid":
 		return []string{"rax", "rbx", "rcx", "rdx"}
 	case "call", "callq":
-		return []string{"cc"}
+		return []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "cc"}
 	default:
 		return nil
 	}
