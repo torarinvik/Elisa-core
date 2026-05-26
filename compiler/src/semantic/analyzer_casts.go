@@ -220,16 +220,26 @@ func castRequiresUnsafePointerCast(src, dst Type) bool {
 }
 
 func (a *Analyzer) castRequiresUnsafeGuestHostPointerCast(cast *ast.CastExpr, dst Type) bool {
-	if a == nil || cast == nil || a.currentFuncDecl == nil || a.currentFuncType == nil || len(a.currentFuncType.BoundaryPointerParamIndices) == 0 {
+	if a == nil || cast == nil {
 		return false
 	}
 	if IsInvalidType(dst) || !isPointerLikeCastType(dst) {
 		return false
 	}
+	// Producer/origin enforcement: converting ANY guest address carrier
+	// (GuestVAddr[T]) into a host pointer requires Unsafe.GuestHostPointerCast,
+	// even outside @boundary_pointer_args functions. This gates the *origin*
+	// sites where guest addresses are produced (TLS/GOT resolution that returns
+	// a GuestVAddr), not only HLE parameters, so a produced guest address cannot
+	// be silently dereferenced as a host pointer.
 	if src := a.exprTypes[cast.Operand]; src != nil {
 		if addr, ok := src.(*AddressSpaceType); ok && addr.Space == "guest" {
 			return true
 		}
+	}
+	// Consumer-boundary enforcement: a cast of an @boundary_pointer_args param.
+	if a.currentFuncDecl == nil || a.currentFuncType == nil || len(a.currentFuncType.BoundaryPointerParamIndices) == 0 {
+		return false
 	}
 	operand := cast.Operand
 	for {
