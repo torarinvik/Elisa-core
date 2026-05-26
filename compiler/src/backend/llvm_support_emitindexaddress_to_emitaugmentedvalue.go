@@ -197,6 +197,23 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 			return s.remapErrorCode(value, actualErrSet, expectedErrSet)
 		}
 	}
+	if actualAddr, ok := actual.(*semantic.AddressSpaceType); ok {
+		if semantic.SameType(actualAddr.Storage, expected) {
+			return value, nil
+		}
+		if isPointerLikeType(expected) {
+			expectedLLVM, err := s.g.lowerType(expected)
+			if err != nil {
+				return nil, err
+			}
+			return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("addrspace.inttoptr")), nil
+		}
+	}
+	if expectedAddr, ok := expected.(*semantic.AddressSpaceType); ok {
+		if semantic.SameType(actual, expectedAddr.Storage) {
+			return value, nil
+		}
+	}
 	if expectedUnion, ok := expected.(*semantic.ErrorUnionType); ok {
 		if actualUnion, ok := actual.(*semantic.ErrorUnionType); ok {
 			codeValue, err := s.extractErrorUnionCode(value, actualUnion)

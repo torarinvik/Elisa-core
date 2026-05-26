@@ -147,6 +147,22 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			return invalidType
 		}
 		return &IDType{Tag: tag, Storage: a.namedTypes["u32"]}
+	case "GuestVAddr", "HostPtr", "NativeMappedGuestPtr":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "%s expects 1 type argument, got %d", expr.Name, len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		elem := a.resolveType(expr.TypeArgs[0])
+		if IsInvalidType(elem) {
+			return invalidType
+		}
+		space := "guest"
+		if expr.Name == "HostPtr" {
+			space = "host"
+		} else if expr.Name == "NativeMappedGuestPtr" {
+			space = "native_mapped_guest"
+		}
+		return &AddressSpaceType{Space: space, Elem: elem, Storage: a.namedTypes["uintptr"]}
 	case "RowId":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			a.errorf(expr.Pos(), "RowId expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

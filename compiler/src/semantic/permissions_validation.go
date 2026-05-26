@@ -321,7 +321,9 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Operand, granted)
 		src := a.exprTypes[n.Operand]
 		dst := a.exprTypes[n]
-		if a.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(src, dst) {
+		if a.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && a.castRequiresUnsafeGuestHostPointerCast(n, dst) {
+			a.warnOnMissingLocalGrant(n.Pos(), "guest-host pointer cast", unsafeGuestHostPointerCastRefs(n.Position), granted)
+		} else if a.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(src, dst) {
 			a.warnOnMissingLocalGrant(n.Pos(), "pointer cast", unsafePointerCastRefs(n.Position), granted)
 		} else if a.enforceUnsafePermissions && a.unsafeLifetimeWidenCasts[n] {
 			a.warnOnMissingLocalGrant(n.Pos(), "lifetime-widening reference cast (a borrow cast to a longer-lived storage class; it can dangle when the storage is freed — persist via clone[dstr] instead)", unsafePointerCastRefs(n.Position), granted)
@@ -435,6 +437,10 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	for _, ref := range missingRefs {
 		if ref.Name == "Unsafe" && ref.Member == "SegmentMutation" {
 			a.errorf(pos, "%s", effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), []string{"Unsafe"}, "can Unsafe.SegmentMutation"))
+			return
+		}
+		if ref.Name == "Unsafe" && ref.Member == "GuestSegmentInstall" {
+			a.errorf(pos, "%s", effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), []string{"Unsafe"}, "can Unsafe.GuestSegmentInstall"))
 			return
 		}
 	}

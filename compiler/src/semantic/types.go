@@ -71,6 +71,12 @@ type IDType struct {
 	Storage Type
 }
 
+type AddressSpaceType struct {
+	Space   string
+	Elem    Type
+	Storage Type
+}
+
 type TypeParamType struct {
 	Name string
 }
@@ -563,6 +569,7 @@ type FuncType struct {
 	CallConv                     string
 	IntrinsicName                string
 	GuardEffects                 []FuncGuardEffect
+	BoundaryPointerParamIndices     []int
 	Poststates                   []FuncPoststate
 	Params                       []Type
 	ExplicitParamCount           int

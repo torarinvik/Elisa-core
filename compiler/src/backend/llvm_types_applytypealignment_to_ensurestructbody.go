@@ -123,6 +123,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return g.lowerBitInt(tt.Width), nil
 	case *semantic.IDType:
 		return g.lowerType(tt.Storage)
+	case *semantic.AddressSpaceType:
+		return g.lowerType(tt.Storage)
 	case *semantic.ConstEnumType:
 		return g.lowerType(tt.Storage)
 	case *semantic.ErrorSetType:

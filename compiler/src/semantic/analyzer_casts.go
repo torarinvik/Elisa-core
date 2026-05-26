@@ -66,6 +66,15 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if dstID, ok := dst.(*IDType); ok {
 		return SameType(dstID.Storage, src)
 	}
+	if srcAddr, ok := src.(*AddressSpaceType); ok {
+		if SameType(src, dst) {
+			return true
+		}
+		return SameType(srcAddr.Storage, dst) || isPointerLikeCastType(dst)
+	}
+	if dstAddr, ok := dst.(*AddressSpaceType); ok {
+		return SameType(dstAddr.Storage, src)
+	}
 	if IsNumericType(src) && IsNumericType(dst) {
 		return true
 	}
@@ -105,6 +114,10 @@ func isPointerLikeCastType(t Type) bool {
 
 func unsafePointerCastRefs(pos lexer.Pos) []ast.PermissionRef {
 	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "PointerCast"}}
+}
+
+func unsafeGuestHostPointerCastRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "GuestHostPointerCast"}}
 }
 
 func unsafePointerArithmeticRefs(pos lexer.Pos) []ast.PermissionRef {
@@ -191,6 +204,9 @@ func castRequiresUnsafePointerCast(src, dst Type) bool {
 	if IsNullType(src) {
 		return false
 	}
+	if srcAddr, ok := src.(*AddressSpaceType); ok && srcAddr.Space == "guest" && isPointerLikeCastType(dst) {
+		return false
+	}
 	if isPointerLikeCastType(src) && isPointerLikeCastType(dst) {
 		return true
 	}
@@ -201,6 +217,37 @@ func castRequiresUnsafePointerCast(src, dst Type) bool {
 		return true
 	}
 	return false
+}
+
+func (a *Analyzer) castRequiresUnsafeGuestHostPointerCast(cast *ast.CastExpr, dst Type) bool {
+	if a == nil || cast == nil || a.currentFuncDecl == nil || a.currentFuncType == nil || len(a.currentFuncType.BoundaryPointerParamIndices) == 0 {
+		return false
+	}
+	if IsInvalidType(dst) || !isPointerLikeCastType(dst) {
+		return false
+	}
+	if src := a.exprTypes[cast.Operand]; src != nil {
+		if addr, ok := src.(*AddressSpaceType); ok && addr.Space == "guest" {
+			return true
+		}
+	}
+	operand := cast.Operand
+	for {
+		if paren, ok := operand.(*ast.ParenExpr); ok {
+			operand = paren.Inner
+			continue
+		}
+		break
+	}
+	ident, ok := operand.(*ast.Ident)
+	if !ok || ident == nil || ident.Name == "" {
+		return false
+	}
+	paramIndex, ok := a.functionAnnotationParamIndex(a.currentFuncDecl, ident.Name)
+	if !ok {
+		return false
+	}
+	return intSliceContains(a.currentFuncType.BoundaryPointerParamIndices, paramIndex)
 }
 
 func (a *Analyzer) regionQualifierDefined(name string) bool {

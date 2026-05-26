@@ -301,7 +301,9 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Operand)
 		src := c.analyzer.exprTypes[n.Operand]
 		dst := c.analyzer.exprTypes[n]
-		if c.analyzer.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && (castRequiresUnsafePointerCast(src, dst) || c.analyzer.unsafeLifetimeWidenCasts[n]) {
+		if c.analyzer.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && c.analyzer.castRequiresUnsafeGuestHostPointerCast(n, dst) {
+			c.addRefs(unsafeGuestHostPointerCastRefs(n.Position))
+		} else if c.analyzer.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && (castRequiresUnsafePointerCast(src, dst) || c.analyzer.unsafeLifetimeWidenCasts[n]) {
 			c.addRefs(unsafePointerCastRefs(n.Position))
 		}
 		if c.analyzer.enforceUnsafePermissions && c.analyzer.unsafeBufferReinterpretCasts[n] {

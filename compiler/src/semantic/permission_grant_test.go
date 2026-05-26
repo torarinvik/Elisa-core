@@ -164,6 +164,123 @@ def run() -> void:
 	}
 }
 
+func TestGuestSegmentInstallPermissionRequiresLocalGrantError(t *testing.T) {
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "guest_segment_install_requires_grant.elisa", `
+extern install_guest_fs() -> void can[Unsafe.GuestSegmentInstall]
+
+def run() -> void:
+    install_guest_fs()
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `call to "install_guest_fs" requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.GuestSegmentInstall or a surrounding can ...: block`) {
+		t.Fatalf("expected guest segment install to require local grant as an error, got:\n%s", all)
+	}
+	if len(result.Errors) == 0 {
+		t.Fatalf("expected missing guest segment install grant to be an error")
+	}
+}
+
+func TestBoundaryPointerArgsRejectsHostReferenceBoundaryShape(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "boundary_pointer_arg_host_ref.elisa", `
+@boundary_pointer_args(mutex)
+def posix_pthread_mutex_lock(mutex: mutable void&?&?) -> int:
+    _ = mutex
+    return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `@boundary_pointer_args on function "posix_pthread_mutex_lock" marks "mutex" as an address-space pointer, but its type is mutable void&?&?; use an address carrier such as GuestVAddr[T] or uintptr at the unsafe boundary and resolve before host dereference`) {
+		t.Fatalf("expected boundary pointer arg shape diagnostic, got:\n%s", all)
+	}
+	if len(result.Errors) == 0 {
+		t.Fatalf("expected host-reference boundary pointer arg to be an error")
+	}
+}
+
+func TestBoundaryPointerArgsAcceptsRawGuestAddressCarrier(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "boundary_pointer_arg_vaddr.elisa", `
+type VAddr = uintptr
+
+@boundary_pointer_args(mutex)
+def posix_pthread_mutex_lock(mutex: VAddr) -> int:
+    _ = mutex
+    return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, "@boundary_pointer_args") {
+		t.Fatalf("expected VAddr boundary pointer arg to satisfy annotation, got:\n%s", all)
+	}
+}
+
+func TestGuestVAddrIsDistinctFromRawInteger(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "guest_vaddr_distinct.elisa", `
+def bad(raw: uintptr) -> GuestVAddr[void]:
+    return raw
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "return type expects GuestVAddr[void], got uintptr") {
+		t.Fatalf("expected raw integer to guest vaddr assignment rejection, got:\n%s", all)
+	}
+}
+
+func TestGuestVAddrCastsToStorageAndBack(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "guest_vaddr_cast_storage.elisa", `
+def wrap(raw: uintptr) -> GuestVAddr[void]:
+    return raw.cast[GuestVAddr[void]]
+
+def unwrap(addr: GuestVAddr[void]) -> uintptr:
+    return addr.cast[uintptr]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, "invalid cast") || strings.Contains(all, "GuestHostPointerCast") {
+		t.Fatalf("expected explicit storage casts for GuestVAddr, got:\n%s", all)
+	}
+}
+
+func TestBoundaryPointerArgsAcceptsGuestVAddrCarrier(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "boundary_pointer_arg_guest_vaddr.elisa", `
+@boundary_pointer_args(mutex)
+def posix_pthread_mutex_lock(mutex: GuestVAddr[void]) -> int:
+    _ = mutex
+    return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, "@boundary_pointer_args") {
+		t.Fatalf("expected GuestVAddr boundary pointer arg to satisfy annotation, got:\n%s", all)
+	}
+}
+
+func TestBoundaryPointerArgCastToHostRefRequiresGuestHostPointerCastGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "boundary_pointer_arg_host_cast_requires_grant.elisa", `
+@boundary_pointer_args(mutex)
+def posix_pthread_mutex_lock_hle(mutex: GuestVAddr[void]) -> int:
+    slot: mutable void&?&? = mutex.cast[mutable void&?&?]
+    _ = slot
+    return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `guest-host pointer cast requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.GuestHostPointerCast or a surrounding can ...: block`) {
+		t.Fatalf("expected guest-host pointer cast diagnostic, got:\n%s", all)
+	}
+	if len(result.Errors) == 0 {
+		t.Fatalf("expected guest-host pointer cast to require an explicit grant")
+	}
+}
+
+func TestBoundaryPointerArgCastToHostRefAcceptsGuestHostPointerCastGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "boundary_pointer_arg_host_cast_with_grant.elisa", `
+@boundary_pointer_args(mutex)
+def posix_pthread_mutex_lock_hle(mutex: GuestVAddr[void]) -> int:
+    trusted Unsafe.GuestHostPointerCast:
+        slot: mutable void&?&? = mutex.cast[mutable void&?&?]
+        _ = slot
+    return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, `guest-host pointer cast requires`) {
+		t.Fatalf("expected explicit guest-host pointer grant to satisfy cast, got:\n%s", all)
+	}
+}
+
 func TestPointerLikeCastRequiresUnsafePointerCastGrant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "pointer_cast_requires_unsafe.elisa", `
 def build(value: uintptr) -> heap u8&:

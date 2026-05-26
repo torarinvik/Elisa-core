@@ -124,6 +124,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionCallConvAnnotation(annotation, fn, signature)
 			case "guard_nonnull", "guard_variant":
 				a.applyFunctionGuardAnnotation(annotation, fn, signature)
+			case "boundary_pointer_args":
+				a.applyFunctionBoundaryPointerArgsAnnotation(annotation, fn, signature)
 			case "internal":
 				// Interface visibility marker only; it is not a runtime/test annotation.
 			case "init":
@@ -242,6 +244,76 @@ func (a *Analyzer) applyFunctionGuardAnnotation(annotation ast.Annotation, fn *a
 	}
 }
 
+func (a *Analyzer) validateFunctionBoundaryPointerArgsAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if len(annotation.Args) == 0 {
+		a.errorf(annotation.Position, "@boundary_pointer_args on function %q expects at least one parameter name", fn.Name)
+		return false
+	}
+	ok := true
+	seen := map[int]bool{}
+	for _, raw := range annotation.Args {
+		paramIndex, found := a.functionAnnotationParamIndex(fn, strings.TrimSpace(raw))
+		if !found {
+			ok = false
+			continue
+		}
+		if seen[paramIndex] {
+			a.errorf(annotation.Position, "@boundary_pointer_args on function %q lists parameter %q more than once", fn.Name, raw)
+			ok = false
+			continue
+		}
+		seen[paramIndex] = true
+		if paramIndex < 0 || paramIndex >= len(signature.Params) {
+			ok = false
+			continue
+		}
+		if !isBoundaryPointerCarrierType(signature.Params[paramIndex]) {
+			a.errorf(annotation.Position, "@boundary_pointer_args on function %q marks %q as an address-space pointer, but its type is %s; use an address carrier such as GuestVAddr[T] or uintptr at the unsafe boundary and resolve before host dereference", fn.Name, strings.TrimSpace(raw), signature.Params[paramIndex])
+			ok = false
+		}
+	}
+	return ok
+}
+
+func (a *Analyzer) applyFunctionBoundaryPointerArgsAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil {
+		return
+	}
+	for _, raw := range annotation.Args {
+		paramIndex, ok := a.functionAnnotationParamIndex(fn, strings.TrimSpace(raw))
+		if !ok {
+			continue
+		}
+		if !intSliceContains(signature.BoundaryPointerParamIndices, paramIndex) {
+			signature.BoundaryPointerParamIndices = append(signature.BoundaryPointerParamIndices, paramIndex)
+		}
+	}
+}
+
+func isBoundaryPointerCarrierType(t Type) bool {
+	switch tt := t.(type) {
+	case *BuiltinType:
+		return tt.Name == "uintptr" || tt.Name == "u64"
+	case *BitIntType:
+		return !tt.Signed && tt.Width == 64
+	case *AddressSpaceType:
+		return tt.Space == "guest"
+	case *InvalidType:
+		return true
+	default:
+		return false
+	}
+}
+
+func intSliceContains(values []int, needle int) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
 	if signature == nil {
 		a.errorf(annotation.Position, "cannot resolve signature for @%s function %q", annotation.Name, fn.Name)
@@ -283,6 +355,9 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	}
 	if annotation.Name == "init" {
 		return a.validateFunctionInitAnnotation(annotation, fn, signature)
+	}
+	if annotation.Name == "boundary_pointer_args" {
+		return a.validateFunctionBoundaryPointerArgsAnnotation(annotation, fn, signature)
 	}
 	if annotation.Name == "inline" {
 		if len(annotation.Args) != 1 {
@@ -576,6 +651,8 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
 	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init":
+		return true
+	case "boundary_pointer_args":
 		return true
 	default:
 		return false

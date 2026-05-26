@@ -14,6 +14,7 @@ func (*NullType) isType()               {}
 func (*BuiltinType) isType()            {}
 func (*BitIntType) isType()             {}
 func (*IDType) isType()                 {}
+func (*AddressSpaceType) isType()       {}
 func (*TypeParamType) isType()          {}
 func (*ConstParamType) isType()         {}
 func (*ConstValueType) isType()         {}
@@ -81,6 +82,21 @@ func (t *IDType) String() string {
 		return "id[<invalid>]"
 	}
 	return fmt.Sprintf("id[%s]", t.Tag.String())
+}
+func (t *AddressSpaceType) String() string {
+	if t == nil || t.Elem == nil {
+		return "Address[<invalid>]"
+	}
+	switch t.Space {
+	case "guest":
+		return fmt.Sprintf("GuestVAddr[%s]", t.Elem.String())
+	case "host":
+		return fmt.Sprintf("HostPtr[%s]", t.Elem.String())
+	case "native_mapped_guest":
+		return fmt.Sprintf("NativeMappedGuestPtr[%s]", t.Elem.String())
+	default:
+		return fmt.Sprintf("Address[%s,%s]", t.Space, t.Elem.String())
+	}
 }
 func (t *RegionParamType) String() string {
 	if t == nil {

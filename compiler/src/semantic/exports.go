@@ -217,33 +217,34 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		return base
 	}
 	return &FuncType{
-		Name:                      specialized.Name,
-		TypeParams:                nil,
-		RefStorageParams:          nil,
-		RefStateParams:            nil,
-		RegionParams:              append([]string(nil), specialized.RegionParams...),
-		GenericParams:             nil,
-		Permissions:               append([]string(nil), specialized.Permissions...),
-		ShapeParams:               append([]string(nil), specialized.ShapeParams...),
-		FreshReturnShapeParams:    append([]string(nil), specialized.FreshReturnShapeParams...),
-		InlineMode:                specialized.InlineMode,
-		HasInlineMode:             specialized.HasInlineMode,
-		HasNoRecurse:              specialized.HasNoRecurse,
-		TemperatureMode:           specialized.TemperatureMode,
-		HasTemperatureMode:        specialized.HasTemperatureMode,
-		Poststates:                cloneFuncPoststates(specialized.Poststates),
-		Params:                    append([]Type(nil), specialized.Params...),
-		ExplicitParamCount:        specialized.ExplicitParamCount,
-		ExplicitParamNames:        append([]string(nil), specialized.ExplicitParamNames...),
-		ExplicitParamDefaultExprs: append([]ast.Expr(nil), specialized.ExplicitParamDefaultExprs...),
-		ExplicitParamHasDefault:   append([]bool(nil), specialized.ExplicitParamHasDefault...),
-		ImplicitParamNames:        append([]string(nil), specialized.ImplicitParamNames...),
-		Return:                    specialized.Return,
-		Variadic:                  specialized.Variadic,
-		SinkParams:                append([]bool(nil), specialized.SinkParams...),
-		SinkParamsKnown:           specialized.SinkParamsKnown,
-		ReturnIsolation:           specialized.ReturnIsolation,
-		ReturnIsolationKnown:      specialized.ReturnIsolationKnown,
+		Name:                        specialized.Name,
+		TypeParams:                  nil,
+		RefStorageParams:            nil,
+		RefStateParams:              nil,
+		RegionParams:                append([]string(nil), specialized.RegionParams...),
+		GenericParams:               nil,
+		Permissions:                 append([]string(nil), specialized.Permissions...),
+		ShapeParams:                 append([]string(nil), specialized.ShapeParams...),
+		FreshReturnShapeParams:      append([]string(nil), specialized.FreshReturnShapeParams...),
+		InlineMode:                  specialized.InlineMode,
+		HasInlineMode:               specialized.HasInlineMode,
+		HasNoRecurse:                specialized.HasNoRecurse,
+		TemperatureMode:             specialized.TemperatureMode,
+		HasTemperatureMode:          specialized.HasTemperatureMode,
+		BoundaryPointerParamIndices: append([]int(nil), specialized.BoundaryPointerParamIndices...),
+		Poststates:                  cloneFuncPoststates(specialized.Poststates),
+		Params:                      append([]Type(nil), specialized.Params...),
+		ExplicitParamCount:          specialized.ExplicitParamCount,
+		ExplicitParamNames:          append([]string(nil), specialized.ExplicitParamNames...),
+		ExplicitParamDefaultExprs:   append([]ast.Expr(nil), specialized.ExplicitParamDefaultExprs...),
+		ExplicitParamHasDefault:     append([]bool(nil), specialized.ExplicitParamHasDefault...),
+		ImplicitParamNames:          append([]string(nil), specialized.ImplicitParamNames...),
+		Return:                      specialized.Return,
+		Variadic:                    specialized.Variadic,
+		SinkParams:                  append([]bool(nil), specialized.SinkParams...),
+		SinkParamsKnown:             specialized.SinkParamsKnown,
+		ReturnIsolation:             specialized.ReturnIsolation,
+		ReturnIsolationKnown:        specialized.ReturnIsolationKnown,
 	}
 }
 
@@ -333,6 +334,8 @@ func isCABICompatibleType(t Type) bool {
 			return false
 		}
 	case *IDType:
+		return isCABICompatibleType(tt.Storage)
+	case *AddressSpaceType:
 		return isCABICompatibleType(tt.Storage)
 	case *RefType:
 		return true

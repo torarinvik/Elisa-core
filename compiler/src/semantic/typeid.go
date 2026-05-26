@@ -87,6 +87,12 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.Tag, active, nextCycleID) || !appendTypeIDKey(b, tt.Storage, active, nextCycleID) {
 			return false
 		}
+	case *AddressSpaceType:
+		appendKeyTag(b, "addrspace")
+		appendKeyString(b, tt.Space)
+		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) || !appendTypeIDKey(b, tt.Storage, active, nextCycleID) {
+			return false
+		}
 	case *TypeParamType:
 		appendKeyTag(b, "typeparam")
 		appendKeyString(b, tt.Name)

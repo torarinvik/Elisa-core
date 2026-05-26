@@ -8,12 +8,15 @@ import (
 
 func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 	switch name {
-	case "id", "Id", "ID", "RowId":
+	case "id", "Id", "ID", "RowId", "GuestVAddr", "HostPtr", "NativeMappedGuestPtr":
 		p.advance()
 		tag := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
 		if name == "RowId" {
 			return &ast.BuiltinTypeExpr{Position: pos, Name: "RowId", TypeArgs: []ast.TypeExpr{tag}}
+		}
+		if name == "GuestVAddr" || name == "HostPtr" || name == "NativeMappedGuestPtr" {
+			return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{tag}}
 		}
 		return &ast.BuiltinTypeExpr{Position: pos, Name: "id", TypeArgs: []ast.TypeExpr{tag}}
 	case "array", "darray":

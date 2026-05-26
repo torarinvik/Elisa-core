@@ -100,6 +100,12 @@ func AssignableTo(dst, src Type) bool {
 	if _, ok := src.(*IDType); ok {
 		return SameType(dst, src)
 	}
+	if _, ok := dst.(*AddressSpaceType); ok {
+		return SameType(dst, src)
+	}
+	if _, ok := src.(*AddressSpaceType); ok {
+		return SameType(dst, src)
+	}
 	if dstTuple, ok := dst.(*TupleType); ok {
 		srcTuple, ok := src.(*TupleType)
 		if !ok || len(dstTuple.Fields) != len(srcTuple.Fields) {

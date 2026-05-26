@@ -112,6 +112,9 @@ func SameType(a, b Type) bool {
 	case *IDType:
 		tb, ok := b.(*IDType)
 		return ok && SameType(ta.Tag, tb.Tag) && SameType(ta.Storage, tb.Storage)
+	case *AddressSpaceType:
+		tb, ok := b.(*AddressSpaceType)
+		return ok && ta.Space == tb.Space && SameType(ta.Elem, tb.Elem) && SameType(ta.Storage, tb.Storage)
 	case *TypeParamType:
 		tb, ok := b.(*TypeParamType)
 		return ok && ta.Name == tb.Name

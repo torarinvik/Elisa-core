@@ -445,6 +445,21 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, err
 		}
 		return &semantic.IDType{Tag: tag, Storage: s.g.result.NamedTypes["u32"]}, nil
+	case "GuestVAddr", "HostPtr", "NativeMappedGuestPtr":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			return nil, fmt.Errorf("%s expects 1 type argument, got %d", expr.Name, len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		elem, err := s.resolveTypeExpr(expr.TypeArgs[0])
+		if err != nil {
+			return nil, err
+		}
+		space := "guest"
+		if expr.Name == "HostPtr" {
+			space = "host"
+		} else if expr.Name == "NativeMappedGuestPtr" {
+			space = "native_mapped_guest"
+		}
+		return &semantic.AddressSpaceType{Space: space, Elem: elem, Storage: s.g.result.NamedTypes["uintptr"]}, nil
 	case "RowId":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("RowId expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

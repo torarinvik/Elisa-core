@@ -28,6 +28,7 @@ var unsafeCapabilityOrder = []string{
 	"PoisonPointerSentinel",
 	"TinyPointerSentinel",
 	"SegmentMutation",
+	"GuestSegmentInstall",
 	"CrossThreadSignalJump",
 	"MachineCodeBuilder",
 	"NonProgress",
@@ -52,7 +53,7 @@ var boundaryInvariantRegistry = []boundaryInvariant{
 	},
 	{
 		Name:        "MachineSegmentState",
-		Triggers:    []string{"Unsafe.SegmentMutation", "EASM.Requires.x86_64.segment.fs", "EASM.Requires.x86_64.segment.gs", "EASM.Requires.x86_64.segment.restore", "EASM.Requires.x86_64.segment.persistent"},
+		Triggers:    []string{"Unsafe.SegmentMutation", "Unsafe.GuestSegmentInstall", "EASM.Requires.x86_64.segment.fs", "EASM.Requires.x86_64.segment.gs", "EASM.Requires.x86_64.segment.restore", "EASM.Requires.x86_64.segment.persistent"},
 		StaticRule:  "segment register writes require an explicit restore/persistent contract",
 		TraceRule:   "trace every host/guest segment switch with thread id and selector",
 		RuntimeRule: "debug/referee mode asserts expected segment state at guest/host boundaries",
