@@ -1955,6 +1955,51 @@ export def enter_host(selector: u16) -> void abi c:
 	}
 }
 
+func TestVerifyAcceptsStackAlignmentLabelPrecondition(t *testing.T) {
+	src := `module stackfacts
+target x86_64
+export def jump_when_call_aligned(value: uintptr) -> void abi c:
+    inputs: value = rdi
+    labels:
+        call_ready: rsp: mod16=0
+    clobbers: memory
+    stack: synthetic, aligned 16
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        pushq %rdi
+        jmp call_ready
+    call_ready:
+        jmp *%rax
+`
+	_, issues := Parse("stack_label.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected stack alignment label precondition to verify, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsUnsatisfiedStackAlignmentLabelPrecondition(t *testing.T) {
+	src := `module stackfacts
+target x86_64
+export def jump_when_call_aligned(value: uintptr) -> void abi c:
+    inputs: value = rdi
+    labels:
+        call_ready: rsp: mod16=0
+    clobbers: memory
+    stack: synthetic, aligned 16
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        jmp call_ready
+    call_ready:
+        jmp *%rax
+`
+	_, issues := Parse("stack_label_bad.easm", src)
+	if !containsIssue(issues, "label-precondition-unsatisfied") {
+		t.Fatalf("expected label-precondition-unsatisfied for stack alignment, got %#v", issues)
+	}
+}
+
 func containsIssue(issues []Issue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {

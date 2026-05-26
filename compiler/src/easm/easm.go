@@ -58,8 +58,10 @@ type LabelContract struct {
 }
 
 type machineFactState struct {
-	LiveRegs map[string]bool
-	FS       string
+	LiveRegs        map[string]bool
+	FS              string
+	StackMod16      int
+	StackMod16Known bool
 }
 
 type Issue struct {
@@ -279,6 +281,8 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	maxEntryStackPopDelta := 0
 	stackMod16 := 8
 	stackMod16Known := strings.Contains(strings.ToLower(target), "x86_64") || strings.Contains(strings.ToLower(target), "amd64")
+	state.StackMod16 = stackMod16
+	state.StackMod16Known = stackMod16Known
 	maxStackAllocation := 0
 	touchesStack := false
 	mutatesStack := false
@@ -309,13 +313,20 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				seenLabelDefinitions[inst.Label] = inst.Line
 			}
 			if contract, ok := labelContracts[inst.Label]; ok {
+				state = withStackMod16(state, stackMod16, stackMod16Known)
 				issues = append(issues, checkLabelPreconditions(path, inst.Line, "fallthrough", inst.Label, contract.Preconditions, state)...)
 				state = applyMachineFactPreconditions(machineFactState{}, contract.Preconditions)
+				stackMod16 = state.StackMod16
+				stackMod16Known = state.StackMod16Known
 			}
 			continue
 		}
 		if inst.Pseudo && normalizeOp(inst.Op) == "state" {
 			state = applyMachineStateAssertion(state, inst.Text)
+			if stack, ok := stackMod16FactPrecondition(inst.Text); ok {
+				stackMod16 = stack
+				stackMod16Known = true
+			}
 			continue
 		}
 		if inst.Pseudo {
@@ -501,6 +512,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		case op == "jmp":
 			if target := directControlTarget(op, inst.Text); target != "" {
 				if contract, ok := labelContracts[target]; ok {
+					state = withStackMod16(state, stackMod16, stackMod16Known)
 					issues = append(issues, checkLabelPreconditions(path, inst.Line, "jmp", target, contract.Preconditions, state)...)
 				}
 				if !definedLabels[target] {
@@ -529,6 +541,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		case isConditionalJump(op):
 			if target := directControlTarget(op, inst.Text); target != "" {
 				if contract, ok := labelContracts[target]; ok {
+					state = withStackMod16(state, stackMod16, stackMod16Known)
 					issues = append(issues, checkLabelPreconditions(path, inst.Line, op, target, contract.Preconditions, state)...)
 				}
 			}
@@ -1297,13 +1310,18 @@ func canonicalRegisterPreconditionSet(preconditions []string) map[string]bool {
 }
 
 func applyMachineFactPreconditions(state machineFactState, preconditions []string) machineFactState {
-	out := machineFactState{LiveRegs: map[string]bool{}, FS: state.FS}
+	out := machineFactState{LiveRegs: map[string]bool{}, FS: state.FS, StackMod16: state.StackMod16, StackMod16Known: state.StackMod16Known}
 	for reg := range state.LiveRegs {
 		out.LiveRegs[reg] = true
 	}
 	for _, pre := range preconditions {
 		if expected, ok := segmentFactPrecondition(pre); ok {
 			out.FS = expected
+			continue
+		}
+		if mod, ok := stackMod16FactPrecondition(pre); ok {
+			out.StackMod16 = mod
+			out.StackMod16Known = true
 			continue
 		}
 		if reg := canonicalRegisterPrecondition(pre); reg != "" && isX86GPR(reg) {
@@ -1320,12 +1338,25 @@ func applyMachineStateAssertion(state machineFactState, assertion string) machin
 	if expected, ok := segmentFactPrecondition(assertion); ok {
 		state.FS = expected
 	}
+	if mod, ok := stackMod16FactPrecondition(assertion); ok {
+		state.StackMod16 = mod
+		state.StackMod16Known = true
+	}
 	return state
 }
 
 func supportedMachineFact(fact string) bool {
-	_, ok := segmentFactPrecondition(fact)
+	if _, ok := segmentFactPrecondition(fact); ok {
+		return true
+	}
+	_, ok := stackMod16FactPrecondition(fact)
 	return ok
+}
+
+func withStackMod16(state machineFactState, mod int, known bool) machineFactState {
+	state.StackMod16 = mod
+	state.StackMod16Known = known
+	return state
 }
 
 func segmentFactPrecondition(pre string) (string, bool) {
@@ -1341,6 +1372,25 @@ func segmentFactPrecondition(pre string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func stackMod16FactPrecondition(pre string) (int, bool) {
+	pre = strings.ToLower(strings.TrimSpace(pre))
+	pre = strings.ReplaceAll(pre, " ", "")
+	pre = strings.TrimPrefix(pre, "%")
+	if before, after, ok := strings.Cut(pre, ":"); ok {
+		before = strings.TrimPrefix(before, "%")
+		if before != "rsp" && before != "esp" && before != "sp" {
+			return 0, false
+		}
+		switch after {
+		case "aligned16", "call_aligned", "mod16=0":
+			return 0, true
+		case "entry_aligned", "mod16=8":
+			return 8, true
+		}
+	}
+	return 0, false
 }
 
 func canonicalRegisterPrecondition(pre string) string {
@@ -1365,6 +1415,14 @@ func checkLabelPreconditions(path string, line int, transferKind string, label s
 			if state.FS != expected {
 				actual := defaultString(state.FS, "unknown")
 				issues = append(issues, Issue{Severity: "error", Code: "label-precondition-unsatisfied", File: path, Line: line, Message: fmt.Sprintf("%s to label %s requires fs:%s but current fs state is %s", transferKind, label, expected, actual)})
+			}
+			continue
+		}
+		if expected, ok := stackMod16FactPrecondition(pre); ok {
+			if !state.StackMod16Known {
+				issues = append(issues, Issue{Severity: "error", Code: "label-precondition-unsatisfied", File: path, Line: line, Message: fmt.Sprintf("%s to label %s requires rsp mod 16 = %d but current stack alignment is unknown", transferKind, label, expected)})
+			} else if state.StackMod16 != expected {
+				issues = append(issues, Issue{Severity: "error", Code: "label-precondition-unsatisfied", File: path, Line: line, Message: fmt.Sprintf("%s to label %s requires rsp mod 16 = %d but current rsp mod 16 = %d", transferKind, label, expected, state.StackMod16)})
 			}
 			continue
 		}
