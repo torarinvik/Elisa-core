@@ -159,6 +159,22 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIRChecksAbiLayoutAnnotationOnFixedLayout(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_abi_layout_fixed_layout_annotation.elisa", `@fixed_layout
+@abi_layout(size, 16, align, 8, field, tag, 0, field, count, 4, field, payload, 8)
+struct Header:
+    tag: u8
+    count: u32
+    payload: u64
+
+def keep() -> void:
+    pass
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRFoldsStaticReflection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_reflection.elisa", `enum Maybe:
     None

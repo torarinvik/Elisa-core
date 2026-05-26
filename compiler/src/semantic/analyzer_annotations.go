@@ -380,8 +380,8 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 }
 
 func (a *Analyzer) validateStructAbiLayoutAnnotation(structDecl *ast.StructDecl, annotation ast.Annotation) {
-	if !structDecl.ReprC {
-		a.errorf(annotation.Position, "@abi_layout on struct %q requires `layout c` so the asserted offsets use C ABI layout rules", structDecl.Name)
+	if !structDecl.ReprC && !structDeclHasAnnotation(structDecl, "fixed_layout") {
+		a.errorf(annotation.Position, "@abi_layout on struct %q requires `layout c` or @fixed_layout so the asserted offsets are intentional ABI surface", structDecl.Name)
 		return
 	}
 	if len(structDecl.TypeParams) != 0 || len(structDecl.GenericParams) != 0 {
@@ -438,6 +438,18 @@ func structDeclHasField(structDecl *ast.StructDecl, fieldName string) bool {
 	}
 	for _, field := range structDecl.Fields {
 		if field.Name == fieldName {
+			return true
+		}
+	}
+	return false
+}
+
+func structDeclHasAnnotation(structDecl *ast.StructDecl, annotationName string) bool {
+	if structDecl == nil {
+		return false
+	}
+	for _, annotation := range structDecl.Annotations {
+		if annotation.Name == annotationName {
 			return true
 		}
 	}
