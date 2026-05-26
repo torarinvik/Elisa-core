@@ -2072,6 +2072,39 @@ export def poison_target_test() -> void abi c:
 	}
 }
 
+func TestVerifyRejectsKnownTinyReturnTarget(t *testing.T) {
+	src := `module tinyret
+target x86_64
+export def bad_ret() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        pushq $1
+        ret
+`
+	_, issues := Parse("tiny_ret.easm", src)
+	if !containsIssue(issues, "tiny-return-target") {
+		t.Fatalf("expected tiny-return-target, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsKnownPoisonReturnTarget(t *testing.T) {
+	src := `module poisonret
+target x86_64
+export def bad_ret() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        movq $0xdead0000dead0000, %rax
+        pushq %rax
+        ret
+`
+	_, issues := Parse("poison_ret.easm", src)
+	if !containsIssue(issues, "poison-return-target") {
+		t.Fatalf("expected poison-return-target, got %#v", issues)
+	}
+}
+
 func containsIssue(issues []Issue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {

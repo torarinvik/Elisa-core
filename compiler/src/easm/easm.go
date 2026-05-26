@@ -63,6 +63,8 @@ type machineFactState struct {
 	FS              string
 	StackMod16      int
 	StackMod16Known bool
+	StackTopValue   uint64
+	StackTopKnown   bool
 }
 
 type Issue struct {
@@ -454,12 +456,14 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		switch {
 		case strings.HasPrefix(op, "push"):
 			mutatesStack = true
+			state.StackTopValue, state.StackTopKnown = pushedKnownValue(state, inst.Text)
 			stackDelta -= 8
 			if stackMod16Known {
 				stackMod16 = mod16(stackMod16 - 8)
 			}
 		case strings.HasPrefix(op, "pop"):
 			mutatesStack = true
+			state.StackTopKnown = false
 			stackDelta += 8
 			if stackDelta > maxEntryStackPopDelta {
 				maxEntryStackPopDelta = stackDelta
@@ -541,6 +545,12 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				usesJmp = true
 			}
 		case op == "ret":
+			if state.StackTopKnown && state.StackTopValue > 0 && state.StackTopValue < 0x10000 && !requireSet["control.tiny_target.unchecked"] {
+				issues = append(issues, Issue{Severity: "error", Code: "tiny-return-target", File: path, Line: inst.Line, Message: fmt.Sprintf("ret target is known tiny value 0x%x; require control.tiny_target.unchecked only for intentional sentinels", state.StackTopValue)})
+			}
+			if state.StackTopKnown && isNonCanonicalX86Address(state.StackTopValue) && !requireSet["control.poison_target.unchecked"] {
+				issues = append(issues, Issue{Severity: "error", Code: "poison-return-target", File: path, Line: inst.Line, Message: fmt.Sprintf("ret target is known non-canonical poison-like value 0x%x; require control.poison_target.unchecked only for intentional tests", state.StackTopValue)})
+			}
 			usesRet = true
 		case op == "std":
 			directionFlagSet = true
@@ -1828,6 +1838,23 @@ func parseImmediateLiteral(value string) (uint64, bool) {
 		return 0, false
 	}
 	return parsed, true
+}
+
+func pushedKnownValue(state machineFactState, text string) (uint64, bool) {
+	parts := splitInstructionOperands(text)
+	if len(parts) != 1 {
+		return 0, false
+	}
+	operand := strings.TrimSpace(parts[0])
+	if value, ok := parseImmediateLiteral(operand); ok {
+		return value, true
+	}
+	reg := canonicalX86GPR(strings.TrimPrefix(operand, "%"))
+	if reg == "" {
+		return 0, false
+	}
+	value, ok := state.KnownUInt[reg]
+	return value, ok
 }
 
 func isNonCanonicalX86Address(value uint64) bool {
