@@ -58,7 +58,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				declType := a.resolveType(n.Type)
 				if a.containsAffineHandleValues(declType, map[string]bool{}) {
-					a.errorf(n.Pos(), "global %q cannot store affine handle values of type %s", n.Name, declType)
+					a.errorf(n.Pos(), "global %q cannot store linear handle values of type %s", n.Name, declType)
 				}
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable, Private: scoped.Private}, n.Pos())
 			case *ast.FuncDecl:
@@ -180,7 +180,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				declType := a.resolveType(n.Type)
 				if a.containsAffineHandleValues(declType, map[string]bool{}) {
-					a.errorf(n.Pos(), "extern var %q cannot store affine handle values of type %s", n.Name, declType)
+					a.errorf(n.Pos(), "extern var %q cannot store linear handle values of type %s", n.Name, declType)
 				}
 				a.applyExternVarAnnotations(n)
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)

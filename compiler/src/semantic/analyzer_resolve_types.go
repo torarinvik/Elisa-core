@@ -115,7 +115,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		elemType := a.resolveType(n.Elem)
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
-			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType)
+			a.errorf(n.Pos(), "references to values containing linear handles are not supported; got %s&", elemType)
 		}
 		return &RefType{Elem: elemType, State: RefState(n.State), StateParam: stateParam, Storage: RefStorage(n.Storage), StorageParam: storageParam, Region: region, ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
@@ -167,7 +167,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	case *ast.TailType:
 		elemType := a.resolveType(n.Elem)
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
-			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType)
+			a.errorf(n.Pos(), "references to values containing linear handles are not supported; got %s&", elemType)
 		}
 		return &RefType{Elem: elemType, State: RefStateNonNull, Storage: RefStorageAny}
 	case *ast.GenericType:

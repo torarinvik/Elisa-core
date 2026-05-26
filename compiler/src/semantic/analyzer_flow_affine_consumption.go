@@ -28,7 +28,7 @@ func isBorrowableAffineOwnerType(t Type) bool {
 
 func affineHandleKind(t Type) string {
 	if !isAffineHandleType(t) {
-		return "value containing affine handles"
+		return "value containing linear handles"
 	}
 	switch tt := t.(type) {
 	case *GenericInstanceType:
@@ -60,7 +60,7 @@ func affineHandleKind(t Type) string {
 			return "task group owner"
 		}
 	}
-	return "affine value"
+	return "linear value"
 }
 
 func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason string) {

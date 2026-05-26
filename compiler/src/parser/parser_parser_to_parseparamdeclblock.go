@@ -292,7 +292,7 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("soa") {
 		return p.parseSoaDecl()
 	}
-	if p.peekIdentText("affine") {
+	if p.peekIdentText("linear") || p.peekIdentText("affine") {
 		return p.parseStructDecl()
 	}
 	if p.peek() == lexer.TOKEN_AT {
@@ -312,7 +312,7 @@ func (p *Parser) parseDecl() ast.Decl {
 		if p.peekIdentText("soa") {
 			return p.parseSoaDeclWithAnnotations(annotations)
 		}
-		if p.peekIdentText("affine") {
+		if p.peekIdentText("linear") || p.peekIdentText("affine") {
 			return p.parseStructDeclWithAnnotations(annotations)
 		}
 		switch p.peek() {

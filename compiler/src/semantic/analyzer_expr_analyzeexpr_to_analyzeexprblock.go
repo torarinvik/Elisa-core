@@ -583,13 +583,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			if _, ok := a.lookupAffineValueKey(n.Operand); ok {
 				if isAffineHandleType(inner) {
 					kind := affineHandleKind(inner)
-					if kind == "affine value" {
-						a.errorf(n.Pos(), "cannot take address of affine value")
+					if kind == "linear value" {
+						a.errorf(n.Pos(), "cannot take address of linear value")
 					} else {
 						a.errorf(n.Pos(), "cannot take address of %s", kind)
 					}
 				} else {
-					a.errorf(n.Pos(), "cannot take address of value containing affine handles")
+					a.errorf(n.Pos(), "cannot take address of value containing linear handles")
 				}
 			}
 		}

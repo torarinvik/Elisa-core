@@ -277,7 +277,7 @@ func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr,
 		return invalidType
 	}
 	if a.containsAffineHandleValues(keyType, map[string]bool{}) {
-		a.errorf(keyExpr.Pos(), "dict keys cannot contain affine handles, got %s", keyType)
+		a.errorf(keyExpr.Pos(), "dict keys cannot contain linear handles, got %s", keyType)
 		return invalidType
 	}
 	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}

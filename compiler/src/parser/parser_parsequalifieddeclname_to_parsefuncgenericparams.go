@@ -517,7 +517,9 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 	return p.parseStructDeclWithLeadingLayout(annotations, ast.StructLayoutDefault, false, p.cur().Pos)
 }
 func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, leadingLayout ast.StructLayoutMode, leadingReprC bool, pos lexer.Pos) *ast.StructDecl {
-	affine := p.matchIdentText("affine")
+	// `linear` is the canonical keyword (use-exactly-once); `affine` is kept as
+	// a deprecated alias so existing sources/docs keep parsing.
+	affine := p.matchIdentText("linear") || p.matchIdentText("affine")
 	reprC := leadingReprC
 	if p.peek() == lexer.TOKEN_REPR {
 		p.errorf("legacy `repr(c) struct` syntax is no longer supported; use `struct` instead")

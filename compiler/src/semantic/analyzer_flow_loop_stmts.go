@@ -347,7 +347,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		a.errorf(stmt.Pos(), "for value iteration does not support affine element type %s; use ref or mutable ref", info.ItemType)
 	}
 	if stmt.Mode != ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) && !isBorrowableAffineOwnerType(info.ItemType) {
-		a.errorf(stmt.Pos(), "references to values containing affine handles are not supported; got %s&", info.ItemType)
+		a.errorf(stmt.Pos(), "references to values containing linear handles are not supported; got %s&", info.ItemType)
 	}
 	switch stmt.Mode {
 	case ast.IterBindRef:

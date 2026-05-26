@@ -134,7 +134,7 @@ func directProtocolLeakKind(t Type) string {
 		// (Thread/Task/MutexGuard) are handled below in their state-aware
 		// forms and must not be caught here.
 		if tt.Affine && !tt.Builtin {
-			return "affine value"
+			return "linear value"
 		}
 		return ""
 	case *GenericInstanceType:
@@ -157,7 +157,7 @@ func directProtocolLeakKind(t Type) string {
 		}
 		// User-declared generic affine structs are also must-consume.
 		if base, ok := tt.Base.(*StructType); ok && base.Affine && !base.Builtin {
-			return "affine value"
+			return "linear value"
 		}
 		return ""
 	default:
@@ -380,7 +380,7 @@ func (a *Analyzer) protocolLeakDescription(t Type) string {
 		parts = append(parts, "held mutex guards")
 	}
 	if len(parts) == 0 {
-		return "affine value"
+		return "linear value"
 	}
 	return "value containing " + joinProtocolLeakKinds(parts)
 }
