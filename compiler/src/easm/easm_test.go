@@ -198,7 +198,7 @@ export def run_on_another_stack(arg: uintptr, entry: uintptr, stack: uintptr) ->
     preserves: r12, r13, callee_saved
     stack: switches
     control: returns
-    requires: control.indirect, stack.call_alignment.unchecked, callee_saved.preservation.unchecked
+    requires: control.indirect, stack.call_alignment.unchecked, callee_saved.preservation.unchecked, input.unused
     body:
         pushq %r12
         pushq %r13
@@ -244,7 +244,7 @@ export def sce_fiber_switch_entry(data: uintptr, set_fpu: i32) -> void abi ps4_s
     preserves: callee_saved
     stack: switches
     control: noreturn, may_fault
-    requires: x86_64.fpu_control, x86_64.simd_state, debug.trap, control.indirect, stack.call_alignment.unchecked
+    requires: x86_64.fpu_control, x86_64.simd_state, debug.trap, control.indirect, stack.call_alignment.unchecked, input.unused
     body:
         movq %rdi, %r11
         movq 24(%r11), %rsp
@@ -1457,6 +1457,39 @@ export def missing_input(a: i64, b: i64) -> void abi c:
 	_, issues := Parse("missing_input.easm", src)
 	if !containsIssue(issues, "missing-input-binding") {
 		t.Fatalf("expected missing-input-binding, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsUnusedInputRegister(t *testing.T) {
+	src := `module bindings
+target x86_64
+export def unused_input(a: i64) -> void abi c:
+    inputs: a = rdi
+    stack: unchanged
+    control: returns
+    body:
+        ret
+`
+	_, issues := Parse("unused_input.easm", src)
+	if !containsIssue(issues, "input-register-unused") {
+		t.Fatalf("expected input-register-unused, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsExplicitUnusedInputRegister(t *testing.T) {
+	src := `module bindings
+target x86_64
+export def unused_input(a: i64) -> void abi c:
+    inputs: a = rdi
+    stack: unchanged
+    control: returns
+    requires: input.unused
+    body:
+        ret
+`
+	_, issues := Parse("unused_input_ok.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected explicit unused input to verify, got %#v", issues)
 	}
 }
 

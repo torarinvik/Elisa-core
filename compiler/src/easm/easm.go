@@ -247,6 +247,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	preserveSet := setOf(fn.Preserves)
 	outputSet := outputRegisterSet(fn.Outputs)
 	returnReg := returnOutputRegister(fn.Outputs)
+	inputRegs := inputRegisterSet(fn.Inputs)
 	returnsVoid := strings.TrimSpace(fn.ReturnType) == "void"
 	stackDelta := 0
 	maxEntryStackPopDelta := 0
@@ -269,6 +270,8 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	lfenceSeen := false
 	clobberedByCall := map[string]int{}
 	returnRegWritten := false
+	inputRegRead := map[string]bool{}
+	inputRegOverwritten := map[string]bool{}
 	for _, inst := range fn.Instructions {
 		op := normalizeOp(inst.Op)
 		if !allowedOps[op] && !isConditionalJump(op) {
@@ -319,6 +322,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			if returnReg != "" && canonical == returnReg {
 				returnRegWritten = true
 			}
+			if inputRegs[canonical] && !inputRegRead[canonical] {
+				inputRegOverwritten[canonical] = true
+			}
 			if isX86GPR(canonical) && !clobberSet[canonical] && !outputSet[canonical] {
 				issues = append(issues, Issue{Severity: "error", Code: "register-write-without-clobber", File: path, Line: inst.Line, Message: fmt.Sprintf("register %s is written but not declared as a clobber or output", canonical)})
 			}
@@ -351,6 +357,11 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				if callLine, ok := clobberedByCall[reg]; ok && instructionReadsRegisterBeforeWriting(inst.Text, reg) {
 					issues = append(issues, Issue{Severity: "error", Code: "caller-saved-use-after-call", File: path, Line: inst.Line, Message: fmt.Sprintf("register %s is read after call on line %d; caller-saved registers must be reloaded or explicitly unchecked", reg, callLine)})
 				}
+			}
+		}
+		for reg := range inputRegs {
+			if !inputRegRead[reg] && !inputRegOverwritten[reg] && instructionReadsRegisterBeforeWriting(inst.Text, reg) {
+				inputRegRead[reg] = true
 			}
 		}
 		if instructionClobbersFlags(op) && !clobberSet["cc"] && !clobberSet["flags"] {
@@ -493,6 +504,13 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	}
 	if !returnsVoid && returnReg != "" && !returnRegWritten && !requireSet["return.register.preinitialized"] {
 		issues = append(issues, Issue{Severity: "error", Code: "return-register-not-written", File: path, Line: fn.Line, Message: fmt.Sprintf("non-void EASM export declares ret = %s but the body does not write it", returnReg)})
+	}
+	if !requireSet["input.unused"] {
+		for reg := range inputRegs {
+			if !inputRegRead[reg] {
+				issues = append(issues, Issue{Severity: "error", Code: "input-register-unused", File: path, Line: fn.Line, Message: fmt.Sprintf("input register %s is declared but not read before being overwritten or returning", reg)})
+			}
+		}
 	}
 	if returnsVoid && hasReturnOutput(fn.Outputs) {
 		issues = append(issues, Issue{Severity: "error", Code: "void-return-output", File: path, Line: fn.Line, Message: "void EASM export cannot declare a ret output"})
@@ -778,6 +796,16 @@ func returnOutputRegister(outputs []string) string {
 	return ""
 }
 
+func inputRegisterSet(inputs []string) map[string]bool {
+	out := map[string]bool{}
+	for _, input := range inputs {
+		if reg := registerAfterEquals(input); reg != "" {
+			out[canonicalX86GPR(reg)] = true
+		}
+	}
+	return out
+}
+
 func outputRegisterSet(outputs []string) map[string]bool {
 	out := map[string]bool{}
 	for _, output := range outputs {
@@ -884,6 +912,7 @@ func allowedRequireToken(token string) bool {
 		"control.indirect",
 		"debug.trap",
 		"fixed_address",
+		"input.unused",
 		"immediate.truncation",
 		"operand_size.inferred",
 		"pic",
@@ -1365,15 +1394,20 @@ func canonicalX86GPR(reg string) string {
 		return "rcx"
 	case "edx", "dx", "dl", "dh":
 		return "rdx"
-	case "esi":
+	case "esi", "si", "sil":
 		return "rsi"
-	case "edi":
+	case "edi", "di", "dil":
 		return "rdi"
 	case "esp":
 		return "rsp"
 	case "ebp":
 		return "rbp"
 	default:
+		for _, base := range []string{"r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"} {
+			if reg == base+"d" || reg == base+"w" || reg == base+"b" {
+				return base
+			}
+		}
 		return reg
 	}
 }
