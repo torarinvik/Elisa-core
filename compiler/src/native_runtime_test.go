@@ -105,7 +105,7 @@ func TestRunCLIDebugRefereeRuntimeChecksAndTrace(t *testing.T) {
 
 @test
 def debug_referee_records_bad_callable() -> void:
-    can Abort.Panic:
+    can Abort.Panic, Debug.Referee:
         debug_referee_reset()
         debug_referee_set_trace_enabled(true)
         debug_referee_checkpoint("before-call")
@@ -120,7 +120,7 @@ def debug_referee_records_bad_callable() -> void:
 
 @test
 def debug_referee_accepts_zero_and_canonical_values() -> void:
-    can Abort.Panic:
+    can Abort.Panic, Debug.Referee:
         debug_referee_reset()
         assert_true(debug_referee_check_pointer("null-sentinel", 0.uintptr()))
         assert_true(debug_referee_check_callable("normal", 0x100000.uintptr()))
@@ -128,7 +128,7 @@ def debug_referee_accepts_zero_and_canonical_values() -> void:
 
 @test
 def debug_referee_records_poison_and_noncanonical() -> void:
-    can Abort.Panic:
+    can Abort.Panic, Debug.Referee:
         debug_referee_reset()
         assert_false(debug_referee_check_pointer("got", DEBUG_REFEREE_POISON_GOT))
         assert_eq(debug_referee_last_reason(), DEBUG_REFEREE_REASON_POISON)

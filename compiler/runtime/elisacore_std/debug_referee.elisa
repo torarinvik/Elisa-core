@@ -4,6 +4,9 @@
 
 const DEBUG_REFEREE_TRACE_CAP: usize = 256
 
+permission Debug:
+    Referee
+
 const DEBUG_REFEREE_KIND_CHECK_CALLABLE: int = 1
 const DEBUG_REFEREE_KIND_CHECK_POINTER: int = 2
 const DEBUG_REFEREE_KIND_TRACE_VALUE: int = 3
@@ -35,13 +38,13 @@ global mutable debug_referee_event_count: usize = 0
 global mutable debug_referee_last_event: DebugRefereeEvent = zeroed
 global mutable debug_referee_events: DebugRefereeEvent[DEBUG_REFEREE_TRACE_CAP] = zeroed
 
-def debug_referee_set_enabled(enabled: bool):
+def debug_referee_set_enabled(enabled: bool) can[Debug.Referee]:
     debug_referee_enabled <- enabled
 
-def debug_referee_set_trace_enabled(enabled: bool):
+def debug_referee_set_trace_enabled(enabled: bool) can[Debug.Referee]:
     debug_referee_trace_enabled <- enabled
 
-def debug_referee_reset():
+def debug_referee_reset() can[Debug.Referee]:
     debug_referee_sequence <- 0
     debug_referee_event_count <- 0
     debug_referee_last_event <- DebugRefereeEvent(0.u64(), 0, 0, 0.uintptr(), "")
@@ -95,7 +98,7 @@ def debug_referee_pointer_reason(value: uintptr) -> int:
         return DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64
     return DEBUG_REFEREE_REASON_OK
 
-def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr):
+def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr) can[Debug.Referee]:
     debug_referee_sequence <- debug_referee_sequence + 1
     event: DebugRefereeEvent = DebugRefereeEvent(debug_referee_sequence, kind, reason, value, label)
     debug_referee_last_event <- event
@@ -105,42 +108,46 @@ def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr):
         debug_referee_events[slot] <- event
         debug_referee_event_count <- debug_referee_event_count + 1
 
-def debug_referee_trace_value(label: cstr, value: uintptr):
-    if debug_referee_trace_enabled:
-        debug_referee_record(DEBUG_REFEREE_KIND_TRACE_VALUE, DEBUG_REFEREE_REASON_OK, value, label)
+def debug_referee_trace_value(label: cstr, value: uintptr) can[Debug.Referee]:
+    can Debug.Referee:
+        if debug_referee_trace_enabled:
+            debug_referee_record(DEBUG_REFEREE_KIND_TRACE_VALUE, DEBUG_REFEREE_REASON_OK, value, label)
 
-def debug_referee_checkpoint(label: cstr):
-    if debug_referee_trace_enabled:
-        debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0.uintptr(), label)
+def debug_referee_checkpoint(label: cstr) can[Debug.Referee]:
+    can Debug.Referee:
+        if debug_referee_trace_enabled:
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0.uintptr(), label)
 
-def debug_referee_check_pointer(label: cstr, value: uintptr) -> bool:
-    reason: int = debug_referee_pointer_reason(value)
-    if reason != DEBUG_REFEREE_REASON_OK:
-        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, reason, value, label)
-        return false
-    if debug_referee_trace_enabled:
-        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, DEBUG_REFEREE_REASON_OK, value, label)
-    return true
+def debug_referee_check_pointer(label: cstr, value: uintptr) -> bool can[Debug.Referee]:
+    can Debug.Referee:
+        reason: int = debug_referee_pointer_reason(value)
+        if reason != DEBUG_REFEREE_REASON_OK:
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, reason, value, label)
+            return false
+        if debug_referee_trace_enabled:
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, DEBUG_REFEREE_REASON_OK, value, label)
+        return true
 
-def debug_referee_check_callable(label: cstr, value: uintptr) -> bool:
-    reason: int = debug_referee_pointer_reason(value)
-    if reason != DEBUG_REFEREE_REASON_OK:
-        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, reason, value, label)
-        return false
-    if debug_referee_trace_enabled:
-        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, DEBUG_REFEREE_REASON_OK, value, label)
-    return true
+def debug_referee_check_callable(label: cstr, value: uintptr) -> bool can[Debug.Referee]:
+    can Debug.Referee:
+        reason: int = debug_referee_pointer_reason(value)
+        if reason != DEBUG_REFEREE_REASON_OK:
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, reason, value, label)
+            return false
+        if debug_referee_trace_enabled:
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, DEBUG_REFEREE_REASON_OK, value, label)
+        return true
 
-def debug_referee_assert_pointer(label: cstr, value: uintptr):
-    can Abort.Panic:
+def debug_referee_assert_pointer(label: cstr, value: uintptr) can[Debug.Referee, Abort.Panic]:
+    can Debug.Referee, Abort.Panic:
         if not debug_referee_enabled:
             return
         if debug_referee_check_pointer(label, value):
             return
         panic("debug referee stopped unsafe pointer")
 
-def debug_referee_assert_callable(label: cstr, value: uintptr):
-    can Abort.Panic:
+def debug_referee_assert_callable(label: cstr, value: uintptr) can[Debug.Referee, Abort.Panic]:
+    can Debug.Referee, Abort.Panic:
         if not debug_referee_enabled:
             return
         if debug_referee_check_callable(label, value):
