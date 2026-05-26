@@ -22,9 +22,53 @@ var unsafeCapabilityOrder = []string{
 	"Alias",
 	"BufferReinterpret",
 	"Assembly",
+	"ExecutableCodePublish",
+	"GuestHostPointerCast",
+	"TinyPointerSentinel",
+	"SegmentMutation",
+	"CrossThreadSignalJump",
+	"MachineCodeBuilder",
 	"NonProgress",
 	"BlockMain",
 	"AssumeProgress",
+}
+
+var boundaryInvariantRegistry = []boundaryInvariant{
+	{
+		Name:        "GuestHostPointer",
+		Triggers:    []string{"Unsafe.PointerCast", "Unsafe.PointerArithmetic", "Unsafe.GuestHostPointerCast"},
+		StaticRule:  "guest addresses must resolve to a proven host/native-mapped pointer before dereference",
+		TraceRule:   "trace every guest-to-host address resolve with address, length, mapping, and result",
+		RuntimeRule: "debug/referee mode traps unresolved, unmapped, poison, or near-null address use",
+	},
+	{
+		Name:        "ExecutableCodePublish",
+		Triggers:    []string{"Unsafe.ExecutableCodePublish", "Unsafe.MachineCodeBuilder", "Unsafe.Assembly", "EASM.Requires.control.indirect"},
+		StaticRule:  "runtime executable code must flow through a named publish primitive before call/jump",
+		TraceRule:   "trace publish address, size, protection, cache/publish result, and first execution",
+		RuntimeRule: "debug/referee mode halts execution of unpublished generated code",
+	},
+	{
+		Name:        "MachineSegmentState",
+		Triggers:    []string{"Unsafe.SegmentMutation", "EASM.Requires.x86_64.segment.fs", "EASM.Requires.x86_64.segment.gs", "EASM.Requires.x86_64.segment.restore", "EASM.Requires.x86_64.segment.persistent"},
+		StaticRule:  "segment register writes require an explicit restore/persistent contract",
+		TraceRule:   "trace every host/guest segment switch with thread id and selector",
+		RuntimeRule: "debug/referee mode asserts expected segment state at guest/host boundaries",
+	},
+	{
+		Name:        "TinyCallable",
+		Triggers:    []string{"Unsafe.IndirectCall", "Unsafe.TinyPointerSentinel", "EASM.Requires.control.indirect"},
+		StaticRule:  "callable targets must not be poison or near-null unless explicitly marked sentinel",
+		TraceRule:   "trace every dynamic callable materialization with source slot/symbol provenance",
+		RuntimeRule: "debug/referee mode halts poison, non-canonical, or near-null call/jump targets",
+	},
+	{
+		Name:        "ThreadAffineSignalJump",
+		Triggers:    []string{"Unsafe.CrossThreadSignalJump", "Unsafe.ThreadShare"},
+		StaticRule:  "signal-handler longjmp requires a thread-affine buffer or explicit cross-thread trust",
+		TraceRule:   "trace signal number, faulting thread, guard thread, and jump decision",
+		RuntimeRule: "referee mode refuses cross-thread longjmp and records a labeled boundary fault",
+	},
 }
 
 func generateUnsafeReport(result *semantic.Result) string {
@@ -39,6 +83,7 @@ func generateUnsafeReport(result *semantic.Result) string {
 	for _, capability := range summary.OtherCapabilities {
 		fmt.Fprintf(&out, "  %s: %d\n", capability, summary.OtherCounts[capability])
 	}
+	writeBoundaryInvariantReport(&out, summary)
 	if len(summary.Functions) == 0 {
 		out.WriteString("functions: none\n")
 	} else {
@@ -74,6 +119,14 @@ type unsafeSummary struct {
 	TrustedTotal      int
 	TrustedCounts     map[string]int
 	TrustedUses       []unsafeTrustedSummary
+}
+
+type boundaryInvariant struct {
+	Name        string
+	Triggers    []string
+	StaticRule  string
+	TraceRule   string
+	RuntimeRule string
 }
 
 type unsafeFunctionSummary struct {
@@ -171,6 +224,50 @@ func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 		return summary.Functions[i].Name < summary.Functions[j].Name
 	})
 	return summary
+}
+
+func writeBoundaryInvariantReport(out *bytes.Buffer, summary unsafeSummary) {
+	active := activeBoundaryInvariants(summary)
+	if len(active) == 0 {
+		out.WriteString("boundary-invariants: none\n")
+		return
+	}
+	out.WriteString("boundary-invariants:\n")
+	for _, invariant := range active {
+		fmt.Fprintf(out, "  %s:\n", invariant.Name)
+		fmt.Fprintf(out, "    static: %s\n", invariant.StaticRule)
+		fmt.Fprintf(out, "    trace: %s\n", invariant.TraceRule)
+		fmt.Fprintf(out, "    runtime: %s\n", invariant.RuntimeRule)
+	}
+}
+
+func activeBoundaryInvariants(summary unsafeSummary) []boundaryInvariant {
+	seen := map[string]bool{}
+	for capability, count := range summary.Capabilities {
+		if count != 0 {
+			seen["Unsafe."+capability] = true
+		}
+	}
+	for capability, count := range summary.OtherCounts {
+		if count != 0 {
+			seen[capability] = true
+		}
+	}
+	for capability, count := range summary.TrustedCounts {
+		if count != 0 {
+			seen[capability] = true
+		}
+	}
+	active := make([]boundaryInvariant, 0, len(boundaryInvariantRegistry))
+	for _, invariant := range boundaryInvariantRegistry {
+		for _, trigger := range invariant.Triggers {
+			if seen[trigger] {
+				active = append(active, invariant)
+				break
+			}
+		}
+	}
+	return active
 }
 
 func collectTrustedUnsafeUses(file *ast.File) []unsafeTrustedSummary {

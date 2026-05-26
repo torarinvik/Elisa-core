@@ -44,6 +44,9 @@ def safe_ffi_wrapper() -> i64:
 		"Unsafe.PointerCast: 1",
 		"Unsafe.RawExtern: 3",
 		"Unsafe.ThreadShare: 1",
+		"boundary-invariants:",
+		"GuestHostPointer:",
+		"ThreadAffineSignalJump:",
 		"c_probe: Unsafe.RawExtern",
 		"raw_cast: Unsafe.PointerCast, Unsafe.RawExtern",
 		"raw_thread_share: Unsafe.RawExtern, Unsafe.ThreadShare",
@@ -81,7 +84,36 @@ func TestUnsafeSummaryIncludesEASMExportsAndRequires(t *testing.T) {
 		"Unsafe.Assembly: 1",
 		"EASM.Requires.memory.raw_read: 1",
 		"EASM.Requires.x86_64.segment.fs: 1",
+		"ExecutableCodePublish:",
+		"MachineSegmentState:",
 		"easm:easm_load_fs: EASM.Requires.memory.raw_read, EASM.Requires.x86_64.segment.fs, Unsafe.Assembly",
+	} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("expected unsafe report to contain %q, got:\n%s", want, report)
+		}
+	}
+}
+
+func TestUnsafeSummaryReportsBoundaryInvariantTrinity(t *testing.T) {
+	report := generateUnsafeReport(&semantic.Result{
+		GlobalScope: semantic.NewScope(nil),
+		EASMModules: []*easm.Module{
+			{
+				Name: "trinity",
+				Functions: []easm.Function{
+					{Name: "easm_indirect_call", Requires: []string{"control.indirect"}},
+				},
+			},
+		},
+	})
+	for _, want := range []string{
+		"boundary-invariants:",
+		"ExecutableCodePublish:",
+		"static: runtime executable code must flow through a named publish primitive before call/jump",
+		"trace: trace publish address, size, protection, cache/publish result, and first execution",
+		"runtime: debug/referee mode halts execution of unpublished generated code",
+		"TinyCallable:",
+		"runtime: debug/referee mode halts poison, non-canonical, or near-null call/jump targets",
 	} {
 		if !strings.Contains(report, want) {
 			t.Fatalf("expected unsafe report to contain %q, got:\n%s", want, report)
