@@ -141,6 +141,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitTreeTraversalHelperCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitAtomicRuntimeCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
 		return value, actualType, err
 	}

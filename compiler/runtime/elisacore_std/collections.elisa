@@ -4,6 +4,8 @@
 
 include "./deque.elisa"
 
+extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+
 const ARENA_DA_INIT_CAP: usize = 256
 const DICT_INIT_CAP: usize = 8
 
@@ -308,9 +310,9 @@ def view[T](da: darray[T]) -> dview[T]:
 # inline_vec_view's inline-buffer path.
 def array_view[T, N: usize](arr: T[N]&) -> dview[T]:
     elem_size: usize = size_of(T)
-    DynArrayView(null, 0, elem_size) return if N == 0usize
+    DynArrayView(null, 0, elem_size) return if N == 0
     trusted Unsafe.UncheckedIndex:
-        return DynArrayView(collections_void_from_items[T](arr[0usize].ref[T&]), N, elem_size)
+        return DynArrayView(collections_void_from_items[T](arr[0].ref[T&]), N, elem_size)
 
 
 @ufcs_only

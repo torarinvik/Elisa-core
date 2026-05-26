@@ -158,6 +158,8 @@ extern arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool
 
 extern arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool
 
+extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+
 const ARENA_DA_INIT_CAP: usize = 256
 
 const DICT_INIT_CAP: usize = 8
@@ -250,6 +252,8 @@ extern arraybuilder: DArrayBuilderNamespace
 
 extern flags: FlagsNamespace
 
+extern arena_box_zeroed[T](a: mutable Arena&) -> mutable heap T&
+
 extern arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, needed: usize) -> mutable darray[T, shape_out]&
 
 extern arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]
@@ -276,6 +280,8 @@ extern darray_view[T](da: darray[T]) -> dview[T]
 
 @ufcs_only
 extern view[T](da: darray[T]) -> dview[T]
+
+extern array_view[T, N: usize](arr: T[N]&) -> dview[T]
 
 @ufcs_only
 extern where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]
