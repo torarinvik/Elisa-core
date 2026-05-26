@@ -61,6 +61,18 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 		return
 	}
 	msg := effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing))
+	// Address-space crossings (Unsafe.GuestHostPointerCast) are the strongest
+	// memory-safety boundary: converting a guest address carrier into a host
+	// pointer is ALWAYS a hard error when ungranted, even when general unsafe
+	// enforcement is in warning mode. This guarantees a produced or received
+	// guest address can never be silently dereferenced as a host pointer; the
+	// author must opt in with `trusted Unsafe.GuestHostPointerCast`.
+	for _, ref := range missingGrantedPermissionRefs(refs, granted) {
+		if ref.Name == "Unsafe" && ref.Member == "GuestHostPointerCast" {
+			a.errorf(pos, "%s", msg)
+			return
+		}
+	}
 	// Memory-safety opt-outs (the Unsafe.* family) are HARD ERRORS under
 	// enforcement: a memory-unsafe operation must not compile unless the author
 	// explicitly grants the corresponding Unsafe permission (the "guaranteed
@@ -321,7 +333,11 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Operand, granted)
 		src := a.exprTypes[n.Operand]
 		dst := a.exprTypes[n]
-		if a.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && a.castRequiresUnsafeGuestHostPointerCast(n, dst) {
+		if n.Origin != ast.CastExprOriginIndirectCall && a.castRequiresUnsafeGuestHostPointerCast(n, dst) {
+			// Address-space crossing: checked regardless of general unsafe
+			// enforcement. warnOnMissingLocalGrant hard-errors a missing
+			// Unsafe.GuestHostPointerCast, so a guest address can never be
+			// silently dereferenced as a host pointer.
 			a.warnOnMissingLocalGrant(n.Pos(), "guest-host pointer cast", unsafeGuestHostPointerCastRefs(n.Position), granted)
 		} else if a.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(src, dst) {
 			a.warnOnMissingLocalGrant(n.Pos(), "pointer cast", unsafePointerCastRefs(n.Position), granted)
