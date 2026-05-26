@@ -62,6 +62,23 @@ export def ticks() -> u64 abi c:
 	}
 }
 
+func TestVerifyRejectsUnknownRequireCapability(t *testing.T) {
+	src := `module typo
+target x86_64
+export def typo_capability() -> void abi c:
+    clobbers: memory
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.wirte
+    body:
+        ret
+`
+	_, issues := Parse("typo.easm", src)
+	if !containsIssue(issues, "unknown-require-capability") {
+		t.Fatalf("expected unknown-require-capability, got %#v", issues)
+	}
+}
+
 func TestVerifyRequiresAtomicRMWCapability(t *testing.T) {
 	src := `module atomics
 target x86_64

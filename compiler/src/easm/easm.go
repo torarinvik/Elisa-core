@@ -831,6 +831,11 @@ func verifyContractTokens(path string, fn *Function) []Issue {
 			issues = append(issues, Issue{Severity: "error", Code: "unknown-control-contract", File: path, Line: fn.Line, Message: fmt.Sprintf("unknown control contract %s", token)})
 		}
 	}
+	for _, token := range contractFields(fn.Requires) {
+		if !allowedRequireToken(token) {
+			issues = append(issues, Issue{Severity: "error", Code: "unknown-require-capability", File: path, Line: fn.Line, Message: fmt.Sprintf("unknown requires capability %s", token)})
+		}
+	}
 	return issues
 }
 
@@ -859,6 +864,47 @@ func allowedStackToken(token string) bool {
 func allowedControlToken(token string) bool {
 	switch token {
 	case "returns", "noreturn", "tail_jumps", "may_fault":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedRequireToken(token string) bool {
+	switch token {
+	case "aarch64.cntvct",
+		"aarch64.platform_register.x18",
+		"aarch64.yield",
+		"callee_saved.preservation.unchecked",
+		"call.caller_saved_liveness.unchecked",
+		"call.return_address_choreography.unchecked",
+		"compare.signed",
+		"compare.unsigned",
+		"control.direct",
+		"control.indirect",
+		"debug.trap",
+		"fixed_address",
+		"immediate.truncation",
+		"operand_size.inferred",
+		"pic",
+		"relocation.symbol",
+		"return.register.preinitialized",
+		"riscv.reserved_registers",
+		"stack.call_alignment.unchecked",
+		"stack.entry_pop.unchecked",
+		"x86_64.atomic.rmw",
+		"x86_64.cpuid",
+		"x86_64.fpu_control",
+		"x86_64.legacy_high_byte",
+		"x86_64.rdtsc",
+		"x86_64.rdtsc.unordered",
+		"x86_64.segment",
+		"x86_64.segment.fs",
+		"x86_64.segment.gs",
+		"x86_64.segment.write",
+		"x86_64.simd_state",
+		"x86_64.sse.lfence",
+		"x86_64.sse.pause":
 		return true
 	default:
 		return false
