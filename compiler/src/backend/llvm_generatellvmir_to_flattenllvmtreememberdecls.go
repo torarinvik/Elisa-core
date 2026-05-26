@@ -287,8 +287,10 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		}
 		if len(n.GenericParams) == 0 {
 			if st, ok := g.lookupStructType(qualifiedName); ok {
-				_, err := g.ensureStructBody(qualifiedName, st)
-				return err
+				if _, err := g.ensureStructBody(qualifiedName, st); err != nil {
+					return err
+				}
+				return g.checkAbiLayoutAnnotations(n, st)
 			}
 		}
 	case *ast.EnumDecl:
@@ -467,8 +469,10 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 		if len(n.GenericParams) == 0 {
 			qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
 			if st, ok := g.lookupStructType(qualifiedName); ok {
-				_, err := g.ensureStructBody(qualifiedName, st)
-				return err
+				if _, err := g.ensureStructBody(qualifiedName, st); err != nil {
+					return err
+				}
+				return g.checkAbiLayoutAnnotations(n, st)
 			}
 		}
 		return nil

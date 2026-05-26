@@ -144,6 +144,21 @@ def keep() -> void:
 	}
 }
 
+func TestGenerateLLVMIRChecksAbiLayoutAnnotation(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_abi_layout_annotation.elisa", `@abi_layout(size, 16, align, 8, field, tag, 0, field, count, 4, field, payload, 8)
+struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+def keep() -> void:
+    pass
+`)
+	if _, err := GenerateLLVMIR(result); err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRFoldsStaticReflection(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_reflection.elisa", `enum Maybe:
     None
@@ -562,6 +577,22 @@ def keep() -> void:
 `)
 	if _, err := GenerateLLVMIR(result); err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+}
+
+func TestGenerateLLVMIRRejectsAbiLayoutAnnotationMismatch(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_abi_layout_annotation_bad.elisa", `@abi_layout(size, 12, field, payload, 4)
+struct Header layout c:
+    tag: u8
+    count: u32
+    payload: u64
+
+def keep() -> void:
+    pass
+`)
+	_, err := GenerateLLVMIR(result)
+	if err == nil || !strings.Contains(err.Error(), `@abi_layout on struct "Header" expected size 12 bytes, got 16`) {
+		t.Fatalf("expected abi layout failure, got: %v", err)
 	}
 }
 

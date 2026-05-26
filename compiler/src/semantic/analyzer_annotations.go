@@ -187,7 +187,7 @@ func isSupportedEnumAnnotation(name string) bool {
 
 func isSupportedStructAnnotation(name string) bool {
 	switch name {
-	case "align", "cacheline_aligned", "fixed_layout", "c_bind", "c_bind_prefix":
+	case "align", "cacheline_aligned", "fixed_layout", "c_bind", "c_bind_prefix", "abi_layout":
 		return true
 	default:
 		return false
@@ -347,6 +347,8 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 				a.errorf(annotation.Position, "@fixed_layout on struct %q does not take arguments", structDecl.Name)
 				continue
 			}
+		case "abi_layout":
+			a.validateStructAbiLayoutAnnotation(structDecl, annotation)
 		case "c_bind", "c_bind_prefix":
 			if len(annotation.Args) != 2 {
 				a.errorf(annotation.Position, "@%s on struct %q expects exactly two arguments: header and C type name", annotation.Name, structDecl.Name)
@@ -375,6 +377,71 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 		structType.Alignment = alignment
 		structType.HasAlignment = true
 	}
+}
+
+func (a *Analyzer) validateStructAbiLayoutAnnotation(structDecl *ast.StructDecl, annotation ast.Annotation) {
+	if !structDecl.ReprC {
+		a.errorf(annotation.Position, "@abi_layout on struct %q requires `layout c` so the asserted offsets use C ABI layout rules", structDecl.Name)
+		return
+	}
+	if len(structDecl.TypeParams) != 0 || len(structDecl.GenericParams) != 0 {
+		a.errorf(annotation.Position, "@abi_layout on struct %q does not support generic structs", structDecl.Name)
+		return
+	}
+	if len(annotation.Args) == 0 {
+		a.errorf(annotation.Position, "@abi_layout on struct %q expects layout assertions such as @abi_layout(size, 16, align, 8, field, payload, 8)", structDecl.Name)
+		return
+	}
+	for i := 0; i < len(annotation.Args); {
+		key := strings.TrimSpace(annotation.Args[i])
+		switch key {
+		case "size", "align":
+			if i+1 >= len(annotation.Args) {
+				a.errorf(annotation.Position, "@abi_layout on struct %q expects an integer byte value after %q", structDecl.Name, key)
+				return
+			}
+			if _, ok := parseAbiLayoutUint(annotation.Args[i+1]); !ok {
+				a.errorf(annotation.Position, "@abi_layout on struct %q expects a non-negative integer byte value after %q, got %q", structDecl.Name, key, annotation.Args[i+1])
+				return
+			}
+			i += 2
+		case "field":
+			if i+2 >= len(annotation.Args) {
+				a.errorf(annotation.Position, "@abi_layout on struct %q expects field, name, offset triples", structDecl.Name)
+				return
+			}
+			fieldName := strings.TrimSpace(annotation.Args[i+1])
+			if fieldName == "" || !structDeclHasField(structDecl, fieldName) {
+				a.errorf(annotation.Position, "@abi_layout on struct %q references unknown field %q", structDecl.Name, fieldName)
+				return
+			}
+			if _, ok := parseAbiLayoutUint(annotation.Args[i+2]); !ok {
+				a.errorf(annotation.Position, "@abi_layout on struct %q expects a non-negative integer offset for field %q, got %q", structDecl.Name, fieldName, annotation.Args[i+2])
+				return
+			}
+			i += 3
+		default:
+			a.errorf(annotation.Position, "@abi_layout on struct %q uses unknown assertion key %q (expected size, align, or field)", structDecl.Name, key)
+			return
+		}
+	}
+}
+
+func parseAbiLayoutUint(text string) (uint64, bool) {
+	parsed, err := strconv.ParseUint(strings.TrimSpace(text), 0, 64)
+	return parsed, err == nil
+}
+
+func structDeclHasField(structDecl *ast.StructDecl, fieldName string) bool {
+	if structDecl == nil {
+		return false
+	}
+	for _, field := range structDecl.Fields {
+		if field.Name == fieldName {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *FuncType) {
