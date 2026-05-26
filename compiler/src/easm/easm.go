@@ -542,6 +542,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	if controlSet["returns"] && usesRet && !terminalOpIs(fn.Instructions, "ret") {
 		issues = append(issues, Issue{Severity: "error", Code: "return-not-terminal", File: path, Line: fn.Line, Message: "returning function must end with ret"})
 	}
+	if controlSet["returns"] && hasCallImmediatelyBeforeRet(fn.Instructions) && !requireSet["call.return_address_choreography.unchecked"] {
+		issues = append(issues, Issue{Severity: "error", Code: "call-immediately-before-ret", File: path, Line: fn.Line, Message: "call followed immediately by ret requires explicit call.return_address_choreography.unchecked intent"})
+	}
 	for _, reg := range []string{"rbx", "rbp", "r12", "r13", "r14", "r15"} {
 		if clobberSet[reg] && !preserveSet[reg] && !preserveSet["callee_saved"] {
 			issues = append(issues, Issue{Severity: "error", Code: "callee-saved-not-preserved", File: path, Line: fn.Line, Message: fmt.Sprintf("callee-saved register %s is clobbered without preservation contract", reg)})
@@ -729,6 +732,17 @@ func terminalOpIs(instructions []Instruction, ops ...string) bool {
 	last := normalizeOp(instructions[len(instructions)-1].Op)
 	for _, op := range ops {
 		if last == op {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCallImmediatelyBeforeRet(instructions []Instruction) bool {
+	for i := 1; i < len(instructions); i++ {
+		prev := normalizeOp(instructions[i-1].Op)
+		cur := normalizeOp(instructions[i].Op)
+		if (prev == "call" || prev == "callq") && cur == "ret" {
 			return true
 		}
 	}

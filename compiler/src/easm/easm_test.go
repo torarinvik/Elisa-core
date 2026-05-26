@@ -489,6 +489,25 @@ export def bad_call(target: uintptr) -> void abi c:
 	}
 }
 
+func TestVerifyRejectsCallImmediatelyBeforeRetWithoutIntent(t *testing.T) {
+	src := `module calls
+target x86_64
+export def bad_call_ret(target: uintptr) -> void abi c:
+    inputs: target = rdi
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
+    stack: aligned 16
+    control: returns
+    requires: control.indirect, stack.call_alignment.unchecked
+    body:
+        call *%rdi
+        ret
+`
+	_, issues := Parse("call_ret.easm", src)
+	if !containsIssue(issues, "call-immediately-before-ret") {
+		t.Fatalf("expected call-immediately-before-ret, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsIndirectControlWithoutIntent(t *testing.T) {
 	src := `module indirect
 target x86_64
