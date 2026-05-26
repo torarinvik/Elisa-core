@@ -149,3 +149,26 @@ func TestUnsafeSummaryReportsBoundaryInvariantTrinity(t *testing.T) {
 		}
 	}
 }
+
+func TestUnsafeSummaryCountsEASMTinyTargetEscapeHatch(t *testing.T) {
+	report := generateUnsafeReport(&semantic.Result{
+		GlobalScope: semantic.NewScope(nil),
+		EASMModules: []*easm.Module{
+			{
+				Name: "tiny",
+				Functions: []easm.Function{
+					{Name: "easm_sentinel_jump", Requires: []string{"control.indirect", "control.tiny_target.unchecked"}},
+				},
+			},
+		},
+	})
+	for _, want := range []string{
+		"Unsafe.TinyPointerSentinel: 1",
+		"EASM.Requires.control.tiny_target.unchecked: 1",
+		"easm:easm_sentinel_jump: EASM.Requires.control.indirect, EASM.Requires.control.tiny_target.unchecked, Unsafe.Assembly, Unsafe.TinyPointerSentinel",
+	} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("expected unsafe report to contain %q, got:\n%s", want, report)
+		}
+	}
+}

@@ -266,6 +266,9 @@ func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 					continue
 				}
 				permissions = append(permissions, "EASM.Requires."+req)
+				if capability := easmRequireUnsafeCapability(req); capability != "" {
+					permissions = append(permissions, capability)
+				}
 			}
 			sort.Strings(permissions)
 			summary.Functions = append(summary.Functions, unsafeFunctionSummary{Name: "easm:" + fn.Name, Permissions: permissions})
@@ -288,6 +291,15 @@ func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 		return summary.Functions[i].Name < summary.Functions[j].Name
 	})
 	return summary
+}
+
+func easmRequireUnsafeCapability(req string) string {
+	switch strings.TrimSpace(req) {
+	case "control.tiny_target.unchecked":
+		return "Unsafe.TinyPointerSentinel"
+	default:
+		return ""
+	}
 }
 
 func writeBoundaryInvariantReport(out *bytes.Buffer, summary unsafeSummary) {
