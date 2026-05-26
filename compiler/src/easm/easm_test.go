@@ -2036,6 +2036,42 @@ export def sentinel_target() -> void abi c:
 	}
 }
 
+func TestVerifyRejectsKnownPoisonIndirectControlTarget(t *testing.T) {
+	src := `module poison
+target x86_64
+export def bad_poison_target() -> void abi c:
+    clobbers: rax
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        movq $0xdead0000dead0000, %rax
+        jmp *%rax
+`
+	_, issues := Parse("poison_target.easm", src)
+	if !containsIssue(issues, "poison-indirect-control-target") {
+		t.Fatalf("expected poison-indirect-control-target, got %#v", issues)
+	}
+}
+
+func TestVerifyAllowsIntentionalPoisonIndirectControlTarget(t *testing.T) {
+	src := `module poison
+target x86_64
+export def poison_target_test() -> void abi c:
+    clobbers: rax
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: control.indirect, control.poison_target.unchecked
+    body:
+        movq $0xdead0000dead0000, %rax
+        jmp *%rax
+`
+	_, issues := Parse("poison_target_allowed.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected intentional poison target to verify, got %#v", issues)
+	}
+}
+
 func containsIssue(issues []Issue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {

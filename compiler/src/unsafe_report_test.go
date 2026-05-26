@@ -172,3 +172,26 @@ func TestUnsafeSummaryCountsEASMTinyTargetEscapeHatch(t *testing.T) {
 		}
 	}
 }
+
+func TestUnsafeSummaryCountsEASMPoisonTargetEscapeHatch(t *testing.T) {
+	report := generateUnsafeReport(&semantic.Result{
+		GlobalScope: semantic.NewScope(nil),
+		EASMModules: []*easm.Module{
+			{
+				Name: "poison",
+				Functions: []easm.Function{
+					{Name: "easm_poison_jump_test", Requires: []string{"control.indirect", "control.poison_target.unchecked"}},
+				},
+			},
+		},
+	})
+	for _, want := range []string{
+		"Unsafe.PoisonPointerSentinel: 1",
+		"EASM.Requires.control.poison_target.unchecked: 1",
+		"easm:easm_poison_jump_test: EASM.Requires.control.indirect, EASM.Requires.control.poison_target.unchecked, Unsafe.Assembly, Unsafe.PoisonPointerSentinel",
+	} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("expected unsafe report to contain %q, got:\n%s", want, report)
+		}
+	}
+}

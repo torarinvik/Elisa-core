@@ -25,6 +25,7 @@ var unsafeCapabilityOrder = []string{
 	"Assembly",
 	"ExecutableCodePublish",
 	"GuestHostPointerCast",
+	"PoisonPointerSentinel",
 	"TinyPointerSentinel",
 	"SegmentMutation",
 	"CrossThreadSignalJump",
@@ -58,7 +59,7 @@ var boundaryInvariantRegistry = []boundaryInvariant{
 	},
 	{
 		Name:        "TinyCallable",
-		Triggers:    []string{"Unsafe.IndirectCall", "Unsafe.TinyPointerSentinel", "EASM.Requires.control.indirect"},
+		Triggers:    []string{"Unsafe.IndirectCall", "Unsafe.PoisonPointerSentinel", "Unsafe.TinyPointerSentinel", "EASM.Requires.control.indirect"},
 		StaticRule:  "callable targets must not be poison or near-null unless explicitly marked sentinel",
 		TraceRule:   "trace every dynamic callable materialization with source slot/symbol provenance",
 		RuntimeRule: "debug/referee mode halts poison, non-canonical, or near-null call/jump targets",
@@ -295,6 +296,8 @@ func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 
 func easmRequireUnsafeCapability(req string) string {
 	switch strings.TrimSpace(req) {
+	case "control.poison_target.unchecked":
+		return "Unsafe.PoisonPointerSentinel"
 	case "control.tiny_target.unchecked":
 		return "Unsafe.TinyPointerSentinel"
 	default:

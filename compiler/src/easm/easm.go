@@ -406,6 +406,13 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				}
 			}
 		}
+		if isIndirectControlTransfer(op, inst.Text) && !requireSet["control.poison_target.unchecked"] {
+			if reg := indirectControlTargetRegister(inst.Text); reg != "" {
+				if value, ok := state.KnownUInt[reg]; ok && isNonCanonicalX86Address(value) {
+					issues = append(issues, Issue{Severity: "error", Code: "poison-indirect-control-target", File: path, Line: inst.Line, Message: fmt.Sprintf("indirect %s target %s is known non-canonical poison-like value 0x%x; require control.poison_target.unchecked only for intentional tests", op, reg, value)})
+				}
+			}
+		}
 		if isDirectSymbolControlTransfer(op, inst.Text) && !definedLabels[directControlTarget(op, inst.Text)] && !requireSet["control.direct"] && !requireSet["relocation.symbol"] {
 			issues = append(issues, Issue{Severity: "error", Code: "direct-control-intent-missing", File: path, Line: inst.Line, Message: "direct symbolic call/jmp requires control.direct or relocation.symbol intent"})
 		}
@@ -1087,6 +1094,7 @@ func allowedRequireToken(token string) bool {
 		"compare.unsigned",
 		"control.direct",
 		"control.indirect",
+		"control.poison_target.unchecked",
 		"control.tiny_target.unchecked",
 		"debug.trap",
 		"fixed_address",
@@ -1820,6 +1828,15 @@ func parseImmediateLiteral(value string) (uint64, bool) {
 		return 0, false
 	}
 	return parsed, true
+}
+
+func isNonCanonicalX86Address(value uint64) bool {
+	sign := (value >> 47) & 1
+	upper := value >> 48
+	if sign == 0 {
+		return upper != 0
+	}
+	return upper != 0xffff
 }
 
 func calleeSavedPushPopProven(instructions []Instruction, reg string) bool {
