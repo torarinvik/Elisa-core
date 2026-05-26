@@ -704,6 +704,24 @@ export def bad_return() -> u64 abi c:
 	}
 }
 
+func TestVerifyRejectsUnwrittenReturnRegister(t *testing.T) {
+	src := `module ret
+target x86_64
+export def bad_return() -> u64 abi c:
+    outputs: ret = rax
+    clobbers: rcx
+    stack: unchanged
+    control: returns
+    body:
+        movq %rdi, %rcx
+        ret
+`
+	_, issues := Parse("unwritten_ret.easm", src)
+	if !containsIssue(issues, "return-register-not-written") {
+		t.Fatalf("expected return-register-not-written, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsHardCodedAddressWithoutCapability(t *testing.T) {
 	src := `module address
 target x86_64
@@ -1524,6 +1542,7 @@ export def ret_f64() -> f64 abi c:
     clobbers: xmm0
     stack: unchanged
     control: returns
+    requires: return.register.preinitialized
     body:
         ret
 `
@@ -1539,6 +1558,7 @@ export def ret_f32() -> f32 abi c:
     clobbers: s0
     stack: unchanged
     control: returns
+    requires: return.register.preinitialized
     body:
         ret
 `

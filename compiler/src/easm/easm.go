@@ -246,6 +246,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	requireSet := setOf(fn.Requires)
 	preserveSet := setOf(fn.Preserves)
 	outputSet := outputRegisterSet(fn.Outputs)
+	returnReg := returnOutputRegister(fn.Outputs)
 	returnsVoid := strings.TrimSpace(fn.ReturnType) == "void"
 	stackDelta := 0
 	maxEntryStackPopDelta := 0
@@ -267,6 +268,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	lfenceAfterRDTSC := false
 	lfenceSeen := false
 	clobberedByCall := map[string]int{}
+	returnRegWritten := false
 	for _, inst := range fn.Instructions {
 		op := normalizeOp(inst.Op)
 		if !allowedOps[op] && !isConditionalJump(op) {
@@ -314,6 +316,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		}
 		if written := writtenRegister(inst.Text); written != "" {
 			canonical := canonicalX86GPR(written)
+			if returnReg != "" && canonical == returnReg {
+				returnRegWritten = true
+			}
 			if isX86GPR(canonical) && !clobberSet[canonical] && !outputSet[canonical] {
 				issues = append(issues, Issue{Severity: "error", Code: "register-write-without-clobber", File: path, Line: inst.Line, Message: fmt.Sprintf("register %s is written but not declared as a clobber or output", canonical)})
 			}
@@ -331,6 +336,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			issues = append(issues, Issue{Severity: "error", Code: "reserved-register-use", File: path, Line: inst.Line, Message: "target-reserved register requires an explicit platform capability"})
 		}
 		for _, reg := range implicitClobbers(op) {
+			if returnReg != "" && canonicalX86GPR(reg) == returnReg {
+				returnRegWritten = true
+			}
 			if !clobberSet[reg] {
 				issues = append(issues, Issue{Severity: "error", Code: "implicit-clobber-missing", File: path, Line: inst.Line, Message: fmt.Sprintf("instruction %q implicitly clobbers %s", inst.Op, reg)})
 			}
@@ -482,6 +490,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	}
 	if !returnsVoid && !hasReturnOutput(fn.Outputs) {
 		issues = append(issues, Issue{Severity: "error", Code: "missing-return-output", File: path, Line: fn.Line, Message: "non-void EASM export must declare outputs: ret = <register>"})
+	}
+	if !returnsVoid && returnReg != "" && !returnRegWritten && !requireSet["return.register.preinitialized"] {
+		issues = append(issues, Issue{Severity: "error", Code: "return-register-not-written", File: path, Line: fn.Line, Message: fmt.Sprintf("non-void EASM export declares ret = %s but the body does not write it", returnReg)})
 	}
 	if returnsVoid && hasReturnOutput(fn.Outputs) {
 		issues = append(issues, Issue{Severity: "error", Code: "void-return-output", File: path, Line: fn.Line, Message: "void EASM export cannot declare a ret output"})
@@ -756,6 +767,15 @@ func hasReturnOutput(outputs []string) bool {
 		}
 	}
 	return false
+}
+
+func returnOutputRegister(outputs []string) string {
+	for _, output := range outputs {
+		if bindingName(output) == "ret" {
+			return canonicalX86GPR(registerAfterEquals(output))
+		}
+	}
+	return ""
 }
 
 func outputRegisterSet(outputs []string) map[string]bool {
