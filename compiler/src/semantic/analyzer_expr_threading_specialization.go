@@ -227,6 +227,102 @@ func (a *Analyzer) validateAtomicRmwArg(callName string, arg ast.Expr, argType T
 	}
 }
 
+func (a *Analyzer) validateAtomicMemoryOrderArgs(callName string, args []ast.Expr) {
+	switch callName {
+	case "load":
+		if len(args) >= 2 {
+			a.validateAtomicMemoryOrder(args[1], callName, atomicOrderContextLoad)
+		}
+	case "store":
+		if len(args) >= 3 {
+			a.validateAtomicMemoryOrder(args[2], callName, atomicOrderContextStore)
+		}
+	case "compare_exchange":
+		if len(args) >= 5 {
+			a.validateAtomicMemoryOrder(args[3], callName, atomicOrderContextReadModifyWrite)
+			a.validateAtomicMemoryOrder(args[4], callName, atomicOrderContextFailure)
+		}
+	case "exchange", "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
+		if len(args) >= 3 {
+			a.validateAtomicMemoryOrder(args[2], callName, atomicOrderContextReadModifyWrite)
+		}
+	case "fence":
+		if len(args) >= 1 {
+			a.validateAtomicMemoryOrder(args[0], callName, atomicOrderContextFence)
+		}
+	}
+}
+
+type atomicOrderContext int
+
+const (
+	atomicOrderContextLoad atomicOrderContext = iota
+	atomicOrderContextStore
+	atomicOrderContextReadModifyWrite
+	atomicOrderContextFailure
+	atomicOrderContextFence
+)
+
+const (
+	atomicMemoryOrderRelaxed = 0
+	atomicMemoryOrderAcquire = 1
+	atomicMemoryOrderRelease = 2
+	atomicMemoryOrderAcqRel  = 3
+	atomicMemoryOrderSeqCst  = 4
+)
+
+func (a *Analyzer) validateAtomicMemoryOrder(arg ast.Expr, callName string, context atomicOrderContext) {
+	order, ok := a.atomicMemoryOrderValue(arg)
+	if !ok {
+		return
+	}
+	switch context {
+	case atomicOrderContextLoad:
+		if order == atomicMemoryOrderRelease || order == atomicMemoryOrderAcqRel {
+			a.errorf(arg.Pos(), "atomic load cannot use release ordering")
+		}
+	case atomicOrderContextStore:
+		if order == atomicMemoryOrderAcquire || order == atomicMemoryOrderAcqRel {
+			a.errorf(arg.Pos(), "atomic store cannot use acquire ordering")
+		}
+	case atomicOrderContextFailure:
+		if order == atomicMemoryOrderRelease || order == atomicMemoryOrderAcqRel {
+			a.errorf(arg.Pos(), "compare_exchange failure ordering cannot use release semantics")
+		}
+	case atomicOrderContextFence:
+		if order == atomicMemoryOrderRelaxed {
+			a.errorf(arg.Pos(), "atomic fence cannot use relaxed ordering")
+		}
+	case atomicOrderContextReadModifyWrite:
+		if order < atomicMemoryOrderRelaxed || order > atomicMemoryOrderSeqCst {
+			a.errorf(arg.Pos(), "atomic %s uses unknown memory ordering %d", callName, order)
+		}
+	}
+}
+
+func (a *Analyzer) atomicMemoryOrderValue(arg ast.Expr) (int64, bool) {
+	if value, ok := a.evalConstExpr(arg); ok && value.Kind == ConstInt {
+		return value.Int, true
+	}
+	if field, ok := arg.(*ast.FieldExpr); ok {
+		if ident, ok := field.Object.(*ast.Ident); ok && ident.Name == "MemoryOrder" {
+			switch field.Field {
+			case "Relaxed":
+				return atomicMemoryOrderRelaxed, true
+			case "Acquire":
+				return atomicMemoryOrderAcquire, true
+			case "Release":
+				return atomicMemoryOrderRelease, true
+			case "AcqRel":
+				return atomicMemoryOrderAcqRel, true
+			case "SeqCst":
+				return atomicMemoryOrderSeqCst, true
+			}
+		}
+	}
+	return 0, false
+}
+
 func (a *Analyzer) specializeFunctionValueType(expected Type, actual Type) (Type, bool) {
 	expectedFunc, ok := expected.(*FuncType)
 	if !ok {
