@@ -41,11 +41,26 @@ func generateUnsafeReport(result *semantic.Result) string {
 	}
 	if len(summary.Functions) == 0 {
 		out.WriteString("functions: none\n")
-		return out.String()
+	} else {
+		out.WriteString("functions:\n")
+		for _, item := range summary.Functions {
+			fmt.Fprintf(&out, "  %s: %s\n", item.Name, strings.Join(item.Permissions, ", "))
+		}
 	}
-	out.WriteString("functions:\n")
-	for _, item := range summary.Functions {
-		fmt.Fprintf(&out, "  %s: %s\n", item.Name, strings.Join(item.Permissions, ", "))
+	fmt.Fprintf(&out, "trusted-total: %d\n", summary.TrustedTotal)
+	if len(summary.TrustedUses) == 0 {
+		out.WriteString("trusted: none\n")
+	} else {
+		out.WriteString("trusted:\n")
+		for _, capability := range unsafeCapabilityOrder {
+			name := "Unsafe." + capability
+			if summary.TrustedCounts[name] != 0 {
+				fmt.Fprintf(&out, "  %s: %d\n", name, summary.TrustedCounts[name])
+			}
+		}
+		for _, use := range summary.TrustedUses {
+			fmt.Fprintf(&out, "  %s: %s\n", use.Function, strings.Join(use.Permissions, ", "))
+		}
 	}
 	return out.String()
 }
@@ -56,6 +71,9 @@ type unsafeSummary struct {
 	OtherCounts       map[string]int
 	OtherCapabilities []string
 	Functions         []unsafeFunctionSummary
+	TrustedTotal      int
+	TrustedCounts     map[string]int
+	TrustedUses       []unsafeTrustedSummary
 }
 
 type unsafeFunctionSummary struct {
@@ -63,16 +81,29 @@ type unsafeFunctionSummary struct {
 	Permissions []string
 }
 
+type unsafeTrustedSummary struct {
+	Function    string
+	Permissions []string
+}
+
 func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 	summary := unsafeSummary{
-		Capabilities: map[string]int{},
-		OtherCounts:  map[string]int{},
+		Capabilities:  map[string]int{},
+		OtherCounts:   map[string]int{},
+		TrustedCounts: map[string]int{},
 	}
 	for _, capability := range unsafeCapabilityOrder {
 		summary.Capabilities[capability] = 0
 	}
 	if result == nil || result.GlobalScope == nil {
 		return summary
+	}
+	summary.TrustedUses = collectTrustedUnsafeUses(result.ActiveFile())
+	for _, use := range summary.TrustedUses {
+		for _, permission := range use.Permissions {
+			summary.TrustedTotal++
+			summary.TrustedCounts[permission]++
+		}
 	}
 	names := make([]string, 0, len(result.GlobalScope.Symbols))
 	for name, sym := range result.GlobalScope.Symbols {
@@ -140,6 +171,107 @@ func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 		return summary.Functions[i].Name < summary.Functions[j].Name
 	})
 	return summary
+}
+
+func collectTrustedUnsafeUses(file *ast.File) []unsafeTrustedSummary {
+	if file == nil {
+		return nil
+	}
+	var out []unsafeTrustedSummary
+	for _, decl := range file.Decls {
+		collectTrustedUnsafeUsesFromDecl(decl, "", &out)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Function == out[j].Function {
+			return strings.Join(out[i].Permissions, ",") < strings.Join(out[j].Permissions, ",")
+		}
+		return out[i].Function < out[j].Function
+	})
+	return out
+}
+
+func collectTrustedUnsafeUsesFromDecl(decl ast.Decl, namespace string, out *[]unsafeTrustedSummary) {
+	switch n := decl.(type) {
+	case *ast.FuncDecl:
+		name := n.Name
+		if namespace != "" {
+			name = namespace + "." + name
+		}
+		collectTrustedUnsafeUsesFromStmts(n.Body, name, out)
+	case *ast.NamespaceDecl:
+		next := n.Name
+		if namespace != "" {
+			next = namespace + "." + next
+		}
+		for _, child := range n.Decls {
+			collectTrustedUnsafeUsesFromDecl(child, next, out)
+		}
+	case *ast.ImplDecl:
+		for _, member := range n.Members {
+			if fn, ok := member.(*ast.FuncDecl); ok {
+				name := fn.Name
+				if namespace != "" {
+					name = namespace + "." + name
+				}
+				collectTrustedUnsafeUsesFromStmts(fn.Body, name, out)
+			}
+		}
+	}
+}
+
+func collectTrustedUnsafeUsesFromStmts(stmts []ast.Stmt, function string, out *[]unsafeTrustedSummary) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.CanStmt:
+			if n.SuppressPermissionInference {
+				permissions := unsafePermissionNames(n.Permissions)
+				if len(permissions) != 0 {
+					*out = append(*out, unsafeTrustedSummary{Function: function, Permissions: permissions})
+				}
+			}
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.IfStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Then, function, out)
+			for _, elif := range n.Elifs {
+				collectTrustedUnsafeUsesFromStmts(elif.Body, function, out)
+			}
+			collectTrustedUnsafeUsesFromStmts(n.Else, function, out)
+		case *ast.WhileStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.ForStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.IterForStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.ParallelForStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.MatchStmt:
+			for _, arm := range n.Arms {
+				collectTrustedUnsafeUsesFromStmts(arm.Body, function, out)
+			}
+		case *ast.InStoreStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.WithStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.ArgsScopeStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.CascadeStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.ScopeStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.PoolStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.LockStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		case *ast.StaticIfStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Then, function, out)
+			for _, elif := range n.Elifs {
+				collectTrustedUnsafeUsesFromStmts(elif.Body, function, out)
+			}
+			collectTrustedUnsafeUsesFromStmts(n.Else, function, out)
+		case *ast.StaticBlockStmt:
+			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+		}
+	}
 }
 
 func unsafePermissionNames(refs []ast.PermissionRef) []string {

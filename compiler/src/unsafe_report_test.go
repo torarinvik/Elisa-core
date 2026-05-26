@@ -47,16 +47,21 @@ def safe_ffi_wrapper() -> i64:
 		"c_probe: Unsafe.RawExtern",
 		"raw_cast: Unsafe.PointerCast, Unsafe.RawExtern",
 		"raw_thread_share: Unsafe.RawExtern, Unsafe.ThreadShare",
+		"trusted-total: 2",
+		"safe_ffi_wrapper: Unsafe.RawExtern",
+		"safe_wrapper: Unsafe.PointerCast",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected unsafe report to contain %q, got:\n%s", want, output)
 		}
 	}
-	if strings.Contains(output, "safe_wrapper:") {
-		t.Fatalf("expected trusted wrapper implementation detail not to appear in surface unsafe report, got:\n%s", output)
-	}
-	if strings.Contains(output, "safe_ffi_wrapper:") {
-		t.Fatalf("expected trusted raw extern wrapper not to appear in surface unsafe report, got:\n%s", output)
+	for _, forbidden := range []string{
+		"functions:\n  safe_wrapper:",
+		"functions:\n  safe_ffi_wrapper:",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("expected trusted wrapper implementation detail not to appear in surface function report, got:\n%s", output)
+		}
 	}
 }
 
