@@ -457,7 +457,11 @@ func structDeclHasAnnotation(structDecl *ast.StructDecl, annotationName string) 
 }
 
 func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *FuncType) {
-	if fn == nil || fnType == nil || len(fn.Annotations) == 0 {
+	if fn == nil || fnType == nil {
+		return
+	}
+	if len(fn.Annotations) == 0 {
+		a.validateExternSegmentTransitionAnnotation(fn, fnType)
 		return
 	}
 	seen := make(map[string]lexer.Pos, len(fn.Annotations))
@@ -553,6 +557,20 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 	if !blockingPos.IsZero() && !nonblockingPos.IsZero() {
 		a.errorf(nonblockingPos, "extern function %q cannot be both @blocking and @nonblocking (first @blocking at %s:%d:%d)", fn.Name, blockingPos.File, blockingPos.Line, blockingPos.Col)
 	}
+	a.validateExternSegmentTransitionAnnotation(fn, fnType)
+}
+
+func (a *Analyzer) validateExternSegmentTransitionAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType) {
+	if fn == nil || fnType == nil {
+		return
+	}
+	if permissionRefsTransitionOwner(functionPermissionRefs(fnType)) == segmentOwnerUnknown {
+		return
+	}
+	if fnType.SegmentTransition != FuncSegmentTransitionNone {
+		return
+	}
+	a.errorf(fn.Pos(), "extern function %q mutates the active segment; add @segment_transition(host) or @segment_transition(guest) so the resulting owner is a typed contract, not inferred from permissions", fn.Name)
 }
 
 func (a *Analyzer) applyExternVarAnnotations(decl *ast.ExternVarDecl) {

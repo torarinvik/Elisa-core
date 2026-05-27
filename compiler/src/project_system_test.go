@@ -731,6 +731,7 @@ def main() -> int:
 	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern GuestFsSelectorRole
 type GuestFsSelector = id[GuestFsSelectorRole]
 
+@segment_transition(guest)
 extern load_fs(selector: GuestFsSelector) -> void can[Unsafe.SegmentMutation, Segment.Guest]
 
 def main() -> int:

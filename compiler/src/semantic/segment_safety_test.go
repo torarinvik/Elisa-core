@@ -59,6 +59,7 @@ def alarm_handler() -> void:
 
 func TestSegmentFlowRejectsHostCallAfterGuestTransition(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "segment_flow_rejects_host_after_guest.elisa", `
+@segment_transition(guest)
 extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
 extern host_only() -> void can[Segment.Host]
 
@@ -76,7 +77,9 @@ def run() -> void:
 
 func TestSegmentFlowAcceptsHostCallAfterHostTransition(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "segment_flow_accepts_host_restore.elisa", `
+@segment_transition(guest)
 extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
+@segment_transition(host)
 extern restore_host() -> void can[Unsafe.SegmentMutation, Segment.Host]
 extern host_only() -> void can[Segment.Host]
 
@@ -109,6 +112,7 @@ def run() -> void:
 
 func TestSegmentFlowRejectsSegmentCallFromUnknownState(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "segment_flow_rejects_unknown.elisa", `
+@segment_transition(guest)
 extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
 extern host_only() -> void can[Segment.Host]
 
@@ -151,5 +155,15 @@ extern load_kernel() -> void can[Unsafe.SegmentMutation]
 	all := allDiagnostics(result)
 	if !strings.Contains(all, `@segment_transition on extern function "load_kernel" uses unsupported target "kernel" (expected host or guest)`) {
 		t.Fatalf("expected invalid segment transition target to be rejected, got:\n%s", all)
+	}
+}
+
+func TestSegmentMutatingExternRequiresExplicitTransition(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "segment_transition_required.elisa", `
+extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `extern function "load_guest" mutates the active segment; add @segment_transition(host) or @segment_transition(guest)`) {
+		t.Fatalf("expected segment-mutating extern to require an explicit transition contract, got:\n%s", all)
 	}
 }
