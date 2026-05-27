@@ -250,7 +250,7 @@ export def shadps4_fenced_rdtsc() -> u64 abi c:
 func TestVerifyAcceptsShadPS4StackSwitchEquivalent(t *testing.T) {
 	src := `module shadps4_stack
 target x86_64
-export def run_on_another_stack(arg: uintptr, entry: uintptr, stack: uintptr) -> void abi ps4_sysv:
+export def run_on_another_stack(arg: uintptr, entry: HostCallable, stack: GuestStackTop) -> void abi ps4_sysv:
     inputs: arg = rdi, entry = rsi, stack = rdx
     clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r12, r13, rsp, rbp, cc, memory
     preserves: r12, r13, callee_saved
@@ -642,7 +642,7 @@ export def bad_alignment(target: uintptr) -> void abi c:
 func TestVerifyAcceptsProvenAlignedIndirectCall(t *testing.T) {
 	src := `module align
 target x86_64
-export def good_alignment(target: uintptr) -> void abi c:
+export def good_alignment(target: HostCallable) -> void abi c:
     inputs: target = rdi
     clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, rsp, cc, memory
     stack: unchanged, aligned 16
@@ -1128,7 +1128,7 @@ export def bad_fs_write(selector: u16) -> void abi c:
 func TestVerifyAcceptsPersistentSegmentRegisterWriteContract(t *testing.T) {
 	src := `module tls
 target x86_64
-export def load_fs(selector: u16) -> void abi c:
+export def load_fs(selector: GuestFsSelector) -> void abi c:
     inputs: selector = rdi
     clobbers: memory
     stack: unchanged
@@ -1136,6 +1136,7 @@ export def load_fs(selector: u16) -> void abi c:
     requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent
     body:
         movw %di, %fs
+        state fs: guest
         ret
 `
 	_, issues := Parse("tls_write_persistent.easm", src)
@@ -1167,7 +1168,7 @@ export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
 func TestVerifyAcceptsStackTopHandoffWithOwnershipContract(t *testing.T) {
 	src := `module stack_owner
 target x86_64
-export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
+export def jump_on_stack(entry: GuestEntryPoint, stack_top: GuestStackTop) -> void abi c:
     inputs: entry = rdi, stack_top = rsi
     clobbers: r11, rsp, memory
     stack: switches, owns, aligned 16, noreturn
@@ -1209,7 +1210,7 @@ export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
 func TestVerifyAcceptsTailJumpFramePointerHandoffEscape(t *testing.T) {
 	src := `module frame_handoff
 target x86_64
-export def jump_on_stack(entry: uintptr, stack_top: uintptr) -> void abi c:
+export def jump_on_stack(entry: GuestEntryPoint, stack_top: GuestStackTop) -> void abi c:
     inputs: entry = rdi, stack_top = rsi
     clobbers: r11, rsp, rbp, memory
     preserves: callee_saved
@@ -1951,7 +1952,7 @@ export def loop(value: uintptr) -> uintptr abi c:
 func TestVerifyAcceptsSegmentLabelPrecondition(t *testing.T) {
 	src := `module segment
 target x86_64
-export def enter_host(selector: u16) -> void abi c:
+export def enter_host(selector: HostFsSelector) -> void abi c:
     facts:
         fs: guest
     inputs: selector = rdi
@@ -1996,6 +1997,45 @@ export def enter_host(selector: u16) -> void abi c:
 	_, issues := Parse("segment_label_bad.easm", src)
 	if !containsIssue(issues, "label-precondition-unsatisfied") {
 		t.Fatalf("expected label-precondition-unsatisfied for unknown fs state, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsControlTransferAfterSegmentWriteWithoutStateAssertion(t *testing.T) {
+	src := `module segment
+target x86_64
+export def enter_guest(selector: u16, target: uintptr) -> void abi c:
+    inputs: selector = rdi, target = rsi
+    clobbers: memory
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent, control.indirect
+    body:
+        movw %di, %fs
+        jmp *%rsi
+`
+	_, issues := Parse("segment_transfer_unknown.easm", src)
+	if !containsIssue(issues, "segment-transfer-state-unknown") {
+		t.Fatalf("expected segment-transfer-state-unknown, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsControlTransferAfterSegmentWriteWithStateAssertion(t *testing.T) {
+	src := `module segment
+target x86_64
+export def enter_guest(selector: GuestFsSelector, target: GuestEntryPoint) -> void abi c:
+    inputs: selector = rdi, target = rsi
+    clobbers: memory
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent, control.indirect
+    body:
+        movw %di, %fs
+        state fs: guest
+        jmp *%rsi
+`
+	_, issues := Parse("segment_transfer_known.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected state assertion to satisfy segment transfer check, got %#v", issues)
 	}
 }
 
@@ -2146,6 +2186,104 @@ export def bad_ret() -> void abi c:
 	_, issues := Parse("poison_ret.easm", src)
 	if !containsIssue(issues, "poison-return-target") {
 		t.Fatalf("expected poison-return-target, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsRawSegmentSelectorInSegmentMutatingEASM(t *testing.T) {
+	src := `module segment_roles
+target x86_64
+export def load_guest(selector: u16) -> void abi c:
+    inputs: selector = rdi
+    clobbers: memory
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent
+    body:
+        movw %di, %fs
+        state fs: guest
+        ret
+`
+	_, issues := Parse("segment_raw_selector.easm", src)
+	if !containsIssue(issues, "raw-segment-selector") {
+		t.Fatalf("expected raw-segment-selector, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsTypedSegmentSelectorInSegmentMutatingEASM(t *testing.T) {
+	src := `module segment_roles
+target x86_64
+export def load_guest(selector: GuestFsSelector) -> void abi c:
+    inputs: selector = rdi
+    clobbers: memory
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent
+    body:
+        movw %di, %fs
+        state fs: guest
+        ret
+`
+	_, issues := Parse("segment_typed_selector.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected typed segment selector to verify, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsRawIndirectTailJumpTarget(t *testing.T) {
+	src := `module control_roles
+target x86_64
+export def jump(entry: uintptr, params: uintptr) -> void abi c:
+    inputs: entry = rdi, params = rsi
+    clobbers: r11
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        movq %rdi, %r11
+        jmp *%r11
+`
+	_, issues := Parse("control_raw_target.easm", src)
+	if !containsIssue(issues, "raw-indirect-control-target") {
+		t.Fatalf("expected raw-indirect-control-target, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsTypedIndirectTailJumpTarget(t *testing.T) {
+	src := `module control_roles
+target x86_64
+export def jump(entry: GuestEntryPoint, params: HostPtr[void]) -> void abi c:
+    inputs: entry = rdi, params = rsi
+    clobbers: r11
+    stack: unchanged
+    control: noreturn, tail_jumps
+    requires: control.indirect, input.unused
+    body:
+        movq %rdi, %r11
+        jmp *%r11
+`
+	_, issues := Parse("control_typed_target.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected typed indirect target to verify, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsRawStackHandoffPointer(t *testing.T) {
+	src := `module stack_roles
+target x86_64
+export def jump(entry: GuestEntryPoint, stack_top: uintptr) -> void abi c:
+    inputs: entry = rdi, stack_top = rsi
+    clobbers: r11, rsp, memory
+    stack: switches, owns, aligned 16, noreturn
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        movq %rsi, %rsp
+        movq %rdi, %r11
+        jmp *%r11
+`
+	_, issues := Parse("stack_raw_handoff.easm", src)
+	if !containsIssue(issues, "raw-stack-handoff") {
+		t.Fatalf("expected raw-stack-handoff, got %#v", issues)
 	}
 }
 

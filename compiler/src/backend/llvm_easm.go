@@ -205,11 +205,37 @@ func (g *llvmGenerator) easmSemanticType(name string) (semantic.Type, error) {
 		if strings.HasSuffix(name, "&?") || strings.HasSuffix(name, "&") {
 			return g.result.NamedTypes["void"], fmt.Errorf("EASM v1 only accepts primitive value types in signatures, got %s", name)
 		}
+		if t, ok := g.easmAddressSpaceCarrierType(name); ok {
+			return t, nil
+		}
 		if t, ok := g.result.NamedTypes[name]; ok {
 			return t, nil
 		}
 		return nil, fmt.Errorf("unknown EASM type %s", name)
 	}
+}
+
+func (g *llvmGenerator) easmAddressSpaceCarrierType(name string) (semantic.Type, bool) {
+	name = strings.TrimSpace(name)
+	for _, spec := range []struct {
+		prefix string
+		space  string
+	}{
+		{prefix: "GuestVAddr[", space: "guest"},
+		{prefix: "HostPtr[", space: "host"},
+		{prefix: "NativeMappedGuestPtr[", space: "native_mapped_guest"},
+	} {
+		if !strings.HasPrefix(name, spec.prefix) || !strings.HasSuffix(name, "]") {
+			continue
+		}
+		elemName := strings.TrimSpace(name[len(spec.prefix) : len(name)-1])
+		elem, ok := g.result.NamedTypes[elemName]
+		if !ok {
+			return nil, false
+		}
+		return &semantic.AddressSpaceType{Space: spec.space, Elem: elem, Storage: g.result.NamedTypes["uintptr"]}, true
+	}
+	return nil, false
 }
 
 func easmCallConv(abi string) string {

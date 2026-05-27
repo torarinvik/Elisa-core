@@ -533,6 +533,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				delete(state.KnownUInt, reg)
 			}
 		case op == "jmp":
+			if writesSegment && state.FS == "" && !requireSet["x86_64.segment.state.unchecked"] {
+				issues = append(issues, Issue{Severity: "error", Code: "segment-transfer-state-unknown", File: path, Line: inst.Line, Message: "control transfer after writing fs/gs requires an explicit machine-state assertion such as state fs: host or state fs: guest"})
+			}
 			if target := directControlTarget(op, inst.Text); target != "" {
 				if contract, ok := labelContracts[target]; ok {
 					state = withStackMod16(state, stackMod16, stackMod16Known)
@@ -545,6 +548,9 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				usesJmp = true
 			}
 		case op == "ret":
+			if writesSegment && state.FS == "" && !requireSet["x86_64.segment.state.unchecked"] {
+				issues = append(issues, Issue{Severity: "error", Code: "segment-transfer-state-unknown", File: path, Line: inst.Line, Message: "return after writing fs/gs requires an explicit machine-state assertion such as state fs: host or state fs: guest"})
+			}
 			if state.StackTopKnown && state.StackTopValue > 0 && state.StackTopValue < 0x10000 && !requireSet["control.tiny_target.unchecked"] {
 				issues = append(issues, Issue{Severity: "error", Code: "tiny-return-target", File: path, Line: inst.Line, Message: fmt.Sprintf("ret target is known tiny value 0x%x; require control.tiny_target.unchecked only for intentional sentinels", state.StackTopValue)})
 			}
@@ -593,6 +599,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	issues = append(issues, verifyABI(path, fn)...)
 	issues = append(issues, verifyContractTokens(path, fn)...)
 	issues = append(issues, verifySignatureTypes(path, fn)...)
+	issues = append(issues, verifyMachineRoleTypes(path, fn, requireSet, controlSet)...)
 	issues = append(issues, verifyBindings(path, target, fn)...)
 	issues = append(issues, verifyRegisterLists(path, target, fn)...)
 	issues = append(issues, verifyDuplicateContractAtoms(path, fn)...)
@@ -710,6 +717,60 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	}
 	_ = target
 	return issues
+}
+
+func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]bool, controlSet map[string]bool) []Issue {
+	var issues []Issue
+	paramTypes := map[string]string{}
+	for _, param := range fn.Params {
+		paramTypes[strings.ToLower(strings.TrimSpace(param.Name))] = strings.TrimSpace(param.Type)
+	}
+	if requireSet["x86_64.segment.write"] && !requireSet["x86_64.segment.selector.untyped"] {
+		for _, param := range fn.Params {
+			name := strings.ToLower(strings.TrimSpace(param.Name))
+			if strings.Contains(name, "selector") && rawScalarType(param.Type) {
+				issues = append(issues, Issue{Severity: "error", Code: "raw-segment-selector", File: path, Line: fn.Line, Message: fmt.Sprintf("segment-mutating EASM parameter %s uses raw %s; use GuestFsSelector or HostFsSelector, or require x86_64.segment.selector.untyped after a manual proof", param.Name, param.Type)})
+			}
+		}
+	}
+	if requireSet["control.indirect"] && !requireSet["control.target.untyped"] {
+		for _, input := range fn.Inputs {
+			name := strings.ToLower(bindingName(input))
+			if name == "" || !looksLikeIndirectControlTargetName(name) {
+				continue
+			}
+			if typ := paramTypes[name]; rawScalarType(typ) {
+				issues = append(issues, Issue{Severity: "error", Code: "raw-indirect-control-target", File: path, Line: fn.Line, Message: fmt.Sprintf("indirect-control EASM parameter %s uses raw %s; use a role type such as GuestEntryPoint, GuestCallable, HostCallable, or ExitFunction, or require control.target.untyped after a manual proof", name, typ)})
+			}
+		}
+	}
+	if (controlSet["tail_jumps"] || controlSet["noreturn"]) && !requireSet["stack.owner.untyped"] {
+		for _, param := range fn.Params {
+			name := strings.ToLower(strings.TrimSpace(param.Name))
+			if strings.Contains(name, "stack") && strings.Contains(name, "top") && rawScalarType(param.Type) {
+				issues = append(issues, Issue{Severity: "error", Code: "raw-stack-handoff", File: path, Line: fn.Line, Message: fmt.Sprintf("stack-handoff EASM parameter %s uses raw %s; use GuestStackTop or require stack.owner.untyped after a manual proof", param.Name, param.Type)})
+			}
+		}
+	}
+	return issues
+}
+
+func rawScalarType(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "u16", "u32", "u64", "usize", "uintptr":
+		return true
+	default:
+		return false
+	}
+}
+
+func looksLikeIndirectControlTargetName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "entry", "target", "callee", "callable", "fn", "func", "function", "code", "pc":
+		return true
+	default:
+		return strings.HasSuffix(name, "_entry") || strings.HasSuffix(name, "_target") || strings.HasSuffix(name, "_pc")
+	}
 }
 
 func BuildReport(paths []string, targetTriple string) (*Report, []*Module) {
@@ -1036,12 +1097,36 @@ func verifySignatureTypes(path string, fn *Function) []Issue {
 }
 
 func allowedSignatureType(name string) bool {
+	name = strings.TrimSpace(name)
 	switch strings.TrimSpace(name) {
 	case "void", "bool", "char", "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "usize", "uintptr", "f32", "f64":
 		return true
 	default:
+		return isEASMRoleType(name) || isAddressSpaceCarrierType(name)
+	}
+}
+
+func isEASMRoleType(name string) bool {
+	name = strings.TrimSpace(name)
+	switch name {
+	case "GuestEntryPoint", "GuestCallable", "GuestPC",
+		"HostCallable", "NativeCallable", "ExitFunction",
+		"GuestStackTop", "GuestFsSelector", "HostFsSelector",
+		"PublishedExecutableAddr", "WritableExecutableAddr":
+		return true
+	default:
 		return false
 	}
+}
+
+func isAddressSpaceCarrierType(name string) bool {
+	name = strings.TrimSpace(name)
+	for _, prefix := range []string{"GuestVAddr[", "HostPtr[", "NativeMappedGuestPtr["} {
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, "]") && len(name) > len(prefix)+1 {
+			return true
+		}
+	}
+	return false
 }
 
 func verifyContractTokens(path string, fn *Function) []Issue {
@@ -1108,6 +1193,7 @@ func allowedRequireToken(token string) bool {
 		"control.direct",
 		"control.indirect",
 		"control.poison_target.unchecked",
+		"control.target.untyped",
 		"control.tiny_target.unchecked",
 		"debug.trap",
 		"fixed_address",
@@ -1121,6 +1207,7 @@ func allowedRequireToken(token string) bool {
 		"riscv.reserved_registers",
 		"stack.call_alignment.unchecked",
 		"stack.entry_pop.unchecked",
+		"stack.owner.untyped",
 		"x86_64.atomic.rmw",
 		"x86_64.cpuid",
 		"x86_64.fpu_control",
@@ -1132,6 +1219,8 @@ func allowedRequireToken(token string) bool {
 		"x86_64.segment.gs",
 		"x86_64.segment.persistent",
 		"x86_64.segment.restore",
+		"x86_64.segment.selector.untyped",
+		"x86_64.segment.state.unchecked",
 		"x86_64.segment.write",
 		"x86_64.simd_state",
 		"x86_64.sse.lfence",
