@@ -124,3 +124,32 @@ def run(flag: bool) -> void:
 		t.Fatalf("expected Segment.Host call from unknown state to be rejected, got:\n%s", all)
 	}
 }
+
+func TestSegmentTransitionAnnotationDrivesAmbientOwner(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "segment_transition_annotation.elisa", `
+@segment_transition(guest)
+extern load_guest() -> void can[Unsafe.SegmentMutation]
+extern host_only() -> void can[Segment.Host]
+
+def run() -> void:
+    can Unsafe.SegmentMutation:
+        load_guest()
+    can Segment.Host:
+        host_only()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `segment owner mismatch: call to "host_only" requires Segment.Host but current ambient segment is Segment.Guest`) {
+		t.Fatalf("expected explicit segment transition annotation to move ambient owner to guest, got:\n%s", all)
+	}
+}
+
+func TestSegmentTransitionAnnotationRejectsInvalidTarget(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "segment_transition_bad_target.elisa", `
+@segment_transition(kernel)
+extern load_kernel() -> void can[Unsafe.SegmentMutation]
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `@segment_transition on extern function "load_kernel" uses unsupported target "kernel" (expected host or guest)`) {
+		t.Fatalf("expected invalid segment transition target to be rejected, got:\n%s", all)
+	}
+}

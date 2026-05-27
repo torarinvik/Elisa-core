@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "ufcs_only", "internal", "blocking", "nonblocking":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "ufcs_only", "internal", "blocking", "nonblocking", "segment_transition":
 		return true
 	default:
 		return false
@@ -517,6 +517,17 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			if len(annotation.Args) != 0 {
 				a.errorf(annotation.Position, "@internal on extern function %q does not take arguments", fn.Name)
 			}
+		case "segment_transition":
+			if len(annotation.Args) != 1 {
+				a.errorf(annotation.Position, "@segment_transition on extern function %q expects exactly one target owner: host or guest", fn.Name)
+				continue
+			}
+			transition, ok := normalizeSegmentTransitionAnnotationArg(annotation.Args[0])
+			if !ok {
+				a.errorf(annotation.Position, "@segment_transition on extern function %q uses unsupported target %q (expected host or guest)", fn.Name, strings.TrimSpace(annotation.Args[0]))
+				continue
+			}
+			fnType.SegmentTransition = transition
 		case "blocking":
 			if len(annotation.Args) != 0 {
 				a.errorf(annotation.Position, "@blocking on extern function %q does not take arguments", fn.Name)

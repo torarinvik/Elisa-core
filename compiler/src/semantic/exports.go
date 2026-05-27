@@ -232,6 +232,7 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		HasAsyncEntry:               specialized.HasAsyncEntry,
 		HasSegmentAgnostic:          specialized.HasSegmentAgnostic,
 		HasSegmentEstablishing:      specialized.HasSegmentEstablishing,
+		SegmentTransition:           specialized.SegmentTransition,
 		TemperatureMode:             specialized.TemperatureMode,
 		HasTemperatureMode:          specialized.HasTemperatureMode,
 		BoundaryPointerParamIndices: append([]int(nil), specialized.BoundaryPointerParamIndices...),

@@ -545,6 +545,14 @@ type FuncPoststate struct {
 	RefState   RefState
 }
 
+type FuncSegmentTransition int
+
+const (
+	FuncSegmentTransitionNone FuncSegmentTransition = iota
+	FuncSegmentTransitionHost
+	FuncSegmentTransitionGuest
+)
+
 type FuncType struct {
 	Name                         string
 	TypeParams                   []string
@@ -567,6 +575,7 @@ type FuncType struct {
 	HasAsyncEntry                bool
 	HasSegmentAgnostic           bool
 	HasSegmentEstablishing       bool
+	SegmentTransition            FuncSegmentTransition
 	TemperatureMode              FuncTemperatureMode
 	HasTemperatureMode           bool
 	CallConv                     string

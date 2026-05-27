@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strings"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -21,6 +23,28 @@ func segmentOwnerName(owner segmentOwnerState) string {
 		return "Guest"
 	default:
 		return "Unknown"
+	}
+}
+
+func normalizeSegmentTransitionAnnotationArg(value string) (FuncSegmentTransition, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "host", "segment.host":
+		return FuncSegmentTransitionHost, true
+	case "guest", "segment.guest":
+		return FuncSegmentTransitionGuest, true
+	default:
+		return FuncSegmentTransitionNone, false
+	}
+}
+
+func segmentOwnerFromFuncTransition(transition FuncSegmentTransition) segmentOwnerState {
+	switch transition {
+	case FuncSegmentTransitionHost:
+		return segmentOwnerHost
+	case FuncSegmentTransitionGuest:
+		return segmentOwnerGuest
+	default:
+		return segmentOwnerUnknown
 	}
 }
 
@@ -75,7 +99,27 @@ func funcTypeHasSegmentDependency(fnType *FuncType) bool {
 	if fnType == nil {
 		return false
 	}
-	return permissionRefsContainSegmentDependency(functionPermissionRefs(fnType))
+	return fnType.SegmentTransition != FuncSegmentTransitionNone || permissionRefsContainSegmentDependency(functionPermissionRefs(fnType))
+}
+
+func funcTypeSegmentTransitionOwner(fnType *FuncType) segmentOwnerState {
+	if fnType == nil {
+		return segmentOwnerUnknown
+	}
+	if owner := segmentOwnerFromFuncTransition(fnType.SegmentTransition); owner != segmentOwnerUnknown {
+		return owner
+	}
+	return permissionRefsTransitionOwner(functionPermissionRefs(fnType))
+}
+
+func funcTypeRequiredSegmentOwner(fnType *FuncType) segmentOwnerState {
+	if fnType == nil {
+		return segmentOwnerUnknown
+	}
+	if funcTypeSegmentTransitionOwner(fnType) != segmentOwnerUnknown {
+		return segmentOwnerUnknown
+	}
+	return permissionRefsRequiredOwner(functionPermissionRefs(fnType))
 }
 
 func (a *Analyzer) validateSegmentFlow(fn *ast.FuncDecl) {
@@ -251,8 +295,7 @@ func (a *Analyzer) validateSegmentFlowExpr(expr ast.Expr, owner *segmentOwnerSta
 			a.validateSegmentFlowExpr(arg, owner)
 		}
 		if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok {
-			refs := functionPermissionRefs(fnType)
-			required := permissionRefsRequiredOwner(refs)
+			required := funcTypeRequiredSegmentOwner(fnType)
 			if required != segmentOwnerUnknown {
 				if *owner == segmentOwnerUnknown {
 					a.errorf(n.Pos(), "segment owner unknown: call to %q requires Segment.%s; establish Segment.%s before crossing this boundary", fnType.Name, segmentOwnerName(required), segmentOwnerName(required))
@@ -260,7 +303,7 @@ func (a *Analyzer) validateSegmentFlowExpr(expr ast.Expr, owner *segmentOwnerSta
 					a.errorf(n.Pos(), "segment owner mismatch: call to %q requires Segment.%s but current ambient segment is Segment.%s", fnType.Name, segmentOwnerName(required), segmentOwnerName(*owner))
 				}
 			}
-			if transition := permissionRefsTransitionOwner(refs); transition != segmentOwnerUnknown {
+			if transition := funcTypeSegmentTransitionOwner(fnType); transition != segmentOwnerUnknown {
 				*owner = transition
 			}
 		}

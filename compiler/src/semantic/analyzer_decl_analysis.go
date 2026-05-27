@@ -126,7 +126,7 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionGuardAnnotation(annotation, fn, signature)
 			case "boundary_pointer_args":
 				a.applyFunctionBoundaryPointerArgsAnnotation(annotation, fn, signature)
-			case "async_entry", "segment_agnostic", "segment_establishing":
+			case "async_entry", "segment_agnostic", "segment_establishing", "segment_transition":
 				a.applyFunctionSegmentSafetyAnnotation(annotation, fn, signature)
 			case "internal":
 				// Interface visibility marker only; it is not a runtime/test annotation.
@@ -168,16 +168,34 @@ func (a *Analyzer) applyFunctionNoRecurseAnnotation(annotation ast.Annotation, f
 }
 
 func (a *Analyzer) applyFunctionSegmentSafetyAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
-	if signature == nil || len(annotation.Args) != 0 {
+	if signature == nil {
 		return
 	}
 	switch annotation.Name {
 	case "async_entry":
+		if len(annotation.Args) != 0 {
+			return
+		}
 		signature.HasAsyncEntry = true
 	case "segment_agnostic":
+		if len(annotation.Args) != 0 {
+			return
+		}
 		signature.HasSegmentAgnostic = true
 	case "segment_establishing":
+		if len(annotation.Args) != 0 {
+			return
+		}
 		signature.HasSegmentEstablishing = true
+	case "segment_transition":
+		if len(annotation.Args) != 1 {
+			return
+		}
+		transition, ok := normalizeSegmentTransitionAnnotationArg(annotation.Args[0])
+		if !ok {
+			return
+		}
+		signature.SegmentTransition = transition
 	}
 }
 
@@ -374,6 +392,17 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	if annotation.Name == "async_entry" || annotation.Name == "segment_agnostic" || annotation.Name == "segment_establishing" {
 		if len(annotation.Args) != 0 {
 			a.errorf(annotation.Position, "@%s on function %q does not take arguments", annotation.Name, fn.Name)
+			return false
+		}
+		return true
+	}
+	if annotation.Name == "segment_transition" {
+		if len(annotation.Args) != 1 {
+			a.errorf(annotation.Position, "@segment_transition on function %q expects exactly one target owner: host or guest", fn.Name)
+			return false
+		}
+		if _, ok := normalizeSegmentTransitionAnnotationArg(annotation.Args[0]); !ok {
+			a.errorf(annotation.Position, "@segment_transition on function %q uses unsupported target %q (expected host or guest)", fn.Name, strings.TrimSpace(annotation.Args[0]))
 			return false
 		}
 		return true
@@ -669,7 +698,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition":
 		return true
 	case "boundary_pointer_args":
 		return true
