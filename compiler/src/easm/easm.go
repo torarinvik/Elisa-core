@@ -1112,7 +1112,8 @@ func isEASMRoleType(name string) bool {
 	case "GuestEntryPoint", "GuestCallable", "GuestThreadEntry", "GuestThreadArg", "GuestThreadResult", "GuestPC",
 		"HostCallable", "NativeCallable", "ExitFunction",
 		"GuestStackTop", "GuestFsSelector", "HostFsSelector",
-		"PublishedExecutableAddr", "WritableExecutableAddr":
+		"PublishedExecutableAddr", "WritableExecutableAddr",
+		"HostStackPointer", "SegmentSelfPointer", "HostThreadId", "SignalContextPtr", "MachineContextPtr":
 		return true
 	default:
 		return false

@@ -2267,6 +2267,34 @@ export def jump(entry: GuestEntryPoint, params: HostPtr[void]) -> void abi c:
 	}
 }
 
+func TestVerifyAcceptsPointerWidthMachineRoleReturns(t *testing.T) {
+	src := `module machine_roles
+target x86_64
+export def current_stack() -> HostStackPointer abi c:
+    outputs: ret = rax
+    clobbers: 
+    stack: unchanged
+    control: returns
+    body:
+        movq %rsp, %rax
+        ret
+
+export def read_fs0() -> SegmentSelfPointer abi c:
+    outputs: ret = rax
+    clobbers: 
+    stack: unchanged
+    control: returns
+    requires: x86_64.segment.fs
+    body:
+        movq %fs:0, %rax
+        ret
+`
+	_, issues := Parse("machine_role_returns.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected pointer-width role returns to verify, got %#v", issues)
+	}
+}
+
 func TestVerifyRejectsRawStackHandoffPointer(t *testing.T) {
 	src := `module stack_roles
 target x86_64
