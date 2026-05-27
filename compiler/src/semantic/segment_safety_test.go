@@ -106,3 +106,21 @@ def run() -> void:
 		t.Fatalf("expected guest call in host state to be rejected, got:\n%s", all)
 	}
 }
+
+func TestSegmentFlowRejectsSegmentCallFromUnknownState(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "segment_flow_rejects_unknown.elisa", `
+extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
+extern host_only() -> void can[Segment.Host]
+
+def run(flag: bool) -> void:
+    if flag:
+        can Unsafe.SegmentMutation, Segment.Guest:
+            load_guest()
+    can Segment.Host:
+        host_only()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `segment owner unknown: call to "host_only" requires Segment.Host; establish Segment.Host before crossing this boundary`) {
+		t.Fatalf("expected Segment.Host call from unknown state to be rejected, got:\n%s", all)
+	}
+}

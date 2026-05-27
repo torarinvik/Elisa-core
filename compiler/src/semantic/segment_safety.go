@@ -253,8 +253,12 @@ func (a *Analyzer) validateSegmentFlowExpr(expr ast.Expr, owner *segmentOwnerSta
 		if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok {
 			refs := functionPermissionRefs(fnType)
 			required := permissionRefsRequiredOwner(refs)
-			if required != segmentOwnerUnknown && *owner != segmentOwnerUnknown && *owner != required {
-				a.errorf(n.Pos(), "segment owner mismatch: call to %q requires Segment.%s but current ambient segment is Segment.%s", fnType.Name, segmentOwnerName(required), segmentOwnerName(*owner))
+			if required != segmentOwnerUnknown {
+				if *owner == segmentOwnerUnknown {
+					a.errorf(n.Pos(), "segment owner unknown: call to %q requires Segment.%s; establish Segment.%s before crossing this boundary", fnType.Name, segmentOwnerName(required), segmentOwnerName(required))
+				} else if *owner != required {
+					a.errorf(n.Pos(), "segment owner mismatch: call to %q requires Segment.%s but current ambient segment is Segment.%s", fnType.Name, segmentOwnerName(required), segmentOwnerName(*owner))
+				}
 			}
 			if transition := permissionRefsTransitionOwner(refs); transition != segmentOwnerUnknown {
 				*owner = transition
