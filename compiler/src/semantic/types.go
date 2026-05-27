@@ -564,12 +564,15 @@ type FuncType struct {
 	InlineMode                   FuncInlineMode
 	HasInlineMode                bool
 	HasNoRecurse                 bool
+	HasAsyncEntry                bool
+	HasSegmentAgnostic           bool
+	HasSegmentEstablishing       bool
 	TemperatureMode              FuncTemperatureMode
 	HasTemperatureMode           bool
 	CallConv                     string
 	IntrinsicName                string
 	GuardEffects                 []FuncGuardEffect
-	BoundaryPointerParamIndices     []int
+	BoundaryPointerParamIndices  []int
 	Poststates                   []FuncPoststate
 	Params                       []Type
 	ExplicitParamCount           int

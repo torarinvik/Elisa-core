@@ -48,7 +48,11 @@ func GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result *semantic.Res
 	if err := g.optimizeModule(optLevel); err != nil {
 		return "", err
 	}
-	return g.printModule(), nil
+	output := g.printModule()
+	if err := validateSegmentAgnosticLLVMIR(output); err != nil {
+		return "", err
+	}
+	return output, nil
 }
 func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile) (*llvmGenerator, error) {
 	return compileLLVMModuleWithTarget(result, optLevel, profile, "")

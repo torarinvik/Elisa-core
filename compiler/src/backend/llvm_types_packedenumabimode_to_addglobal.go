@@ -15,6 +15,11 @@ static void elisacoreAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, co
 	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
 }
 
+static void elisacoreAddFunctionStringAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen, const char* Value, size_t ValueLen) {
+	LLVMAttributeRef Attr = LLVMCreateStringAttribute(Ctx, Name, NameLen, Value, ValueLen);
+	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
+}
+
 static LLVMTypeRef elisacoreGlobalValueType(LLVMValueRef Value) {
 	return LLVMGlobalGetValueType(Value);
 }
@@ -527,6 +532,7 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 		}
 		g.applyFunctionNoRecurseAttributes(value, fnType)
 		g.applyFunctionTemperatureAttributes(value, fnType)
+		g.applyFunctionSegmentSafetyAttributes(value, fnType)
 	}
 	if explicitInlineMode {
 		return
@@ -600,6 +606,12 @@ func (g *llvmGenerator) applyFunctionTemperatureAttributes(fn C.LLVMValueRef, fn
 		g.addColdAttribute(fn)
 	}
 }
+func (g *llvmGenerator) applyFunctionSegmentSafetyAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
+	if g == nil || fn == nil || fnType == nil || !fnType.HasSegmentAgnostic {
+		return
+	}
+	g.addFunctionStringAttribute(fn, "elisacore.segment_agnostic", "true")
+}
 func (g *llvmGenerator) addAlwaysInlineAttribute(fn C.LLVMValueRef) {
 	if g == nil || g.context == nil || fn == nil {
 		return
@@ -637,6 +649,16 @@ func (g *llvmGenerator) addFunctionEnumAttribute(fn C.LLVMValueRef, name string)
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))
 	C.elisacoreAddAlwaysInlineAttr(g.context, fn, nameC, C.size_t(len(name)))
+}
+func (g *llvmGenerator) addFunctionStringAttribute(fn C.LLVMValueRef, name string, value string) {
+	if g == nil || g.context == nil || fn == nil || name == "" {
+		return
+	}
+	nameC := cString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	valueC := cString(value)
+	defer C.free(unsafe.Pointer(valueC))
+	C.elisacoreAddFunctionStringAttr(g.context, fn, nameC, C.size_t(len(name)), valueC, C.size_t(len(value)))
 }
 func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 	switch name {

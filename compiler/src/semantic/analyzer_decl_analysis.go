@@ -126,6 +126,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionGuardAnnotation(annotation, fn, signature)
 			case "boundary_pointer_args":
 				a.applyFunctionBoundaryPointerArgsAnnotation(annotation, fn, signature)
+			case "async_entry", "segment_agnostic", "segment_establishing":
+				a.applyFunctionSegmentSafetyAnnotation(annotation, fn, signature)
 			case "internal":
 				// Interface visibility marker only; it is not a runtime/test annotation.
 			case "init":
@@ -163,6 +165,20 @@ func (a *Analyzer) applyFunctionNoRecurseAnnotation(annotation ast.Annotation, f
 		return
 	}
 	signature.HasNoRecurse = true
+}
+
+func (a *Analyzer) applyFunctionSegmentSafetyAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil || len(annotation.Args) != 0 {
+		return
+	}
+	switch annotation.Name {
+	case "async_entry":
+		signature.HasAsyncEntry = true
+	case "segment_agnostic":
+		signature.HasSegmentAgnostic = true
+	case "segment_establishing":
+		signature.HasSegmentEstablishing = true
+	}
 }
 
 func (a *Analyzer) applyFunctionTemperatureAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
