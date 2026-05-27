@@ -1109,7 +1109,7 @@ func allowedSignatureType(name string) bool {
 func isEASMRoleType(name string) bool {
 	name = strings.TrimSpace(name)
 	switch name {
-	case "GuestEntryPoint", "GuestCallable", "GuestPC",
+	case "GuestEntryPoint", "GuestCallable", "GuestThreadEntry", "GuestThreadArg", "GuestThreadResult", "GuestPC",
 		"HostCallable", "NativeCallable", "ExitFunction",
 		"GuestStackTop", "GuestFsSelector", "HostFsSelector",
 		"PublishedExecutableAddr", "WritableExecutableAddr":
