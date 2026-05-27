@@ -484,10 +484,11 @@ func TestAnalyzeNamedFunctionCallArgsThroughGlobalAlias(t *testing.T) {
 global runner: func(i64, i64) -> i64 = add
 
 def build() -> i64:
-    return runner(y: 7, x: do:
-        seed = 3
-        seed
-    )
+    can Global.Read:
+        return runner(y: 7, x: do:
+            seed = 3
+            seed
+        )
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
@@ -504,10 +505,11 @@ def add(x: i64, y: i64) -> i64:
 global BOX: CallbackBox = CallbackBox(add)
 
 def build() -> i64:
-    return BOX.run(y: 7, x: do:
-        seed = 3
-        seed
-    )
+    can Global.Read:
+        return BOX.run(y: 7, x: do:
+            seed = 3
+            seed
+        )
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)

@@ -526,7 +526,7 @@ def write(text: u8&) -> int:
 	}
 }
 
-func TestMutableGlobalAccessRequiresUnsafeMutableGlobalGrant(t *testing.T) {
+func TestGlobalReadInfersGlobalReadPermission(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "mutable_global_requires_unsafe.elisa", `
 global mutable counter: int = 0
 
@@ -534,8 +534,8 @@ def read_counter() -> int:
     return counter
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
-	if !strings.Contains(all, `mutable global access requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.MutableGlobal or a surrounding can ...: block`) {
-		t.Fatalf("expected missing mutable global grant warning, got:\n%s", all)
+	if strings.Contains(all, `global read requires`) {
+		t.Fatalf("expected direct global read to infer permission without local diagnostic, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("read_counter")
 	if !ok {
@@ -545,22 +545,22 @@ def read_counter() -> int:
 	if !ok {
 		t.Fatalf("expected read_counter function type, got %T", sym.Type)
 	}
-	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Unsafe.MutableGlobal]" {
-		t.Fatalf("expected mutable global access to infer caller permission, got %q", got)
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Global.Read, Unsafe.MutableGlobal]" {
+		t.Fatalf("expected global read to infer caller permission, got %q", got)
 	}
 }
 
-func TestTrustedMutableGlobalAccessDoesNotInferCallerPermission(t *testing.T) {
+func TestTrustedGlobalReadDoesNotInferCallerPermission(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_mutable_global.elisa", `
 global mutable counter: int = 0
 
 def read_counter() -> int:
-    trusted Unsafe.MutableGlobal:
+    trusted Global.Read, Unsafe.MutableGlobal:
         return counter
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
-	if strings.Contains(all, `mutable global access requires`) || strings.Contains(all, `explicit local effect grant`) {
-		t.Fatalf("expected trusted mutable global grant to satisfy access, got:\n%s", all)
+	if strings.Contains(all, `global read requires`) || strings.Contains(all, `mutable global access requires`) || strings.Contains(all, `explicit local effect grant`) {
+		t.Fatalf("expected trusted global read grant to satisfy access, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("read_counter")
 	if !ok {
@@ -571,11 +571,11 @@ def read_counter() -> int:
 		t.Fatalf("expected read_counter function type, got %T", sym.Type)
 	}
 	if got := PermissionRefsString(fnType.PermissionRefs); got != "" {
-		t.Fatalf("expected trusted mutable global access not to infer caller permission, got %q", got)
+		t.Fatalf("expected trusted global read not to infer caller permission, got %q", got)
 	}
 }
 
-func TestMutableGlobalAssignmentRequiresUnsafeMutableGlobalGrant(t *testing.T) {
+func TestGlobalAssignmentInfersGlobalWritePermission(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "mutable_global_assignment_requires_unsafe.elisa", `
 global mutable counter: int = 0
 
@@ -583,8 +583,8 @@ def set_counter(value: int) -> void:
     counter <- value
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
-	if !strings.Contains(all, `mutable global access requires can[Unsafe]`) {
-		t.Fatalf("expected missing mutable global grant warning for assignment, got:\n%s", all)
+	if strings.Contains(all, `global write requires`) {
+		t.Fatalf("expected direct global write to infer permission without local diagnostic, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("set_counter")
 	if !ok {
@@ -594,8 +594,50 @@ def set_counter(value: int) -> void:
 	if !ok {
 		t.Fatalf("expected set_counter function type, got %T", sym.Type)
 	}
-	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Unsafe.MutableGlobal]" {
-		t.Fatalf("expected mutable global assignment to infer caller permission, got %q", got)
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Global.Write, Unsafe.MutableGlobal]" {
+		t.Fatalf("expected global assignment to infer caller permission, got %q", got)
+	}
+}
+
+func TestGlobalReadWithLocalGrantIsQuiet(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "global_read_with_grant.elisa", `
+global counter: int = 7
+
+def read_counter() -> int:
+    can Global.Read:
+        return counter
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, `global read requires`) || strings.Contains(all, `explicit local effect grant`) {
+		t.Fatalf("expected Global.Read grant to satisfy read, got:\n%s", all)
+	}
+}
+
+func TestGlobalWriteWithLocalGrantIsQuiet(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "global_write_with_grant.elisa", `
+global mutable counter: int = 0
+
+def set_counter(value: int) -> void:
+    can Global.Write, Unsafe.MutableGlobal:
+        counter <- value
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, `global write requires`) || strings.Contains(all, `mutable global access requires`) || strings.Contains(all, `explicit local effect grant`) {
+		t.Fatalf("expected Global.Write grant to satisfy write, got:\n%s", all)
+	}
+}
+
+func TestDeclaredGlobalReadCallRequiresLocalGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "declared_global_read_call_requires_grant.elisa", `
+def read_effect() -> int can[Global.Read]:
+    return 1
+
+def caller() -> int:
+    return read_effect()
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `call to "read_effect" requires can[Global]`) {
+		t.Fatalf("expected declared Global.Read call to require an explicit local grant, got:\n%s", all)
 	}
 }
 

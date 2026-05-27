@@ -145,6 +145,14 @@ func unsafeMutableGlobalRefs(pos lexer.Pos) []ast.PermissionRef {
 	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "MutableGlobal"}}
 }
 
+func globalReadRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Global", Member: "Read"}}
+}
+
+func globalWriteRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Global", Member: "Write"}}
+}
+
 func unsafeUncheckedIndexRefs(pos lexer.Pos) []ast.PermissionRef {
 	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "UncheckedIndex"}}
 }

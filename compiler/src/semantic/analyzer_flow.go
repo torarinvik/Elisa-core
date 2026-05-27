@@ -211,12 +211,20 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// a location, not a value; don't trip the uninitialized-read check there
 		// (the assignment itself initializes it).
 		a.suppressUninitReadCheck++
+		a.suppressGlobalReadCheck++
 		if n.Optional {
 			targetType = a.optionalAssignmentTargetType(n.Target)
 		} else {
 			targetType = a.assignmentTargetType(n.Target)
 		}
+		a.suppressGlobalReadCheck--
 		a.suppressUninitReadCheck--
+		if sym, ok := a.globalStorageRoot(n.Target); ok {
+			a.recordFunctionPermissionRefs(globalWriteRefs(n.Target.Pos()))
+			if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+				a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Target.Pos()))
+			}
+		}
 		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
@@ -257,6 +265,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
+		if sym, ok := a.globalStorageRoot(n.Target); ok {
+			a.recordFunctionPermissionRefs(globalReadRefs(n.Target.Pos()))
+			a.recordFunctionPermissionRefs(globalWriteRefs(n.Target.Pos()))
+			if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+				a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Target.Pos()))
+			}
+		}
 		valueType := a.analyzeExpr(n.Value)
 		if !IsNumericType(targetType) || !IsNumericType(valueType) {
 			a.errorf(n.Pos(), "augmented assignment requires numeric operands")
@@ -265,8 +280,16 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 	case *ast.AsRefAssignStmt:
 		a.suppressUninitReadCheck++
+		a.suppressGlobalReadCheck++
 		targetType := a.asRefTargetType(n.Target, n.AsKind)
+		a.suppressGlobalReadCheck--
 		a.suppressUninitReadCheck--
+		if sym, ok := a.globalStorageRoot(n.Target); ok {
+			a.recordFunctionPermissionRefs(globalWriteRefs(n.Target.Pos()))
+			if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+				a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Target.Pos()))
+			}
+		}
 		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {

@@ -181,6 +181,7 @@ type Analyzer struct {
 	// value read (it is being filled / had its address taken), so the
 	// definite-assignment read check must not fire.
 	suppressUninitReadCheck           int
+	suppressGlobalReadCheck           int
 	currentPoolScopes                 []poolScopeState
 	currentIndexBounds                map[string]indexBoundFact
 	currentFunctionUsedPermissions    map[string]bool

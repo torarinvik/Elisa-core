@@ -607,10 +607,18 @@ func (g *llvmGenerator) applyFunctionTemperatureAttributes(fn C.LLVMValueRef, fn
 	}
 }
 func (g *llvmGenerator) applyFunctionSegmentSafetyAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
-	if g == nil || fn == nil || fnType == nil || !fnType.HasSegmentAgnostic {
+	if g == nil || fn == nil || fnType == nil {
 		return
 	}
-	g.addFunctionStringAttribute(fn, "elisacore.segment_agnostic", "true")
+	if fnType.HasSegmentAgnostic {
+		g.addFunctionStringAttribute(fn, "elisacore.segment_agnostic", "true")
+	}
+	if fnType.HasAsyncEntry {
+		g.addFunctionStringAttribute(fn, "elisacore.async_entry", "true")
+	}
+	if fnType.HasSegmentEstablishing {
+		g.addFunctionStringAttribute(fn, "elisacore.segment_establishing", "true")
+	}
 }
 func (g *llvmGenerator) addAlwaysInlineAttribute(fn C.LLVMValueRef) {
 	if g == nil || g.context == nil || fn == nil {

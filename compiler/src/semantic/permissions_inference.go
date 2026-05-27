@@ -118,16 +118,16 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	case *ast.DeferStmt:
 		c.collectStmts(n.Body)
 	case *ast.AssignStmt:
-		c.collectExpr(n.Target)
+		c.collectWriteTarget(n.Target, false)
 		c.collectExpr(n.Value)
 		if c.analyzer.enforceUnsafePermissions && c.analyzer.stmtRequiresUnsafeAlias(n) {
 			c.addRefs(unsafeAliasRefs(n.Position))
 		}
 	case *ast.AugAssignStmt:
-		c.collectExpr(n.Target)
+		c.collectWriteTarget(n.Target, true)
 		c.collectExpr(n.Value)
 	case *ast.AsRefAssignStmt:
-		c.collectExpr(n.Target)
+		c.collectWriteTarget(n.Target, false)
 		c.collectExpr(n.Value)
 	case *ast.ReturnStmt:
 		c.collectExpr(n.Value)
@@ -233,10 +233,13 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	}
 	switch n := expr.(type) {
 	case *ast.Ident:
-		if c.analyzer.enforceUnsafePermissions {
-			if sym, _, ok := c.analyzer.lookupVisibleGlobal(n.Name); ok && sym.Kind == SymbolGlobal && sym.Mutable {
+		if sym, ok := c.analyzer.globalStorageSymbolForIdent(n.Name); ok {
+			c.addRefs(globalReadRefs(n.Position))
+			if c.analyzer.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 				c.addRefs(unsafeMutableGlobalRefs(n.Position))
 			}
+		}
+		if c.analyzer.enforceUnsafePermissions {
 			if c.analyzer.storageViewUseRequiresUnsafeStaleRef(n) {
 				c.addRefs(unsafeStaleRefRefs(n.Position))
 			}
@@ -405,5 +408,32 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		}
 	case *ast.IsAliasExpr:
 		c.collectExpr(n.Target)
+	}
+}
+
+func (c *permissionEffectCollector) collectWriteTarget(expr ast.Expr, alsoRead bool) {
+	if expr == nil {
+		return
+	}
+	if sym, ok := c.analyzer.globalStorageRoot(expr); ok {
+		c.addRefs(globalWriteRefs(expr.Pos()))
+		if alsoRead {
+			c.addRefs(globalReadRefs(expr.Pos()))
+		}
+		if c.analyzer.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+			c.addRefs(unsafeMutableGlobalRefs(expr.Pos()))
+		}
+	}
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		if globalStorageRootExpr(expr) != n.Object {
+			c.collectWriteTarget(n.Object, alsoRead)
+		}
+	case *ast.IndexExpr:
+		c.collectExpr(n.Index)
+		c.collectExpr(n.Fallback)
+	case *ast.SliceExpr:
+		c.collectExpr(n.Start)
+		c.collectExpr(n.End)
 	}
 }

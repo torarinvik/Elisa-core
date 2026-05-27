@@ -168,16 +168,16 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 	case *ast.DeferStmt:
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.AssignStmt:
-		a.validatePermissionExpr(n.Target, granted)
+		a.validatePermissionWriteTarget(n.Target, false, granted)
 		a.validatePermissionExpr(n.Value, granted)
 		if a.enforceUnsafePermissions && a.stmtRequiresUnsafeAlias(n) {
 			a.warnOnMissingLocalGrant(n.Pos(), "mutable alias", unsafeAliasRefs(n.Position), granted)
 		}
 	case *ast.AugAssignStmt:
-		a.validatePermissionExpr(n.Target, granted)
+		a.validatePermissionWriteTarget(n.Target, true, granted)
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.AsRefAssignStmt:
-		a.validatePermissionExpr(n.Target, granted)
+		a.validatePermissionWriteTarget(n.Target, false, granted)
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.ReturnStmt:
 		if n.Value != nil {
@@ -279,16 +279,41 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 	}
 }
 
+func (a *Analyzer) validatePermissionWriteTarget(expr ast.Expr, alsoRead bool, granted map[string]bool) {
+	if expr == nil {
+		return
+	}
+	if sym, ok := a.globalStorageRoot(expr); ok {
+		if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+			a.warnOnMissingLocalGrant(expr.Pos(), "mutable global access", unsafeMutableGlobalRefs(expr.Pos()), granted)
+		}
+	}
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		if globalStorageRootExpr(expr) != n.Object {
+			a.validatePermissionWriteTarget(n.Object, alsoRead, granted)
+		}
+	case *ast.IndexExpr:
+		a.validatePermissionExpr(n.Index, granted)
+		a.validatePermissionExpr(n.Fallback, granted)
+	case *ast.SliceExpr:
+		a.validatePermissionExpr(n.Start, granted)
+		a.validatePermissionExpr(n.End, granted)
+	}
+}
+
 func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool) {
 	if expr == nil {
 		return
 	}
 	switch n := expr.(type) {
 	case *ast.Ident:
-		if a.enforceUnsafePermissions {
-			if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok && sym.Kind == SymbolGlobal && sym.Mutable {
+		if sym, ok := a.globalStorageSymbolForIdent(n.Name); ok {
+			if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 				a.warnOnMissingLocalGrant(n.Pos(), "mutable global access", unsafeMutableGlobalRefs(n.Position), granted)
 			}
+		}
+		if a.enforceUnsafePermissions {
 			if a.storageViewUseRequiresUnsafeStaleRef(n) {
 				a.warnOnMissingLocalGrant(n.Pos(), "stale reference", unsafeStaleRefRefs(n.Position), granted)
 			}
@@ -469,7 +494,8 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	if a.permissionWarningsSuppressedByGenericContext(fnType, granted) {
 		return
 	}
-	missingRefs := missingGrantedPermissionRefs(functionPermissionRefs(fnType), granted)
+	requiredRefs := permissionRefsRequiringLocalGrant(fnType)
+	missingRefs := missingGrantedPermissionRefs(requiredRefs, granted)
 	for _, ref := range missingRefs {
 		if ref.Name == "Unsafe" && ref.Member == "SegmentMutation" {
 			a.errorf(pos, "%s", effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), []string{"Unsafe"}, "can Unsafe.SegmentMutation"))
@@ -484,9 +510,9 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 			return
 		}
 	}
-	missing := missingGrantedPermissionFamilies(functionPermissionRefs(fnType), granted)
+	missing := missingGrantedPermissionFamilies(requiredRefs, granted)
 	if len(missing) == 0 {
 		return
 	}
-	a.warnf(pos, effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), missing, permissionGrantHint(functionPermissionRefs(fnType), missing)))
+	a.warnf(pos, effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), missing, permissionGrantHint(requiredRefs, missing)))
 }

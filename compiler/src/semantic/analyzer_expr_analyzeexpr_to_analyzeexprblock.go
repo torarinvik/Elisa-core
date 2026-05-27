@@ -22,8 +22,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// Private, so this only affects qualified globals.
 			if sym, ok := a.currentScope.Lookup(n.Name); ok && !(sym.Private && !a.canAccessPrivateName(n.Name)) {
 				result = promoteWritableRefType(sym.Type, sym.Mutable)
-				if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
-					a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Position))
+				if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
+					a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
+					if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+						a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Position))
+					}
 				}
 				if sym.Kind == SymbolRegionMark {
 					a.errorf(n.Pos(), "checkpoint %q can only be used in restore <region> from %q", n.Name, n.Name)
@@ -90,8 +93,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
 			result = promoteWritableRefType(sym.Type, sym.Mutable)
-			if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
-				a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Position))
+			if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
+				a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
+				if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
+					a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Position))
+				}
 			}
 			if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
 				if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {

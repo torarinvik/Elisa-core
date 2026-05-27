@@ -329,7 +329,7 @@ def get[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
     return zeroed
 
 def read(a: mutable Arena&) -> i32:
-    can Memory.Allocate, Abort.Panic:
+    can Global.Read, Memory.Allocate, Abort.Panic:
         table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.new(a)
         symbol_id: SymbolTableId = table.declare("alpha", FixtureSymbol{value: 7})
         if let found = table.lookup("alpha"):
@@ -459,7 +459,7 @@ def count[K, T](map: IndexMap[K, T]&) -> usize:
     return 0usize
 
 def read(a: mutable Arena&) -> i32:
-    can Memory.Allocate, Abort.Panic:
+    can Global.Read, Memory.Allocate, Abort.Panic:
         map: mutable IndexMap[cstr[key_shape], FixtureSymbol] = indexmap.new(a)
         _ = map.set("alpha", FixtureSymbol{value: 7})
         if map.has("alpha"):
