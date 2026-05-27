@@ -694,7 +694,7 @@ func TestRunCLIProjectBuildRequiresEASMSegmentMutationOnExternSurface(t *testing
 `)
 	writeFixtureFile(t, filepath.Join(projectRoot, "easm", "segment.easm"), `module segment
 target x86_64-apple-darwin
-export def load_fs(selector: u16) -> void abi c:
+export def load_fs(selector: GuestFsSelector) -> void abi c:
     inputs: selector = rdi
     clobbers: memory
     stack: unchanged
@@ -702,12 +702,16 @@ export def load_fs(selector: u16) -> void abi c:
     requires: x86_64.segment.fs, x86_64.segment.write, x86_64.segment.persistent
     body:
         movw %di, %fs
+        state fs: guest
         ret
 `)
-	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern load_fs(selector: u16) -> void
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern GuestFsSelectorRole
+type GuestFsSelector = id[GuestFsSelectorRole]
+
+extern load_fs(selector: GuestFsSelector) -> void
 
 def main() -> int:
-    load_fs(0u16)
+    load_fs(0u32.cast[GuestFsSelector])
     return 0
 `)
 
@@ -717,15 +721,21 @@ def main() -> int:
 	if exitCode == 0 {
 		t.Fatalf("expected EASM segment mutation to require extern permissions, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "matching Elisa extern does not expose can[Unsafe.SegmentMutation]") {
+	if !strings.Contains(stderr.String(), "matching Elisa extern does not expose can[Unsafe.SegmentMutation, Segment.Guest]") {
 		t.Fatalf("expected missing Unsafe.SegmentMutation diagnostic, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
+	if !strings.Contains(stderr.String(), "Segment.Guest") {
+		t.Fatalf("expected missing Segment.Guest diagnostic, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
 
-	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern load_fs(selector: u16) -> void can[Unsafe.SegmentMutation]
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern GuestFsSelectorRole
+type GuestFsSelector = id[GuestFsSelectorRole]
+
+extern load_fs(selector: GuestFsSelector) -> void can[Unsafe.SegmentMutation, Segment.Guest]
 
 def main() -> int:
-    can Unsafe.SegmentMutation:
-        load_fs(0u16)
+    can Unsafe.SegmentMutation, Segment.Guest:
+        load_fs(0u32.cast[GuestFsSelector])
     return 0
 `)
 	stdout.Reset()

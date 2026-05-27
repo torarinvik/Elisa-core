@@ -190,7 +190,40 @@ func easmDeclaredEffectPermissions(fn *easm.Function) []string {
 			add("Unsafe.SegmentMutation")
 		}
 	}
+	switch easmDeclaredFinalFSOwner(fn) {
+	case "guest":
+		add("Segment.Guest")
+	case "host":
+		add("Segment.Host")
+	}
 	return out
+}
+
+func easmDeclaredFinalFSOwner(fn *easm.Function) string {
+	if fn == nil {
+		return ""
+	}
+	owner := ""
+	for _, inst := range fn.Instructions {
+		if !inst.Pseudo || strings.ToLower(strings.TrimSpace(inst.Op)) != "state" {
+			continue
+		}
+		text := strings.TrimSpace(inst.Text)
+		lower := strings.ToLower(text)
+		if !strings.HasPrefix(lower, "fs:") {
+			continue
+		}
+		value := strings.TrimSpace(text[len("fs:"):])
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "guest", "host":
+			owner = strings.ToLower(fields[0])
+		}
+	}
+	return owner
 }
 
 func (g *llvmGenerator) easmSemanticType(name string) (semantic.Type, error) {
