@@ -355,6 +355,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	if annotation.Name == "boundary_pointer_args" {
 		return a.validateFunctionBoundaryPointerArgsAnnotation(annotation, fn, signature)
 	}
+	if annotation.Name == "async_entry" || annotation.Name == "segment_agnostic" || annotation.Name == "segment_establishing" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@%s on function %q does not take arguments", annotation.Name, fn.Name)
+			return false
+		}
+		return true
+	}
 	if annotation.Name == "inline" {
 		if len(annotation.Args) != 1 {
 			a.errorf(annotation.Position, "@inline on function %q expects exactly one mode argument", fn.Name)
@@ -646,7 +653,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing":
 		return true
 	case "boundary_pointer_args":
 		return true

@@ -27,7 +27,20 @@ func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 			a.currentFuncType = fnType
 		}
 	}
+	a.validateSegmentEntryAnnotations(fn)
 	a.validatePermissionStmts(fn.Body, granted)
+	if funcHasAnnotation(fn, "segment_agnostic") {
+		a.validateSegmentAgnosticStmts(fn.Body)
+	}
+}
+
+func (a *Analyzer) validateSegmentEntryAnnotations(fn *ast.FuncDecl) {
+	if fn == nil || !funcHasAnnotation(fn, "async_entry") {
+		return
+	}
+	if !funcHasAnnotation(fn, "segment_agnostic") && !funcHasAnnotation(fn, "segment_establishing") {
+		a.errorf(fn.Pos(), "@async_entry function %q enters with unknown segment owner; add @segment_agnostic or @segment_establishing so host/guest %%fs assumptions are explicit", fn.Name)
+	}
 }
 
 func grantedPermissionFamilies(families []string) map[string]bool {
