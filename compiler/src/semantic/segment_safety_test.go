@@ -56,3 +56,53 @@ def alarm_handler() -> void:
 		t.Fatalf("expected segment-agnostic function to reject segment-dependent call, got:\n%s", all)
 	}
 }
+
+func TestSegmentFlowRejectsHostCallAfterGuestTransition(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "segment_flow_rejects_host_after_guest.elisa", `
+extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
+extern host_only() -> void can[Segment.Host]
+
+def run() -> void:
+    can Unsafe.SegmentMutation, Segment.Guest:
+        load_guest()
+    can Segment.Host:
+        host_only()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `segment owner mismatch: call to "host_only" requires Segment.Host but current ambient segment is Segment.Guest`) {
+		t.Fatalf("expected host call after guest transition to be rejected, got:\n%s", all)
+	}
+}
+
+func TestSegmentFlowAcceptsHostCallAfterHostTransition(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "segment_flow_accepts_host_restore.elisa", `
+extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
+extern restore_host() -> void can[Unsafe.SegmentMutation, Segment.Host]
+extern host_only() -> void can[Segment.Host]
+
+def run() -> void:
+    can Unsafe.SegmentMutation, Segment.Guest:
+        load_guest()
+    can Unsafe.SegmentMutation, Segment.Host:
+        restore_host()
+    can Segment.Host:
+        host_only()
+`)
+	if all := allDiagnostics(result); strings.Contains(all, `segment owner mismatch`) {
+		t.Fatalf("expected host call after host transition to be accepted, got:\n%s", all)
+	}
+}
+
+func TestSegmentFlowRejectsGuestCallInHostState(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "segment_flow_rejects_guest_in_host.elisa", `
+extern guest_only() -> void can[Segment.Guest]
+
+def run() -> void:
+    can Segment.Guest:
+        guest_only()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `segment owner mismatch: call to "guest_only" requires Segment.Guest but current ambient segment is Segment.Host`) {
+		t.Fatalf("expected guest call in host state to be rejected, got:\n%s", all)
+	}
+}

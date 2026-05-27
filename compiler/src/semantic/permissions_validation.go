@@ -29,6 +29,7 @@ func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 	}
 	a.validateSegmentEntryAnnotations(fn)
 	a.validatePermissionStmts(fn.Body, granted)
+	a.validateSegmentFlow(fn)
 	if funcHasAnnotation(fn, "segment_agnostic") {
 		a.validateSegmentAgnosticStmts(fn.Body)
 	}
