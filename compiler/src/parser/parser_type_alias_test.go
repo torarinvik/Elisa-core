@@ -38,12 +38,13 @@ func TestParseIDTypeAliasSpellings(t *testing.T) {
 type SymbolId = Id[Symbol]
 type ScopeId = ID[Scope]
 type SymbolRow = RowId[SymbolRows]
+type GuestEntryPoint = ptrid[GuestEntryPointRole]
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
-	if len(file.Decls) != 4 {
-		t.Fatalf("expected 4 decls, got %d", len(file.Decls))
+	if len(file.Decls) != 5 {
+		t.Fatalf("expected 5 decls, got %d", len(file.Decls))
 	}
 	for i, declNode := range file.Decls[:3] {
 		decl, ok := declNode.(*ast.TypeAliasDecl)

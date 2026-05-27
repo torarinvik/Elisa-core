@@ -117,6 +117,57 @@ def wrap(raw: u32) -> NameId:
 	}
 }
 
+func TestPtrIDTypeAliasIsPointerWidthHandle(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ptrid_type_alias_ok.elisa", `
+extern GuestEntryPointRole
+extern ExitFunctionRole
+type GuestEntryPoint = ptrid[GuestEntryPointRole]
+type ExitFunction = ptrid[ExitFunctionRole]
+
+def raw(entry: GuestEntryPoint) -> uintptr:
+	return !entry
+
+def wrap(raw: uintptr) -> GuestEntryPoint:
+	return raw as GuestEntryPoint
+`)
+	entryID, ok := result.NamedTypes["GuestEntryPoint"].(*IDType)
+	if !ok {
+		t.Fatalf("expected GuestEntryPoint to resolve to IDType, got %T", result.NamedTypes["GuestEntryPoint"])
+	}
+	exitID, ok := result.NamedTypes["ExitFunction"].(*IDType)
+	if !ok {
+		t.Fatalf("expected ExitFunction to resolve to IDType, got %T", result.NamedTypes["ExitFunction"])
+	}
+	if SameType(entryID, exitID) {
+		t.Fatalf("expected pointer-width id roles to remain distinct")
+	}
+	if !SameType(entryID.Storage, result.NamedTypes["uintptr"]) {
+		t.Fatalf("expected ptrid storage to be uintptr, got %s", entryID.Storage)
+	}
+}
+
+func TestPtrIDTypeRejectsAccidentalIntegerAndOtherPtrIDAssignment(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ptrid_type_alias_reject.elisa", `
+extern GuestEntryPointRole
+extern ExitFunctionRole
+type GuestEntryPoint = ptrid[GuestEntryPointRole]
+type ExitFunction = ptrid[ExitFunctionRole]
+
+def bad_integer(raw: uintptr) -> GuestEntryPoint:
+	return raw
+
+def bad_id(exit: ExitFunction) -> GuestEntryPoint:
+	return exit
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "return type expects id[GuestEntryPointRole], got uintptr") {
+		t.Fatalf("expected raw uintptr assignment rejection, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "return type expects id[GuestEntryPointRole], got id[ExitFunctionRole]") {
+		t.Fatalf("expected distinct ptrid assignment rejection, got:\n%s", joined)
+	}
+}
+
 func TestRowIDTypeRequiresSOATag(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "row_id_type_ok.elisa", `
 soa SymbolRows:
