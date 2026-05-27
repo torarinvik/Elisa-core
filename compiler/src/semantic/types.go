@@ -575,6 +575,7 @@ type FuncType struct {
 	HasAsyncEntry                bool
 	HasSegmentAgnostic           bool
 	HasSegmentEstablishing       bool
+	HasReentrantSafe             bool
 	SegmentTransition            FuncSegmentTransition
 	TemperatureMode              FuncTemperatureMode
 	HasTemperatureMode           bool

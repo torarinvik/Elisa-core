@@ -105,6 +105,8 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		HasAsyncEntry:               base.HasAsyncEntry,
 		HasSegmentAgnostic:          base.HasSegmentAgnostic,
 		HasSegmentEstablishing:      base.HasSegmentEstablishing,
+		HasReentrantSafe:            base.HasReentrantSafe,
+		SegmentTransition:           base.SegmentTransition,
 		TemperatureMode:             base.TemperatureMode,
 		HasTemperatureMode:          base.HasTemperatureMode,
 		CallConv:                    base.CallConv,

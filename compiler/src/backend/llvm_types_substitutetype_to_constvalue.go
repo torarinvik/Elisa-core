@@ -177,6 +177,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			HasAsyncEntry:          tt.HasAsyncEntry,
 			HasSegmentAgnostic:     tt.HasSegmentAgnostic,
 			HasSegmentEstablishing: tt.HasSegmentEstablishing,
+			HasReentrantSafe:       tt.HasReentrantSafe,
+			SegmentTransition:      tt.SegmentTransition,
 			TemperatureMode:        tt.TemperatureMode,
 			HasTemperatureMode:     tt.HasTemperatureMode,
 			CallConv:               tt.CallConv,

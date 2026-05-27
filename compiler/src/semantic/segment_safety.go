@@ -638,3 +638,220 @@ func (a *Analyzer) validateSegmentAgnosticBackendDependency(fn *ast.FuncDecl, po
 	}
 	a.errorf(pos, "@segment_agnostic function %q has a backend-derived Segment.Host dependency; disable %%fs canary/TLS lowering or remove @segment_agnostic", fn.Name)
 }
+
+func (a *Analyzer) validateReentrantSafeStmts(stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		a.validateReentrantSafeStmt(stmt)
+	}
+}
+
+func (a *Analyzer) validateReentrantSafeStmt(stmt ast.Stmt) {
+	switch n := stmt.(type) {
+	case *ast.LockStmt:
+		a.errorf(n.Pos(), "@reentrant_safe code cannot enter lock blocks; async paths must be lock-free")
+		a.validateReentrantSafeExpr(n.Mutex)
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.PoolStmt:
+		a.errorf(n.Pos(), "@reentrant_safe code cannot spawn pool work; async paths must not schedule blocking or reentrant work")
+		a.validateReentrantSafeExpr(n.Workers)
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.ParallelForStmt:
+		a.errorf(n.Pos(), "@reentrant_safe code cannot use parallel for; async paths must not schedule blocking or reentrant work")
+		a.validateReentrantSafeExpr(n.Source)
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.VarDeclStmt:
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.LetDestructureStmt:
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.TupleBindStmt:
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.MoveBindStmt:
+		a.validateReentrantSafeExpr(n.Value)
+		a.validateReentrantSafeExpr(n.Store)
+	case *ast.ArgsScopeStmt:
+		for _, arg := range n.Args {
+			a.validateReentrantSafeExpr(arg.Value)
+		}
+		for _, pack := range n.ParamPacks {
+			for _, arg := range pack.Args {
+				a.validateReentrantSafeExpr(arg.Value)
+			}
+		}
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.DeferStmt:
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.AssignStmt:
+		a.validateReentrantSafeExpr(n.Target)
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.AugAssignStmt:
+		a.validateReentrantSafeExpr(n.Target)
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.AsRefAssignStmt:
+		a.validateReentrantSafeExpr(n.Target)
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.ReturnStmt:
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.IfStmt:
+		a.validateReentrantSafeExpr(n.Cond)
+		a.validateReentrantSafeStmts(n.Then)
+		for _, elif := range n.Elifs {
+			a.validateReentrantSafeExpr(elif.Cond)
+			a.validateReentrantSafeStmts(elif.Body)
+		}
+		a.validateReentrantSafeStmts(n.Else)
+	case *ast.MatchStmt:
+		a.validateReentrantSafeExpr(n.Value)
+		a.validateReentrantSafeExpr(n.Store)
+		for _, arm := range n.Arms {
+			a.validateReentrantSafeStmts(arm.Body)
+		}
+	case *ast.InStoreStmt:
+		a.validateReentrantSafeExpr(n.Store)
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.CanStmt:
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.WhileStmt:
+		a.validateReentrantSafeExpr(n.Cond)
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.ForStmt:
+		a.validateReentrantSafeExpr(n.Start)
+		a.validateReentrantSafeExpr(n.End)
+		a.validateReentrantSafeExpr(n.Step)
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.IterForStmt:
+		a.validateReentrantSafeExpr(n.Source)
+		a.validateReentrantSafeExpr(n.WhereFilter)
+		a.validateReentrantSafeExpr(n.Filter)
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.PanicStmt:
+		a.validateReentrantSafeExpr(n.Message)
+	case *ast.ExprStmt:
+		a.validateReentrantSafeExpr(n.Expr)
+	case *ast.StaticIfStmt:
+		for _, active := range a.activeStmtBranch(n) {
+			a.validateReentrantSafeStmt(active)
+		}
+	case *ast.StaticErrorStmt:
+		a.validateReentrantSafeExpr(n.Message)
+	case *ast.StaticAssertStmt:
+		a.validateReentrantSafeExpr(n.Cond)
+		a.validateReentrantSafeExpr(n.Message)
+	case *ast.StaticAssertBlockStmt:
+		for _, item := range n.Assertions {
+			a.validateReentrantSafeExpr(item.Cond)
+			a.validateReentrantSafeExpr(item.Message)
+		}
+	case *ast.StaticBlockStmt:
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.DiscardStmt:
+		a.validateReentrantSafeExpr(n.Value)
+	}
+}
+
+func (a *Analyzer) validateReentrantSafeExpr(expr ast.Expr) {
+	if expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.CallExpr:
+		if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok && fnType != nil && !fnType.HasReentrantSafe {
+			a.errorf(n.Pos(), "@reentrant_safe code cannot call %q because it is not marked @reentrant_safe", fnType.Name)
+		}
+		a.validateReentrantSafeExpr(n.Func)
+		a.validateReentrantSafeExpr(n.SafeReceiver)
+		for _, arg := range n.Args {
+			a.validateReentrantSafeExpr(arg)
+		}
+	case *ast.BinaryExpr:
+		a.validateReentrantSafeExpr(n.Left)
+		a.validateReentrantSafeExpr(n.Right)
+	case *ast.UnaryExpr:
+		a.validateReentrantSafeExpr(n.Operand)
+	case *ast.FieldExpr:
+		a.validateReentrantSafeExpr(n.Object)
+	case *ast.IndexExpr:
+		a.validateReentrantSafeExpr(n.Object)
+		a.validateReentrantSafeExpr(n.Index)
+		a.validateReentrantSafeExpr(n.Fallback)
+	case *ast.SliceExpr:
+		a.validateReentrantSafeExpr(n.Object)
+		a.validateReentrantSafeExpr(n.Start)
+		a.validateReentrantSafeExpr(n.End)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			a.validateReentrantSafeExpr(elem)
+		}
+		a.validateReentrantSafeExpr(n.Owner)
+	case *ast.CastExpr:
+		a.validateReentrantSafeExpr(n.Operand)
+	case *ast.TernaryExpr:
+		a.validateReentrantSafeExpr(n.Value)
+		a.validateReentrantSafeExpr(n.Cond)
+		a.validateReentrantSafeExpr(n.Alt)
+	case *ast.AddrOfExpr:
+		a.validateReentrantSafeExpr(n.Operand)
+	case *ast.MoveExpr:
+		a.validateReentrantSafeExpr(n.Operand)
+	case *ast.SpecializeExpr:
+		a.validateReentrantSafeExpr(n.Operand)
+	case *ast.StructLitExpr:
+		if call, ok := a.loweredInitCalls[n]; ok && call != nil {
+			a.validateReentrantSafeExpr(call)
+			break
+		}
+		for _, arg := range n.Args {
+			a.validateReentrantSafeExpr(arg)
+		}
+	case *ast.RecordUpdateExpr:
+		a.validateReentrantSafeExpr(n.Base)
+		for _, arg := range n.Args {
+			a.validateReentrantSafeExpr(arg)
+		}
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			a.validateReentrantSafeExpr(elem)
+		}
+	case *ast.ParenExpr:
+		a.validateReentrantSafeExpr(n.Inner)
+	case *ast.RaiseExpr:
+		a.validateReentrantSafeExpr(n.Error)
+	case *ast.TryExpr:
+		a.validateReentrantSafeExpr(n.Value)
+		a.validateReentrantSafeExpr(n.Fallback)
+	case *ast.UnwrapElseExpr:
+		a.validateReentrantSafeExpr(n.Value)
+		a.validateReentrantSafeExpr(n.Fallback)
+	case *ast.OptionalBindExpr:
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.AllocExpr:
+		a.validateReentrantSafeExpr(n.Owner)
+		a.validateReentrantSafeExpr(n.NodeSpan)
+		a.validateReentrantSafeExpr(n.Value)
+	case *ast.CanExpr:
+		a.validateReentrantSafeExpr(n.Expr)
+	case *ast.MatchExpr:
+		a.validateReentrantSafeExpr(n.Value)
+		a.validateReentrantSafeExpr(n.Store)
+		for _, arm := range n.Arms {
+			a.validateReentrantSafeStmts(arm.Body)
+		}
+	case *ast.VisitExpr:
+		a.validateReentrantSafeExpr(n.Value)
+		for _, arm := range n.Arms {
+			a.validateReentrantSafeExpr(arm.Guard)
+			a.validateReentrantSafeStmts(arm.Body)
+		}
+	case *ast.FoldExpr:
+		a.validateReentrantSafeExpr(n.Value)
+		for _, arm := range n.Arms {
+			a.validateReentrantSafeExpr(arm.Guard)
+			a.validateReentrantSafeStmts(arm.Body)
+		}
+	case *ast.IsPatternExpr:
+		for _, target := range n.Targets {
+			a.validateReentrantSafeExpr(target)
+		}
+	case *ast.IsAliasExpr:
+		a.validateReentrantSafeExpr(n.Target)
+	}
+}

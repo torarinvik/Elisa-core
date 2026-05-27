@@ -21,11 +21,40 @@ func TestAsyncEntrySegmentEstablishingIsAccepted(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "async_entry_segment_establishing.elisa", `
 @async_entry
 @segment_establishing
+@reentrant_safe
 def alarm_handler() -> void:
     return
 `)
 	if all := allDiagnostics(result); strings.Contains(all, `@async_entry function "alarm_handler" enters with unknown segment owner`) {
 		t.Fatalf("expected segment-establishing async entry to be accepted, got:\n%s", all)
+	}
+}
+
+func TestAsyncEntryRequiresReentrantSafe(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "async_entry_requires_reentrant_safe.elisa", `
+@async_entry
+@segment_establishing
+def alarm_handler() -> void:
+    return
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `@async_entry function "alarm_handler" can interrupt arbitrary code; add @reentrant_safe`) {
+		t.Fatalf("expected async entry without reentrant contract to be rejected, got:\n%s", all)
+	}
+}
+
+func TestReentrantSafeRejectsUnmarkedCall(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "reentrant_safe_rejects_unmarked_call.elisa", `
+def ordinary() -> void:
+    return
+
+@reentrant_safe
+def alarm_helper() -> void:
+    ordinary()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `@reentrant_safe code cannot call "ordinary" because it is not marked @reentrant_safe`) {
+		t.Fatalf("expected reentrant-safe function to reject unmarked call, got:\n%s", all)
 	}
 }
 

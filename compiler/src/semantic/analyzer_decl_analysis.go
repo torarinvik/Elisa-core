@@ -126,7 +126,7 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionGuardAnnotation(annotation, fn, signature)
 			case "boundary_pointer_args":
 				a.applyFunctionBoundaryPointerArgsAnnotation(annotation, fn, signature)
-			case "async_entry", "segment_agnostic", "segment_establishing", "segment_transition":
+			case "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe":
 				a.applyFunctionSegmentSafetyAnnotation(annotation, fn, signature)
 			case "internal":
 				// Interface visibility marker only; it is not a runtime/test annotation.
@@ -187,6 +187,11 @@ func (a *Analyzer) applyFunctionSegmentSafetyAnnotation(annotation ast.Annotatio
 			return
 		}
 		signature.HasSegmentEstablishing = true
+	case "reentrant_safe":
+		if len(annotation.Args) != 0 {
+			return
+		}
+		signature.HasReentrantSafe = true
 	case "segment_transition":
 		if len(annotation.Args) != 1 {
 			return
@@ -389,7 +394,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	if annotation.Name == "boundary_pointer_args" {
 		return a.validateFunctionBoundaryPointerArgsAnnotation(annotation, fn, signature)
 	}
-	if annotation.Name == "async_entry" || annotation.Name == "segment_agnostic" || annotation.Name == "segment_establishing" {
+	if annotation.Name == "async_entry" || annotation.Name == "segment_agnostic" || annotation.Name == "segment_establishing" || annotation.Name == "reentrant_safe" {
 		if len(annotation.Args) != 0 {
 			a.errorf(annotation.Position, "@%s on function %q does not take arguments", annotation.Name, fn.Name)
 			return false
@@ -698,7 +703,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe":
 		return true
 	case "boundary_pointer_args":
 		return true

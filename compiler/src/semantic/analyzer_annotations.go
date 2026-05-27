@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "ufcs_only", "internal", "blocking", "nonblocking", "segment_transition":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "ufcs_only", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe":
 		return true
 	default:
 		return false
@@ -532,6 +532,12 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 				continue
 			}
 			fnType.SegmentTransition = transition
+		case "reentrant_safe":
+			if len(annotation.Args) != 0 {
+				a.errorf(annotation.Position, "@reentrant_safe on extern function %q does not take arguments", fn.Name)
+				continue
+			}
+			fnType.HasReentrantSafe = true
 		case "blocking":
 			if len(annotation.Args) != 0 {
 				a.errorf(annotation.Position, "@blocking on extern function %q does not take arguments", fn.Name)
