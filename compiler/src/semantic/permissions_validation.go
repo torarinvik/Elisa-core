@@ -81,6 +81,12 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 		return
 	}
 	msg := effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing))
+	// Teach the safe alternatives for the dynamic-index gate: most uses want a
+	// checked access, not the unsafe opt-out. Appended after the standard message
+	// so existing prefix assertions still hold.
+	if label == "unchecked index" {
+		msg += "; for a checked access write `get arr[i]` (propagates absence) or `arr[i] else <fallback>` (handles it inline), or keep it unchecked with `trusted Unsafe.UncheckedIndex`"
+	}
 	// Address-space crossings (Unsafe.GuestHostPointerCast) are the strongest
 	// memory-safety boundary: converting a guest address carrier into a host
 	// pointer is ALWAYS a hard error when ungranted, even when general unsafe

@@ -81,3 +81,19 @@ def read_counter() -> int:
 		t.Fatalf("get laundered the mutable-global permission; expected Unsafe.MutableGlobal in inferred set, got %q", got)
 	}
 }
+
+// The dynamic-index gate diagnostic teaches the safe alternatives (`get`,
+// inline `else`, or the named unsafe opt-out) rather than only naming the
+// permission.
+func TestUncheckedIndexDiagnosticTeachesGet(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "unchecked_index_teach.elisa", `def f(xs: darray[i32]&, i: usize) -> i32:
+    return xs[i]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "unchecked index requires") {
+		t.Fatalf("expected unchecked-index gate diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "`get arr[i]`") || !strings.Contains(all, "`arr[i] else <fallback>`") || !strings.Contains(all, "trusted Unsafe.UncheckedIndex") {
+		t.Fatalf("expected teaching hint with get/else/trusted alternatives, got:\n%s", all)
+	}
+}
