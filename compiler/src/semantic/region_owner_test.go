@@ -145,6 +145,25 @@ func TestRegionMixedOwnedAndPlainReturnRejected(t *testing.T) {
 	}
 }
 
+// A region is a plain-bytes store: it frees its contents in bulk without
+// consuming them. Allocating a linear (must-consume) handle into a region is
+// therefore rejected — it could never be consumed and bulk-free would drop the
+// must-consume obligation.
+func TestLinearValueCannotBeAllocatedIntoRegion(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "region_linear_alloc.elisa", `linear struct Guard:
+    armed: bool
+
+def f() -> void:
+    region r(64)
+    g: r Guard& = new[r] Guard(true)
+    _ = g
+    destroy r
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "linear handles into region") {
+		t.Fatalf("expected linear-value-into-region to be rejected; got: %s", all)
+	}
+}
+
 // Destroying on only some branches still leaks on the others (relies on the
 // branch-join meet treating consume-on-all-arms as consumed and consume-on-
 // some-arms as still-live).

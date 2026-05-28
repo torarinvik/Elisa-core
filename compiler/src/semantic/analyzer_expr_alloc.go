@@ -120,6 +120,16 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		return invalidType
 	}
 	valueType := a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
+	// A region is a plain-bytes store: destroy/reset frees its contents in bulk
+	// without running destructors or consuming linear handles. A value carrying
+	// a linear (must-consume) handle therefore cannot live in a region — you
+	// only get a region reference back, can never consume it, and bulk-free
+	// would silently drop the must-consume obligation. Reject it at the
+	// allocation site (a future destructor-running region capability is what
+	// would lift this).
+	if a.containsAffineHandleValues(valueType, map[string]bool{}) {
+		a.errorf(expr.Value.Pos(), "cannot allocate a value containing linear handles into region %q: a region frees its contents in bulk (destroy/reset) without consuming them, so the linear value could never be consumed; keep it outside the region and store a borrow, or consume it explicitly", ident.Name)
+	}
 	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, Region: ident.Name, ExplicitStorage: true}
 }
 
