@@ -77,6 +77,15 @@ func (p *Parser) parseRegion() *ast.RegionStmt {
 		capacity = p.parseExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 	}
+	// `region NAME(cap):` is the scoped form: the region owner is discharged
+	// automatically at block exit (RAII), so no explicit `destroy` is needed.
+	// The plain `region NAME(cap)` form must be matched by `destroy NAME` on
+	// every path (it is an affine must-consume owner).
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		body := p.parseBlock()
+		return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity, Body: body}
+	}
 	p.expectNewline()
 	return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity}
 }
