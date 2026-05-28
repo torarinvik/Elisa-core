@@ -141,6 +141,20 @@ func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) seman
 	}
 	return s.exprType(expr.Value)
 }
+// backendOptionalBindBoundType mirrors the analyzer's optionalBindBoundType: a
+// slice operand (`if let s = arr[a:b]:`) binds the bounded view, so its slot is
+// allocated with the view type; other operands use the optional/nullable unwrap.
+func (s *functionState) backendOptionalBindBoundType(expr *ast.OptionalBindExpr) (semantic.Type, bool) {
+	if _, ok := unwrapToSliceForBind(expr.Value); ok {
+		viewType := s.optionalBindSourceType(expr)
+		if opt, isOpt := viewType.(*semantic.OptionalType); isOpt && opt != nil {
+			return opt.Value, true
+		}
+		return viewType, true
+	}
+	return backendConditionOptionalBindType(s.optionalBindSourceType(expr))
+}
+
 func (s *functionState) emitOptionalBindSourceValue(expr ast.Expr, sourceType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil || sourceType == nil {
 		return nil, nil, fmt.Errorf("invalid let condition source")
@@ -158,6 +172,31 @@ func (s *functionState) emitOptionalBindSourceValue(expr ast.Expr, sourceType se
 func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil || expr.Value == nil {
 		return nil, nil, nil, fmt.Errorf("invalid let condition")
+	}
+	// `if let s = arr[a:b]:` — a bounds-checked slice. "Present" means the bounds
+	// are within the source; the bound value is the bounded view.
+	if slice, ok := unwrapToSliceForBind(expr.Value); ok {
+		usizeType := s.g.result.NamedTypes["usize"]
+		startValue, _, err := s.emitExpr(slice.Start, usizeType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		endValue, _, err := s.emitExpr(slice.End, usizeType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		lenValue, err := s.emitSliceSourceLength(slice)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		startLEEnd := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), startValue, endValue, cStringFree("cond.slice.start_le_end"))
+		endLELen := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), endValue, lenValue, cStringFree("cond.slice.end_le_len"))
+		presentValue := C.LLVMBuildAnd(s.builder, startLEEnd, endLELen, cStringFree("cond.slice.in_range"))
+		viewValue, viewType, err := s.emitSliceExpr(slice)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return presentValue, viewValue, viewType, nil
 	}
 	valueType := s.optionalBindSourceType(expr)
 	if optionalType, ok := valueType.(*semantic.OptionalType); ok {
@@ -187,6 +226,19 @@ func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVM
 	}
 	return nil, nil, nil, fmt.Errorf("let condition requires an optional or nullable reference")
 }
+func unwrapToSliceForBind(expr ast.Expr) (*ast.SliceExpr, bool) {
+	for {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.SliceExpr:
+			return n, true
+		default:
+			return nil, false
+		}
+	}
+}
+
 func (s *functionState) emitOptionalBindExpr(expr *ast.OptionalBindExpr) (C.LLVMValueRef, semantic.Type, error) {
 	presentValue, _, _, err := s.emitOptionalBindTest(expr)
 	if err != nil {
@@ -395,7 +447,7 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 			if n.Name == "" || n.Name == "_" {
 				return nil, nil
 			}
-			boundType, ok := backendConditionOptionalBindType(s.optionalBindSourceType(n))
+			boundType, ok := s.backendOptionalBindBoundType(n)
 			if !ok {
 				return nil, nil
 			}

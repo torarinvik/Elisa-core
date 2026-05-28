@@ -48,6 +48,18 @@ func TestGetSlicePropagationRequiresOptionalReturn(t *testing.T) {
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 }
 
+// `if let s = arr[a:b]:` is a bounds-checked slice binding: it typechecks
+// without an unchecked-slice grant, and inside the block the bounded view's
+// static length makes constant inner indexing zero-cost.
+func TestIfLetSliceBindsBoundedViewAndProvesInnerIndex(t *testing.T) {
+	analyzeFunctionAnalysisTestSourceWithOptions(t, "iflet_slice_ok.elisa", `def f(xs: darray[i32]&) -> i32:
+    if let s = xs[0:3]:
+        return s[0] + s[1] + s[2]
+    else:
+        return -1
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+}
+
 // An out-of-range constant index must NOT be falsely proven by the static
 // length: s[10] into a length-8 view is genuinely out of bounds.
 func TestOutOfRangeConstIndexIntoBoundedSliceNotProven(t *testing.T) {

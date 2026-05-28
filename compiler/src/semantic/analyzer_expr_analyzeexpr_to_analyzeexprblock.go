@@ -405,7 +405,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				}
 			}
 		}
-		if _, ok := conditionOptionalBindType(valueType); !ok {
+		if _, ok := a.optionalBindBoundType(n.Value, valueType); !ok {
 			a.errorf(n.Pos(), nullableRefRequirementMessage("let condition", valueType.String()))
 			result = invalidType
 			return

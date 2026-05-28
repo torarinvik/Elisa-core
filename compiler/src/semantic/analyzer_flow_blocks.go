@@ -84,7 +84,24 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 	return a.analyzeBlockWithAffineClonePrepared(stmts, scope, func() {
 		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
 		a.applyIndexBoundsFactsForCondition(cond, truthy)
+		a.applyViewStaticLenForCondition(cond, truthy)
 	})
+}
+
+// optionalBindBoundType resolves the type bound by an `if let NAME = VALUE:`
+// condition. A slice operand (`if let s = arr[a:b]:`) is a bounds-checked slice:
+// it is marked checked (so codegen emits the runtime bounds test) and binds the
+// bounded view, taking the else arm when out of range. All other operands fall
+// back to the standard optional / nullable-reference unwrap.
+func (a *Analyzer) optionalBindBoundType(value ast.Expr, valueType Type) (Type, bool) {
+	if slice, ok := stripOptimizationParens(value).(*ast.SliceExpr); ok && slice != nil {
+		a.checkedSliceExprs[slice] = true
+		if opt, isOpt := valueType.(*OptionalType); isOpt && opt != nil {
+			return opt.Value, true
+		}
+		return valueType, true
+	}
+	return conditionOptionalBindType(valueType)
 }
 
 func conditionOptionalBindType(valueType Type) (Type, bool) {
@@ -309,7 +326,7 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 		if valueType == nil {
 			valueType = a.analyzeExpr(n.Value)
 		}
-		boundType, ok := conditionOptionalBindType(valueType)
+		boundType, ok := a.optionalBindBoundType(n.Value, valueType)
 		if !ok {
 			return nil
 		}
@@ -404,7 +421,7 @@ func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map
 		if valueType == nil {
 			valueType = a.analyzeExpr(n.Value)
 		}
-		boundType, ok := conditionOptionalBindType(valueType)
+		boundType, ok := a.optionalBindBoundType(n.Value, valueType)
 		if !ok {
 			return nil
 		}
@@ -539,7 +556,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 		if valueType == nil {
 			valueType = a.analyzeExprInScope(n.Value, scope)
 		}
-		boundType, ok := conditionOptionalBindType(valueType)
+		boundType, ok := a.optionalBindBoundType(n.Value, valueType)
 		if !ok {
 			return
 		}

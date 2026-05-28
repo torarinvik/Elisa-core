@@ -58,6 +58,27 @@ func (a *Analyzer) constSliceLength(expr *ast.SliceExpr) (int64, bool) {
 	return end.Int - start.Int, true
 }
 
+// applyViewStaticLenForCondition records static-length facts for views bound by
+// `if let s = arr[a:b]:` conditions, so constant inner indexing inside the
+// truthy block is provably in bounds. Runs inside the block's scoped fact map.
+func (a *Analyzer) applyViewStaticLenForCondition(cond ast.Expr, truthy bool) {
+	if a == nil || !truthy {
+		return
+	}
+	switch n := stripOptimizationParens(cond).(type) {
+	case *ast.OptionalBindExpr:
+		if n.Name == "" || n.Name == "_" {
+			return
+		}
+		a.recordViewStaticLenBinding(n.Name, n.Value, a.exprTypes[n.Value])
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND && truthy {
+			a.applyViewStaticLenForCondition(n.Left, true)
+			a.applyViewStaticLenForCondition(n.Right, true)
+		}
+	}
+}
+
 // recordViewStaticLenBinding records that a freshly-bound view variable came
 // from a constant-bounded slice and therefore has a statically-known length.
 func (a *Analyzer) recordViewStaticLenBinding(name string, value ast.Expr, bindingType Type) {
