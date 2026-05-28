@@ -451,7 +451,11 @@ type StructType struct {
 	DerivedStateMap  map[string]*StructDerivedState
 	Fields           map[string]Field
 	Affine           bool
-	ReprC            bool
+	// Droppable: `affine` (use-at-most-once, may be dropped) vs `linear`
+	// (use-exactly-once, must-consume). Only meaningful when Affine is true;
+	// defaults false so a propagation gap is over-strict (linear), never unsound.
+	Droppable bool
+	ReprC     bool
 	Layout           ast.StructLayoutMode
 	PackedLayout     bool
 	HasPackedGroups  bool

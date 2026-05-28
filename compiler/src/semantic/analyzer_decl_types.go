@@ -151,6 +151,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					NamedStateCases:  append([]string(nil), n.NamedStateCases...),
 					Fields:           map[string]Field{},
 					Affine:           n.Affine,
+					Droppable:        n.Droppable,
 					ReprC:            n.ReprC,
 					Layout:           n.Layout,
 					PackedLayout:     n.Layout == ast.StructLayoutPacked,

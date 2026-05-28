@@ -128,12 +128,13 @@ func joinAffinePath(base, suffix string) string {
 func directProtocolLeakKind(t Type) string {
 	switch tt := t.(type) {
 	case *StructType:
-		// A user-declared `affine struct` is must-consume: it models a
+		// A user-declared `linear struct` is must-consume: it models a
 		// transaction/handle that has to be consumed exactly once (e.g.
-		// MapTxn -> commit or rollback). Builtin affine carriers
-		// (Thread/Task/MutexGuard) are handled below in their state-aware
-		// forms and must not be caught here.
-		if tt.Affine && !tt.Builtin {
+		// MapTxn -> commit or rollback). An `affine struct` (Droppable) is
+		// move-only but may be dropped, so it carries no must-consume
+		// obligation. Builtin affine carriers (Thread/Task/MutexGuard) are
+		// handled below in their state-aware forms and must not be caught here.
+		if tt.Affine && !tt.Builtin && !tt.Droppable {
 			return "linear value"
 		}
 		return ""
@@ -155,8 +156,9 @@ func directProtocolLeakKind(t Type) string {
 			}
 			return ""
 		}
-		// User-declared generic affine structs are also must-consume.
-		if base, ok := tt.Base.(*StructType); ok && base.Affine && !base.Builtin {
+		// User-declared generic `linear` structs are also must-consume;
+		// `affine` (Droppable) ones are not.
+		if base, ok := tt.Base.(*StructType); ok && base.Affine && !base.Builtin && !base.Droppable {
 			return "linear value"
 		}
 		return ""

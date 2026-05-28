@@ -601,7 +601,11 @@ type StructDecl struct {
 	NamedStateCases  []string
 	DerivedStates    []DerivedStateDecl
 	Affine           bool
-	ReprC            bool
+	// Droppable distinguishes `affine` (use-at-most-once, may be dropped) from
+	// `linear` (use-exactly-once, must be consumed). Only meaningful when
+	// Affine is true; defaults false so a plain `linear` type is must-consume.
+	Droppable bool
+	ReprC     bool
 	Layout           StructLayoutMode
 	Fields           []FieldDecl
 }

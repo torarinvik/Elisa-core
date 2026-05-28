@@ -517,9 +517,21 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 	return p.parseStructDeclWithLeadingLayout(annotations, ast.StructLayoutDefault, false, p.cur().Pos)
 }
 func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, leadingLayout ast.StructLayoutMode, leadingReprC bool, pos lexer.Pos) *ast.StructDecl {
-	// `linear` is the canonical keyword (use-exactly-once); `affine` is kept as
-	// a deprecated alias so existing sources/docs keep parsing.
-	affine := p.matchIdentText("linear") || p.matchIdentText("affine")
+	// Two distinct single-use disciplines (both move-only / use-at-most-once):
+	//   `linear` = must be consumed exactly once (cannot be dropped); the
+	//             must-consume-before-scope-exit obligation applies.
+	//   `affine` = may be used at most once but MAY be dropped silently (no
+	//             must-consume obligation).
+	// Droppable defaults false so any later propagation gap is over-strict
+	// (treated as must-consume / linear), never unsound.
+	affine := false
+	droppable := false
+	if p.matchIdentText("linear") {
+		affine = true
+	} else if p.matchIdentText("affine") {
+		affine = true
+		droppable = true
+	}
 	reprC := leadingReprC
 	if p.peek() == lexer.TOKEN_REPR {
 		p.errorf("legacy `repr(c) struct` syntax is no longer supported; use `struct` instead")
@@ -634,7 +646,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, RegionOwner: regionOwner, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, Affine: affine, ReprC: reprC, Layout: layout, Fields: fields}
+	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, RegionOwner: regionOwner, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, Affine: affine, Droppable: droppable, ReprC: reprC, Layout: layout, Fields: fields}
 }
 func (p *Parser) peekNamedStructStateBracket() bool {
 	return p.peek() == lexer.TOKEN_LBRACKET && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "state"
