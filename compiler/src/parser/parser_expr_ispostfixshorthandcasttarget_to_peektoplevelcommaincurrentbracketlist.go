@@ -44,7 +44,31 @@ func isSingleUppercaseIdentifier(name string) bool {
 	return len(name) == 1 && name[0] >= 'A' && name[0] <= 'Z'
 }
 
+// peekOwnedQualifier reports whether the cursor is the `owned` ownership
+// qualifier in type position (e.g. `owned Arena`). It only triggers when a
+// type plausibly follows, so a value/type incidentally named "owned" is not
+// misread.
+func (p *Parser) peekOwnedQualifier() bool {
+	if p.peek() != lexer.TOKEN_IDENT || p.cur().Text != "owned" {
+		return false
+	}
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	switch p.tokens[p.pos+1].Kind {
+	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE, lexer.TOKEN_TAIL, lexer.TOKEN_LPAREN:
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Parser) parseTypeExpr() ast.TypeExpr {
+	if p.peekOwnedQualifier() {
+		p.advance()
+		elem := p.parseTypeExpr()
+		return &ast.OwnedType{Position: elem.Pos(), Elem: elem}
+	}
 	if p.match(lexer.TOKEN_MUTABLE) {
 		elem := p.parseTypeExpr()
 		return &ast.MutableType{Position: elem.Pos(), Elem: elem}
@@ -75,6 +99,11 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	return typ
 }
 func (p *Parser) parseTypeExprWithoutErrorUnionSuffix() ast.TypeExpr {
+	if p.peekOwnedQualifier() {
+		p.advance()
+		elem := p.parseTypeExprWithoutErrorUnionSuffix()
+		return &ast.OwnedType{Position: elem.Pos(), Elem: elem}
+	}
 	if p.match(lexer.TOKEN_MUTABLE) {
 		elem := p.parseTypeExprWithoutErrorUnionSuffix()
 		return &ast.MutableType{Position: elem.Pos(), Elem: elem}

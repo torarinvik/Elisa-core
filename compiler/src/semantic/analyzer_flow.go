@@ -50,6 +50,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordValueBinding(sym, n.Value)
 		a.markCreatedProtocolSymbol(sym, n.Value)
 		a.markReceivedOwnedRegion(sym, n.Value)
+		if isOwnedTypeExpr(n.Type) {
+			a.registerOwnedStoreOwner(sym)
+		}
 		a.recordBorrowedOwnerRefBinding(sym, n.Value)
 		a.recordFunctionValueBinding(sym, n.Value)
 		a.recordImmutableSymbolOptimizationFacts(sym, n.Value)

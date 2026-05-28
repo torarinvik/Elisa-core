@@ -47,6 +47,7 @@ func (n *AggregateStateTypeExpr) Pos() lexer.Pos {
 }
 func (n *StateSetTypeExpr) Pos() lexer.Pos { return n.Position }
 func (n *MutableType) Pos() lexer.Pos      { return n.Position }
+func (n *OwnedType) Pos() lexer.Pos        { return n.Position }
 func (n *TailType) Pos() lexer.Pos         { return n.Position }
 func (n *ArrayType) Pos() lexer.Pos        { return n.Position }
 func (n *BuiltinTypeExpr) Pos() lexer.Pos  { return n.Position }
@@ -271,6 +272,7 @@ func (*GenericType) nodeTag()                          {}
 func (*AggregateStateTypeExpr) nodeTag()               {}
 func (*StateSetTypeExpr) nodeTag()                     {}
 func (*MutableType) nodeTag()                          {}
+func (*OwnedType) nodeTag()                            {}
 func (*TailType) nodeTag()                             {}
 func (*ArrayType) nodeTag()                            {}
 func (*BuiltinTypeExpr) nodeTag()                      {}
@@ -474,6 +476,7 @@ func (*GenericType) typeExprTag()                      {}
 func (*AggregateStateTypeExpr) typeExprTag()           {}
 func (*StateSetTypeExpr) typeExprTag()                 {}
 func (*MutableType) typeExprTag()                      {}
+func (*OwnedType) typeExprTag()                        {}
 func (*TailType) typeExprTag()                         {}
 func (*ArrayType) typeExprTag()                        {}
 func (*BuiltinTypeExpr) typeExprTag()                  {}

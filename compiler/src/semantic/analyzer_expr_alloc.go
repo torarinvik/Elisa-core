@@ -110,7 +110,10 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		a.errorf(expr.Pos(), "region allocation requires function scope")
 		return invalidType
 	}
-	if sym, ok := a.currentScope.Lookup(ident.Name); !ok || sym.Kind != SymbolRegion {
+	// The owner is a region if it is a `region` decl (SymbolRegion) OR a binding
+	// declared `owned <store>` / a moved-in owned region (registered in
+	// currentRegions, see registerOwnedStoreOwner / markReceivedOwnedRegion).
+	if sym, ok := a.currentScope.Lookup(ident.Name); !ok || (sym.Kind != SymbolRegion && !a.symbolIsRegionOwner(sym)) {
 		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType)
 		a.analyzeExpr(expr.Value)
 		return invalidType

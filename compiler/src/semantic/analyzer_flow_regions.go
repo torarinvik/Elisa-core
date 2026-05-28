@@ -144,6 +144,45 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 // returnedRegionOwner reports the region owner symbol of a `return move <region>`
 // expression (approach A: ownership transfer is inferred from an explicit move
 // of a live region owner).
+// isOwnedTypeExpr reports whether a declared type carries the `owned`
+// ownership qualifier (e.g. `owned Arena`, `mutable owned Arena`).
+func isOwnedTypeExpr(t ast.TypeExpr) bool {
+	switch n := t.(type) {
+	case *ast.OwnedType:
+		return true
+	case *ast.MutableType:
+		return isOwnedTypeExpr(n.Elem)
+	default:
+		return false
+	}
+}
+
+// registerOwnedStoreOwner makes a binding/parameter declared `owned <store>` a
+// first-class region owner: it joins currentRegions (so destroy/leak/move and
+// new[owner] work) and inherits the affine must-consume obligation. A plain
+// (non-owned) store value or `&` borrow is left exactly as it is today.
+// symbolIsRegionOwner reports whether a symbol has been registered as a region
+// owner (region decl, `owned <store>` binding/param, or moved-in owned region),
+// regardless of its SymbolKind.
+func (a *Analyzer) symbolIsRegionOwner(sym *Symbol) bool {
+	if sym == nil || a.currentRegions == nil {
+		return false
+	}
+	_, ok := a.currentRegions[sym]
+	return ok
+}
+
+func (a *Analyzer) registerOwnedStoreOwner(sym *Symbol) {
+	if sym == nil {
+		return
+	}
+	if a.currentRegions == nil {
+		a.currentRegions = map[*Symbol]regionState{}
+	}
+	a.currentRegions[sym] = regionState{}
+	a.markLiveProtocolDescription(affineValueKey{Root: sym}, "owned region")
+}
+
 func (a *Analyzer) returnedRegionOwner(expr ast.Expr) (*Symbol, bool) {
 	moved, ok := explicitMoveOperand(expr)
 	if !ok {

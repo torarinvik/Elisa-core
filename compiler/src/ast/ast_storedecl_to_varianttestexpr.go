@@ -377,6 +377,15 @@ type MutableType struct {
 	Position lexer.Pos
 	Elem     TypeExpr
 }
+
+// OwnedType marks a binding/parameter as OWNING the lifetime/resource
+// obligation of an allocator/store value (e.g. `owned Arena`): it is affine
+// (move-only) and must be consumed (destroy/leak/move/return). A plain
+// (non-owned) store value/borrow keeps its existing semantics unchanged.
+type OwnedType struct {
+	Position lexer.Pos
+	Elem     TypeExpr
+}
 type TailType struct {
 	Position lexer.Pos
 	Elem     TypeExpr

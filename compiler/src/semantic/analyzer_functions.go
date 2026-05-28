@@ -105,6 +105,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
+						if isOwnedTypeExpr(param.Type) {
+							a.registerOwnedStoreOwner(sym)
+						}
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
@@ -276,6 +279,9 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
+						if isOwnedTypeExpr(param.Type) {
+							a.registerOwnedStoreOwner(sym)
+						}
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
@@ -421,6 +427,9 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
+						if isOwnedTypeExpr(param.Type) {
+							a.registerOwnedStoreOwner(sym)
+						}
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}

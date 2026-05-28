@@ -164,6 +164,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return cloned
 		}
 		return elemType
+	case *ast.OwnedType:
+		// `owned T` resolves to T; the affine must-consume obligation is recorded
+		// on the binding/parameter (registerOwnedStoreOwner), not on the value's
+		// type, so plain `T` values keep their existing semantics untouched.
+		return a.resolveType(n.Elem)
 	case *ast.TailType:
 		elemType := a.resolveType(n.Elem)
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
