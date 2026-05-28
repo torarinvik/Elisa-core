@@ -222,9 +222,20 @@ func (l *Lexer) handleIndentation() {
 	// Skip blank lines and comment-only lines (consume them entirely)
 	for {
 		if l.pos >= len(l.src) || l.peek() == '\n' {
+			// Consuming a `#line` directive below sets atLineStart; clear it so it
+			// does not leak out and trigger a spurious mid-line re-entry into
+			// indentation handling on the next token.
+			l.atLineStart = false
 			return
 		}
 		if l.peek() == '#' {
+			// A `#line <num> <path>` directive (always emitted at column 0 by
+			// include expansion) must retarget position here too — otherwise the
+			// comment-skip below would swallow it and lose the attribution.
+			if indent == 0 && l.tryConsumeLineDirective() {
+				indent = l.measureIndent()
+				continue
+			}
 			// Skip comment and trailing newline, then re-measure
 			l.skipLineComment()
 			if l.pos < len(l.src) && l.peek() == '\n' {
@@ -239,6 +250,9 @@ func (l *Lexer) handleIndentation() {
 		}
 		break
 	}
+
+	// See note above: clear any atLineStart set by a consumed `#line` directive.
+	l.atLineStart = false
 
 	current := l.indentStack[len(l.indentStack)-1]
 
