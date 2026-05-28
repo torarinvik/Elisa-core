@@ -336,3 +336,29 @@ def main() -> usize:
 		t.Fatalf("expected main function type, got %T", sym.Type)
 	}
 }
+
+// An `extern` forward declaration that matches an Elisa `def` of the same name
+// must reconcile even though the extern carries an implicit can[Unsafe] effect
+// the implementation lacks. This covers a regression where, in large units, the
+// effect difference defeated SameType-based reconciliation: the first symbol in
+// a cluster reported "does not match implementation" and the rest (especially
+// those whose first parameter is a reference, mistaken for an overload receiver)
+// reported "duplicate declaration".
+func TestExternForwardDeclarationReconcilesWithImplementation(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "extern_forward_decl_reconcile.elisa", `
+@c_abi(c)
+def k_create(type_: int, out_error: mutable int&?) -> void&?:
+    return null
+@c_abi(c)
+def k_destroy(handle: void&?) -> int:
+    return 0
+
+extern k_create(type_: int, out_error: mutable int&?) -> void&?
+extern k_destroy(handle: void&?) -> int
+
+def use_them() -> int:
+    e: int = 0
+    h: void&? = k_create(0, e.ref[mutable int&])
+    return k_destroy(h)
+`)
+}

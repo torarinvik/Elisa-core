@@ -329,7 +329,12 @@ func externImplementationTypesCompatible(externSym, implSym *Symbol) bool {
 	if externFn.IntrinsicName != "" {
 		return false
 	}
-	return SameType(externFn, implFn)
+	// Compare ABI signature, not full type identity: an `extern` declaration
+	// carries an implicit `can[Unsafe]` effect (calling foreign code is unsafe)
+	// that a matching Elisa `def` reimplementation does not. That effect
+	// difference must not block reconciling the forward declaration with its
+	// implementation, so match on params/return/callconv/variadic only.
+	return externFuncABICompatible(externFn, implFn)
 }
 
 func (a *Analyzer) externImplementationCompatible(externSym, implSym *Symbol, pos lexer.Pos) bool {
@@ -356,7 +361,11 @@ func externFunctionCanOverloadWithImplementation(externSym, implSym *Symbol) boo
 	if !externOK || !implOK || externFn == nil || implFn == nil {
 		return false
 	}
-	if SameType(externFn, implFn) {
+	// ABI-compatible extern/impl are the same function (the extern's implicit
+	// can[Unsafe] effect aside), not distinct overloads — so they must reconcile
+	// rather than be treated as an overload set. Only genuinely different ABI
+	// signatures are overload candidates.
+	if externFuncABICompatible(externFn, implFn) {
 		return false
 	}
 	_, externReceiver := receiverOverloadType(externSym)
