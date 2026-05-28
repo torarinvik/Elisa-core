@@ -64,7 +64,12 @@ func (a *Analyzer) recordViewStaticLenBinding(name string, value ast.Expr, bindi
 	if a == nil || name == "" || value == nil {
 		return
 	}
-	slice, ok := stripOptimizationParens(value).(*ast.SliceExpr)
+	inner := stripOptimizationParens(value)
+	if get, ok := inner.(*ast.GetExpr); ok && get != nil {
+		// `x = get arr[a:b]` carries the bounded view's length to x.
+		inner = stripOptimizationParens(get.Value)
+	}
+	slice, ok := inner.(*ast.SliceExpr)
 	if !ok {
 		// A binding to a non-slice expression clears any stale length fact.
 		delete(a.currentViewStaticLen, name)

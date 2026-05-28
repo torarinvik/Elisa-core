@@ -397,6 +397,40 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 				return i.evalExpr(frame, synth)
 			}
 		}
+		if slice, ok := n.Value.(*ast.SliceExpr); ok {
+			obj, err := i.evalExpr(frame, slice.Object)
+			if err != nil {
+				return VoidValue(), err
+			}
+			startV, err := i.evalExpr(frame, slice.Start)
+			if err != nil {
+				return VoidValue(), err
+			}
+			endV, err := i.evalExpr(frame, slice.End)
+			if err != nil {
+				return VoidValue(), err
+			}
+			start, err := requireInt(startV)
+			if err != nil {
+				return VoidValue(), err
+			}
+			end, err := requireInt(endV)
+			if err != nil {
+				return VoidValue(), err
+			}
+			length, err := valueSequenceLength(obj)
+			if err != nil {
+				return VoidValue(), err
+			}
+			if start >= 0 && start <= end && end <= length {
+				return sliceValue(obj, start, end)
+			}
+			// Out of range: a value fallback handles it; return/raise recovery is
+			// not modeled by this limited interpreter.
+			if n.Fallback != nil {
+				return i.evalExpr(frame, n.Fallback)
+			}
+		}
 		return VoidValue(), fmt.Errorf("unsupported interpreter expression %T", expr)
 	case *ast.TernaryExpr:
 		cond, err := i.evalExpr(frame, n.Cond)

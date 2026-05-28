@@ -483,6 +483,18 @@ func numericAsFloat(value Value) (float64, error) {
 func indexValue(value Value, index int64) (Value, error) {
 	return indexValueAt(value, index)
 }
+func valueSequenceLength(value Value) (int64, error) {
+	value = derefValue(value)
+	switch value.kind {
+	case valueList:
+		return int64(len(value.listVal)), nil
+	case valueString:
+		return int64(len(value.strVal)), nil
+	default:
+		return 0, fmt.Errorf("slicing requires list or string, got %s", value.String())
+	}
+}
+
 func indexInRange(value Value, index int64) (bool, error) {
 	value = derefValue(value)
 	if index < 0 {

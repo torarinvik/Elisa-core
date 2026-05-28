@@ -188,6 +188,13 @@ func (a *Analyzer) analyzeGetExpr(n *ast.GetExpr) Type {
 			a.indexBoundsProven[idx] = true
 		}
 	}
+	// `get arr[a:b]` is a bounds-checked slice: the `get` performs the runtime
+	// bounds test, yielding the bounded view on success and taking the recovery /
+	// propagation path when the bounds fall outside the source.
+	slice, isSlice := n.Value.(*ast.SliceExpr)
+	if isSlice {
+		a.checkedSliceExprs[slice] = true
+	}
 
 	valueType := a.analyzeExpr(n.Value)
 	if IsInvalidType(valueType) {
@@ -205,6 +212,10 @@ func (a *Analyzer) analyzeGetExpr(n *ast.GetExpr) Type {
 	case isIndex:
 		// The element type produced by analyzeIndexExpr is the unwrapped result;
 		// `get` performs the bounds check, so the access is total.
+		resultType = valueType
+	case isSlice:
+		// The bounded view is the result; `get` performs the runtime bounds
+		// check, taking the recovery / propagation path when out of range.
 		resultType = valueType
 	case isOptionalValueType(valueType):
 		resultType = optionalValueInner(valueType)

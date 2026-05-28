@@ -708,7 +708,66 @@ func (s *functionState) emitGetExpr(expr *ast.GetExpr) (C.LLVMValueRef, semantic
 	if idx, ok := expr.Value.(*ast.IndexExpr); ok {
 		return s.emitGetCheckedIndexExpr(idx, recovery, resultType)
 	}
+	if slice, ok := expr.Value.(*ast.SliceExpr); ok {
+		return s.emitGetCheckedSliceExpr(slice, recovery, resultType)
+	}
 	return s.emitGetUnwrapExpr(expr.Value, recovery, resultType)
+}
+
+// emitGetCheckedSliceExpr emits a bounds-checked slice: when [start, end) is
+// within the source (0 <= start <= end <= len) it produces the bounded view;
+// otherwise it runs the recovery clause. The bounds are usize (unsigned), so the
+// non-negativity of start is free.
+func (s *functionState) emitGetCheckedSliceExpr(slice *ast.SliceExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	usizeType := s.g.result.NamedTypes["usize"]
+	startValue, _, err := s.emitExpr(slice.Start, usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	endValue, _, err := s.emitExpr(slice.End, usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	lenValue, err := s.emitSliceSourceLength(slice)
+	if err != nil {
+		return nil, nil, err
+	}
+	startLEEnd := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), startValue, endValue, cStringFree("get.slice.start_le_end"))
+	endLELen := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), endValue, lenValue, cStringFree("get.slice.end_le_len"))
+	okCond := C.LLVMBuildAnd(s.builder, startLEEnd, endLELen, cStringFree("get.slice.in_range"))
+	return s.emitGetBranch(okCond, func() (C.LLVMValueRef, error) {
+		view, _, err := s.emitSliceExpr(slice)
+		return view, err
+	}, recovery, resultType)
+}
+
+// emitSliceSourceLength computes the element count of a slice's source for the
+// bounds check: a constant for fixed-size arrays, the runtime count field for
+// dynamic containers (darray / view / darray-view).
+func (s *functionState) emitSliceSourceLength(slice *ast.SliceExpr) (C.LLVMValueRef, error) {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVM, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	objType := s.exprType(slice.Object)
+	base := objType
+	if ref, ok := base.(*semantic.RefType); ok && ref != nil {
+		base = ref.Elem
+	}
+	if arr, ok := base.(*semantic.ArrayType); ok && arr != nil && arr.HasConstSize {
+		return C.LLVMConstInt(usizeLLVM, C.ulonglong(arr.ConstSize), 0), nil
+	}
+	switch base.(type) {
+	case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+		containerPtr, _, err := s.emitAddressOrTemp(slice.Object)
+		if err != nil {
+			return nil, err
+		}
+		return s.emitContainerCountValue(containerPtr, base, "get.slice.count")
+	default:
+		return nil, fmt.Errorf("bounds-checked slice is not supported for %s", objType.String())
+	}
 }
 
 // emitGetCheckedIndexExpr emits a bounds-checked container access: in-range

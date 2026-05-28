@@ -29,6 +29,25 @@ func TestRuntimeIndexIntoConstBoundedSliceStillGated(t *testing.T) {
 	}
 }
 
+// `get arr[a:b]` is a bounds-checked slice: it needs no unchecked-slice grant,
+// and the bounded view it yields carries a static length so a constant inner
+// index is zero-cost.
+func TestGetSliceIsCheckedAndInnerIndexProven(t *testing.T) {
+	analyzeFunctionAnalysisTestSourceWithOptions(t, "get_slice_ok.elisa", `def f(xs: darray[i32]&) -> i32:
+    s = get xs[0:3] else return -1
+    return s[0] + s[1] + s[2]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+}
+
+// `get arr[a:b]` with no else propagates absence; the enclosing function must
+// return an optional. A constant inner index stays zero-cost.
+func TestGetSlicePropagationRequiresOptionalReturn(t *testing.T) {
+	analyzeFunctionAnalysisTestSourceWithOptions(t, "get_slice_prop.elisa", `def f(xs: darray[i32]&) -> i32?:
+    s = get xs[0:3]
+    return s[1]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+}
+
 // An out-of-range constant index must NOT be falsely proven by the static
 // length: s[10] into a length-8 view is genuinely out of bounds.
 func TestOutOfRangeConstIndexIntoBoundedSliceNotProven(t *testing.T) {
