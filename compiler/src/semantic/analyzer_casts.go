@@ -128,6 +128,10 @@ func unsafeIndirectCallRefs(pos lexer.Pos) []ast.PermissionRef {
 	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "IndirectCall"}}
 }
 
+func unsafeLeakRefs(pos lexer.Pos) []ast.PermissionRef {
+	return []ast.PermissionRef{{Position: pos, Name: "Unsafe", Member: "Leak"}}
+}
+
 // isIndirectCallTarget reports whether a CallExpr.Func is the synthetic cast
 // produced by the postfix `value.call_as[func(...)->T](args)` form, i.e. a raw
 // function-pointer value being invoked through its asserted signature. Such a

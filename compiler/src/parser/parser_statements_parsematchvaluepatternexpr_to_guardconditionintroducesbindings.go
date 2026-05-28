@@ -104,6 +104,13 @@ func (p *Parser) parseDestroy() *ast.DestroyStmt {
 	p.expectNewline()
 	return &ast.DestroyStmt{Position: pos, Name: name}
 }
+func (p *Parser) parseLeak() *ast.LeakStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.LeakStmt{Position: pos, Name: name}
+}
 func (p *Parser) parseMark() *ast.MarkStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)

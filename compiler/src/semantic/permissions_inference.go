@@ -224,6 +224,8 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	case *ast.RegionStmt:
 		c.collectExpr(n.Capacity)
 		c.collectStmts(n.Body)
+	case *ast.LeakStmt:
+		c.addRefs(unsafeLeakRefs(n.Position))
 	}
 }
 

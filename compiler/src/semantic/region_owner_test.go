@@ -35,6 +35,33 @@ func TestScopedRegionAutoDischarges(t *testing.T) {
 `)
 }
 
+// `leak` discharges the must-consume obligation (so the region is no longer
+// reported unconsumed), but it is an audited memory-safety opt-out gated by
+// Unsafe.Leak — ungranted use must be flagged.
+func TestLeakDischargesButRequiresUnsafeLeak(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "region_leak_stmt.elisa", `def f() -> void:
+    region scratch(64)
+    leak scratch
+`)
+	if errs := strings.Join(result.Errors(), "\n"); strings.Contains(errs, "must be consumed before scope exit") {
+		t.Fatalf("leak should satisfy the must-consume obligation; got errors: %s", errs)
+	}
+	// The Unsafe.Leak requirement is a warning in non-enforcing mode (a hard
+	// error under EnforceUnsafePermissions, like other Unsafe.* ops).
+	if warns := strings.Join(result.Warnings(), "\n"); !strings.Contains(warns, "leak requires") || !strings.Contains(warns, "Unsafe.Leak") {
+		t.Fatalf("expected leak to require Unsafe.Leak; got warnings: %s", warns)
+	}
+}
+
+// With the grant, leak is fully clean.
+func TestLeakWithGrantIsClean(t *testing.T) {
+	analyzeTreeTestSource(t, "region_leak_granted.elisa", `def f() -> void:
+    region scratch(64)
+    trusted Unsafe.Leak:
+        leak scratch
+`)
+}
+
 // Destroying on only some branches still leaks on the others (relies on the
 // branch-join meet treating consume-on-all-arms as consumed and consume-on-
 // some-arms as still-live).

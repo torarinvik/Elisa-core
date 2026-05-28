@@ -178,6 +178,7 @@ func (n *StaticBlockStmt) Pos() lexer.Pos              { return n.Position }
 func (n *DiscardStmt) Pos() lexer.Pos                  { return n.Position }
 func (n *RegionStmt) Pos() lexer.Pos                   { return n.Position }
 func (n *DestroyStmt) Pos() lexer.Pos                  { return n.Position }
+func (n *LeakStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *MarkStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *CheckpointStmt) Pos() lexer.Pos               { return n.Position }
 func (n *GroupedCheckpointStmt) Pos() lexer.Pos        { return n.Position }
@@ -382,6 +383,7 @@ func (*StaticBlockStmt) nodeTag()                      {}
 func (*DiscardStmt) nodeTag()                          {}
 func (*RegionStmt) nodeTag()                           {}
 func (*DestroyStmt) nodeTag()                          {}
+func (*LeakStmt) nodeTag()                             {}
 func (*MarkStmt) nodeTag()                             {}
 func (*CheckpointStmt) nodeTag()                       {}
 func (*GroupedCheckpointStmt) nodeTag()                {}
@@ -584,6 +586,7 @@ func (*StaticBlockStmt) stmtTag()                      {}
 func (*DiscardStmt) stmtTag()                          {}
 func (*RegionStmt) stmtTag()                           {}
 func (*DestroyStmt) stmtTag()                          {}
+func (*LeakStmt) stmtTag()                             {}
 func (*MarkStmt) stmtTag()                             {}
 func (*CheckpointStmt) stmtTag()                       {}
 func (*GroupedCheckpointStmt) stmtTag()                {}

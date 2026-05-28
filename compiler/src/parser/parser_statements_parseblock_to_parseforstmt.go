@@ -134,6 +134,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 				return p.parseDestroy()
 			}
+		case "leak":
+			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+				return p.parseLeak()
+			}
 		case "mark":
 			if p.pos+3 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_AS && p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT {
 				return p.parseMark()

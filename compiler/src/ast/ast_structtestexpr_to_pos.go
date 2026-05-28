@@ -470,6 +470,10 @@ type DestroyStmt struct {
 	Position lexer.Pos
 	Name     string
 }
+type LeakStmt struct {
+	Position lexer.Pos
+	Name     string
+}
 type MarkStmt struct {
 	Position   lexer.Pos
 	RegionName string

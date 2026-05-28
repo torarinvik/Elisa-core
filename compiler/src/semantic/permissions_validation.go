@@ -211,6 +211,8 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 	case *ast.SignalStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
 		a.warnOnMissingLocalGrant(n.Pos(), "signal", refs, granted)
+	case *ast.LeakStmt:
+		a.warnOnMissingLocalGrant(n.Pos(), "leak", unsafeLeakRefs(n.Position), granted)
 	case *ast.PoolStmt:
 		a.validatePermissionExpr(n.Workers, granted)
 		if !granted["Pool"] {

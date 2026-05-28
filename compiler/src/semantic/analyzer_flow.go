@@ -207,6 +207,21 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordRegionInvalidateTransform(n.Pos(), n.Name, "", "destroy region", before, -1)
 		// destroy discharges the region owner's must-consume obligation.
 		a.recordAffineConsumption(affineValueKey{Root: sym}, "destroy")
+	case *ast.LeakStmt:
+		sym, state := a.lookupRegionState(n.Name)
+		if sym == nil {
+			a.errorf(n.Pos(), "undefined region %q", n.Name)
+			return
+		}
+		if state.Destroyed {
+			a.errorf(n.Pos(), "region %q has already been destroyed", n.Name)
+			return
+		}
+		// leak discharges the must-consume obligation WITHOUT freeing the region
+		// (its refs stay valid). It is an explicit, audited memory-safety opt-out
+		// gated by Unsafe.Leak.
+		a.recordFunctionPermissionRefs(unsafeLeakRefs(n.Position))
+		a.recordAffineConsumption(affineValueKey{Root: sym}, "leak")
 	case *ast.AssignStmt:
 		var targetType Type
 		// Analyzing an assignment target reads the base of a field/index path as
