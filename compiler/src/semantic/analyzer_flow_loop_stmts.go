@@ -112,7 +112,9 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 
 	savedIndexBounds := a.currentIndexBounds
 	savedViewStaticLen := a.currentViewStaticLen
+	savedViewMutable := a.currentViewMutable
 	a.currentViewStaticLen = cloneViewStaticLen(savedViewStaticLen)
+	a.currentViewMutable = cloneViewMutable(savedViewMutable)
 	loopIndexBounds := cloneIndexBoundFacts(savedIndexBounds)
 	if stmt.Op == lexer.TOKEN_RANGE_LT && isZeroOptimizationExpr(stmt.Start) {
 		if loopIndexBounds == nil {
@@ -131,6 +133,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	a.loopDepth--
 	a.currentIndexBounds = savedIndexBounds
 	a.currentViewStaticLen = savedViewStaticLen
+	a.currentViewMutable = savedViewMutable
 	if !blockDefinitelyExits(stmt.Body) {
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)

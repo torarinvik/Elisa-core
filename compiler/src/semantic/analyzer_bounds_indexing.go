@@ -40,6 +40,17 @@ func cloneViewStaticLen(src map[string]int64) map[string]int64 {
 	return out
 }
 
+func cloneViewMutable(src map[string]bool) map[string]bool {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(src))
+	for name, mut := range src {
+		out[name] = mut
+	}
+	return out
+}
+
 // constSliceLength returns the statically-known element count of a slice when
 // both bounds const-evaluate to non-negative integers with start <= end. The
 // resulting view then carries a provable length for zero-cost constant indexing.
@@ -79,29 +90,39 @@ func (a *Analyzer) applyViewStaticLenForCondition(cond ast.Expr, truthy bool) {
 	}
 }
 
-// recordViewStaticLenBinding records that a freshly-bound view variable came
-// from a constant-bounded slice and therefore has a statically-known length.
+// recordViewStaticLenBinding records facts for a freshly-bound view variable
+// produced by a slice: its statically-known length (for constant bounds, so
+// inner constant indexing is zero-cost) and its mutability. A sliced view is
+// writable iff its source is writable (and, where a frozen notion exists, not
+// frozen); writing through a view of an immutable source is rejected.
 func (a *Analyzer) recordViewStaticLenBinding(name string, value ast.Expr, bindingType Type) {
 	if a == nil || name == "" || value == nil {
 		return
 	}
 	inner := stripOptimizationParens(value)
 	if get, ok := inner.(*ast.GetExpr); ok && get != nil {
-		// `x = get arr[a:b]` carries the bounded view's length to x.
+		// `x = get arr[a:b]` carries the bounded view's facts to x.
 		inner = stripOptimizationParens(get.Value)
 	}
 	slice, ok := inner.(*ast.SliceExpr)
 	if !ok {
-		// A binding to a non-slice expression clears any stale length fact.
+		// A binding to a non-slice expression clears any stale view facts.
 		delete(a.currentViewStaticLen, name)
+		delete(a.currentViewMutable, name)
 		return
 	}
 	switch StripAggregateStateType(bindingType).(type) {
 	case *ViewType, *DArrayViewType:
 	default:
 		delete(a.currentViewStaticLen, name)
+		delete(a.currentViewMutable, name)
 		return
 	}
+	// A bounded view inherits the source's write capability.
+	if a.currentViewMutable == nil {
+		a.currentViewMutable = make(map[string]bool)
+	}
+	a.currentViewMutable[name] = a.sliceSourceWritable(slice.Object)
 	if length, ok := a.constSliceLength(slice); ok {
 		if a.currentViewStaticLen == nil {
 			a.currentViewStaticLen = make(map[string]int64)
@@ -110,6 +131,17 @@ func (a *Analyzer) recordViewStaticLenBinding(name string, value ast.Expr, bindi
 		return
 	}
 	delete(a.currentViewStaticLen, name)
+}
+
+// sliceSourceWritable reports whether a slice's source permits writes through
+// the resulting view. Mutability flows from the source; the frozen downgrade is
+// applied only where a frozen notion exists today (packed / tree stores) — plain
+// arrays and darrays carry no frozen state yet, so they pass through.
+func (a *Analyzer) sliceSourceWritable(source ast.Expr) bool {
+	if a == nil || source == nil {
+		return false
+	}
+	return a.mutationPathWritable(source)
 }
 
 func (a *Analyzer) applyIndexBoundsFactsForCondition(cond ast.Expr, truthy bool) {
@@ -151,9 +183,10 @@ func (a *Analyzer) invalidateIndexBoundsForAssignedTarget(target ast.Expr) {
 	// If the index variable itself is reassigned, its upper-bound proof no longer
 	// holds for the new value.
 	delete(a.currentIndexBounds, base)
-	// A reassigned view binding may no longer be the constant-bounded slice that
-	// established its static length.
+	// A reassigned view binding may no longer be the slice that established its
+	// static length / mutability.
 	delete(a.currentViewStaticLen, base)
+	delete(a.currentViewMutable, base)
 	a.invalidateIndexBoundsReferencingBase(base)
 }
 

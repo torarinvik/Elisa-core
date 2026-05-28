@@ -117,6 +117,11 @@ type Analyzer struct {
 	// follows the same block/loop save-restore and reassignment-invalidation
 	// discipline as currentIndexBounds.
 	currentViewStaticLen          map[string]int64
+	// currentViewMutable records whether a slice-derived view binding permits
+	// writes (its source is writable and not frozen). Writing through a view of
+	// an immutable source is rejected. Keyed by binding name, scoped like
+	// currentViewStaticLen.
+	currentViewMutable            map[string]bool
 	// checkedSliceExprs records slice expressions whose bounds are checked at
 	// runtime because they are the operand of `get` / `if let` (the safe
 	// bounded-view forms). Codegen emits a bounds test at slice creation for
@@ -448,6 +453,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		indexBoundsProven:                 make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
 		getWrappedIndexExprs:              make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
 		currentViewStaticLen:              make(map[string]int64),
+		currentViewMutable:                make(map[string]bool),
 		checkedSliceExprs:                 make(map[*ast.SliceExpr]bool),
 		storageViewStaleUses:              make(map[ast.Expr]storageViewDependencyState, exprCapacity/64+8),
 		unsafeAliasExprs:                  make(map[ast.Expr]bool, exprCapacity/64+8),

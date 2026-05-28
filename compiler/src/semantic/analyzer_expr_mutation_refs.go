@@ -243,6 +243,14 @@ func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
 	if ref, ok := objType.(*RefType); ok {
 		return a.refExprAllowsMutation(stripped, ref)
 	}
+	// A slice-derived bounded view is writable only when its source was writable
+	// (recorded at bind time). Writing through a view of an immutable source is
+	// rejected; untracked views keep their existing behavior.
+	if ident, ok := stripped.(*ast.Ident); ok && ident != nil {
+		if mut, tracked := a.currentViewMutable[ident.Name]; tracked {
+			return mut
+		}
+	}
 	switch n := stripped.(type) {
 	case *ast.FieldExpr:
 		return a.mutationPathWritable(n.Object)

@@ -60,6 +60,37 @@ func TestIfLetSliceBindsBoundedViewAndProvesInnerIndex(t *testing.T) {
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 }
 
+// A bounded view over a MUTABLE source is writable: `s[i] <- v` is allowed.
+func TestMutableBoundedViewAllowsWriteFromMutableSource(t *testing.T) {
+	analyzeFunctionAnalysisTestSourceWithOptions(t, "mut_view_ok.elisa", `def f(xs: mutable darray[i32]&) -> void:
+    if let s = xs[0:3]:
+        s[1] <- 25
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+}
+
+// A bounded view over an IMMUTABLE source is read-only: writing through it must
+// be rejected (closes the prior view-mutation soundness hole).
+func TestBoundedViewRejectsWriteFromImmutableSource(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "mut_view_bad.elisa", `def f(xs: darray[i32]&) -> void:
+    if let s = xs[0:3]:
+        s[1] <- 25
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "cannot mutate through readonly ref") {
+		t.Fatalf("expected write through view of immutable source to be rejected, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// The same gate applies to a bare slice binding, not just if-let.
+func TestBareSliceViewRejectsWriteFromImmutableSource(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "mut_view_bare_bad.elisa", `def f(xs: darray[i32]&) -> void:
+    s: dview[i32] = xs[0:3]
+    s[1] <- 25
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "cannot mutate through readonly ref") {
+		t.Fatalf("expected write through bare view of immutable source to be rejected, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // An out-of-range constant index must NOT be falsely proven by the static
 // length: s[10] into a length-8 view is genuinely out of bounds.
 func TestOutOfRangeConstIndexIntoBoundedSliceNotProven(t *testing.T) {
