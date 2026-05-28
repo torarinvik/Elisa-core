@@ -103,6 +103,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	}
 
 	fnType := lambdaFuncTypeSkeleton("lambda", paramTypes, paramNames, returnType)
+	fnType.OwnedParams = ownedParamFlags(expr.Params)
 	if expectedFunc != nil {
 		fnType.DeclaredPermissionRefs = append([]ast.PermissionRef(nil), expectedFunc.DeclaredPermissionRefs...)
 		fnType.DeclaredPermissions = append([]string(nil), expectedFunc.DeclaredPermissions...)

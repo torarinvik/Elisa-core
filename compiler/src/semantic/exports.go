@@ -250,6 +250,8 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		SinkParamsKnown:             specialized.SinkParamsKnown,
 		ReturnIsolation:             specialized.ReturnIsolation,
 		ReturnIsolationKnown:        specialized.ReturnIsolationKnown,
+		ReturnsOwnedRegion:          specialized.ReturnsOwnedRegion,
+		OwnedParams:                 append([]bool(nil), specialized.OwnedParams...),
 	}
 }
 

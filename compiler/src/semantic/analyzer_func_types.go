@@ -86,7 +86,24 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 		ImplicitParamNames:        implicitNames,
 		Return:                    retType,
 		Variadic:                  variadic,
+		OwnedParams:               ownedParamFlags(allParams),
 	}
+}
+
+// ownedParamFlags records which parameters are declared `owned <store>` so call
+// sites can require/transfer ownership. Returns nil when none are owned (the
+// common case) to avoid allocating.
+func ownedParamFlags(params []ast.ParamDecl) []bool {
+	var flags []bool
+	for i, p := range params {
+		if isOwnedTypeExpr(p.Type) {
+			if flags == nil {
+				flags = make([]bool, len(params))
+			}
+			flags[i] = true
+		}
+	}
+	return flags
 }
 
 func ensuresClauseSteps(clause ast.EnsuresClause) []borrowReturnAnnotationStep {

@@ -256,6 +256,17 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			if !a.tryConsumeSinkCallArg(expr.Func, ft, i, orderedArgs[i], expectedType) {
 				a.consumeAffineValueExpr(orderedArgs[i], expectedType, "argument to call "+strconv.Quote(ft.Name))
 			}
+			// An `owned <store>` parameter takes ownership: the caller must move
+			// an owned region into it (consuming it here; the callee discharges
+			// it). Passing an owner without `move` would copy the allocator
+			// handle into a second owner — reject it.
+			if i < len(ft.OwnedParams) && ft.OwnedParams[i] {
+				if srcOwner, ok := a.returnedRegionOwner(orderedArgs[i]); ok {
+					a.transferRegionOwnerOut(srcOwner, "moved into owned parameter of "+strconv.Quote(ft.Name))
+				} else if srcOwner, ok := a.regionOwnerIdent(orderedArgs[i]); ok {
+					a.errorf(orderedArgs[i].Pos(), "owned region %q is move-only: use `move %s` to transfer it into the owned parameter of %q", srcOwner.Name, srcOwner.Name, ft.Name)
+				}
+			}
 		} else {
 			argType = a.analyzeExpr(orderedArgs[i])
 		}

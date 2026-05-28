@@ -116,6 +116,58 @@ def f() -> i32:
 	}
 }
 
+// An `owned Arena` parameter on a regular function transfers ownership: the
+// caller must `move` an owned region in (consuming it), and may not use it
+// afterwards. Without `move` it is rejected (would copy into a second owner).
+func TestOwnedParamCallTransfersOwnership(t *testing.T) {
+	prelude := `extern new_arena(cap: usize) -> Arena
+def sink(x: owned Arena) -> void:
+    destroy x
+`
+	// move transfers; caller is clean.
+	analyzeTreeTestSource(t, "owned_param_move.elisa", prelude+`
+def f() -> void:
+    r: owned Arena = new_arena(64)
+    sink(move r)
+`)
+	// without move -> rejected.
+	noMove := analyzeTreeTestSourceWithSemanticErrors(t, "owned_param_no_move.elisa", prelude+`
+def f() -> void:
+    r: owned Arena = new_arena(64)
+    sink(r)
+`)
+	if all := strings.Join(noMove.Errors(), "\n"); !strings.Contains(all, "move-only") {
+		t.Fatalf("expected owned param call without move to be rejected; got: %s", all)
+	}
+	// using the region after the move-in -> rejected (transferred).
+	used := analyzeTreeTestSourceWithSemanticErrors(t, "owned_param_used.elisa", prelude+`
+def f() -> void:
+    r: owned Arena = new_arena(64)
+    sink(move r)
+    destroy r
+`)
+	if all := strings.Join(used.Errors(), "\n"); !strings.Contains(all, "already been destroyed") && !strings.Contains(all, "cannot") {
+		t.Fatalf("expected region unavailable after move into owned param; got: %s", all)
+	}
+}
+
+// No-laundering through generic instantiation: a generic function's `owned`
+// parameter keeps its ownership obligation when instantiated (FuncType.
+// OwnedParams must propagate through substitution).
+func TestOwnedParamSurvivesGenericInstantiation(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "owned_param_generic.elisa", `extern new_arena(cap: usize) -> Arena
+def sink[T](tag: T, x: owned Arena) -> void:
+    destroy x
+
+def f() -> void:
+    r: owned Arena = new_arena(64)
+    sink(0, r)
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "move-only") {
+		t.Fatalf("expected owned-ness to survive generic instantiation (require move); got: %s", all)
+	}
+}
+
 // Guardrail: a plain (non-owned) Arena value carries NO new obligation — its
 // existing semantics are untouched. Ownership comes only via the `owned` marker.
 func TestPlainArenaValueHasNoObligation(t *testing.T) {

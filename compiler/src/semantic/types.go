@@ -609,4 +609,10 @@ type FuncType struct {
 	// the affine must-consume obligation — approach A: ownership transfer
 	// inferred from `move`, no distinct owned-region type.
 	ReturnsOwnedRegion bool
+	// OwnedParams[i] is true when parameter i is declared `owned <store>` and
+	// therefore takes ownership of a region: the caller must `move` an owned
+	// region into it (consuming it) and the callee must consume it. Defaults
+	// empty/false so a propagation gap is over-strict (the caller keeps the
+	// must-consume obligation -> a compile error), never a silent double-free.
+	OwnedParams []bool
 }
