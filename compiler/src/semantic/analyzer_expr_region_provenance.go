@@ -104,6 +104,13 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefState{}, false
 		}
 		return regionRefStateFromDependency(sym, state.Generation), true
+	case *ast.LambdaExpr:
+		// A closure that captures region-dependent values depends on those
+		// regions: using the closure after the region is destroyed/reset is a
+		// use-after-free. Carry the union of the captures' region provenance so
+		// the existing invalidation + use-check (and return-escape check) apply
+		// to the closure value itself.
+		return a.regionRefStateForLambdaCaptures(n)
 	case *ast.StructLitExpr:
 		actual := a.exprTypes[n]
 		fields, ok := a.resolvedStructFields(actual)
@@ -329,6 +336,29 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 	default:
 		return regionRefState{}, false
 	}
+}
+
+func (a *Analyzer) regionRefStateForLambdaCaptures(expr *ast.LambdaExpr) (regionRefState, bool) {
+	if a == nil || expr == nil || a.currentScope == nil || a.lambdaInfo == nil {
+		return regionRefState{}, false
+	}
+	info, ok := a.lambdaInfo[expr]
+	if !ok || info == nil {
+		return regionRefState{}, false
+	}
+	states := make([]regionRefState, 0, len(info.Captures))
+	for _, name := range info.Captures {
+		// Reuse the Ident path so alias roots / canonicalization are honored.
+		state, ok := a.regionRefStateForExpr(&ast.Ident{Position: expr.Position, Name: name})
+		if !ok || !hasRegionProvenance(state) {
+			continue
+		}
+		states = append(states, state)
+	}
+	if len(states) == 0 {
+		return regionRefState{}, false
+	}
+	return mergeRegionRefStates(states...)
 }
 
 func (a *Analyzer) regionRefStateForProofCarryingViewCall(call *ast.CallExpr) (regionRefState, bool) {

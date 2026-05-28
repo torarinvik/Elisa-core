@@ -62,6 +62,43 @@ func TestLeakWithGrantIsClean(t *testing.T) {
 `)
 }
 
+// A closure that captures a region-dependent value carries that region
+// dependency: using the closure after the region is destroyed is a
+// use-after-free and must be rejected (the dep must not be laundered through
+// the lambda capture).
+func TestClosureCapturingRegionDepRejectedAfterDestroy(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "region_closure_uaf.elisa", `struct RegionNode in owner:
+    next: owner RegionNode&?
+    value: i32
+
+def f(seed: i32) -> i32:
+    region r(64)
+    first: r RegionNode[r]& = new[r] RegionNode[r](null, seed)
+    g: func() -> i32 = lambda () => first.value
+    destroy r
+    return g()
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "cannot be used") || !strings.Contains(all, "region") {
+		t.Fatalf("expected closure-after-destroy to be rejected as a region use-after-free; got: %s", all)
+	}
+}
+
+// The same closure used while the region is still live is fine.
+func TestClosureCapturingRegionDepCleanBeforeDestroy(t *testing.T) {
+	analyzeTreeTestSource(t, "region_closure_ok.elisa", `struct RegionNode in owner:
+    next: owner RegionNode&?
+    value: i32
+
+def f(seed: i32) -> i32:
+    region r(64)
+    first: r RegionNode[r]& = new[r] RegionNode[r](null, seed)
+    g: func() -> i32 = lambda () => first.value
+    out: i32 = g()
+    destroy r
+    return out
+`)
+}
+
 // Destroying on only some branches still leaks on the others (relies on the
 // branch-join meet treating consume-on-all-arms as consumed and consume-on-
 // some-arms as still-live).
