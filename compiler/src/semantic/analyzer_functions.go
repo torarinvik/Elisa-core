@@ -71,6 +71,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentFuncDecl = fn
 	a.currentFuncType = fnType
+	savedSawPlainValueReturn := a.currentFuncSawPlainValueReturn
+	a.currentFuncSawPlainValueReturn = false
+	defer func() { a.currentFuncSawPlainValueReturn = savedSawPlainValueReturn }()
 	a.currentConservativeCallWidenings = map[*Symbol][]conservativeCallWidening{}
 	a.currentRegionFactTransforms = nil
 	if fnType != nil {

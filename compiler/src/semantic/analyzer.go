@@ -148,6 +148,12 @@ type Analyzer struct {
 	currentReturn                 Type
 	currentFuncDecl               *ast.FuncDecl
 	currentFuncType               *FuncType
+	// currentFuncSawPlainValueReturn records whether the current function has a
+	// value-returning path that is NOT a `return move <region>`. Combined with
+	// FuncType.ReturnsOwnedRegion it rejects functions that transfer an owned
+	// region on some paths but not others (which would make the caller's
+	// must-consume obligation unsound).
+	currentFuncSawPlainValueReturn bool
 	currentRegions                map[*Symbol]regionState
 	currentRegionMarks            map[*Symbol]regionMarkState
 	currentCheckpoints            map[*Symbol]checkpointState

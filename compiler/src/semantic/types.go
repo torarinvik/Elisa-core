@@ -600,4 +600,9 @@ type FuncType struct {
 	ReturnBorrowedOwnerRefsKnown bool
 	ReturnIsolation              ReturnIsolationSummary
 	ReturnIsolationKnown         bool
+	// ReturnsOwnedRegion is set when every value-returning path hands back an
+	// owned region (`return move <region>`). The caller's binding then inherits
+	// the affine must-consume obligation — approach A: ownership transfer
+	// inferred from `move`, no distinct owned-region type.
+	ReturnsOwnedRegion bool
 }

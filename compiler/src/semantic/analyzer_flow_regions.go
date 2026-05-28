@@ -141,6 +141,61 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 }
 
+// returnedRegionOwner reports the region owner symbol of a `return move <region>`
+// expression (approach A: ownership transfer is inferred from an explicit move
+// of a live region owner).
+func (a *Analyzer) returnedRegionOwner(expr ast.Expr) (*Symbol, bool) {
+	moved, ok := explicitMoveOperand(expr)
+	if !ok {
+		return nil, false
+	}
+	ident, ok := moved.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	sym, state := a.lookupRegionState(ident.Name)
+	if sym == nil || state.Destroyed {
+		return nil, false
+	}
+	return sym, true
+}
+
+func unwrapToCallExpr(expr ast.Expr) *ast.CallExpr {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return unwrapToCallExpr(n.Inner)
+	case *ast.MoveExpr:
+		return unwrapToCallExpr(n.Operand)
+	case *ast.CallExpr:
+		return n
+	default:
+		return nil
+	}
+}
+
+// markReceivedOwnedRegion registers a binding whose initializer is a call to a
+// function returning an owned region (FuncType.ReturnsOwnedRegion) as a
+// first-class region owner: it joins currentRegions (so destroy/leak/checkpoint
+// and new[binding] work) and inherits the affine must-consume obligation.
+func (a *Analyzer) markReceivedOwnedRegion(sym *Symbol, value ast.Expr) {
+	if sym == nil || value == nil {
+		return
+	}
+	call := unwrapToCallExpr(value)
+	if call == nil {
+		return
+	}
+	fnType, _ := a.exprTypes[call.Func].(*FuncType)
+	if fnType == nil || !fnType.ReturnsOwnedRegion {
+		return
+	}
+	if a.currentRegions == nil {
+		a.currentRegions = map[*Symbol]regionState{}
+	}
+	a.currentRegions[sym] = regionState{}
+	a.markLiveProtocolDescription(affineValueKey{Root: sym}, "region owner")
+}
+
 func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	if stmt.Capacity != nil {
 		capacityType := a.analyzeExpr(stmt.Capacity)

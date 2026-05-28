@@ -83,9 +83,12 @@ func (a *Analyzer) lookupRegionState(name string) (*Symbol, regionState) {
 		return nil, regionState{}
 	}
 	sym, ok := a.currentScope.Lookup(name)
-	if !ok || sym.Kind != SymbolRegion {
+	if !ok {
 		return nil, regionState{}
 	}
+	// A region owner is anything registered in currentRegions: a `region` decl
+	// (SymbolRegion) OR a local that received an owned region from a
+	// `return move <region>` call (SymbolLocal — see markReceivedOwnedRegion).
 	state, ok := a.currentRegions[sym]
 	if !ok {
 		return nil, regionState{}

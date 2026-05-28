@@ -49,6 +49,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordSpecializedValueTypeBinding(sym, valueType)
 		a.recordValueBinding(sym, n.Value)
 		a.markCreatedProtocolSymbol(sym, n.Value)
+		a.markReceivedOwnedRegion(sym, n.Value)
 		a.recordBorrowedOwnerRefBinding(sym, n.Value)
 		a.recordFunctionValueBinding(sym, n.Value)
 		a.recordImmutableSymbolOptimizationFacts(sym, n.Value)
@@ -350,6 +351,24 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.checkLocalArenaEscape(n.Value, valueType, "return")
 		a.checkReturnBorrowEscapesLocal(n.Value, valueType)
+		// Approach A: `return move <region>` transfers an owned region to the
+		// caller. Consume it locally (discharging the must-consume obligation)
+		// and mark the function as returning an owned region. All value-returns
+		// must agree, or the caller's inherited obligation would be unsound.
+		if ownerSym, isOwned := a.returnedRegionOwner(n.Value); isOwned {
+			if a.currentFuncSawPlainValueReturn {
+				a.errorf(n.Pos(), "this path returns an owned region but another returns a plain value; every value-returning path must transfer the region with `return move <region>` or none may")
+			}
+			a.recordAffineConsumption(affineValueKey{Root: ownerSym}, "return")
+			if a.currentFuncType != nil {
+				a.currentFuncType.ReturnsOwnedRegion = true
+			}
+		} else {
+			if a.currentFuncType != nil && a.currentFuncType.ReturnsOwnedRegion {
+				a.errorf(n.Pos(), "this path returns a plain value but another returns an owned region; every value-returning path must transfer the region with `return move <region>` or none may")
+			}
+			a.currentFuncSawPlainValueReturn = true
+		}
 		if refState, ok := a.regionRefStateForExpr(n.Value); ok {
 			if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil {
 				if _, isRef := valueType.(*RefType); isRef {

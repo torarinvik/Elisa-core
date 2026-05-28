@@ -138,6 +138,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	savedRegionFactTransforms := a.currentRegionFactTransforms
+	savedSawPlainValueReturn := a.currentFuncSawPlainValueReturn
 
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = returnType
@@ -161,6 +162,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentConservativeCallWidenings = map[*Symbol][]conservativeCallWidening{}
 	a.currentRegionFactTransforms = nil
+	a.currentFuncSawPlainValueReturn = false
 
 	for _, capture := range captures {
 		sym := &Symbol{Name: capture.name, Kind: SymbolLocal, Type: capture.typ, Node: expr, Mutable: capture.mutable}
@@ -260,6 +262,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
 	a.currentRegionFactTransforms = savedRegionFactTransforms
+	a.currentFuncSawPlainValueReturn = savedSawPlainValueReturn
 
 	a.recordAnalyzedExprType(expr, fnType)
 	return fnType
