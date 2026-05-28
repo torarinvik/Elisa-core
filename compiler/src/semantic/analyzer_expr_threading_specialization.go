@@ -187,6 +187,13 @@ func isAtomicRmwCallName(name string) bool {
 }
 
 func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type) {
+	// An owned region moved into the worker is an exclusive ownership transfer,
+	// not sharing — the caller relinquishes it, so it need not be structurally
+	// shareable. The transfer/consume is recorded by the caller (see the
+	// spawn1/pool_submit1 site in analyzer_expr_calls.go).
+	if _, ok := a.returnedRegionOwner(arg); ok {
+		return
+	}
 	if !a.typeStructurallyThreadShareable(argType, map[string]bool{}) {
 		a.errorf(arg.Pos(), "argument to %q is not structurally shareable across threads: %s", callName, argType)
 		return

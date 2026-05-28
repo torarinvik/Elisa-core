@@ -264,6 +264,16 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				a.recordFunctionPermissionRefs(unsafeThreadShareRefs(orderedArgs[i].Pos()))
 			}
 			a.validateThreadTransferArg(ft.Name, orderedArgs[i], argType)
+			// Transferring an owned region into a worker thread: `move`-ing the
+			// owner consumes it here (the thread now owns it; the worker's
+			// `owned` parameter discharges it). Passing an owner WITHOUT move
+			// would copy the allocator handle into the thread while the caller
+			// still owns it — reject that and require an explicit move.
+			if ownerSym, ok := a.returnedRegionOwner(orderedArgs[i]); ok {
+				a.transferRegionOwnerOut(ownerSym, "moved into thread by "+strconv.Quote(ft.Name))
+			} else if sym, ok := a.regionOwnerIdent(orderedArgs[i]); ok {
+				a.errorf(orderedArgs[i].Pos(), "owned region %q passed to %q must be moved (`move %s`) to transfer ownership to the worker thread", sym.Name, ft.Name, sym.Name)
+			}
 		}
 		if isAtomicRmwCallName(ft.Name) && i == 0 {
 			a.validateAtomicRmwArg(ft.Name, orderedArgs[i], argType)

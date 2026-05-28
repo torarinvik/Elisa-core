@@ -199,6 +199,44 @@ func (a *Analyzer) returnedRegionOwner(expr ast.Expr) (*Symbol, bool) {
 	return sym, true
 }
 
+// transferRegionOwnerOut consumes a region owner that has left the caller's
+// control (moved into a worker thread): the caller can no longer destroy, reset,
+// allocate from, or read through it, and dependent refs are invalidated — but it
+// is not freed (the new owner is responsible for that).
+func (a *Analyzer) transferRegionOwnerOut(sym *Symbol, reason string) {
+	if sym == nil {
+		return
+	}
+	if state, ok := a.currentRegions[sym]; ok {
+		state.Destroyed = true
+		a.currentRegions[sym] = state
+		a.invalidateRegionRefs(sym, func(regionDependencyState) bool { return true }, reason)
+		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, reason)
+	}
+	a.recordAffineConsumption(affineValueKey{Root: sym}, reason)
+}
+
+// regionOwnerIdent reports a live region owner referenced as a bare ident (NOT
+// moved). Used to require an explicit `move` when transferring ownership.
+func (a *Analyzer) regionOwnerIdent(expr ast.Expr) (*Symbol, bool) {
+	if _, isMove := explicitMoveOperand(expr); isMove {
+		return nil, false
+	}
+	inner := expr
+	if paren, ok := inner.(*ast.ParenExpr); ok {
+		inner = paren.Inner
+	}
+	ident, ok := inner.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	sym, state := a.lookupRegionState(ident.Name)
+	if sym == nil || state.Destroyed {
+		return nil, false
+	}
+	return sym, true
+}
+
 func unwrapToCallExpr(expr ast.Expr) *ast.CallExpr {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
