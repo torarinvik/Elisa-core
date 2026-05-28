@@ -40,7 +40,9 @@ def probe_first_scalar() -> i64:
 		region scratch(4096)
 		in scratch:
 			values: darray[i64] = [11, 22]
-			return values[0]
+			out: i64 = values[0]
+			destroy scratch
+			return out
 
 @test
 def keyword_compare_test() -> void:
@@ -397,6 +399,7 @@ def category_union_tree_roundtrip_test() -> void:
 				assert_eq(eval(store, flipped), 36)
 				copied: Lua.Expr = clone[Lua.Expr](flipped)
 				assert_eq(eval(store, copied), 36)
+		destroy scratch
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write category_union native fixture: %v", err)
@@ -475,6 +478,7 @@ def per_variant_tree_fold_rewrite_test() -> void:
 			assert_eq(score(root), 16)
 			rewritten: Lua.Expr = rewrite_spans(root)
 			assert_eq(score(rewritten), 26)
+		destroy scratch
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write per_variant native tree fixture: %v", err)
@@ -558,6 +562,7 @@ def tree_attribute_native_test() -> void:
 			dright: Dense.Expr = Dense.Expr.Int(value: 4)
 			droot: Dense.Expr = Dense.Expr.Binary(left: dleft, right: dright)
 			assert_eq(droot.checksum, 9)
+		destroy scratch
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write tree attribute native fixture: %v", err)
@@ -661,6 +666,7 @@ def mixed_tree_children_clone_rewrite_test() -> void:
 			assert_eq(eval_lua(lua_store, copied), 31)
 			rewritten: Lua.Expr = rewrite_same(lua_store, copied)
 			assert_eq(eval_lua(lua_store, rewritten), 31)
+		destroy scratch
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write mixed tree native fixture: %v", err)

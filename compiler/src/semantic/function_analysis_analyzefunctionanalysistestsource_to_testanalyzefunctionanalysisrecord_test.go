@@ -440,7 +440,9 @@ packed enum Expr:
 def build_region(seed: i32) -> i32:
 	region scratch(1024)
 	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
-	return first.value
+	out: i32 = first.value
+	destroy scratch
+	return out
 
 def freeze_expr_store(owner: Arena) -> Expr.Store[Frozen]:
 	store: Expr.Store[Local] = Expr.Store(owner)
@@ -495,6 +497,7 @@ func TestAnalyzeFunctionAnalysisRecordsRegionInvalidateTransforms(t *testing.T) 
 	temp: scratch i32& = new[scratch] seed + 1
 	restore scratch from cp
 	reset scratch
+	destroy scratch
 	return seed
 
 def destroy_demo() -> void:
@@ -547,7 +550,9 @@ def alias_region_ref(seed: i32) -> i32:
 	region scratch(1024)
 	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
 	alias: mutable scratch RegionNode[scratch]& = first
-	return alias.value
+	out: i32 = alias.value
+	destroy scratch
+	return out
 `)
 	analysis, ok := result.FunctionAnalysisByName("alias_region_ref")
 	if !ok || analysis == nil {
@@ -570,7 +575,9 @@ def alias_region_mutation(seed: i32) -> i32:
 	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
 	alias: mutable scratch RegionNode[scratch]& = first
 	alias.value <- alias.value + 1
-	return first.value
+	out: i32 = first.value
+	destroy scratch
+	return out
 `)
 	analysis, ok := result.FunctionAnalysisByName("alias_region_mutation")
 	if !ok || analysis == nil {

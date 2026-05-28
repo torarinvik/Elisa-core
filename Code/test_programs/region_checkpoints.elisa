@@ -7,7 +7,9 @@ def region_checkpoint_demo(seed: i32) -> i32:
     carried: i32 = reused[0]
     reset scratch
     final: scratch i32& = new[scratch] seed + 3
-    return carried + final[0]
+    out: i32 = carried + final[0]
+    destroy scratch
+    return out
 
 
 def region_checkpoint_nested_demo(seed: i32) -> i32:
@@ -23,4 +25,6 @@ def region_checkpoint_nested_demo(seed: i32) -> i32:
     restore scratch from outer
     reset scratch
     final: scratch i32& = new[scratch] seed + 3
-    return baseline + kept + final[0]
+    out: i32 = baseline + kept + final[0]
+    destroy scratch
+    return out

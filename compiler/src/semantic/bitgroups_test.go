@@ -246,6 +246,7 @@ def build() -> void:
 		next: null
 	}
 	_ = head.next
+	destroy scratch
 `)
 	if len(result.Errors()) != 0 {
 		t.Fatalf("expected region-owned struct instantiation to analyze cleanly, got:\n%s", strings.Join(result.Errors(), "\n"))
@@ -279,6 +280,7 @@ def build() -> void:
 		next: null
 	}
 	_ = box.next
+	destroy scratch
 `)
 	if len(result.Errors()) != 0 {
 		t.Fatalf("expected mixed type and region struct params to analyze cleanly, got:\n%s", strings.Join(result.Errors(), "\n"))

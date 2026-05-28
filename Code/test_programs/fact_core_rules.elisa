@@ -35,4 +35,6 @@ def fact_core_rules(mutable player: FactPlayer[Alive]&, owner: Arena) -> int:
     restore scratch from saved
     reset scratch
     _ = frozen
-    return value
+    out: int = value
+    destroy scratch
+    return out

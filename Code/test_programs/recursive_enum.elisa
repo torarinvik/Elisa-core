@@ -16,4 +16,6 @@ def make_sum() -> int:
 	one: scratch Expr& = new[scratch] one_value
 	two: scratch Expr& = new[scratch] two_value
 	tree: scratch Expr& = new[scratch] Expr.Add(one.cast[Expr&], two.cast[Expr&])
-	return eval(tree.cast[Expr&])
+	out: int = eval(tree.cast[Expr&])
+	destroy scratch
+	return out

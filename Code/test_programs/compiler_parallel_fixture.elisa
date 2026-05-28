@@ -54,7 +54,9 @@ def compiler_parallel_fixture(pool: mutable ThreadPool&) -> i64:
 		task_group_add(group.ref[TaskGroup&], move grouped)
 		wait all group
 
-		return join(move thread) + await awaited
+		out: i64 = join(move thread) + await awaited
+		destroy scratch
+		return out
 
 def compiler_lock_probe(mu: mutable Mutex) -> i64:
 	can Sync.Lock, Sync.Unlock:

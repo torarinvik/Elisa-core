@@ -205,6 +205,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateRegionRefs(sym, func(regionDependencyState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 		a.recordRegionInvalidateTransform(n.Pos(), n.Name, "", "destroy region", before, -1)
+		// destroy discharges the region owner's must-consume obligation.
+		a.recordAffineConsumption(affineValueKey{Root: sym}, "destroy")
 	case *ast.AssignStmt:
 		var targetType Type
 		// Analyzing an assignment target reads the base of a field/index path as

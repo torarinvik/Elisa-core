@@ -18,7 +18,9 @@ def fold_common() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
-		return node.span + node.span
+		out: int = node.span + node.span
+		destroy scratch
+		return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -50,7 +52,9 @@ def fold_common() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
-		return node.span + node.span
+		out: int = node.span + node.span
+		destroy scratch
+		return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -84,7 +88,9 @@ def fold_common() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
-		return node.span + node.span
+		out: int = node.span + node.span
+		destroy scratch
+		return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -118,7 +124,9 @@ def fold_common_frozen() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	in frozen:
-		return node.span + node.span
+		out: int = node.span + node.span
+		destroy scratch
+		return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -147,7 +155,9 @@ def fold_common_frozen() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	in frozen:
-		return node.span + node.span
+		out: int = node.span + node.span
+		destroy scratch
+		return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -180,7 +190,10 @@ def fold_child_common_frozen() -> int:
 	node: Expr = new[store] Expr.Wrap(span: 9, child: child)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	if node in frozen as Expr.Wrap(child: child_alias):
-		return child_alias.span + child_alias.span
+		out: int = child_alias.span + child_alias.span
+		destroy scratch
+		return out
+	destroy scratch
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_field_cache_default.elisa", src)
@@ -407,7 +420,9 @@ def fold_common_frozen_direct() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return node.span + node.span
+	out: int = node.span + node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -441,7 +456,9 @@ def fold_common_frozen_wrapped_direct() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	boxed: Box = wrap_node(node)
-	return boxed.node.span + boxed.node.span
+	out: int = boxed.node.span + boxed.node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -478,7 +495,9 @@ def fold_common_frozen_helper_indexed_direct() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return wrapped.items[0u].node.span + wrapped.items[0u].node.span
+	out: int = wrapped.items[0u].node.span + wrapped.items[0u].node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -513,7 +532,9 @@ def fold_side_common_frozen_wrapped_direct() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	boxed: Box = wrap_node(node)
-	return boxed.node.span + boxed.node.span
+	out: int = boxed.node.span + boxed.node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_side_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)

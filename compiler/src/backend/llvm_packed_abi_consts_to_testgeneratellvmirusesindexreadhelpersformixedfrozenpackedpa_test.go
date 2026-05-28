@@ -102,7 +102,9 @@ def fold() -> int:
 		node: Expr = new Expr.Lit(value: 5)
 		match node:
 			Expr.Lit(value):
-				return value
+				out: int = value
+				destroy scratch
+				return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_default.elisa", src)
 	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
@@ -132,7 +134,9 @@ def fold() -> int:
 		node: Expr = new Expr.Lit(value: 5)
 		match node:
 			Expr.Lit(value):
-				return value
+				out: int = value
+				destroy scratch
+				return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_legacy.elisa", src)
 	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIIndexSOA)
@@ -162,7 +166,9 @@ def sum_pair() -> int:
 	store: Pair.Store[Local] = Pair.Store(scratch)
 	in store:
 		node: Pair = new Pair.Both(span: 7, left: 2, right: 3)
-		return node.span
+		out: int = node.span
+		destroy scratch
+		return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_profile_build_heavy.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -201,8 +207,11 @@ def sum_pair() -> int:
 		node: Pair = new Pair.Both(left: 2, right: 3)
 		match node:
 			Pair.Both(left: left, right: right):
-				return left + right
+				out: int = left + right
+				destroy scratch
+				return out
 			Pair.End:
+				destroy scratch
 				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_index_soa.elisa", src)
@@ -235,8 +244,11 @@ def sum_pair() -> int:
 		node: Pair = new Pair.Both(left: 2, right: 3)
 		match node:
 			Pair.Both(left: left, right: right):
-				return left + right
+				out: int = left + right
+				destroy scratch
+				return out
 			Pair.End:
+				destroy scratch
 				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_default.elisa", src)
@@ -274,8 +286,11 @@ def fold_frozen() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match node in frozen:
 		Expr.Lit(value):
-			return value
+			out: int = value
+			destroy scratch
+			return out
 		Expr.End:
+			destroy scratch
 			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_index_soa.elisa", src)
@@ -307,8 +322,11 @@ def fold_frozen() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match node in frozen:
 		Expr.Lit(value):
-			return value
+			out: int = value
+			destroy scratch
+			return out
 		Expr.End:
+			destroy scratch
 			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_default.elisa", src)
@@ -450,7 +468,9 @@ def fold_frozen() -> i64:
 	frozen_types: TypeExpr.Store[Frozen] = freeze(move types)
 	frozen_exprs: Expr.Store[Frozen] = freeze(move exprs)
 	frozen_clauses: Clause.Store[Frozen] = freeze(move clauses)
-	return score_expr(node, frozen_exprs, frozen_clauses, frozen_types)
+	out: i64 = score_expr(node, frozen_exprs, frozen_clauses, frozen_types)
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_adjacent_frozen_handle_payload_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -514,7 +534,9 @@ def fold_frozen() -> i64:
 	frozen_types: TypeExpr.Store[Frozen] = freeze(move types)
 	frozen_exprs: Expr.Store[Frozen] = freeze(move exprs)
 	frozen_clauses: Clause.Store[Frozen] = freeze(move clauses)
-	return score_expr(node, frozen_exprs, frozen_clauses, frozen_types)
+	out: i64 = score_expr(node, frozen_exprs, frozen_clauses, frozen_types)
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_adjacent_frozen_handle_payload_default.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -552,8 +574,10 @@ def fold_frozen_mixed() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match node in frozen:
 		Expr.Hold(value):
+			destroy scratch
 			return 1
 		Expr.End:
+			destroy scratch
 			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_payload_decode_index_soa.elisa", src)

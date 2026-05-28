@@ -161,6 +161,8 @@ def packed_ml_expr_repro_impl() -> i64:
     frozen_exprs: Expr.Store[Frozen] = freeze(move exprs)
     frozen_clauses: Clause.Store[Frozen] = freeze(move clauses)
 
-    return score_expr(match_expr, frozen_exprs, frozen_clauses, frozen_patterns, frozen_types) + score_pattern(guarded_pat, frozen_patterns, frozen_exprs, frozen_clauses, frozen_types)
+    out: i64 = score_expr(match_expr, frozen_exprs, frozen_clauses, frozen_patterns, frozen_types) + score_pattern(guarded_pat, frozen_patterns, frozen_exprs, frozen_clauses, frozen_types)
+    destroy scratch
+    return out
 
 export func packed_ml_expr_repro() -> i64 = packed_ml_expr_repro_impl

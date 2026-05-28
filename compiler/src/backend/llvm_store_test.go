@@ -169,7 +169,9 @@ def build() -> i64:
         next: null
     }
     if head.next == null:
+        destroy scratch
         return 1
+    destroy scratch
     return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_struct_region_owner.elisa", src)

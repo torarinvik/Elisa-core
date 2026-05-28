@@ -124,8 +124,13 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
-	a.analyzeRegionDecl(stmt)
+	sym := a.analyzeRegionDecl(stmt)
 	a.analyzeInStoreStmt(scopedArenaInStoreStmt(stmt))
+	// Scoped region: the owner is discharged automatically at block exit, so it
+	// satisfies the must-consume obligation registered in analyzeRegionDecl.
+	if sym != nil {
+		a.recordAffineConsumption(affineValueKey{Root: sym}, "region scope exit")
+	}
 	a.currentScope = savedScope
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
@@ -136,7 +141,7 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 }
 
-func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) {
+func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	if stmt.Capacity != nil {
 		capacityType := a.analyzeExpr(stmt.Capacity)
 		if !IsNumericType(capacityType) {
@@ -153,8 +158,16 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) {
 	if a.currentRegions != nil {
 		a.currentRegions[sym] = regionState{}
 	}
+	// A region owns a bulk allocation, so it is an affine resource that must be
+	// consumed on every path before scope exit (like any other linear value).
+	// A bare `region NAME(...)` must be matched by `destroy NAME`; a scoped
+	// `region NAME(...):` block discharges this automatically at block exit
+	// (see analyzeScopedArenaStmt). This is what makes a forgotten region a
+	// compile error rather than a silent leak.
+	a.markLiveProtocolDescription(affineValueKey{Root: sym}, "region owner")
 	a.currentTreeAllocOwner = treeAllocOwnerBinding{Kind: treeAllocOwnerRegion, RegionName: stmt.Name}
 	a.currentAllocExpr = &ast.Ident{Position: stmt.Position, Name: stmt.Name}
+	return sym
 }
 
 func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {

@@ -31,4 +31,6 @@ def packed_demo() -> int:
 	root: Expr = build_expr(scratch)
 	in token_store:
 		marker: Token = new Token.Region(span: 10)
-		return eval(root, store) + marker.span
+		out: int = eval(root, store) + marker.span
+		destroy scratch
+		return out

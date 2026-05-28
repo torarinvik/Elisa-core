@@ -22,5 +22,8 @@ def main() -> i64:
         next: null
     }
     if expr.next == null and expr_from_arena.next == null and box.next == null:
-        return expr.value + expr_from_arena.value + box.value
+        out: i64 = expr.value + expr_from_arena.value + box.value
+        destroy scratch
+        return out
+    destroy scratch
     return 0

@@ -54,7 +54,9 @@ def tree_runtime_bench_impl(repeats: i64) -> i64:
 			total: mutable i64 = 0
 			for _ in 0..<repeats:
 				total <- total + tree_runtime_escape(eval(root))
-			return total
+			out: i64 = total
+			destroy scratch
+			return out
 
 export func tree_runtime_bench(repeats: i64) -> i64 = tree_runtime_bench_impl
 `, annotation)
@@ -95,7 +97,9 @@ def tree_runtime_bench_impl(repeats: i64) -> i64:
 			total: mutable i64 = 0
 			for _ in 0..<repeats:
 				total <- total + tree_runtime_escape(eval(store, root))
-			return total
+			out: i64 = total
+			destroy scratch
+			return out
 
 export func tree_runtime_bench(repeats: i64) -> i64 = tree_runtime_bench_impl
 `, annotation)

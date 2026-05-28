@@ -95,6 +95,7 @@ def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[R
 
     match parser_peek(parser.cast[ParserState&]):
         TokenKind.Eof:
+            destroy parse
             return false
 
     first_kind: TokenKind = parser_advance(parser.cast[mutable ParserState&])
@@ -103,12 +104,16 @@ def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[R
     global_ok: bool = try scope_define(parse_arena, root.cast[mutable Scope&], "parse_file", SymbolKind.Func, TokenKind.Def)
     local_ok: bool = try scope_define(parse_arena, child.cast[mutable Scope&], local_name, SymbolKind.Local, first_kind)
 
-    return global_ok and local_ok and scope_contains(child.cast[Scope&], "parse_file") and scope_contains(child.cast[Scope&], local_name)
+    out: bool error[RuntimeError] = global_ok and local_ok and scope_contains(child.cast[Scope&], "parse_file") and scope_contains(child.cast[Scope&], local_name)
+    destroy parse
+    return out
 
 def frontend_region_token(line: int, column: int) -> int:
     region scratch(2048)
     token: scratch Token& = new[scratch] Token(TokenKind.Ident, SourceSpan(line, column), "token")
-    return token.span.column
+    out: int = token.span.column
+    destroy scratch
+    return out
 
 def frontend_smoke(name: cstr) -> bool error[RuntimeError]:
     tokens: view[Token] = make_tokens()

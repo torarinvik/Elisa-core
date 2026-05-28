@@ -761,6 +761,7 @@ tree Lua:
 def build_store() -> void:
 	region scratch(256u)
 	store = Lua.Store(scratch)
+	destroy scratch
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_category_union_table_shell.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)

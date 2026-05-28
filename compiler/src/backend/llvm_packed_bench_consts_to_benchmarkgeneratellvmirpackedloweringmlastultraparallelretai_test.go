@@ -203,7 +203,9 @@ def build_and_checksum() -> i64:
     frozen_stmts: Stmt.Store[Frozen] = freeze(move stmt_store)
     frozen_decls: Decl.Store[Frozen] = freeze(move decl_store)
 
-    return checksum_language_ast(frozen_decls, frozen_stmts, frozen_exprs, frozen_patterns, frozen_types)
+    out: i64 = checksum_language_ast(frozen_decls, frozen_stmts, frozen_exprs, frozen_patterns, frozen_types)
+    destroy scratch
+    return out
 `
 const packedLoweringParserASTMegaBenchmarkSource = `@packed_profile(retained_reads)
 packed enum TypeExpr:
@@ -390,7 +392,9 @@ def build_and_checksum_mega() -> i64:
 
     total: mutable i64 = checksum_language_ast(frozen_decls, frozen_stmts, frozen_exprs, frozen_patterns, frozen_types)
     total <- total + checksum_language_ast(frozen_decls, frozen_stmts, frozen_exprs, frozen_patterns, frozen_types)
-    return total
+    out: i64 = total
+    destroy scratch
+    return out
 `
 
 func parseAndAnalyzeBackendBenchmarkSource(b *testing.B, filename string, src string) *semantic.Result {

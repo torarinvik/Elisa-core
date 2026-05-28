@@ -259,8 +259,11 @@ def frontend_case_char_literals() -> bool:
         bytes: u8[26] = [39, 97, 39, 32, 39, 92, 110, 39, 32, 39, 92, 120, 52, 49, 39, 32, 39, 92, 117, 48, 48, 52, 49, 39, 10, 0]
         tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, bytes[0].ref[u8&])
         if not frontend_expect_token_count(tokens, 6):
+            destroy scratch
             return false
-        return frontend_expect_kind(tokens, 0, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 1, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 2, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 3, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 4, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 5, FrontendTokenKind.Eof)
+        out: bool = frontend_expect_kind(tokens, 0, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 1, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 2, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 3, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 4, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 5, FrontendTokenKind.Eof)
+        destroy scratch
+        return out
 
 
 def frontend_token_hash_mix(hash: u64, value: u64) -> u64:

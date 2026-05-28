@@ -222,7 +222,7 @@ func TestRunCLIEmittedLoweredGrammarSourceIsStandalone(t *testing.T) {
 func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "contextual_ternary_darray.elisa")
-	src := "def main() -> i64:\n    region scratch(4096)\n    in scratch:\n        xs: darray[i64] = ([1] if true else [])\n        return xs.count.i64()\n"
+	src := "def main() -> i64:\n    region scratch(4096)\n    in scratch:\n        xs: darray[i64] = ([1] if true else [])\n        out: i64 = xs.count.i64()\n        destroy scratch\n        return out\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write contextual ternary fixture: %v", err)
 	}

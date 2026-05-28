@@ -29,7 +29,9 @@ def fold_side_common_frozen_helper_indexed_direct() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return wrapped.items[0u].node.span + wrapped.items[0u].node.span
+	out: int = wrapped.items[0u].node.span + wrapped.items[0u].node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_side_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -66,7 +68,9 @@ def fold_common_frozen_wrapped_reassign() -> int:
 	first: int = boxed.node.span
 	boxed.node <- other
 	_ = frozen
-	return first + boxed.node.span
+	out: int = first + boxed.node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_field_cache_reassign_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -107,7 +111,9 @@ def fold_common_frozen_helper_indexed_reassign() -> int:
 	first: int = wrapped.items[0u].node.span
 	wrapped.items[0u].node <- other
 	_ = frozen
-	return first + wrapped.items[0u].node.span
+	out: int = first + wrapped.items[0u].node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_field_cache_reassign_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -147,7 +153,9 @@ def fold_common_frozen_nested_helper_indexed_direct() -> int:
 	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
 	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return wrapped.meta.items[0u].node.span + wrapped.meta.items[0u].node.span
+	out: int = wrapped.meta.items[0u].node.span + wrapped.meta.items[0u].node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_helper_indexed_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -187,7 +195,9 @@ def fold_common_frozen_nested_wild_helper_indexed_direct() -> int:
 	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
 	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return wrapped.meta.items[0u].node.span + wrapped.meta.items[0u].node.span
+	out: int = wrapped.meta.items[0u].node.span + wrapped.meta.items[0u].node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_helper_indexed_field_cache_direct_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -231,7 +241,9 @@ def fold_common_frozen_nested_wild_helper_indexed_reassign() -> int:
 	first: int = wrapped.meta.items[0u].node.span
 	wrapped.meta.items[0u].node <- other
 	_ = frozen
-	return first + wrapped.meta.items[0u].node.span
+	out: int = first + wrapped.meta.items[0u].node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_helper_indexed_field_cache_reassign_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -275,7 +287,9 @@ def fold_common_frozen_nested_helper_indexed_reassign() -> int:
 	first: int = wrapped.meta.items[0u].node.span
 	wrapped.meta.items[0u].node <- other
 	_ = frozen
-	return first + wrapped.meta.items[0u].node.span
+	out: int = first + wrapped.meta.items[0u].node.span
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_helper_indexed_field_cache_reassign_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -382,7 +396,9 @@ def fold_common_frozen_mixed() -> int:
 	node: Expr = new[store] Expr.Hold(span: 7, value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	in frozen:
-		return node.span + node.span
+		out: int = node.span + node.span
+		destroy scratch
+		return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_field_cache_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -415,10 +431,14 @@ def fold_child_common_frozen_mixed() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match node in frozen:
 		Expr.Wrap(child: child_alias):
-			return child_alias.span + child_alias.span
+			out: int = child_alias.span + child_alias.span
+			destroy scratch
+			return out
 		Expr.Int(value: _):
+			destroy scratch
 			return 0
 		Expr.Hold(value: _):
+			destroy scratch
 			return 1
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_matched_payload_field_cache_index_soa.elisa", src)
@@ -465,10 +485,14 @@ def fold_helper_indexed_child_common_frozen_mixed() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match wrapped.items[0u].node in frozen:
 		Expr.Wrap(child: child_alias):
-			return child_alias.span + child_alias.span
+			out: int = child_alias.span + child_alias.span
+			destroy scratch
+			return out
 		Expr.Int(value: _):
+			destroy scratch
 			return 0
 		Expr.Hold(value: _):
+			destroy scratch
 			return 1
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_matched_payload_field_cache_index_soa.elisa", src)
@@ -518,10 +542,14 @@ def fold_nested_helper_indexed_child_common_frozen_mixed() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match wrapped.meta.items[0u].node in frozen:
 		Expr.Wrap(child: child_alias):
-			return child_alias.span + child_alias.span
+			out: int = child_alias.span + child_alias.span
+			destroy scratch
+			return out
 		Expr.Int(value: _):
+			destroy scratch
 			return 0
 		Expr.Hold(value: _):
+			destroy scratch
 			return 1
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_rebased_helper_indexed_matched_payload_field_cache_index_soa.elisa", src)

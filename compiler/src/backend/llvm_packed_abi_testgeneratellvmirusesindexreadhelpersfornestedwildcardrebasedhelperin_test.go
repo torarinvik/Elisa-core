@@ -37,10 +37,14 @@ def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match wrapped.meta.items[0u].node in frozen:
 		Expr.Wrap(child: child_alias):
-			return child_alias.span + child_alias.span
+			out: int = child_alias.span + child_alias.span
+			destroy scratch
+			return out
 		Expr.Int(value: _):
+			destroy scratch
 			return 0
 		Expr.Hold(value: _):
+			destroy scratch
 			return 1
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_rebased_helper_indexed_matched_payload_field_cache_index_soa.elisa", src)
@@ -74,8 +78,11 @@ def choose() -> int:
 	frozen: Flag.Store[Frozen] = freeze(move store)
 	match node in frozen:
 		Flag.Yes:
-			return node.span + node.span
+			out: int = node.span + node.span
+			destroy scratch
+			return out
 		Flag.No:
+			destroy scratch
 			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payloadless_match_fields_index_soa.elisa", src)
@@ -107,8 +114,10 @@ def choose() -> int:
 		node: Flag = new Flag.Yes
 		match node:
 			Flag.Yes:
+				destroy scratch
 				return 1
 			Flag.No:
+				destroy scratch
 				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_tag_read_index_soa.elisa", src)
@@ -141,7 +150,9 @@ def fold_common_frozen() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	in frozen:
-		return node.span + node.span
+		out: int = node.span + node.span
+		destroy scratch
+		return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_index_soa_opt.elisa", src)
 	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIIndexSOA)
@@ -175,8 +186,11 @@ def fold_match_frozen() -> int:
 	in frozen:
 		match node:
 			Expr.Lit(value):
-				return value + node.span
+				out: int = value + node.span
+				destroy scratch
+				return out
 			Expr.End:
+				destroy scratch
 				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_frozen_index_soa_opt.elisa", src)
@@ -223,7 +237,9 @@ def fold_export() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Wide(span: 7, cost: 11, first: 2, second: 3, third: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return fold(node, frozen)
+	out: int = fold(node, frozen)
+	destroy scratch
+	return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_retained_reads_wide_payload_opt.elisa", src)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel3)
@@ -254,7 +270,10 @@ def fold_if_pattern() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	if node in frozen as Expr.Lit(value: value):
-		return value + node.span
+		out: int = value + node.span
+		destroy scratch
+		return out
+	destroy scratch
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_if_pattern_index_soa.elisa", src)
@@ -287,8 +306,11 @@ def fold() -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match node in frozen:
 		Expr.Lit(value):
-			return value + node.span
+			out: int = value + node.span
+			destroy scratch
+			return out
 		Expr.End:
+			destroy scratch
 			return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_index_soa.elisa", src)
@@ -320,7 +342,10 @@ def fold_view() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	if node in frozen as Expr.Lit(value: value):
-		return node.value + node.span + value
+		out: int = node.value + node.span + value
+		destroy scratch
+		return out
+	destroy scratch
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt_index_soa.elisa", src)
@@ -351,7 +376,10 @@ def fold_view() -> int:
 	node: Expr = new[store] Expr.Block(count: 3u, items: source_items[0u:3u])
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	if node in frozen as Expr.Block:
-		return node.items[0u] + node.items[2u]
+		out: int = node.items[0u] + node.items[2u]
+		destroy scratch
+		return out
+	destroy scratch
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt_tail_index_soa.elisa", src)
@@ -472,8 +500,11 @@ def fold() -> int:
 		node: Expr = new Expr.Lit(value: 5)
 		match node:
 			Expr.Lit(value):
-				return value
+				out: int = value
+				destroy scratch
+				return out
 			Expr.End:
+				destroy scratch
 				return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_index_soa_tag_read_mixed.elisa", src)
@@ -503,7 +534,9 @@ def fold() -> int:
 		node: Expr = new Expr.Block(count: 3u, items: source_items[0u:3u])
 		match node:
 			Expr.Block(count: _, items: items):
-				return items[0u] + items[2u]
+				out: int = items[0u] + items[2u]
+				destroy scratch
+				return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_tail_payload_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -532,7 +565,9 @@ def fold() -> int:
 		node: Expr = new Expr.Block(items: source_items[0u:3u], count: 3u)
 		match node:
 			Expr.Block(items: items, count: count):
-				return count.int() + items[0u] + items[2u]
+				out: int = count.int() + items[0u] + items[2u]
+				destroy scratch
+				return out
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_tail_payload_non_final_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
