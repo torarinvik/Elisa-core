@@ -386,7 +386,15 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "if condition must be bool, got %s", condType)
 		}
-		mergedAffine := a.cloneAffineValueStates()
+		// The post-if affine state is the meet of the branch outcomes, NOT the
+		// entry state unioned with them. Seeding with entry would keep a value
+		// "live" even when every arm consumes it (a false "must be consumed"),
+		// because mergeAffineValueStates only ever adds liveness. The skip path
+		// (condition false with no else) is already supplied by the empty-else
+		// snapshot that is analyzed and merged below, so entry survives the join
+		// only when it actually should.
+		entryAffine := a.cloneAffineValueStates()
+		var mergedAffine map[affineValueKey]affineValueState
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		mergedStorageViewDeps := a.cloneStorageViewDeps()
 		functionValueBranches := make([]map[*Symbol]*FuncType, 0, len(n.Elifs)+2)
@@ -435,6 +443,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if len(n.Else) == 0 {
 			functionValueBranches = append(functionValueBranches, a.currentFunctionValues)
 			specializedValueTypeBranches = append(specializedValueTypeBranches, a.currentSpecializedValueTypes)
+		}
+		if mergedAffine == nil {
+			// Every taken branch diverged and an else covered the remaining
+			// case: code after the if is unreachable. Preserve entry so the
+			// flow state stays non-nil for downstream analysis.
+			mergedAffine = entryAffine
 		}
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
