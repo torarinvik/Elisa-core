@@ -51,6 +51,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.markCreatedProtocolSymbol(sym, n.Value)
 		a.markReceivedOwnedRegion(sym, n.Value)
 		if isOwnedTypeExpr(n.Type) {
+			// An owned region is move-only: rebinding it to another `owned`
+			// binding must transfer it (consume the source), never copy the
+			// allocator handle into a second owner (which would double-free).
+			if srcOwner, ok := a.returnedRegionOwner(n.Value); ok {
+				a.transferRegionOwnerOut(srcOwner, "moved into binding")
+			} else if srcOwner, ok := a.regionOwnerIdent(n.Value); ok {
+				a.errorf(n.Value.Pos(), "owned region %q is move-only: use `move %s` to transfer ownership to %q", srcOwner.Name, srcOwner.Name, n.Name)
+			}
 			a.registerOwnedStoreOwner(sym)
 		}
 		a.recordBorrowedOwnerRefBinding(sym, n.Value)

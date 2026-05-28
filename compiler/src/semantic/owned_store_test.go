@@ -56,6 +56,66 @@ def worker(r: owned Arena) -> void:
 `)
 }
 
+// An owned region is move-only: binding it to another `owned` binding by copy
+// would create two owners of one region (double-free). Require `move`.
+func TestOwnedArenaIsMoveOnly(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "owned_copy.elisa", `extern new_arena(cap: usize) -> Arena
+
+def f() -> void:
+    r: owned Arena = new_arena(64)
+    s: owned Arena = r
+    destroy r
+    destroy s
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "move-only") {
+		t.Fatalf("expected owned region copy to be rejected as move-only; got: %s", all)
+	}
+}
+
+// Moving an owned region to a new owner transfers it: the source is consumed,
+// only the destination must be (and may be) consumed.
+func TestOwnedArenaMoveTransfersToNewOwner(t *testing.T) {
+	analyzeTreeTestSource(t, "owned_move_ok.elisa", `extern new_arena(cap: usize) -> Arena
+
+def f() -> void:
+    r: owned Arena = new_arena(64)
+    s: owned Arena = move r
+    destroy s
+`)
+	// And the source is unavailable after the move.
+	used := analyzeTreeTestSourceWithSemanticErrors(t, "owned_move_used.elisa", `extern new_arena(cap: usize) -> Arena
+
+def f() -> void:
+    r: owned Arena = new_arena(64)
+    s: owned Arena = move r
+    destroy r
+    destroy s
+`)
+	if all := strings.Join(used.Errors(), "\n"); !strings.Contains(all, "already been destroyed") && !strings.Contains(all, "cannot") {
+		t.Fatalf("expected source region to be unavailable after move; got: %s", all)
+	}
+}
+
+// A closure capturing a value allocated from an owned region cannot be used
+// after the region is destroyed (no laundering of the UAF through the capture).
+func TestClosureCapturingOwnedRegionDepRejectedAfterDestroy(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "owned_closure.elisa", `extern new_arena(cap: usize) -> Arena
+
+struct Node in owner:
+    value: i32
+
+def f() -> i32:
+    r: owned Arena = new_arena(64)
+    first: r Node[r]& = new[r] Node(7)
+    g: func() -> i32 = lambda () => first.value
+    destroy r
+    return g()
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "cannot be used") || !strings.Contains(all, "region") {
+		t.Fatalf("expected closure-after-destroy on an owned region to be rejected; got: %s", all)
+	}
+}
+
 // Guardrail: a plain (non-owned) Arena value carries NO new obligation — its
 // existing semantics are untouched. Ownership comes only via the `owned` marker.
 func TestPlainArenaValueHasNoObligation(t *testing.T) {
