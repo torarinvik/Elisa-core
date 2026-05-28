@@ -262,6 +262,9 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 	case *ast.UnwrapElseExpr:
 		a.validateDeferStmtBodyExpr(n.Value)
 		a.validateDeferStmtBodyExpr(n.Fallback)
+	case *ast.GetExpr:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Fallback)
 	case *ast.OptionalBindExpr:
 		a.validateDeferStmtBodyExpr(n.Value)
 	case *ast.AllocExpr:

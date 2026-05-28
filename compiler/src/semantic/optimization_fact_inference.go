@@ -208,6 +208,8 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
 	case *ast.UnwrapElseExpr:
 		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
+	case *ast.GetExpr:
+		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
 	case *ast.OptionalBindExpr:
 		if valueFacts, ok := a.lookupOptimizationFactsForExpr(n.Value); ok {
 			facts = overlayOptimizationFacts(facts, valueFacts)
@@ -224,7 +226,7 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 
 func exprRequiresOptimizationFactInference(expr ast.Expr) bool {
 	switch expr.(type) {
-	case *ast.Ident, *ast.IndexExpr, *ast.FieldExpr, *ast.CallExpr, *ast.AllocExpr, *ast.SliceExpr, *ast.TernaryExpr, *ast.TryExpr, *ast.UnwrapElseExpr:
+	case *ast.Ident, *ast.IndexExpr, *ast.FieldExpr, *ast.CallExpr, *ast.AllocExpr, *ast.SliceExpr, *ast.TernaryExpr, *ast.TryExpr, *ast.UnwrapElseExpr, *ast.GetExpr:
 		return true
 	default:
 		return false

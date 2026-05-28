@@ -371,6 +371,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeCatchExpr(n)
 		return
 	case *ast.UnwrapElseExpr:
+		a.deprecatedf(n.Pos(), "implicit `else` unwrap is deprecated; write `get <expr> else ...` to make the absence check explicit")
 		recovery := recoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
 		valueType := a.analyzeExpr(n.Value)
 		var resultType Type
@@ -389,6 +390,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			a.reportShapeMismatchNotes(n.Pos(), resultType, fallbackType)
 		}
 		result = resultType
+		return
+	case *ast.GetExpr:
+		result = a.analyzeGetExpr(n)
 		return
 	case *ast.OptionalBindExpr:
 		valueType := a.analyzeExpr(n.Value)

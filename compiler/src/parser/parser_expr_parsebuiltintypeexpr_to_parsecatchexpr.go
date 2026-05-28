@@ -121,6 +121,11 @@ func (p *Parser) parseExpr() ast.Expr {
 			tryExpr.Fallback = fallback
 			return tryExpr
 		}
+		if getExpr, ok := expr.(*ast.GetExpr); ok && getExpr.Recovery == nil && getExpr.Fallback == nil {
+			getExpr.Recovery = recovery
+			getExpr.Fallback = fallback
+			return getExpr
+		}
 		return &ast.UnwrapElseExpr{Position: pos, Value: expr, Fallback: fallback, Recovery: recovery}
 	}
 	if p.matchIdentText("can") {
@@ -460,6 +465,31 @@ func matchPatternAsIsTargetExpr(pattern ast.MatchPattern) ast.Expr {
 	default:
 		return nil
 	}
+}
+
+// elseIntroducesRecoveryClause reports whether the token sequence immediately
+// after an `else` is a recovery clause (`return`, `raise`, `void`, or a
+// `binding:` block) rather than a plain value fallback. The caller is positioned
+// on the `else` token.
+func (p *Parser) elseIntroducesRecoveryClause() bool {
+	if p.peek() != lexer.TOKEN_ELSE {
+		return false
+	}
+	next := p.pos + 1
+	if next >= len(p.tokens) {
+		return false
+	}
+	switch p.tokens[next].Kind {
+	case lexer.TOKEN_RETURN, lexer.TOKEN_RAISE:
+		return true
+	case lexer.TOKEN_IDENT:
+		if p.tokens[next].Text == "void" {
+			return true
+		}
+		// `else binding:` block recovery.
+		return next+1 < len(p.tokens) && p.tokens[next+1].Kind == lexer.TOKEN_COLON
+	}
+	return false
 }
 
 func (p *Parser) parseRecoveryClause(pos lexer.Pos) *ast.RecoveryClause {

@@ -269,6 +269,8 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 		return false
 	case *ast.UnwrapElseExpr:
 		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Fallback, name)
+	case *ast.GetExpr:
+		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Fallback, name)
 	case *ast.OptionalBindExpr:
 		return exprReferencesVariantFields(n.Value, name)
 	case *ast.AllocExpr:

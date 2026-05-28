@@ -438,6 +438,9 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	case *ast.UnwrapElseExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		a.validatePermissionExpr(n.Fallback, granted)
+	case *ast.GetExpr:
+		a.validatePermissionExpr(n.Value, granted)
+		a.validatePermissionExpr(n.Fallback, granted)
 	case *ast.OptionalBindExpr:
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.AllocExpr:

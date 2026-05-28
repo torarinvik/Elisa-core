@@ -686,6 +686,152 @@ func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (C.LLVMValu
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
 	return phi, resultType, nil
 }
+// emitGetExpr lowers the `get` prefix (the optional analog of `try`). Three
+// shapes:
+//   - `get arr[i] else <value>`: the value fallback was parsed onto the inner
+//     IndexExpr, which is already a complete checked access — emit it directly.
+//   - `get arr[i]` / `get arr[i] else return|raise`: a bounds-checked access
+//     whose absence path runs the recovery (or, with no else, returns None).
+//   - `get opt` / `get opt else ...`: unwrap an optional / nullable reference,
+//     with the recovery (or None-propagation) on the absent path.
+func (s *functionState) emitGetExpr(expr *ast.GetExpr) (C.LLVMValueRef, semantic.Type, error) {
+	resultType := s.exprType(expr)
+	if idx, ok := expr.Value.(*ast.IndexExpr); ok && idx.Fallback != nil {
+		return s.emitExpr(expr.Value, resultType)
+	}
+	// Resolve the recovery: an explicit `else`, or the propagation default which
+	// early-returns the enclosing function's None.
+	recovery := astRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
+	if recovery == nil {
+		recovery = &ast.RecoveryClause{Position: expr.Position, Kind: ast.RecoveryReturn, Value: &ast.NullLit{Position: expr.Position}}
+	}
+	if idx, ok := expr.Value.(*ast.IndexExpr); ok {
+		return s.emitGetCheckedIndexExpr(idx, recovery, resultType)
+	}
+	return s.emitGetUnwrapExpr(expr.Value, recovery, resultType)
+}
+
+// emitGetCheckedIndexExpr emits a bounds-checked container access: in-range
+// produces the element, out-of-range runs the recovery clause.
+func (s *functionState) emitGetCheckedIndexExpr(idx *ast.IndexExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	usizeType := s.g.result.NamedTypes["usize"]
+	indexValue, _, err := s.emitExpr(idx.Index, usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	countValue, loadValue, err := s.prepareSafeIndexFallback(idx, indexValue)
+	if err != nil {
+		return nil, nil, err
+	}
+	okCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("get.index.in.range"))
+	return s.emitGetBranch(okCond, func() (C.LLVMValueRef, error) {
+		value, actualType, err := loadValue()
+		if err != nil {
+			return nil, err
+		}
+		if !semantic.SameType(actualType, resultType) && !isVoidType(resultType) {
+			return s.coerceValue(value, actualType, resultType)
+		}
+		return value, nil
+	}, recovery, resultType)
+}
+
+// emitGetUnwrapExpr unwraps an optional / nullable reference, running the
+// recovery clause on the absent path.
+func (s *functionState) emitGetUnwrapExpr(valueExpr ast.Expr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	valueType := s.exprType(valueExpr)
+	value, _, err := s.emitExpr(valueExpr, valueType)
+	if err != nil {
+		return nil, nil, err
+	}
+	var okCond, okValue C.LLVMValueRef
+	switch t := valueType.(type) {
+	case *semantic.RefType:
+		llvmRefType, err := s.g.lowerType(valueType)
+		if err != nil {
+			return nil, nil, err
+		}
+		nullValue := C.LLVMConstNull(llvmRefType)
+		okCond = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("get.nonnull"))
+		okValue = value
+	case *semantic.OptionalType:
+		okCond, err = s.extractOptionalPresent(value, t)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !isVoidType(resultType) {
+			okValue, err = s.extractOptionalPayload(value, t)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	default:
+		return nil, nil, fmt.Errorf("get requires an optional value or nullable ref")
+	}
+	return s.emitGetBranch(okCond, func() (C.LLVMValueRef, error) { return okValue, nil }, recovery, resultType)
+}
+
+// emitGetBranch is the shared branch/merge skeleton for `get`: when okCond holds
+// it takes okValue (computed lazily so the in-range index load only happens on
+// the taken path); otherwise it runs the recovery clause, which may fall through
+// (value/void) or terminate (return/raise).
+func (s *functionState) emitGetBranch(okCond C.LLVMValueRef, okValue func() (C.LLVMValueRef, error), recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.ok"))
+	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.fallback"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.merge"))
+	C.LLVMBuildCondBr(s.builder, okCond, okBB, fallbackBB)
+
+	incomingValues := make([]C.LLVMValueRef, 0, 2)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	okVal, err := okValue()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !s.currentBlockTerminated() {
+		okEnd := C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+		if !isVoidType(resultType) {
+			incomingValues = append(incomingValues, okVal)
+		}
+		incomingBlocks = append(incomingBlocks, okEnd)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	fallbackValue, reachable, err := s.emitRecoveryClause(recovery, resultType, nil, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if reachable && !s.currentBlockTerminated() {
+		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+		if !isVoidType(resultType) {
+			incomingValues = append(incomingValues, fallbackValue)
+		}
+		incomingBlocks = append(incomingBlocks, fallbackEnd)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingBlocks) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if isVoidType(resultType) {
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 {
+		return incomingValues[0], resultType, nil
+	}
+	phiType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("getphi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
 func (s *functionState) emitIntLiteral(expr *ast.IntLit) (C.LLVMValueRef, semantic.Type, error) {
 	t := s.exprType(expr)
 	if t == nil {

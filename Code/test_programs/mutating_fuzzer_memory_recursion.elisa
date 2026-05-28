@@ -1,5 +1,5 @@
 def mutate_151_require_heap_node() -> heap HeapNode& error[MemoryError]:
-    node: heap HeapNode& = alloc_heap_node() else raise MemoryError.OutOfMemory
+    node: heap HeapNode& = get alloc_heap_node() else raise MemoryError.OutOfMemory
     return node
 
 
@@ -53,14 +53,14 @@ def mutate_159_static_format_literal() -> int:
 
 
 def mutate_160_alloc_bytes_bits() -> uintptr error[MemoryError]:
-    bytes: heap u8& = alloc_bytes(16) else raise MemoryError.OutOfMemory
+    bytes: heap u8& = get alloc_bytes(16) else raise MemoryError.OutOfMemory
     bits: uintptr = bytes.uintptr()
     sfree_bytes(bytes)
     return bits
 
 
 def mutate_161_heap_bytes_plus_offset(size: usize, offset: usize) -> uintptr error[MemoryError]:
-    bytes: heap u8& = alloc_bytes(size) else raise MemoryError.OutOfMemory
+    bytes: heap u8& = get alloc_bytes(size) else raise MemoryError.OutOfMemory
     shifted: heap u8& = bytes + offset
     bits: uintptr = shifted.uintptr()
     sfree_bytes(bytes)
@@ -153,8 +153,8 @@ def mutate_173_use_recursive_heap_logic() -> int error[MemoryError, LogicError]:
 
 
 def mutate_174_alloc_bytes_twice() -> uintptr error[MemoryError]:
-    left: heap u8& = alloc_bytes(8) else raise MemoryError.OutOfMemory
-    right: heap u8& = alloc_bytes(8) else raise MemoryError.OutOfMemory
+    left: heap u8& = get alloc_bytes(8) else raise MemoryError.OutOfMemory
+    right: heap u8& = get alloc_bytes(8) else raise MemoryError.OutOfMemory
     bits: uintptr = left.uintptr() + right.uintptr()
     sfree_bytes(left)
     sfree_bytes(right)
@@ -223,7 +223,7 @@ def mutate_181_checked_write_into(buffer: u8&, size: usize, format: static u8&) 
 
 
 def mutate_182_alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError]:
-    buffer: heap u8& = alloc_bytes(32) else raise MemoryError.OutOfMemory
+    buffer: heap u8& = get alloc_bytes(32) else raise MemoryError.OutOfMemory
     written: int = try mutate_181_checked_write_into(buffer.cast[u8&], 32, "num=%d")
     sfree_bytes(buffer)
     return written
@@ -238,7 +238,7 @@ def mutate_184_static_as_any_bits(format: static u8&) -> uintptr:
 
 
 def mutate_185_heap_as_any_bits() -> uintptr error[MemoryError]:
-    ptr: heap u8& = alloc_bytes(24) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(24) else raise MemoryError.OutOfMemory
     bits: uintptr = ptr.cast[u8&].uintptr()
     sfree_bytes(ptr)
     return bits
@@ -249,7 +249,7 @@ def mutate_186_zero_any_void() -> void&:
 
 
 def mutate_187_any_void_offset_bits(offset: usize) -> uintptr error[MemoryError]:
-    bytes: heap u8& = alloc_bytes(24) else raise MemoryError.OutOfMemory
+    bytes: heap u8& = get alloc_bytes(24) else raise MemoryError.OutOfMemory
     raw: void& = bytes.cast[void&]
     bits: uintptr = (raw.cast[u8&] + offset).uintptr()
     sfree_bytes(bytes)
@@ -275,7 +275,7 @@ def mutate_190_heap_node_any_roundtrip() -> bool error[MemoryError]:
 
 
 def mutate_191_heap_bytes_format_bits() -> uintptr error[MemoryError, FormatError]:
-    buffer: heap u8& = alloc_bytes(64) else raise MemoryError.OutOfMemory
+    buffer: heap u8& = get alloc_bytes(64) else raise MemoryError.OutOfMemory
     try mutate_181_checked_write_into(buffer.cast[u8&], 64, "v=%d")
     bits: uintptr = buffer.cast[u8&].uintptr()
     sfree_bytes(buffer)
@@ -301,7 +301,7 @@ def mutate_194_recursive_heap_offset_sum(depth: int, ptr: heap u8&) -> uintptr:
 
 
 def mutate_195_use_heap_offset_sum() -> uintptr error[MemoryError]:
-    ptr: heap u8& = alloc_bytes(32) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(32) else raise MemoryError.OutOfMemory
     bits: uintptr = mutate_194_recursive_heap_offset_sum(2, ptr)
     sfree_bytes(ptr)
     return bits
@@ -326,14 +326,14 @@ def mutate_198_recursive_any_void_bits(depth: int, ptr: void&) -> uintptr:
 
 
 def mutate_199_any_void_from_heap_bytes() -> uintptr error[MemoryError]:
-    ptr: heap u8& = alloc_bytes(40) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(40) else raise MemoryError.OutOfMemory
     bits: uintptr = mutate_198_recursive_any_void_bits(2, ptr.cast[void&])
     sfree_bytes(ptr)
     return bits
 
 
 def mutate_200_mixed_memory_combo(depth: int) -> uintptr error[MemoryError, FormatError]:
-    ptr: heap u8& = alloc_bytes(48) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(48) else raise MemoryError.OutOfMemory
     try mutate_181_checked_write_into(ptr.cast[u8&], 48, "mix=%d")
     bits: uintptr = mutate_194_recursive_heap_offset_sum(depth, ptr) + mutate_188_recursive_static_ptr_bits(depth, "mix")
     sfree_bytes(ptr)

@@ -244,6 +244,8 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		return regionRefState{}, false
 	case *ast.UnwrapElseExpr:
 		return a.regionRefStateForRecoveredExpr(n.Value, n.Fallback)
+	case *ast.GetExpr:
+		return a.regionRefStateForRecoveredExpr(n.Value, n.Fallback)
 	case *ast.TernaryExpr:
 		left, leftOK := a.regionRefStateForExpr(n.Value)
 		right, rightOK := a.regionRefStateForExpr(n.Alt)

@@ -174,6 +174,9 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 	case *ast.UnwrapElseExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Fallback)
+	case *ast.GetExpr:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Fallback)
 	case *ast.OptionalBindExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 	case *ast.TernaryExpr:

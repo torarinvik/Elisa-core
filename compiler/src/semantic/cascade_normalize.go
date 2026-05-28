@@ -330,6 +330,10 @@ func normalizeCascadeExpr(expr ast.Expr, target ast.Expr, rewriteShorthand bool)
 		n.Value = normalizeCascadeExpr(n.Value, target, rewriteShorthand)
 		n.Fallback = normalizeCascadeExpr(n.Fallback, target, rewriteShorthand)
 		return n
+	case *ast.GetExpr:
+		n.Value = normalizeCascadeExpr(n.Value, target, rewriteShorthand)
+		n.Fallback = normalizeCascadeExpr(n.Fallback, target, rewriteShorthand)
+		return n
 	case *ast.OptionalBindExpr:
 		n.Value = normalizeCascadeExpr(n.Value, target, rewriteShorthand)
 		return n

@@ -546,6 +546,13 @@ func (c *progressCallCollector) collectExpr(expr ast.Expr) {
 			c.collectExpr(n.Recovery.Value)
 			c.collectStmts(n.Recovery.Body)
 		}
+	case *ast.GetExpr:
+		c.collectExpr(n.Value)
+		c.collectExpr(n.Fallback)
+		if n.Recovery != nil {
+			c.collectExpr(n.Recovery.Value)
+			c.collectStmts(n.Recovery.Body)
+		}
 	case *ast.OptionalBindExpr:
 		c.collectExpr(n.Value)
 	case *ast.RaiseExpr:

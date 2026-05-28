@@ -20,7 +20,7 @@ static def checksum() -> i64:
     missing = first item in selected where item > 100
     reflected_payloads = count variant in variants(StaticMaybe) where variant.has_field("value")
     reflected_fields = count field in fields(StaticPair) where field.name != "left"
-    return items.count + selected[0] + (first_selected else 0) + (missing else 2) + reflected_payloads + reflected_fields
+    return items.count + selected[0] + (get first_selected else 0) + (get missing else 2) + reflected_payloads + reflected_fields
 
 def main() -> i64:
     static assert variants(StaticMaybe).count == 2

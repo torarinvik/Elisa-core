@@ -243,6 +243,11 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 			return a.optimizationBaseForExpr(n.Value)
 		}
 		return a.sharedOptimizationBaseForExprs(n.Value, n.Fallback)
+	case *ast.GetExpr:
+		if a.exprDefinitelyNever(n.Fallback) {
+			return a.optimizationBaseForExpr(n.Value)
+		}
+		return a.sharedOptimizationBaseForExprs(n.Value, n.Fallback)
 	case *ast.OptionalBindExpr:
 		return a.optimizationBaseForExpr(n.Value)
 	}

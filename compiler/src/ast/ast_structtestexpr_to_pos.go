@@ -52,6 +52,17 @@ type TryExpr struct {
 	Recovery                 *RecoveryClause
 	UsesDefaultShorthandForm bool
 }
+
+// GetExpr is the optional analog of TryExpr: `get expr` unwraps an Optional /
+// nullable reference, propagating absence (early-return None) when there is no
+// `else`. With a trailing `else` it carries a Fallback/Recovery exactly like
+// TryExpr, lowering to the same recovery machinery.
+type GetExpr struct {
+	Position lexer.Pos
+	Value    Expr
+	Fallback Expr
+	Recovery *RecoveryClause
+}
 type CatchArm struct {
 	Position     lexer.Pos
 	Name         string

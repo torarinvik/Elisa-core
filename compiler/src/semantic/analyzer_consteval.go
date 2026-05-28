@@ -298,6 +298,8 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		return a.evalConstExpr(n.Alt)
 	case *ast.UnwrapElseExpr:
 		return a.evalConstUnwrapElseExpr(n)
+	case *ast.GetExpr:
+		return a.evalConstGetExpr(n)
 	case *ast.TupleExpr:
 		elems := make([]ConstValue, 0, len(n.Elems))
 		for _, elem := range n.Elems {
@@ -686,6 +688,34 @@ func (a *Analyzer) lookupConstEvalValue(name string) (ConstValue, bool) {
 func (a *Analyzer) evalConstUnwrapElseExpr(expr *ast.UnwrapElseExpr) (ConstValue, bool) {
 	if expr == nil {
 		return ConstValue{}, false
+	}
+	value, ok := a.evalConstExpr(expr.Value)
+	if !ok || value.Kind != ConstOptional {
+		return ConstValue{}, false
+	}
+	if value.Some {
+		if value.Value == nil {
+			return ConstValue{}, false
+		}
+		return cloneConstValue(*value.Value), true
+	}
+	recovery := expr.Recovery
+	if recovery == nil && expr.Fallback != nil {
+		recovery = &ast.RecoveryClause{Position: expr.Fallback.Pos(), Kind: ast.RecoveryValue, Value: expr.Fallback}
+	}
+	if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
+		return ConstValue{}, false
+	}
+	return a.evalConstExpr(recovery.Value)
+}
+
+func (a *Analyzer) evalConstGetExpr(expr *ast.GetExpr) (ConstValue, bool) {
+	if expr == nil {
+		return ConstValue{}, false
+	}
+	// `get arr[i] else <value>`: the index already carries its value fallback.
+	if idx, ok := expr.Value.(*ast.IndexExpr); ok && idx.Fallback != nil {
+		return a.evalConstExpr(idx)
 	}
 	value, ok := a.evalConstExpr(expr.Value)
 	if !ok || value.Kind != ConstOptional {

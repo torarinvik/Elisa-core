@@ -10,7 +10,7 @@ extern sfree_node(node: heap Node&) -> heap Node! effects[Memory.Release]
 
 def require_node() -> mutable heap Node& error[MemoryError]:
     raw: heap Node&? = alloc_node() can Memory.Allocate
-    node: heap Node& = raw else raise MemoryError.OutOfMemory
+    node: heap Node& = get raw else raise MemoryError.OutOfMemory
     return node
 
 def make_node_value() -> int error[MemoryError]:

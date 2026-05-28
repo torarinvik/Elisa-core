@@ -35,6 +35,9 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	}
 	finish := func(result Type) Type {
 		if expr.Fallback != nil {
+			if !a.getWrappedIndexExprs[expr] {
+				a.deprecatedf(expr.Pos(), "implicit `else` index fallback is deprecated; write `get <expr>[<index>] else ...` to make the bounds check explicit")
+			}
 			if !safeIndexFallbackOperandType(objType) {
 				a.errorf(expr.Pos(), "index fallback requires an array, darray, view, packed store, or a proven non-null reference to one, got %s", objType)
 			}
@@ -155,6 +158,107 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	}
 	a.errorf(expr.Pos(), "indexing requires string, array, view, packed store, or reference type, got %s", objType)
 	return finish(invalidType)
+}
+
+// analyzeGetExpr type-checks the `get` prefix: the optional analog of `try`.
+//
+//   - `get arr[i]`  — a bounds-checked container access. The bounds obligation is
+//     discharged by the check `get` itself performs, so it never demands
+//     Unsafe.UncheckedIndex; the absence path is the recovery (or propagation).
+//   - `get opt`     — unwraps an Optional / nullable reference.
+//
+// With a trailing `else` the recovery supplies a fallback value / return / raise.
+// Without `else`, `get` propagates absence by early-returning the enclosing
+// function's None — which therefore must return an optional or nullable ref.
+func (a *Analyzer) analyzeGetExpr(n *ast.GetExpr) Type {
+	if n == nil {
+		return invalidType
+	}
+	// Checked-index form. When the inner index already carries a value fallback
+	// (the postfix parser grabbed `else <value>`), the access is total on its own;
+	// otherwise the `get` itself is the bounds check, so pre-mark it proven so it
+	// does not also demand an Unsafe.UncheckedIndex grant.
+	idx, isIndex := n.Value.(*ast.IndexExpr)
+	indexAlreadyTotal := isIndex && idx.Fallback != nil
+	if isIndex {
+		// The explicit `get` head owns this index's recovery, so it must not get
+		// the bare-`else` deprecation warning.
+		a.getWrappedIndexExprs[idx] = true
+		if idx.Fallback == nil {
+			a.indexBoundsProven[idx] = true
+		}
+	}
+
+	valueType := a.analyzeExpr(n.Value)
+	if IsInvalidType(valueType) {
+		return invalidType
+	}
+
+	if indexAlreadyTotal {
+		// `get arr[i] else <value>`: the index fallback supplies the absence path,
+		// so the access is total and there is nothing left for `get` to propagate.
+		return valueType
+	}
+
+	var resultType Type
+	switch {
+	case isIndex:
+		// The element type produced by analyzeIndexExpr is the unwrapped result;
+		// `get` performs the bounds check, so the access is total.
+		resultType = valueType
+	case isOptionalValueType(valueType):
+		resultType = optionalValueInner(valueType)
+	default:
+		if refType, ok := valueType.(*RefType); ok && refType.State == RefStateNullable {
+			resultType = cloneRefTypeWithState(refType, RefStateNonNull)
+			break
+		}
+		a.errorf(n.Pos(), "get requires an optional, a nullable reference, or a container index, got %s", valueType)
+		return invalidType
+	}
+
+	recovery := recoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
+	if recovery == nil {
+		// Propagation form: absence early-returns the enclosing function's None.
+		if !a.currentFuncReturnAcceptsAbsence() {
+			a.errorf(n.Pos(), "get without else requires the enclosing function to return an optional or nullable reference")
+		}
+		return resultType
+	}
+	fallbackType := a.analyzeRecoveryClause(recovery, resultType, nil, "get fallback")
+	if !IsNeverType(fallbackType) && !AssignableTo(resultType, fallbackType) {
+		a.errorf(n.Pos(), "get fallback expects %s, got %s", resultType, fallbackType)
+		a.reportShapeMismatchNotes(n.Pos(), resultType, fallbackType)
+	}
+	return resultType
+}
+
+func isOptionalValueType(t Type) bool {
+	_, ok := t.(*OptionalType)
+	return ok
+}
+
+func optionalValueInner(t Type) Type {
+	if opt, ok := t.(*OptionalType); ok && opt != nil {
+		return opt.Value
+	}
+	return t
+}
+
+// currentFuncReturnAcceptsAbsence reports whether the enclosing function's return
+// type can carry a None — i.e. an Optional or a nullable reference — which is the
+// requirement for the propagating (`else`-less) form of `get`.
+func (a *Analyzer) currentFuncReturnAcceptsAbsence() bool {
+	if a == nil || a.currentFuncType == nil {
+		return false
+	}
+	switch ret := a.currentFuncType.Return.(type) {
+	case *OptionalType:
+		return true
+	case *RefType:
+		return ret != nil && ret.State == RefStateNullable
+	}
+	return false
 }
 
 func (a *Analyzer) tupleIndexResultType(tuple *TupleType, indexExpr ast.Expr) (Type, bool) {

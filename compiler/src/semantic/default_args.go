@@ -246,6 +246,13 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 			return nil
 		}
 		return &ast.UnwrapElseExpr{Position: n.Position, Value: value, Fallback: fallback}
+	case *ast.GetExpr:
+		value := cloneDefaultArgExpr(n.Value)
+		fallback := cloneDefaultArgExpr(n.Fallback)
+		if (n.Value != nil && value == nil) || (n.Fallback != nil && fallback == nil) {
+			return nil
+		}
+		return &ast.GetExpr{Position: n.Position, Value: value, Fallback: fallback, Recovery: n.Recovery}
 	case *ast.OptionalBindExpr:
 		value := cloneDefaultArgExpr(n.Value)
 		if n.Value != nil && value == nil {

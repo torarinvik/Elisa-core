@@ -374,6 +374,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitCatchExpr(n)
 	case *ast.UnwrapElseExpr:
 		value, actualType, err = s.emitUnwrapElseExpr(n)
+	case *ast.GetExpr:
+		value, actualType, err = s.emitGetExpr(n)
 	case *ast.OptionalBindExpr:
 		value, actualType, err = s.emitOptionalBindExpr(n)
 	case *ast.AllocExpr:

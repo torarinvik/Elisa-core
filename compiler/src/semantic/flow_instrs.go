@@ -176,6 +176,10 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Fallback)
 		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Value), Position: n.Pos(), Note: "else fallback handles nullable path"})
+	case *ast.GetExpr:
+		appendBasicFlowExprInstrs(block, n.Value)
+		appendBasicFlowExprInstrs(block, n.Fallback)
+		appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrErrorExit, Location: "<error>", Source: flowLocationForExpr(n.Value), Position: n.Pos(), Note: "else fallback handles nullable path"})
 	case *ast.OptionalBindExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.TernaryExpr:

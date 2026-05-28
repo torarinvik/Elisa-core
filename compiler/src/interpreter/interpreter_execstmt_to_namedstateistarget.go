@@ -381,6 +381,23 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 			return VoidValue(), err
 		}
 		return RefValue(slot), nil
+	case *ast.GetExpr:
+		// `get arr[i] else <value>` is a bounds-checked access. When the value
+		// fallback is already on the inner IndexExpr (postfix `else <value>`),
+		// delegate to the index evaluation which honors it. When the fallback is
+		// a value recovery carried by the `get`, synthesize an equivalent
+		// IndexExpr. Optional unwrap and return/raise recovery are not supported
+		// by this limited interpreter (it does not model optionals).
+		if idx, ok := n.Value.(*ast.IndexExpr); ok {
+			if idx.Fallback != nil {
+				return i.evalExpr(frame, idx)
+			}
+			if n.Fallback != nil {
+				synth := &ast.IndexExpr{Position: idx.Position, Object: idx.Object, Index: idx.Index, Fallback: n.Fallback}
+				return i.evalExpr(frame, synth)
+			}
+		}
+		return VoidValue(), fmt.Errorf("unsupported interpreter expression %T", expr)
 	case *ast.TernaryExpr:
 		cond, err := i.evalExpr(frame, n.Cond)
 		if err != nil {

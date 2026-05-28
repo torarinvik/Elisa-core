@@ -108,6 +108,9 @@ func (c *parallelForCaptureCollector) collectExpr(expr ast.Expr, locals map[stri
 	case *ast.UnwrapElseExpr:
 		c.collectExpr(n.Value, locals)
 		c.collectExpr(n.Fallback, locals)
+	case *ast.GetExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Fallback, locals)
 	case *ast.OptionalBindExpr:
 		c.collectExpr(n.Value, locals)
 	case *ast.AllocExpr:

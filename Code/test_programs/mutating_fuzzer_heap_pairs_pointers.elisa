@@ -1,5 +1,5 @@
 def mutate_201_require_heap_pair_node() -> heap HeapPairNode& error[MemoryError]:
-    node: heap HeapPairNode& = alloc_heap_pair_node() else raise MemoryError.OutOfMemory
+    node: heap HeapPairNode& = get alloc_heap_pair_node() else raise MemoryError.OutOfMemory
     return node
 
 
@@ -107,8 +107,8 @@ def mutate_214_heap_pair_any_roundtrip() -> bool error[MemoryError]:
 
 
 def mutate_215_alloc_and_compare_two_buffers() -> bool error[MemoryError]:
-    left: heap u8& = alloc_bytes(8) else raise MemoryError.OutOfMemory
-    right: heap u8& = alloc_bytes(8) else raise MemoryError.OutOfMemory
+    left: heap u8& = get alloc_bytes(8) else raise MemoryError.OutOfMemory
+    right: heap u8& = get alloc_bytes(8) else raise MemoryError.OutOfMemory
     different: bool = left.uintptr() != right.uintptr()
     sfree_bytes(left)
     sfree_bytes(right)
@@ -147,14 +147,14 @@ def mutate_220_use_heap_pair_any_sum() -> int error[MemoryError, DiskError, NetE
 
 
 def mutate_221_alloc_zero_offset_compare() -> bool error[MemoryError]:
-    ptr: heap u8& = alloc_bytes(12) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(12) else raise MemoryError.OutOfMemory
     same: bool = (ptr + 0).uintptr() == ptr.uintptr()
     sfree_bytes(ptr)
     return same
 
 
 def mutate_222_heap_bytes_to_any_void_roundtrip() -> bool error[MemoryError]:
-    ptr: heap u8& = alloc_bytes(12) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(12) else raise MemoryError.OutOfMemory
     same: bool = ptr.cast[void&].cast[u8&].uintptr() == ptr.uintptr()
     sfree_bytes(ptr)
     return same
@@ -179,7 +179,7 @@ def mutate_225_combo_pointers_and_errors(which: int) -> int:
 
 
 def mutate_226_recursive_alloc_bits(depth: int, size: usize) -> uintptr error[MemoryError]:
-    ptr: heap u8& = alloc_bytes(size) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(size) else raise MemoryError.OutOfMemory
     bits: uintptr = ptr.uintptr()
     sfree_bytes(ptr)
     if depth <= 0:
@@ -221,7 +221,7 @@ def mutate_232_static_vs_stack_bits() -> bool:
 
 
 def mutate_233_heap_not_zero_any_void() -> bool error[MemoryError]:
-    ptr: heap u8& = alloc_bytes(12) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(12) else raise MemoryError.OutOfMemory
     different: bool = ptr.cast[void&] != mutate_186_zero_any_void()
     sfree_bytes(ptr)
     return different
@@ -239,7 +239,7 @@ def mutate_235_use_recursive_static_string_walk() -> uintptr:
 
 
 def mutate_236_recursive_heap_any_mix(depth: int) -> uintptr error[MemoryError]:
-    ptr: heap u8& = alloc_bytes(16) else raise MemoryError.OutOfMemory
+    ptr: heap u8& = get alloc_bytes(16) else raise MemoryError.OutOfMemory
     bits: uintptr = mutate_192_recursive_any_ptr_walk(depth, ptr.cast[u8&]) + mutate_194_recursive_heap_offset_sum(depth, ptr)
     sfree_bytes(ptr)
     return bits

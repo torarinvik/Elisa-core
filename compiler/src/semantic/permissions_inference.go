@@ -371,6 +371,9 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	case *ast.UnwrapElseExpr:
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Fallback)
+	case *ast.GetExpr:
+		c.collectExpr(n.Value)
+		c.collectExpr(n.Fallback)
 	case *ast.OptionalBindExpr:
 		c.collectExpr(n.Value)
 	case *ast.AllocExpr:

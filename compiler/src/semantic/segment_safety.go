@@ -361,6 +361,9 @@ func (a *Analyzer) validateSegmentFlowExpr(expr ast.Expr, owner *segmentOwnerSta
 	case *ast.UnwrapElseExpr:
 		a.validateSegmentFlowExpr(n.Value, owner)
 		a.validateSegmentFlowExpr(n.Fallback, owner)
+	case *ast.GetExpr:
+		a.validateSegmentFlowExpr(n.Value, owner)
+		a.validateSegmentFlowExpr(n.Fallback, owner)
 	case *ast.OptionalBindExpr:
 		a.validateSegmentFlowExpr(n.Value, owner)
 	case *ast.AllocExpr:
@@ -593,6 +596,9 @@ func (a *Analyzer) validateSegmentAgnosticExpr(expr ast.Expr) {
 	case *ast.UnwrapElseExpr:
 		a.validateSegmentAgnosticExpr(n.Value)
 		a.validateSegmentAgnosticExpr(n.Fallback)
+	case *ast.GetExpr:
+		a.validateSegmentAgnosticExpr(n.Value)
+		a.validateSegmentAgnosticExpr(n.Fallback)
 	case *ast.OptionalBindExpr:
 		a.validateSegmentAgnosticExpr(n.Value)
 	case *ast.AllocExpr:
@@ -819,6 +825,9 @@ func (a *Analyzer) validateReentrantSafeExpr(expr ast.Expr) {
 		a.validateReentrantSafeExpr(n.Value)
 		a.validateReentrantSafeExpr(n.Fallback)
 	case *ast.UnwrapElseExpr:
+		a.validateReentrantSafeExpr(n.Value)
+		a.validateReentrantSafeExpr(n.Fallback)
+	case *ast.GetExpr:
 		a.validateReentrantSafeExpr(n.Value)
 		a.validateReentrantSafeExpr(n.Fallback)
 	case *ast.OptionalBindExpr:

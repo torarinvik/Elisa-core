@@ -1070,7 +1070,7 @@ def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
 
 
 def index_map_get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
-    index: usize = index_map_find_index[K, T](map, key) else return null
+    index: usize = get index_map_find_index[K, T](map, key) else return null
     value: T = index_map_value[K, T](map, index)
     return value
 
@@ -1145,7 +1145,7 @@ def symbol_table_valid_id[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTabl
 
 
 def symbol_table_find_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
-    index: usize = index_map_find_index[K, T](table.items, key) else return SYMBOL_TABLE_INVALID_ID
+    index: usize = get index_map_find_index[K, T](table.items, key) else return SYMBOL_TABLE_INVALID_ID
     return symbol_table_id_from_index(index)
 
 

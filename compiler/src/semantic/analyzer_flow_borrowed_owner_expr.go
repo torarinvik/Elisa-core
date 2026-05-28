@@ -218,6 +218,8 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		return borrowedOwnerRefState{}, false
 	case *ast.UnwrapElseExpr:
 		return a.borrowedOwnerRefStateForRecoveredExpr(n.Value, n.Fallback)
+	case *ast.GetExpr:
+		return a.borrowedOwnerRefStateForRecoveredExpr(n.Value, n.Fallback)
 	case *ast.OptionalBindExpr:
 		return a.borrowedOwnerRefStateForExpr(n.Value)
 	case *ast.TernaryExpr:

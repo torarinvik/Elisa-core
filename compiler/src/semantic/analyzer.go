@@ -105,6 +105,11 @@ type Analyzer struct {
 	safeCalls                     map[*ast.CallExpr]*SafeCallInfo
 	exprFacts                     map[ast.Expr]OptimizationFacts
 	indexBoundsProven             map[*ast.IndexExpr]bool
+	// getWrappedIndexExprs records index expressions whose `else` recovery is
+	// owned by an enclosing `get` (e.g. `get arr[i] else 0`). Such sites already
+	// use the explicit `get` head, so they must NOT receive the bare-`else`
+	// deprecation warning.
+	getWrappedIndexExprs          map[*ast.IndexExpr]bool
 	storageViewStaleUses          map[ast.Expr]storageViewDependencyState
 	unsafeAliasExprs              map[ast.Expr]bool
 	unsafeAliasStmts              map[ast.Stmt]bool
@@ -429,6 +434,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		safeCalls:                         make(map[*ast.CallExpr]*SafeCallInfo, exprCapacity/32+8),
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
 		indexBoundsProven:                 make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
+		getWrappedIndexExprs:              make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
 		storageViewStaleUses:              make(map[ast.Expr]storageViewDependencyState, exprCapacity/64+8),
 		unsafeAliasExprs:                  make(map[ast.Expr]bool, exprCapacity/64+8),
 		unsafeAliasStmts:                  make(map[ast.Stmt]bool, exprCapacity/64+8),

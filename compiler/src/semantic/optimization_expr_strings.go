@@ -152,6 +152,8 @@ func optimizationExprString(expr ast.Expr) string {
 		return fmt.Sprintf("(try %s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Fallback))
 	case *ast.UnwrapElseExpr:
 		return fmt.Sprintf("(%s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Fallback))
+	case *ast.GetExpr:
+		return fmt.Sprintf("(%s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Fallback))
 	case *ast.OptionalBindExpr:
 		return fmt.Sprintf("(let %s = %s)", n.Name, optimizationExprString(n.Value))
 	default:

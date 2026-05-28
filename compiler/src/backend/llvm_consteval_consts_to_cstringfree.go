@@ -193,6 +193,8 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 		return s.evalConstExpr(n.Alt)
 	case *ast.UnwrapElseExpr:
 		return s.evalConstUnwrapElseExpr(n)
+	case *ast.GetExpr:
+		return s.evalConstGetExpr(n)
 	case *ast.QueryExpr:
 		return s.evalConstQueryExpr(n)
 	}
@@ -212,6 +214,9 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
 	if unwrapExpr, ok := expr.(*ast.UnwrapElseExpr); ok {
 		return g.evalConstUnwrapElseExpr(unwrapExpr)
+	}
+	if getExpr, ok := expr.(*ast.GetExpr); ok {
+		return g.evalConstGetExpr(getExpr)
 	}
 	if queryExpr, ok := expr.(*ast.QueryExpr); ok {
 		return g.evalConstQueryExpr(queryExpr)
@@ -254,6 +259,54 @@ func (s *functionState) evalConstUnwrapElseExpr(expr *ast.UnwrapElseExpr) (seman
 func (g *llvmGenerator) evalConstUnwrapElseExpr(expr *ast.UnwrapElseExpr) (semantic.ConstValue, bool) {
 	if expr == nil {
 		return semantic.ConstValue{}, false
+	}
+	value, ok := g.evalConstExpr(expr.Value)
+	if !ok || value.Kind != semantic.ConstOptional {
+		return semantic.ConstValue{}, false
+	}
+	if value.Some {
+		if value.Value == nil {
+			return semantic.ConstValue{}, false
+		}
+		return cloneBackendConstValue(*value.Value), true
+	}
+	recovery := backendConstRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
+	if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
+		return semantic.ConstValue{}, false
+	}
+	return g.evalConstExpr(recovery.Value)
+}
+
+func (s *functionState) evalConstGetExpr(expr *ast.GetExpr) (semantic.ConstValue, bool) {
+	if expr == nil {
+		return semantic.ConstValue{}, false
+	}
+	if idx, ok := expr.Value.(*ast.IndexExpr); ok && idx.Fallback != nil {
+		return s.evalConstExpr(idx)
+	}
+	value, ok := s.evalConstExpr(expr.Value)
+	if !ok || value.Kind != semantic.ConstOptional {
+		return semantic.ConstValue{}, false
+	}
+	if value.Some {
+		if value.Value == nil {
+			return semantic.ConstValue{}, false
+		}
+		return cloneBackendConstValue(*value.Value), true
+	}
+	recovery := backendConstRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
+	if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
+		return semantic.ConstValue{}, false
+	}
+	return s.evalConstExpr(recovery.Value)
+}
+
+func (g *llvmGenerator) evalConstGetExpr(expr *ast.GetExpr) (semantic.ConstValue, bool) {
+	if expr == nil {
+		return semantic.ConstValue{}, false
+	}
+	if idx, ok := expr.Value.(*ast.IndexExpr); ok && idx.Fallback != nil {
+		return g.evalConstExpr(idx)
 	}
 	value, ok := g.evalConstExpr(expr.Value)
 	if !ok || value.Kind != semantic.ConstOptional {
@@ -437,6 +490,25 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		}
 		return evalConstExprWithLookup(n.Alt, lookup, call)
 	case *ast.UnwrapElseExpr:
+		value, ok := evalConstExprWithLookup(n.Value, lookup, call)
+		if !ok || value.Kind != semantic.ConstOptional {
+			return semantic.ConstValue{}, false
+		}
+		if value.Some {
+			if value.Value == nil {
+				return semantic.ConstValue{}, false
+			}
+			return cloneBackendConstValue(*value.Value), true
+		}
+		recovery := backendConstRecoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
+		if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
+			return semantic.ConstValue{}, false
+		}
+		return evalConstExprWithLookup(recovery.Value, lookup, call)
+	case *ast.GetExpr:
+		if idx, ok := n.Value.(*ast.IndexExpr); ok && idx.Fallback != nil {
+			return evalConstExprWithLookup(idx, lookup, call)
+		}
 		value, ok := evalConstExprWithLookup(n.Value, lookup, call)
 		if !ok || value.Kind != semantic.ConstOptional {
 			return semantic.ConstValue{}, false

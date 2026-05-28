@@ -316,6 +316,9 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 	case *ast.UnwrapElseExpr:
 		c.countExpr(n.Value)
 		c.countExpr(n.Fallback)
+	case *ast.GetExpr:
+		c.countExpr(n.Value)
+		c.countExpr(n.Fallback)
 	case *ast.OptionalBindExpr:
 		c.countExpr(n.Value)
 	case *ast.AllocExpr:

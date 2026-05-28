@@ -175,7 +175,11 @@ func (p *Parser) parsePostfix() ast.Expr {
 			}
 			p.expect(lexer.TOKEN_RBRACKET)
 			expr = &ast.IndexExpr{Position: pos, Object: expr, Index: start}
-			if p.peek() == lexer.TOKEN_ELSE {
+			// A trailing `else <value>` is a postfix index fallback. Recovery forms
+			// (`else return`, `else raise`, `else void`, `else binding:`) are left
+			// for the expression-level recovery handling, so that e.g.
+			// `get arr[i] else return null` folds the recovery into the `get`.
+			if p.peek() == lexer.TOKEN_ELSE && !p.elseIntroducesRecoveryClause() {
 				p.advance()
 				expr.(*ast.IndexExpr).Fallback = p.parseOr()
 			}
@@ -408,6 +412,17 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		if p.cur().Text == "rewrite" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
 			return p.parseRewriteExpr()
+		}
+		// Contextual `get` prefix: the optional analog of `try`. Recognized only
+		// when immediately followed by an identifier (the start of the operand),
+		// so call sites like `get(x)`, method calls `x.get(i)`, indexing `get[i]`,
+		// and bare `get` identifiers are left untouched. A trailing `else` is
+		// folded into the GetExpr at parseExpr, mirroring TryExpr.
+		if p.cur().Text == "get" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			pos := p.cur().Pos
+			p.advance()
+			value := p.parseOr()
+			return &ast.GetExpr{Position: pos, Value: value}
 		}
 		tok := p.advance()
 		if p.peek() == lexer.TOKEN_SCOPE {

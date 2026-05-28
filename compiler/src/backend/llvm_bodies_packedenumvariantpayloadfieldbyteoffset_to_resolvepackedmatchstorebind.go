@@ -342,6 +342,8 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 		return false
 	case *ast.UnwrapElseExpr:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Fallback)
+	case *ast.GetExpr:
+		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Fallback)
 	case *ast.OptionalBindExpr:
 		return exprReadsMatchedValueField(name, n.Value)
 	case *ast.AllocExpr:

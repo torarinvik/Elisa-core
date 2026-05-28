@@ -110,6 +110,7 @@ func (n *TypeExprExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ParenExpr) Pos() lexer.Pos       { return n.Position }
 func (n *RaiseExpr) Pos() lexer.Pos       { return n.Position }
 func (n *TryExpr) Pos() lexer.Pos         { return n.Position }
+func (n *GetExpr) Pos() lexer.Pos         { return n.Position }
 func (n *CatchExpr) Pos() lexer.Pos       { return n.Position }
 func (n *UnwrapElseExpr) Pos() lexer.Pos  { return n.Position }
 func (n *OptionalBindExpr) Pos() lexer.Pos {
@@ -323,6 +324,7 @@ func (*TypeExprExpr) nodeTag()                         {}
 func (*ParenExpr) nodeTag()                            {}
 func (*RaiseExpr) nodeTag()                            {}
 func (*TryExpr) nodeTag()                              {}
+func (*GetExpr) nodeTag()                              {}
 func (*CatchExpr) nodeTag()                            {}
 func (*UnwrapElseExpr) nodeTag()                       {}
 func (*OptionalBindExpr) nodeTag()                     {}
@@ -547,6 +549,7 @@ func (*EmitExpr) exprTag()                             {}
 func (*MatchStmt) stmtTag()                            {}
 func (*ExpectPatternStmt) stmtTag()                    {}
 func (*TryExpr) exprTag()                              {}
+func (*GetExpr) exprTag()                              {}
 func (*CatchExpr) exprTag()                            {}
 func (*UnwrapElseExpr) exprTag()                       {}
 func (*OptionalBindExpr) exprTag()                     {}
