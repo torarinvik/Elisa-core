@@ -111,6 +111,8 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	a.defineLocalInScope(loopScope, loopSym, stmt.Pos())
 
 	savedIndexBounds := a.currentIndexBounds
+	savedViewStaticLen := a.currentViewStaticLen
+	a.currentViewStaticLen = cloneViewStaticLen(savedViewStaticLen)
 	loopIndexBounds := cloneIndexBoundFacts(savedIndexBounds)
 	if stmt.Op == lexer.TOKEN_RANGE_LT && isZeroOptimizationExpr(stmt.Start) {
 		if loopIndexBounds == nil {
@@ -128,6 +130,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	a.loopDepth--
 	a.currentIndexBounds = savedIndexBounds
+	a.currentViewStaticLen = savedViewStaticLen
 	if !blockDefinitelyExits(stmt.Body) {
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)

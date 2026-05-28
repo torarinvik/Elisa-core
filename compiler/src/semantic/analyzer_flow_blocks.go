@@ -724,6 +724,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	savedAliasBindings := a.currentAliasBindings
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedIndexBounds := a.currentIndexBounds
+	savedViewStaticLen := a.currentViewStaticLen
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
@@ -733,6 +734,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentAliasAccesses = a.cloneAliasAccesses()
 	a.currentAliasBindings = a.cloneAliasBindings()
 	a.currentIndexBounds = cloneIndexBoundFacts(a.currentIndexBounds)
+	a.currentViewStaticLen = cloneViewStaticLen(a.currentViewStaticLen)
 	if prepare != nil {
 		prepare()
 	}
@@ -748,5 +750,6 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentAliasBindings = savedAliasBindings
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentIndexBounds = savedIndexBounds
+	a.currentViewStaticLen = savedViewStaticLen
 	return snapshot
 }

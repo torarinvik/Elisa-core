@@ -110,6 +110,13 @@ type Analyzer struct {
 	// use the explicit `get` head, so they must NOT receive the bare-`else`
 	// deprecation warning.
 	getWrappedIndexExprs          map[*ast.IndexExpr]bool
+	// currentViewStaticLen records the statically-known element count of a
+	// view/darray-view binding produced by a constant-bounded slice
+	// (e.g. `s = arr[0:15]` -> 15). A constant index `s[k]` with 0 <= k < len is
+	// then provably in bounds with zero runtime cost. Keyed by binding name, it
+	// follows the same block/loop save-restore and reassignment-invalidation
+	// discipline as currentIndexBounds.
+	currentViewStaticLen          map[string]int64
 	storageViewStaleUses          map[ast.Expr]storageViewDependencyState
 	unsafeAliasExprs              map[ast.Expr]bool
 	unsafeAliasStmts              map[ast.Stmt]bool
@@ -435,6 +442,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
 		indexBoundsProven:                 make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
 		getWrappedIndexExprs:              make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
+		currentViewStaticLen:              make(map[string]int64),
 		storageViewStaleUses:              make(map[ast.Expr]storageViewDependencyState, exprCapacity/64+8),
 		unsafeAliasExprs:                  make(map[ast.Expr]bool, exprCapacity/64+8),
 		unsafeAliasStmts:                  make(map[ast.Stmt]bool, exprCapacity/64+8),

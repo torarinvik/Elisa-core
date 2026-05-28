@@ -48,6 +48,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordSpecializedValueTypeBinding(sym, valueType)
 		a.recordValueBinding(sym, n.Value)
+		a.recordViewStaticLenBinding(n.Name, n.Value, bindingType)
 		a.markCreatedProtocolSymbol(sym, n.Value)
 		a.markReceivedOwnedRegion(sym, n.Value)
 		if isOwnedTypeExpr(n.Type) {

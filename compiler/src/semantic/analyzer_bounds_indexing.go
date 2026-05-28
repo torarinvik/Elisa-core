@@ -29,6 +29,63 @@ func cloneIndexBoundFacts(src map[string]indexBoundFact) map[string]indexBoundFa
 	return out
 }
 
+func cloneViewStaticLen(src map[string]int64) map[string]int64 {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]int64, len(src))
+	for name, length := range src {
+		out[name] = length
+	}
+	return out
+}
+
+// constSliceLength returns the statically-known element count of a slice when
+// both bounds const-evaluate to non-negative integers with start <= end. The
+// resulting view then carries a provable length for zero-cost constant indexing.
+func (a *Analyzer) constSliceLength(expr *ast.SliceExpr) (int64, bool) {
+	if expr == nil {
+		return 0, false
+	}
+	start, startOK := a.evalConstExpr(expr.Start)
+	end, endOK := a.evalConstExpr(expr.End)
+	if !startOK || !endOK || start.Kind != ConstInt || end.Kind != ConstInt {
+		return 0, false
+	}
+	if start.Int < 0 || end.Int < start.Int {
+		return 0, false
+	}
+	return end.Int - start.Int, true
+}
+
+// recordViewStaticLenBinding records that a freshly-bound view variable came
+// from a constant-bounded slice and therefore has a statically-known length.
+func (a *Analyzer) recordViewStaticLenBinding(name string, value ast.Expr, bindingType Type) {
+	if a == nil || name == "" || value == nil {
+		return
+	}
+	slice, ok := stripOptimizationParens(value).(*ast.SliceExpr)
+	if !ok {
+		// A binding to a non-slice expression clears any stale length fact.
+		delete(a.currentViewStaticLen, name)
+		return
+	}
+	switch StripAggregateStateType(bindingType).(type) {
+	case *ViewType, *DArrayViewType:
+	default:
+		delete(a.currentViewStaticLen, name)
+		return
+	}
+	if length, ok := a.constSliceLength(slice); ok {
+		if a.currentViewStaticLen == nil {
+			a.currentViewStaticLen = make(map[string]int64)
+		}
+		a.currentViewStaticLen[name] = length
+		return
+	}
+	delete(a.currentViewStaticLen, name)
+}
+
 func (a *Analyzer) applyIndexBoundsFactsForCondition(cond ast.Expr, truthy bool) {
 	facts := indexBoundsFactsForCondition(cond, truthy)
 	if len(facts) == 0 {
@@ -68,6 +125,9 @@ func (a *Analyzer) invalidateIndexBoundsForAssignedTarget(target ast.Expr) {
 	// If the index variable itself is reassigned, its upper-bound proof no longer
 	// holds for the new value.
 	delete(a.currentIndexBounds, base)
+	// A reassigned view binding may no longer be the constant-bounded slice that
+	// established its static length.
+	delete(a.currentViewStaticLen, base)
 	a.invalidateIndexBoundsReferencingBase(base)
 }
 
@@ -140,6 +200,18 @@ func (a *Analyzer) indexExprHasBoundsProof(expr *ast.IndexExpr, objType Type) bo
 	if array, ok := stripRefForBounds(objType).(*ArrayType); ok && array != nil {
 		if value, ok := a.evalConstExpr(expr.Index); ok && value.Kind == ConstInt {
 			return value.Int >= 0 && (!array.HasConstSize || value.Int < array.ConstSize)
+		}
+	}
+	// A view bound from a constant-bounded slice has a statically-known length;
+	// a constant index within [0, len) is provably in bounds (zero-cost).
+	if base, ok := stripOptimizationParens(expr.Object).(*ast.Ident); ok && base != nil {
+		if length, known := a.currentViewStaticLen[base.Name]; known {
+			switch StripAggregateStateType(stripRefForBounds(objType)).(type) {
+			case *ViewType, *DArrayViewType:
+				if value, ok := a.evalConstExpr(expr.Index); ok && value.Kind == ConstInt {
+					return value.Int >= 0 && value.Int < length
+				}
+			}
 		}
 	}
 	indexName, ok := stripOptimizationParens(expr.Index).(*ast.Ident)
