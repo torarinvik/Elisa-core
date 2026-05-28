@@ -469,7 +469,9 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 	}
 	included[abs] = true
 	out.Grow(len(raw))
+	writeLineDirective(out, 1, abs)
 	start := 0
+	curLine := 1
 	for start <= len(raw) {
 		end := bytes.IndexByte(raw[start:], '\n')
 		hasNewline := end >= 0
@@ -494,6 +496,8 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
 				out.WriteByte('\n')
 			}
+			// Resume attribution to the parent file after the spliced include.
+			writeLineDirective(out, curLine+1, abs)
 		} else {
 			out.Write(line)
 			if hasNewline {
@@ -504,6 +508,7 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 			break
 		}
 		start = end + 1
+		curLine++
 	}
 	return nil
 }

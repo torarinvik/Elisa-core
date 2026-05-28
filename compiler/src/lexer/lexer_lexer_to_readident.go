@@ -137,6 +137,67 @@ func (l *Lexer) skipLineComment() {
 		l.advance()
 	}
 }
+
+// tryConsumeLineDirective recognizes a `#line <num> <path>` directive (emitted by
+// include expansion) and retargets the lexer's position to the real source file
+// and line, so every token Pos attributes to the file the code actually came
+// from rather than the flattened include buffer. Returns false for ordinary `#`
+// comments, which are skipped normally. Called with l.peek() == '#'.
+func (l *Lexer) tryConsumeLineDirective() bool {
+	i := l.pos + 1
+	for i < len(l.src) && (l.src[i] == ' ' || l.src[i] == '\t') {
+		i++
+	}
+	const kw = "line"
+	if i+len(kw) > len(l.src) {
+		return false
+	}
+	for k := 0; k < len(kw); k++ {
+		if l.src[i+k] != kw[k] {
+			return false
+		}
+	}
+	j := i + len(kw)
+	if j >= len(l.src) || (l.src[j] != ' ' && l.src[j] != '\t') {
+		return false
+	}
+	for j < len(l.src) && (l.src[j] == ' ' || l.src[j] == '\t') {
+		j++
+	}
+	numStart := j
+	num := 0
+	for j < len(l.src) && l.src[j] >= '0' && l.src[j] <= '9' {
+		num = num*10 + int(l.src[j]-'0')
+		j++
+	}
+	if j == numStart {
+		return false
+	}
+	for j < len(l.src) && (l.src[j] == ' ' || l.src[j] == '\t') {
+		j++
+	}
+	fileStart := j
+	for j < len(l.src) && l.src[j] != '\n' {
+		j++
+	}
+	fileEnd := j
+	for fileEnd > fileStart && (l.src[fileEnd-1] == ' ' || l.src[fileEnd-1] == '\t' || l.src[fileEnd-1] == '\r') {
+		fileEnd--
+	}
+	if fileEnd == fileStart {
+		return false
+	}
+	file := string(l.src[fileStart:fileEnd])
+	if j < len(l.src) && l.src[j] == '\n' {
+		j++
+	}
+	l.pos = j
+	l.line = num
+	l.col = 1
+	l.filename = file
+	l.atLineStart = true
+	return true
+}
 func (l *Lexer) measureIndent() int {
 	indent := 0
 	for l.pos < len(l.src) {

@@ -15,6 +15,16 @@ func (l *Lexer) NextToken() Token {
 		return tok
 	}
 
+	// Consume `#line <num> <path>` source-attribution directives (emitted by
+	// include expansion, always at column 0) before indentation handling, so they
+	// retarget Pos to the real source file without producing tokens or affecting
+	// indentation.
+	for l.atLineStart && l.pos < len(l.src) && l.src[l.pos] == '#' {
+		if !l.tryConsumeLineDirective() {
+			break
+		}
+	}
+
 	// At line start, handle indentation outside groupings, and also for grouped block expressions.
 	if l.atLineStart {
 		l.atLineStart = false

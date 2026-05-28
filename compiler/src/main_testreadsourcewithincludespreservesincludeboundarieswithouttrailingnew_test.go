@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+// stripLineDirectives removes the `#line <num> <path>` source-attribution
+// markers that include expansion now emits, so boundary/indentation assertions
+// can compare against the bare expanded content.
+func stripLineDirectives(s string) string {
+	lines := strings.Split(s, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, ln := range lines {
+		if strings.HasPrefix(ln, "#line ") {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	return strings.Join(kept, "\n")
+}
+
 func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines(t *testing.T) {
 	dir := t.TempDir()
 	leafPath := filepath.Join(dir, "leaf.elisa")
@@ -31,7 +46,7 @@ func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines
 		t.Fatalf("readSourceWithIncludes: %v", err)
 	}
 
-	got := string(expanded)
+	got := stripLineDirectives(string(expanded))
 	want := "root_start\nleaf_line\nmid_line\nroot_end"
 	if got != want {
 		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
@@ -58,7 +73,7 @@ func TestReadSourceWithIncludesAcceptsBareIncludeDirective(t *testing.T) {
 		t.Fatalf("readSourceWithIncludes: %v", err)
 	}
 
-	got := string(expanded)
+	got := stripLineDirectives(string(expanded))
 	want := "root_start\nleaf_line\nmid_line\nroot_end"
 	if got != want {
 		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
@@ -85,7 +100,7 @@ func TestReadSourceWithIncludesAcceptsPascalIncludeDirectives(t *testing.T) {
 		t.Fatalf("readSourceWithIncludes: %v", err)
 	}
 
-	got := string(expanded)
+	got := stripLineDirectives(string(expanded))
 	want := "root_start\nleaf_line\nmid_line\nroot_end"
 	if got != want {
 		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
@@ -109,7 +124,7 @@ func TestReadSourceWithIncludesPreservesIndentedIncludeContext(t *testing.T) {
 		t.Fatalf("readSourceWithIncludes: %v", err)
 	}
 
-	got := string(expanded)
+	got := stripLineDirectives(string(expanded))
 	want := "module M:\n    def foo() -> int:\n        return 7\n\ndef main() -> int:\n    return M::foo()"
 	if got != want {
 		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)

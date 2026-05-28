@@ -482,7 +482,9 @@ func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included 
 	included[abs] = true
 
 	out.Grow(len(raw))
+	writeLineDirective(out, 1, abs)
 	start := 0
+	curLine := 1
 	for start <= len(raw) {
 		end := bytes.IndexByte(raw[start:], '\n')
 		hasNewline := end >= 0
@@ -503,6 +505,8 @@ func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included 
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
 				out.WriteByte('\n')
 			}
+			// Resume attribution to the parent file after the spliced include.
+			writeLineDirective(out, curLine+1, abs)
 		} else {
 			out.Write(line)
 			if hasNewline {
@@ -513,8 +517,16 @@ func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included 
 			break
 		}
 		start = end + 1
+		curLine++
 	}
 	return nil
+}
+
+// writeLineDirective emits a `#line <num> <path>` source-attribution marker at
+// column 0. The lexer consumes these to retarget token positions to the real
+// file/line after `include` flattens the tree into one buffer.
+func writeLineDirective(out *bytes.Buffer, line int, file string) {
+	fmt.Fprintf(out, "#line %d %s\n", line, file)
 }
 
 func leadingWhitespaceBytes(line []byte) []byte {
@@ -540,7 +552,11 @@ func writeIndentedInclude(out *bytes.Buffer, data []byte, indent []byte) {
 			end = len(data)
 		}
 		if end > start {
-			out.Write(indent)
+			// `#line` source-attribution directives must stay at column 0 so the
+			// lexer consumes them before indentation handling.
+			if !bytes.HasPrefix(data[start:end], []byte("#line ")) {
+				out.Write(indent)
+			}
 			out.Write(data[start:end])
 		}
 		if hasNewline {
