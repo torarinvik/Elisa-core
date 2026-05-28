@@ -336,7 +336,7 @@ func semanticStringArrayType(t semantic.Type) (*semantic.ArrayType, bool) {
 	return arrayType, true
 }
 func (s *functionState) emitStaticStringIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
-	ptr, _, err := s.emitIndexAddress(expr)
+	ptr, _, err := s.emitIndexAddress(expr, false)
 	if err != nil {
 		return nil, nil, err
 	}

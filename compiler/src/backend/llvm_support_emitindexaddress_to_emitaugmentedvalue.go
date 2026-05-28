@@ -15,7 +15,11 @@ import (
 	"fmt"
 )
 
-func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+// emitIndexAddress computes the address of an indexed element. userFacing marks
+// a genuine user `arr[i]` access (vs compiler-internal carrier reads): only such
+// accesses receive the debug-mode bounds watchdog, so debug verification stays
+// at the user-operation boundary and never instruments internal machinery.
+func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (C.LLVMValueRef, semantic.Type, error) {
 	if expr != nil && expr.Fallback != nil {
 		return nil, nil, fmt.Errorf("safe index fallback is not addressable")
 	}
@@ -46,17 +50,32 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 		if err != nil {
 			return nil, nil, err
 		}
+		if userFacing {
+			if err := s.emitDebugIndexBoundsGuard(containerPtr, t, indexValue); err != nil {
+				return nil, nil, err
+			}
+		}
 		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 	case *semantic.ViewType:
 		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
 			return nil, nil, err
 		}
+		if userFacing {
+			if err := s.emitDebugIndexBoundsGuard(containerPtr, t, indexValue); err != nil {
+				return nil, nil, err
+			}
+		}
 		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 	case *semantic.DArrayViewType:
 		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
 			return nil, nil, err
+		}
+		if userFacing {
+			if err := s.emitDebugIndexBoundsGuard(containerPtr, t, indexValue); err != nil {
+				return nil, nil, err
+			}
 		}
 		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 	case *semantic.RefType:
@@ -74,6 +93,11 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 			return ptr, arrayElem.Elem, nil
 		}
 		if elemType, ok := runtimeIndexedElemType(t.Elem); ok {
+			if userFacing {
+				if err := s.emitDebugIndexBoundsGuard(basePtr, t.Elem, indexValue); err != nil {
+					return nil, nil, err
+				}
+			}
 			return s.emitRuntimeIndexedAddress(basePtr, t.Elem, elemType, indexValue)
 		}
 		elemLLVMType, err := s.g.lowerType(t.Elem)
@@ -93,6 +117,37 @@ func (s *functionState) emitRuntimeIndexedAddress(containerPtr C.LLVMValueRef, c
 		return nil, nil, err
 	}
 	return s.emitRuntimePointerIndexedAddressWithType(containerPtr, containerLLVMType, elemType, indexValue)
+}
+
+// emitDebugIndexBoundsGuard is the debug-mode watchdog: in debug builds
+// (OptimizationLevel0) every dynamic container index is bounds-checked at
+// runtime and traps on violation — so statically-proven and `trusted`-unchecked
+// accesses, which emit no check in release, are still verified while testing.
+// In release builds this is a no-op (zero overhead): "debug verifies what
+// release assumes." Only containers carrying a runtime count are guarded.
+func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, containerType semantic.Type, indexValue C.LLVMValueRef) error {
+	if s == nil || s.g == nil || s.g.optLevel != OptimizationLevel0 {
+		return nil
+	}
+	switch containerType.(type) {
+	case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+	default:
+		return nil
+	}
+	countValue, err := s.emitContainerCountValue(containerPtr, containerType, "wd.count")
+	if err != nil {
+		return err
+	}
+	inBounds := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("wd.in_bounds"))
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.fail"))
+	C.LLVMBuildCondBr(s.builder, inBounds, okBB, failBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if err := s.emitTrapUnreachable("wd.trap"); err != nil {
+		return err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	return nil
 }
 func (s *functionState) emitRuntimePointerIndexedAddress(containerPtr C.LLVMValueRef, lowerContainer func() (C.LLVMTypeRef, error), elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
 	containerLLVMType, err := lowerContainer()

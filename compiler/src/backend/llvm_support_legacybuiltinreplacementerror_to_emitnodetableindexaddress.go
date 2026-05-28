@@ -51,7 +51,7 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 	case *ast.FieldExpr:
 		return s.emitFieldAddress(n)
 	case *ast.IndexExpr:
-		return s.emitIndexAddress(n)
+		return s.emitIndexAddress(n, false)
 	case *ast.ParenExpr:
 		return s.emitAddress(n.Inner)
 	default:
