@@ -138,6 +138,33 @@ func (l *Lexer) skipLineComment() {
 	}
 }
 
+// isBlockCommentStart reports whether the lexer is positioned at a triple
+// double-quote (`"""`), which opens a multi-line comment.
+func (l *Lexer) isBlockCommentStart() bool {
+	return l.peek() == '"' && l.peekAt(1) == '"' && l.peekAt(2) == '"'
+}
+
+// skipBlockComment consumes a `""" ... """` multi-line comment. It must be called
+// with the lexer positioned at the opening `"""`. The closing delimiter is the next
+// `"""`; block comments do not nest. advance() keeps line/col accurate across the
+// embedded newlines. An unterminated comment is consumed to EOF.
+func (l *Lexer) skipBlockComment() {
+	// Consume the opening `"""`.
+	l.advance()
+	l.advance()
+	l.advance()
+	for l.pos < len(l.src) {
+		if l.isBlockCommentStart() {
+			// Consume the closing `"""`.
+			l.advance()
+			l.advance()
+			l.advance()
+			return
+		}
+		l.advance()
+	}
+}
+
 // tryConsumeLineDirective recognizes a `#line <num> <path>` directive (emitted by
 // include expansion) and retargets the lexer's position to the real source file
 // and line, so every token Pos attributes to the file the code actually came
@@ -247,6 +274,29 @@ func (l *Lexer) handleIndentation() {
 			}
 			indent = l.measureIndent()
 			continue
+		}
+		if l.isBlockCommentStart() {
+			// A `""" ... """` block comment at line start: consume it (it may span
+			// lines) so it is invisible to indentation, exactly like a `#` line.
+			l.skipBlockComment()
+			for l.pos < len(l.src) && (l.peek() == ' ' || l.peek() == '\t') {
+				l.advance()
+			}
+			if l.pos >= len(l.src) || l.peek() == '\n' {
+				// Comment-only line: skip the newline + blanks and re-measure the
+				// next real line's indentation.
+				if l.pos < len(l.src) && l.peek() == '\n' {
+					l.advance()
+					for l.pos < len(l.src) && l.peek() == '\n' {
+						l.advance()
+					}
+				}
+				indent = l.measureIndent()
+				continue
+			}
+			// Trailing code after the comment on the same line: that code is the
+			// line's first token, at the line's already-measured leading indent.
+			break
 		}
 		break
 	}

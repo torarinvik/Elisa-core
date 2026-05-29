@@ -103,3 +103,63 @@ func TestTokenizeLayoutIntrospectionAliases(t *testing.T) {
 		t.Fatalf("expected %d layout introspection tokens, got %d from %v", len(want), gotIndex, tokens)
 	}
 }
+
+func TestTripleQuoteBlockComments(t *testing.T) {
+	countKinds := func(src string) (strs []string, idents int, indents int, dedents int, errs int) {
+		l := New("c.elisa", []byte(src))
+		toks := l.Tokenize()
+		errs = len(l.Errors())
+		for _, tk := range toks {
+			switch tk.Kind {
+			case TOKEN_STRING_LIT:
+				strs = append(strs, tk.Text)
+			case TOKEN_IDENT:
+				idents++
+			case TOKEN_INDENT:
+				indents++
+			case TOKEN_DEDENT:
+				dedents++
+			}
+		}
+		return
+	}
+
+	// Single-line block comment produces no string/ident tokens and no errors.
+	if s, id, _, _, e := countKinds(`"""just a comment"""` + "\n"); len(s) != 0 || id != 0 || e != 0 {
+		t.Fatalf("single-line block comment: strs=%v idents=%d errs=%d", s, id, e)
+	}
+
+	// Multi-line block comment is fully consumed.
+	multi := "\"\"\" a comment\nof multiple lines here\"\"\"\n"
+	if s, id, _, _, e := countKinds(multi); len(s) != 0 || id != 0 || e != 0 {
+		t.Fatalf("multi-line block comment: strs=%v idents=%d errs=%d", s, id, e)
+	}
+
+	// Normal string literals still lex correctly (not swallowed as comments).
+	if s, _, _, _, e := countKinds(`x <- "hello"` + "\n"); e != 0 || len(s) != 1 || s[0] != "hello" {
+		t.Fatalf("normal string regressed: strs=%v errs=%d", s, e)
+	}
+
+	// Empty string still lexes as a string, not a comment.
+	if s, _, _, _, e := countKinds(`x <- ""` + "\n"); e != 0 || len(s) != 1 || s[0] != "" {
+		t.Fatalf("empty string regressed: strs=%v errs=%d", s, e)
+	}
+
+	// A docstring-style block comment as the first line of a block must not disturb
+	// indentation: the body still produces exactly one INDENT and its statement.
+	body := "def f() -> void:\n    \"\"\"doc\nspanning\"\"\"\n    g()\n"
+	s, id, indents, _, e := countKinds(body)
+	if e != 0 {
+		t.Fatalf("docstring body: unexpected errors=%d", e)
+	}
+	if len(s) != 0 {
+		t.Fatalf("docstring body: unexpected string tokens %v", s)
+	}
+	if indents != 1 {
+		t.Fatalf("docstring body: expected exactly 1 INDENT, got %d", indents)
+	}
+	// idents: f, void, g  -> at least g present
+	if id < 1 {
+		t.Fatalf("docstring body: expected body identifier, got idents=%d", id)
+	}
+}

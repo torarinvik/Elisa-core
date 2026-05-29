@@ -80,6 +80,13 @@ func (l *Lexer) NextToken() Token {
 		return l.NextToken()
 	}
 
+	// Triple-quote (`"""`) multi-line comments. Checked before string literals so a
+	// `"""` is not mis-lexed as an empty string `""` followed by a `"`.
+	if l.isBlockCommentStart() {
+		l.skipBlockComment()
+		return l.NextToken()
+	}
+
 	// String literals
 	if ch == '"' {
 		return l.readString()
