@@ -67,22 +67,16 @@ static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
     static else:
         const MAP_ANONYMOUS = 0x1000
 
-    extern mmap(
-        addr: heap void&?,
-        length: usize,
-        prot: int,
-        flags: int,
-        fd: int,
-        offset: isize
-    ) -> mutable heap void&?
+    # uintptr-typed to exactly match the declaration the emulator (guest_exec/tls) uses,
+    # so the two declarations dedup to one instead of conflicting as "duplicate mmap".
+    extern mmap(addr: uintptr, length: usize, prot: int, flags: int, fd: int, offset: i64) -> uintptr
 
     extern munmap(addr: heap void&, length: usize) -> int
 
     # MAP_FAILED is the macro ((void*)-1), NOT a libc function. Compute it instead of
     # declaring a (nonexistent) extern function, which would crash when called.
-    def MAP_FAILED() -> mutable heap void&?:
-        trusted Unsafe.PointerCast:
-            return (0.uintptr() - 1.uintptr()).cast[mutable heap void&?]
+    def MAP_FAILED() -> uintptr:
+        return 0.uintptr() - 1.uintptr()
 
 static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
     const MEM_COMMIT = 0x1000
@@ -130,6 +124,11 @@ def inv_handle(ptr: heap void&?) -> bool:
 
 @internal
 def arena_region_from_raw(raw: heap void&) -> mutable heap Region&:
+    trusted Unsafe.PointerCast:
+        return raw.cast[mutable heap Region&]
+
+@internal
+def arena_region_from_uintptr(raw: uintptr) -> mutable heap Region&:
     trusted Unsafe.PointerCast:
         return raw.cast[mutable heap Region&]
 
@@ -221,19 +220,19 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
             r: heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            raw: mutable heap void&? = null
+            raw_addr: mutable uintptr = 0.uintptr()
             trusted Unsafe.RawExtern:
-                raw <- mmap(
-                    null,
+                raw_addr <- mmap(
+                    0.uintptr(),
                     size_bytes,
                     PROT_READ | PROT_WRITE,
                     MAP_ANONYMOUS | MAP_PRIVATE,
                     -1,
-                    0
+                    0i64
                 )
-            assert raw != MAP_FAILED()
-            assert raw != null
-            r: heap Region& = arena_region_from_raw(raw)
+            assert raw_addr != MAP_FAILED()
+            assert raw_addr != 0.uintptr()
+            r: heap Region& = arena_region_from_uintptr(raw_addr)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             raw: heap void&? = VirtualAllocEx(
