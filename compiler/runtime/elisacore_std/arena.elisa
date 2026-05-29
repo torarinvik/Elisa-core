@@ -7,7 +7,16 @@ const ARENA_BACKEND_LINUX_MMAP = 1
 const ARENA_BACKEND_WIN32_VIRTUALALLOC = 2
 const ARENA_BACKEND_WASM_HEAPBASE = 3
 
-const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
+# Backend chosen by target OS so the arena never depends on host libc malloc on the
+# platforms the emulator targets: POSIX (macOS/Linux/FreeBSD) -> mmap, Windows ->
+# VirtualAlloc. This matters because on the x86_64-under-Rosetta substrate, libc malloc
+# is unusable from inside guarded guest execution; an mmap-backed arena avoids it.
+static if ELISA_TARGET_OS_WINDOWS:
+    const ARENA_BACKEND: int = ARENA_BACKEND_WIN32_VIRTUALALLOC
+static elif ELISA_TARGET_OS_POSIX:
+    const ARENA_BACKEND: int = ARENA_BACKEND_LINUX_MMAP
+static else:
+    const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
 
 const ARENA_REGION_DEFAULT_CAPACITY: usize = 8 * 1024
 const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
@@ -41,15 +50,22 @@ struct ArenaMark:
 # Backend FFI declarations
 # ------------------------------------------------------------
 
-static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
-    extern malloc(size: usize) -> mutable heap void&? effects[Memory.Allocate]
-    extern free(ptr: heap void&) effects[Memory.Release]
+# malloc/free are declared for every backend: the libc-malloc backend uses them for
+# region allocation, and other runtime modules (e.g. concurrency) call malloc directly
+# and resolve it via this declaration. Under the mmap/VirtualAlloc backends the arena
+# itself does not use them for regions.
+extern malloc(size: usize) -> mutable heap void&? effects[Memory.Allocate]
+extern free(ptr: heap void&) effects[Memory.Release]
 
-static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
     const PROT_READ = 0x1
     const PROT_WRITE = 0x2
     const MAP_PRIVATE = 0x02
-    const MAP_ANONYMOUS = 0x20
+    # MAP_ANON differs by OS: 0x20 on Linux, 0x1000 on macOS/BSD.
+    static if ELISA_TARGET_OS_LINUX:
+        const MAP_ANONYMOUS = 0x20
+    static else:
+        const MAP_ANONYMOUS = 0x1000
 
     extern mmap(
         addr: heap void&?,
@@ -61,7 +77,12 @@ static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
     ) -> mutable heap void&?
 
     extern munmap(addr: heap void&, length: usize) -> int
-    extern MAP_FAILED() -> mutable heap void&?
+
+    # MAP_FAILED is the macro ((void*)-1), NOT a libc function. Compute it instead of
+    # declaring a (nonexistent) extern function, which would crash when called.
+    def MAP_FAILED() -> mutable heap void&?:
+        trusted Unsafe.PointerCast:
+            return (0.uintptr() - 1.uintptr()).cast[mutable heap void&?]
 
 static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
     const MEM_COMMIT = 0x1000
@@ -177,8 +198,11 @@ def arena_nullable_u8_from_heap(ptr: heap u8&) -> u8&?:
 # ------------------------------------------------------------
 
 def sfree[T](ptr: heap T&) -> heap T!:
-    trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
-        free(ptr.cast[heap void&]) can Memory.Release
+    # Only valid against the libc-malloc backend; mmap/VirtualAlloc regions are released
+    # by free_region (which knows the size). Calling libc free on an mmap pointer is UB.
+    static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+        trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+            free(ptr.cast[heap void&]) can Memory.Release
     return null
 
 # ------------------------------------------------------------
@@ -197,15 +221,18 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
             r: heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            raw: heap void&? = mmap(
-                null,
-                size_bytes,
-                PROT_READ | PROT_WRITE,
-                MAP_ANONYMOUS | MAP_PRIVATE,
-                -1,
-                0
-            )
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- mmap(
+                    null,
+                    size_bytes,
+                    PROT_READ | PROT_WRITE,
+                    MAP_ANONYMOUS | MAP_PRIVATE,
+                    -1,
+                    0
+                )
             assert raw != MAP_FAILED()
+            assert raw != null
             r: heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
