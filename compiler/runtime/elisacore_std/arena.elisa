@@ -235,14 +235,17 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
             r: heap Region& = arena_region_from_uintptr(raw_addr)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
-            raw: heap void&? = VirtualAllocEx(
-                GetCurrentProcess(),
-                null,
-                size_bytes,
-                MEM_COMMIT | MEM_RESERVE,
-                PAGE_READWRITE
-            )
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- VirtualAllocEx(
+                    GetCurrentProcess(),
+                    null,
+                    size_bytes,
+                    MEM_COMMIT | MEM_RESERVE,
+                    PAGE_READWRITE
+                )
             assert not inv_handle(raw)
+            assert raw != null
             r: heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
