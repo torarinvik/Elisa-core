@@ -236,6 +236,12 @@ type DArrayType struct {
 	Elem        Type
 	Shape       Shape
 	SurfaceName string
+	// Region is the (string-named) region this darray was allocated in, inferred
+	// from the enclosing `in <region>:` scope at creation. Phase 1 of
+	// region-parameterized containers: carried on the type but NOT yet consulted
+	// by SameType/AssignableTo/String or codegen (see REGION_CONTAINERS_DESIGN.md).
+	// Empty == unknown / not-yet-inferred.
+	Region string
 }
 
 type ViewType struct {

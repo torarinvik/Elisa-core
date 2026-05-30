@@ -144,7 +144,7 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if IsInvalidType(elem) {
 			return invalidType
 		}
-		return &DArrayType{Elem: elem, Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+		return &DArrayType{Elem: elem, Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName, Region: n.Region}
 	case *ViewType:
 		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(elem) {

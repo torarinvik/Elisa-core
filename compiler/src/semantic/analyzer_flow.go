@@ -41,6 +41,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				bindingType = specializedType
 			}
 		}
+		// Region-parameterized containers (Phase 1): a darray local declared inside
+		// an `in <region>:` scope carries that region in its type. Carried only;
+		// not yet enforced (see REGION_CONTAINERS_DESIGN.md).
+		bindingType = a.stampContainerRegion(bindingType)
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
 		if n.Value != nil && isZeroedInitializer(n.Value) {
