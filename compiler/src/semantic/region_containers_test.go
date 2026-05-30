@@ -29,6 +29,23 @@ func TestRegionContainerReturnEscapeChecking(t *testing.T) {
 	}
 }
 
+// Storing a scope-owned-region container into storage that outlives the region
+// (here a global) is rejected — same use-after-free, via store rather than return.
+func TestRegionContainerStoreEscapeChecking(t *testing.T) {
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "region_store_bad.elisa", `global mutable g: darray[u8] = zeroed
+
+def stash() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            v: mutable darray[u8] @a = []
+            v.push(65)
+            g <- v
+`)
+	if all := strings.Join(bad.Errors(), "\n"); !strings.Contains(all, "escapes via store") {
+		t.Fatalf("expected scope-owned region container store-into-global to be rejected; got: %s", all)
+	}
+}
+
 // A darray region param `@r` must bind to the argument's region at a call and
 // substitute through (mirroring RefType region unification).
 func TestDArrayRegionUnificationAndSubstitution(t *testing.T) {

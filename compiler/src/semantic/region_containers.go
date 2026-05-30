@@ -61,6 +61,16 @@ func semanticContainerDArray(t Type) *DArrayType {
 // outlive the call. This is the bucket-granular analogue of Rust's
 // "reference does not outlive its referent".
 func (a *Analyzer) checkReturnRegionContainerEscape(valueExpr ast.Expr, valueType Type) {
+	a.checkRegionContainerEscape(valueExpr, valueType, "return")
+}
+
+// checkStoredRegionContainerEscape rejects storing a scope-owned-region container
+// into storage that outlives the region (a global / function-outliving lvalue).
+func (a *Analyzer) checkStoredRegionContainerEscape(valueExpr ast.Expr, valueType Type) {
+	a.checkRegionContainerEscape(valueExpr, valueType, "store into longer-lived storage")
+}
+
+func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type, via string) {
 	if a == nil || valueExpr == nil {
 		return
 	}
@@ -69,10 +79,10 @@ func (a *Analyzer) checkReturnRegionContainerEscape(valueExpr ast.Expr, valueTyp
 		return
 	}
 	if a.lookupRegionParam(da.Region) {
-		return // caller-owned region — fine to return.
+		return // caller-owned region — fine.
 	}
 	if sym, _ := a.lookupRegionState(da.Region); sym != nil {
-		a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via return; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", da.Region)
+		a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", da.Region, via)
 	}
 }
 

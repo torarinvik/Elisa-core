@@ -272,6 +272,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		if a.lvalueStorageOutlivesFunction(n.Target) {
 			a.checkLocalArenaEscape(n.Value, valueType, "store")
+			a.checkStoredRegionContainerEscape(n.Value, valueType)
 		}
 		a.checkStoredBorrowEscapesLocal(n.Target, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
