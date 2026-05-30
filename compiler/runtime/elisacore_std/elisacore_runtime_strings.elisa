@@ -206,6 +206,17 @@ def sview(value: u8&?, start: i64, end: i64) -> sview:
 
     return StringView(src + lo, (hi - lo).i64())
 
+# Ergonomic cast: a raw C-string (u8&?) -> borrowed string view, so content
+# equality works directly (`bytes.sview() == "x86_64"`) instead of streq().
+# This is the explicit postfix-shorthand cast `value.sview()`; it strlen's the
+# C-string to bound the view (null -> empty view). The view BORROWS the
+# underlying storage, so it is valid only while that C-string is alive — the
+# compiler tracks the interior borrow. Unlike `cstr`/DStr (a counted/owned
+# string that would require a copy), a view is alloc-free and is exactly the
+# right primitive for comparison.
+def __cast__(value: u8&?) -> sview:
+    return sview(value, 0, -1)
+
 def string_view_len(view: sview) -> i64:
     return view.len
 

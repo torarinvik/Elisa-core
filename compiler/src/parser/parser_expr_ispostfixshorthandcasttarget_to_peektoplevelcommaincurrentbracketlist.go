@@ -11,7 +11,11 @@ func isPostfixShorthandCastTarget(name string) bool {
 		"i8", "i16", "i32", "i64", "isize",
 		"s8", "s16", "s32", "s64",
 		"u8", "u16", "u32", "u64", "usize", "uintptr",
-		"f32", "f64":
+		"f32", "f64",
+		// lowercase builtin string types: enable the postfix-shorthand cast
+		// (`bytes.sview()` / `bytes.cstr?()`) so a __cast__ hook (e.g. raw
+		// C-string -> view) can drive ergonomic string content equality.
+		"sview", "cstr":
 		return true
 	}
 	if name == "" {

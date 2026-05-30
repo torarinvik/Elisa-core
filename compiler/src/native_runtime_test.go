@@ -166,6 +166,60 @@ def debug_referee_records_poison_and_noncanonical() -> void:
 	}
 }
 
+func TestRunCLIPostfixSviewCastEnablesStringContentEquality(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "sview_cast_string_equality_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// A raw C-string (u8&?) gains content equality against string literals via the
+	// postfix-shorthand cast to a borrowed view (__cast__(u8&?) -> sview), instead of
+	// needing streq(). The == lowers to a length + byte content comparison.
+	src := fmt.Sprintf(`# include %q
+
+def sview_cast_matches_program(p: u8&?) -> bool:
+    return p.sview() == "program"
+
+@test
+def sview_cast_string_equality_test() -> void:
+    can Abort.Panic:
+        assert_true(sview_cast_matches_program("program"))
+        assert_false(sview_cast_matches_program("different"))
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write sview cast fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected sview cast test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	// Allow benign runtime-prelude lint warnings on stderr; fail only on errors.
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] sview_cast_string_equality_test",
+		"[       OK ] sview_cast_string_equality_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected sview cast output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIDebugTraceTapeFingerprint(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
