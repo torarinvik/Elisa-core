@@ -167,7 +167,10 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("darray extend expects 1 argument, got %d", len(expr.Args))
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	owner, ok := s.regionArenaOwner(darrayType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray extend requires an active in <arena>: scope")
 	}
@@ -344,7 +347,10 @@ func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVM
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("darray reserve expects 1 argument, got %d", len(expr.Args))
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	owner, ok := s.regionArenaOwner(darrayType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray reserve requires an active in <arena>: scope")
 	}
