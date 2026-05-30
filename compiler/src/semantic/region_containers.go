@@ -36,6 +36,21 @@ func (a *Analyzer) stampContainerRegion(t Type) Type {
 	return t
 }
 
+// containerRegionParamInScope reports whether t is a container whose region is
+// an in-scope region parameter (e.g. `def f[region r](out: darray[T] @r&)`).
+// Such a container may be grown without an ambient `in <arena>:` scope: the
+// arena for r is supplied by the caller (region-aware codegen sources it from
+// the region environment / hidden arena param).
+func (a *Analyzer) containerRegionParamInScope(t Type) bool {
+	if a == nil {
+		return false
+	}
+	if da, ok := t.(*DArrayType); ok && da != nil && da.Region != "" {
+		return a.lookupRegionParam(da.Region)
+	}
+	return false
+}
+
 // activeContainerRegionName is the name of the region of the innermost active
 // `in <arena/region>:` scope, or "" if none.
 func (a *Analyzer) activeContainerRegionName() string {

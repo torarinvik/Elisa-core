@@ -254,7 +254,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray push requires a mutable darray receiver")
 	}
-	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !a.containerRegionParamInScope(darrayType) {
 		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "push")
