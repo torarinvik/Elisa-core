@@ -98,9 +98,13 @@ for ref item in items:
 ### Mutable-ref iteration
 
 ```elisa
-for mutable ref item in items:
+for mutable item in items:
     normalize(item)
 ```
+
+`mutable` alone denotes a mutable-ref binder — mutating a discarded per-iteration
+copy is never the intent. `for mutable ref item in items:` is an accepted, more
+explicit alias.
 
 These forms should all share the same overall `for` shape.
 

@@ -144,6 +144,27 @@ func TestParseIterableForStatementWithMutableRefBinder(t *testing.T) {
 		t.Fatalf("expected mutable ref name pattern item, got %T %#v", iterStmt.Pattern, iterStmt.Pattern)
 	}
 }
+
+// `for mutable item in ...` is the concise spelling of a mutable-ref binder;
+// `mutable ref` remains an accepted alias (covered above).
+func TestParseIterableForStatementWithMutableBinderShorthand(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for mutable item in items:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if iterStmt.Mode != ast.IterBindMutableRef {
+		t.Fatalf("expected mutable ref bind mode from `mutable` shorthand, got %v", iterStmt.Mode)
+	}
+	pattern, ok := iterStmt.Pattern.(*ast.MoveBindNamePattern)
+	if !ok || pattern.Name != "item" {
+		t.Fatalf("expected name pattern item, got %T %#v", iterStmt.Pattern, iterStmt.Pattern)
+	}
+}
 func TestParseIterableForStatementWithPatternFilter(t *testing.T) {
 	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    None\n\ndef walk(items: darray[Expr]) -> void:\n    for item in items where Expr.Int(value):\n        pass\n")
 	if len(errs) != 0 {

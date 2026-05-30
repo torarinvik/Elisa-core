@@ -472,11 +472,12 @@ func (p *Parser) looksLikeForStmtAt(pos int) bool {
 }
 func (p *Parser) parseIterBindMode() ast.IterBindMode {
 	if p.match(lexer.TOKEN_MUTABLE) {
-		if !p.peekIdentText("ref") {
-			p.errorf("for mutable binder expects `mutable ref`")
-			return ast.IterBindMutableRef
+		// `for mutable x in ...` binds a mutable ref (mutating a discarded
+		// per-iteration copy is never the intent, so `mutable` alone means
+		// mutable-ref). `for mutable ref x in ...` is an accepted explicit alias.
+		if p.peekIdentText("ref") {
+			p.advance()
 		}
-		p.advance()
 		return ast.IterBindMutableRef
 	}
 	if p.peekIdentText("ref") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_IN {
