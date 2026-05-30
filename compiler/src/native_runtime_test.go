@@ -220,6 +220,104 @@ def sview_cast_string_equality_test() -> void:
 	}
 }
 
+func TestRunCLIAutoRefCoercesValuesToReferenceParams(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "autoref_call_site_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// A plain value passed where a reference parameter is expected is implicitly
+	// address-of-coerced (auto-ref) at the call site, removing the need for the
+	// `value.ref[T&]` ceremony. An immutable place coerces to an immutable `T&`;
+	// a mutable place coerces to a `mutable T&` and writes through propagate.
+	src := fmt.Sprintf(`# include %q
+
+struct AutoRefCell:
+    value: mutable i64
+
+def autoref_read(cell: AutoRefCell&) -> i64:
+    return cell.value
+
+def autoref_write(cell: mutable AutoRefCell&) -> void:
+    cell.value <- 99
+
+@test
+def autoref_value_to_reference_param_test() -> void:
+    can Abort.Panic:
+        immutable_cell: AutoRefCell = AutoRefCell(value: 5)
+        assert_eq(autoref_read(immutable_cell), 5)
+        mutable_cell: mutable AutoRefCell = AutoRefCell(value: 1)
+        autoref_write(mutable_cell)
+        assert_eq(autoref_read(mutable_cell), 99)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write autoref fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected autoref test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	// Allow benign runtime-prelude lint warnings on stderr; fail only on errors.
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] autoref_value_to_reference_param_test",
+		"[       OK ] autoref_value_to_reference_param_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected autoref output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIAutoRefRejectsImmutableValueForMutableReferenceParam(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "autoref_immutable_reject_fixture.elisa")
+	// Passing an immutable place where a `mutable T&` parameter is expected must
+	// be rejected: auto-ref produces an immutable reference, which is not
+	// assignable to a mutable reference. Forcing it would require an explicit
+	// unsafe cast.
+	src := `struct AutoRefCell:
+    value: mutable i64
+
+def autoref_write(cell: mutable AutoRefCell&) -> void:
+    cell.value <- 99
+
+@test
+def autoref_immutable_reject_test() -> void:
+    immutable_cell: AutoRefCell = AutoRefCell(value: 5)
+    autoref_write(immutable_cell)
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write autoref reject fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected immutable-to-mutable auto-ref to be rejected, but compilation succeeded; stdout:\n%s", stdout.String())
+	}
+	combined := stdout.String() + stderr.String()
+	if !strings.Contains(combined, "expects mutable AutoRefCell&") {
+		t.Fatalf("expected a mutable-reference mismatch diagnostic, got:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
 func TestRunCLIDebugTraceTapeFingerprint(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
