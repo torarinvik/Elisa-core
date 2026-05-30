@@ -36,6 +36,46 @@ func (a *Analyzer) stampContainerRegion(t Type) Type {
 	return t
 }
 
+// semanticContainerDArray peels ref wrappers to the underlying container darray
+// (region annotations live on the DArrayType, possibly inside a RefType).
+func semanticContainerDArray(t Type) *DArrayType {
+	for {
+		switch tt := t.(type) {
+		case *DArrayType:
+			return tt
+		case *RefType:
+			if tt == nil {
+				return nil
+			}
+			t = tt.Elem
+		default:
+			return nil
+		}
+	}
+}
+
+// checkReturnRegionContainerEscape rejects returning a container allocated in a
+// *scope-owned* region (`region NAME(...):`), which would dangle once the region
+// is freed at scope exit. Borrowed arenas (`in <arena>:`, region == arena var,
+// not a tracked region) and caller-provided region params are fine: those
+// outlive the call. This is the bucket-granular analogue of Rust's
+// "reference does not outlive its referent".
+func (a *Analyzer) checkReturnRegionContainerEscape(valueExpr ast.Expr, valueType Type) {
+	if a == nil || valueExpr == nil {
+		return
+	}
+	da := semanticContainerDArray(valueType)
+	if da == nil || da.Region == "" {
+		return
+	}
+	if a.lookupRegionParam(da.Region) {
+		return // caller-owned region — fine to return.
+	}
+	if sym, _ := a.lookupRegionState(da.Region); sym != nil {
+		a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via return; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", da.Region)
+	}
+}
+
 // containerRegionParamInScope reports whether t is a container whose region is
 // an in-scope region parameter (e.g. `def f[region r](out: darray[T] @r&)`).
 // Such a container may be grown without an ambient `in <arena>:` scope: the
