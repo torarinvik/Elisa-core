@@ -409,7 +409,7 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
     channel checksum: i64
     program(state: mutable ParserState&) -> Pascal.Decl:
         token = "program"
-        return zeroed as Pascal.Decl
+        return zeroed.cast[Pascal.Decl]
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)

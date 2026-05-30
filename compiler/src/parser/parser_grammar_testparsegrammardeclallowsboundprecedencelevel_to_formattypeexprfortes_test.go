@@ -148,7 +148,7 @@ func TestParseGrammarDeclPreservesNonCallMemberExpressions(t *testing.T) {
     assignment(state: mutable ParserState&) -> Pascal.Stmt:
         name_token = state.expect_ident_token()
         name_id = name_token.lexeme_key
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)

@@ -770,7 +770,7 @@ tree Flow:
 def count_stmt_children(store: Flow.Store[Local], stmt: Flow.Stmt) -> i64:
 	in store:
 		total: mutable i64 = 0
-		for child in children(stmt as Flow.Node):
+		for child in children(stmt.cast[Flow.Node]):
 			_ = child.kind
 			total <- total + 1
 		return total

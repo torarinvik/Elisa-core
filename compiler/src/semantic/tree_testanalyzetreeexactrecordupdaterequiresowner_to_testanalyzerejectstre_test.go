@@ -178,7 +178,7 @@ func TestAnalyzeRejectsChildrenOverrideIncompatibleType(t *testing.T) {
 
 def visit(stmt: Lua.Stmt) -> i64:
 	total: mutable i64 = 0
-	for child in children(stmt as Lua.Expr):
+	for child in children(stmt.cast[Lua.Expr]):
 		total <- total + child.name_index.i64()
 	return total
 `)

@@ -493,7 +493,7 @@ func TestRunCLIProjectBuildEmitsEASMWrapper(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern easm_identity(value: i64) -> i64
 
 def main() -> int:
-    return easm_identity(7) as int
+    return easm_identity(7).cast[int]
 `)
 	writeFixtureFile(t, filepath.Join(projectRoot, "easm", "identity.easm"), `module identity
 target any

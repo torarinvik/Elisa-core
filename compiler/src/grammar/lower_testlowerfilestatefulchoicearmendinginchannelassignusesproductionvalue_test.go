@@ -26,7 +26,7 @@ grammar PerlFrontend over Token using ParserState:
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
 		"__grammar_seq_value_",
-		"zeroed as Tail",
+		"zeroed.cast[Tail]",
 		"Tail(name_token:, close_token:)",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -65,8 +65,8 @@ func TestLowerFileStatefulInfersUntypedChannelsFromNamedTupleReturnFields(t *tes
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"item: mutable i64 = zeroed as i64",
-		"count: mutable usize = zeroed as usize",
+		"item: mutable i64 = zeroed.cast[i64]",
+		"count: mutable usize = zeroed.cast[usize]",
 		"return (true, __grammar_committed_",
 		"(item, count)",
 	} {
@@ -89,9 +89,9 @@ func TestLowerFileStatefulTypedExprTermInSeparatedListInfersElementType(t *testi
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"param_name_ids: mutable darray[NameId] = zeroed as darray[NameId]",
+		"param_name_ids: mutable darray[NameId] = zeroed.cast[darray[NameId]]",
 		"__grammar_list_value_",
-		"mutable NameId = zeroed as NameId",
+		"mutable NameId = zeroed.cast[NameId]",
 		".push(__grammar_seq_value_",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -199,7 +199,7 @@ func TestLowerFileStatefulSingletonBuildsSingleItemList(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"decls: mutable darray[Pascal.Decl] = zeroed as darray[Pascal.Decl]",
+		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
 		"__grammar_singleton_value_",
 		"in arena:",
 		".push(decl)",
@@ -223,7 +223,7 @@ func TestLowerFileStatefulEmptyBuildsTypedEmptyList(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"decls: mutable darray[Pascal.Decl] = zeroed as darray[Pascal.Decl]",
+		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
 		"__grammar_empty_value_",
 		": darray[Pascal.Decl] = []",
 		"decls <- __grammar_empty_value_",
@@ -247,7 +247,7 @@ func TestLowerFileStatefulConcatTermFlattensListOperands(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"decls: mutable darray[Token] = zeroed as darray[Token]",
+		"decls: mutable darray[Token] = zeroed.cast[darray[Token]]",
 		"__grammar_concat_value_",
 		"__grammar_concat_group_",
 		"parser.expect_kind(TokenKind.IDENT)",
@@ -272,7 +272,7 @@ func TestLowerFileStatefulConcatMergesListElementTypePastUntypedEmpty(t *testing
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"decls: mutable darray[Pascal.Decl] = zeroed as darray[Pascal.Decl]",
+		"decls: mutable darray[Pascal.Decl] = zeroed.cast[darray[Pascal.Decl]]",
 		"__grammar_concat_value_",
 		"darray[Pascal.Decl] = []",
 		".push(decl)",
@@ -384,7 +384,7 @@ func TestLowerFileStatefulCutPropagatesCommittedFailureThroughChoice(t *testing.
         "if"
         cut
         "then"
-        return zeroed as Token
+        return zeroed.cast[Token]
     ident_statement(state: mutable ParserState&) -> Token:
         .IDENT(tok)
         return tok

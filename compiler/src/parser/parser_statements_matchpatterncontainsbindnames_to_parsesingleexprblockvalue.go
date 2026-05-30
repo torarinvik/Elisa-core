@@ -120,9 +120,9 @@ func (p *Parser) parseExpectPatternStmt() ast.Stmt {
 	if p.matchIdentText("let") {
 		patterns = p.parseTopLevelMatchPatterns()
 		p.expect(lexer.TOKEN_ASSIGN)
-		value = p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
+		value = p.withInMembershipDisabled(p.parseExpr)
 	} else {
-		value = p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
+		value = p.withInMembershipDisabled(p.parseExpr)
 		p.expect(lexer.TOKEN_AS)
 		patterns = p.parseTopLevelMatchPatterns()
 	}
@@ -513,7 +513,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			var owner ast.Expr
 			if p.peek() == lexer.TOKEN_IN {
 				p.advance()
-				owner = p.withAsCastDisabled(p.parseExpr)
+				owner = p.parseExpr()
 				value = &ast.CallExpr{
 					Position: owner.Pos(),
 					Func: &ast.FieldExpr{
@@ -553,7 +553,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 
 	var expr ast.Expr
 	if p.peekIdentText("move") {
-		expr = p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
+		expr = p.withInMembershipDisabled(p.parseExpr)
 	} else {
 		expr = p.parseExpr()
 	}
@@ -562,7 +562,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		var store ast.Expr
 		if p.peek() == lexer.TOKEN_IN {
 			p.advance()
-			store = p.withAsCastDisabled(p.parseExpr)
+			store = p.parseExpr()
 		}
 		if p.peek() == lexer.TOKEN_AS {
 			p.advance()

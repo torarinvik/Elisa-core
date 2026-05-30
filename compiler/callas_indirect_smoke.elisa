@@ -22,7 +22,7 @@ def call_as_indirect_smoke():
         # two-argument signature
         f: mutable void&? = null
         trusted Unsafe.PointerCast:
-            f <- callas_add as void&?
+            f <- callas_add.cast[void&?]
         assert f != null
         two: mutable int = 0
         trusted Unsafe.IndirectCall:
@@ -32,7 +32,7 @@ def call_as_indirect_smoke():
         # single-argument signature, negative return
         g: mutable void&? = null
         trusted Unsafe.PointerCast:
-            g <- callas_neg as void&?
+            g <- callas_neg.cast[void&?]
         one: mutable int = 0
         trusted Unsafe.IndirectCall:
             one <- g.call_as[func(int) -> int](7)
@@ -41,7 +41,7 @@ def call_as_indirect_smoke():
         # zero-argument signature
         h: mutable void&? = null
         trusted Unsafe.PointerCast:
-            h <- callas_noargs as void&?
+            h <- callas_noargs.cast[void&?]
         zero: mutable int = 0
         trusted Unsafe.IndirectCall:
             zero <- h.call_as[func() -> int]()

@@ -590,7 +590,7 @@ def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R effects[P], a
 		result_box: heap ConcurrencyBox[R]& = ctx_concurrency_box_new(result_seed)
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyWorkStart1))
 		state: heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]
-		state.fn_bits <- fn as uintptr
+		state.fn_bits <- fn.cast[uintptr]
 		state.arg_bits <- arg_box.cast[void&]
 		state.result_bits <- result_box.cast[void&]
 		state.refs.value <- 2

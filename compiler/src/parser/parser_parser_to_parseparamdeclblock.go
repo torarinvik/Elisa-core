@@ -14,7 +14,6 @@ type Parser struct {
 	poolScopes          []string
 	declVisibility      map[ast.Decl]string
 	currentVisibility   string
-	allowAsCast         bool
 	allowInMembership   bool
 	allowTernary        bool
 	allowWhereExpr      bool
@@ -22,7 +21,7 @@ type Parser struct {
 }
 
 func New(tokens []lexer.Token) *Parser {
-	return &Parser{tokens: tokens, declVisibility: map[ast.Decl]string{}, currentVisibility: "public", allowAsCast: true, allowInMembership: true, allowTernary: true, allowWhereExpr: true}
+	return &Parser{tokens: tokens, declVisibility: map[ast.Decl]string{}, currentVisibility: "public", allowInMembership: true, allowTernary: true, allowWhereExpr: true}
 }
 func (p *Parser) Errors() []string { return p.errors }
 func (p *Parser) activePoolName() string {
@@ -60,22 +59,6 @@ func (p *Parser) match(kind lexer.TokenKind) bool {
 		return true
 	}
 	return false
-}
-func (p *Parser) withAsCastDisabled(parse func() ast.Expr) ast.Expr {
-	saved := p.allowAsCast
-	p.allowAsCast = false
-	defer func() {
-		p.allowAsCast = saved
-	}()
-	return parse()
-}
-func (p *Parser) withAsCastEnabled(parse func() ast.Expr) ast.Expr {
-	saved := p.allowAsCast
-	p.allowAsCast = true
-	defer func() {
-		p.allowAsCast = saved
-	}()
-	return parse()
 }
 func (p *Parser) withInMembershipDisabled(parse func() ast.Expr) ast.Expr {
 	saved := p.allowInMembership

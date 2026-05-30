@@ -99,7 +99,7 @@ def raw(name: NameId) -> u32:
 	return !name
 
 def wrap(raw: u32) -> NameId:
-	return raw as NameId
+	return raw.cast[NameId]
 `)
 	nameID, ok := result.NamedTypes["NameId"].(*IDType)
 	if !ok {
@@ -128,7 +128,7 @@ def raw(entry: GuestEntryPoint) -> uintptr:
 	return !entry
 
 def wrap(raw: uintptr) -> GuestEntryPoint:
-	return raw as GuestEntryPoint
+	return raw.cast[GuestEntryPoint]
 `)
 	entryID, ok := result.NamedTypes["GuestEntryPoint"].(*IDType)
 	if !ok {

@@ -120,7 +120,7 @@ func TestParseGrammarDeclAllowsNamedRecoveryPolicies(t *testing.T) {
 	recovery StatementRecovery:
 		message ParseMessageKey.ExpectedStatement
 		until .SEMICOLON, .END, token(TokenKind.EOF)
-		fallback zeroed as Pascal.Stmt
+		fallback zeroed.cast[Pascal.Stmt]
 	statement() -> Pascal.Stmt recover StatementRecovery:
 		stmt = state.statement_core() recover StatementRecovery
 		return stmt
@@ -168,7 +168,7 @@ func TestParseGrammarDeclAllowsNamedRecoveryPolicies(t *testing.T) {
 		"recovery StatementRecovery:",
 		"message ParseMessageKey.ExpectedStatement",
 		"until .SEMICOLON, .END, token(TokenKind.EOF)",
-		"fallback zeroed as Pascal.Stmt",
+		"fallback zeroed.cast[Pascal.Stmt]",
 		"statement() -> Pascal.Stmt recover StatementRecovery:",
 		"stmt = state.statement_core() recover StatementRecovery",
 	} {
@@ -297,7 +297,7 @@ func TestParseGrammarDeclAllowsCutTerm(t *testing.T) {
         "if"
         cut
         "then"
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)

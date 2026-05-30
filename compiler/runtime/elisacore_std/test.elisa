@@ -30,7 +30,7 @@ def assert_ne[T](actual: T, expected: T):
 
 
 def id_invalid[T]() -> id[T]:
-    return 0.u32() as id[T]
+    return 0.u32().cast[id[T]]
 
 
 def id_valid[T](value: id[T]) -> bool:

@@ -544,7 +544,7 @@ func (p *Parser) parseChildrenCallArgs() ([]ast.Expr, []string) {
 	}
 	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	for {
-		arg := p.withAsCastEnabled(p.parseExpr)
+		arg := p.parseExpr()
 		if p.peek() == lexer.TOKEN_TO {
 			pos := p.cur().Pos
 			p.advance()
@@ -634,18 +634,12 @@ func (p *Parser) membershipLiteralAhead() bool {
 func (p *Parser) notInMembershipAhead() bool {
 	return p.allowInMembership && p.peek() == lexer.TOKEN_NOT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IN
 }
+// parseAs no longer parses `expr as T` as a cast; `as` is reserved exclusively
+// for binding/aliasing constructs (match-pattern captures, visit/fold/rewrite
+// roots, export aliases). Use `expr.cast[T]` for casts. This pass-through is
+// retained as a precedence-chain seam.
 func (p *Parser) parseAs() ast.Expr {
-	left := p.parseBitwiseOr()
-	for p.allowAsCast && p.peek() == lexer.TOKEN_AS {
-		if p.pos+1 >= len(p.tokens) || !tokenCanStartTypeExpr(p.tokens[p.pos+1]) {
-			return left
-		}
-		pos := p.cur().Pos
-		p.advance()
-		target := p.parseTypeExpr()
-		left = &ast.CastExpr{Position: pos, Operand: left, Target: target, Origin: ast.CastExprOriginAsSyntax}
-	}
-	return left
+	return p.parseBitwiseOr()
 }
 func (p *Parser) parseIsTestExpr() ast.Expr {
 	pos := p.cur().Pos

@@ -328,7 +328,7 @@ func TestParseGrammarProductionAllowsRecoverClause(t *testing.T) {
 }
 func TestParseGrammarProductionAllowsRecoverFallbackValue(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
-	statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt):
+	statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed.cast[Pascal.Stmt]):
 		stmt = state.assignment()
 		return stmt
 `)
@@ -344,7 +344,7 @@ func TestParseGrammarProductionAllowsRecoverFallbackValue(t *testing.T) {
 		t.Fatal("expected recover fallback expression")
 	}
 	formatted := unparse.FormatFile(file)
-	want := "statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed as Pascal.Stmt):"
+	want := "statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed.cast[Pascal.Stmt]):"
 	if !strings.Contains(formatted, want) {
 		t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
 	}
@@ -385,7 +385,7 @@ func TestParseGrammarDeclAllowsTermLevelRecoverClause(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
 	cursor state
 	statement(state: mutable ParserState&) -> Pascal.Stmt:
-		stmt = state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt)
+		stmt = state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed.cast[Pascal.Stmt])
 		guard(state.current_token().kind == TokenKind.END) recover(ParseMessageKey.ExpectedStatement, until("end", token(TokenKind.EOF)))
 		return stmt
 `)
@@ -422,7 +422,7 @@ func TestParseGrammarDeclAllowsTermLevelRecoverClause(t *testing.T) {
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"stmt = state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed as Pascal.Stmt)",
+		"stmt = state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed.cast[Pascal.Stmt])",
 		"guard((state.current_token().kind == TokenKind.END)) recover(ParseMessageKey.ExpectedStatement, until(\"end\", token(TokenKind.EOF)))",
 	} {
 		if !strings.Contains(formatted, want) {

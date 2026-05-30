@@ -120,7 +120,7 @@ func TestLowerDeclPreservesChoiceOptionalAndListAsOrdinaryCalls(t *testing.T) {
 	if !strings.Contains(statementFormatted, "choice(assignment(), choice(compound_statement(), choice(if_statement(), while_statement())))") {
 		t.Fatalf("expected lowered choice production to stay as ordinary choice call, got:\n%s", statementFormatted)
 	}
-	if !strings.Contains(statementFormatted, "return zeroed as Pascal.Stmt") {
+	if !strings.Contains(statementFormatted, "return zeroed.cast[Pascal.Stmt]") {
 		t.Fatalf("expected lowered choice production to end with typed placeholder return, got:\n%s", statementFormatted)
 	}
 }
@@ -161,7 +161,7 @@ func TestLowerDeclExpandsGrammarTokenSets(t *testing.T) {
         until StatementOrFileSync
     statement() -> Pascal.Stmt recover StatementRecovery:
         values = separated token(TokenKind.IDENT) by .SEMICOLON until(StatementOrFileSync)
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
@@ -244,7 +244,7 @@ func TestLowerDeclExpandsFirstTokenSets(t *testing.T) {
 	block() -> Pascal.Stmt:
 		lookahead(StatementStart)
 		values = separated statement() by .END until(StatementOrEnd)
-		return zeroed as Pascal.Stmt
+		return zeroed.cast[Pascal.Stmt]
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
@@ -283,7 +283,7 @@ func TestLowerDeclExpandsFirstTermLookahead(t *testing.T) {
 				expr(begin_token)
 	block() -> Pascal.Stmt:
 		lookahead(first(statement))
-		return zeroed as Pascal.Stmt
+		return zeroed.cast[Pascal.Stmt]
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)

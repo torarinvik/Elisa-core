@@ -181,7 +181,7 @@ func (p *Parser) parseNotifyStmt() ast.Stmt {
 func (p *Parser) parseLockStmt() *ast.LockStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("lock")
-	mutex := p.withAsCastDisabled(p.parseExpr)
+	mutex := p.parseExpr()
 	p.expect(lexer.TOKEN_AS)
 	guardName := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)

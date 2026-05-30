@@ -417,17 +417,17 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 		return p.parseIfLetClause(pos, hint, isElif)
 	}
 	headStart := p.pos
-	head := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
+	head := p.withInMembershipDisabled(p.parseExpr)
 	if p.peek() == lexer.TOKEN_IN && p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACE) {
 		p.pos = headStart
-		cond := p.withAsCastDisabled(p.parseExpr)
+		cond := p.parseExpr()
 		p.expect(lexer.TOKEN_COLON)
 		body := p.parseStmtBodyAfterColon()
 		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
 	}
 	if p.notInMembershipAhead() {
 		p.pos = headStart
-		cond := p.withAsCastDisabled(p.parseExpr)
+		cond := p.parseExpr()
 		p.expect(lexer.TOKEN_COLON)
 		body := p.parseStmtBodyAfterColon()
 		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
@@ -453,7 +453,7 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 				p.errorf("if likely/unlikely hint cannot be combined with pattern binders")
 			}
 		}
-		store := p.withAsCastDisabled(p.parseExpr)
+		store := p.parseExpr()
 		if p.match(lexer.TOKEN_AS) {
 			patterns := p.parseTopLevelMatchPatterns()
 			p.expect(lexer.TOKEN_COLON)
@@ -462,7 +462,7 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Patterns: patterns, Body: body}
 		}
 		p.pos = headStart
-		cond := p.withAsCastDisabled(p.parseExpr)
+		cond := p.parseExpr()
 		p.expect(lexer.TOKEN_COLON)
 		body := p.parseStmtBodyAfterColon()
 		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}

@@ -55,7 +55,7 @@ func (p *Parser) parseCatchArmBody(pos lexer.Pos) []ast.Stmt {
 func (p *Parser) parseVisitExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("visit")
-	value := p.withAsCastDisabled(p.parseExpr)
+	value := p.parseExpr()
 	var root ast.TypeExpr
 	if p.match(lexer.TOKEN_AS) {
 		root = p.parseTypeExpr()
@@ -66,7 +66,7 @@ func (p *Parser) parseVisitExpr() ast.Expr {
 func (p *Parser) parseFoldExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("fold")
-	value := p.withAsCastDisabled(p.parseExpr)
+	value := p.parseExpr()
 	p.expect(lexer.TOKEN_AS)
 	root := p.parseTypeExpr()
 	p.expectIdentText("into")
@@ -77,7 +77,7 @@ func (p *Parser) parseFoldExpr() ast.Expr {
 func (p *Parser) parseRewriteExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("rewrite")
-	value := p.withAsCastDisabled(p.parseExpr)
+	value := p.parseExpr()
 	p.expect(lexer.TOKEN_AS)
 	root := p.parseTypeExpr()
 	rewriteDefault := p.matchIdentText("default")
@@ -365,7 +365,7 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackU
 		if shorthand {
 			arg = &ast.Ident{Position: namePos, Name: name}
 		} else {
-			arg = p.withAsCastEnabled(p.parseExpr)
+			arg = p.parseExpr()
 		}
 		if name == "" && sawPack {
 			p.errorf("call parameter-pack application must come after all positional arguments")

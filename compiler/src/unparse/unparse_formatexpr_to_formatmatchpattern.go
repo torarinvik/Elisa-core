@@ -218,9 +218,8 @@ func formatExpr(expr ast.Expr) string {
 				return formatExpr(n.Operand) + "." + target + "()"
 			}
 		}
-		if n.Origin == ast.CastExprOriginToSyntax || n.Origin == ast.CastExprOriginAsSyntax {
-			return formatExpr(n.Operand) + " as " + formatTypeExpr(n.Target)
-		}
+		// `as`/`->` cast spellings are removed; render all value casts as
+		// `.cast[T]` (the canonical form) regardless of their parsed origin.
 		if addr, ok := n.Operand.(*ast.AddrOfExpr); ok && addr != nil {
 			if isRefCastTarget(n.Target) {
 				return formatExpr(addr.Operand) + ".ref[" + formatTypeExpr(n.Target) + "]"

@@ -23,7 +23,7 @@ func TestLowerFileStatefulUsesConfiguredTokenEnvironment(t *testing.T) {
     expr() -> Pascal.Stmt recover(SMLParseMessageKey.ExpectedExpression, until(.END, .EOF)):
         token = .IDENT
         "raw"
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
@@ -75,7 +75,7 @@ grammar SMLFrontend with SMLGrammarEnv:
     expr() -> Pascal.Stmt recover(SMLParseMessageKey.ExpectedExpression, until(.END, .EOF)):
         token = .IDENT
         "raw"
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
@@ -188,7 +188,7 @@ func TestLowerFileStatefulInjectsHeaderArgsIntoRecoveredProductionCalls(t *testi
     alloc alloc
 	statement() -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF))):
         .IDENT(tok)
-		return zeroed as Pascal.Stmt
+		return zeroed.cast[Pascal.Stmt]
 	block() -> darray[Pascal.Stmt]:
         items = list(statement(), ";", until(token(TokenKind.EOF)))
         return items
@@ -270,7 +270,7 @@ func TestLowerFileStatefulUsesClauseResolvesImportedRecoveryPolicies(t *testing.
     recovery StatementRecovery:
         message ParseMessageKey.ExpectedStatement
         until .SEMICOLON, token(TokenKind.EOF)
-        fallback zeroed as Token
+        fallback zeroed.cast[Token]
 
 grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:
     cursor state
@@ -284,7 +284,7 @@ grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:
 		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
 		"state.current_token().kind == TokenKind.SEMICOLON",
 		"state.current_token().kind != TokenKind.EOF",
-		"__grammar_recover_value_statement_PascalStmtGrammar_recover_value_11 <- zeroed as Token",
+		"__grammar_recover_value_statement_PascalStmtGrammar_recover_value_11 <- zeroed.cast[Token]",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected uses-imported recovery policy lowering to contain %q, got:\n%s", want, formatted)
@@ -383,7 +383,7 @@ func TestLowerFileStatefulSeedsBareHeaderChannelFromProductionReturnType(t *test
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
-	if !strings.Contains(formatted, "node: mutable Token = zeroed as Token") {
+	if !strings.Contains(formatted, "node: mutable Token = zeroed.cast[Token]") {
 		t.Fatalf("expected bare header channel to seed from the production return type, got:\n%s", formatted)
 	}
 	if !strings.Contains(formatted, "return (true, __grammar_committed_") {
@@ -478,7 +478,7 @@ grammar PerlFrontend over Token using ParserState:
 	if strings.Contains(formatted, "Tail(node:)") {
 		t.Fatalf("expected non-matching tree channel not to synthesize struct literal, got:\n%s", formatted)
 	}
-	if !strings.Contains(formatted, "zeroed as Tail") {
+	if !strings.Contains(formatted, "zeroed.cast[Tail]") {
 		t.Fatalf("expected unmatched struct channels to fall back to zeroed return value, got:\n%s", formatted)
 	}
 	if strings.Contains(formatted, "node: mutable Tail") {
@@ -500,8 +500,8 @@ grammar PerlFrontend over Token using ParserState:
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"name_token: mutable Token = zeroed as Token",
-		"close_token: mutable Token = zeroed as Token",
+		"name_token: mutable Token = zeroed.cast[Token]",
+		"close_token: mutable Token = zeroed.cast[Token]",
 		"Tail(name_token:, close_token:)",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -527,8 +527,8 @@ grammar PerlFrontend over Token using ParserState:
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"name_token: mutable Token = zeroed as Token",
-		"close_token: mutable Token = zeroed as Token",
+		"name_token: mutable Token = zeroed.cast[Token]",
+		"close_token: mutable Token = zeroed.cast[Token]",
 		"Tail(name_token:, close_token:)",
 	} {
 		if !strings.Contains(formatted, want) {

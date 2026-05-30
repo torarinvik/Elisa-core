@@ -394,7 +394,7 @@ func TestLowerDeclRoutesTokenKindMatcherThroughStateReceiverWhenPresent(t *testi
     assignment(state: mutable ParserState&) -> Pascal.Stmt:
         name_token = token(TokenKind.IDENT)
         state.expect(":=")
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	funcs := LowerDecl(decl)
 	if len(funcs) != 1 {
@@ -419,7 +419,7 @@ func TestLowerFileStatefulListCollectsValuesIntoDarray(t *testing.T) {
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"mutable darray[Token] = zeroed as darray[Token]",
+		"mutable darray[Token] = zeroed.cast[darray[Token]]",
 		"<- []",
 		".push(",
 	} {

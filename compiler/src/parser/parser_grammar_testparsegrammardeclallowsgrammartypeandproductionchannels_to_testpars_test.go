@@ -102,7 +102,7 @@ func TestParseGrammarDeclAllowsConcatTerm(t *testing.T) {
 func TestParseGrammarDeclAllowsWhenTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     body(tok: Token, state: mutable ParserState&) -> Pascal.Stmt:
-        node = when(tok.kind == TokenKind.THEN, state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt), when(is_statement_start(state.current_token().kind), state.statement_core(), expr(zeroed as Pascal.Stmt)))
+        node = when(tok.kind == TokenKind.THEN, state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed.cast[Pascal.Stmt]), when(is_statement_start(state.current_token().kind), state.statement_core(), expr(zeroed.cast[Pascal.Stmt])))
         return node
 `)
 	if len(errs) != 0 {
@@ -128,7 +128,7 @@ func TestParseGrammarDeclAllowsWhenTerm(t *testing.T) {
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"node = when((tok.kind == TokenKind.THEN), state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed as Pascal.Stmt), when(is_statement_start(state.current_token().kind), state.statement_core(), expr(zeroed as Pascal.Stmt)))",
+		"node = when((tok.kind == TokenKind.THEN), state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed.cast[Pascal.Stmt]), when(is_statement_start(state.current_token().kind), state.statement_core(), expr(zeroed.cast[Pascal.Stmt])))",
 		"return node",
 	} {
 		if !strings.Contains(formatted, want) {

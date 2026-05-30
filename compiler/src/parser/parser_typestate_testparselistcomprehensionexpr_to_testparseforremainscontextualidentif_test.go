@@ -125,7 +125,7 @@ func TestParseListLiteralSpreadElements(t *testing.T) {
 }
 
 func TestParseChildrenToOverrideExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt as Lua.Node).node\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt.cast[Lua.Node]).node\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -146,10 +146,10 @@ func TestParseChildrenToOverrideExpr(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected to-override arg, got %T", call.Args[0])
 	}
-	if cast.Origin != ast.CastExprOriginAsSyntax {
-		t.Fatalf("expected as-syntax cast origin, got %v", cast.Origin)
+	if cast.Origin != ast.CastExprOriginExplicitCast {
+		t.Fatalf("expected explicit cast origin, got %v", cast.Origin)
 	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "children(stmt as Lua.Node)") {
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "children(stmt.cast[Lua.Node])") {
 		t.Fatalf("expected unparse to preserve children as-cast syntax, got:\n%s", formatted)
 	}
 }
@@ -288,53 +288,19 @@ func TestParsePostfixCastWithMutableAnyRefTarget(t *testing.T) {
 		t.Fatalf("expected mutable cast target, got %T", cast.Target)
 	}
 }
-func TestParseAsCastExprPreservesSyntax(t *testing.T) {
-	file, errs := parseSourceFile(t, "struct Arena:\n    value: i64\n\ndef keep(owner: Arena) -> mutable Arena&:\n    return &owner as mutable Arena&\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl := file.Decls[1].(*ast.FuncDecl)
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
-	}
-	cast, ok := ret.Value.(*ast.CastExpr)
-	if !ok {
-		t.Fatalf("expected cast expr, got %T", ret.Value)
-	}
-	if cast.Origin != ast.CastExprOriginAsSyntax {
-		t.Fatalf("expected as-syntax cast origin, got %v", cast.Origin)
-	}
-	if _, ok := cast.Operand.(*ast.AddrOfExpr); !ok {
-		t.Fatalf("expected address-of operand, got %T", cast.Operand)
-	}
-	if _, ok := cast.Target.(*ast.MutableType); !ok {
-		t.Fatalf("expected mutable cast target, got %T", cast.Target)
-	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "&owner as mutable Arena&") {
-		t.Fatalf("expected unparse to preserve as cast syntax, got:\n%s", formatted)
+func TestAsCastSyntaxIsRejectedInReturn(t *testing.T) {
+	// The `expr as T` value-cast spelling was removed; `as` is reserved for
+	// binding/aliasing constructs only. `expr.cast[T]` is the replacement. The
+	// parser must no longer accept a value-level `as` cast in expression position.
+	_, errs := parseSourceFile(t, "def keep(x: i64) -> i64:\n    return x as i64\n")
+	if len(errs) == 0 {
+		t.Fatalf("expected `expr as T` to be rejected after as-cast removal")
 	}
 }
-func TestParseAsCastInsideIfConditionCallArgs(t *testing.T) {
-	file, errs := parseSourceFile(t, "def accepts(text: u8&) -> bool:\n    return true\n\ndef keep() -> i64:\n    if accepts(\"hello\" as u8&):\n        return 1\n    return 0\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl := file.Decls[1].(*ast.FuncDecl)
-	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected if stmt, got %T", decl.Body[0])
-	}
-	call, ok := ifStmt.Cond.(*ast.CallExpr)
-	if !ok {
-		t.Fatalf("expected call condition, got %T", ifStmt.Cond)
-	}
-	cast, ok := call.Args[0].(*ast.CastExpr)
-	if !ok {
-		t.Fatalf("expected as-cast call arg, got %T", call.Args[0])
-	}
-	if cast.Origin != ast.CastExprOriginAsSyntax {
-		t.Fatalf("expected as-syntax cast origin, got %v", cast.Origin)
+func TestAsCastSyntaxIsRejectedInCallArgs(t *testing.T) {
+	_, errs := parseSourceFile(t, "def accepts(text: u8&) -> bool:\n    return true\n\ndef keep() -> i64:\n    if accepts(\"hello\" as u8&):\n        return 1\n    return 0\n")
+	if len(errs) == 0 {
+		t.Fatalf("expected `expr as T` in call args to be rejected after as-cast removal")
 	}
 }
 func TestParseAsRefAssignmentRemainsStatementSyntax(t *testing.T) {

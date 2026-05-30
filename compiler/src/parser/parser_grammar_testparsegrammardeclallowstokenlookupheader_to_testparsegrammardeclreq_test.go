@@ -99,7 +99,7 @@ func TestParseGrammarDeclAllowsTokenSets(t *testing.T) {
         until StatementSync
     statement() -> Pascal.Stmt recover StatementRecovery:
         statements = separated statement_core() by .SEMICOLON until(StatementSync)
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -313,7 +313,7 @@ func TestParseGrammarDeclAllowsFirstTokenSetItem(t *testing.T) {
     tokenset StatementStart = first(statement)
     statement() -> Pascal.Stmt:
         .IDENT(name)
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -338,10 +338,10 @@ func TestParseGrammarDeclAllowsFirstTermLookahead(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalStmtGrammar over Token using ParserState:
     statement() -> Pascal.Stmt:
         .IDENT(name)
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
     block() -> Pascal.Stmt:
         lookahead(first(statement))
-        return zeroed as Pascal.Stmt
+        return zeroed.cast[Pascal.Stmt]
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)

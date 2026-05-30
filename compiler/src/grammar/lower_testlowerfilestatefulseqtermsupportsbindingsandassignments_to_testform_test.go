@@ -84,8 +84,8 @@ func TestLowerFileStatefulOptionalAndRepeatSuffixShorthandLowerThroughExistingTe
 		"state.current_token().kind == token_kind_for_text(\")\")",
 		"__grammar_optional_cursor_",
 		"def maybe_item(state: mutable ParserState&) -> Token?:",
-		"null as Token?",
-		"as Token?",
+		"null.cast[Token?]",
+		".cast[Token?]",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered shorthand production to contain %q, got:\n%s", want, formatted)
@@ -140,7 +140,7 @@ func TestLowerFileStatefulProductionWithNamedRecoverPolicyRecordsAndSynchronizes
 }
 func TestLowerFileStatefulProductionWithRecoverFallbackReturnsFallbackValue(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
-    statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt):
+    statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed.cast[Pascal.Stmt]):
 		stmt = choice(state.assignment(), state.compound_statement())
 		return stmt
 `)
@@ -149,7 +149,7 @@ func TestLowerFileStatefulProductionWithRecoverFallbackReturnsFallbackValue(t *t
 	for _, want := range []string{
 		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
 		"state.advance_token()",
-		"return zeroed as Pascal.Stmt",
+		"return zeroed.cast[Pascal.Stmt]",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered recover fallback production to contain %q, got:\n%s", want, formatted)
@@ -221,7 +221,7 @@ grammar DemoGrammar over Token using ParserState:
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
-	if !strings.Contains(formatted, "as Token?") {
+	if !strings.Contains(formatted, ".cast[Token?]") {
 		t.Fatalf("expected lowered choice to promote Token branch to Token?, got:\n%s", formatted)
 	}
 }
@@ -229,7 +229,7 @@ func TestLowerFileStatefulTermLevelRecoverClauseRecordsAndContinues(t *testing.T
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
 	    cursor state
 	    statement() -> Token:
-	        stmt = token(TokenKind.IDENT) recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Token)
+	        stmt = token(TokenKind.IDENT) recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed.cast[Token])
 	        return stmt
 `)
 	lowered := LowerFile(file)
@@ -239,7 +239,7 @@ func TestLowerFileStatefulTermLevelRecoverClauseRecordsAndContinues(t *testing.T
 		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
 		"state.current_token().kind == token_kind_for_text(\";\")",
 		"state.advance_token()",
-		"zeroed as Token",
+		"zeroed.cast[Token]",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered term-level recover production to contain %q, got:\n%s", want, formatted)
@@ -252,7 +252,7 @@ func TestLowerFileStatefulTermLevelNamedRecoverPolicyRecordsAndContinues(t *test
 	    recovery StatementRecovery:
 	        message ParseMessageKey.ExpectedStatement
 	        until ";", token(TokenKind.EOF)
-	        fallback zeroed as Token
+	        fallback zeroed.cast[Token]
 	    statement() -> Token:
 	        stmt = token(TokenKind.IDENT) recover StatementRecovery
 	        return stmt
@@ -264,7 +264,7 @@ func TestLowerFileStatefulTermLevelNamedRecoverPolicyRecordsAndContinues(t *test
 		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
 		"state.current_token().kind == token_kind_for_text(\";\")",
 		"state.advance_token()",
-		"zeroed as Token",
+		"zeroed.cast[Token]",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered named term-level recover production to contain %q, got:\n%s", want, formatted)
@@ -306,7 +306,7 @@ func TestLowerFileStatefulReturnlessRecoverClauseUsesVoidTupleValue(t *testing.T
 	}{
 		{name: "public", fn: publicFn, wantBody: "record_parse_error(ParseMessageKey.ExpectedStatement)"},
 		{name: "public try", fn: publicTryFn, wantReturn: "value: bool"},
-		{name: "internal try", fn: internalTryFn, wantReturn: "value: bool", wantBody: "zeroed as bool"},
+		{name: "internal try", fn: internalTryFn, wantReturn: "value: bool", wantBody: "zeroed.cast[bool]"},
 	} {
 		formatted := unparse.FormatDecl(tc.fn)
 		if tc.wantReturn != "" && !strings.Contains(formatted, tc.wantReturn) {
@@ -327,7 +327,7 @@ func TestLowerFileStatefulListCallsRecoveredProductionDirectly(t *testing.T) {
         return stmt
     block(state: mutable ParserState&) -> Pascal.Block:
         statements = list(state.statement(), ";", until("end", token(TokenKind.EOF)))
-        return zeroed as Pascal.Block
+        return zeroed.cast[Pascal.Block]
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)

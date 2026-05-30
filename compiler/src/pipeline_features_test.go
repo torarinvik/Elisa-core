@@ -315,7 +315,7 @@ func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
 func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_named_runtime_call.elisa")
-	src := "extern puts(text: u8&) -> int\nextern assert(cond: bool) -> void\n\ndef main() -> int:\n    printed: int = puts(text: do:\n        prefix: static u8& = \"hi\"\n        prefix as u8&\n    )\n    assert(cond: printed == 2)\n    return printed\n"
+	src := "extern puts(text: u8&) -> int\nextern assert(cond: bool) -> void\n\ndef main() -> int:\n    printed: int = puts(text: do:\n        prefix: static u8& = \"hi\"\n        prefix.cast[u8&]\n    )\n    assert(cond: printed == 2)\n    return printed\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write named-runtime interpreter fixture: %v", err)
 	}
