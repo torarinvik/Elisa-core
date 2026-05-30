@@ -79,6 +79,34 @@ func TestReadSourceWithIncludesAcceptsBareIncludeDirective(t *testing.T) {
 		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
 	}
 }
+// An absolute include path must be honored verbatim, not joined onto the
+// including file's directory. Regression guard: filepath.Join does not treat an
+// absolute second arg as absolute (it concatenates), which previously made
+// `include "/abs/path.elisa"` resolve to `<dir>/abs/path.elisa` and fail.
+func TestReadSourceWithIncludesAcceptsAbsoluteIncludePath(t *testing.T) {
+	leafDir := t.TempDir()
+	rootDir := t.TempDir() // a DIFFERENT directory, so only an absolute path resolves
+	leafPath := filepath.Join(leafDir, "leaf.elisa")
+	rootPath := filepath.Join(rootDir, "root.elisa")
+
+	if err := os.WriteFile(leafPath, []byte("leaf_line"), 0o644); err != nil {
+		t.Fatalf("write leaf fixture: %v", err)
+	}
+	if err := os.WriteFile(rootPath, []byte("root_start\ninclude \""+leafPath+"\"\nroot_end"), 0o644); err != nil {
+		t.Fatalf("write root fixture: %v", err)
+	}
+
+	expanded, err := readSourceWithIncludes(rootPath, map[string]bool{})
+	if err != nil {
+		t.Fatalf("readSourceWithIncludes with absolute include: %v", err)
+	}
+
+	got := stripLineDirectives(string(expanded))
+	want := "root_start\nleaf_line\nroot_end"
+	if got != want {
+		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
+	}
+}
 func TestReadSourceWithIncludesAcceptsPascalIncludeDirectives(t *testing.T) {
 	dir := t.TempDir()
 	leafPath := filepath.Join(dir, "leaf.elisa")

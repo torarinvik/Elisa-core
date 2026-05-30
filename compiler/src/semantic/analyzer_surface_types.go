@@ -209,7 +209,7 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			a.errorf(expr.Pos(), "dict expects 2 type arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 			return invalidType
 		}
-		return a.resolveDictType(expr.TypeArgs[0], expr.TypeArgs[1], "dict")
+		return a.resolveDictType(expr.TypeArgs[0], expr.TypeArgs[1], "dict", expr.Region)
 	case "str":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			a.errorf(expr.Pos(), "str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -280,7 +280,7 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 	}
 }
 
-func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr, surfaceName string) Type {
+func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr, surfaceName string, region string) Type {
 	keyType := a.resolveType(keyExpr)
 	valueType := a.resolveType(valueExpr)
 	if IsInvalidType(keyType) || IsInvalidType(valueType) {
@@ -290,7 +290,7 @@ func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr,
 		a.errorf(keyExpr.Pos(), "dict keys cannot contain linear handles, got %s", keyType)
 		return invalidType
 	}
-	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}
+	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName, Region: region}
 }
 
 func dictRuntimeBackedKeyType(keyType Type) bool {

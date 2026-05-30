@@ -107,18 +107,50 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 }
 
 // containerRegionParamInScope reports whether t is a container whose region is
-// an in-scope region parameter (e.g. `def f[region r](out: darray[T] @r&)`).
-// Such a container may be grown without an ambient `in <arena>:` scope: the
-// arena for r is supplied by the caller (region-aware codegen sources it from
-// the region environment / hidden arena param).
+// an in-scope region parameter (e.g. `def f[region r](out: darray[T] @r&)` or
+// `def f[region r](d: dict[K,V] @r&)`). Such a container may be grown/inserted
+// without an ambient `in <arena>:` scope: the arena for r is supplied by the
+// caller (region-aware codegen sources it from the region environment / hidden
+// arena param). Handles darray, dict, dict-entry receivers, peeling refs.
 func (a *Analyzer) containerRegionParamInScope(t Type) bool {
 	if a == nil {
 		return false
 	}
-	if da, ok := t.(*DArrayType); ok && da != nil && da.Region != "" {
-		return a.lookupRegionParam(da.Region)
+	if region := containerOrEntryRegion(t); region != "" {
+		return a.lookupRegionParam(region)
 	}
 	return false
+}
+
+// containerOrEntryRegion peels ref wrappers and returns the allocation region of
+// a darray, dict, or dict-entry (the entry's underlying dict), or "".
+func containerOrEntryRegion(t Type) string {
+	for {
+		switch tt := t.(type) {
+		case *DArrayType:
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
+		case *DictType:
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
+		case *DictEntryType:
+			if tt == nil || tt.Dict == nil {
+				return ""
+			}
+			return tt.Dict.Region
+		case *RefType:
+			if tt == nil {
+				return ""
+			}
+			t = tt.Elem
+		default:
+			return ""
+		}
+	}
 }
 
 // activeContainerRegionName is the name of the region of the innermost active

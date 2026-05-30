@@ -498,7 +498,13 @@ func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included 
 			indent := leadingWhitespaceBytes(line)
 			var includeBuf bytes.Buffer
 			outLenBefore := out.Len()
-			if err := writeSourceWithIncludesActive(&includeBuf, filepath.Join(filepath.Dir(abs), includePath), included, active); err != nil {
+			// An absolute include path is used verbatim; filepath.Join would
+			// concatenate it onto the current dir rather than honoring it.
+			resolvedInclude := includePath
+			if !filepath.IsAbs(resolvedInclude) {
+				resolvedInclude = filepath.Join(filepath.Dir(abs), includePath)
+			}
+			if err := writeSourceWithIncludesActive(&includeBuf, resolvedInclude, included, active); err != nil {
 				return err
 			}
 			writeIndentedInclude(out, includeBuf.Bytes(), indent)

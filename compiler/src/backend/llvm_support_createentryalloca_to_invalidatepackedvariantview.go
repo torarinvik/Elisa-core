@@ -165,6 +165,23 @@ func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
 	return treeAllocOwnerBinding{}, false
 }
 
+// dictMutationHelperName picks the runtime helper the dict-entry codegen calls
+// for an insert/get_or_insert. The real std `arena_dict_put` /
+// `arena_dict_get_or_insert` return `error[RuntimeError]` (an sret/error-tag
+// ABI the hand-rolled call site cannot consume), so the std also ships thin
+// non-error `_checked` wrappers (try->panic-via-else). Prefer the wrapper when
+// present; fall back to the base name for minimal runtimes/test stubs that
+// already define a non-error helper of that name.
+func (s *functionState) dictMutationHelperName(base string) string {
+	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
+		return base
+	}
+	if _, ok := s.g.result.GlobalScope.Lookup(base + "_checked"); ok {
+		return base + "_checked"
+	}
+	return base
+}
+
 // regionArenaOwner resolves the arena for a named region from the live region
 // environment (s.regions), for region-parameterized container ops. Region-
 // containers Phase 2 codegen: a container grows in its OWN region's arena
@@ -182,20 +199,30 @@ func (s *functionState) regionArenaOwner(region string) (treeAllocOwnerBinding, 
 	}
 	return treeAllocOwnerBinding{}, false
 }
-// containerRegionDArray peels ref wrappers to the underlying container darray
-// (region annotations live on the DArrayType inside `darray[T] @r&`).
-func containerRegionDArray(t semantic.Type) *semantic.DArrayType {
+// containerRegionName peels ref wrappers and returns the allocation region of
+// the underlying region-carrying container (darray or dict), or "" if t is not
+// such a container. Used to match a region param against a call argument's
+// region for hidden-arena passing.
+func containerRegionName(t semantic.Type) string {
 	for {
 		switch tt := t.(type) {
 		case *semantic.DArrayType:
-			return tt
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
+		case *semantic.DictType:
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
 		case *semantic.RefType:
 			if tt == nil {
-				return nil
+				return ""
 			}
 			t = tt.Elem
 		default:
-			return nil
+			return ""
 		}
 	}
 }
@@ -213,12 +240,11 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 	for _, regionParam := range fn.RegionParams {
 		var arena C.LLVMValueRef
 		for i, p := range fn.Params {
-			pda := containerRegionDArray(p)
-			if pda == nil || pda.Region != regionParam || i >= len(expr.Args) {
+			if containerRegionName(p) != regionParam || i >= len(expr.Args) {
 				continue
 			}
-			if ada := containerRegionDArray(s.exprType(expr.Args[i])); ada != nil && ada.Region != "" {
-				if owner, ok := s.regionArenaOwner(ada.Region); ok {
+			if argRegion := containerRegionName(s.exprType(expr.Args[i])); argRegion != "" {
+				if owner, ok := s.regionArenaOwner(argRegion); ok {
 					arena = owner.arenaRef
 				}
 			}

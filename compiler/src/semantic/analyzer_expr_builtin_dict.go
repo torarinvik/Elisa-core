@@ -85,7 +85,12 @@ func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
 		return refToTypeExprWithStorage(elem, t.State != RefStateNonNull, ast.RefStorage(t.Storage))
 	case *DStrType:
 		if isWildcardShape(t.Shape) {
-			return &ast.BuiltinTypeExpr{Position: pos, Name: "cstr"}
+			// A wildcard-shape cstr must round-trip through the bare-NamedType
+			// path (resolveType: NamedType "cstr" -> wildcard DStrType). Emitting
+			// a BuiltinTypeExpr{Name:"cstr"} instead would re-hit the arity check
+			// ("cstr expects 1 argument"), breaking method rewrites like `d.get`
+			// on a `dict[cstr, V]` (wildcard key).
+			return &ast.NamedType{Position: pos, Name: "cstr"}
 		}
 		return &ast.BuiltinTypeExpr{Position: pos, Name: "cstr", ValueArgs: []ast.Expr{&ast.Ident{Position: pos, Name: t.Shape.String()}}}
 	case *DictType:
@@ -267,7 +272,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry insert requires an entry created from a mutable dict receiver")
 	}
-	if a.currentAllocExpr == nil {
+	if a.currentAllocExpr == nil && !a.containerRegionParamInScope(receiverType) {
 		a.errorf(expr.Pos(), "dict entry insert requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {
@@ -306,7 +311,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry get_or_insert requires an entry created from a mutable dict receiver")
 	}
-	if a.currentAllocExpr == nil {
+	if a.currentAllocExpr == nil && !a.containerRegionParamInScope(receiverType) {
 		a.errorf(expr.Pos(), "dict entry get_or_insert requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {

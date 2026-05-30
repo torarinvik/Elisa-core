@@ -93,7 +93,12 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("dict entry get_or_insert expects 1 argument, got %d", len(expr.Args))
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	// Region-parameterized dict: prefer the dict's own region arena (if live in
+	// s.regions) over the ambient scope, mirroring darray push / dict insert.
+	owner, ok := s.regionArenaOwner(entryType.Dict.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("dict entry get_or_insert requires an active in <arena>: scope")
 	}
@@ -165,7 +170,7 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 	if err != nil {
 		return nil, nil, true, err
 	}
-	getOrInsertCallee, getOrInsertType, err := s.ensureRuntimeFunction("arena_dict_get_or_insert", map[string]semantic.Type{"K": entryType.Dict.Key, "T": entryType.Dict.Value})
+	getOrInsertCallee, getOrInsertType, err := s.ensureRuntimeFunction(s.dictMutationHelperName("arena_dict_get_or_insert"), map[string]semantic.Type{"K": entryType.Dict.Key, "T": entryType.Dict.Value})
 	if err != nil {
 		return nil, nil, true, err
 	}

@@ -59,3 +59,71 @@ def region_param_push_test() -> void:
 		}
 	}
 }
+
+// End-to-end: a region-parameterized function inserts into a `dict[cstr,i64] @r`
+// parameter via the entry API (`d.entry(k).insert(v)`) with NO ambient
+// `in <arena>:` scope of its own — the dict's growth arena is threaded by the
+// compiler as a hidden Arena& param sourced from the caller's region, exactly
+// mirroring the darray push ABI. Verifies the inserted values read back
+// correctly (no arena corruption) across several insertions + a rehash.
+func TestRunCLIRegionParamDictInsertThreadsArenaViaHiddenParam(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	repoRoot := repoRootFromMainTest(t)
+	stdDir := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_param_dict_fixture.elisa")
+	// Include the full runtime + heap (which pulls in collections' dict ops) via
+	// absolute include paths, so the fixture self-defines the default runtime
+	// (skipping the auto-linked runtime object — no duplicate symbols).
+	src := `include "` + filepath.Join(stdDir, "elisacore_runtime.elisa") + `"
+include "` + filepath.Join(stdDir, "heap.elisa") + `"
+
+def fill[region r](d: mutable dict[cstr, i64] @r) -> i64:
+    d.entry("alpha").insert(10)
+    d.entry("beta").insert(20)
+    d.entry("gamma").insert(30)
+    d.entry("delta").insert(40)
+    sum: mutable i64 = 0
+    sa: i64& = get d.get("alpha") else return -1
+    sum <- sum + sa[0]
+    sb: i64& = get d.entry("beta").get_or_insert(0) else return -2
+    sum <- sum + sb[0]
+    sc: i64& = get d.get("gamma") else return -3
+    sum <- sum + sc[0]
+    sd: i64& = get d.entry("delta").get_or_insert(0) else return -4
+    sum <- sum + sd[0]
+    return sum
+
+@test
+def region_param_dict_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region a(4096):
+            d: mutable dict[cstr, i64] @a = zeroed
+            s: i64 = fill(d)
+            if s != 100:
+                panic("expected sum 100 (10+20+30+40)")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write region-param dict fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-param dict test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] region_param_dict_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected region-param dict output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}

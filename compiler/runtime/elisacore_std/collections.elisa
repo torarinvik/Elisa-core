@@ -889,6 +889,19 @@ def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, ke
         existing return if existing != null
         return try arena_dict_put(a, m, key, value)
 
+# Non-error wrappers used by the dict-entry codegen ABI (`d.entry(k).insert(v)`
+# / `.get_or_insert(v)`). The entry ops run under `can Abort.Panic`, so a growth
+# OOM surfaces as null rather than an error-union the hand-rolled call site would
+# have to thread. These keep the codegen call shape simple: a plain nullable
+# value ref (`mutable T&?` -> nullable ptr), no sret/error-tag ABI.
+def arena_dict_put_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
+    can Memory.Allocate, Abort.Panic:
+        return try arena_dict_put(a, m, key, value) else null
+
+def arena_dict_get_or_insert_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
+    can Memory.Allocate, Abort.Panic:
+        return try arena_dict_get_or_insert(a, m, key, value) else null
+
 def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
     return arena_dict_get(m, key) != null
 

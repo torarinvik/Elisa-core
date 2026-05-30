@@ -545,7 +545,14 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("dict entry insert expects 1 argument, got %d", len(expr.Args))
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	// Region-parameterized dict: prefer the arena of the dict's own region (if
+	// live in s.regions) over the ambient scope, mirroring darray push. Today a
+	// dict's region == its ambient scope, so this is behavior-preserving; it
+	// becomes load-bearing once insert happens through a region-param dict.
+	owner, ok := s.regionArenaOwner(entryType.Dict.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("dict entry insert requires an active in <arena>: scope")
 	}
@@ -618,7 +625,7 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	putCallee, putType, err := s.ensureRuntimeFunction("arena_dict_put", map[string]semantic.Type{"K": entryType.Dict.Key, "T": entryType.Dict.Value})
+	putCallee, putType, err := s.ensureRuntimeFunction(s.dictMutationHelperName("arena_dict_put"), map[string]semantic.Type{"K": entryType.Dict.Key, "T": entryType.Dict.Value})
 	if err != nil {
 		return nil, nil, true, err
 	}

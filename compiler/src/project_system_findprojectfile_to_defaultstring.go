@@ -513,6 +513,16 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 	return nil
 }
 func resolveExpandedIncludePath(currentDir string, includePath string, includeDirs []string) (string, error) {
+	// An absolute include path is used verbatim. filepath.Join(currentDir,
+	// includePath) does NOT honor an absolute second arg — it concatenates — so
+	// without this branch `include "/abs/x.elisa"` would silently resolve to
+	// `<currentDir>/abs/x.elisa` and fail with a confusing not-found.
+	if filepath.IsAbs(includePath) {
+		if _, err := os.Stat(includePath); err == nil {
+			return includePath, nil
+		}
+		return "", fmt.Errorf("include %q not found", includePath)
+	}
 	candidates := make([]string, 0, len(includeDirs)+1)
 	candidates = append(candidates, filepath.Join(currentDir, includePath))
 	for _, dir := range includeDirs {
