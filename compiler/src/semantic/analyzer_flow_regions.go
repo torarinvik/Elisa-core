@@ -290,6 +290,14 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	if a.currentRegions != nil {
 		a.currentRegions[sym] = regionState{}
 	}
+	// Record this region's lifetime ordinal (declaration order == nesting order
+	// for live regions). Outer regions get lower ordinals and thus outlive inner
+	// ones. See regionLifetimeOrdinals.
+	if a.regionLifetimeOrdinals == nil {
+		a.regionLifetimeOrdinals = map[string]int{}
+	}
+	a.regionLifetimeCounter++
+	a.regionLifetimeOrdinals[stmt.Name] = a.regionLifetimeCounter
 	// A region owns a bulk allocation, so it is an affine resource that must be
 	// consumed on every path before scope exit (like any other linear value).
 	// A bare `region NAME(...)` must be matched by `destroy NAME`; a scoped

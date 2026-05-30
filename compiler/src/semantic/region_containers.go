@@ -106,6 +106,65 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 	}
 }
 
+// regionLifetimeOrdinal returns a region's position in the outlives-lattice: a
+// LOWER ordinal means a longer-lived region. Region params are caller-owned and
+// outlive every local region (ordinal 0). Local regions get their declaration
+// ordinal (1+). Any other region identity ('heap, a borrowed `in <arena>:`, or
+// an unknown name) is treated as outermost (0) — borrowed/process arenas outlive
+// local regions. The second return reports whether the region is *comparable*
+// (a known region param or tracked local region); incomparable regions must not
+// drive a rejection.
+func (a *Analyzer) regionLifetimeOrdinal(region string) (int, bool) {
+	if a == nil || region == "" {
+		return 0, false
+	}
+	if a.lookupRegionParam(region) {
+		return 0, true
+	}
+	if ord, ok := a.regionLifetimeOrdinals[region]; ok {
+		return ord, true
+	}
+	return 0, false
+}
+
+// regionOutlives reports whether region `outer` strictly outlives region `inner`
+// — i.e. `inner` is freed first, so a pointer into `inner` stored in `outer`'s
+// bucket would dangle. Only decides when both regions are comparable.
+func (a *Analyzer) regionOutlives(outer, inner string) bool {
+	if outer == inner {
+		return false
+	}
+	oo, ok1 := a.regionLifetimeOrdinal(outer)
+	io, ok2 := a.regionLifetimeOrdinal(inner)
+	if !ok1 || !ok2 {
+		return false
+	}
+	return oo < io
+}
+
+// checkNestedRegionStoreEscape rejects storing a value whose region is freed
+// before the target slot's region — e.g. an inner-`@r` container/ref written
+// into an outer-region object (`darray[T] @outer`'s element typed `@inner`, a
+// field `@inner` of an `@outer` struct, etc.). Once the inner region is freed,
+// the still-live outer storage holds a dangling pointer. This is the nested-
+// region case of the escape property, decided by the region outlives-lattice.
+// The existing function-outliving store check (checkStoredRegionContainerEscape)
+// covers the global / process-lifetime target; this covers the local outer ->
+// inner case the lattice makes precise.
+func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr ast.Expr, targetType, valueType Type) {
+	if a == nil || targetExpr == nil {
+		return
+	}
+	valueRegion := containerOrEntryRegion(valueType)
+	targetRegion := containerOrEntryRegion(targetType)
+	if valueRegion == "" || targetRegion == "" {
+		return
+	}
+	if a.regionOutlives(targetRegion, valueRegion) {
+		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+	}
+}
+
 // containerRegionParamInScope reports whether t is a container whose region is
 // an in-scope region parameter (e.g. `def f[region r](out: darray[T] @r&)` or
 // `def f[region r](d: dict[K,V] @r&)`). Such a container may be grown/inserted

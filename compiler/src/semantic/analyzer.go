@@ -177,6 +177,16 @@ type Analyzer struct {
 	// must-consume obligation unsound).
 	currentFuncSawPlainValueReturn bool
 	currentRegions                map[*Symbol]regionState
+	// regionLifetimeOrdinals maps a local region name to a monotonic ordinal
+	// assigned at its `region NAME(...)` declaration. Because regions nest
+	// lexically (LIFO destruction), a LOWER ordinal means a longer-lived region:
+	// an outer region is declared before — and freed after — an inner one. This
+	// is the region outlives-lattice for local regions; region params are
+	// caller-owned and outlive every local (ordinal 0), and 'heap/borrowed arenas
+	// are treated as outermost. Used to reject storing an inner-@r value into an
+	// outer-region slot (a dangling pointer once the inner region is freed).
+	regionLifetimeOrdinals        map[string]int
+	regionLifetimeCounter         int
 	currentRegionMarks            map[*Symbol]regionMarkState
 	currentCheckpoints            map[*Symbol]checkpointState
 	currentRegionRefs             map[*Symbol]regionRefState

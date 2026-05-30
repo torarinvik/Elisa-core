@@ -274,6 +274,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.checkLocalArenaEscape(n.Value, valueType, "store")
 			a.checkStoredRegionContainerEscape(n.Value, valueType)
 		}
+		// Nested-region escape: storing an inner-@r value into an outer-region
+		// slot dangles once the inner region is freed. Decided by the region
+		// outlives-lattice, independent of whether the target outlives the
+		// function (the function-outliving case is handled just above).
+		a.checkNestedRegionStoreEscape(n.Target, targetType, valueType)
 		a.checkStoredBorrowEscapesLocal(n.Target, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {

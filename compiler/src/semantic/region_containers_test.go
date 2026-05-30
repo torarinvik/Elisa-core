@@ -60,6 +60,37 @@ def stash() -> void:
 	}
 }
 
+// Nested-region escape: pushing a value from an inner (shorter-lived) region
+// into a darray whose element region is an outer (longer-lived) region leaves a
+// dangling reference once the inner region is freed. Rejected by the outlives
+// lattice. The symmetric case (outer value into an inner-region container) is
+// safe and must NOT be rejected.
+func TestRegionNestedStoreEscapeChecking(t *testing.T) {
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "region_nested_bad.elisa", `def nest_bad() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region outer(4096):
+            big: mutable darray[darray[u8] @outer] @outer = []
+            region inner(4096):
+                small: mutable darray[u8] @inner = []
+                big.push(small)
+`)
+	if all := strings.Join(bad.Errors(), "\n"); !strings.Contains(all, "is freed first") {
+		t.Fatalf("expected inner-region value pushed into outer container to be rejected; got: %s", all)
+	}
+
+	ok := analyzeTreeTestSourceWithSemanticErrors(t, "region_nested_ok.elisa", `def nest_ok() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region outer(4096):
+            small: mutable darray[u8] @outer = []
+            region inner(4096):
+                big: mutable darray[darray[u8] @outer] @inner = []
+                big.push(small)
+`)
+	if all := strings.Join(ok.Errors(), "\n"); strings.Contains(all, "is freed first") {
+		t.Fatalf("outer-region value into inner-region container must be allowed; got: %s", all)
+	}
+}
+
 // A darray region param `@r` must bind to the argument's region at a call and
 // substitute through (mirroring RefType region unification).
 func TestDArrayRegionUnificationAndSubstitution(t *testing.T) {
