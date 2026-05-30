@@ -1,0 +1,74 @@
+# ============================================================
+# Allocator interface — "any allocator" (bump / malloc-backed)
+# ============================================================
+#
+# region = lifetime + backing allocator. The lifetime model is static and
+# allocator-agnostic (an `@r` value cannot outlive region `r`, enforced by the
+# escape checker); the allocation *strategy* is pluggable at runtime. This module
+# is that pluggable surface: a static-dispatch `Allocator` protocol any backend
+# implements, plus the two byte-allocator backends.
+#
+# Reclamation granularity is a property of the backend:
+#   - bump  : reclaims in bulk (arena_reset / arena_free) or to a LIFO mark
+#             (arena_snapshot / arena_rewind). Per-object deallocate is a no-op.
+#   - malloc: per-object free / realloc.
+#   - pool  : per-object reuse of same-size slots — the typed free-list
+#             MemoryPool[T] in heap.elisa (memory_pool_create / _destroy / _reset).
+#             Pools are typed (slot = T), so they are not a byte Allocator; they
+#             are the third reclamation strategy alongside this interface.
+
+include "./heap.elisa"
+
+protocol Allocator:
+    type State
+    def allocate(s: mutable State&, size: usize) -> mutable heap void&? can[Memory.Allocate]
+    def deallocate(s: mutable State&, ptr: heap void&, size: usize) can[Memory.Release]
+    def reallocate(s: mutable State&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate]
+
+# ------------------------------------------------------------
+# Bump allocator — backed by an Arena.
+# ------------------------------------------------------------
+# Individual deallocate is a no-op: a bump region reclaims in bulk (reset/free)
+# or to a mark (arena_rewind). This is the default, address-stable strategy.
+struct BumpAllocator:
+    tag: u8
+
+impl Allocator for BumpAllocator:
+    type State = Arena
+
+    def allocate(s: mutable Arena&, size: usize) -> mutable heap void&? can[Memory.Allocate]:
+        can Memory.Allocate, Abort.Panic:
+            return arena_alloc(s, size)
+
+    def deallocate(s: mutable Arena&, ptr: heap void&, size: usize) can[Memory.Release]:
+        return
+
+    def reallocate(s: mutable Arena&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate]:
+        can Memory.Allocate, Abort.Panic:
+            return arena_realloc(s, ptr, old_size, new_size)
+
+# ------------------------------------------------------------
+# Malloc-backed allocator — per-object libc malloc / free / realloc.
+# ------------------------------------------------------------
+# Stateless (the C heap is the implicit state). Use when individual lifetimes
+# don't nest and bulk reclamation doesn't fit.
+extern realloc(ptr: mutable heap void&?, size: usize) -> mutable heap void&? effects[Memory.Allocate]
+
+struct MallocAllocator:
+    tag: u8
+
+impl Allocator for MallocAllocator:
+    type State = MallocAllocator
+
+    def allocate(s: mutable MallocAllocator&, size: usize) -> mutable heap void&? can[Memory.Allocate]:
+        can Memory.Allocate:
+            return malloc(size)
+
+    def deallocate(s: mutable MallocAllocator&, ptr: heap void&, size: usize) can[Memory.Release]:
+        can Memory.Release:
+            free(ptr)
+
+    def reallocate(s: mutable MallocAllocator&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate]:
+        can Memory.Allocate:
+            trusted Unsafe.PointerCast:
+                return realloc(ptr.cast[mutable heap void&], new_size)

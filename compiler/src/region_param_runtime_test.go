@@ -127,3 +127,67 @@ def region_param_dict_test() -> void:
 		}
 	}
 }
+
+// End-to-end: the "any allocator" interface. A single generic function written
+// against the `Allocator` protocol allocates + fills a buffer through BOTH a
+// bump (Arena) backend and a malloc-backed backend, proving static-dispatch
+// allocator polymorphism (region = lifetime + pluggable backing allocator).
+// Also exercises mark/reset-to-mark reclamation (arena_snapshot/arena_rewind).
+func TestRunCLIAllocatorInterfaceBumpAndMalloc(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	repoRoot := repoRootFromMainTest(t)
+	stdDir := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "allocator_iface_fixture.elisa")
+	src := `include "` + filepath.Join(stdDir, "elisacore_runtime.elisa") + `"
+include "` + filepath.Join(stdDir, "allocator.elisa") + `"
+
+def fill_and_sum[A: Allocator](s: mutable A.State&, n: usize) -> u64 can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        raw: mutable heap void& = get A.allocate(s, n) else return 0u64
+        trusted Unsafe.PointerCast:
+            buf: mutable heap u8& = raw.cast[mutable heap u8&]
+            sum: mutable u64 = 0u64
+            for i in 0..<n.i64():
+                buf[i] <- (i + 1).u8()
+                sum <- sum + buf[i].u64()
+            return sum
+
+@test
+def allocator_interface_test() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region a(4096):
+            before: ArenaMark = arena_snapshot(a.ref[Arena&])
+            bump_sum: u64 = fill_and_sum[BumpAllocator](a.ref[mutable Arena&], 10)
+            if bump_sum != 55u64:
+                panic("bump: expected 55 (1..10)")
+            arena_rewind(a.ref[mutable Arena&], before)
+            again: u64 = fill_and_sum[BumpAllocator](a.ref[mutable Arena&], 10)
+            if again != 55u64:
+                panic("bump after rewind: expected 55")
+        m: mutable MallocAllocator = MallocAllocator(0)
+        malloc_sum: u64 = fill_and_sum[MallocAllocator](m.ref[mutable MallocAllocator&], 10)
+        if malloc_sum != 55u64:
+            panic("malloc: expected 55 (1..10)")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write allocator-interface fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected allocator-interface test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] allocator_interface_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected allocator-interface output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
