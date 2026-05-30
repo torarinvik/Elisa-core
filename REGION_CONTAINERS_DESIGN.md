@@ -120,6 +120,68 @@ spill arena.)
 5. **Cleanup:** safe `darray @ r → cstr/sview @ r`; collapse `DArrayBuilder`;
    sweep the codebase (verbatim_port becomes the canary).
 
+## IMPORTANT: Phase 2 and Phase 3 are coupled (verified in codegen)
+`emitBuiltinDArrayPushCall` (src/backend) resolves the arena via
+`lookupTreeAllocOwner()` — i.e. the **ambient `in arena:` scope** — and errors
+`darray push requires an active in <arena>: scope` if there is none. The runtime
+darray header does **not** store its arena. Therefore the static check is
+load-bearing *in lockstep with codegen*: relaxing it (allow push through a
+borrow with no ambient scope) without changing codegen would compile and then
+fail/UB at the backend. **The check-relax (Phase 2) and the arena-sourcing
+(Phase 3) MUST land together.** Phase 1 (carry the region) remains a safe,
+independent prerequisite, already done.
+
+## Phase 2+3 calling convention (spec to implement)
+The single mechanism: **a region is an implicit `Arena&` capability parameter.**
+
+Codegen / runtime env:
+- Maintain a codegen **region environment**: `region-name -> arena ref`. Today
+  `lookupTreeAllocOwner()` gives exactly one entry (the ambient scope). Generalize
+  it to a map populated from (a) `in <arena/region>:` scopes and (b) **hidden
+  arena parameters**.
+- `da.push(x)` for `da : darray[T] @ r` lowers to ensure-capacity against
+  `regionEnv[r].arenaRef` — not `lookupTreeAllocOwner()`. If `r` is the ambient
+  scope, behavior is identical to today (backwards path preserved).
+
+ABI:
+- A function gains **one hidden `Arena&` param per distinct region** it needs an
+  allocator for — i.e. every region that (a) appears in a `@r` container param it
+  mutates/grows, or (b) it allocates into and is not a local `in` scope. Order:
+  appended after explicit params, sorted by region-param introduction order.
+- Functions with no such regions get **no** hidden params (ABI unchanged — most
+  functions, so the blast radius is bounded to allocator-touching APIs).
+- The `'heap` (process-lifetime) region's arena is a known global, never a hidden
+  param.
+
+Semantic side:
+- Region vars: add `RegionParam` to container types; a `darray[T] @ r` *parameter*
+  introduces region var `r`. Calls unify `r` with the argument's region
+  (`collectTypeBindings`/`substituteType` gain a region axis, mirroring shape/
+  storage params).
+- The append/extend/reserve/dict checks change from "ambient arena active" to
+  "the container's region is **available** in the current region env" (an ambient
+  `in` scope OR an in-scope hidden region param).
+- Escape stays as today's ref machinery: `@r` value can't outlive `r`.
+
+Open decisions (resolve before coding):
+1. **Region subtyping/outlives** — start invariant (exact match); add `'heap`-
+   outlives-local only where forced.
+2. **Multi-region functions** — N hidden params; keep region vars distinct in
+   unification.
+3. **Return values** — a returned `@r` container forces `r` to be a caller-
+   provided region (can't be a local `in` scope); enforce via the escape check.
+4. **Generic + region interaction** — region params compose with `[T]` generics;
+   ensure specialization keys include region bindings.
+
+Suggested execution order (one coupled change, but staged internally):
+a. Semantic: `RegionParam` + region unification in calls (types only, still
+   inert at codegen — keep ambient sourcing). Suite stays green.
+b. Codegen: generalize `lookupTreeAllocOwner` to a region env; add hidden-arena
+   param emission + call-site passing for region-param functions.
+c. Flip the checks to region-availability; route push/extend/etc. through
+   `regionEnv[r]`.
+d. Sweep: delete `DArrayBuilder`; add safe `darray@r -> cstr/sview@r`.
+
 ## Recommendation
 Phases 1–2 are tractable type-system/check work and deliver most of the
 ergonomic win (no threading; region in the type) while leaving the runtime ABI
