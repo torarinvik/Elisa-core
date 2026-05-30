@@ -83,8 +83,8 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS:
-		left = mutableScalarRefValueContextOperandType(left)
-		right = mutableScalarRefValueContextOperandType(right)
+		left = scalarRefValueContextOperandType(left)
+		right = scalarRefValueContextOperandType(right)
 		if lref, ok := left.(*RefType); ok && IsIntegralStorageType(right) {
 			if a.enforceUnsafePermissions {
 				a.recordFunctionPermissionRefs(unsafePointerArithmeticRefs(expr.Position))
@@ -138,9 +138,17 @@ func valueContextOperandType(t Type) Type {
 	return t
 }
 
-func mutableScalarRefValueContextOperandType(t Type) Type {
+// scalarRefValueContextOperandType deref's a scalar reference to its referent
+// value for +/- arithmetic, so the operator means value arithmetic, not pointer
+// arithmetic on the address. This applies to both mutable and immutable scalar
+// refs (numeric/bool) — previously only MUTABLE refs were deref'd, so an
+// immutable scalar ref (e.g. the `i64&` bound by `for ref x in nums`) fell
+// through to the pointer-arithmetic path and silently used the address bits,
+// a silent wrong-result footgun. `u8&` refs are excluded: they are the genuine
+// C-string / byte-pointer case where `+ n` is intended pointer stepping.
+func scalarRefValueContextOperandType(t Type) Type {
 	if ref, ok := t.(*RefType); ok && ref != nil {
-		if ref.Mutable && (IsNumericType(ref.Elem) || IsBoolType(ref.Elem)) && !isBytePointerArithmeticRef(ref) {
+		if (IsNumericType(ref.Elem) || IsBoolType(ref.Elem)) && !isBytePointerArithmeticRef(ref) {
 			return ref.Elem
 		}
 	}
