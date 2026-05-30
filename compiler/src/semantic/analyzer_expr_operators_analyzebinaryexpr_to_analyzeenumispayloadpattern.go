@@ -59,6 +59,21 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		if !typesComparableForEquality(compareLeft, compareRight) {
 			a.errorf(expr.Pos(), "cannot compare %s and %s", left, right)
 		}
+		// Footgun guard: comparing two raw `u8&` C-string pointers with == / !=
+		// compares addresses, not contents (unlike cstr/sview/dstr, which content-
+		// compare). This silently does the wrong thing in ported C code.
+		if !IsNullType(left) && !IsNullType(right) &&
+			runtimeStringKindOf(compareLeft) == runtimeStringRaw &&
+			runtimeStringKindOf(compareRight) == runtimeStringRaw {
+			// Suppress when both operands fold to compile-time constants
+			// (e.g. `target.arch == "x86_64"`): const-eval compares by content,
+			// so only a genuine *runtime* address compare is a footgun.
+			_, lConst := a.evalConstExpr(expr.Left)
+			_, rConst := a.evalConstExpr(expr.Right)
+			if !(lConst && rConst) {
+				a.warnf(expr.Pos(), "%s on two raw u8& C-string pointers compares addresses, not contents; use streq() or compare via cstr/sview/dstr for content equality", lexer.TokenName(expr.Op))
+			}
+		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
 		left = valueContextOperandType(left)
