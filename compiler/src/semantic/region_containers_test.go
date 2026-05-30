@@ -60,6 +60,24 @@ def stash() -> void:
 	}
 }
 
+// The design's canonical form — pushing directly into a container inside a
+// `region r(...):` scope — must be allowed: the container's region r is live
+// (it is the active region scope), so the grow sources r's arena. Previously the
+// push check accepted only a plain `in <arena>:` owner or a region param and
+// wrongly rejected this, even though codegen handled it.
+func TestRegionScopeDirectPushAllowed(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_direct_push.elisa", `def build() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            v: mutable darray[u8] @a = []
+            v.push(65)
+            v.reserve(16)
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "requires an active in <arena>: scope") {
+		t.Fatalf("push/reserve into a live-region container must be allowed; got: %s", all)
+	}
+}
+
 // Nested-region escape: pushing a value from an inner (shorter-lived) region
 // into a darray whose element region is an outer (longer-lived) region leaves a
 // dangling reference once the inner region is freed. Rejected by the outlives

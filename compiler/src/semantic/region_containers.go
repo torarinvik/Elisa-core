@@ -165,6 +165,35 @@ func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr ast.Expr, targetType,
 	}
 }
 
+// regionAvailableForContainer reports whether a container's allocation region is
+// LIVE at the current point, so a grow/push may source that region's arena. The
+// design's rule: "push is legal iff the container's region r is live." A region
+// is live when it is (a) an in-scope region parameter (caller supplies the
+// arena), (b) the active `region r(...):` scope, or (c) any tracked, non-
+// destroyed local region in scope. Codegen mirrors this via regionArenaOwner,
+// which sources the arena from exactly that region's binding — so accepting these
+// here is sound (the previous check rejected the design's canonical
+// `region a: v.push(x)`, which codegen already handled).
+func (a *Analyzer) regionAvailableForContainer(t Type) bool {
+	if a == nil {
+		return false
+	}
+	region := containerOrEntryRegion(t)
+	if region == "" {
+		return false
+	}
+	if a.lookupRegionParam(region) {
+		return true
+	}
+	if a.currentTreeAllocOwner.Kind == treeAllocOwnerRegion && a.currentTreeAllocOwner.RegionName == region {
+		return true
+	}
+	if sym, state := a.lookupRegionState(region); sym != nil && !state.Destroyed {
+		return true
+	}
+	return false
+}
+
 // containerRegionParamInScope reports whether t is a container whose region is
 // an in-scope region parameter (e.g. `def f[region r](out: darray[T] @r&)` or
 // `def f[region r](d: dict[K,V] @r&)`). Such a container may be grown/inserted
