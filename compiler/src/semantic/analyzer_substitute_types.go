@@ -172,7 +172,11 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if IsInvalidType(value) {
 			return invalidType
 		}
-		return &DictType{Key: key, Value: value, SurfaceName: n.SurfaceName}
+		dictRegion := n.Region
+		if bound, ok := regionBindings[n.Region]; ok {
+			dictRegion = bound
+		}
+		return &DictType{Key: key, Value: value, SurfaceName: n.SurfaceName, Region: dictRegion}
 	case *SViewType:
 		return &SViewType{Begin: n.Begin, End: n.End}
 	case *GenericInstanceType:

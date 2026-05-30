@@ -25,31 +25,51 @@ func (a *Analyzer) stampContainerRegion(t Type) Type {
 	if region == "" {
 		return t
 	}
-	if da, ok := t.(*DArrayType); ok && da != nil && da.Region == "" {
-		cp := *da
-		cp.Region = region
-		if debugRegionContainers {
-			println("REGIONSTAMP darray ->", region)
+	switch c := t.(type) {
+	case *DArrayType:
+		if c != nil && c.Region == "" {
+			cp := *c
+			cp.Region = region
+			if debugRegionContainers {
+				println("REGIONSTAMP darray ->", region)
+			}
+			return &cp
 		}
-		return &cp
+	case *DictType:
+		if c != nil && c.Region == "" {
+			cp := *c
+			cp.Region = region
+			return &cp
+		}
 	}
 	return t
 }
 
-// semanticContainerDArray peels ref wrappers to the underlying container darray
-// (region annotations live on the DArrayType, possibly inside a RefType).
-func semanticContainerDArray(t Type) *DArrayType {
+// (semanticContainerDArray removed — superseded by containerRegion.)
+
+// containerRegion peels ref wrappers and returns the allocation region of the
+// underlying container (darray or dict), or "" if t is not a region-carrying
+// container.
+func containerRegion(t Type) string {
 	for {
 		switch tt := t.(type) {
 		case *DArrayType:
-			return tt
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
+		case *DictType:
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
 		case *RefType:
 			if tt == nil {
-				return nil
+				return ""
 			}
 			t = tt.Elem
 		default:
-			return nil
+			return ""
 		}
 	}
 }
@@ -74,15 +94,15 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 	if a == nil || valueExpr == nil {
 		return
 	}
-	da := semanticContainerDArray(valueType)
-	if da == nil || da.Region == "" {
+	region := containerRegion(valueType)
+	if region == "" {
 		return
 	}
-	if a.lookupRegionParam(da.Region) {
+	if a.lookupRegionParam(region) {
 		return // caller-owned region — fine.
 	}
-	if sym, _ := a.lookupRegionState(da.Region); sym != nil {
-		a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", da.Region, via)
+	if sym, _ := a.lookupRegionState(region); sym != nil {
+		a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", region, via)
 	}
 }
 

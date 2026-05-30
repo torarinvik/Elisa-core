@@ -444,6 +444,7 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *DictType:
 		if act, ok := actual.(*DictType); ok {
+			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectTypeBindings(p.Key, act.Key, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		}

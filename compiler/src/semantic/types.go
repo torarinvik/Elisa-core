@@ -274,6 +274,10 @@ type DictType struct {
 	Key         Type
 	Value       Type
 	SurfaceName string
+	// Region — allocation region (see DArrayType.Region). Region-parameterized
+	// containers Phase 1+: carried/inferred and escape-checked; the dict-op
+	// codegen ABI (insert through a region param) is a follow-up.
+	Region string
 }
 
 type DictEntryType struct {

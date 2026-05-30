@@ -29,6 +29,20 @@ func TestRegionContainerReturnEscapeChecking(t *testing.T) {
 	}
 }
 
+// dict containers carry their region and are escape-checked too.
+func TestRegionDictReturnEscapeChecking(t *testing.T) {
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "region_dict_escape.elisa", `def leak_dict() -> dict[i64, i64]:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            d: mutable dict[i64, i64] @a = zeroed
+            d.insert(1, 2)
+            return d
+`)
+	if all := strings.Join(bad.Errors(), "\n"); !strings.Contains(all, "escapes via return") {
+		t.Fatalf("expected scope-owned region dict return to be rejected; got: %s", all)
+	}
+}
+
 // Storing a scope-owned-region container into storage that outlives the region
 // (here a global) is rejected — same use-after-free, via store rather than return.
 func TestRegionContainerStoreEscapeChecking(t *testing.T) {
