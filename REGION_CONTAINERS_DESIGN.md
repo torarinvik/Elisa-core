@@ -26,6 +26,46 @@ safety. Backwards-incompatible by design.
   runtime-field approach. We are deliberately *not* generalizing that; we fold
   its capability into plain `darray` via the type-level region instead.
 
+## Memory model (agreed)
+Decisions that constrain the whole design:
+
+1. **Address stability is a core invariant.** A pointer/`@r` reference into a
+   region stays valid for the region's entire lifetime. Objects are **never
+   silently moved.** This is what makes raw `@r` pointers sound, keeps FFI/guest
+   interop working, and lets the checker reason about lifetimes only (never moves).
+2. **No automatic compaction.** Moving a live object changes its address and
+   dangles every pointer to it; doing it safely requires a precise *moving
+   garbage collector* (root tracking / barriers / handle rewriting). That is the
+   opposite of an arena and incompatible with raw pointers — so it is **not** the
+   default and not built first. ("Copy the survivor to the bottom and bump the
+   region pointer" = a one-object copying collector; rejected for pointer regions.)
+3. **Reclaiming dead objects mid-lifetime** (the "3 allocated, 1 survives" case)
+   is done *without moving*, in this preference order:
+   - **nested / child regions** — short-lived objects in a sub-region freed when
+     they die; the survivor lives in the parent. (The idiomatic arena answer:
+     lifetime structure via nesting, not compaction.)
+   - **`mark` / `reset-to-mark`** — LIFO savepoint + rollback of the bump pointer
+     (Elisa already has region marks). O(1), no moving.
+   - **pool / free-list allocator** — per-object reuse of same-size slots; slots
+     don't move.
+   - **explicit promote-copy** — programmer copies a survivor to a longer-lived
+     region before reset. Explicit beats hidden moving.
+4. **Allocator is an interface; region = lifetime + backing allocator.** Separate
+   the *lifetime model* (static, allocator-agnostic: `@r` shares/can't-outlive
+   `r`) from the *allocation strategy* (runtime, pluggable: bump default, pool,
+   malloc-backed). Strategy decides reclamation granularity; lifetime semantics
+   are uniform. Ship bump → pool → malloc-backed.
+5. **Invalidating operations are statically gated.** `destroy` / `reset` /
+   `reset-to-mark` are legal only when no live borrow points into the invalidated
+   range — the same no-live-borrows check, at bucket granularity. This is the
+   "...unless it has some mechanism" intuition made concrete: it's the static
+   check, not a runtime guard.
+6. **Compaction, if ever, is a separate opt-in flavor.** A *handle-based* region
+   (`Handle[T]` indexes a table the allocator owns) can compact by rewriting the
+   table — but gives up raw interior `@r` pointers (no FFI of interior pointers).
+   Two flavors: **pointer-stable regions** (default, FFI-safe, never move) vs
+   **handle regions** (opt-in, movable). Deferred; never the default.
+
 ## Mental model: Rust lifetimes, but the unit is the region (not the object)
 The goal is Rust-grade static memory safety, with the **region/bucket** as the
 lifetime, not the individual RAII object. The correspondence:
