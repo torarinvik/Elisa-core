@@ -430,6 +430,7 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *DArrayType:
 		if act, ok := actual.(*DArrayType); ok {
+			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
 		}
