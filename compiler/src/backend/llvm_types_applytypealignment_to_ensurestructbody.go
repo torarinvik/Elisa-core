@@ -87,6 +87,13 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 		}
 		params = append(params, paramType)
 	}
+	// Region-parameterized containers: one hidden Arena& (pointer) parameter per
+	// region parameter, appended after the explicit/implicit params. The callee
+	// reads these into its region environment; callers pass the bound region's
+	// arena. Inert for every existing function (none declare region params).
+	for range fn.RegionParams {
+		params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+	}
 	lowered := C.LLVMFunctionType(returnType, llvmTypeSlicePtr(params), C.unsigned(len(params)), boolToLLVMBool(fn.Variadic))
 	g.functionTypes[fn] = lowered
 	return lowered, nil

@@ -455,6 +455,19 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		}
 	}
 
+	// Region-parameterized containers: the hidden Arena& params (appended after
+	// all explicit/implicit params by lowerFunctionType) become this function's
+	// region environment, so container ops on `@r` resolve their arena via
+	// regionArenaOwner(r). Inert for functions with no region params.
+	if len(fnType.RegionParams) != 0 {
+		arenaType := g.result.NamedTypes["Arena"]
+		base := paramOffset + len(fnType.Params)
+		for j, regionName := range fnType.RegionParams {
+			arenaParam := C.LLVMGetParam(fnValue, C.unsigned(base+j))
+			state.regions = append(state.regions, regionBinding{name: regionName, ptr: arenaParam, typ: arenaType})
+		}
+	}
+
 	if err := state.emitBlock(decl.Body, false); err != nil {
 		return err
 	}

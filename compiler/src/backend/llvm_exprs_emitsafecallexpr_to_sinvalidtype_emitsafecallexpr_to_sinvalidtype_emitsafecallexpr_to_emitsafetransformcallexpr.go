@@ -170,7 +170,7 @@ func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, se
 			}
 			args = append(args, value)
 		}
-		callValue, callType, err = s.emitResolvedCall(callee, funcType, true, args)
+		callValue, callType, err = s.emitResolvedCall(callee, funcType, true, args, nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -196,7 +196,7 @@ func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, se
 			}
 			args = append(args, value)
 		}
-		callValue, callType, err = s.emitResolvedCall(calleeValue, funcType, false, args)
+		callValue, callType, err = s.emitResolvedCall(calleeValue, funcType, false, args, nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -352,7 +352,7 @@ func (s *functionState) emitSafeTransformCallExpr(expr *ast.CallExpr) (C.LLVMVal
 		}
 		args = append(args, value)
 	}
-	callValue, callType, err := s.emitResolvedCall(callee, funcType, true, args)
+	callValue, callType, err := s.emitResolvedCall(callee, funcType, true, args, nil)
 	if err != nil {
 		return nil, nil, err
 	}

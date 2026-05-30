@@ -182,6 +182,52 @@ func (s *functionState) regionArenaOwner(region string) (treeAllocOwnerBinding, 
 	}
 	return treeAllocOwnerBinding{}, false
 }
+// containerRegionDArray peels ref wrappers to the underlying container darray
+// (region annotations live on the DArrayType inside `darray[T] @r&`).
+func containerRegionDArray(t semantic.Type) *semantic.DArrayType {
+	for {
+		switch tt := t.(type) {
+		case *semantic.DArrayType:
+			return tt
+		case *semantic.RefType:
+			if tt == nil {
+				return nil
+			}
+			t = tt.Elem
+		default:
+			return nil
+		}
+	}
+}
+
+// resolveRegionArenaArgs builds the hidden Arena& arguments for a call to a
+// region-parameterized function: for each region param, find a container param
+// annotated with that region, read the matching argument's region, and pass
+// that region's arena from the caller's region environment. Order matches the
+// hidden params appended by lowerFunctionType.
+func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.FuncType) []C.LLVMValueRef {
+	if s == nil || expr == nil || fn == nil || len(fn.RegionParams) == 0 {
+		return nil
+	}
+	out := make([]C.LLVMValueRef, 0, len(fn.RegionParams))
+	for _, regionParam := range fn.RegionParams {
+		var arena C.LLVMValueRef
+		for i, p := range fn.Params {
+			pda := containerRegionDArray(p)
+			if pda == nil || pda.Region != regionParam || i >= len(expr.Args) {
+				continue
+			}
+			if ada := containerRegionDArray(s.exprType(expr.Args[i])); ada != nil && ada.Region != "" {
+				if owner, ok := s.regionArenaOwner(ada.Region); ok {
+					arena = owner.arenaRef
+				}
+			}
+			break
+		}
+		out = append(out, arena)
+	}
+	return out
+}
 func (s *functionState) lookupTreeAllocOwnerForFamily(family *semantic.TreeType) (treeAllocOwnerBinding, bool) {
 	if s != nil && s.treeAllocOwner.isPerm {
 		return s.treeAllocOwner, true

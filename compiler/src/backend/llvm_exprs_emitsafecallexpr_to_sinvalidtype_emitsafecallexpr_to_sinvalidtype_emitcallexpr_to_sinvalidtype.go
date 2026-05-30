@@ -257,7 +257,8 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		}
 		args = append(args, value)
 	}
-	return s.emitResolvedCall(callee, funcType, s.directCallTarget(expr.Func), args)
+	regionArenaArgs := s.resolveRegionArenaArgs(expr, funcType)
+	return s.emitResolvedCall(callee, funcType, s.directCallTarget(expr.Func), args, regionArenaArgs)
 }
 
 func backendIsCVariadicTailArg(fnType *semantic.FuncType, index int) bool {

@@ -432,7 +432,7 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
 	return phi, resultType, true, nil
 }
-func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semantic.FuncType, direct bool, args []C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semantic.FuncType, direct bool, args []C.LLVMValueRef, regionArenaArgs []C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
 	if funcType == nil {
 		return nil, nil, fmt.Errorf("call target does not have a function type")
 	}
@@ -451,6 +451,10 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	if err != nil {
 		return nil, nil, err
 	}
+	// Region-parameterized containers: append the hidden Arena& args (one per
+	// region param) after the explicit/implicit args, matching the param order
+	// in lowerFunctionType. Empty for non-region-param functions.
+	args = append(args, regionArenaArgs...)
 	base := layout.paramBase()
 	// applyByvalCallAttrs tags the byval pointer arguments on a built call.
 	applyByvalCallAttrs := func(call C.LLVMValueRef) {
