@@ -91,6 +91,17 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		storage, explicit, label, region, storageParam := p.parseRefStorageQualifier()
 		typ = p.parseBaseType(storage, explicit, label, region, storageParam)
 	}
+	// Explicit `@r` region annotation on a container type (region-parameterized
+	// containers, Phase 2). Only meaningful on container builtins for now.
+	if p.peek() == lexer.TOKEN_AT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		p.advance() // '@'
+		regionName := p.advance().Text
+		if bt, ok := typ.(*ast.BuiltinTypeExpr); ok && bt != nil {
+			bt.Region = regionName
+		} else {
+			p.errorf("region annotation `@%s` is only supported on container types", regionName)
+		}
+	}
 	if p.match(lexer.TOKEN_PIPE) {
 		errType := p.parseTypeExpr()
 		p.errorf("legacy fallible return syntax `T | ErrorSet` is no longer supported; use `T error[SomeSet]` instead")

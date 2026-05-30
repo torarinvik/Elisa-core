@@ -400,6 +400,9 @@ type BuiltinTypeExpr struct {
 	Name      string
 	TypeArgs  []TypeExpr
 	ValueArgs []Expr
+	// Region is an explicit `@r` region annotation on a container type
+	// (region-parameterized containers, Phase 2). Empty == inferred from scope.
+	Region string
 }
 type FuncTypeExpr struct {
 	Position          lexer.Pos
