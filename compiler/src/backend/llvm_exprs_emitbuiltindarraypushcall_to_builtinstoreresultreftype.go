@@ -96,7 +96,15 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("darray push expects 1 argument, got %d", len(expr.Args))
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	// Region-parameterized containers: prefer the arena of the darray's own
+	// region (if that region is live in s.regions) over the ambient scope. In
+	// today's code a container's region == its ambient scope, so this resolves
+	// to the same arena (behavior-preserving); it becomes load-bearing once a
+	// helper pushes through a borrow whose region differs from the ambient one.
+	owner, ok := s.regionArenaOwner(darrayType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray push requires an active in <arena>: scope")
 	}

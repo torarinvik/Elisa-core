@@ -164,6 +164,24 @@ func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
 	}
 	return treeAllocOwnerBinding{}, false
 }
+
+// regionArenaOwner resolves the arena for a named region from the live region
+// environment (s.regions), for region-parameterized container ops. Region-
+// containers Phase 2 codegen: a container grows in its OWN region's arena
+// rather than the ambient scope. Today the two coincide (a container's region
+// == its ambient scope), so this is behavior-preserving; it becomes load-
+// bearing once pushes happen through a borrow whose region differs.
+func (s *functionState) regionArenaOwner(region string) (treeAllocOwnerBinding, bool) {
+	if s == nil || region == "" {
+		return treeAllocOwnerBinding{}, false
+	}
+	for i := len(s.regions) - 1; i >= 0; i-- {
+		if s.regions[i].name == region && s.regions[i].ptr != nil {
+			return treeAllocOwnerBinding{arenaRef: s.regions[i].ptr}, true
+		}
+	}
+	return treeAllocOwnerBinding{}, false
+}
 func (s *functionState) lookupTreeAllocOwnerForFamily(family *semantic.TreeType) (treeAllocOwnerBinding, bool) {
 	if s != nil && s.treeAllocOwner.isPerm {
 		return s.treeAllocOwner, true
