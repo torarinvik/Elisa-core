@@ -26,6 +26,46 @@ safety. Backwards-incompatible by design.
   runtime-field approach. We are deliberately *not* generalizing that; we fold
   its capability into plain `darray` via the type-level region instead.
 
+## Mental model: Rust lifetimes, but the unit is the region (not the object)
+The goal is Rust-grade static memory safety, with the **region/bucket** as the
+lifetime, not the individual RAII object. The correspondence:
+
+| Rust | Elisa regions |
+|---|---|
+| lifetime `'a` | region `r` (a named `in r:` scope / `'heap`) |
+| `&'a T` | `T& @r`, `darray[T] @r`, … (value tagged with its region) |
+| `fn f<'a>(x: &'a T)` | `def f[r](x: darray[T] @r&)` (region param) |
+| `'a: 'b` (outlives) | region `r` outlives region `s` (lexical nesting / `'heap` outlives all) |
+| borrow checker / NLL | region-escape checker (`@r` value may not outlive `r`) |
+| `Drop` per object | **no per-object drop** — the whole bucket is freed at region end |
+
+**Why region-granularity is *easier* than Rust NLL** (this shapes the build):
+- The lifetime lattice is the set of **live regions** — few, and lexically
+  nested via `in` scopes — not one lifetime per borrow. Far smaller than NLL's
+  per-statement region inference.
+- **No per-object drop / drop-order / reborrow-splitting.** A region is one
+  bump-allocated bucket freed atomically at scope end (`destroy`/block exit).
+  Most of Rust's borrow-checker subtlety (drop glue, partial moves, two-phase
+  borrows) simply doesn't arise — there's nothing to drop mid-region.
+- Aliasing within a region is fine (no XOR-mutability requirement for *liveness*
+  safety; that's a separate concern Elisa already handles via ref mutability).
+
+**What we still must get Rust-right (the real work):**
+1. **Escape.** A `@r` value must not outlive `r` — via return, store into a
+   longer-lived object, or capture. This is THE safety property. Largely the
+   existing ref-escape machinery, generalized to containers and to region params.
+2. **Outlives lattice.** `'heap` outlives every local region; an outer `in`
+   scope outlives an inner one; a region param's bound is its caller's region.
+   Start invariant (exact match), add `outlives` only where forced.
+3. **Variance.** `darray[T] @r` should be covariant in `r` (a longer-lived region
+   usable where a shorter is expected) and behave like `&'a` in elem variance.
+   Decide variance explicitly per type constructor.
+4. **Region-in-struct / nested containers.** `darray[darray[T] @r] @s` requires
+   `r` outlives `s`; a struct holding `@r` fields is itself `@r`-bounded. Needs a
+   well-id rule for "the region(s) a type is parameterized by."
+5. **Elision.** Like Rust lifetime elision: infer region params at boundaries so
+   they're almost never written; `@r` is surface only where inference can't.
+
 ## The model
 A **region** is a *static* identity (a name, like a lifetime). Its **backing
 arena** is an *implicit capability* the compiler supplies wherever allocation in
