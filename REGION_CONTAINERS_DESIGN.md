@@ -222,6 +222,41 @@ c. Flip the checks to region-availability; route push/extend/etc. through
    `regionEnv[r]`.
 d. Sweep: delete `DArrayBuilder`; add safe `darray@r -> cstr/sview@r`.
 
+## Codegen implementation plan (grounded in the backend)
+Traced facts:
+- `functionState.treeAllocOwner` holds the *single* ambient arena (`arenaRef`),
+  saved/restored at `in`-scope boundaries.
+- **`functionState.regions []regionBinding{name, ptr, typ}` already IS a region
+  environment** — `region NAME(...)` registers `{name, ptr=arena alloca}`. This
+  is the map we need; it just isn't consulted by container ops.
+- `emitBuiltinDArrayPushCall` resolves the arena via `lookupTreeAllocOwner()`
+  (ambient) and errors with no active scope. Same for extend/reserve/dict.
+
+Steps (must land together — not independently green):
+1. **Region-aware sourcing.** In the push/extend/reserve/dict codegen, if
+   `darrayType.Region` names an entry in `s.regions`, source the arena from that
+   entry's `ptr` instead of `lookupTreeAllocOwner()`. (Behavior-identical today,
+   since a container's region == its ambient scope; becomes load-bearing once
+   helpers push through a borrow.)
+2. **Hidden-arena params.** For a function with `RegionParams`, append one hidden
+   `Arena&` param per region param (deterministic order). Register each into
+   `s.regions{name: regionParam, ptr: hiddenParamValue}` at function entry.
+3. **Call-site passing.** At a call to a region-param function, for each region
+   param look up the bound region (from `regionBindings` produced by
+   `collectTypeBindings`) and pass that region's arena `ptr` from the caller's
+   `s.regions`. Indirect/function-value/extern calls need the same ABI or a ban.
+4. **Flip the checks.** Replace the semantic `requires an active in <arena>:
+   scope` checks (analyzer_expr_builtin_collections.go ×N, dict, comprehension)
+   with region-availability: allowed if the container's region is an ambient `in`
+   scope OR an in-scope region param. Backend mirrors via `s.regions`.
+5. **Escape + cleanup.** Generalize ref escape to container `@r`; delete
+   `DArrayBuilder`; add safe `darray@r -> cstr/sview@r`.
+
+⚠️ Risk note: steps 1–3 mis-wired = **wrong arena at runtime = memory
+corruption**, the worst failure class. This is why it must be executed with a
+fresh, careful pass and heavy runtime testing (every container op through a
+region param, multi-region functions, nested regions), not rushed.
+
 ## Recommendation
 Phases 1–2 are tractable type-system/check work and deliver most of the
 ergonomic win (no threading; region in the type) while leaving the runtime ABI
