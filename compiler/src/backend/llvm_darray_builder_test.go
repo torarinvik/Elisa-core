@@ -57,7 +57,7 @@ def build(owner: Arena) -> i64:
 	}
 }
 
-func TestGenerateLLVMIRSpecializesGenericExternUFCSBuilderPush(t *testing.T) {
+func TestGenerateLLVMIRSpecializesGenericExternMethodBuilderPush(t *testing.T) {
 	src := `struct DArrayBuilder[T]:
     count: usize
 
@@ -68,7 +68,7 @@ def build() -> void:
     items: mutable DArrayBuilder[i64] = zeroed
     items.push(7)
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_generic_extern_ufcs_builder_push.elisa", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_generic_extern_method_builder_push.elisa", src)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)

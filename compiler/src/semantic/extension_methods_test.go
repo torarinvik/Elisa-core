@@ -708,8 +708,8 @@ def read(flag: bool) -> (value: bool, after: usize):
 	}
 }
 
-func TestAnalyzeUFCSOnlyFunctionSupportsReceiverCallWithoutGlobalCollision(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ufcs_only_value_method.elisa", `
+func TestAnalyzeMethodFunctionSupportsReceiverCallWithoutGlobalCollision(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "method_value_receiver.elisa", `
 struct IndexMap[K, T]:
     marker: u8
 
@@ -727,8 +727,8 @@ def read[K, T](map: IndexMap[K, T]&, index: usize) -> T:
 	}
 }
 
-func TestAnalyzeUFCSOnlyFunctionDoesNotShadowTupleValueBindings(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ufcs_only_tuple_value_binding.elisa", `
+func TestAnalyzeMethodFunctionDoesNotShadowTupleValueBindings(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "method_tuple_value_binding.elisa", `
 struct IndexMap[K, T]:
     marker: u8
 
@@ -748,8 +748,8 @@ def read(flag: bool) -> (value: bool, after: usize):
 	}
 }
 
-func TestAnalyzeUFCSOnlyFunctionSupportsSymbolTableStyleReceiverCalls(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ufcs_only_symbol_table_methods.elisa", `
+func TestAnalyzeMethodFunctionSupportsSymbolTableStyleReceiverCalls(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "method_symbol_table_receivers.elisa", `
 extern SymbolTableSlot
 type SymbolTableId = id[SymbolTableSlot]
 
@@ -780,8 +780,8 @@ def read[T](table: SymbolTable[cstr, T]&, symbol_id: SymbolTableId) -> T:
 	}
 }
 
-func TestAnalyzeExternUFCSOnlyFunctionSupportsReceiverCall(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "extern_ufcs_only_builder_method.elisa", `
+func TestAnalyzeExternMethodFunctionSupportsReceiverCall(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "extern_method_builder.elisa", `
 struct DArrayBuilder[T]:
     marker: u8
 
