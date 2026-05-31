@@ -2,7 +2,7 @@ def json_reduce_sum_smoke(values: darray[i64, 4], bias: i64) -> i64:
     base: dview[i64] = values[0:4]
     return reduce_sum(readonly(base), json_reduce_sum_bias, bias)
 def json_expect_checksum(source: static u8&, expected: i64) -> bool:
-    return json_parser_checksum_impl(source as u8&) == expected
+    return json_parser_checksum_impl(source.cast[u8&]) == expected
 def json_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: usize, mode: i64) -> i64:
     can Thread.Spawn, Thread.Join, Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
         if worker_count == 0 or iterations == 0 or worker_count > JSON_PARALLEL_MAX_WORKERS:

@@ -58,7 +58,7 @@ def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out
         first_region.count <- internal_words
 
         internal: mutable heap JsonParserDocumentInternal& = packed_store_region_data(first_region).cast[mutable heap JsonParserDocumentInternal&]
-        arena_owner: mutable Arena = Arena(first_region, first_region, 0)
+        arena_owner: mutable Arena = Arena(first_region, first_region, 0, 0)
         source_copy: heap u8& = arena_alloc(arena_owner.ref[mutable Arena&], source_len + 1).cast[heap u8&]
         if source_len > 0:
             memcpy(source_copy.cast[void&], source.cast[void&], source_len)
