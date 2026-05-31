@@ -61,7 +61,7 @@ func TestGenerateLLVMIRSpecializesGenericExternUFCSBuilderPush(t *testing.T) {
 	src := `struct DArrayBuilder[T]:
     count: usize
 
-@ufcs_only
+@method
 extern push[T](builder: mutable DArrayBuilder[T]&, item: T) -> void
 
 def build() -> void:

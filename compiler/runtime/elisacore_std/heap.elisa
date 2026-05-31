@@ -225,11 +225,11 @@ def region_pool_free[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
         node.next <- pool.free_list
         pool.free_list as & <- node
 
-@ufcs_only
+@method
 def create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
     return region_pool_create[T](pool) can Memory.Allocate, Abort.Panic
 
-@ufcs_only
+@method
 def recycle[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
     region_pool_free[T](pool, ptr)
 
@@ -271,10 +271,10 @@ def region_pool_release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
         node.next <- pool.free_list
         pool.free_list as & <- node
 
-@ufcs_only
+@method
 def acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T]:
     return region_pool_acquire[T](pool) can Memory.Allocate, Abort.Panic
 
-@ufcs_only
+@method
 def release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
     region_pool_release[T](pool, move handle)

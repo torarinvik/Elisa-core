@@ -713,7 +713,7 @@ func TestAnalyzeUFCSOnlyFunctionSupportsReceiverCallWithoutGlobalCollision(t *te
 struct IndexMap[K, T]:
     marker: u8
 
-@ufcs_only
+@method
 def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
     _ = map
     _ = index
@@ -732,7 +732,7 @@ func TestAnalyzeUFCSOnlyFunctionDoesNotShadowTupleValueBindings(t *testing.T) {
 struct IndexMap[K, T]:
     marker: u8
 
-@ufcs_only
+@method
 def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
     _ = map
     _ = index
@@ -759,13 +759,13 @@ struct SymbolEntry[T]:
 struct SymbolTable[K, T]:
     marker: u8
 
-@ufcs_only
+@method
 def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
     _ = table
     _ = symbol_id
     return zeroed
 
-@ufcs_only
+@method
 def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[T]:
     _ = table
     _ = symbol_id
@@ -785,7 +785,7 @@ func TestAnalyzeExternUFCSOnlyFunctionSupportsReceiverCall(t *testing.T) {
 struct DArrayBuilder[T]:
     marker: u8
 
-@ufcs_only
+@method
 extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
 
 def read(builder: DArrayBuilder[i64]&) -> darray[i64]:

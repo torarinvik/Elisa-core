@@ -279,59 +279,59 @@ extern arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, sha
 
 extern darray_view[T](da: darray[T]) -> dview[T]
 
-@ufcs_only
+@method
 extern view[T](da: darray[T]) -> dview[T]
 
 extern array_view[T, N: usize](arr: T[N]&) -> dview[T]
 
-@ufcs_only
+@method
 extern where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]
 
 extern darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
 
 extern new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[T]
 
-@ufcs_only
+@method
 extern builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
 
 extern darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize
 
-@ufcs_only
+@method
 extern count[T](builder: DArrayBuilder[T]&) -> usize
 
 extern darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool
 
-@ufcs_only
+@method
 extern is_empty[T](builder: DArrayBuilder[T]&) -> bool
 
 extern darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T
 
-@ufcs_only
+@method
 extern get[T](builder: DArrayBuilder[T]&, index: usize) -> T
 
 extern darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize)
 
-@ufcs_only
+@method
 extern reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize)
 
 extern darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T)
 
-@ufcs_only
+@method
 extern push[T](builder: mutable DArrayBuilder[T]&, item: T)
 
 extern darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]
 
-@ufcs_only
+@method
 extern view[T](builder: DArrayBuilder[T]&) -> dview[T]
 
 extern darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]
 
-@ufcs_only
+@method
 extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
 
 extern darray_builder_clear[T](builder: mutable DArrayBuilder[T]&)
 
-@ufcs_only
+@method
 extern clear[T](builder: mutable DArrayBuilder[T]&)
 
 extern inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]
@@ -340,54 +340,54 @@ extern new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> Inlin
 
 extern inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize
 
-@ufcs_only
+@method
 extern count[T, N: usize](vec: InlineVec[T, N]&) -> usize
 
 extern inline_vec_is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool
 
-@ufcs_only
+@method
 extern is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool
 
 extern inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool
 
-@ufcs_only
+@method
 extern spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool
 
 extern inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T
 
-@ufcs_only
+@method
 extern get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T
 
 extern inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T)
 
-@ufcs_only
+@method
 extern set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T)
 
 extern inline_vec_spill[T, N: usize](vec: mutable InlineVec[T, N]&)
 
 extern inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T)
 
-@ufcs_only
+@method
 extern push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T)
 
 extern inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T
 
-@ufcs_only
+@method
 extern pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T
 
 extern inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T
 
-@ufcs_only
+@method
 extern last[T, N: usize](vec: InlineVec[T, N]&) -> T
 
 extern inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]
 
-@ufcs_only
+@method
 extern view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]
 
 extern inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&)
 
-@ufcs_only
+@method
 extern clear[T, N: usize](vec: mutable InlineVec[T, N]&)
 
 extern flags_new[T](api: FlagsNamespace) -> Flags[T]
@@ -432,12 +432,12 @@ extern arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, i
 
 extern darray_pop[T](da: mutable darray[T]&) -> T
 
-@ufcs_only
+@method
 extern pop[T](da: mutable darray[T]&) -> T
 
 extern darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T
 
-@ufcs_only
+@method
 extern remove_at[T](da: mutable darray[T]&, index: usize) -> T
 
 extern arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&
@@ -512,13 +512,13 @@ extern index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T
 
 extern index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]
 
-@ufcs_only
+@method
 extern entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]
 
-@ufcs_only
+@method
 extern value[K, T](map: IndexMap[K, T]&, index: usize) -> T
 
-@ufcs_only
+@method
 extern entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]
 
 extern index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
@@ -569,13 +569,13 @@ extern symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTabl
 
 extern symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]
 
-@ufcs_only
+@method
 extern entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]
 
-@ufcs_only
+@method
 extern value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
 
-@ufcs_only
+@method
 extern entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]
 
 extern symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId

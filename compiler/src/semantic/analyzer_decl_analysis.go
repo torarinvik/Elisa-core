@@ -377,13 +377,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
-	if annotation.Name == "ufcs_only" {
+	if annotation.Name == "method" {
 		if len(annotation.Args) != 0 {
-			a.errorf(annotation.Position, "@ufcs_only on function %q does not take arguments", fn.Name)
+			a.errorf(annotation.Position, "@method on function %q does not take arguments", fn.Name)
 			return false
 		}
 		if len(signature.Params) == 0 {
-			a.errorf(annotation.Position, "@ufcs_only function %q must take at least one receiver parameter", fn.Name)
+			a.errorf(annotation.Position, "@method function %q must take at least one receiver parameter", fn.Name)
 			return false
 		}
 		return true
@@ -703,7 +703,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "ufcs_only", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "method", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe":
 		return true
 	case "boundary_pointer_args":
 		return true

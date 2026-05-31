@@ -40,7 +40,7 @@ func (a *Analyzer) defineReceiverOverloadGlobal(visibleName string, sym *Symbol,
 	if sym.UFCSOnly {
 		newReceiver, newOK := receiverOverloadType(sym)
 		if !newOK {
-			a.errorf(pos, "@ufcs_only function %q must take at least one receiver parameter", visibleName)
+			a.errorf(pos, "@method function %q must take at least one receiver parameter", visibleName)
 			return
 		}
 		for _, existing := range a.ufcsFunctionsByName[visibleName] {

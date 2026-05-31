@@ -78,7 +78,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						symbolName = initHookSymbolName(qualifiedName, fnType, n.Pos())
 					}
 				}
-				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, UFCSOnly: funcHasAnnotation(n, "ufcs_only"), Private: scoped.Private}
+				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, UFCSOnly: funcHasAnnotation(n, "method"), Private: scoped.Private}
 				a.functionTypes[symbolName] = fnType
 				a.funcDeclSymbols[n] = sym
 				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {
@@ -124,7 +124,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 							a.markRawExternFuncType(fnDecl, fnType)
 							linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
 							a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, fnDecl.Pos())
-							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(fnDecl, "ufcs_only")}
+							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(fnDecl, "method")}
 							a.functionTypes[qualifiedName] = fnType
 							a.defineGlobal(sym, fnDecl.Pos())
 							a.registerExtensionMethod(visibleName, receiver, sym, fnDecl, fnType)
@@ -152,7 +152,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						a.markRawExternFuncType(fnDecl, fnType)
 						linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
 						a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, fnDecl.Pos())
-						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(fnDecl, "ufcs_only")}
+						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(fnDecl, "method")}
 						a.functionTypes[qualifiedName] = fnType
 						a.defineGlobal(sym, fnDecl.Pos())
 					}
@@ -171,7 +171,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				a.functionTypes[qualifiedName] = fnType
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
 				a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, n.Pos())
-				sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(n, "ufcs_only"), Private: scoped.Private}
+				sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, LinkName: linkName, Mutable: false, UFCSOnly: externFuncHasAnnotation(n, "method"), Private: scoped.Private}
 				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {
 					a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
 				}

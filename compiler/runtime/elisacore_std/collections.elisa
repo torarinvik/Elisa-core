@@ -298,7 +298,7 @@ def darray_view[T](da: darray[T]) -> dview[T]:
     return DynArrayView(collections_void_from_items[T](da.items), da.count, elem_size)
 
 
-@ufcs_only
+@method
 def view[T](da: darray[T]) -> dview[T]:
     return darray_view[T](da)
 
@@ -315,7 +315,7 @@ def array_view[T, N: usize](arr: T[N]&) -> dview[T]:
         return DynArrayView(collections_void_from_items[T](arr[0].ref[T&]), N, elem_size)
 
 
-@ufcs_only
+@method
 def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
     return FilteredView[S, T](source, predicate)
 
@@ -335,7 +335,7 @@ def new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[
     return darray_builder[T](owner)
 
 
-@ufcs_only
+@method
 def builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
     return darray_builder[T](owner)
 
@@ -344,7 +344,7 @@ def darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize:
     return builder.items.count
 
 
-@ufcs_only
+@method
 def count[T](builder: DArrayBuilder[T]&) -> usize:
     return darray_builder_count[T](builder)
 
@@ -353,7 +353,7 @@ def darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool:
     return builder.items.count == 0
 
 
-@ufcs_only
+@method
 def is_empty[T](builder: DArrayBuilder[T]&) -> bool:
     return darray_builder_is_empty[T](builder)
 
@@ -363,7 +363,7 @@ def darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
     return builder.items[index]
 
 
-@ufcs_only
+@method
 def get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
     return darray_builder_get[T](builder, index)
 
@@ -376,7 +376,7 @@ def darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usiz
             _ = builder.items.reserve(capacity)
 
 
-@ufcs_only
+@method
 def reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize):
     can Memory.Allocate, Abort.Panic:
         darray_builder_reserve[T](builder, capacity)
@@ -390,7 +390,7 @@ def darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T):
             builder.items.push(item)
 
 
-@ufcs_only
+@method
 def push[T](builder: mutable DArrayBuilder[T]&, item: T):
     can Memory.Allocate, Abort.Panic:
         darray_builder_push[T](builder, item)
@@ -402,7 +402,7 @@ def darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]:
     return DynArrayView(collections_void_from_items[T](builder.items.items), builder.items.count, elem_size)
 
 
-@ufcs_only
+@method
 def view[T](builder: DArrayBuilder[T]&) -> dview[T]:
     return darray_builder_view[T](builder)
 
@@ -411,7 +411,7 @@ def darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
     return builder.items
 
 
-@ufcs_only
+@method
 def finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
     return darray_builder_finish[T](builder)
 
@@ -420,7 +420,7 @@ def darray_builder_clear[T](builder: mutable DArrayBuilder[T]&):
     builder.items.count <- 0
 
 
-@ufcs_only
+@method
 def clear[T](builder: mutable DArrayBuilder[T]&):
     darray_builder_clear[T](builder)
 
@@ -444,7 +444,7 @@ def inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
     return vec.len
 
 
-@ufcs_only
+@method
 def count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
     return inline_vec_count[T, N](vec)
 
@@ -453,7 +453,7 @@ def inline_vec_is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
     return vec.len == 0
 
 
-@ufcs_only
+@method
 def is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
     return inline_vec_is_empty[T, N](vec)
 
@@ -462,7 +462,7 @@ def inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
     return vec.is_spilled
 
 
-@ufcs_only
+@method
 def spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
     return inline_vec_spilled[T, N](vec)
 
@@ -476,7 +476,7 @@ def inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
         return vec.inline_items[index]
 
 
-@ufcs_only
+@method
 def get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
     return inline_vec_get[T, N](vec, index)
 
@@ -491,7 +491,7 @@ def inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, ite
             vec.inline_items[index] <- item
 
 
-@ufcs_only
+@method
 def set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
     inline_vec_set[T, N](vec, index, item)
 
@@ -536,7 +536,7 @@ def inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
         vec.len <- vec.len + 1
 
 
-@ufcs_only
+@method
 def push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
     can Memory.Allocate, Abort.Panic:
         inline_vec_push[T, N](vec, item)
@@ -553,7 +553,7 @@ def inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
         return vec.inline_items[vec.len]
 
 
-@ufcs_only
+@method
 def pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
     return inline_vec_pop[T, N](vec)
 
@@ -563,7 +563,7 @@ def inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T:
     return inline_vec_get[T, N](vec, vec.len - 1)
 
 
-@ufcs_only
+@method
 def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
     return inline_vec_last[T, N](vec)
 
@@ -578,7 +578,7 @@ def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
         return DynArrayView(collections_void_from_items[T](vec.inline_items[0].ref[T&]), vec.len, elem_size)
 
 
-@ufcs_only
+@method
 def view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
     return inline_vec_view[T, N](vec)
 
@@ -590,7 +590,7 @@ def inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&):
     vec.is_spilled <- false
 
 
-@ufcs_only
+@method
 def clear[T, N: usize](vec: mutable InlineVec[T, N]&):
     inline_vec_clear[T, N](vec)
 
@@ -702,7 +702,7 @@ def darray_pop[T](da: mutable darray[T]&) -> T:
         da.count <- da.count - 1
         return da[da.count]
 
-@ufcs_only
+@method
 def pop[T](da: mutable darray[T]&) -> T:
     can Abort.Panic:
         return darray_pop[T](da)
@@ -719,7 +719,7 @@ def darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T:
         da.count <- da.count - 1
         return removed
 
-@ufcs_only
+@method
 def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
     can Abort.Panic:
         return darray_remove_at[T](da, index)
@@ -1033,17 +1033,17 @@ def index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
     return map.entries.view()
 
 
-@ufcs_only
+@method
 def entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
     return index_map_entry[K, T](map, index)
 
 
-@ufcs_only
+@method
 def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
     return index_map_value[K, T](map, index)
 
 
-@ufcs_only
+@method
 def entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
     return index_map_entries[K, T](map)
 
@@ -1184,17 +1184,17 @@ def symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry
     return index_map_entries[K, T](table.items)
 
 
-@ufcs_only
+@method
 def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
     return symbol_table_entry[K, T](table, symbol_id)
 
 
-@ufcs_only
+@method
 def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
     return symbol_table_value[K, T](table, symbol_id)
 
 
-@ufcs_only
+@method
 def entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]:
     return symbol_table_entries[K, T](table)
 
