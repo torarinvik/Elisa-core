@@ -358,3 +358,12 @@ def bytes_view(buf: darray[u8]) -> sview:
         return sview("", 0, 0)
     trusted Unsafe.UncheckedIndex:
         return StringView(buf[0].ref[u8&], n.i64())
+
+# FNV-1a 64-bit hash of the bytes of `value` (std::hash<std::string_view>). Deterministic
+# and order-sensitive; to hash a C-string / dstr, take a `sview` of its bytes first.
+def hash_sview(value: sview) -> u64:
+    h: mutable u64 = 0xcbf29ce484222325u64
+    for ch in value:
+        h <- h ^ ch.u64()
+        h <- h * 0x100000001b3u64
+    return h

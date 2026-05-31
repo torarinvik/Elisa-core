@@ -241,3 +241,49 @@ def fold_reduce() -> void:
 		}
 	}
 }
+
+// TestRunCLIStringsHashSview verifies the FNV-1a hash_sview (std::hash<string_view>):
+// determinism, sensitivity to a one-byte change, and the empty-string FNV offset basis.
+func TestRunCLIStringsHashSview(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	rel := func(name string) string {
+		p, err := filepath.Rel(fixtureDir, filepath.Join(std, name))
+		if err != nil {
+			t.Fatalf("rel include %s: %v", name, err)
+		}
+		return filepath.ToSlash(p)
+	}
+	preamble := fmt.Sprintf("# include %q\n# include %q\n",
+		rel("test.elisa"), rel("elisacore_runtime.elisa"))
+	src := preamble + `
+@test
+def hash_sview_fnv1a() -> void:
+    can Abort.Panic:
+        a: u64 = hash_sview(sview("abc", 0, -1))
+        b: u64 = hash_sview(sview("abc", 0, -1))
+        c: u64 = hash_sview(sview("abd", 0, -1))
+        e: u64 = hash_sview(sview("", 0, 0))
+        assert_eq(a == b, true)
+        assert_eq(a == c, false)
+        assert_eq(a == 0u64, false)
+        assert_eq(e == 0xcbf29ce484222325u64, true)
+`
+	fixturePath := filepath.Join(fixtureDir, "hash_sview.elisa")
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected hash_sview test to pass, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"[       OK ] hash_sview_fnv1a",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, stdout.String())
+		}
+	}
+}
