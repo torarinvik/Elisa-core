@@ -21,6 +21,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType, valueType)
 				a.reportShapeMismatchNotes(n.Pos(), declType, valueType)
 			}
+			// Nested-region escape: binding an inner-@r value into a variable whose
+			// declared type names an outer region dangles once the inner region is
+			// freed (the var-decl analogue of the assignment/push check). Decided by
+			// the region outlives-lattice.
+			a.checkNestedRegionStoreEscape(n.Value, declType, valueType)
 		} else if declType == nil {
 			a.errorf(n.Pos(), "variable %q requires a type or initializer", n.Name)
 			declType = invalidType

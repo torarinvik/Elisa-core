@@ -121,6 +121,19 @@ func TestRegionNestedStoreEscapeChecking(t *testing.T) {
 		t.Fatalf("expected inner-region value pushed into outer container to be rejected; got: %s", all)
 	}
 
+	badDecl := analyzeTreeTestSourceWithSemanticErrors(t, "region_nested_decl_bad.elisa", `def nest_decl_bad() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region outer(4096):
+            region inner(4096):
+                small: mutable darray[u8] @inner = []
+                small.push(1)
+                stash: darray[u8] @outer = small
+                _ = stash
+`)
+	if all := strings.Join(badDecl.Errors(), "\n"); !strings.Contains(all, "is freed first") {
+		t.Fatalf("expected inner-region value bound into an outer-region var to be rejected; got: %s", all)
+	}
+
 	ok := analyzeTreeTestSourceWithSemanticErrors(t, "region_nested_ok.elisa", `def nest_ok() -> void:
     can Memory.Allocate, Abort.Panic:
         region outer(4096):
