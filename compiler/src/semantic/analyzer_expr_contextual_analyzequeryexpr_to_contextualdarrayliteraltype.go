@@ -47,7 +47,14 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 	}
 	expr.Filter = a.rewriteFrozenTreeRowFieldFilterShorthand(loopScope, pattern, sourceType, expr.Filter)
 	if expr.Filter != nil {
+		// When the query source const-folds (compile-time reflection like fields(T), or a
+		// const list), the predicate is evaluated at compile time over interned literals, so
+		// suppress the raw-u8&-compare footgun lint inside it.
+		_, sourceConst := a.evalConstExpr(expr.Source)
+		prevSuppress := a.inCompileTimeQueryPredicate
+		a.inCompileTimeQueryPredicate = sourceConst
 		condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
+		a.inCompileTimeQueryPredicate = prevSuppress
 		if !IsBoolType(condType) {
 			a.errorf(expr.Filter.Pos(), "query expression predicate must be bool, got %s", condType)
 		}

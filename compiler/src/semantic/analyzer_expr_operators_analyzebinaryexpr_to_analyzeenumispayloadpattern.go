@@ -70,7 +70,7 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 			// so only a genuine *runtime* address compare is a footgun.
 			_, lConst := a.evalConstExpr(expr.Left)
 			_, rConst := a.evalConstExpr(expr.Right)
-			if !(lConst && rConst) {
+			if !(lConst && rConst) && !a.inCompileTimeQueryPredicate {
 				a.warnf(expr.Pos(), "%s on two raw u8& C-string pointers compares addresses, not contents; use streq() or compare via cstr/sview/dstr for content equality", lexer.TokenName(expr.Op))
 			}
 		}
