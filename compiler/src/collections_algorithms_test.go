@@ -133,3 +133,57 @@ def sort_and_ordering() -> void:
 		}
 	}
 }
+
+// TestRunCLICollectionsBinarySearch exercises lower_bound / binary_search over a sorted
+// range, covering hits, misses, and the below-first / past-last boundary positions.
+func TestRunCLICollectionsBinarySearch(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	rel := func(name string) string {
+		p, err := filepath.Rel(fixtureDir, filepath.Join(std, name))
+		if err != nil {
+			t.Fatalf("rel include %s: %v", name, err)
+		}
+		return filepath.ToSlash(p)
+	}
+	preamble := fmt.Sprintf("# include %q\n# include %q\n",
+		rel("test.elisa"), rel("elisacore_runtime.elisa"))
+	src := preamble + `
+def asc(a: i64, b: i64) -> bool:
+    return a < b
+
+@test
+def binary_search_lookups() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region scratch(128):
+            xs: mutable darray[i64] = []
+            in scratch:
+                _ = xs.push(1)
+                _ = xs.push(3)
+                _ = xs.push(5)
+                _ = xs.push(7)
+            assert_eq(xs.lower_bound(5, asc), 2)
+            assert_eq(xs.lower_bound(4, asc), 2)
+            assert_eq(xs.lower_bound(0, asc), 0)
+            assert_eq(xs.lower_bound(99, asc), 4)
+            assert_eq(xs.binary_search(5, asc), true)
+            assert_eq(xs.binary_search(4, asc), false)
+`
+	fixturePath := filepath.Join(fixtureDir, "binary_search.elisa")
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected binary-search test to pass, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"[       OK ] binary_search_lookups",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, stdout.String())
+		}
+	}
+}

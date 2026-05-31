@@ -860,6 +860,28 @@ def max_element[T](da: darray[T], less: func(T, T) -> bool) -> T?:
             i <- i + 1
     return best
 
+# Binary-search lookups over a range already sorted by the same `less`
+# (std::lower_bound / std::binary_search). O(log n).
+@method
+def lower_bound[T](da: darray[T], target: T, less: func(T, T) -> bool) -> usize:
+    lo: mutable usize = 0
+    hi: mutable usize = da.count
+    trusted Unsafe.AssumeProgress:
+        while lo < hi:
+            mid: usize = lo + (hi - lo) / 2
+            if less(da[mid], target):
+                lo <- mid + 1
+            else:
+                hi <- mid
+    return lo
+
+@method
+def binary_search[T](da: darray[T], target: T, less: func(T, T) -> bool) -> bool:
+    idx: usize = da.lower_bound(target, less)
+    if idx >= da.count:
+        return false
+    return not less(target, da[idx])
+
 def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
     can Memory.Allocate, Abort.Panic:
         needed: usize = da.count + new_items_count
