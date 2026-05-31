@@ -6,11 +6,20 @@ const ARENA_BACKEND_WIN32_VIRTUALALLOC = 2
 
 const ARENA_BACKEND_WASM_HEAPBASE = 3
 
-const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
+static if ELISA_TARGET_OS_WINDOWS:
+    const ARENA_BACKEND: int = ARENA_BACKEND_WIN32_VIRTUALALLOC
+static elif ELISA_TARGET_OS_POSIX:
+    const ARENA_BACKEND: int = ARENA_BACKEND_LINUX_MMAP
+static else:
+    const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
 
 const ARENA_REGION_DEFAULT_CAPACITY: usize = (8 * 1024)
 
 const ARENA_WASM_PAGE_SIZE: usize = (64 * 1024)
+
+const ARENA_REGION_BACKEND_DEFAULT: int = 0
+
+const ARENA_REGION_BACKEND_MALLOC: int = 1
 
 error RuntimeError:
     OutOfMemory
@@ -34,17 +43,21 @@ struct ArenaMark:
     region: heap Region&?
     count: usize
 
-static if (ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC):
-    extern malloc(size: usize) -> mutable heap void&? effects[Memory.Allocate]
-    extern free(ptr: heap void&) effects[Memory.Release]
-static elif (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
+extern malloc(size: usize) -> mutable heap void&? effects[Memory.Allocate]
+
+extern free(ptr: heap void&) effects[Memory.Release]
+
+static if (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
     const PROT_READ = 0x1
     const PROT_WRITE = 0x2
     const MAP_PRIVATE = 0x02
-    const MAP_ANONYMOUS = 0x20
-    extern mmap(addr: heap void&?, length: usize, prot: int, flags: int, fd: int, offset: isize) -> mutable heap void&?
+    static if ELISA_TARGET_OS_LINUX:
+        const MAP_ANONYMOUS = 0x20
+    static else:
+        const MAP_ANONYMOUS = 0x1000
+    extern mmap(addr: uintptr, length: usize, prot: int, flags: int, fd: int, offset: i64) -> uintptr
     extern munmap(addr: heap void&, length: usize) -> int
-    extern MAP_FAILED() -> mutable heap void&?
+    extern MAP_FAILED() -> uintptr
 static elif (ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC):
     const MEM_COMMIT = 0x1000
     const MEM_RESERVE = 0x2000
@@ -71,7 +84,11 @@ extern new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable hea
 
 extern new_region(capacity: usize) -> mutable heap Region&
 
+extern new_region_backend(capacity: usize, backend: int) -> mutable heap Region&
+
 extern free_region(r: heap Region&)
+
+extern free_region_backend(r: heap Region&, backend: int)
 
 extern arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&
 
@@ -440,6 +457,44 @@ extern darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T
 @method
 extern remove_at[T](da: mutable darray[T]&, index: usize) -> T
 
+@method
+extern any_of[T](da: darray[T], pred: func(T) -> bool) -> bool
+
+@method
+extern all_of[T](da: darray[T], pred: func(T) -> bool) -> bool
+
+@method
+extern count_if[T](da: darray[T], pred: func(T) -> bool) -> usize
+
+@method
+extern find_if[T](da: darray[T], pred: func(T) -> bool) -> T?
+
+@method
+extern fold[T, A](da: darray[T], init: A, f: func(A, T) -> A) -> A
+
+extern darray_sift_down[T](da: mutable darray[T]&, less: func(T, T) -> bool, start: usize, end: usize)
+
+@method
+extern sort[T](da: mutable darray[T]&, less: func(T, T) -> bool)
+
+@method
+extern reverse[T](da: mutable darray[T]&)
+
+@method
+extern is_sorted[T](da: darray[T], less: func(T, T) -> bool) -> bool
+
+@method
+extern min_element[T](da: darray[T], less: func(T, T) -> bool) -> T?
+
+@method
+extern max_element[T](da: darray[T], less: func(T, T) -> bool) -> T?
+
+@method
+extern lower_bound[T](da: darray[T], target: T, less: func(T, T) -> bool) -> usize
+
+@method
+extern binary_search[T](da: darray[T], target: T, less: func(T, T) -> bool) -> bool
+
 extern arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&
 
 extern arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&
@@ -463,6 +518,10 @@ extern arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?
 extern arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]
 
 extern arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]
+
+extern arena_dict_put_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?
+
+extern arena_dict_get_or_insert_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?
 
 extern arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool
 
