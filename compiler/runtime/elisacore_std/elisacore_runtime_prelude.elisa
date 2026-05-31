@@ -154,7 +154,7 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 		entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
 		trusted Unsafe.AssumeProgress:
 			while entry != null:
-				if entry.ptr == ptr.cast[u8&]:
+				if entry.ptr.cast[uintptr] == ptr.cast[u8&].cast[uintptr]:
 					entry.len <- len
 					return
 				entry <- entry.next
@@ -176,7 +176,7 @@ def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
 
 	trusted Unsafe.AssumeProgress:
 		while entry != null:
-			if entry.ptr == ptr.cast[u8&]:
+			if entry.ptr.cast[uintptr] == ptr.cast[u8&].cast[uintptr]:
 				# Move-to-front heuristic
 				if prev != null:
 					prev.next <- entry.next

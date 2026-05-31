@@ -239,7 +239,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
                     PROT_READ | PROT_WRITE,
                     MAP_ANONYMOUS | MAP_PRIVATE,
                     -1,
-                    0i64
+                    0
                 )
             assert raw_addr != MAP_FAILED()
             assert raw_addr != 0.uintptr()

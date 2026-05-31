@@ -2297,6 +2297,31 @@ func (a *Analyzer) warnf(pos lexer.Pos, format string, args ...interface{}) {
 	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
 }
 
+// intLitRequiresSuffix reports whether an integer literal's value exceeds the int64 range
+// (but still fits uint64), in which case an unsuffixed literal would fail default `int`
+// inference and the explicit unsigned suffix is necessary -- so it should not be flagged as
+// discouraged. Values that fit int64 (the vast majority) return false and stay lint-eligible.
+func intLitRequiresSuffix(n *ast.IntLit) bool {
+	if n == nil {
+		return false
+	}
+	text := strings.ReplaceAll(n.Value, "_", "")
+	base := 10
+	if n.IsHex {
+		base = 16
+		text = strings.TrimPrefix(text, "0x")
+		text = strings.TrimPrefix(text, "0X")
+	}
+	if _, err := strconv.ParseInt(text, base, 64); err != nil {
+		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
+			if _, uerr := strconv.ParseUint(text, base, 64); uerr == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (a *Analyzer) warnNumericLiteralSuffix(expr ast.Expr, suffix string) {
 	if suffix == "" || expr == nil {
 		return
