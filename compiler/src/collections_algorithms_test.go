@@ -338,3 +338,50 @@ def fs_path_ops() -> void:
 		}
 	}
 }
+
+// TestRunCLIFsJoin verifies Fs::join (path concatenation into an arena): separator
+// insertion, no doubled slash when base ends with one, and absolute-leaf replacement.
+func TestRunCLIFsJoin(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	rel := func(name string) string {
+		p, err := filepath.Rel(fixtureDir, filepath.Join(std, name))
+		if err != nil {
+			t.Fatalf("rel include %s: %v", name, err)
+		}
+		return filepath.ToSlash(p)
+	}
+	preamble := fmt.Sprintf("# include %q\n# include %q\n",
+		rel("test.elisa"), rel("elisacore_runtime.elisa"))
+	src := preamble + `
+def eqd(d: dstr, lit: static u8&) -> bool:
+    return sview_eq(bytes_view(d), sview(lit, 0, -1))
+
+@test
+def fs_join() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region scratch(256):
+            o: mutable Arena& = scratch.ref[mutable Arena&]
+            assert_eq(eqd(Fs::join(o, sview("a/b", 0, -1), sview("c", 0, -1)), "a/b/c"), true)
+            assert_eq(eqd(Fs::join(o, sview("a/b/", 0, -1), sview("c", 0, -1)), "a/b/c"), true)
+            assert_eq(eqd(Fs::join(o, sview("a", 0, -1), sview("/abs", 0, -1)), "/abs"), true)
+            assert_eq(eqd(Fs::join(o, sview("", 0, -1), sview("c", 0, -1)), "c"), true)
+`
+	fixturePath := filepath.Join(fixtureDir, "fs_join.elisa")
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected Fs::join test to pass, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"[       OK ] fs_join",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, stdout.String())
+		}
+	}
+}
