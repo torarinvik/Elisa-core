@@ -372,8 +372,19 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 	}
 	switch p := pattern.(type) {
 	case *TypeParamType:
-		if _, exists := bindings[p.Name]; !exists {
+		if existing, exists := bindings[p.Name]; !exists {
 			bindings[p.Name] = actual
+		} else if _, existingIsParam := existing.(*TypeParamType); existingIsParam {
+			// A prior binding to an (unresolved) type parameter — e.g. the
+			// return-type match binding this param to the CALLER's own unbound
+			// param when the call sits in a no-expected-type position — is only a
+			// placeholder. A concrete argument-derived type is strictly better, so
+			// let it override. Without this, a type param that appears only in
+			// value positions (e.g. fold's accumulator `A`, inferred from `init`)
+			// never resolves once the speculative return binding has claimed it.
+			if _, actualIsParam := actual.(*TypeParamType); !actualIsParam {
+				bindings[p.Name] = actual
+			}
 		}
 	case *ConstParamType:
 		if _, exists := bindings[p.Name]; !exists {

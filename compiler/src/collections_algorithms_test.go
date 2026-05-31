@@ -187,3 +187,57 @@ def binary_search_lookups() -> void:
 		}
 	}
 }
+
+// TestRunCLICollectionsFold exercises fold/reduce, including the no-expected-type-context
+// position (a fold call passed directly to a generic assert_eq) that previously failed to
+// infer the accumulator type param. Regression guard for the collectTypeBindings fix.
+func TestRunCLICollectionsFold(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	rel := func(name string) string {
+		p, err := filepath.Rel(fixtureDir, filepath.Join(std, name))
+		if err != nil {
+			t.Fatalf("rel include %s: %v", name, err)
+		}
+		return filepath.ToSlash(p)
+	}
+	preamble := fmt.Sprintf("# include %q\n# include %q\n",
+		rel("test.elisa"), rel("elisacore_runtime.elisa"))
+	src := preamble + `
+def i64_sum(a: i64, b: i64) -> i64:
+    return a + b
+
+def i64_max(acc: i64, x: i64) -> i64:
+    return x if x > acc else acc
+
+@test
+def fold_reduce() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region scratch(64):
+            xs: mutable darray[i64] = []
+            in scratch:
+                _ = xs.push(3)
+                _ = xs.push(7)
+                _ = xs.push(2)
+            z: i64 = 0
+            assert_eq(xs.fold(z, i64_sum), 12)
+            assert_eq(xs.fold(z, i64_max), 7)
+`
+	fixturePath := filepath.Join(fixtureDir, "fold_reduce.elisa")
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected fold test to pass, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"[       OK ] fold_reduce",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, stdout.String())
+		}
+	}
+}
