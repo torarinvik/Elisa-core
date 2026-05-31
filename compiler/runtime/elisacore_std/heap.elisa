@@ -177,3 +177,88 @@ def memory_pool_deinit[T](pool: mutable MemoryPool[T]&):
     arena_free(pool.arena.ref[Arena&]) can Memory.Release, Abort.Panic
     pool.arena <- zeroed
     pool.free_list <- null
+
+# ------------------------------------------------------------
+# Region-anchored object pool
+# ------------------------------------------------------------
+# Like MemoryPool[T], but its slabs come from a borrowed region arena (`owner`) rather than an
+# arena it owns. Freed slots are recycled through an intrusive free list; forgetting to free is
+# safe because the region bulk-frees every slab at teardown, so `region_pool_free` is purely a
+# slot-reuse optimization, never a correctness obligation. Slots are pointer-stable (never move).
+# There is deliberately no deinit: the region owns the arena and reclaims it at `destroy r`.
+
+struct RegionPool[T]:
+    owner: mutable Arena&?
+    free_list: mutable heap MemoryPoolFreeNode&?
+
+def region_pool_new[T](owner: mutable Arena&) -> RegionPool[T]:
+    out: mutable RegionPool[T] = zeroed
+    out.owner as & <- owner
+    return out
+
+def region_pool_create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
+    can Memory.Allocate, Abort.Panic:
+        if pool.free_list != null:
+            node: heap MemoryPoolFreeNode& = pool.free_list
+            pool.free_list <- node.next
+            trusted Unsafe.PointerCast:
+                item: heap T& = node.cast[heap T&]
+                item[0] <- zeroed
+                return item
+
+        item_size: mutable usize = size_of(T)
+        if item_size < size_of(MemoryPoolFreeNode):
+            item_size <- size_of(MemoryPoolFreeNode)
+
+        assert pool.owner != null
+        owner: mutable Arena& = pool.owner
+        raw: heap void& = arena_alloc(owner, item_size)
+        trusted Unsafe.PointerCast:
+            item: heap T& = raw.cast[heap T&]
+            item[0] <- zeroed
+            return item
+
+def region_pool_free[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
+    ptr[0] <- zeroed
+    trusted Unsafe.PointerCast:
+        node: heap MemoryPoolFreeNode& = ptr.cast[heap MemoryPoolFreeNode&]
+        node.next <- pool.free_list
+        pool.free_list as & <- node
+
+@ufcs_only
+def create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
+    return region_pool_create[T](pool) can Memory.Allocate, Abort.Panic
+
+@ufcs_only
+def recycle[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
+    region_pool_free[T](pool, ptr)
+
+# An `affine` (use-at-most-once, droppable) owning handle for one pooled object. `acquire`
+# produces one; `release` consumes it. Because the handle is affine, the compiler rejects
+# use-after-release and double-release (the same checker that guards Thread/MutexGuard). Because
+# it is `affine` (not `linear`), it is DROPPABLE: forgetting to release just forgoes slot reuse
+# — the region still bulk-frees the slab at teardown, so dropping is safe (never a leak, never a
+# dangling slot). Borrow the object via `handle.ptr` while the handle is live.
+affine struct Pooled[T]:
+    ptr: mutable heap T&
+
+def region_pool_acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T]:
+    return Pooled[T](region_pool_create[T](pool)) can Memory.Allocate, Abort.Panic
+
+def region_pool_release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
+    # Recycle inline (rather than calling region_pool_free) so we never hand the handle's
+    # interior mutable ref across a call boundary, which the affine checker forbids.
+    slot: mutable heap T& = handle.ptr
+    slot[0] <- zeroed
+    trusted Unsafe.PointerCast:
+        node: heap MemoryPoolFreeNode& = slot.cast[heap MemoryPoolFreeNode&]
+        node.next <- pool.free_list
+        pool.free_list as & <- node
+
+@ufcs_only
+def acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T]:
+    return region_pool_acquire[T](pool) can Memory.Allocate, Abort.Panic
+
+@ufcs_only
+def release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
+    region_pool_release[T](pool, move handle)
