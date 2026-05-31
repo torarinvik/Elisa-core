@@ -126,73 +126,53 @@ func (a *Analyzer) recordBorrowedOwnerRefParam(sym *Symbol) {
 	a.currentBorrowedOwnerRefs[sym] = state
 }
 
-// affineInteriorBorrowOrigin reports whether `expr` produces a raw interior pointer
-// borrowed out of a live affine handle, returning the affine-value key of that handle.
-// It recognizes a direct interior projection (`h.ptr`, `h.slots[i]` where `h` is an
-// affine handle and the projected member is a plain reference) and copy-hops of an
-// already-tracked interior alias (`c = b`). Consuming the returned handle recycles the
-// pointee, so any later use of the bound local is a use-after-free. This is what makes
-// a deliberately-stashed `b = h.ptr` survive `release(move h)` checkable, closing the
-// hole that affine consumption alone (which only reaches the handle's own sub-paths)
-// leaves open.
-func (a *Analyzer) affineInteriorBorrowOrigin(expr ast.Expr) (affineValueKey, bool) {
-	switch n := expr.(type) {
-	case *ast.ParenExpr:
-		return a.affineInteriorBorrowOrigin(n.Inner)
-	case *ast.CastExpr:
-		// Only follow a cast that keeps the value a reference into the pooled object
-		// (e.g. reinterpreting `heap T&` as `u8&`). A cast to a non-reference — such
-		// as `.uintptr()` yielding a copied address integer — severs the alias: the
-		// result no longer dereferences the slot, so using it after release is safe.
-		castType := a.exprTypes[expr]
-		if castType == nil {
-			castType = a.analyzeExpr(expr)
-		}
-		if _, ok := castType.(*RefType); !ok {
-			return affineValueKey{}, false
-		}
-		return a.affineInteriorBorrowOrigin(n.Operand)
-	case *ast.MoveExpr:
-		return a.affineInteriorBorrowOrigin(n.Operand)
-	case *ast.Ident:
-		// copy-hop: `c = b` inherits the origin of an already-tracked interior alias.
-		if a.currentScope == nil || a.currentBorrowedOwnerRefs == nil {
-			return affineValueKey{}, false
-		}
-		sym, ok := a.currentScope.Lookup(n.Name)
-		if !ok {
-			return affineValueKey{}, false
-		}
-		state, ok := a.currentBorrowedOwnerRefs[sym]
-		if ok && state.RawInteriorAffineAlias && state.HasDirect {
-			return state.Direct, true
-		}
-		return affineValueKey{}, false
-	case *ast.FieldExpr:
-		return a.affineInteriorBorrowOriginFromProjection(expr, n.Object)
-	case *ast.IndexExpr:
-		if n.Fallback != nil {
-			return affineValueKey{}, false
-		}
-		return a.affineInteriorBorrowOriginFromProjection(expr, n.Object)
-	default:
-		return affineValueKey{}, false
+// borrowedOwnerRefStateHasRawInteriorAlias reports whether a borrowed-owner state (or any
+// nested field/element of it) is a raw interior pointer aliased out of a Pooled handle.
+// Such states must be tracked even when the bound type is not an owner-ref carrier, so a
+// borrow stashed in a local, struct, or aggregate and used after release is caught.
+func borrowedOwnerRefStateHasRawInteriorAlias(state borrowedOwnerRefState) bool {
+	if state.RawInteriorAffineAlias {
+		return true
 	}
+	for _, child := range state.Fields {
+		if borrowedOwnerRefStateHasRawInteriorAlias(child) {
+			return true
+		}
+	}
+	return false
 }
 
-func (a *Analyzer) affineInteriorBorrowOriginFromProjection(expr ast.Expr, base ast.Expr) (affineValueKey, bool) {
-	valueType := a.exprTypes[expr]
-	if valueType == nil {
-		valueType = a.analyzeExpr(expr)
+// stripRawInteriorAffineAlias removes raw interior-alias content from a borrowed-owner
+// state (recursively), leaving any genuine owner-borrow content intact. Used when a cast
+// severs the alias by producing a non-reference value (e.g. `.uintptr()`).
+func stripRawInteriorAffineAlias(state borrowedOwnerRefState) borrowedOwnerRefState {
+	if state.RawInteriorAffineAlias {
+		state.HasDirect = false
+		state.Direct = affineValueKey{}
+		state.RawInteriorAffineAlias = false
 	}
-	// A genuine owner/handle-typed member is handled by the existing owner-borrow
-	// machinery; this path is only for plain raw interior pointers into the object.
-	if _, ok := borrowableOwnerRefElemType(valueType); ok {
-		return affineValueKey{}, false
+	for name, child := range state.Fields {
+		stripped := stripRawInteriorAffineAlias(child)
+		if hasBorrowedOwnerRefState(stripped) {
+			state.Fields[name] = stripped
+		} else {
+			delete(state.Fields, name)
+		}
 	}
-	if _, ok := valueType.(*RefType); !ok {
-		return affineValueKey{}, false
-	}
+	return state
+}
+
+// poolInteriorBorrowKey reports whether the projection `expr` (`h.ptr`, `h.slots[i]`)
+// produces a plain raw interior pointer out of a live Pooled handle, returning the
+// affine-value key of that handle. Releasing the handle recycles the pointee, so any
+// later use of a value carrying this alias is a use-after-free. Genuine owner/handle-typed
+// members are left to the existing owner-borrow machinery.
+func (a *Analyzer) poolInteriorBorrowKey(expr ast.Expr, base ast.Expr) (affineValueKey, bool) {
+	// Check the base is a live Pooled handle FIRST. The base is a sub-expression that is
+	// already analyzed by the time this runs, so this is cheap and — crucially — never
+	// re-enters analysis of `expr`. (`expr` itself must NOT be re-analyzed here: this is
+	// invoked from the field/index use-site check during analysis of `expr`, so calling
+	// analyzeExpr(expr) would recurse infinitely.)
 	baseKey, ok := a.lookupAffineValueKey(base)
 	if !ok {
 		return affineValueKey{}, false
@@ -202,6 +182,19 @@ func (a *Analyzer) affineInteriorBorrowOriginFromProjection(expr ast.Expr, base 
 		baseType = a.analyzeExpr(base)
 	}
 	if !isRegionPoolHandleType(baseType) {
+		return affineValueKey{}, false
+	}
+	// The projected member must be a plain raw reference (the interior pointer). Use only
+	// the cached type — do not analyze `expr`. A genuine owner/handle-typed member is left
+	// to the existing owner-borrow machinery.
+	valueType := a.exprTypes[expr]
+	if valueType == nil {
+		return affineValueKey{}, false
+	}
+	if _, ok := borrowableOwnerRefElemType(valueType); ok {
+		return affineValueKey{}, false
+	}
+	if _, ok := valueType.(*RefType); !ok {
 		return affineValueKey{}, false
 	}
 	return baseKey, true
@@ -251,21 +244,23 @@ func (a *Analyzer) recordBorrowedOwnerRefBinding(sym *Symbol, value ast.Expr) {
 	if a.currentBorrowedOwnerRefs == nil || sym == nil {
 		return
 	}
-	// Only a binding that is itself a reference can dangle: an alias copied into a
-	// non-reference local (e.g. a `uintptr` address snapshot) is just a value and is
-	// safe to read after release.
-	if _, isRef := sym.Type.(*RefType); isRef {
-		if key, ok := a.affineInteriorBorrowOrigin(value); ok {
-			a.currentBorrowedOwnerRefs[sym] = borrowedOwnerRefState{HasDirect: true, Direct: key, RawInteriorAffineAlias: true}
-			return
-		}
+	valueState, hasValueState := a.borrowedOwnerRefStateForExpr(value)
+	// A raw interior pointer aliased out of a Pooled handle (directly, or buried in a
+	// struct/aggregate field) must be tracked even when the bound type is not an
+	// owner-ref carrier — that is what lets a borrow stashed in a local or data
+	// structure and used after release be caught. The cast-sever in
+	// borrowedOwnerRefStateForExpr already drops aliases that a non-reference cast
+	// (e.g. a `uintptr` address snapshot) turned into a plain value.
+	if hasValueState && borrowedOwnerRefStateHasRawInteriorAlias(valueState) {
+		a.currentBorrowedOwnerRefs[sym] = cloneBorrowedOwnerRefState(valueState)
+		return
 	}
 	if !a.containsBorrowedOwnerRefValues(sym.Type, map[string]bool{}) {
 		delete(a.currentBorrowedOwnerRefs, sym)
 		return
 	}
-	if state, ok := a.borrowedOwnerRefStateForExpr(value); ok {
-		a.currentBorrowedOwnerRefs[sym] = state
+	if hasValueState {
+		a.currentBorrowedOwnerRefs[sym] = valueState
 		return
 	}
 	if _, ok := borrowableOwnerRefElemType(sym.Type); ok {

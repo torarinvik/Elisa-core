@@ -372,19 +372,24 @@ func (a *Analyzer) reportInvalidRegionUse(expr ast.Expr, valueType Type) {
 }
 
 func (a *Analyzer) reportBorrowedOwnerRefUseAfterConsume(expr ast.Expr, valueType Type) {
-	ownerType, ok := borrowableOwnerRefElemType(valueType)
-	if !ok {
+	refState, hasRefState := a.borrowedOwnerRefStateForExpr(expr)
+	if !hasRefState || !refState.HasDirect {
 		return
 	}
-	key, ok := a.lookupBorrowedOwnerRefKey(expr)
-	if !ok {
+	consumed, ok := a.lookupAffineValueStateForKey(refState.Direct)
+	if !ok || consumed.ConsumedBy == "" {
 		return
 	}
-	state, ok := a.lookupAffineValueStateForKey(key)
-	if !ok || state.ConsumedBy == "" {
+	// A raw interior pointer aliased out of a Pooled handle (e.g. stashed in a struct
+	// field, `holder.p`) dangles once the handle is released, regardless of the value's
+	// own type. Genuine owner borrows keep their owner-typed diagnostic.
+	if refState.RawInteriorAffineAlias {
+		a.errorf(expr.Pos(), consumedFactUseMessage("interior reference", affineValueDisplayName(expr), consumed.ConsumedBy))
 		return
 	}
-	a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(ownerType), affineValueDisplayName(expr), state.ConsumedBy))
+	if ownerType, ok := borrowableOwnerRefElemType(valueType); ok {
+		a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(ownerType), affineValueDisplayName(expr), consumed.ConsumedBy))
+	}
 }
 
 func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {

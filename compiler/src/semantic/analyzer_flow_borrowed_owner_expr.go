@@ -48,7 +48,25 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 	case *ast.ParenExpr:
 		return a.borrowedOwnerRefStateForExpr(n.Inner)
 	case *ast.CastExpr:
-		return a.borrowedOwnerRefStateForExpr(n.Operand)
+		state, ok := a.borrowedOwnerRefStateForExpr(n.Operand)
+		if !ok {
+			return borrowedOwnerRefState{}, false
+		}
+		// A cast that yields a non-reference value (e.g. `.uintptr()`) severs a raw
+		// interior-pointer alias: the result is a copied value, not a pointer into the
+		// pooled slot, so it is safe to use after release. Genuine owner-borrow content
+		// is left intact.
+		castType := a.exprTypes[n]
+		if castType == nil {
+			castType = a.analyzeExpr(n)
+		}
+		if _, isRef := castType.(*RefType); !isRef {
+			state = stripRawInteriorAffineAlias(state)
+			if !hasBorrowedOwnerRefState(state) {
+				return borrowedOwnerRefState{}, false
+			}
+		}
+		return state, true
 	case *ast.MoveExpr:
 		return a.borrowedOwnerRefStateForExpr(n.Operand)
 	case *ast.AddrOfExpr:
@@ -173,6 +191,9 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		}
 		return state, true
 	case *ast.FieldExpr:
+		if key, ok := a.poolInteriorBorrowKey(n, n.Object); ok {
+			return borrowedOwnerRefState{HasDirect: true, Direct: key, RawInteriorAffineAlias: true}, true
+		}
 		state, ok := a.borrowedOwnerRefStateForExpr(n.Object)
 		if !ok {
 			return borrowedOwnerRefState{}, false
@@ -181,6 +202,9 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 	case *ast.IndexExpr:
 		if n.Fallback != nil {
 			return a.borrowedOwnerRefStateForRecoveredExpr(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index}, n.Fallback)
+		}
+		if key, ok := a.poolInteriorBorrowKey(n, n.Object); ok {
+			return borrowedOwnerRefState{HasDirect: true, Direct: key, RawInteriorAffineAlias: true}, true
 		}
 		state, ok := a.borrowedOwnerRefStateForExpr(n.Object)
 		if !ok {

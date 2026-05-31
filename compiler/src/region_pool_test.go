@@ -235,3 +235,74 @@ def interior_borrow_valid() -> void:
 		t.Fatalf("interior-borrow check over-rejected valid usage, got:\n%s", combined)
 	}
 }
+
+// TestRunCLIRegionPoolRejectsStructStoredInteriorBorrowAfterRelease covers escape into a
+// data structure: the interior borrow is stashed in a struct field (`Holder(h.ptr)`) and
+// used through that field after release. This exercises the nested-Fields tracking that
+// composes the alias fact through struct-literal construction and field projection.
+func TestRunCLIRegionPoolRejectsStructStoredInteriorBorrowAfterRelease(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_pool_struct_store_fixture.elisa")
+	src := regionPoolFixturePreamble(t, fixtureDir) + `
+struct PoolNode:
+    left: mutable i64
+
+struct Holder:
+    p: mutable heap PoolNode&
+
+def struct_store_uaf() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region scratch(64):
+            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
+            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            holder: mutable Holder = Holder(h.ptr)
+            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            holder.p.left <- 5
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write struct-store fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected struct-stored interior borrow used after release to be rejected, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if combined := stdout.String() + stderr.String(); !strings.Contains(combined, "cannot be used") {
+		t.Fatalf("expected a use-after-consume diagnostic for the struct-stored borrow, got:\n%s", combined)
+	}
+}
+
+// TestRunCLIRegionPoolAllowsStructStoredInteriorBorrowBeforeRelease confirms the struct-store
+// tracking does not over-reject: using the field before release compiles cleanly.
+func TestRunCLIRegionPoolAllowsStructStoredInteriorBorrowBeforeRelease(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_pool_struct_valid_fixture.elisa")
+	src := regionPoolFixturePreamble(t, fixtureDir) + `
+struct PoolNode:
+    left: mutable i64
+
+struct Holder:
+    p: mutable heap PoolNode&
+
+def struct_store_valid() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region scratch(64):
+            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
+            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            holder: mutable Holder = Holder(h.ptr)
+            holder.p.left <- 5
+            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write struct-store valid fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected valid struct-stored borrow usage to compile, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if combined := stdout.String() + stderr.String(); strings.Contains(combined, "cannot be used") {
+		t.Fatalf("struct-store check over-rejected valid usage, got:\n%s", combined)
+	}
+}
