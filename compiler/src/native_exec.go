@@ -248,9 +248,22 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	result.EASMModules = easmModules
 	timing.ObjectWrite = time.Since(objectStart)
 	runtimeObjectPath := ""
+	debugRefereeObjectPath := ""
 	if !resultDefinesDefaultElisaCoreRuntime(result) {
 		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
 		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, targetTriple, stderr); err != nil {
+			cleanup()
+			return "", func() {}, timing, err
+		}
+	} else if !resultDefinesDebugReferee(result) {
+		// The program self-provides the core runtime, so the default runtime object -- which
+		// also carries debug_referee.elisa -- is skipped above. When the program still
+		// references the debug referee (e.g. via debug_referee.elisai's externs) without
+		// defining it, link a standalone debug_referee object so its trace globals/functions
+		// resolve instead of failing at load ("symbol not found in flat namespace"). The
+		// guard skips programs that already define the referee, avoiding duplicate symbols.
+		debugRefereeObjectPath = filepath.Join(tempDir, "elisacore_debug_referee.o")
+		if err := writeDebugRefereeObject(debugRefereeObjectPath, packedProfile, targetTriple, stderr); err != nil {
 			cleanup()
 			return "", func() {}, timing, err
 		}
@@ -320,6 +333,9 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	linkArgs = append(linkArgs, objectPath)
 	if runtimeObjectPath != "" {
 		linkArgs = append(linkArgs, runtimeObjectPath)
+	}
+	if debugRefereeObjectPath != "" {
+		linkArgs = append(linkArgs, debugRefereeObjectPath)
 	}
 	linkArgs = append(linkArgs, foreignFiles...)
 	linkArgs = append(linkArgs, linkFlags...)
@@ -1317,6 +1333,77 @@ func resultDefinesDefaultElisaCoreRuntime(result *semantic.Result) bool {
 		}
 	}
 	return true
+}
+
+// resultDefinesDebugReferee reports whether the program supplies the debug_referee
+// implementation itself (an actual definition, not just the .elisai interface's externs).
+// A real `def` parses to *ast.FuncDecl; an `extern` parses to *ast.ExternFuncDecl, so this
+// stays false for interface-only includes -- exactly the case that needs the standalone object.
+func resultDefinesDebugReferee(result *semantic.Result) bool {
+	if result == nil || result.GlobalScope == nil {
+		return false
+	}
+	sym, ok := result.GlobalScope.Lookup("debug_referee_record")
+	if !ok || sym == nil {
+		return false
+	}
+	_, ok = sym.Node.(*ast.FuncDecl)
+	return ok
+}
+
+func debugRefereeSupportPath() (string, error) {
+	repoRoot, err := compilerRepoRootForNativeExec()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "debug_referee.elisa")
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("failed to locate debug referee runtime support %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// writeDebugRefereeObject compiles debug_referee.elisa on its own into a native object. It
+// depends only on language builtins (cstr, panic), so it links cleanly alongside a program's
+// self-provided runtime without redefining arena_alloc and friends.
+func writeDebugRefereeObject(outputPath string, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
+	srcPath, err := debugRefereeSupportPath()
+	if err != nil {
+		return err
+	}
+	src, err := readSourceWithIncludes(srcPath, map[string]bool{})
+	if err != nil {
+		return err
+	}
+	var parseStderr bytes.Buffer
+	file, ok := parseProgram(srcPath, src, &parseStderr)
+	if !ok {
+		if parseStderr.Len() != 0 && stderr != nil {
+			_, _ = io.Copy(stderr, &parseStderr)
+		}
+		return fmt.Errorf("failed to parse debug referee runtime support")
+	}
+	refereeResult := semantic.Analyze(file)
+	if errs := refereeResult.Errors(); len(errs) != 0 {
+		if stderr != nil {
+			for _, e := range errs {
+				fmt.Fprintf(stderr, "%s\n", e)
+			}
+		}
+		return fmt.Errorf("failed to analyze debug referee runtime support")
+	}
+	if clangPath, err := exec.LookPath("clang"); err == nil {
+		if err := writeNativeObjectViaClangIR(clangPath, refereeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, stderr); err == nil {
+			return nil
+		} else if strings.TrimSpace(targetTriple) != "" {
+			return err
+		}
+	}
+	return backend.WriteLLVMObjectFileWithOptions(refereeResult, outputPath, backend.LLVMObjectEmitOptions{
+		OptLevel:      backend.OptimizationLevel3,
+		PackedProfile: packedProfile,
+		TargetTriple:  targetTriple,
+	})
 }
 
 func runNativeExecutable(exePath string, targetTriple string, stdout io.Writer, stderr io.Writer) error {
