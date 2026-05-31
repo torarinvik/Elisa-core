@@ -759,6 +759,107 @@ def find_if[T](da: darray[T], pred: func(T) -> bool) -> T?:
             return x
     return null
 
+# Comparator-based ordering algorithms (the C++ idiom: a strict-weak-ordering
+# `less(a, b)`, not a `T`-level `<`, so they stay generic without operator
+# overloading). All in-place / allocation-free.
+
+# Internal heapsort sift-down used by `sort`.
+def darray_sift_down[T](da: mutable darray[T]&, less: func(T, T) -> bool, start: usize, end: usize):
+    can Abort.Panic:
+        root: mutable usize = start
+        trusted Unsafe.AssumeProgress:
+            while true:
+                child: usize = root * 2 + 1
+                if child >= end:
+                    return
+                largest: mutable usize = root
+                if less(da[largest], da[child]):
+                    largest <- child
+                if child + 1 < end and less(da[largest], da[child + 1]):
+                    largest <- child + 1
+                if largest == root:
+                    return
+                tmp: T = da[root]
+                da[root] <- da[largest]
+                da[largest] <- tmp
+                root <- largest
+
+# In-place sort ascending by `less` (std::sort). O(n log n) heapsort, no allocation.
+@method
+def sort[T](da: mutable darray[T]&, less: func(T, T) -> bool):
+    can Abort.Panic:
+        n: usize = da.count
+        if n < 2:
+            return
+        i: mutable usize = n / 2
+        trusted Unsafe.AssumeProgress:
+            while i > 0:
+                i <- i - 1
+                darray_sift_down[T](da, less, i, n)
+        e: mutable usize = n
+        trusted Unsafe.AssumeProgress:
+            while e > 1:
+                e <- e - 1
+                tmp: T = da[0]
+                da[0] <- da[e]
+                da[e] <- tmp
+                darray_sift_down[T](da, less, 0, e)
+
+# Reverse the elements in place (std::reverse).
+@method
+def reverse[T](da: mutable darray[T]&):
+    n: usize = da.count
+    if n < 2:
+        return
+    i: mutable usize = 0
+    j: mutable usize = n - 1
+    trusted Unsafe.AssumeProgress:
+        while i < j:
+            tmp: T = da[i]
+            da[i] <- da[j]
+            da[j] <- tmp
+            i <- i + 1
+            j <- j - 1
+
+# True if no element compares `less` than its predecessor (std::is_sorted).
+@method
+def is_sorted[T](da: darray[T], less: func(T, T) -> bool) -> bool:
+    i: mutable usize = 1
+    trusted Unsafe.AssumeProgress:
+        while i < da.count:
+            if less(da[i], da[i - 1]):
+                return false
+            i <- i + 1
+    return true
+
+# Smallest / largest element by `less`, or `null` if empty (std::min_element /
+# std::max_element, returning the element rather than an iterator).
+@method
+def min_element[T](da: darray[T], less: func(T, T) -> bool) -> T?:
+    if da.count == 0:
+        return null
+    best: mutable T = da[0]
+    i: mutable usize = 1
+    trusted Unsafe.AssumeProgress:
+        while i < da.count:
+            if less(da[i], best):
+                best <- da[i]
+            i <- i + 1
+    return best
+
+@method
+def max_element[T](da: darray[T], less: func(T, T) -> bool) -> T?:
+    if da.count == 0:
+        return null
+    best: mutable T = da[0]
+    i: mutable usize = 1
+    trusted Unsafe.AssumeProgress:
+        while i < da.count:
+            if less(best, da[i]):
+                best <- da[i]
+            i <- i + 1
+    return best
+
 def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
     can Memory.Allocate, Abort.Panic:
         needed: usize = da.count + new_items_count
