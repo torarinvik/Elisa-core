@@ -340,7 +340,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "region_checkpoints",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "region_checkpoints.elisa"),
 			checks: []string{
-				"%Arena = type { ptr, ptr, i64 }",
+				"%Arena = type { ptr, ptr, i64, i64 }",
 				"%ArenaMark = type { ptr, i64 }",
 				"declare %ArenaMark @arena_snapshot(ptr)",
 				"declare void @arena_rewind(ptr, %ArenaMark)",

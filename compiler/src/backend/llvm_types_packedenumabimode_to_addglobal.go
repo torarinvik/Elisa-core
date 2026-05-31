@@ -553,7 +553,9 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 	}
 	switch name {
 	case "new_region",
+		"new_region_backend",
 		"free_region",
+		"free_region_backend",
 		"arena_alloc",
 		"arena_realloc",
 		"arena_memcpy",

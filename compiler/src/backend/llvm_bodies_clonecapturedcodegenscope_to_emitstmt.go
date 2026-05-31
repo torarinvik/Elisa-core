@@ -230,7 +230,7 @@ func (s *functionState) emitRegionDecl(n *ast.RegionStmt) error {
 	s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
 	s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
 	s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: alloca}
-	return s.emitRegionInit(alloca, arenaType, n.Capacity)
+	return s.emitRegionInit(alloca, arenaType, n.Capacity, n.Allocator)
 }
 func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	s.pushScope()

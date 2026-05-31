@@ -34,8 +34,9 @@ const CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT: bool = false
 # Global arena state
 # ------------------------------------------------------------
 
-global mutable perm_arena: Arena = Arena(null, null, 0)
-global mutable scratch_arena: Arena = Arena(null, null, 0)
+# 4th field is Arena.backend; 0 == ARENA_REGION_BACKEND_DEFAULT (compile-time ARENA_BACKEND).
+global mutable perm_arena: Arena = Arena(null, null, 0, 0)
+global mutable scratch_arena: Arena = Arena(null, null, 0, 0)
 
 # ------------------------------------------------------------
 # Struct definitions

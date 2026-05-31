@@ -77,6 +77,12 @@ func (p *Parser) parseRegion() *ast.RegionStmt {
 		capacity = p.parseExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 	}
+	// Optional `using <allocator>` selects the region's backing allocator (e.g. `using malloc`).
+	// `using` is a contextual identifier here, not a reserved keyword.
+	allocator := ""
+	if p.matchIdentText("using") {
+		allocator = p.expect(lexer.TOKEN_IDENT).Text
+	}
 	// `region NAME(cap):` is the scoped form: the region owner is discharged
 	// automatically at block exit (RAII), so no explicit `destroy` is needed.
 	// The plain `region NAME(cap)` form must be matched by `destroy NAME` on
@@ -84,10 +90,10 @@ func (p *Parser) parseRegion() *ast.RegionStmt {
 	if p.match(lexer.TOKEN_COLON) {
 		p.expectNewline()
 		body := p.parseBlock()
-		return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity, Body: body}
+		return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity, Allocator: allocator, Body: body}
 	}
 	p.expectNewline()
-	return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity}
+	return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity, Allocator: allocator}
 }
 func (p *Parser) parseScopeStmt() *ast.ScopeStmt {
 	pos := p.cur().Pos

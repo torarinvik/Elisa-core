@@ -475,6 +475,9 @@ type RegionStmt struct {
 	Name      string
 	Capacity  Expr
 	OwnerName string
+	// Allocator selects the region's backing allocator via `region NAME(cap) using <name>:`.
+	// Empty means the compile-time default backend; "malloc" backs blocks with libc malloc.
+	Allocator string
 	Body      []Stmt
 }
 type DestroyStmt struct {

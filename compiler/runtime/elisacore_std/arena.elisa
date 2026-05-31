@@ -21,6 +21,14 @@ static else:
 const ARENA_REGION_DEFAULT_CAPACITY: usize = 8 * 1024
 const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
 
+# Per-region backing selector stored in Arena.backend (see `region r(...) using malloc:`).
+# DEFAULT (0) follows the compile-time ARENA_BACKEND, so a zero-initialized Arena keeps the
+# existing behavior unchanged; MALLOC overrides just this region's blocks to libc malloc/free.
+# These are intentionally distinct from the ARENA_BACKEND_* constants above: the field is a
+# per-region override, not the compile-time backend.
+const ARENA_REGION_BACKEND_DEFAULT: int = 0
+const ARENA_REGION_BACKEND_MALLOC: int = 1
+
 error RuntimeError:
     OutOfMemory
 
@@ -41,6 +49,9 @@ struct Arena:
     begin:mutable heap Region&?
     end:mutable heap Region&?
     end_index: mutable usize
+    # Per-region backing selector; 0 (ARENA_REGION_BACKEND_DEFAULT) for a zero-initialized
+    # arena, so existing arenas keep the compile-time ARENA_BACKEND path unchanged.
+    backend: mutable int
 
 struct ArenaMark:
     region: heap Region&?
@@ -280,6 +291,33 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
 def new_region(capacity: usize) -> mutable heap Region&:
     return new_region_with_owner(capacity, 0.uintptr()) can Memory.Allocate, Abort.Panic
 
+# A libc-malloc-backed region block, available on every target (malloc/free are declared for
+# all backends above). Used by malloc-selected regions regardless of the compile-time default.
+@internal
+def new_region_malloc(capacity: usize) -> mutable heap Region&:
+    can Memory.Allocate, Abort.Panic:
+        size_bytes: usize = size_of(Region) + size_of(uintptr) * capacity
+        raw: mutable heap void&? = null
+        trusted Unsafe.RawExtern:
+            raw <- malloc(size_bytes)
+        assert raw != null
+        r: heap Region& = arena_region_from_raw(raw)
+        r.next <- null
+        r.count <- 0
+        r.capacity <- capacity
+        r.owner_tag <- 0.uintptr()
+        r.owner_next <- null
+        r.global_index <- 0
+        return r
+
+# Backend-dispatching region allocator. DEFAULT follows the compile-time ARENA_BACKEND (so it
+# is identical to new_region); MALLOC forces libc malloc for this region's blocks.
+def new_region_backend(capacity: usize, backend: int) -> mutable heap Region&:
+    can Memory.Allocate, Abort.Panic:
+        if backend == ARENA_REGION_BACKEND_MALLOC:
+            return new_region_malloc(capacity)
+        return new_region(capacity)
+
 def free_region(r: heap Region&):
     can Memory.Release, Abort.Panic:
         static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
@@ -303,6 +341,22 @@ def free_region(r: heap Region&):
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
             pass
 
+# Free a libc-malloc-backed region block (counterpart to new_region_malloc).
+@internal
+def free_region_malloc(r: heap Region&):
+    can Memory.Release, Abort.Panic:
+        trusted Unsafe.RawExtern:
+            free(arena_heap_void_from_region(r))
+
+# Backend-dispatching region free. DEFAULT follows the compile-time ARENA_BACKEND (identical to
+# free_region); MALLOC frees via libc free, matching new_region_backend's MALLOC allocation.
+def free_region_backend(r: heap Region&, backend: int):
+    can Memory.Release, Abort.Panic:
+        if backend == ARENA_REGION_BACKEND_MALLOC:
+            free_region_malloc(r)
+            return
+        free_region(r)
+
 def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         size: usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
@@ -314,7 +368,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             if capacity < size:
                 capacity <- size
 
-            a.end as & <- new_region(capacity)
+            a.end as & <- new_region_backend(capacity, a.backend)
             a.begin <- a.end
             a.end_index <- 0
             a.end.global_index <- 0
@@ -333,7 +387,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             if capacity < size:
                 capacity <- size
 
-            a.end.next as & <- new_region(capacity)
+            a.end.next as & <- new_region_backend(capacity, a.backend)
             a.end <- a.end.next
             a.end_index <- a.end_index + 1
             a.end.global_index <- a.end_index
@@ -458,7 +512,7 @@ def arena_free(a: mutable Arena&):
             while r != null:
                 r0: mutable heap Region& = r
                 r <- r.next
-                free_region(r0)
+                free_region_backend(r0, a.backend)
 
         a.begin as ! <- null
         a.end as ! <- null
@@ -474,7 +528,7 @@ def arena_trim(a: mutable Arena&):
             while r != null:
                 r0: mutable heap Region& = r
                 r <- r.next
-                free_region(r0)
+                free_region_backend(r0, a.backend)
 
         a.end.next as ! <- null
 

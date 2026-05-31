@@ -280,6 +280,11 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 			a.errorf(stmt.Capacity.Pos(), "region capacity must be numeric, got %s", capacityType)
 		}
 	}
+	// Only the libc-malloc backing override is currently supported; an empty allocator
+	// keeps the compile-time default backend.
+	if stmt.Allocator != "" && stmt.Allocator != "malloc" {
+		a.errorf(stmt.Pos(), "unknown region allocator %q (expected \"malloc\")", stmt.Allocator)
+	}
 	arenaType, ok := a.namedTypes["Arena"]
 	if !ok {
 		a.errorf(stmt.Pos(), "missing builtin Arena type for region lowering")

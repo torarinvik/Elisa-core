@@ -28,6 +28,7 @@ struct Arena:
     begin: mutable heap Region&?
     end: mutable heap Region&?
     end_index: mutable usize
+    backend: mutable int
 
 struct ArenaMark:
     region: heap Region&?

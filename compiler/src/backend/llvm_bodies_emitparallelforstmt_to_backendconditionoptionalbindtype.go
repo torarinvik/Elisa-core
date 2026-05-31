@@ -443,7 +443,7 @@ func (s *functionState) emitPoolShutdown(poolPtr C.LLVMValueRef, poolType semant
 	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{poolPtr}, "")
 	return nil
 }
-func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityExpr ast.Expr) error {
+func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityExpr ast.Expr, allocator string) error {
 	capacityType := s.g.result.NamedTypes["usize"]
 	var capacityValue C.LLVMValueRef
 	if capacityExpr != nil {
@@ -464,19 +464,45 @@ func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semant
 		return fmt.Errorf("missing builtin Region type for region initialization")
 	}
 	regionRefType := &semantic.RefType{Elem: regionType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	helperType := &semantic.FuncType{Name: "new_region", Params: []semantic.Type{capacityType}, Return: regionRefType}
-	callee, err := s.g.ensureFunctionDeclared("new_region", helperType)
-	if err != nil {
-		return err
-	}
-	llvmFnType, err := s.g.lowerFunctionType(helperType)
-	if err != nil {
-		return err
-	}
-	regionValue := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{capacityValue}, "region.init")
 	arenaLLVMType, err := s.g.lowerType(arenaType)
 	if err != nil {
 		return err
+	}
+	var regionValue C.LLVMValueRef
+	if allocator == "malloc" {
+		// `region NAME(cap) using malloc:` — eagerly create the first block via the
+		// backend-dispatching allocator and record the selector in Arena.backend (field 3)
+		// so later growth (arena_alloc) and teardown (arena_free) keep using malloc.
+		// ARENA_REGION_BACKEND_MALLOC == 1 (see arena.elisa).
+		intType := s.g.result.NamedTypes["int"]
+		intLLVMType, lerr := s.g.lowerType(intType)
+		if lerr != nil {
+			return lerr
+		}
+		backendTag := C.LLVMConstInt(intLLVMType, 1, 0)
+		helperType := &semantic.FuncType{Name: "new_region_backend", Params: []semantic.Type{capacityType, intType}, Return: regionRefType}
+		callee, cerr := s.g.ensureFunctionDeclared("new_region_backend", helperType)
+		if cerr != nil {
+			return cerr
+		}
+		llvmFnType, ferr := s.g.lowerFunctionType(helperType)
+		if ferr != nil {
+			return ferr
+		}
+		regionValue = s.buildCall(llvmFnType, callee, []C.LLVMValueRef{capacityValue, backendTag}, "region.init")
+		backendPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 3, cStringFree("region.backend"))
+		C.LLVMBuildStore(s.builder, backendTag, backendPtr)
+	} else {
+		helperType := &semantic.FuncType{Name: "new_region", Params: []semantic.Type{capacityType}, Return: regionRefType}
+		callee, cerr := s.g.ensureFunctionDeclared("new_region", helperType)
+		if cerr != nil {
+			return cerr
+		}
+		llvmFnType, ferr := s.g.lowerFunctionType(helperType)
+		if ferr != nil {
+			return ferr
+		}
+		regionValue = s.buildCall(llvmFnType, callee, []C.LLVMValueRef{capacityValue}, "region.init")
 	}
 	beginPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 0, cStringFree("region.begin"))
 	endPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 1, cStringFree("region.end"))
