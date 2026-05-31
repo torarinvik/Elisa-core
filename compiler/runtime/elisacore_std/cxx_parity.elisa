@@ -156,7 +156,7 @@ def cxx_array_ref_at[T](ptr: mutable void&?, index: usize) -> mutable T&:
 
 def cxx_vector_new[T](a: mutable Arena&, initial_capacity: usize) -> darray[T]:
     can Memory.Allocate, Abort.Panic:
-        out: mutable darray[T] = zeroed
+        out: mutable darray[T] = []
         in a:
             _ = out.reserve(initial_capacity)
         return out
