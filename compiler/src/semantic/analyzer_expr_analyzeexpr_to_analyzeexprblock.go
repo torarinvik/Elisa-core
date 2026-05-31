@@ -63,6 +63,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 						}
 					}
 				}
+				if a.reportRawInteriorAffineAliasUse(n, sym) {
+					return
+				}
 				if fnType, ok := a.lookupCurrentFunctionValueType(sym); ok {
 					result = fnType
 					return

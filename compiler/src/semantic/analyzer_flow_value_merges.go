@@ -46,11 +46,25 @@ func mergeBorrowedOwnerRefBindings(dst map[*Symbol]borrowedOwnerRefState, src ma
 	for sym, state := range dst {
 		srcState, ok := src[sym]
 		if !ok {
+			// Genuine owner borrows use intersection (dropped if not in both branches),
+			// but a raw interior-pointer alias must keep its taint conservatively: the
+			// slot is dangling on this path even if the other branch never aliased it.
+			if state.RawInteriorAffineAlias {
+				merged[sym] = cloneBorrowedOwnerRefStateShallowFields(state)
+			}
 			continue
 		}
 		mergedState, ok := mergeBorrowedOwnerRefState(state, srcState)
 		if ok {
 			merged[sym] = mergedState
+		}
+	}
+	for sym, state := range src {
+		if _, ok := dst[sym]; ok {
+			continue
+		}
+		if state.RawInteriorAffineAlias {
+			merged[sym] = cloneBorrowedOwnerRefStateShallowFields(state)
 		}
 	}
 	return merged

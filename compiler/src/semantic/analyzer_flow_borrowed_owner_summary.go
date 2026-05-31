@@ -19,7 +19,7 @@ func (a *Analyzer) cloneAffineValueStates() map[affineValueKey]affineValueState 
 }
 
 func cloneBorrowedOwnerRefState(state borrowedOwnerRefState) borrowedOwnerRefState {
-	cloned := borrowedOwnerRefState{HasDirect: state.HasDirect, Direct: state.Direct}
+	cloned := borrowedOwnerRefState{HasDirect: state.HasDirect, Direct: state.Direct, RawInteriorAffineAlias: state.RawInteriorAffineAlias}
 	if len(state.Fields) != 0 {
 		cloned.Fields = make(map[string]borrowedOwnerRefState, len(state.Fields))
 		for key, child := range state.Fields {
@@ -30,7 +30,7 @@ func cloneBorrowedOwnerRefState(state borrowedOwnerRefState) borrowedOwnerRefSta
 }
 
 func cloneBorrowedOwnerRefStateShallowFields(state borrowedOwnerRefState) borrowedOwnerRefState {
-	return borrowedOwnerRefState{HasDirect: state.HasDirect, Direct: state.Direct}
+	return borrowedOwnerRefState{HasDirect: state.HasDirect, Direct: state.Direct, RawInteriorAffineAlias: state.RawInteriorAffineAlias}
 }
 
 func cloneBorrowedOwnerRefSummaryTarget(target borrowedOwnerRefSummaryTarget) borrowedOwnerRefSummaryTarget {
@@ -295,6 +295,17 @@ func hasBorrowedOwnerRefState(state borrowedOwnerRefState) bool {
 }
 
 func mergeBorrowedOwnerRefState(dst borrowedOwnerRefState, src borrowedOwnerRefState) (borrowedOwnerRefState, bool) {
+	// Raw interior-pointer aliases of an affine handle merge with conservative UNION
+	// (the taint survives if either branch carries it): a use-after-release is unsound
+	// on any path, so we must not let an intersection merge discard the alias fact.
+	if dst.RawInteriorAffineAlias || src.RawInteriorAffineAlias {
+		if dst.RawInteriorAffineAlias && dst.HasDirect {
+			return cloneBorrowedOwnerRefStateShallowFields(dst), true
+		}
+		if src.RawInteriorAffineAlias && src.HasDirect {
+			return cloneBorrowedOwnerRefStateShallowFields(src), true
+		}
+	}
 	merged := borrowedOwnerRefState{}
 	if dst.HasDirect && src.HasDirect && dst.Direct == src.Direct {
 		merged.HasDirect = true

@@ -365,6 +365,14 @@ type borrowedOwnerRefState struct {
 	HasDirect bool
 	Direct    affineValueKey
 	Fields    map[string]borrowedOwnerRefState
+	// RawInteriorAffineAlias marks an entry that is NOT a borrow of a linear/owner
+	// value, but a raw interior pointer copied out of an affine handle's field
+	// (e.g. `b: heap T& = h.ptr` where `h` is an affine `Pooled[T]`). `Direct` then
+	// names the affine handle whose consumption recycles the slot `b` points at, so
+	// using `b` after that handle is consumed is a use-after-free. These entries are
+	// merged with conservative UNION semantics (keep the taint if either branch has
+	// it), unlike the intersection semantics used for genuine owner borrows.
+	RawInteriorAffineAlias bool
 }
 
 type affineValueState struct {
