@@ -78,6 +78,31 @@ func TestRegionScopeDirectPushAllowed(t *testing.T) {
 	}
 }
 
+// A safe `darray[u8] @r -> sview/cstr @r` conversion carries the region, so the
+// escape checker rejects returning it out of a scope-owned region (the bytes are
+// freed at scope exit) — the safety the unsafe `out[0].ref[static u8&]` idiom
+// lacked.
+func TestRegionDarrayViewConversionEscapeChecking(t *testing.T) {
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "region_view_escape.elisa", `def leak_sview() -> sview:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            d: mutable darray[u8] @a = []
+            d.push(65)
+            return d.as_sview()
+
+def leak_cstr() -> cstr:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            d: mutable darray[u8] @a = []
+            d.push(65)
+            return d.as_cstr()
+`)
+	all := strings.Join(bad.Errors(), "\n")
+	if strings.Count(all, "escapes via return") < 2 {
+		t.Fatalf("expected both sview and cstr from a scope-owned region to be rejected; got: %s", all)
+	}
+}
+
 // Nested-region escape: pushing a value from an inner (shorter-lived) region
 // into a darray whose element region is an outer (longer-lived) region leaves a
 // dangling reference once the inner region is freed. Rejected by the outlives

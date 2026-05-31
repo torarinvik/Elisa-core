@@ -191,3 +191,57 @@ def allocator_interface_test() -> void:
 		}
 	}
 }
+
+// End-to-end: the safe `darray[u8] -> sview/cstr` conversions (design §5),
+// replacing the unsafe `out[0].ref[static u8&]` idiom. `.as_sview()` is a bounded
+// {data,len} view; `.as_cstr()` writes a NUL sentinel at items[count] (c_str()
+// semantics) so the result is a valid NUL-terminated C-string. Byte-correct.
+func TestRunCLIDarraySviewAndCstrConversions(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "darray_views.elisa")
+	src := `@test
+def darray_views_test() -> void:
+    can Memory.Allocate, Abort.Panic:
+        arena: mutable Arena = zeroed
+        in arena:
+            d: mutable darray[u8] = []
+            d.push(72)
+            d.push(105)
+            sv: sview = d.as_sview()
+            sum: mutable i64 = 0
+            count: mutable i64 = 0
+            for ch in sv:
+                sum <- sum + ch.i64()
+                count <- count + 1
+            if count != 2:
+                panic("sview len must be 2")
+            if sum != 177:
+                panic("sview byte sum must be 177 (72+105)")
+            cs: cstr = d.as_cstr()
+            clen: mutable i64 = 0
+            for ch in cs:
+                clen <- clen + 1
+            if clen != 2:
+                panic("cstr must be NUL-terminated after 2 bytes")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write darray-views fixture: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected darray-views test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] darray_views_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected darray-views output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}

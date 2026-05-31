@@ -268,6 +268,11 @@ type StoreRowViewType struct {
 type DStrType struct {
 	Shape       Shape
 	SurfaceName string
+	// Region is the allocation region a `cstr @r` points into (region-
+	// parameterized containers). A cstr produced from `darray[u8] @r` via
+	// `.cstr()` carries r so the escape checker proves it cannot outlive r.
+	// Inert in SameType/AssignableTo (Phase 1), like DArrayType/DictType.Region.
+	Region string
 }
 
 type DictType struct {
@@ -288,6 +293,11 @@ type DictEntryType struct {
 type SViewType struct {
 	Begin string
 	End   string
+	// Region is the allocation region an `sview @r` points into. An sview
+	// produced from `darray[u8] @r` via `.sview()` carries r so the escape
+	// checker proves the bounded {data,len} view cannot outlive r. Inert in
+	// SameType/AssignableTo (Phase 1), like DArrayType/DictType/DStrType.Region.
+	Region string
 }
 
 type EnumVariant struct {

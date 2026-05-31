@@ -162,7 +162,11 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		}
 		return &DArrayViewType{Elem: elem, Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
 	case *DStrType:
-		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+		dstrRegion := n.Region
+		if bound, ok := regionBindings[n.Region]; ok {
+			dstrRegion = bound
+		}
+		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName, Region: dstrRegion}
 	case *DictType:
 		key := a.substituteTypeWithDepth(n.Key, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(key) {
@@ -178,7 +182,11 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		}
 		return &DictType{Key: key, Value: value, SurfaceName: n.SurfaceName, Region: dictRegion}
 	case *SViewType:
-		return &SViewType{Begin: n.Begin, End: n.End}
+		sviewRegion := n.Region
+		if bound, ok := regionBindings[n.Region]; ok {
+			sviewRegion = bound
+		}
+		return &SViewType{Begin: n.Begin, End: n.End, Region: sviewRegion}
 	case *GenericInstanceType:
 		args := make([]Type, 0, len(n.Args))
 		for _, arg := range n.Args {

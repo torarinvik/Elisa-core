@@ -440,6 +440,7 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *DStrType:
 		if act, ok := actual.(*DStrType); ok {
+			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
 		}
 	case *DictType:
@@ -449,7 +450,9 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		}
 	case *SViewType:
-		_, _ = actual.(*SViewType)
+		if act, ok := actual.(*SViewType); ok {
+			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
+		}
 	case *EnumType:
 		_, _ = actual.(*EnumType)
 	case *GenericInstanceType:

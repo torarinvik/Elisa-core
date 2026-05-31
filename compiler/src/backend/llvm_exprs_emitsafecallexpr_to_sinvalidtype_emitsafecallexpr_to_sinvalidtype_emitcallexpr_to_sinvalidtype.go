@@ -174,6 +174,12 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinDArrayReserveCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinDArraySviewCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitBuiltinDArrayCstrCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitBuiltinDArrayClearCall(expr); handled {
 		return value, actualType, err
 	}

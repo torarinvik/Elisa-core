@@ -50,6 +50,12 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if resultType, ok := a.analyzeBuiltinDarrayReserveCall(expr); ok {
 		return resultType
 	}
+	if resultType, ok := a.analyzeBuiltinDarraySviewCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinDarrayCstrCall(expr); ok {
+		return resultType
+	}
 	if resultType, ok := a.analyzeBuiltinDarrayClearCall(expr); ok {
 		return resultType
 	}
