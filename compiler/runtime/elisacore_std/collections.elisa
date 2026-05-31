@@ -724,6 +724,41 @@ def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
     can Abort.Panic:
         return darray_remove_at[T](da, index)
 
+# Read-only range algorithms (no allocation). The predicate is a pure
+# `func(T) -> bool`, so a named function or a `lambda` works. These replace
+# hand-rolled scan loops and transliterate std::any_of / all_of / count_if /
+# find_if directly (`v.any_of(pred)` reads as `std::any_of(v..., pred)`).
+@method
+def any_of[T](da: darray[T], pred: func(T) -> bool) -> bool:
+    for x in da:
+        if pred(x):
+            return true
+    return false
+
+@method
+def all_of[T](da: darray[T], pred: func(T) -> bool) -> bool:
+    for x in da:
+        if not pred(x):
+            return false
+    return true
+
+@method
+def count_if[T](da: darray[T], pred: func(T) -> bool) -> usize:
+    n: mutable usize = 0
+    for x in da:
+        if pred(x):
+            n <- n + 1
+    return n
+
+# Returns the first element satisfying `pred`, or `null` if none does
+# (std::find_if, returning the element rather than an iterator).
+@method
+def find_if[T](da: darray[T], pred: func(T) -> bool) -> T?:
+    for x in da:
+        if pred(x):
+            return x
+    return null
+
 def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
     can Memory.Allocate, Abort.Panic:
         needed: usize = da.count + new_items_count
