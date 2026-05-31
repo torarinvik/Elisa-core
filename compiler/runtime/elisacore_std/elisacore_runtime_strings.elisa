@@ -367,3 +367,40 @@ def hash_sview(value: sview) -> u64:
         h <- h ^ ch.u64()
         h <- h * 0x100000001b3u64
     return h
+
+# Last index of `byte` in `view`, or -1 if absent (the rfind companion to
+# sview_find_byte). Used by the Fs path helpers below.
+def sview_find_last_byte(view: sview, byte: u8) -> i64:
+    i: mutable i64 = sview_len(view).i64()
+    trusted Unsafe.AssumeProgress:
+        while i > 0:
+            i <- i - 1
+            if sview_at(view, i.usize()) == byte:
+                return i
+    return -1
+
+# `Fs`: pure (allocation-free, OS-free) std::filesystem::path string decomposition.
+# All operate on a `/`-separated path `sview` and return sub-views into it — the OS-backed
+# queries (exists / is_directory / create_directory / directory_iterator) are separate and
+# live with the host FFI. Semantics mirror C++ std::filesystem::path:
+#   filename("a/b/c.txt")=="c.txt", parent("a/b/c.txt")=="a/b",
+#   extension("a/b/c.txt")==".txt" (incl. the dot; "" for none or a leading-dot name),
+#   stem("a/b/c.txt")=="c".
+module Fs:
+    def filename(p: sview) -> sview:
+        slash: i64 = sview_find_last_byte(p, 47u8)
+        return string_view_suffix(p, slash + 1)
+
+    def parent(p: sview) -> sview:
+        slash: i64 = sview_find_last_byte(p, 47u8)
+        return string_view_prefix(p, slash) if slash >= 0 else sview("", 0, 0)
+
+    def extension(p: sview) -> sview:
+        name_start: i64 = sview_find_last_byte(p, 47u8) + 1
+        dot: i64 = sview_find_last_byte(p, 46u8)
+        return string_view_suffix(p, dot) if dot > name_start else sview("", 0, 0)
+
+    def stem(p: sview) -> sview:
+        name_start: i64 = sview_find_last_byte(p, 47u8) + 1
+        dot: i64 = sview_find_last_byte(p, 46u8)
+        return string_view_slice(p, name_start, dot) if dot > name_start else string_view_suffix(p, name_start)

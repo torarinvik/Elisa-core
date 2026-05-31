@@ -287,3 +287,54 @@ def hash_sview_fnv1a() -> void:
 		}
 	}
 }
+
+// TestRunCLIFsPathOps verifies the Fs:: path-decomposition module (filename / parent /
+// extension / stem) over normal, bare, hidden-file, and dot-in-parent paths.
+func TestRunCLIFsPathOps(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	rel := func(name string) string {
+		p, err := filepath.Rel(fixtureDir, filepath.Join(std, name))
+		if err != nil {
+			t.Fatalf("rel include %s: %v", name, err)
+		}
+		return filepath.ToSlash(p)
+	}
+	preamble := fmt.Sprintf("# include %q\n# include %q\n",
+		rel("test.elisa"), rel("elisacore_runtime.elisa"))
+	src := preamble + `
+def eq(v: sview, lit: static u8&) -> bool:
+    return sview_eq(v, sview(lit, 0, -1))
+
+@test
+def fs_path_ops() -> void:
+    can Abort.Panic:
+        p: sview = sview("dir/sub/file.txt", 0, -1)
+        assert_eq(eq(Fs::filename(p), "file.txt"), true)
+        assert_eq(eq(Fs::parent(p), "dir/sub"), true)
+        assert_eq(eq(Fs::extension(p), ".txt"), true)
+        assert_eq(eq(Fs::stem(p), "file"), true)
+        assert_eq(eq(Fs::filename(sview("name", 0, -1)), "name"), true)
+        assert_eq(eq(Fs::extension(sview("name", 0, -1)), ""), true)
+        assert_eq(eq(Fs::extension(sview("dir/.gitignore", 0, -1)), ""), true)
+        assert_eq(eq(Fs::stem(sview("dir/.gitignore", 0, -1)), ".gitignore"), true)
+        assert_eq(eq(Fs::extension(sview("a.b/c", 0, -1)), ""), true)
+`
+	fixturePath := filepath.Join(fixtureDir, "fs_path_ops.elisa")
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected Fs path-ops test to pass, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"[       OK ] fs_path_ops",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, stdout.String())
+		}
+	}
+}
