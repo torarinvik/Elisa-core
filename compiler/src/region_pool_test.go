@@ -49,16 +49,16 @@ def region_pool_acquire_reuse_release() -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            h: Pooled[PoolNode] = pool.acquire()
             h.ptr.left <- 11
             h.ptr.right <- 12
             assert_eq(h.ptr.left + h.ptr.right, 23)
             addr1: uintptr = h.ptr.cast[u8&].uintptr()
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
-            h2: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            pool.release(move h)
+            h2: Pooled[PoolNode] = pool.acquire()
             assert_eq(h2.ptr.cast[u8&].uintptr(), addr1)
             assert_eq(h2.ptr.left, 0)
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h2)
+            pool.release(move h2)
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write region pool fixture: %v", err)
@@ -91,8 +91,8 @@ def use_after_release() -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            h: Pooled[PoolNode] = pool.acquire()
+            pool.release(move h)
             h.ptr.left <- 5
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -123,9 +123,9 @@ def double_release() -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            h: Pooled[PoolNode] = pool.acquire()
+            pool.release(move h)
+            pool.release(move h)
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write double-release fixture: %v", err)
@@ -158,7 +158,7 @@ def interior_borrow_uaf(flag: bool) -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            h: Pooled[PoolNode] = pool.acquire()
 ` + body + "\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write interior-borrow fixture: %v", err)
@@ -178,7 +178,7 @@ def interior_borrow_uaf(flag: bool) -> void:
 // interior pointer copied out of the handle (`b = h.ptr`) and written through after release.
 func TestRunCLIRegionPoolRejectsStashedInteriorBorrowAfterRelease(t *testing.T) {
 	expectRegionPoolInteriorBorrowRejected(t, "region_pool_stash_fixture.elisa", `            b: mutable heap PoolNode& = h.ptr
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            pool.release(move h)
             b.left <- 99`)
 }
 
@@ -187,7 +187,7 @@ func TestRunCLIRegionPoolRejectsStashedInteriorBorrowAfterRelease(t *testing.T) 
 func TestRunCLIRegionPoolRejectsCopyHopInteriorBorrowAfterRelease(t *testing.T) {
 	expectRegionPoolInteriorBorrowRejected(t, "region_pool_copyhop_fixture.elisa", `            b: mutable heap PoolNode& = h.ptr
             c: mutable heap PoolNode& = b
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            pool.release(move h)
             c.left <- 99`)
 }
 
@@ -197,7 +197,7 @@ func TestRunCLIRegionPoolRejectsCopyHopInteriorBorrowAfterRelease(t *testing.T) 
 func TestRunCLIRegionPoolRejectsInteriorBorrowAfterConditionalRelease(t *testing.T) {
 	expectRegionPoolInteriorBorrowRejected(t, "region_pool_cf_fixture.elisa", `            b: mutable heap PoolNode& = h.ptr
             if flag:
-                region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+                pool.release(move h)
             b.left <- 99`)
 }
 
@@ -216,11 +216,11 @@ def interior_borrow_valid() -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            h: Pooled[PoolNode] = pool.acquire()
             b: mutable heap PoolNode& = h.ptr
             b.left <- 5
             addr: uintptr = h.ptr.cast[u8&].uintptr()
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            pool.release(move h)
             snapshot: uintptr = addr
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -255,9 +255,9 @@ def struct_store_uaf() -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            h: Pooled[PoolNode] = pool.acquire()
             holder: mutable Holder = Holder(h.ptr)
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            pool.release(move h)
             holder.p.left <- 5
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -290,10 +290,10 @@ def struct_store_valid() -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            h: Pooled[PoolNode] = pool.acquire()
             holder: mutable Holder = Holder(h.ptr)
             holder.p.left <- 5
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            pool.release(move h)
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write struct-store valid fixture: %v", err)
@@ -335,9 +335,9 @@ def xfn_uaf() -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            h: Pooled[PoolNode] = pool.acquire()
             b: mutable heap PoolNode& = ` + tc.bind + `
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            pool.release(move h)
             b.left <- 5
 `
 			if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -373,10 +373,10 @@ def xfn_valid() -> void:
         region scratch(64):
             owner: mutable Arena& = scratch.ref[mutable Arena&]
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            h: Pooled[PoolNode] = pool.acquire()
             b: mutable heap PoolNode& = passthrough(h.ptr)
             b.left <- 5
-            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            pool.release(move h)
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write cross-fn valid fixture: %v", err)
@@ -387,5 +387,54 @@ def xfn_valid() -> void:
 	}
 	if combined := stdout.String() + stderr.String(); strings.Contains(combined, "cannot be used") {
 		t.Fatalf("cross-function check over-rejected valid usage, got:\n%s", combined)
+	}
+}
+
+// TestRunCLIRegionPoolIdiomaticUsageRunsAndReuses exercises the ergonomic surface end to end:
+// UFCS `pool.acquire()` / `pool.release(move h)` (auto-borrowing the mutable pool receiver),
+// an inferred handle binding, an inlined owner, and `region_pool_new` with T inferred from the
+// binding (no repeated `[T]`). It confirms the freed slot is reused and zeroed, and that an
+// acquire left un-released (dropped) is safe — the region reclaims the slab at teardown.
+func TestRunCLIRegionPoolIdiomaticUsageRunsAndReuses(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_pool_idiomatic_fixture.elisa")
+	src := regionPoolFixturePreamble(t, fixtureDir) + `
+struct PoolNode:
+    left: mutable i64
+    right: mutable i64
+
+@test
+def idiomatic_pool() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region scratch(64):
+            pool: mutable RegionPool[PoolNode] = region_pool_new(scratch.ref[mutable Arena&])
+            h = pool.acquire()
+            h.ptr.left <- 11
+            h.ptr.right <- 12
+            assert_eq(h.ptr.left + h.ptr.right, 23)
+            addr1: uintptr = h.ptr.cast[u8&].uintptr()
+            pool.release(move h)
+            h2 = pool.acquire()
+            assert_eq(h2.ptr.cast[u8&].uintptr(), addr1)
+            assert_eq(h2.ptr.left, 0)
+            # dropped without release: safe — the region reclaims the slab at teardown
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write idiomatic pool fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected idiomatic pool test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] idiomatic_pool",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected idiomatic pool output to contain %q, got:\n%s", check, stdout.String())
+		}
 	}
 }

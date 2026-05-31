@@ -233,6 +233,22 @@ def create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
 def recycle[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
     region_pool_free[T](pool, ptr)
 
+# Canonical usage (prefer this safe, ergonomic form over the raw region_pool_* functions):
+#
+#     region scratch(4096):
+#         pool: mutable RegionPool[Node] = region_pool_new(scratch.ref[mutable Arena&])
+#         h = pool.acquire()              # h: Pooled[Node], inferred
+#         h.ptr.value <- 42               # borrow the object via h.ptr while h is live
+#         pool.release(move h)            # OPTIONAL: recycles the slot for reuse
+#         # ... dropping h without releasing is also safe: the region reclaims the
+#         #     whole slab at `destroy scratch` (release is reuse, never an obligation).
+#
+# `pool.acquire()` / `pool.release(move h)` auto-borrow the mutable pool receiver (no
+# explicit `.ref[...]`), and `T` is inferred from the binding type, so `[T]` need not be
+# repeated on `region_pool_new`. Safety: a raw interior borrow taken out of the handle
+# (`b = h.ptr`) and used after release is a compile error — including when the borrow is
+# stashed in a struct/aggregate field or laundered through a function that returns it.
+#
 # An `affine` (use-at-most-once, droppable) owning handle for one pooled object. `acquire`
 # produces one; `release` consumes it. Because the handle is affine, the compiler rejects
 # use-after-release and double-release (the same checker that guards Thread/MutexGuard). Because
