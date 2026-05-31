@@ -241,6 +241,10 @@ type Analyzer struct {
 	returnProvenanceInProgress        map[*ast.FuncDecl]bool
 	returnProvenanceLocalInProgress   map[*Symbol]bool
 	returnBorrowedOwnerRefInProgress  map[*ast.FuncDecl]bool
+	// inReturnBorrowCapture is true only while computing a return statement's
+	// borrowed-owner summary, enabling pass-through tracking of raw reference parameters
+	// (so `return p` records "returns param i") without affecting any other analysis.
+	inReturnBorrowCapture bool
 	returnBorrowedOwnerLocalProgress  map[*Symbol]bool
 	sinkParamInferenceInProgress      map[*ast.FuncDecl]bool
 	parallelForInfo                   map[*ast.ParallelForStmt]*ParallelForInfo

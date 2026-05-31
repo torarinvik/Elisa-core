@@ -104,6 +104,19 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		if _, ok := borrowableOwnerRefElemType(sym.Type); ok {
 			return borrowedOwnerRefState{HasDirect: true, Direct: affineValueKey{Root: sym}}, true
 		}
+		// Only while capturing a function's return-borrow summary, treat a raw reference
+		// parameter as a pass-through borrow source, so a function that returns one of its
+		// reference parameters records a "returns param i" summary. At call sites that
+		// summary is instantiated against the actual argument, so the interior-alias fact
+		// only materializes when a caller passes a raw interior borrow of a Pooled handle;
+		// ordinary reference arguments instantiate to nothing. Confining this to the
+		// return-capture site keeps normal-path analysis, diagnostics, and use-site
+		// behavior completely unchanged.
+		if a.inReturnBorrowCapture && sym.Kind == SymbolParam {
+			if _, ok := sym.Type.(*RefType); ok {
+				return borrowedOwnerRefState{HasDirect: true, Direct: affineValueKey{Root: sym}}, true
+			}
+		}
 		return borrowedOwnerRefState{}, false
 	case *ast.StructLitExpr:
 		actual := a.exprTypes[n]

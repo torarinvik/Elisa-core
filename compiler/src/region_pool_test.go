@@ -306,3 +306,86 @@ def struct_store_valid() -> void:
 		t.Fatalf("struct-store check over-rejected valid usage, got:\n%s", combined)
 	}
 }
+
+// TestRunCLIRegionPoolRejectsCrossFunctionPassthroughBorrowAfterRelease covers escape across a
+// function boundary: the interior borrow is laundered through a function that returns one of
+// its reference parameters (`passthrough(h.ptr)`) and used after release. The function's
+// return-borrow summary ("returns param 0") is instantiated against the actual argument at the
+// call site, recovering the alias. Includes a nested-call variant to confirm summaries compose.
+func TestRunCLIRegionPoolRejectsCrossFunctionPassthroughBorrowAfterRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bind string
+	}{
+		{"single", "passthrough(h.ptr)"},
+		{"nested", "passthrough(passthrough(h.ptr))"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixtureDir := t.TempDir()
+			fixturePath := filepath.Join(fixtureDir, "region_pool_xfn_fixture.elisa")
+			src := regionPoolFixturePreamble(t, fixtureDir) + `
+struct PoolNode:
+    left: mutable i64
+
+def passthrough(p: mutable heap PoolNode&) -> mutable heap PoolNode&:
+    return p
+
+def xfn_uaf() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region scratch(64):
+            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
+            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            b: mutable heap PoolNode& = ` + tc.bind + `
+            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+            b.left <- 5
+`
+			if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+				t.Fatalf("failed to write cross-fn fixture: %v", err)
+			}
+			var stdout, stderr bytes.Buffer
+			exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr)
+			if exitCode == 0 {
+				t.Fatalf("expected cross-function passthrough borrow used after release to be rejected, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+			}
+			if combined := stdout.String() + stderr.String(); !strings.Contains(combined, "cannot be used") {
+				t.Fatalf("expected a use-after-consume diagnostic for the laundered borrow, got:\n%s", combined)
+			}
+		})
+	}
+}
+
+// TestRunCLIRegionPoolAllowsCrossFunctionPassthroughBorrowBeforeRelease confirms the
+// cross-function tracking does not over-reject: using the laundered borrow before release
+// compiles cleanly (the summary instantiates to a live alias, not a consumed one).
+func TestRunCLIRegionPoolAllowsCrossFunctionPassthroughBorrowBeforeRelease(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_pool_xfn_valid_fixture.elisa")
+	src := regionPoolFixturePreamble(t, fixtureDir) + `
+struct PoolNode:
+    left: mutable i64
+
+def passthrough(p: mutable heap PoolNode&) -> mutable heap PoolNode&:
+    return p
+
+def xfn_valid() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region scratch(64):
+            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
+            h: Pooled[PoolNode] = region_pool_acquire(pool.ref[RegionPool[PoolNode]&])
+            b: mutable heap PoolNode& = passthrough(h.ptr)
+            b.left <- 5
+            region_pool_release(pool.ref[RegionPool[PoolNode]&], move h)
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write cross-fn valid fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected valid cross-function borrow usage to compile, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if combined := stdout.String() + stderr.String(); strings.Contains(combined, "cannot be used") {
+		t.Fatalf("cross-function check over-rejected valid usage, got:\n%s", combined)
+	}
+}

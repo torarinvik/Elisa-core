@@ -413,7 +413,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				}
 			}
 		}
-		if ownerState, ok := a.borrowedOwnerRefStateForExpr(n.Value); ok {
+		a.inReturnBorrowCapture = true
+		ownerState, ownerStateOK := a.borrowedOwnerRefStateForExpr(n.Value)
+		a.inReturnBorrowCapture = false
+		if ownerStateOK {
 			if summary, ok := abstractParamOnlyBorrowedOwnerRefSummary(ownerState); ok {
 				if merged, ok := mergeBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs, summary); ok {
 					a.currentReturnBorrowedOwnerRefs = merged
