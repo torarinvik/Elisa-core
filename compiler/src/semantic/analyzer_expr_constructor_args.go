@@ -429,6 +429,11 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 			}
 			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+		} else {
+			// Parameter is `T&` but the argument is a value (it will be auto-ref'd at the
+			// call site, e.g. `write_span(byte[0], n)` against `data: T&`). Bind the element
+			// type parameter against the value's own type so T resolves to the value type.
+			a.collectTypeBindings(p.Elem, actual, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		}
 	case *ArrayType:
 		if act, ok := actual.(*ArrayType); ok {

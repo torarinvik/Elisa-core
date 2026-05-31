@@ -289,6 +289,11 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 				}
 			}
 			collectSpecializationBindings(p.Elem, a.Elem, bindings)
+		} else {
+			// Parameter is `T&` but the argument is a value, auto-ref'd at the call site
+			// (e.g. `write_span(byte[0], n)` against `data: T&`). Bind the element type
+			// parameter against the value's own type so T specializes to the value type.
+			collectSpecializationBindings(p.Elem, actual, bindings)
 		}
 	case *semantic.ArrayType:
 		if a, ok := actual.(*semantic.ArrayType); ok {
