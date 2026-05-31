@@ -7,6 +7,45 @@ Result: no `in arena:` threading, no `trusted out[0].ref[static u8&]` surface,
 no `darray` vs `DArrayBuilder` split, zero runtime overhead, and static escape
 safety. Backwards-incompatible by design.
 
+## Implementation status (2026-05-31)
+The headline vision below — *region as a parameter in the container type* with the
+arena threaded across the ABI (Phases 1–3) — is still the design ahead, not yet built.
+What **is** implemented and verified so far, from the memory model:
+
+- **Backing-allocator strategies (memory model §4).** `region r(cap) using malloc:`
+  backs a region's arena blocks with libc malloc instead of the compile-time default
+  (mmap on POSIX); the default path is behavior-preserving. The allocator is selected
+  per-region at runtime via an `Arena.backend` tag.
+- **Pool / free-list reclamation (memory model §3, third bullet).** `RegionPool[T]`
+  + the affine `Pooled[T]` handle (`heap.elisa`): a region-anchored object pool whose
+  same-size slots are recycled through a free list and are **pointer-stable** (never
+  move; FFI-safe). `release` is pure slot reuse, never an obligation — a dropped handle
+  is safe because the region bulk-frees the slab at teardown. Idiom: `pool.acquire()` /
+  `pool.release(move h)` (see the "Canonical usage" doc in `heap.elisa`).
+- **Object-granularity invalidation gating (memory model §5) for pool borrows.** A raw
+  interior borrow taken out of a `Pooled` handle (`b = h.ptr`) and used after `release`
+  is a **compile-time** use-after-free error — including when the borrow is stashed in a
+  struct/aggregate field or laundered through a function that returns it (the three
+  escape vectors). This composes the affine-consume checker with the borrowed-owner-ref
+  alias machinery; scoped precisely to the pool handle (`Thread`/`Task`/`MutexGuard`,
+  whose interior pointers reference externally-owned storage, are intentionally exempt).
+
+**Safety verified.** An adversarial battery confirms the borrow checker, lifetimes, and
+memory safety behave: rejected — unconsumed `linear`, affine double-move/double-release,
+return-of-local-ref ("dangles"), local-arena collection returned or stored into a
+non-local field ("use-after-free"), nested-region escape at var-decl init ("outlives"),
+darray interior borrow used after a reallocating `push`, pool interior borrow used after
+release (in-function / struct-stored / cross-function), and use of a `= zeroed` value
+whose zero is invalid (a non-optional ref); accepted — affine drop, use within the
+region, `= zeroed` reads where zero is a valid value, and assign-before-read. No holes
+found. (Regression coverage lives in `semantic/*_test.go`: `linear_affine`,
+`return_borrow_escape`, `darray_region_escape`, `darray_interior_borrow`, `region_pool`,
+etc.)
+
+The pool/allocator pieces are the reclamation + strategy layers of the model; the
+container-type region-parameterization and its ABI threading (Phases 1–3) remain the
+larger, still-unbuilt body of this design.
+
 ## What we build on (today's substrate)
 - **Regions are already named strings.** `RefType{ … Region string }`. Refs are
   region-tracked, with region-assignability checks (`refRegionAssignable`). So
