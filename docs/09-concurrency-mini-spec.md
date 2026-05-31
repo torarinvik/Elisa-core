@@ -376,6 +376,13 @@ extern notify_one(cv: CondVar&) -> void can[Sync.Notify]
 extern notify_all(cv: CondVar&) -> void can[Sync.Notify]
 ```
 
+Source-level statement sugar is also available for condition-variable notification:
+
+```elisa
+notify one cv
+notify all cv
+```
+
 This gives the language a type-level account of:
 
 - join exactly once
@@ -639,6 +646,18 @@ desugars to:
 t: Task[i64, Pending] = pool_submit1(&workers, work, arg)
 ```
 
+When the target pool should be named explicitly, use the bracketed form:
+
+```elisa
+t: Task[i64, Pending] = submit[pool] work(arg)
+```
+
+which desugars to:
+
+```elisa
+t: Task[i64, Pending] = pool_submit1(&pool, work, arg)
+```
+
 ### Await
 
 ```elisa
@@ -651,6 +670,10 @@ desugars to:
 result: i64 = pool_await(move task)
 ```
 
+`await` is the consuming completion surface for a pending task handle. After
+`await task`, that task handle has been moved into the await operation and may
+not be used again.
+
 ### Wait-All
 
 ```elisa
@@ -662,6 +685,11 @@ desugars to:
 ```elisa
 task_group_wait_all(&jobs)
 ```
+
+`wait all jobs` is the completion surface for a task group that has accumulated
+pending tasks. A task group holding pending tasks must be satisfied with
+`wait all group` before scope exit; leaving such a group live is rejected in the
+same way dropping a pending `Task[..., Pending]` is rejected.
 
 ### Lock Scope
 
@@ -817,6 +845,8 @@ It affects only:
 - `await task` lowers to `pool_await(move task)`
 - `lock mu as g:` lowers to lock/acquire CFG plus guaranteed `mutex_unlock(move g)`
 - `wait all jobs` lowers to `task_group_wait_all(&jobs)`
+- pending task handles must be consumed, typically by `await task` or by moving them into a `TaskGroup`
+- task groups with pending tasks must be completed with `wait all group` before scope exit
 
 ## Staging Recommendation
 

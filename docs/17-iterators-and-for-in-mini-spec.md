@@ -19,6 +19,28 @@ for index in 0u..<items.len:
     ...
 ```
 
+Current range-shaped loop headers also accept inclusive bounds, descending bounds, and explicit steps:
+
+```elisa
+for i in 0..3:
+    ...
+
+for i in 0..<10..2:
+    ...
+
+for remaining in limit..>0:
+    ...
+```
+
+Reverse iterable loops use `rev(...)` in source position rather than a special
+header prefix. The older `for rev item in items:` spelling is no longer
+supported.
+
+```elisa
+for item in rev(items):
+    ...
+```
+
 into a small, explicit iteration model that:
 
 - reduces boilerplate for arrays, views, strings, and tree-shaped data
@@ -331,6 +353,41 @@ The first tree helper should mean:
 
 This gives tree users a real ergonomic win without forcing a hidden traversal
 policy into the language.
+
+When every structural child edge has the same item type, `children(node)` yields
+that type directly. Exact members may therefore keep precise child element
+types:
+
+```elisa
+for child in children(binary):
+    total <- total + child.span
+```
+
+Mixed child categories need an explicit widening cast on the source value so the
+result sequence has one common item type:
+
+```elisa
+for child in children(stmt.cast[Lua.Node]):
+    total <- total + child.kind.i64()
+```
+
+The `children(...)` carrier also keeps the widened source node available through
+`.node` when code needs to recover that exact root value explicitly.
+
+```elisa
+def root_of(stmt: Lua.Stmt) -> Lua.Node:
+    return children(stmt.cast[Lua.Node]).node
+```
+
+Current rules:
+
+- `children(node)` requires at least one structural child edge
+- all structural child payloads must have the same item type unless the source is explicitly widened first
+- `children(stmt.cast[Lua.Node])` is the canonical mixed-child form when a statement can own expressions, blocks, and sibling statements
+- `children(expr).node` returns the source node value carried by that child view; this is most relevant after an explicit widening cast such as `children(stmt.cast[Lua.Node]).node`
+- legacy override syntax such as `children(stmt to Lua.Node)` is deprecated; use an explicit cast like `children(stmt.cast[Lua.Node])`
+- incompatible overrides are rejected rather than silently dropping non-matching children
+- explicit `link` payloads are not part of `children(...)`
 
 #### Deferred tree traversals
 

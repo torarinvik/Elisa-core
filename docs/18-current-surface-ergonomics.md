@@ -42,9 +42,17 @@ Current rules:
 
 Use bracketed `is [A | B | C]` when a value can match any of several variants or enum members. Short checks stay inline and the bracketed form keeps the intent obvious.
 
+The parser also accepts the unbracketed multi-target form `value is A | B | C` for short inline tests. The bracketed spelling is usually clearer once the alternatives get longer or use qualified names.
+
 ```elisa
 def is_additive(op: TokenKind) -> bool:
     return op is [.PLUS | .MINUS]
+
+def is_rel(kind: Tok) -> bool:
+    return kind is .LT | .LTEQ | .GT
+
+def is_scalar(value: Expr) -> bool:
+    return value is Expr.Int | Expr.Bool | Expr.Char
 ```
 
 For longer variant families, wrap the alternatives in parentheses and put one alternative per line. This is the preferred shape for long declaration-family or AST-kind classifiers.
@@ -116,17 +124,27 @@ def read(node: Node&?) -> i64:
     return 0
 ```
 
-Prefer unified `else` recovery for nullable values and handled error unions. Plain `value else fallback` unwraps an optional or nullable reference and uses the fallback when absent. `else return`, `else raise`, and `else void` make the recovery action explicit.
+Prefer explicit `get` recovery for nullable values, optionals, and checked accesses. `get value else fallback` unwraps an optional or nullable reference and uses the fallback when absent. `else return`, `else raise`, and `else void` make the recovery action explicit.
 
 ```elisa
 def required_name(name: NameId?) -> NameId error[LookupError]:
-    return name else raise LookupError.MissingName
+    return get name else raise LookupError.MissingName
 
 def first_or_default(value: Item?) -> Item:
-    return value else Item.Default
+    return get value else Item.Default
 
 def visit_if_present(value: Item?) -> void:
-    value else void
+    get value else void
+```
+
+Use `get` for optional values and checked accesses when you want the absence or bounds check to stay visible in the source.
+
+```elisa
+def first_or_zero(xs: dview[i32], i: usize) -> i32:
+    return get xs[i] else 0
+
+def require_value(value: i32?) -> i32:
+    return get value else raise LookupError.MissingName
 ```
 
 For error unions, bare `try fallible()` still propagates the error. `try fallible() else ...` handles the error locally and produces the success value.
@@ -146,7 +164,219 @@ def write_best_effort(value: Buffer) -> void:
 
 The same recovery actions are available for handled error unions: `try fallible() else return fallback`, `try fallible() else raise Error.Tag`, and `try fallible_void() else void`.
 
-`return?`, `match?`, and `try? ... default` remain accepted as migration syntax, but the preferred spelling is the unified `else` form: `value else ...` for optionals and `try expr else ...` for handled error unions.
+Error-union signatures use `T error[...]`, not the removed pipe form. Closed
+rows can name whole families or specific tags, and open rows add trailing `...`
+to keep the selected family rows open for compatible `try` / `raise`
+propagation.
+
+```elisa
+error FileError:
+    NotFound
+    PermissionDenied
+
+error NetworkError:
+    Timeout
+    Disconnected
+
+extern read_disk() -> int error[FileError]
+extern read_network() -> int error[NetworkError.Timeout]
+
+def load_any(use_disk: bool) -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+    if use_disk:
+        return try read_disk()
+    return try read_network()
+```
+
+Current rules for error-union signature rows:
+
+- `T error[FileError]` names the closed whole-family form
+- `T error[FileError.NotFound]` names a closed explicit-tag subset form
+- `T error[FileError, ...]` keeps that family open in row form
+- `T error[FileError.NotFound, ...]` keeps a representative tag row open rather than closed
+- mixed-family open rows such as `error[FileError.NotFound, NetworkError.Timeout, ...]` are allowed
+- equivalent full-family closed subsets canonicalize back to the family form, so listing every tag in one family formats as `error[Family]`
+- legacy `T | ErrorSet` return syntax is no longer supported; use `T error[SomeSet]` instead
+- legacy `error[Set.*]` and `error[Set.*, ...]` shorthands are no longer supported; use `error[Set]`, `error[Set, ...]`, or explicit tag rows instead
+
+Compatibility note: the compiler still accepts older implicit absence-recovery spellings such as `value else fallback`, `xs[i] else fallback`, and `try optional_value else fallback`, but these docs prefer the explicit `get ... else ...` surface for nullable/optional and checked-access recovery.
+
+```elisa
+a: i64 = maybe else 11
+return xs[i] else 0
+return try value else 11
+```
+
+When the handled branches want to name success and error payloads directly, use `catch expr:`. Each arm names the handled outcome and supplies the replacement expression or block.
+
+```elisa
+def load_flag(flag: bool) -> i64:
+    return catch read_value(flag):
+        loaded:
+            loaded
+        error err:
+            log_error(err)
+            1
+```
+
+`return?`, `match?`, and `try? ... default` remain accepted as migration syntax, but the preferred spelling is the explicit recovery surface: `get value else ...` or `get access else ...` for optional/checked-access recovery, and `try expr else ...` for handled error unions.
+
+One legacy migration form still accepted by the parser is `return? with ...:`. It lowers to the same multi-binding optional ladder as `if let`, but new code should prefer the explicit `if let` spelling.
+
+```elisa
+return? with lower_value = lower,
+             upper_value = upper,
+             value_int = value:
+    value_int >= lower_value and value_int <= upper_value
+```
+
+The simplest legacy shorthand remains accepted as `return? value`. It returns the present payload and otherwise returns `null`. New code should prefer the explicit recovery form.
+
+```elisa
+def first(found: i64?) -> i64?:
+    return? found
+    return null
+```
+
+The legacy `match?` form also remains accepted, including the named-binder spelling. It lowers to an optional bind followed by an ordinary `match`, so new code should prefer an explicit `if let` plus `match` or a normal `match` with a null arm.
+
+```elisa
+match? node = maybe:
+    Expr.Int(value):
+        return value
+    _:
+        return 0
+```
+
+Ordinary `match` also accepts optionals directly. Use a `null:` arm for the absent case and regular payload patterns for the present case.
+
+```elisa
+def score(maybe: Expr?) -> i64:
+    match maybe:
+        null:
+            return 0
+        Expr.Int(value):
+            return value
+        _:
+            return 2
+```
+
+The same form works as a match expression:
+
+```elisa
+return match maybe:
+    null:
+        0
+    Expr.Int(value):
+        value
+    _:
+        2
+```
+
+Likewise, `try? expr default fallback` is still parsed as the old handled-error shorthand, but new code should use `try expr else fallback`.
+
+```elisa
+legacy: i64 = try? read_value() default 2
+```
+
+Packed/tree store refinement also has a deprecated conditional form. `if value in store as Pattern:` is still accepted, but new code should prefer `match value in store:` with pattern arms.
+
+```elisa
+if node in store as Expr.Int(value: value):
+    return value
+```
+
+When a successful refinement needs to survive as a first-class value, packed
+enums and trees use exact view types. Packed enums spell the refined witness as
+`packedview[Enum.Variant]`. Trees use the bare exact member type, such as
+`Lua.Expr.Binary`; the older `treeview[Lua.Expr.Binary]` spelling still parses
+for compatibility, but canonical formatting and type strings use the bare
+concrete variant type.
+
+```elisa
+def score_lit(view_node: packedview[Expr.Int]) -> int:
+    return view_node.span
+
+def fold(node: Expr, store: Expr.Store[Frozen]) -> int:
+    if node as Expr.Int:
+        lit: packedview[Expr.Int] = node
+        return score_lit(lit) + lit.value
+    return 0
+```
+
+```elisa
+def score_binary(view_node: Lua.Expr.Binary) -> i64:
+    return view_node.left.span + view_node.right.span + view_node.span
+
+def child_span(node: Lua.Expr) -> i64:
+    if node is Lua.Expr.Binary:
+        return score_binary(node)
+    return node.span
+```
+
+Current rules:
+
+- `packedview[Enum.Variant]` is the first-class exact packed-variant type after a successful packed refinement
+- exact tree variants use the bare concrete member type such as `Lua.Expr.Binary`
+- `treeview[Lua.Expr.Binary]` remains accepted as a compatibility alias, but canonical source should write `Lua.Expr.Binary`
+- these exact refined types can appear in parameters, returns, and local bindings
+
+Frozen packed stores also expose dense node keys and arena-backed per-node side
+tables. Use `dense_key(node, frozen_store)` to derive a stable `NodeKey[Expr]`
+for a packed enum value or `packedview[...]` proven to come from that exact
+frozen store root. Use `node_table_fill` to allocate one element slot per frozen
+node.
+
+```elisa
+def inspect(owner: Arena) -> i32:
+    store: Expr.Store[Local] = Expr.Store(owner)
+    in store:
+        left: Expr = new Expr.Lit(span: 1, value: 3)
+        right: Expr = new Expr.Lit(span: 2, value: 4)
+        _ = new Expr.Add(span: 5, left: left, right: right)
+
+    frozen: Expr.Store[Frozen] = freeze(move store)
+    node: Expr = frozen[2]
+    key: NodeKey[Expr] = dense_key(node, frozen)
+    table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
+    table[key] <- 7
+    return frozen[key].span + table[key]
+```
+
+Current rules:
+
+- `dense_key(node, frozen)` requires a packed enum value or `packedview[...]` proven to come from the same exact frozen store root
+- `NodeKey[Expr]` may index that exact `Expr.Store[Frozen]` root or a `NodeTable[Expr, T]` built from the same root
+- `node_table_fill.specialize[Expr, T]()(owner, frozen, init)` returns `NodeTable[Expr, T]` with one slot per frozen packed node
+- `NodeTable.values` exposes the backing storage as `dview[T]`
+- `node_table_fill` currently requires explicit specialization in v1
+- these helpers are for packed enum frozen stores rather than ordinary enums or tree stores
+
+Frozen packed stores also expose a dense readonly tag view through `.tags`.
+This is useful for scan-oriented loops and slice-based inspection when the pass
+only needs the packed tag stream rather than the full nodes.
+
+```elisa
+def count_ints(frozen: Expr.Store[Frozen]) -> usize:
+    nodes: dview[Expr] = frozen[1:frozen.count]
+    tags: dview[Expr.Tag] = frozen.tags
+    prefix: dview[Expr.Tag] = frozen.tags[0:1]
+    count: mutable usize = 0u
+    for tag in tags:
+        if tag == Expr.Tag.Int:
+            count <- count + 1u
+    return count
+```
+
+Current rules:
+
+- `frozen.count` is the dense packed-node extent of that frozen store root
+- `frozen[i]` yields the packed enum value at that dense frozen-store index
+- `frozen[a:b]` yields an ordinary readonly `dview[Expr]` slice over the frozen packed nodes
+- `frozen.tags` exposes the packed tag stream as `dview[Expr.Tag]`
+- packed-store root index results are readonly; assignment through `frozen[i] <- ...` is rejected
+- slicing a frozen tag view keeps the ordinary readonly `dview[Expr.Tag]` surface
+- packed-store slice index results are readonly; assignment through `chunk[i] <- ...` is rejected
+- tag-view index results are readonly; assignment through `tags[i] <- ...` is rejected
 
 ## Membership Candidate Sets
 
@@ -278,6 +508,13 @@ if type_expr == null or depth > 32:
 
 Prefer the ordinary `if` form when the condition or returned expression needs multiple lines, diagnostics, mutation, or comments.
 
+For statement-oriented early exits, the parser also accepts `guard condition else ...` and the equivalent alias `require condition else ...`. These are best kept for short guard-style exits where the `else` action is the entire point of the statement.
+
+```elisa
+guard maybe != null else return 0
+require enabled else return INVALID_SYMBOL_ID
+```
+
 When an early optional result depends on several optional inputs, prefer multi-binding `if let`. Each binding unwraps an optional in order, and the branch runs only when all bindings are present.
 
 ```elisa
@@ -301,6 +538,16 @@ if let actual_lower = lower_value,
 
 This lowers to the same ordinary optional-bind ladder you would write by hand. A short condition can be kept as a statement block with `then:` when that makes the guard read naturally.
 
+`elif let` continues the same optional-bind family in the fallback branch, which keeps multi-stage optional selection flatter than a second nested `if let`.
+
+```elisa
+if let actual_lower = lower,
+       actual_upper = upper:
+    return
+elif let actual_fallback = fallback:
+    return
+```
+
 When the present branch immediately wants to match on the unwrapped value, combine `if let` with an ordinary `match`.
 
 ```elisa
@@ -320,11 +567,22 @@ If the true branch contains another low-precedence operator, wrap it so the inte
 return (left == right) if rhs is Value.Int(right) else false
 ```
 
+Slice operands also work with `if let`. In that form, the slice acts as a checked view construction: the branch runs only when the slice bounds are valid, and the bound name has the resulting bounded view type inside the branch.
+
+```elisa
+def sum_prefix(xs: darray[i32]&) -> i32:
+    if let s = xs[0:3]:
+        return s[0] + s[1] + s[2]
+    return -1
+```
+
 Current rules:
 
 - `if let name = value:` accepts value optionals such as `T?` and nullable references such as `T&?`
 - `if let a = first, b = second:` runs only when every optional binding is present; bindings are evaluated left-to-right
+- `elif let name = value:` is the optional-bind continuation form for an `if let` chain
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
+- `if let name = source[a:b]:` performs a checked slice bind and exposes the bounded view only when the slice is in range
 - `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
 - `condition then:` lowers to an ordinary `if condition:` statement block and is intended for short guard-style branches
 - `value return if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
@@ -950,10 +1208,26 @@ def keep(expr: Expr) -> bool:
 Current rules:
 
 - `static generate:` is declaration-level only
-- `emit` is only valid inside `static generate:`
+- declaration `emit` is valid inside `static generate:`
+- sequence-rewrite `emit` is also valid inside `rewrite ... as sequence[T]:` arms
 - `${expr}` may appear inside generated identifiers or member paths; the expression must evaluate to a compile-time string, integer, or reflection record with a `name`
 - generated declarations are parsed as normal Elisa declarations and then use the normal semantic and backend paths
 - generated declarations are inserted where the generator appears, so ordinary declaration visibility and duplicate-name diagnostics apply
+
+Inside sequence rewrites, `emit` appends values into the output sequence being built. `emit value` appends one element, `emit all values` appends every element from a `darray` or `dview`, and `emit nothing` leaves the current arm without output.
+
+```elisa
+def compact(items: dview[u32]) -> darray[u32]:
+    return rewrite items as sequence[u32]:
+        item when item != 0u32:
+            emit item
+
+def concat(left: dview[u32], right: dview[u32]) -> darray[u32]:
+    segments: darray[dview[u32]] = [left, right]
+    return rewrite segments as sequence[u32]:
+        segment:
+            emit all segment
+```
 
 ## Grammar recovery policies
 
@@ -1310,6 +1584,9 @@ effectalias FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
 def parse() -> i64 effects[FrontendEffects]:
     return 1
 
+def parse_checked() -> i64 effects[FrontendEffects, error IoErr, Memory.Allocate]:
+    return 1
+
 def parse_debug() -> i64 effects[FrontendEffects, Console.Write]:
     return 1
 
@@ -1322,7 +1599,9 @@ Current rules:
 
 - aliases may be used on function declarations and function types
 - aliases may bundle `error[...]`, `can[...]`, or both
-- bracketed signature rows may include aliases, direct capability refs such as `Abort.Panic`, and direct errors such as `error ParseErr`
+- bracketed signature rows may include aliases, direct capability refs such as `Abort.Panic`, and direct whole-family error entries such as `error ParseErr`
+- mixed rows such as `effects[FrontendEffects, error IoErr, Memory.Allocate]` are allowed
+- when an alias is used, keep all extra direct error or capability items inside the same bracketed `effects[...]` row rather than combining the alias with separate trailing `error[...]` or `can[...]` clauses
 - `permission` declarations and `effectalias` aliases are compile-time surface only; both lower into the existing semantic permission/effect model rather than a runtime object
 - `effect` declarations remain accepted during migration but are deprecated; prefer `permission`
 
@@ -1352,7 +1631,7 @@ Current rules for local grants:
 - `-emit fmt` always prints local grants in surface syntax rather than declaration syntax
 - the formatter conservatively inlines simple one-statement grant blocks into `... can ...` form for returns, assignments, declarations, tuple binds, discards, `as` rebinds, and expression statements
 - the formatter keeps block form for multi-statement regions and for statements it cannot safely rewrite, including statement-position `panic(...)`
-- when a granted expression contains `try ... else ...` or `value else fallback`, the formatter parenthesizes the expression so the grant applies to the whole expression
+- when a granted expression contains `try ... else ...`, `get value else fallback`, or legacy `value else fallback`, the formatter parenthesizes the expression so the grant applies to the whole expression
 
 Style guidance:
 
@@ -1507,7 +1786,7 @@ Current rules:
 - `def f(...) with Name -> T` makes implicit bundle fields visible by field name inside the function body
 - `def f(use Name)` expands an explicit bundle into the function's explicit parameter set
 - `call(use Name(...), other: ...)` applies an explicit bundle at a call site
-- `call(use Name)` is the canonical empty bundle application; legacy `call(use Name())` still parses with a deprecation diagnostic
+- `call(use Name)` is the canonical empty bundle application; legacy `use Name()` still parses with a deprecation diagnostic
 - `with args(...)` installs ambient explicit arguments for nested calls inside a block
 - calls auto-forward when the caller already has the same implicit context in scope
 - `with Name(..)` spreads same-named ambient values into the bundle, and explicit overrides win over the spread values
@@ -1678,6 +1957,132 @@ def classify(node: Lua.Expr) -> i64:
 ```
 
 Within a tree family, unqualified sibling names still resolve when they are unambiguous. Use qualified names such as `Lua.Expr` when two trees expose the same local node name, or when the code benefits from saying exactly which family owns the child. Structural `child` and `children` relations are inferred for tree-family payloads; keep explicit `link` for non-structural references that should not be traversed as owned children.
+
+```elisa
+tree Lua:
+    @role(expr)
+    node Expr:
+        Binary(op: LuaBinaryOp, left: Expr, right: Expr)
+        Call(callee: Expr, args: darray[Expr], link source_expr: Expr)
+```
+
+Current rules:
+
+- same-family payloads such as `left: Expr`, `right: Expr`, and `callee: Expr` are structural children by default
+- same-family element types inside sequence payloads such as `darray[Expr]` are also traversed as children
+- `link source_expr: Expr` keeps a same-family reference explicit without making it part of `children(node)` traversal
+
+## Tree `visit` expressions
+
+`visit value:` is the direct non-recursive tree dispatch surface. It picks an
+arm from the exact tree member of the visited value and returns that arm's
+result.
+
+```elisa
+def score(node: Lua.Expr) -> i64:
+    return visit node:
+        Lua.Expr.Nil(expr):
+            expr.span
+        Lua.Expr.Int(expr):
+            expr.value
+        Lua.Expr.Binary(expr):
+            expr.left.span + expr.right.span
+
+def stmt_total(block: Lua.Block) -> i64:
+    return visit block:
+        Lua.Block(node):
+            node.stmts.len.i64()
+```
+
+The arm surface also supports alternatives and guards:
+
+```elisa
+return visit node:
+    Lua.Expr.Int(expr) | Lua.Expr.Float(expr) when expr.span > 0:
+        expr.span
+    _:
+        0
+```
+
+When the source expression is broader than the intended dispatch domain, select
+the domain explicitly with `as Root`:
+
+```elisa
+def score_node(node: Lua.Node) -> i64:
+    return visit node as Lua.Node:
+        Lua.Stmt.ExprStmt(stmt) when stmt.expr.kind == .Call:
+            stmt.span + 1
+        _:
+            0
+```
+
+Current rules:
+
+- `visit value:` dispatches on the exact tree member of a tree family root, category value, exact variant, block, or struct member
+- `visit value as Root:` selects the visit domain explicitly when the source value is broader than the intended tree family root or category
+- each arm binds the exact member value through a binder such as `Lua.Expr.Int(expr):`
+- wildcard `_:` arms are allowed
+- arm alternatives with `|` and arm guards with `when` follow the same surface rules as other pattern arms
+- `visit` is expression-oriented; each arm produces the final value for that branch
+
+## Tree attributes and projected attribute sequences
+
+Tree families can define computed field-like attributes with `attribute`.
+
+```elisa
+attribute Lua.Expr.checksum -> i64:
+    Lua.Expr.Int(expr):
+        return expr.value
+    Lua.Expr.Binary(expr, left, right):
+        return left.checksum + right.checksum
+
+def checksum_of(node: Lua.Expr) -> i64:
+    return node.checksum
+```
+
+Attributes may also be declared on a broader family root and may return an
+error union when computing the attribute can fail.
+
+```elisa
+attribute Lua.Node.checksum -> i64 error[LuaFrontendError]:
+    Lua.Expr.Binary(node, left, right):
+        lua_binary_checksum(node.span, left.checksum, right.checksum)
+    _:
+        0
+```
+
+Projected attribute reads work on child sequences too:
+
+```elisa
+attribute Lua.Expr.node_count -> usize:
+    Lua.Expr.Int(_):
+        return 1u
+    Lua.Expr.Binary(expr, left, right):
+        total: mutable usize = 1u
+        for child_count in children.node_count:
+            total <- total + child_count
+        return total
+
+attribute Lua.Expr.is_leaf -> bool:
+    Lua.Expr.Int(_):
+        return true
+    Lua.Expr.Binary(_):
+        return false
+
+def all_children_leaf(node: Lua.Expr) -> bool:
+    return all(children(node).is_leaf)
+```
+
+Current rules:
+
+- `attribute Receiver.name -> T:` declares a computed tree attribute on a tree category, exact variant, block, struct member, or family root type
+- attribute bodies use the same visit-arm shape as `visit`
+- attribute return types may be ordinary values or error unions
+- `node.attr` reads the computed attribute through ordinary field-like syntax
+- attribute arms may use the implicit `children` projected sequence when the matched member has structural children
+- sequence projections such as `children.node_count` and `children(node).is_leaf` produce projected attribute sequences rather than eagerly materialized arrays
+- projected attribute sequences work in loops, queries, and aggregators such as `all(...)` and `any(...)`
+- tree attributes are computed views, not stored tree payload fields
 
 ## Lexer DSL for mixed-mode frontends
 
@@ -2296,7 +2701,10 @@ Current rules:
 
 - `defer block:` runs when the current block scope exits
 - `defer function:` runs on function exit rather than the nearest nested block exit
+- `defer function:` is currently only supported in the outermost function scope
 - defer bodies are ordinary statement blocks and may capture surrounding locals
+- defer bodies cannot `return` from the enclosing function
+- a linear value scheduled for deferred consumption by a `defer function:` body cannot be consumed again inline
 - `defer` is contextual, so ordinary identifiers like `defer_value` and calls like `defer(x)` still parse normally outside defer position
 
 ## Stores, rows, and dict defaulting sugar
@@ -2325,6 +2733,52 @@ Current rules:
 - the generic syntax parses for more than one key family, but the current runtime-backed helper surface is primarily validated for `dict[cstr[key_shape], V]` unless matching helper overloads are supplied
 - packed and row store values should be read through the fact-core lens: mutable local stores carry store-dependency facts, `freeze(move store)` consumes the local store and rebases handles onto frozen-store facts, and row scans may add optimization facts such as readonly, contiguous, or exact extent
 
+## `clone[...]` builtin
+
+`clone[target](value)` is the current deep-copy surface for owner-backed dynamic
+arrays, tree values, and other cloneable aggregate shapes.
+
+```elisa
+tree Lua:
+    common:
+        span: i64
+    @role(expr)
+    node Expr:
+        Int(value: i64)
+    block Block:
+        items: darray[Expr]
+
+struct Pair:
+    items: darray[u32]
+    root: Lua.Block
+
+def clone_pair(owner: mutable Arena&, source_items: dview[u32], block: Lua.Block) -> Pair:
+    can Abort.Panic, Memory.Allocate:
+        in owner:
+            return Pair{
+                items: clone[darray[u32]](source_items),
+                root: clone[Lua.Block](block),
+            }
+```
+
+Bounded string views can also be persisted into owned bytes:
+
+```elisa
+def persist(owner: mutable Arena&, text: sview) -> dstr:
+    can Abort.Panic, Memory.Allocate:
+        in owner:
+            return clone[dstr](text)
+```
+
+Current rules:
+
+- `clone[darray[T]](view_or_array)` deep-copies into an owner-backed dynamic array
+- `clone[dstr](text)` and `clone[darray[u8]](text)` are the current owner-backed string-persistence surfaces for `sview`
+- tree categories, exact variants, blocks, and other tree members can be cloned with `clone[Tree.Member](value)`
+- ordinary structs may be cloned when their fields themselves support the required clone or copy path
+- allocating clone targets require an active `in owner:` scope
+- reference targets such as `clone[i64&](value)` are rejected in v1
+
 ## Pool scopes and `parallel for`
 
 The current explicit parallel loop surface is pool-scoped rather than implicit.
@@ -2350,6 +2804,29 @@ Current rules:
 - current sources must be either frozen packed stores or readonly contiguous exact-extent views
 - captured outer values must still satisfy the compiler's existing thread-transfer checks
 - this is the current implemented parallel loop feature, not just a proposal placeholder
+
+## Tuple-bind statements
+
+Tuple values can be unpacked directly into local names with a statement-form tuple binder. Use `=` when the binder introduces new locals, and `<-` when it rebinds existing locals from another tuple-shaped value.
+
+```elisa
+node, checksum = built
+
+left, right <- pair
+```
+
+The same binder shape is also available in tuple-producing loops and queries:
+
+```elisa
+for left, right in pairs where left < right:
+    total <- total + left + right
+```
+
+Current rules:
+
+- `a, b = value` declares fresh locals from a tuple-shaped source
+- `a, b <- value` reassigns existing locals from a tuple-shaped source
+- tuple binders participate in the same name-based filtering surface used by `for ... where ...` and `each ... where ...`
 
 ## Cascade blocks and cascade expressions
 
@@ -2381,6 +2858,9 @@ def build() -> func(i64) -> i64:
     return lambda (value: i64) -> i64:
         return value + 1
 
+def fast_build() -> func(i64) -> i64:
+    return lambda (value: i64) => value + 1
+
 def capture(offset: i64) -> func(i64) -> i64:
     return λ value: value + offset
 ```
@@ -2389,9 +2869,53 @@ Current rules:
 
 - both `lambda` and `λ` are accepted spellings
 - lambdas may use a block body or a single expression body
+- `lambda (params) => expr` is accepted as an expression-body spelling; formatting canonicalizes it to the ordinary inline-expression form
 - shorthand parameter forms like `λ value: ...` rely on the expected function type to provide parameter typing
+- block-bodied lambdas require either an explicit return type or a contextual function type
 - lambdas capture surrounding locals and may return closures
 - `lambda` is contextual, so a parameter or local named `lambda` still parses as an identifier outside lambda position
+
+## Tree `fold`
+
+`fold value as Root into T:` is the bottom-up tree reduction surface. Each arm
+matches an exact tree member and receives folded child results rather than raw
+child handles.
+
+```elisa
+def score(node: Lua.Expr) -> i64:
+    return fold node as Lua.Node into i64:
+        Lua.Expr.Nil(expr, children):
+            expr.span + children.len.i64()
+        Lua.Expr.Int(expr, children):
+            expr.value + children.len.i64()
+        Lua.Expr.Call(expr, callee, args: arg_values):
+            callee + arg_values.len.i64() + expr.span
+        Lua.Expr.Binary(expr, left, right):
+            left + right + expr.span
+```
+
+Optional and sequence child fields preserve their shape in the folded bindings:
+
+```elisa
+def score(node: Lua.Stmt) -> i64:
+    return fold node as Lua.Node into i64:
+        Lua.Block(block, children):
+            children.len.i64() + block.span
+        Lua.Stmt.IfStmt(stmt, condition, then_block, elseifs: elseif_values, else_block):
+            optional_i64_value(else_block) + condition + then_block + elseif_values.len.i64() + stmt.span
+        Lua.Stmt.NumericFor(stmt, start, limit, step, body):
+            optional_i64_value(step) + start + limit + body + stmt.name_index.i64()
+```
+
+Current rules:
+
+- `fold value as Root into T:` dispatches over the chosen tree root or category and produces a `T`
+- the first arm binder such as `expr`, `stmt`, or `block` is the exact current tree member
+- a trailing binder like `children` receives the folded direct-child result sequence when requested
+- named child-result bindings such as `args: arg_values` bind one child field's folded result under a chosen local name
+- optional child fields produce optional folded results
+- sequence child fields produce folded sequences whose element type is the fold result type
+- non-sequence child fields produce one folded result value each
 
 ## Tree `rewrite`
 
@@ -2405,14 +2929,24 @@ def simplify(node: Expr) -> Expr:
                 default
             Expr.Add(expr, left, right):
                 default
+
+def simplify_binary(node: Lua.Expr) -> Lua.Expr:
+    in perm:
+        return rewrite node as Lua.Expr default:
+            Lua.Expr.Binary(expr, left, right):
+                default{span = expr.span, left, right}
 ```
 
 Current rules:
 
 - `rewrite value as Root:` is fold-backed, but it specializes child-result bindings to the original child edge types instead of forcing every rewritten child to have one uniform result type
+- `rewrite value as Root default:` installs an implicit pass-through default for omitted exact variants of the chosen rewrite root
 - arm heads, guards, exact tree targets, variant targets, wildcard arms, and named child-result bindings follow the existing `fold` arm rules
 - named child bindings such as `left` and `right` are the already-rewritten child results
+- inside an exact rewrite arm, bare `default` rebuilds the current exact member using the already rewritten child results
+- `default{field = value, other}` rebuilds the current exact member while overriding selected fields or reusing same-named bindings
 - use a family root such as `Lua.Node` or `ATPLSyntax.Node` when a category has heterogeneous structural children such as expressions, statements, and blocks
+- `default` and `default{...}` are only allowed inside exact tree rewrite arms
 - `rewrite` is contextual, so an ordinary function or local named `rewrite` still parses normally in call position such as `rewrite(value)`
 
 ## Char literals
@@ -2471,17 +3005,19 @@ def score(op: Op) -> i64:
 
 Current rules:
 
-- `as` is the concise ordinary cast/coercion surface used throughout self-hosted code
-- `.cast[T]` is the explicit low-level reinterpret cast surface
+- value-level `as` casts such as `expr as T` are no longer accepted; `as` is reserved for binding, aliasing, and related declaration surfaces
+- `.cast[T]` is the explicit cast surface in expression position
 - `.ref[T&]` is the explicit lvalue/reference reinterpretation surface
 - postfix shorthand like `op.i64()` dispatches to a visible exact `__cast__(value: Source) -> Target` hook when one exists
 - prefix type-constructor shorthand like `i64(op)` uses the same cast path and the same exact `__cast__` hook lookup as `op.i64()`
 - optional postfix shorthand like `text.int?()` dispatches to a visible exact `__cast__(value: Source) -> int?` hook when one exists
-- ordinary explicit casts continue to use normal cast rules rather than hook dispatch
+- ordinary explicit `.cast[T]` conversions continue to use normal cast rules rather than hook dispatch
 - the postfix hook surface is intentionally exact-source/exact-target rather than a broad overload search
-- legacy expression-arrow casts such as `value -> T` are deprecated; `->` remains for function signatures, grammar signatures, effects, and other arrow-shaped declarations
+- legacy postfix reference-cast shorthand such as `bits.u8&()` is no longer supported; use `.cast[T&]` when retargeting an existing pointer/reference-like value explicitly, or `.ref[T&]` when reinterpreting an lvalue slot
+- legacy expression-arrow casts such as `value -> T` are deprecated; new code should use `.cast[T]`, hook-backed `T(value)` / `value.T()`, or other current conversion surfaces as appropriate
+- legacy `.cast[T]()` call-style syntax is no longer supported; use `.cast[T]`
 
-That distinction matters when reading code: `value as T` is an explicit ordinary cast, `value.cast[T]` is a low-level reinterpretation, `slot.ref[T&]` is a reference reinterpretation, `value.T()` and `T(value)` are hook-backed conversion shorthands, and `value.T?()` is the same hook mechanism returning an optional.
+That distinction matters when reading code: `value.cast[T]` is the explicit cast surface, `slot.ref[T&]` is a reference reinterpretation, `value.T()` and `T(value)` are hook-backed conversion shorthands, and `value.T?()` is the same hook mechanism returning an optional.
 
 ## Checked `ensures` clauses
 

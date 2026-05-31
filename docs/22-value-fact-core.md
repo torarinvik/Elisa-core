@@ -342,8 +342,9 @@ produce <error> ErrorPath <- FileError.NotFound
 ```
 
 Similarly, `try checked()` without a fallback produces a propagated error path;
-`try checked() else fallback` and nullable `value else fallback` produce handled
-alternate paths. These are not success-path `ensures` facts.
+`try checked() else fallback` and nullable `get value else fallback` produce
+handled alternate paths. Legacy nullable `value else fallback` remains accepted
+as compatibility syntax. These are not success-path `ensures` facts.
 
 ### Alias class mutation
 

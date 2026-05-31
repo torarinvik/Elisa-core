@@ -49,7 +49,31 @@ Current rules:
 
 - `@packed_profile(...)` applies a named packed-layout profile such as `build_heavy`
 - supported profiles currently include `canonical`, `retained_reads`, and `build_heavy`
+- removed legacy annotations `@packed_abi(...)` and `@packed_prefix(...)` should be migrated to one of the supported `@packed_profile(...)` variants
 - these annotations apply to packed enums and related packed/tree lowering surfaces rather than ordinary structs
+
+Packed enum common fields may also choose their storage placement explicitly.
+
+```elisa
+@packed_profile(retained_reads)
+packed enum Expr:
+    common:
+        @storage(side_table)
+        span: int
+        @storage(inline)
+        kind: int
+    Lit(value: int)
+    End
+```
+
+Current rules:
+
+- `@storage(inline)` keeps the common field in the inline packed common-field path
+- `@storage(side_table)` places the common field in the packed side-table path
+- `@storage(...)` is currently supported on `packed enum` `common:` fields
+- ordinary struct fields and non-common enum payload fields do not accept `@storage(...)`
+- prefer the canonical spellings `inline` and `side_table`; other normalized spellings are compatibility-only
+- side-tabled common fields still require a packed profile/backend path that supports side-tabled common storage
 
 ## Function codegen annotations
 
@@ -120,6 +144,7 @@ Current rules:
 
 - `likely` and `unlikely` are contextual statement hints for `if` and `while`
 - the raw condition expression remains the same expression the compiler would analyze without the hint
+- branch hints do not combine with `if let ...:` optional binders or pattern-binder `if` forms; use an ordinary boolean condition when a hint is needed
 - current LLVM lowering turns these into branch-weight metadata rather than a different source-level control-flow rule
 
 ## Practical caveats

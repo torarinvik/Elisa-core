@@ -3,19 +3,21 @@
 The current compiler supports two related statement families on top of the
 existing `region`, `new[...]`, and `destroy` operations:
 
-- region-local `mark` / `restore ... from ...` / `reset`
+- region-local `mark` / `restore ... from ...` / `reset` / `leak`
 - statement-form `scope`, named checkpoints, grouped checkpoints, and `restore name`
 
 ## Syntax
 
 ```elisa
 region scratch(1024u)
+region scratch(1024u) using malloc
 
 mark scratch as cp
 temp: scratch i32& = new[scratch] 1
 restore scratch from cp
 
 reset scratch
+leak scratch
 destroy scratch
 ```
 
@@ -42,8 +44,15 @@ Supported forms:
 - `mark <region> as <checkpoint>`
 - `restore <region> from <checkpoint>`
 - `reset <region>`
+- `leak <region>`
 
-All three are statements, not expressions.
+All of these are statements, not expressions.
+
+Region declarations also accept an optional backing selector with `using <allocator>`. This keeps the ordinary region surface while choosing a different runtime-backed allocator for the region storage.
+
+```elisa
+region scratch(2) using malloc
+```
 
 ## Scope statements
 
@@ -109,6 +118,10 @@ This is a region-local operation:
 `reset scratch` clears the region back to its initial empty state, but keeps the region itself alive and reusable.
 
 This is different from `destroy scratch`, which ends the region lifetime entirely.
+
+### `leak`
+
+`leak scratch` ends the compiler's ownership obligation for the region without running its ordinary cleanup path. Use it only for intentionally unreclaimed storage or handoff paths where the backing allocation is meant to outlive the current scope.
 
 ## Conservative safety rule
 

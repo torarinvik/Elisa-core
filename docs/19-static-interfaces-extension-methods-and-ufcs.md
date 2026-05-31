@@ -154,7 +154,7 @@ struct Box:
 def read(maybe_box: Box?) -> int:
     _ = maybe_box?.value
     _ = maybe_box?.scale(2)
-    return maybe_box?.value else 0
+    return get maybe_box?.value else 0
 
 def score(value: int) -> int:
     return value + 1
