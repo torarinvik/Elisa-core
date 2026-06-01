@@ -40,6 +40,23 @@ Current section headers:
 - `requires:`
 - `body:`
 
+## Memory effects
+
+Memory effects are declared in `clobbers:`.
+
+- `memory` declares broad memory access and covers both reads and writes.
+- `memory.read` declares loads only.
+- `memory.write` declares stores only.
+
+The verifier treats `lea` as address computation, not memory access. A
+read-modify-write instruction such as `addq $1, (%rdi)` requires read coverage
+and write coverage, either via broad `memory` or both direction-specific atoms.
+
+Memory base registers that come directly from input parameters must use a typed
+address-space carrier such as `HostPtr[T]`, `GuestVAddr[T]`, or
+`NativeMappedGuestPtr[T]`. Raw scalar bases such as `uintptr` are rejected unless
+the function declares `requires: memory.base.untyped` after a manual proof.
+
 ## Inputs and outputs
 
 Input binding surface:
@@ -127,6 +144,7 @@ labels:
 - `frame_pointer.handoff.unchecked`
 - `input.unused`
 - `immediate.truncation`
+- `memory.base.untyped`
 - `operand_size.inferred`
 - `pic`
 - `relocation.symbol`
@@ -231,6 +249,7 @@ Current EASM verifier and parser can report these issue codes:
 - `label-precondition-unsatisfied`
 - `large-stack-adjust-without-probe`
 - `may-fault-without-faulting-op`
+- `memory-read-without-clobber`
 - `memory-write-without-clobber`
 - `missing-body`
 - `missing-capability`
@@ -248,11 +267,13 @@ Current EASM verifier and parser can report these issue codes:
 - `poison-return-target`
 - `preserve-without-clobber`
 - `raw-indirect-control-target`
+- `raw-memory-base`
 - `raw-segment-selector`
 - `raw-stack-handoff`
 - `rdtsc-without-fence`
 - `read-failed`
 - `register-target-mismatch`
+- `register-read-uninitialized`
 - `register-write-without-clobber`
 - `reserved-register-use`
 - `return-not-terminal`
