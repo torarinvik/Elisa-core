@@ -218,12 +218,21 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		return value, nil
 	}
 	if actualRef, ok := actual.(*semantic.RefType); ok && actualRef != nil {
-		if _, expectedIsRef := expected.(*semantic.RefType); !expectedIsRef && semantic.SameType(actualRef.Elem, expected) && (isNumericType(actualRef.Elem) || semantic.IsBoolType(actualRef.Elem)) {
-			loaded, err := s.loadValue(value, actualRef.Elem, "ref.value")
-			if err != nil {
-				return nil, err
+		if _, expectedIsRef := expected.(*semantic.RefType); !expectedIsRef && (isNumericType(actualRef.Elem) || semantic.IsBoolType(actualRef.Elem)) {
+			// A reference to a numeric/bool auto-dereferences to its pointee value when
+			// coerced to a numeric/bool target -- including across numeric kinds, e.g. a
+			// `usize&` parameter used as `u64` (off.u64()). The sole exception is uintptr:
+			// `someRef.uintptr()` (esp. x.ref[T&].uintptr()) is the established address-of
+			// idiom, so coercing a reference to uintptr keeps its pointer bits (ptrtoint).
+			derefToValue := semantic.SameType(actualRef.Elem, expected) ||
+				((isNumericType(expected) || semantic.IsBoolType(expected)) && !isUintptrType(expected))
+			if derefToValue {
+				loaded, err := s.loadValue(value, actualRef.Elem, "ref.value")
+				if err != nil {
+					return nil, err
+				}
+				return s.coerceValue(loaded, actualRef.Elem, expected)
 			}
-			return s.coerceValue(loaded, actualRef.Elem, expected)
 		}
 	}
 	if semantic.IsNeverType(actual) {

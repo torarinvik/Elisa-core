@@ -1427,6 +1427,10 @@ func numericCastType(t semantic.Type) semantic.Type {
 func isNumericCastType(t semantic.Type) bool {
 	return semantic.IsNumericType(numericCastType(t))
 }
+func isUintptrType(t semantic.Type) bool {
+	b, ok := t.(*semantic.BuiltinType)
+	return ok && b != nil && b.Name == "uintptr"
+}
 func isPointerLikeType(t semantic.Type) bool {
 	switch t.(type) {
 	case *semantic.RefType, *semantic.NullType, *semantic.DStrType, *semantic.FuncType:
