@@ -426,7 +426,7 @@ func runnableTestCases(cases []selectedTestCase) []selectedTestCase {
 	}
 	return out
 }
-func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stdout io.Writer, stderr io.Writer) int {
+func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stdout io.Writer, stderr io.Writer) int {
 	suiteStart := time.Now()
 	writeTestPhaseLine(stderr, "selected_tests", "read_source")
 	source, err := readSourceWithIncludes(inputFile, map[string]bool{})
@@ -475,7 +475,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		var nativeTiming nativeBuildTiming
 		var analyzeTime time.Duration
 		var shimWriteTime time.Duration
-		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, stderr)
+		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr)
 		compileTotal = time.Since(compileStart)
 		analyzeTotal = analyzeTime
 		nativeObjectTotal = nativeTiming.ObjectWrite

@@ -99,7 +99,23 @@ import (
 	"unsafe"
 
 	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
+
+// traceCapturableScalar reports whether a value of this semantic type fits a single
+// integer register and is safe to widen to i64 for recording. Aggregates, error unions,
+// optionals, dstr etc. are skipped (recorded as a plain step) -- both because they do not
+// fit i64 and because their LLVM value representation is not always a plain scalar the
+// widening helper can consume.
+func traceCapturableScalar(t semantic.Type) bool {
+	if t == nil {
+		return false
+	}
+	if _, ok := t.(*semantic.RefType); ok {
+		return true
+	}
+	return isNumericType(t) || semantic.IsBoolType(t)
+}
 
 // traceState drives -ftrace instrumentation: it emits a call to
 // elisa_trace_record(func_name, line) at every statement. The runtime (in
@@ -145,7 +161,7 @@ func (t *traceState) nameGlobalFor(name string) C.LLVMValueRef {
 
 // recordValue emits a value record if the value widens to i64 (scalar/pointer); otherwise
 // it falls back to a plain step record so the line still appears in the path.
-func (t *traceState) recordValue(state *functionState, line int, varName string, value C.LLVMValueRef) {
+func (t *traceState) recordValue(state *functionState, line int, varName string, value C.LLVMValueRef, valueType semantic.Type) {
 	if t == nil || state == nil || state.builder == nil || state.traceNameGlobal == nil {
 		return
 	}
@@ -153,7 +169,7 @@ func (t *traceState) recordValue(state *functionState, line int, varName string,
 		line = 0
 	}
 	var v64 C.LLVMValueRef
-	if value != nil {
+	if value != nil && traceCapturableScalar(valueType) {
 		v64 = C.elisacoreTraceValueToI64(state.builder, t.g.context, value)
 	}
 	if v64 == nil || varName == "" || varName == "_" {

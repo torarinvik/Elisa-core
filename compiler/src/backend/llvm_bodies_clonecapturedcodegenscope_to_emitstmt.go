@@ -339,7 +339,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		s.bindImplicitTreeOwnerParam(n.Name, declType, alloca, initValue)
 		if s.g.trace != nil {
-			s.g.trace.recordValue(s, n.Pos().Line, n.Name, initValue)
+			s.g.trace.recordValue(s, n.Pos().Line, n.Name, initValue, declType)
 		}
 		return nil
 	case *ast.LetDestructureStmt:
@@ -439,7 +439,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 						return err
 					}
 					if s.g.trace != nil {
-						s.g.trace.recordValue(s, n.Pos().Line, identTarget.Name, value)
+						s.g.trace.recordValue(s, n.Pos().Line, identTarget.Name, value, storeType)
 					}
 					s.invalidatePackedReadCaches()
 					return nil
@@ -480,7 +480,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			}
 			// Value record for a scalar ident; otherwise (field/index target, or a
 			// non-scalar value) recordValue falls back to a plain step.
-			s.g.trace.recordValue(s, n.Pos().Line, assignName, value)
+			s.g.trace.recordValue(s, n.Pos().Line, assignName, value, targetType)
 		}
 		s.bindPackedStoreValue(targetType, value)
 		if path, ok := s.packedEnumStoragePath(n.Target); ok {

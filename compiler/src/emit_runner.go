@@ -245,7 +245,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			return 1
 		}
 		writeTestPhaseLine(stderr, "emit_test", "selected_test_execution")
-		return executeSelectedTests(program.filename, result, options.filter, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, stdout, stderr)
+		return executeSelectedTests(program.filename, result, options.filter, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, stdout, stderr)
 	case emitInterpret:
 		if options.output != "" {
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitInterpret)
