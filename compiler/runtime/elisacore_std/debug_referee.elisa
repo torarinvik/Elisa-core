@@ -99,33 +99,49 @@ struct ElisaTraceEntry:
     var_name: mutable cstr
     value: mutable u64
     line: mutable u32
+    repeat: mutable u32
     has_value: mutable u8
 
 global mutable elisa_trace_ring: ElisaTraceEntry[ELISA_TRACE_CAP] = zeroed
-global mutable elisa_trace_pos: u64 = 0
+global mutable elisa_trace_pos: u64 = 0     # ring head: number of distinct entries written
+global mutable elisa_trace_total: u64 = 0   # actual steps recorded (counts deduped repeats)
 
 # Plain step record: just function + line (the execution path).
 def elisa_trace_record(name: cstr, line: u32) -> void:
     if not elisa_trace_fault_checked:
         elisa_trace_maybe_install_fault_handler()
+    elisa_trace_total <- elisa_trace_total + 1u64
+    # Collapse a consecutive run of the same plain step (e.g. a hot loop body) into a
+    # single entry with a repeat count, so a tight loop does not flush the whole ring.
+    if elisa_trace_pos > 0u64:
+        last: usize = ((elisa_trace_pos - 1u64) % ELISA_TRACE_CAP.u64()).usize()
+        # Compare the name by POINTER (the compiler passes one constant string per
+        # function, so identity == same function) -- cheap, and avoids a string compare on
+        # the hot path. cstr `==` would do a ctx_streq.
+        if elisa_trace_ring[last].has_value == 0u8 and elisa_trace_ring[last].line == line and elisa_trace_ring[last].name.cast[uintptr] == name.cast[uintptr]:
+            elisa_trace_ring[last].repeat <- elisa_trace_ring[last].repeat + 1u32
+            return
     idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
     elisa_trace_ring[idx].name <- name
     elisa_trace_ring[idx].line <- line
+    elisa_trace_ring[idx].repeat <- 0u32
     elisa_trace_ring[idx].has_value <- 0u8
     elisa_trace_pos <- elisa_trace_pos + 1u64
 
 # Value record: a variable received a (scalar/pointer) value at this step.
 def elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64) -> void:
+    elisa_trace_total <- elisa_trace_total + 1u64
     idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
     elisa_trace_ring[idx].name <- name
     elisa_trace_ring[idx].line <- line
     elisa_trace_ring[idx].var_name <- var_name
     elisa_trace_ring[idx].value <- value
+    elisa_trace_ring[idx].repeat <- 0u32
     elisa_trace_ring[idx].has_value <- 1u8
     elisa_trace_pos <- elisa_trace_pos + 1u64
 
 def elisa_trace_count() -> u64:
-    return elisa_trace_pos
+    return elisa_trace_total
 
 # On a fault, print the recent trace then restore the default disposition and re-raise so
 # the original crash still happens (core dump etc.). snprintf/write in a handler is not
@@ -155,12 +171,12 @@ def elisa_trace_maybe_install_fault_handler() -> void:
         elisa_trace_install_fault_handler()
 
 def elisa_trace_dump() -> void:
-    total: u64 = elisa_trace_pos
-    n: mutable u64 = total
+    entries: u64 = elisa_trace_pos
+    n: mutable u64 = entries
     if n > ELISA_TRACE_CAP.u64():
         n <- ELISA_TRACE_CAP.u64()
-    hdr: mutable u8[128] = zeroed
-    hw: int = snprintf(hdr[0], 128usize, "--- elisa trace: most recent %llu of %llu step(s) ---\n", n, total) can Console.Format
+    hdr: mutable u8[160] = zeroed
+    hw: int = snprintf(hdr[0], 160usize, "--- elisa trace: most recent %llu entries (%llu step(s)) ---\n", n, elisa_trace_total) can Console.Format
     if hw > 0:
         _ = write(2, hdr[0].ref[void&], hw.usize()) can Console
     i: mutable u64 = 0u64
@@ -168,12 +184,15 @@ def elisa_trace_dump() -> void:
         idx: usize = ((elisa_trace_pos - 1u64 - i) % ELISA_TRACE_CAP.u64()).usize()
         nm: cstr = elisa_trace_ring[idx].name
         ln: u32 = elisa_trace_ring[idx].line
+        rep: u32 = elisa_trace_ring[idx].repeat
         buf: mutable u8[256] = zeroed
         w: mutable int = 0
         if elisa_trace_ring[idx].has_value != 0u8:
             vn: cstr = elisa_trace_ring[idx].var_name
             vv: u64 = elisa_trace_ring[idx].value
             w <- snprintf(buf[0], 256usize, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
+        elif rep != 0u32:
+            w <- snprintf(buf[0], 256usize, "  [-%llu] %s:%u (x%u)\n", i, nm, ln, rep + 1u32) can Console.Format
         else:
             w <- snprintf(buf[0], 256usize, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
         if w > 0:
