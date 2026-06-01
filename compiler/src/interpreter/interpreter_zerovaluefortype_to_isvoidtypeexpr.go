@@ -267,6 +267,12 @@ func parseIntLiteral(lit *ast.IntLit) (Value, error) {
 	}
 	value, err := strconv.ParseInt(text, base, 64)
 	if err != nil {
+		// A literal that overflows int64 but fits uint64 -- a high address or a
+		// full-width mask such as 0xFFFFFFFF00000000 -- is valid in u64/uintptr
+		// contexts. Reinterpret its bits as int64 so the value round-trips.
+		if uvalue, uerr := strconv.ParseUint(text, base, 64); uerr == nil {
+			return IntValue(int64(uvalue)), nil
+		}
 		return VoidValue(), err
 	}
 	return IntValue(value), nil
