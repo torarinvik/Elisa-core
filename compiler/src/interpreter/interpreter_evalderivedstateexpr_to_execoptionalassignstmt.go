@@ -94,9 +94,50 @@ func interpreterDerivedStateSelfPath(expr ast.Expr) ([]string, bool) {
 		return nil, false
 	}
 }
+
+// evalPositionalArgs evaluates a call's arguments left to right as positional values, for
+// passing to a host mock (which receives them positionally, e.g. self, addr).
+func (i *Interpreter) evalPositionalArgs(frame *frame, argExprs []ast.Expr) ([]Value, error) {
+	args := make([]Value, 0, len(argExprs))
+	for _, argExpr := range argExprs {
+		value, err := i.evalExpr(frame, argExpr)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, value)
+	}
+	return args, nil
+}
+
+func mockCallName(funcExpr ast.Expr) (string, bool) {
+	switch f := funcExpr.(type) {
+	case *ast.Ident:
+		if f == nil {
+			return "", false
+		}
+		return f.Name, true
+	case *ast.FieldExpr:
+		return interpreterQualifiedFieldName(f)
+	}
+	return "", false
+}
+
 func (i *Interpreter) evalCallExpr(frame *frame, expr *ast.CallExpr) (Value, error) {
 	if expr != nil && expr.Safe {
 		return i.evalSafeCallExpr(frame, expr)
+	}
+	// Intercept mocked calls by their syntactic name before resolving the callee, so an
+	// extern (which has no value in the interpreter) can still be served by a mock.
+	if len(i.mocks) > 0 {
+		if name, ok := mockCallName(expr.Func); ok {
+			if mockFn, ok := i.mocks[name]; ok {
+				args, err := i.evalPositionalArgs(frame, expr.LoweredArgs())
+				if err != nil {
+					return VoidValue(), err
+				}
+				return mockFn(args)
+			}
+		}
 	}
 	calleeValue, err := i.evalExpr(frame, expr.Func)
 	if err != nil {
@@ -154,6 +195,13 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 		return i.callLambda(calleeValue.lambdaVal, expr, frame, argExprs, prependNamed)
 	}
 	name := calleeValue.funcName
+	if mockFn, ok := i.mocks[name]; ok {
+		args, err := i.evalPositionalArgs(frame, argExprs)
+		if err != nil {
+			return VoidValue(), err
+		}
+		return mockFn(args)
+	}
 	if runtimeFn, ok := i.runtimeFuncs[name]; ok {
 		positional, named, err := i.evalCallArgsForParams(frame, expr, argExprs, prependNamed, runtimeFn.params)
 		if err != nil {

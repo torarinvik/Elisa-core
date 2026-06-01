@@ -17,6 +17,11 @@ type Options struct {
 	Entry    string
 	Stdout   io.Writer
 	Debugger *Debugger
+	// Mocks replaces named function calls with a host-provided implementation, keyed by the
+	// resolved function name. It lets pure logic be stepped in the interpreter against
+	// injected data -- e.g. mocking MemoryManager_ReadU8 to serve bytes from a captured guest
+	// memory image -- without executing the real (native) body. Args are passed positionally.
+	Mocks map[string]func(args []Value) (Value, error)
 }
 type Result struct {
 	Return Value
@@ -74,6 +79,7 @@ type Interpreter struct {
 	runtimeFuncs map[string]runtimeFuncInfo
 	nextLambdaID int
 	debugger     *Debugger
+	mocks        map[string]func(args []Value) (Value, error)
 }
 type frame struct {
 	locals    map[string]Value
@@ -187,6 +193,7 @@ func Execute(result *semantic.Result, options Options) (*Result, error) {
 		consts:    map[string]Value{},
 		globals:   map[string]Value{},
 		debugger:  options.Debugger,
+		mocks:     options.Mocks,
 	}
 	if interp.debugger != nil {
 		interp.debugger.Reset()
@@ -465,6 +472,9 @@ func stringifyValue(value Value) (string, error) {
 	}
 }
 func (i *Interpreter) callFunctionByName(name string, args []Value) (Value, error) {
+	if mockFn, ok := i.mocks[name]; ok {
+		return mockFn(cloneArgs(args))
+	}
 	if runtimeFn, ok := i.runtimeFuncs[name]; ok {
 		return runtimeFn.fn(cloneArgs(args))
 	}
