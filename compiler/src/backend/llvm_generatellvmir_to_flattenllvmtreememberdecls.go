@@ -40,7 +40,14 @@ func GenerateLLVMIRWithOptAndPackedLoweringProfile(result *semantic.Result, optL
 }
 
 func GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string) (string, error) {
-	g, err := compileLLVMModuleWithTarget(result, optLevel, profile, targetTriple)
+	return GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(result, optLevel, profile, targetTriple, false)
+}
+
+// GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug is like the non-Debug
+// variant but emits DWARF debug-info metadata into the IR when debugInfo is true, so
+// the textual-IR -> llc native build path produces a symbolized (attachable) binary.
+func GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool) (string, error) {
+	g, err := compileLLVMModuleWithTargetAndDebug(result, optLevel, profile, targetTriple, debugInfo)
 	if err != nil {
 		return "", err
 	}

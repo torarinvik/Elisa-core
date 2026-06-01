@@ -50,12 +50,12 @@ type nativeBuildTiming struct {
 	CacheHit     bool
 }
 
-func buildNativeExecutable(result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), error) {
+func buildNativeExecutable(result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, stderr io.Writer) (string, func(), error) {
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("clang is required to build native executables: %w", err)
 	}
-	exePath, cleanup, _, err := buildNativeExecutableWithClang(clangPath, result, foreignFiles, linkFlags, outputPath, optLevel, packedProfile, targetTriple, stderr)
+	exePath, cleanup, _, err := buildNativeExecutableWithClang(clangPath, result, foreignFiles, linkFlags, outputPath, optLevel, packedProfile, targetTriple, debugInfo, stderr)
 	return exePath, cleanup, err
 }
 
@@ -210,7 +210,7 @@ func exportedTypeNames(result *semantic.Result) []string {
 	return names
 }
 
-func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
+func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
 	if result == nil {
 		return "", func() {}, nativeBuildTiming{}, fmt.Errorf("semantic result is nil")
 	}
@@ -240,7 +240,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	objectStart := time.Now()
 	easmModules := append([]*easm.Module(nil), result.EASMModules...)
 	result.EASMModules = nil
-	if err := writeNativeObjectViaClangIR(clangPath, result, objectPath, optLevel, packedProfile, targetTriple, stderr); err != nil {
+	if err := writeNativeObjectViaClangIR(clangPath, result, objectPath, optLevel, packedProfile, targetTriple, debugInfo, stderr); err != nil {
 		result.EASMModules = easmModules
 		cleanup()
 		return "", func() {}, timing, err
@@ -547,7 +547,7 @@ func nativeExecCommand(exePath string, targetTriple string, args ...string) *exe
 	return exec.Command(prefix[0], cmdArgs...)
 }
 
-func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, objectPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
+func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, objectPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, stderr io.Writer) error {
 	_ = clangPath
 	// Optional textual IR dump for debugging. This regenerates the module and
 	// serializes it (slow for large modules), so it is opt-in.
@@ -571,13 +571,14 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 			OptLevel:      optLevel,
 			PackedProfile: packedProfile,
 			TargetTriple:  targetTriple,
+			DebugInfo:     debugInfo,
 		}); err == nil {
 			return nil
 		}
 		// Fall through to the textual IR + llc path on any in-process error.
 	}
 	// Default path: generate textual IR and compile it with llc.
-	ir, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result, optLevel, packedProfile, targetTriple)
+	ir, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(result, optLevel, packedProfile, targetTriple, debugInfo)
 	if err != nil {
 		return err
 	}
@@ -595,6 +596,7 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 		OptLevel:      optLevel,
 		PackedProfile: packedProfile,
 		TargetTriple:  targetTriple,
+		DebugInfo:     debugInfo,
 	})
 }
 
@@ -1306,7 +1308,7 @@ func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend
 		}
 	}
 	if clangPath, err := exec.LookPath("clang"); err == nil {
-		if err := writeNativeObjectViaClangIR(clangPath, runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, stderr); err == nil {
+		if err := writeNativeObjectViaClangIR(clangPath, runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, false, stderr); err == nil {
 			return nil
 		} else if strings.TrimSpace(targetTriple) != "" {
 			return err
@@ -1393,7 +1395,7 @@ func writeDebugRefereeObject(outputPath string, packedProfile backend.PackedLowe
 		return fmt.Errorf("failed to analyze debug referee runtime support")
 	}
 	if clangPath, err := exec.LookPath("clang"); err == nil {
-		if err := writeNativeObjectViaClangIR(clangPath, refereeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, stderr); err == nil {
+		if err := writeNativeObjectViaClangIR(clangPath, refereeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, false, stderr); err == nil {
 			return nil
 		} else if strings.TrimSpace(targetTriple) != "" {
 			return err
