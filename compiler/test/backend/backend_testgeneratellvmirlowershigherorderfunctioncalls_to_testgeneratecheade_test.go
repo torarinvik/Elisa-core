@@ -50,7 +50,7 @@ def call_bits(bits: uintptr, value: i64) -> i64:
     return fn(value)
 
 def run() -> i64:
-	bits: uintptr = inc as uintptr
+	bits: uintptr = inc.cast[uintptr]
     return call_bits(bits, 41)
 `
 	result := parseAndAnalyze(t, "backend_function_value_erasure_casts.elisa", src)
@@ -227,13 +227,13 @@ func TestGenerateLLVMIRCoercesStringLiteralToSView(t *testing.T) {
 }
 func TestGenerateLLVMIRLowersEscapedStringLiteralBytes(t *testing.T) {
 	src := `def newline_text() -> u8&:
-	return "line\nbreak" as u8&
+	return "line\nbreak".cast[u8&]
 
 def quoted_text() -> u8&:
-	return "quote: \" slash: \\ hex: \x41" as u8&
+	return "quote: \" slash: \\ hex: \x41".cast[u8&]
 
 def unicode_text() -> u8&:
-	return "\u263A" as u8&
+	return "\u263A".cast[u8&]
 `
 	result := parseAndAnalyze(t, "backend_string_escapes.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)

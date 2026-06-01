@@ -439,7 +439,7 @@ func TestGenerateLLVMIRSpecializesSameExtentRuntimeStringEquality(t *testing.T) 
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
-	return StringView("" as u8&, end - start)
+	return StringView("".cast[u8&], end - start)
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return sview(value, start, end)

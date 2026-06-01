@@ -208,11 +208,12 @@ def arena_nullable_u8_from_heap(ptr: heap u8&) -> u8&?:
 # ------------------------------------------------------------
 
 def sfree[T](ptr: heap T&) -> heap T!:
-    # Only valid against the libc-malloc backend; mmap/VirtualAlloc regions are released
-    # by free_region (which knows the size). Calling libc free on an mmap pointer is UB.
-    static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
-        trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
-            free(ptr.cast[heap void&]) can Memory.Release
+    can Memory.Release:
+        # Only valid against the libc-malloc backend; mmap/VirtualAlloc regions are released
+        # by free_region (which knows the size). Calling libc free on an mmap pointer is UB.
+        static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+            trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+                free(ptr.cast[heap void&])
     return null
 
 # ------------------------------------------------------------
@@ -326,7 +327,9 @@ def free_region(r: heap Region&):
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
             size_bytes: usize = size_of(Region) + size_of(uintptr) * r.capacity
-            ret: int = munmap(arena_heap_void_from_region(r), size_bytes)
+            ret: mutable int = 0
+            trusted Unsafe.RawExtern:
+                ret <- munmap(arena_heap_void_from_region(r), size_bytes)
             assert ret == 0
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
@@ -355,7 +358,8 @@ def free_region_backend(r: heap Region&, backend: int):
         if backend == ARENA_REGION_BACKEND_MALLOC:
             free_region_malloc(r)
             return
-        free_region(r)
+        trusted Unsafe.RawExtern:
+            free_region(r)
 
 def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
@@ -512,7 +516,8 @@ def arena_free(a: mutable Arena&):
             while r != null:
                 r0: mutable heap Region& = r
                 r <- r.next
-                free_region_backend(r0, a.backend)
+                trusted Unsafe.RawExtern:
+                    free_region_backend(r0, a.backend)
 
         a.begin as ! <- null
         a.end as ! <- null
@@ -528,7 +533,8 @@ def arena_trim(a: mutable Arena&):
             while r != null:
                 r0: mutable heap Region& = r
                 r <- r.next
-                free_region_backend(r0, a.backend)
+                trusted Unsafe.RawExtern:
+                    free_region_backend(r0, a.backend)
 
         a.end.next as ! <- null
 

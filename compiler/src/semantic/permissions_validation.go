@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"path/filepath"
 	"strings"
 )
 
@@ -80,6 +81,9 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 	if len(missing) == 0 {
 		return
 	}
+	if isRuntimeStdPermissionInternal(pos.File) && allUnsafeFamilies(missing) {
+		return
+	}
 	msg := effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing))
 	// Teach the safe alternatives for the dynamic-index gate: most uses want a
 	// checked access, not the unsafe opt-out. Appended after the standard message
@@ -109,6 +113,15 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 		return
 	}
 	a.warnf(pos, msg)
+}
+
+func isRuntimeStdPermissionInternal(path string) bool {
+	switch filepath.Base(path) {
+	case "arena.elisa", "heap.elisa", "collections.elisa", "elisacore_runtime.elisa", "elisacore_runtime_prelude.elisa":
+		return true
+	default:
+		return false
+	}
 }
 
 // allUnsafeFamilies reports whether every missing permission family is the

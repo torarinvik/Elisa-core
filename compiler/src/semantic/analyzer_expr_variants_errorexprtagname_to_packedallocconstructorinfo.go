@@ -462,6 +462,7 @@ func (a *Analyzer) treeStoreConstructorCall(expr *ast.CallExpr) (*TreeStoreType,
 		if !AssignableTo(arenaType, actual) {
 			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType, arenaType, actual)
 		}
+		a.markRegionAllocatedByOwnerExpr(expr.Args[0])
 	} else {
 		a.analyzeExpr(expr.Args[0])
 	}
@@ -500,11 +501,26 @@ func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumSt
 		if !AssignableTo(arenaType, actual) {
 			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType, arenaType, actual)
 		}
+		a.markRegionAllocatedByOwnerExpr(expr.Args[0])
 	} else {
 		a.analyzeExpr(expr.Args[0])
 	}
 	return PackedEnumStoreWithState(storeType, a.namedTypes["Local"]), true
 }
+
+func (a *Analyzer) markRegionAllocatedByOwnerExpr(expr ast.Expr) {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return
+	}
+	sym, state := a.lookupRegionState(ident.Name)
+	if sym == nil || state.Destroyed {
+		return
+	}
+	state.Allocated = true
+	a.currentRegions[sym] = state
+}
+
 func (a *Analyzer) enumConstructorCall(expr *ast.CallExpr) (*EnumType, *EnumVariant, bool) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok {

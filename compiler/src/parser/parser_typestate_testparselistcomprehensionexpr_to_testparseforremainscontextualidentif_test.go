@@ -289,18 +289,15 @@ func TestParsePostfixCastWithMutableAnyRefTarget(t *testing.T) {
 	}
 }
 func TestAsCastSyntaxIsRejectedInReturn(t *testing.T) {
-	// The `expr as T` value-cast spelling was removed; `as` is reserved for
-	// binding/aliasing constructs only. `expr.cast[T]` is the replacement. The
-	// parser must no longer accept a value-level `as` cast in expression position.
 	_, errs := parseSourceFile(t, "def keep(x: i64) -> i64:\n    return x as i64\n")
 	if len(errs) == 0 {
-		t.Fatalf("expected `expr as T` to be rejected after as-cast removal")
+		t.Fatalf("expected `expr as T` to be rejected")
 	}
 }
 func TestAsCastSyntaxIsRejectedInCallArgs(t *testing.T) {
 	_, errs := parseSourceFile(t, "def accepts(text: u8&) -> bool:\n    return true\n\ndef keep() -> i64:\n    if accepts(\"hello\" as u8&):\n        return 1\n    return 0\n")
 	if len(errs) == 0 {
-		t.Fatalf("expected `expr as T` in call args to be rejected after as-cast removal")
+		t.Fatalf("expected `expr as T` in call args to be rejected")
 	}
 }
 func TestParseAsRefAssignmentRemainsStatementSyntax(t *testing.T) {

@@ -386,7 +386,7 @@ def load_text(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]:
 	return text
 
 def load_with_fallback(path: u8&) -> u8&:
-	text: u8& = try read_file(path) else "" as u8&
+	text: u8& = try read_file(path) else "".cast[u8&]
 	return text
 `
 	_, errs := parseAndAnalyze(t, "error_handling_ok.elisa", src)

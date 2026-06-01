@@ -113,7 +113,8 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 	// The owner is a region if it is a `region` decl (SymbolRegion) OR a binding
 	// declared `owned <store>` / a moved-in owned region (registered in
 	// currentRegions, see registerOwnedStoreOwner / markReceivedOwnedRegion).
-	if sym, ok := a.currentScope.Lookup(ident.Name); !ok || (sym.Kind != SymbolRegion && !a.symbolIsRegionOwner(sym)) {
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || (sym.Kind != SymbolRegion && !a.symbolIsRegionOwner(sym)) {
 		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType)
 		a.analyzeExpr(expr.Value)
 		return invalidType
@@ -122,6 +123,8 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		a.errorf(expr.Pos(), "cannot allocate from destroyed region %q", ident.Name)
 		return invalidType
 	}
+	state.Allocated = true
+	a.currentRegions[sym] = state
 	valueType := a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
 	// A region is a plain-bytes store: destroy/reset frees its contents in bulk
 	// without running destructors or consuming linear handles. A value carrying

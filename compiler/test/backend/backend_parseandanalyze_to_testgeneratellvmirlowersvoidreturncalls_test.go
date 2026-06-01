@@ -455,11 +455,11 @@ def bump(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
 		"declare i64 @fetch_and(ptr, i64, i32)",
 		"declare i64 @fetch_xor(ptr, i64, i32)",
 		"define i64 @bump(%atomic__i64",
-		"call i64 @fetch_add(ptr",
-		"call i64 @fetch_sub(ptr",
-		"call i64 @fetch_or(ptr",
-		"call i64 @fetch_and(ptr",
-		"call i64 @fetch_xor(ptr",
+		"atomicrmw add ptr",
+		"atomicrmw sub ptr",
+		"atomicrmw or ptr",
+		"atomicrmw and ptr",
+		"atomicrmw xor ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

@@ -705,7 +705,8 @@ def darray_pop[T](da: mutable darray[T]&) -> T:
 @method
 def pop[T](da: mutable darray[T]&) -> T:
     can Abort.Panic:
-        return darray_pop[T](da)
+        trusted Unsafe.UncheckedIndex:
+            return darray_pop[T](da)
 
 def darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T:
     can Abort.Panic:
@@ -722,7 +723,8 @@ def darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T:
 @method
 def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
     can Abort.Panic:
-        return darray_remove_at[T](da, index)
+        trusted Unsafe.UncheckedIndex:
+            return darray_remove_at[T](da, index)
 
 # Read-only range algorithms (no allocation). The predicate is a pure
 # `func(T) -> bool`, so a named function or a `lambda` works. These replace
@@ -805,7 +807,8 @@ def sort[T](da: mutable darray[T]&, less: func(T, T) -> bool):
         trusted Unsafe.AssumeProgress:
             while i > 0:
                 i <- i - 1
-                darray_sift_down[T](da, less, i, n)
+                trusted Unsafe.UncheckedIndex:
+                    darray_sift_down[T](da, less, i, n)
         e: mutable usize = n
         trusted Unsafe.AssumeProgress:
             while e > 1:
@@ -813,7 +816,8 @@ def sort[T](da: mutable darray[T]&, less: func(T, T) -> bool):
                 tmp: T = da[0]
                 da[0] <- da[e]
                 da[e] <- tmp
-                darray_sift_down[T](da, less, 0, e)
+                trusted Unsafe.UncheckedIndex:
+                    darray_sift_down[T](da, less, 0, e)
 
 # Reverse the elements in place (std::reverse).
 @method
@@ -887,7 +891,9 @@ def lower_bound[T](da: darray[T], target: T, less: func(T, T) -> bool) -> usize:
 
 @method
 def binary_search[T](da: darray[T], target: T, less: func(T, T) -> bool) -> bool:
-    idx: usize = da.lower_bound(target, less)
+    idx: mutable usize = 0
+    trusted Unsafe.UncheckedIndex:
+        idx <- da.lower_bound(target, less)
     if idx >= da.count:
         return false
     return not less(target, da[idx])

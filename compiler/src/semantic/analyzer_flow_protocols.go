@@ -498,6 +498,11 @@ func (a *Analyzer) reportUnconsumedProtocolValues() {
 		if key.Root == nil || (state.LiveProtocolType == nil && state.LiveProtocolDescription == "") {
 			continue
 		}
+		if key.Root.Kind == SymbolRegion && key.Path == "" {
+			if regionState, ok := a.currentRegions[key.Root]; ok && regionState.Allocated && !regionState.Destroyed {
+				continue
+			}
+		}
 		pos := lexer.Pos{}
 		if key.Root.Node != nil {
 			pos = key.Root.Node.Pos()

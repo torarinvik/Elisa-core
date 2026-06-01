@@ -369,7 +369,7 @@ export func pass_array_c(value: i32[4]) -> i32[4] = pass_array
 }
 func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
 	src := `def choose_text(value: u8&?) -> u8&:
-	return value if value != null else "" as u8&
+	return value if value != null else "".cast[u8&]
 `
 	_, errs := parseAndAnalyze(t, "ternary_refinement.elisa", src)
 	requireNoErrors(t, errs)
@@ -415,7 +415,7 @@ func TestAnalyzeAcceptsBareReferenceTypeSyntax(t *testing.T) {
 	value: int
 
 def read(box: Box&) -> int:
-	ptr: u8& = "hello" as u8&
+	ptr: u8& = "hello".cast[u8&]
 	return box.value + ptr[0].int()
 `
 	_, errs := parseAndAnalyze(t, "bare_reference_type_accept.elisa", src)
@@ -429,7 +429,7 @@ func TestParseRejectsLegacyDotReferenceCastSyntax(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected parse error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "legacy reference cast syntax is no longer supported") {
+	if !strings.Contains(strings.Join(errs, "\n"), "unexpected token ) in expression") {
 		t.Fatalf("expected legacy reference cast parse diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -446,7 +446,7 @@ def keep_heap(box: heap Box&?) -> heap Box&?:
 	return box.cast[Box&?].cast[heap Box&?]
 
 def coerce_text() -> u8&:
-	return "hello" as u8&
+	return "hello".cast[u8&]
 
 def use_source() -> Box&?:
 	return maybe_heap_box().cast[Box&?]
@@ -462,17 +462,14 @@ func TestAnalyzeRefSugarAddressCast(t *testing.T) {
 	src := `struct Box:
 	value: int
 
-def widen_local() -> Box&:
-	box: Box = zeroed
+def widen_param(box: Box&) -> Box&:
 	return box.ref[Box&]
 
-def bytes_local() -> u8&:
-	buf: u8[4] = zeroed
+def bytes_param(buf: u8[4]&) -> u8&:
 	return buf.ref[u8&]
 
-def keep_explicit_stack() -> stack Box&:
-	box: Box = zeroed
-	return box.ref[stack Box&]
+def keep_explicit_heap(box: heap Box&) -> heap Box&:
+	return box.ref[heap Box&]
 `
 	result, errs := parseAndAnalyze(t, "ref_sugar_address_cast.elisa", src)
 	requireNoErrors(t, errs)

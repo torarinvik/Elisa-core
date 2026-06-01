@@ -116,7 +116,7 @@ func TestAnalyzeRejectsTryOnNonFallibleExpression(t *testing.T) {
 }
 func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
 	src := `def bad(value: u8&) -> u8&:
-	return value else "" as u8&
+	return value else "".cast[u8&]
 `
 	_, errs := parseAndAnalyze(t, "else_on_nonnullable_ref.elisa", src)
 	if len(errs) == 0 {
@@ -457,16 +457,16 @@ func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "elisacore_runtime.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireFunctionPermissionRefs(t, result, "int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "int_to_string_scratch", "Memory.Allocate", "Console.Format", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "char_to_string", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "char_to_string_scratch", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "rt_concat2", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "rt_string_builder_new", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "rt_string_builder_append", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "rt_string_builder_finish", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "rt_int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "rt_char_to_string", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic", "Global.Read", "Global.Write")
+	requireFunctionPermissionRefs(t, result, "int_to_string_scratch", "Memory.Allocate", "Console.Format", "Abort.Panic", "Global.Read", "Global.Write")
+	requireFunctionPermissionRefs(t, result, "char_to_string", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
+	requireFunctionPermissionRefs(t, result, "char_to_string_scratch", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
+	requireFunctionPermissionRefs(t, result, "rt_concat2", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
+	requireFunctionPermissionRefs(t, result, "rt_string_builder_new", "Memory.Allocate", "Abort.Panic", "Global.Read")
+	requireFunctionPermissionRefs(t, result, "rt_string_builder_append", "Memory.Allocate", "Abort.Panic", "Global.Read")
+	requireFunctionPermissionRefs(t, result, "rt_string_builder_finish", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
+	requireFunctionPermissionRefs(t, result, "rt_int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic", "Global.Read", "Global.Write")
+	requireFunctionPermissionRefs(t, result, "rt_char_to_string", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
 	requireFunctionPermissionRefs(t, result, "rt_puts", "Console.Write")
 	requireFunctionReturnTypeString(t, result, "int_to_string", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "int_to_string_scratch", "heap u8&")

@@ -56,13 +56,13 @@ extern foreign_task: Task[i64, Pending]
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "global \"current_thread\" cannot store affine handle values of type Thread[i64, Joinable]") {
+	if !strings.Contains(all, "global \"current_thread\" cannot store linear handle values of type Thread[i64, Joinable]") {
 		t.Fatalf("expected direct affine-global diagnostic, got:\n%s", all)
 	}
-	if !strings.Contains(all, "global \"current_holder\" cannot store affine handle values of type Holder") {
+	if !strings.Contains(all, "global \"current_holder\" cannot store linear handle values of type Holder") {
 		t.Fatalf("expected structural affine-global diagnostic, got:\n%s", all)
 	}
-	if !strings.Contains(all, "extern var \"foreign_task\" cannot store affine handle values of type Task[i64, Pending]") {
+	if !strings.Contains(all, "extern var \"foreign_task\" cannot store linear handle values of type Task[i64, Pending]") {
 		t.Fatalf("expected affine extern-global diagnostic, got:\n%s", all)
 	}
 }
@@ -82,10 +82,10 @@ def bad_local(holder: Holder) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "references to values containing affine handles are not supported; got Holder&") {
+	if !strings.Contains(all, "references to values containing linear handles are not supported; got Holder&") {
 		t.Fatalf("expected affine-reference diagnostic, got:\n%s", all)
 	}
-	if !strings.Contains(all, "cannot take address of value containing affine handles") {
+	if !strings.Contains(all, "cannot take address of value containing linear handles") {
 		t.Fatalf("expected affine-address-of-container diagnostic, got:\n%s", all)
 	}
 }
@@ -106,7 +106,7 @@ def bad(holder: Holder) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "value containing affine handles \"holder\" cannot be used: usage facts were consumed by argument to call \"join\"") {
+	if !strings.Contains(all, "value containing linear handles \"holder\" cannot be used: usage facts were consumed by argument to call \"join\"") {
 		t.Fatalf("expected aggregate-after-field-move diagnostic, got:\n%s", all)
 	}
 }
@@ -123,7 +123,7 @@ def bad(holder: Holder) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "value containing affine handles \"holder\" cannot be used: usage facts were consumed by move into local \"copy\"") {
+	if !strings.Contains(all, "value containing linear handles \"holder\" cannot be used: usage facts were consumed by move into local \"copy\"") {
 		t.Fatalf("expected moved-aggregate diagnostic, got:\n%s", all)
 	}
 }
@@ -214,7 +214,7 @@ def bad(items: array[Thread[i64, Joinable], 1]) -> i64:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "value containing affine handles \"items\" cannot be used: usage facts were consumed by argument to call \"join\"") {
+	if !strings.Contains(all, "value containing linear handles \"items\" cannot be used: usage facts were consumed by argument to call \"join\"") {
 		t.Fatalf("expected indexed-affine diagnostic, got:\n%s", all)
 	}
 }

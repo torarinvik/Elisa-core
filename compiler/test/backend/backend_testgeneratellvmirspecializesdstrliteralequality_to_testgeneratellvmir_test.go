@@ -235,7 +235,7 @@ func TestGenerateLLVMIRSpecializesLongStringViewLiteralHelperCalls(t *testing.T)
 	src := `extern string_view_eq(view: StringView, other: u8&?) -> int
 
 def same_long(view: StringView) -> bool:
-	return string_view_eq(view, "destroy_region" as u8&) != 0
+	return string_view_eq(view, "destroy_region".cast[u8&]) != 0
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_long.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)

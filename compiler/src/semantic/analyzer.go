@@ -81,102 +81,102 @@ const (
 )
 
 type Analyzer struct {
-	file                          *ast.File
-	diagnostics                   []Diagnostic
-	namedTypes                    map[string]Type
-	staticInterfaces              map[string]*StaticInterface
-	staticImpls                   map[string]*StaticImpl
-	extensionMethodsByName        map[string][]*ExtensionMethod
-	ufcsFunctionsByName           map[string][]*Symbol
-	permissions                   map[string]*PermissionSet
-	effectAliases                 map[string]*EffectAlias
-	contextBundles                map[string]*ContextBundle
-	paramPacks                    map[string]*ParamPack
-	globalScope                   *Scope
-	functionTypes                 map[string]*FuncType
-	externLinkNames               map[string]externLinkNameSignature
-	constValues                   map[string]ConstValue
-	exprTypes                     map[ast.Expr]Type
-	treeAttributes                map[string]map[string]*TreeAttribute
-	attributeFieldRefs            map[*ast.FieldExpr]*AttributeFieldRef
-	rewriteDefaults               map[*ast.Ident]bool
-	optionalBindSourceTypes       map[*ast.OptionalBindExpr]Type
-	interfaceMethodRefs           map[*ast.FieldExpr]*InterfaceMethodRef
-	safeCalls                     map[*ast.CallExpr]*SafeCallInfo
-	exprFacts                     map[ast.Expr]OptimizationFacts
-	indexBoundsProven             map[*ast.IndexExpr]bool
+	file                    *ast.File
+	diagnostics             []Diagnostic
+	namedTypes              map[string]Type
+	staticInterfaces        map[string]*StaticInterface
+	staticImpls             map[string]*StaticImpl
+	extensionMethodsByName  map[string][]*ExtensionMethod
+	ufcsFunctionsByName     map[string][]*Symbol
+	permissions             map[string]*PermissionSet
+	effectAliases           map[string]*EffectAlias
+	contextBundles          map[string]*ContextBundle
+	paramPacks              map[string]*ParamPack
+	globalScope             *Scope
+	functionTypes           map[string]*FuncType
+	externLinkNames         map[string]externLinkNameSignature
+	constValues             map[string]ConstValue
+	exprTypes               map[ast.Expr]Type
+	treeAttributes          map[string]map[string]*TreeAttribute
+	attributeFieldRefs      map[*ast.FieldExpr]*AttributeFieldRef
+	rewriteDefaults         map[*ast.Ident]bool
+	optionalBindSourceTypes map[*ast.OptionalBindExpr]Type
+	interfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
+	safeCalls               map[*ast.CallExpr]*SafeCallInfo
+	exprFacts               map[ast.Expr]OptimizationFacts
+	indexBoundsProven       map[*ast.IndexExpr]bool
 	// getWrappedIndexExprs records index expressions whose `else` recovery is
 	// owned by an enclosing `get` (e.g. `get arr[i] else 0`). Such sites already
 	// use the explicit `get` head, so they must NOT receive the bare-`else`
 	// deprecation warning.
-	getWrappedIndexExprs          map[*ast.IndexExpr]bool
+	getWrappedIndexExprs map[*ast.IndexExpr]bool
 	// currentViewStaticLen records the statically-known element count of a
 	// view/darray-view binding produced by a constant-bounded slice
 	// (e.g. `s = arr[0:15]` -> 15). A constant index `s[k]` with 0 <= k < len is
 	// then provably in bounds with zero runtime cost. Keyed by binding name, it
 	// follows the same block/loop save-restore and reassignment-invalidation
 	// discipline as currentIndexBounds.
-	currentViewStaticLen          map[string]int64
+	currentViewStaticLen map[string]int64
 	// currentViewMutable records whether a slice-derived view binding permits
 	// writes (its source is writable and not frozen). Writing through a view of
 	// an immutable source is rejected. Keyed by binding name, scoped like
 	// currentViewStaticLen.
-	currentViewMutable            map[string]bool
+	currentViewMutable map[string]bool
 	// checkedSliceExprs records slice expressions whose bounds are checked at
 	// runtime because they are the operand of `get` / `if let` (the safe
 	// bounded-view forms). Codegen emits a bounds test at slice creation for
 	// these, taking the recovery / else path when out of range.
-	checkedSliceExprs             map[*ast.SliceExpr]bool
-	storageViewStaleUses          map[ast.Expr]storageViewDependencyState
-	unsafeAliasExprs              map[ast.Expr]bool
-	unsafeAliasStmts              map[ast.Stmt]bool
-	progressSummaries             map[*ast.FuncDecl]*FunctionProgressSummary
-	numericLiteralSuffixWarnings  map[ast.Expr]bool
-	treeConstructorCallees        map[ast.Expr]bool
-	resolvedCastHooks             map[ast.Expr]*Symbol
-	unsafeLifetimeWidenCasts      map[*ast.CastExpr]bool
-	unsafeBufferReinterpretCasts  map[*ast.CastExpr]bool
-	loweredInitCalls              map[*ast.StructLitExpr]*ast.CallExpr
-	exprDenseNodeKeys             map[ast.Expr]DenseNodeKeyInfo
-	exprNodeTables                map[ast.Expr]NodeTableInfo
-	deferInfo                     map[*ast.DeferStmt]*DeferInfo
-	foldInfo                      map[*ast.FoldExpr]*FoldInfo
-	lambdaInfo                    map[*ast.LambdaExpr]*LambdaInfo
-	symbolFacts                   map[*Symbol]OptimizationFacts
-	funcDeclSymbols               map[*ast.FuncDecl]*Symbol
-	declVisibility                map[ast.Decl]string
-	privateTypeNames              map[string]bool
-	castHooksByName               map[string]map[castHookSignature]*Symbol
-	initHooksByName               map[string]map[initHookSignature]*Symbol
-	typeParamScopes               []map[string]Type
-	typeParamInterfaceScopes      []map[string]*StaticInterface
-	interfaceAssocTypeScopes      []map[string]Type
-	refStorageParamScopes         []map[string]Type
-	refStateParamScopes           []map[string]Type
-	constParamScopes              []map[string]Type
-	constEvalScopes               []map[string]ConstValue
-	staticContextDepth            int
-	staticCallDepth               int
-	shapeParamScopes              []map[string]Shape
-	regionParamScopes             []map[string]bool
-	permissionParamScopes         []map[string]bool
-	freshShapeCounter             int
-	returnFreshShapeStatus        map[string]freshReturnStatus
-	annotatedFuncs                []*AnnotatedFunc
-	exportedTypes                 []*ExportedType
-	exportedFuncs                 []*ExportedFunc
-	exportedGlobals               []*ExportedGlobal
-	currentScope                  *Scope
-	currentReturn                 Type
-	currentFuncDecl               *ast.FuncDecl
-	currentFuncType               *FuncType
+	checkedSliceExprs            map[*ast.SliceExpr]bool
+	storageViewStaleUses         map[ast.Expr]storageViewDependencyState
+	unsafeAliasExprs             map[ast.Expr]bool
+	unsafeAliasStmts             map[ast.Stmt]bool
+	progressSummaries            map[*ast.FuncDecl]*FunctionProgressSummary
+	numericLiteralSuffixWarnings map[ast.Expr]bool
+	treeConstructorCallees       map[ast.Expr]bool
+	resolvedCastHooks            map[ast.Expr]*Symbol
+	unsafeLifetimeWidenCasts     map[*ast.CastExpr]bool
+	unsafeBufferReinterpretCasts map[*ast.CastExpr]bool
+	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
+	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
+	exprNodeTables               map[ast.Expr]NodeTableInfo
+	deferInfo                    map[*ast.DeferStmt]*DeferInfo
+	foldInfo                     map[*ast.FoldExpr]*FoldInfo
+	lambdaInfo                   map[*ast.LambdaExpr]*LambdaInfo
+	symbolFacts                  map[*Symbol]OptimizationFacts
+	funcDeclSymbols              map[*ast.FuncDecl]*Symbol
+	declVisibility               map[ast.Decl]string
+	privateTypeNames             map[string]bool
+	castHooksByName              map[string]map[castHookSignature]*Symbol
+	initHooksByName              map[string]map[initHookSignature]*Symbol
+	typeParamScopes              []map[string]Type
+	typeParamInterfaceScopes     []map[string]*StaticInterface
+	interfaceAssocTypeScopes     []map[string]Type
+	refStorageParamScopes        []map[string]Type
+	refStateParamScopes          []map[string]Type
+	constParamScopes             []map[string]Type
+	constEvalScopes              []map[string]ConstValue
+	staticContextDepth           int
+	staticCallDepth              int
+	shapeParamScopes             []map[string]Shape
+	regionParamScopes            []map[string]bool
+	permissionParamScopes        []map[string]bool
+	freshShapeCounter            int
+	returnFreshShapeStatus       map[string]freshReturnStatus
+	annotatedFuncs               []*AnnotatedFunc
+	exportedTypes                []*ExportedType
+	exportedFuncs                []*ExportedFunc
+	exportedGlobals              []*ExportedGlobal
+	currentScope                 *Scope
+	currentReturn                Type
+	currentFuncDecl              *ast.FuncDecl
+	currentFuncType              *FuncType
 	// currentFuncSawPlainValueReturn records whether the current function has a
 	// value-returning path that is NOT a `return move <region>`. Combined with
 	// FuncType.ReturnsOwnedRegion it rejects functions that transfer an owned
 	// region on some paths but not others (which would make the caller's
 	// must-consume obligation unsound).
 	currentFuncSawPlainValueReturn bool
-	currentRegions                map[*Symbol]regionState
+	currentRegions                 map[*Symbol]regionState
 	// regionLifetimeOrdinals maps a local region name to a monotonic ordinal
 	// assigned at its `region NAME(...)` declaration. Because regions nest
 	// lexically (LIFO destruction), a LOWER ordinal means a longer-lived region:
@@ -238,30 +238,30 @@ type Analyzer struct {
 	// `count field in fields(T) where field.name != "x"`). Such a predicate is evaluated at
 	// compile time over interned literals, so a raw-u8&-`==`/`!=` there is not a runtime
 	// address-compare footgun and must not be flagged by the C-string comparison lint.
-	inCompileTimeQueryPredicate       bool
-	enforceUnsafePermissions          bool
-	enforceProgressSafety             bool
-	suppressOptimizationFacts         bool
-	suppressLazyFuncSummaryInference  bool
-	returnProvenanceInProgress        map[*ast.FuncDecl]bool
-	returnProvenanceLocalInProgress   map[*Symbol]bool
-	returnBorrowedOwnerRefInProgress  map[*ast.FuncDecl]bool
+	inCompileTimeQueryPredicate      bool
+	enforceUnsafePermissions         bool
+	enforceProgressSafety            bool
+	suppressOptimizationFacts        bool
+	suppressLazyFuncSummaryInference bool
+	returnProvenanceInProgress       map[*ast.FuncDecl]bool
+	returnProvenanceLocalInProgress  map[*Symbol]bool
+	returnBorrowedOwnerRefInProgress map[*ast.FuncDecl]bool
 	// inReturnBorrowCapture is true only while computing a return statement's
 	// borrowed-owner summary, enabling pass-through tracking of raw reference parameters
 	// (so `return p` records "returns param i") without affecting any other analysis.
-	inReturnBorrowCapture bool
-	returnBorrowedOwnerLocalProgress  map[*Symbol]bool
-	sinkParamInferenceInProgress      map[*ast.FuncDecl]bool
-	parallelForInfo                   map[*ast.ParallelForStmt]*ParallelForInfo
-	functionAnalyses                  map[*ast.FuncDecl]*FunctionAnalysis
-	loweredWithStmts                  map[*ast.WithStmt]bool
-	currentNamespace                  string
-	currentUsings                     []string
-	currentImplicitScopes             []map[string]ast.Expr
-	currentExplicitArgScopes          []map[string]ast.Expr
-	currentLocalParamPackScopes       []map[string]*ParamPack
-	implicitTempCounter               int
-	semanticLimitDiagnostics          map[string]bool
+	inReturnBorrowCapture            bool
+	returnBorrowedOwnerLocalProgress map[*Symbol]bool
+	sinkParamInferenceInProgress     map[*ast.FuncDecl]bool
+	parallelForInfo                  map[*ast.ParallelForStmt]*ParallelForInfo
+	functionAnalyses                 map[*ast.FuncDecl]*FunctionAnalysis
+	loweredWithStmts                 map[*ast.WithStmt]bool
+	currentNamespace                 string
+	currentUsings                    []string
+	currentImplicitScopes            []map[string]ast.Expr
+	currentExplicitArgScopes         []map[string]ast.Expr
+	currentLocalParamPackScopes      []map[string]*ParamPack
+	implicitTempCounter              int
+	semanticLimitDiagnostics         map[string]bool
 }
 
 type castHookSignature struct {
@@ -277,6 +277,7 @@ type initHookSignature struct {
 type regionState struct {
 	Destroyed  bool
 	Generation int
+	Allocated  bool
 }
 
 type regionMarkState struct {

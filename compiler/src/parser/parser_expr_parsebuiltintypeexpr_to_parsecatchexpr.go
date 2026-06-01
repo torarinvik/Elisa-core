@@ -634,10 +634,6 @@ func (p *Parser) membershipLiteralAhead() bool {
 func (p *Parser) notInMembershipAhead() bool {
 	return p.allowInMembership && p.peek() == lexer.TOKEN_NOT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IN
 }
-// parseAs no longer parses `expr as T` as a cast; `as` is reserved exclusively
-// for binding/aliasing constructs (match-pattern captures, visit/fold/rewrite
-// roots, export aliases). Use `expr.cast[T]` for casts. This pass-through is
-// retained as a precedence-chain seam.
 func (p *Parser) parseAs() ast.Expr {
 	return p.parseBitwiseOr()
 }

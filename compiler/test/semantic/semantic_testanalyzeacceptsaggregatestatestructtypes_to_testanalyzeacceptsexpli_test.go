@@ -494,7 +494,7 @@ def invoke_writer(fn: func(u8&) -> int can[Console.Write], text: u8&) -> int can
     return fn(text)
 
 def run() -> int can[Console.Write]:
-	return invoke_writer(puts, "hello" as u8&)
+	return invoke_writer(puts, "hello".cast[u8&])
 `
 	result, errs := parseAndAnalyze(t, "function_type_permissions.elisa", src)
 	requireNoErrors(t, errs)
@@ -507,7 +507,7 @@ def invoke_writer[permission P](fn: func(u8&) -> int can[P], text: u8&) -> int c
     return fn(text)
 
 def run() -> int can[Console.Write]:
-	return invoke_writer(puts, "hello" as u8&)
+	return invoke_writer(puts, "hello".cast[u8&])
 `
 	result, errs := parseAndAnalyze(t, "permission_polymorphic_function_wrapper.elisa", src)
 	requireNoErrors(t, errs)
@@ -536,7 +536,7 @@ def call_erased(raw: void&, value: i64) -> i64:
 
 def run() -> i64:
 	raw: void& = inc.cast[void&]
-	bits: uintptr = raw as uintptr
+	bits: uintptr = raw.cast[uintptr]
 	fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]
 	return call_erased(fn.cast[void&], 40)
 `

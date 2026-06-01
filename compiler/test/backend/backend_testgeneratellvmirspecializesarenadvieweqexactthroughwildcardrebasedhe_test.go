@@ -314,7 +314,7 @@ extern register_perm_string_len(ptr: u8&?, len: usize)
 extern intern_small_string(src: u8&, len: usize) -> heap u8&
 
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
-	src: u8& = value if value != null else "" as u8&
+	src: u8& = value if value != null else "".cast[u8&]
 	_ = start
 	return StringView(src, end)
 
@@ -323,7 +323,7 @@ def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 
 def string_view_copy(view: StringView) -> heap u8&:
 	_ = view
-	return intern_small_string("" as u8&, 0)
+	return intern_small_string("".cast[u8&], 0)
 
 def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
 	return string_view_copy(view)
@@ -396,7 +396,7 @@ func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
 	src := `extern string_view_eq(view: StringView, other: u8&?) -> int
 
 def frontend_sv_eq_literal(view: StringView, literal: static u8&) -> bool:
-	return string_view_eq(view, literal as u8&) != 0
+	return string_view_eq(view, literal.cast[u8&]) != 0
 
 def same_short(view: StringView) -> bool:
 	return frontend_sv_eq_literal(view, "def")

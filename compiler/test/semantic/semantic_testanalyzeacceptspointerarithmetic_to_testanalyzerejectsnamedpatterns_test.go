@@ -234,7 +234,7 @@ def bad(handle: Handle) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "cannot take address of affine value") {
+	if !strings.Contains(all, "cannot take address of linear value") {
 		t.Fatalf("expected user-affine address diagnostic, got:\n%s", all)
 	}
 }
@@ -249,7 +249,7 @@ global current: Handle = zeroed
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "global \"current\" cannot store affine handle values of type Handle") {
+	if !strings.Contains(all, "global \"current\" cannot store linear handle values of type Handle") {
 		t.Fatalf("expected user-affine global diagnostic, got:\n%s", all)
 	}
 }

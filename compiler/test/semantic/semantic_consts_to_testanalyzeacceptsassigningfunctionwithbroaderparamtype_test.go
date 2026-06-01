@@ -108,10 +108,10 @@ const enum TokenKind of i16:
     IDENT = 1
 
 def current_token(state: ParserState&) -> Token:
-    return zeroed as Token
+    return zeroed.cast[Token]
 
 def expect_kind(state: mutable ParserState&, kind: TokenKind) -> Token:
-    return zeroed as Token
+    return zeroed.cast[Token]
 
 grammar DemoGrammar over Token using ParserState:
     cursor state
@@ -147,10 +147,10 @@ const enum TokenKind of i16:
     IDENT = 1
 
 def current_token(state: ParserState&) -> Token:
-    return zeroed as Token
+    return zeroed.cast[Token]
 
 def expect_kind(state: mutable ParserState&, kind: TokenKind) -> Token:
-    return zeroed as Token
+    return zeroed.cast[Token]
 
 grammar DemoGrammar over Token using ParserState:
     cursor state
@@ -186,10 +186,10 @@ const enum TokenKind of i16:
     IDENT = 1
 
 def current_token(state: ParserState&) -> Token:
-    return zeroed as Token
+    return zeroed.cast[Token]
 
 def expect_kind(state: mutable ParserState&, kind: TokenKind) -> Token:
-    return zeroed as Token
+    return zeroed.cast[Token]
 
 grammar DemoGrammar over Token using ParserState:
     cursor state
@@ -309,15 +309,15 @@ func requireExprTypeString(t *testing.T, result *semantic.Result, expr ast.Expr,
 		t.Fatalf("expected expression %T type %q, got %q", expr, expected, got)
 	}
 }
-func TestAnalyzeAsCastUsesExistingCastSemantics(t *testing.T) {
+func TestAnalyzeCastMethodUsesExistingCastSemantics(t *testing.T) {
 	src := `struct Arena:
     value: i64
 
-def keep(owner: Arena) -> mutable Arena&:
-    return &owner as mutable Arena&
+def keep(owner: mutable Arena&) -> mutable Arena&:
+    return owner.cast[mutable Arena&]
 `
 
-	result, errs := parseAndAnalyze(t, "as_cast.elisa", src)
+	result, errs := parseAndAnalyze(t, "method_cast.elisa", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 
@@ -330,9 +330,6 @@ def keep(owner: Arena) -> mutable Arena&:
 	if !ok {
 		t.Fatalf("expected cast expr, got %T", ret.Value)
 	}
-	if cast.Origin != ast.CastExprOriginAsSyntax {
-		t.Fatalf("expected as-syntax origin, got %v", cast.Origin)
-	}
 	requireExprTypeString(t, result, cast, "mutable Arena&")
 }
 
@@ -342,7 +339,7 @@ func TestAnalyzeAcceptsConstEnumCastToOptionalSameEnum(t *testing.T) {
     WRITE = 1
 
 def make_mode() -> Mode?:
-    return Mode.READ as Mode?
+    return Mode.READ.cast[Mode?]
 `
 
 	result, errs := parseAndAnalyze(t, "const_enum_optional_cast.elisa", src)
@@ -478,7 +475,7 @@ func TestAnalyzePayloadErrorConstructorChecksArguments(t *testing.T) {
 	UnsupportedType(span: i64, code: i32)
 
 def fail() -> i64 error[BackendError]:
-	raise BackendError.UnsupportedType("bad" as u8&, 7)
+	raise BackendError.UnsupportedType("bad".cast[u8&], 7)
 `
 	_, errs := parseAndAnalyze(t, "payload_error_constructor_bad_arg.elisa", src)
 	if !strings.Contains(strings.Join(errs, "\n"), `error constructor argument 1 to "BackendError.UnsupportedType" expects i64`) {
