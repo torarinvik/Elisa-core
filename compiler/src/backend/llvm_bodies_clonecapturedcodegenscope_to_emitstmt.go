@@ -411,6 +411,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitArenaFree(binding.ptr, binding.typ)
 	case *ast.AssignStmt:
 		if n.Optional {
+			if s.g.trace != nil {
+				s.g.trace.recordStep(s, n.Pos().Line)
+			}
 			return s.emitOptionalAssignStmt(n)
 		}
 		if identTarget, ok := n.Target.(*ast.Ident); ok {
@@ -435,6 +438,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 					if err := s.storeValue(slotPtr, value, storeType, identTarget.Name+".ref.assign"); err != nil {
 						return err
 					}
+					if s.g.trace != nil {
+						s.g.trace.recordValue(s, n.Pos().Line, identTarget.Name, value)
+					}
 					s.invalidatePackedReadCaches()
 					return nil
 				}
@@ -444,6 +450,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			if handled, err := s.emitBitGroupMemberAssign(fieldTarget, n.Value); handled {
 				if err != nil {
 					return err
+				}
+				if s.g.trace != nil {
+					s.g.trace.recordStep(s, n.Pos().Line)
 				}
 				s.invalidatePackedReadCaches()
 				return nil
@@ -465,9 +474,13 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		if s.g.trace != nil {
+			assignName := ""
 			if id, ok := n.Target.(*ast.Ident); ok {
-				s.g.trace.recordValue(s, n.Pos().Line, id.Name, value)
+				assignName = id.Name
 			}
+			// Value record for a scalar ident; otherwise (field/index target, or a
+			// non-scalar value) recordValue falls back to a plain step.
+			s.g.trace.recordValue(s, n.Pos().Line, assignName, value)
 		}
 		s.bindPackedStoreValue(targetType, value)
 		if path, ok := s.packedEnumStoragePath(n.Target); ok {

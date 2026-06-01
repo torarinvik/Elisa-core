@@ -157,8 +157,7 @@ func (t *traceState) recordValue(state *functionState, line int, varName string,
 		v64 = C.elisacoreTraceValueToI64(state.builder, t.g.context, value)
 	}
 	if v64 == nil || varName == "" || varName == "_" {
-		C.elisacoreBuildTraceCall(state.builder, t.g.context, t.recordFnTy, t.recordFn,
-			state.traceNameGlobal, C.unsigned(line))
+		t.recordStep(state, line)
 		return
 	}
 	varGlobal := t.nameGlobalFor(varName)
@@ -172,12 +171,21 @@ func (t *traceState) recordStmt(state *functionState, stmt ast.Stmt) {
 	if t == nil || state == nil || stmt == nil || state.builder == nil || state.traceNameGlobal == nil {
 		return
 	}
-	// A variable declaration self-records (with its value) in the VarDeclStmt handler;
-	// skip the generic step here to avoid a duplicate entry for that line.
-	if _, ok := stmt.(*ast.VarDeclStmt); ok {
+	// Declarations and assignments self-record (with their value) in their own handlers;
+	// skip the generic step here so each such line produces exactly one entry.
+	switch stmt.(type) {
+	case *ast.VarDeclStmt, *ast.AssignStmt:
 		return
 	}
-	line := stmt.Pos().Line
+	t.recordStep(state, stmt.Pos().Line)
+}
+
+// recordStep emits a plain step record (function + line) -- the execution path with no
+// captured value.
+func (t *traceState) recordStep(state *functionState, line int) {
+	if t == nil || state == nil || state.builder == nil || state.traceNameGlobal == nil {
+		return
+	}
 	if line < 0 {
 		line = 0
 	}
