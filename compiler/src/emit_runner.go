@@ -435,6 +435,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			OptLevel:      effectiveOptimizationLevel(options),
 			PackedProfile: options.packedProfile,
 			TargetTriple:  options.targetTriple,
+			DebugInfo:     options.debugInfo,
 		}); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1

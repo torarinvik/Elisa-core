@@ -288,6 +288,9 @@ func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
 	return nil
 }
 func (s *functionState) emitStmt(stmt ast.Stmt) error {
+	if s.g.di != nil {
+		s.g.di.setLoc(s, stmt)
+	}
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
 		var declType semantic.Type

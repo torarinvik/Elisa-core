@@ -59,10 +59,15 @@ func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, prof
 }
 
 func compileLLVMModuleWithTarget(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string) (*llvmGenerator, error) {
+	return compileLLVMModuleWithTargetAndDebug(result, optLevel, profile, targetTriple, false)
+}
+
+func compileLLVMModuleWithTargetAndDebug(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool) (*llvmGenerator, error) {
 	g, err := newLLVMGenerator(result)
 	if err != nil {
 		return nil, err
 	}
+	g.emitDebugInfo = debugInfo
 	g.optLevel = optLevel
 	g.packedProfile = profile
 	g.packedEnumABI = profile.packedModeForStore(nil)
@@ -117,6 +122,8 @@ type llvmGenerator struct {
 	cachedArenaRefType        *semantic.RefType
 	syntheticCounter          int
 	wordBits                  int
+	emitDebugInfo             bool
+	di                        *debugInfo
 }
 type typeMemoKey struct {
 	id  semantic.TypeID
@@ -203,6 +210,10 @@ func (g *llvmGenerator) nextSyntheticName(prefix string) string {
 	return name
 }
 func (g *llvmGenerator) dispose() {
+	if g.di != nil {
+		g.di.dispose()
+		g.di = nil
+	}
 	if g.targetData != nil {
 		C.LLVMDisposeTargetData(g.targetData)
 	}
@@ -224,6 +235,9 @@ func (g *llvmGenerator) dispose() {
 	}
 }
 func (g *llvmGenerator) emitModule() error {
+	if g.emitDebugInfo {
+		g.initDebugInfo()
+	}
 	for _, decl := range g.result.ActiveFile().Decls {
 		if err := g.predeclareDeclTypes(decl); err != nil {
 			return err
@@ -248,6 +262,9 @@ func (g *llvmGenerator) emitModule() error {
 		if err := g.emitExportedFunction(exported); err != nil {
 			return err
 		}
+	}
+	if g.di != nil {
+		g.di.finalize()
 	}
 	return nil
 }

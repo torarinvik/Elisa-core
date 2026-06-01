@@ -50,6 +50,7 @@ type functionState struct {
 	fnType                       *semantic.FuncType
 	builder                      C.LLVMBuilderRef
 	scope                        *codegenScope
+	diScope                      C.LLVMMetadataRef
 	typeMap                      map[string]semantic.Type
 	specializedFuncTypes         map[*semantic.FuncType]*semantic.FuncType
 	resultSlot                   C.LLVMValueRef
@@ -403,6 +404,10 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		fnType:  fnType,
 		builder: builder,
 		typeMap: typeBindings,
+	}
+
+	if g.di != nil {
+		g.di.attachFunction(state, decl, fnValue)
 	}
 
 	abiLayout, layoutErr := g.computeFuncAbiLayout(fnType)
