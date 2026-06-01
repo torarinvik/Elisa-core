@@ -792,6 +792,43 @@ func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]boo
 			}
 		}
 	}
+	// A register dereferenced as a memory base carries an unstated "this is a valid pointer
+	// into some memory" claim. When that base comes directly from an input parameter, the
+	// parameter must use an address-space carrier (HostPtr[T], GuestVAddr[T], ...) or a
+	// pointer role that names the memory class -- not a raw scalar integer that hides which
+	// memory is being touched. Bases derived through arithmetic or further moves are a later
+	// dataflow layer; this catches the direct dereference of a raw-typed pointer parameter.
+	if !requireSet["memory.base.untyped"] {
+		inputRegParam := map[string]string{}
+		for _, input := range fn.Inputs {
+			if reg := registerAfterEquals(input); reg != "" {
+				inputRegParam[canonicalX86GPR(reg)] = strings.ToLower(bindingName(input))
+			}
+		}
+		flagged := map[string]bool{}
+		for _, inst := range fn.Instructions {
+			if inst.Pseudo {
+				continue
+			}
+			for _, operand := range splitInstructionOperands(inst.Text) {
+				if !operandIsMemory(operand) {
+					continue
+				}
+				base := memoryBaseRegister(operand)
+				if base == "" || base == "rsp" || base == "rip" || flagged[base] {
+					continue
+				}
+				paramName, ok := inputRegParam[base]
+				if !ok {
+					continue
+				}
+				if rawScalarType(paramTypes[paramName]) {
+					flagged[base] = true
+					issues = append(issues, Issue{Severity: "error", Code: "raw-memory-base", File: path, Line: inst.Line, Message: fmt.Sprintf("memory base %%%s comes from EASM parameter %s of raw type %s; use an address-space carrier such as HostPtr[T] or GuestVAddr[T] that names the memory class, or require memory.base.untyped after a manual proof", base, paramName, paramTypes[paramName])})
+				}
+			}
+		}
+	}
 	return issues
 }
 
@@ -1241,6 +1278,7 @@ func allowedRequireToken(token string) bool {
 		"frame_pointer.handoff.unchecked",
 		"input.unused",
 		"immediate.truncation",
+		"memory.base.untyped",
 		"operand_size.inferred",
 		"pic",
 		"relocation.symbol",
@@ -2409,6 +2447,32 @@ func hasMemoryOperand(text string) bool {
 		}
 	}
 	return usesSegmentOverride(text)
+}
+
+// memoryBaseRegister returns the canonical base register of a memory operand of the form
+// disp(base, index, scale), or "" if it has no GPR base (a segment-relative reference or an
+// absolute address). Only the base is returned -- the index register is a scalar offset, not
+// a pointer, so it is not subject to pointer-provenance typing.
+func memoryBaseRegister(operand string) string {
+	open := strings.Index(operand, "(")
+	if open < 0 {
+		return ""
+	}
+	rel := strings.Index(operand[open:], ")")
+	if rel < 0 {
+		return ""
+	}
+	inner := operand[open+1 : open+rel]
+	fields := strings.Split(inner, ",")
+	base := strings.TrimPrefix(strings.TrimSpace(fields[0]), "%")
+	if base == "" {
+		return ""
+	}
+	reg := canonicalX86GPR(base)
+	if !isX86GPR(reg) {
+		return ""
+	}
+	return reg
 }
 
 // operandIsMemory reports whether a single operand denotes a memory location: a

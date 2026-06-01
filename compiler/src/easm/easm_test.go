@@ -160,7 +160,7 @@ export def swap32(ptr: uintptr, value: u32) -> u32 abi c:
 func TestVerifyAcceptsAtomicRMWWithIntent(t *testing.T) {
 	src := `module atomics
 target x86_64
-export def swap32(ptr: uintptr, value: u32) -> u32 abi c:
+export def swap32(ptr: HostPtr[u32], value: u32) -> u32 abi c:
     inputs: ptr = rdi, value = rsi
     outputs: ret = rax
     clobbers: rax, memory
@@ -202,7 +202,7 @@ export def swap32(ptr: uintptr, value: u32) -> u32 abi c:
 func TestVerifyAcceptsShadPS4GuestEntryTailJumpTrampoline(t *testing.T) {
 	src := `module shadps4_guest
 target x86_64
-export def shadps4_guest_entry(params: uintptr, exit_func: uintptr) -> void abi ps4_sysv:
+export def shadps4_guest_entry(params: HostPtr[void], exit_func: uintptr) -> void abi ps4_sysv:
     inputs: params = rdi, exit_func = rsi
     clobbers: rax, r9, r10, r11, rsi, rdi, rsp, cc, memory
     stack: synthetic, aligned 16, noreturn
@@ -280,7 +280,7 @@ export def run_on_another_stack(arg: uintptr, entry: HostCallable, stack: GuestS
 func TestVerifyAcceptsShadPS4FiberContextInstructionSubset(t *testing.T) {
 	src := `module shadps4_fiber
 target x86_64
-export def sce_fiber_setjmp(ctx: uintptr, incoming_rax: u64) -> i32 abi ps4_sysv:
+export def sce_fiber_setjmp(ctx: HostPtr[void], incoming_rax: u64) -> i32 abi ps4_sysv:
     inputs: ctx = rdi, incoming_rax = rax
     outputs: ret = rax
     clobbers: rax, rdx, cc, memory
@@ -1272,7 +1272,7 @@ export def explicit_contract(ptr: uintptr) -> void abi c:
     clobbers: rax, rsp, cc, memory
     stack: unchanged, probed
     control: returns
-    requires: operand_size.inferred, immediate.truncation, relocation.symbol, x86_64.segment.fs
+    requires: operand_size.inferred, immediate.truncation, relocation.symbol, x86_64.segment.fs, memory.base.untyped
     body:
         mov $1, 0(%rdi)
         movb $0x1ff, %al
