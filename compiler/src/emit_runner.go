@@ -412,7 +412,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			if options.runNative {
 				exeOutputPath = ""
 			}
-			exePath, cleanup, err := buildNativeExecutable(result, options.foreignFiles, options.linkFlags, exeOutputPath, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, stderr)
+			exePath, cleanup, err := buildNativeExecutable(result, options.foreignFiles, options.linkFlags, exeOutputPath, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, stderr)
 			if err != nil {
 				cleanup()
 				fmt.Fprintf(stderr, "error: %s\n", err)

@@ -57,6 +57,8 @@ type projectCLIOptions struct {
 	packedProfile   backend.PackedLoweringProfile
 	jsonOutput      bool
 	strictContracts bool
+	debugInfo       bool
+	recordTrace     bool
 }
 type projectDefinition struct {
 	Version               string                             `json:"version,omitempty"`
@@ -218,6 +220,8 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		packedProfile: target.packedProfile,
 		hasOptLevel:   target.hasOptLevel,
 		optLevel:      target.optLevel,
+		debugInfo:     options.debugInfo,
+		recordTrace:   options.recordTrace,
 	}
 
 	switch options.command {
@@ -368,6 +372,10 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			options.jsonOutput = true
 		case arg == "--strict-contracts":
 			options.strictContracts = true
+		case arg == "-g" || arg == "-debug-info":
+			options.debugInfo = true
+		case arg == "-ftrace" || arg == "-record-trace":
+			options.recordTrace = true
 		case arg == "-o":
 			i++
 			if i >= len(args) {

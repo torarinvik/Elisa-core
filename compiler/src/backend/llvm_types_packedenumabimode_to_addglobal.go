@@ -585,7 +585,11 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 		"ctx_string_view_eq",
 		"ctx_string_views_eq",
 		"ctx_string_from_view",
-		"ctx_llvm_codegen_fatal":
+		"ctx_llvm_codegen_fatal",
+		"elisa_trace_record",
+		"elisa_trace_record_value",
+		"elisa_trace_count",
+		"elisa_trace_dump":
 		return true
 	default:
 		return false
