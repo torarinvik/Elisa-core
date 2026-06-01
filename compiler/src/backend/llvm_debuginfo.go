@@ -62,6 +62,38 @@ static void elisacoreAddModuleFlagU32(LLVMModuleRef m, const char *key, size_t k
 	LLVMMetadataRef mv = LLVMValueAsMetadata(LLVMConstInt(LLVMInt32TypeInContext(LLVMGetModuleContext(m)), val, 0));
 	LLVMAddModuleFlag(m, LLVMModuleFlagBehaviorWarning, key, keyLen, mv);
 }
+
+static LLVMMetadataRef elisacoreDIBasicType(LLVMDIBuilderRef dib, const char *name, size_t nameLen, uint64_t bits, unsigned encoding) {
+	return LLVMDIBuilderCreateBasicType(dib, name, nameLen, bits, (LLVMDWARFTypeEncoding)encoding, 0);
+}
+
+// A pointer-sized (64-bit) DWARF pointer to the given pointee (NULL pointee => void*).
+static LLVMMetadataRef elisacoreDIPointerType(LLVMDIBuilderRef dib, LLVMMetadataRef pointee) {
+	return LLVMDIBuilderCreatePointerType(dib, pointee, 64, 64, 0, "", 0);
+}
+
+// AlwaysPreserve=1 so the variable survives even when unused.
+static LLVMMetadataRef elisacoreDIParamVar(LLVMDIBuilderRef dib, LLVMMetadataRef scope, const char *name, size_t nameLen,
+		unsigned argNo, LLVMMetadataRef file, unsigned line, LLVMMetadataRef ty) {
+	return LLVMDIBuilderCreateParameterVariable(dib, scope, name, nameLen, argNo, file, line, ty, 1, 0);
+}
+
+static LLVMMetadataRef elisacoreDIAutoVar(LLVMDIBuilderRef dib, LLVMMetadataRef scope, const char *name, size_t nameLen,
+		LLVMMetadataRef file, unsigned line, LLVMMetadataRef ty) {
+	return LLVMDIBuilderCreateAutoVariable(dib, scope, name, nameLen, file, line, ty, 1, 0, 0);
+}
+
+// Associate a variable's storage (alloca / byval pointer) with its debug-info entry,
+// inserting the dbg record at the end of the given block.
+static void elisacoreDIInsertDeclare(LLVMDIBuilderRef dib, LLVMContextRef ctx, LLVMValueRef storage,
+		LLVMMetadataRef varInfo, unsigned line, unsigned col, LLVMMetadataRef scope, LLVMBasicBlockRef block) {
+	if (storage == NULL || varInfo == NULL || block == NULL) {
+		return;
+	}
+	LLVMMetadataRef expr = LLVMDIBuilderCreateExpression(dib, NULL, 0);
+	LLVMMetadataRef loc = LLVMDIBuilderCreateDebugLocation(ctx, line, col, scope, NULL);
+	LLVMDIBuilderInsertDeclareRecordAtEnd(dib, storage, varInfo, expr, loc, block);
+}
 */
 import "C"
 
@@ -70,6 +102,15 @@ import (
 	"unsafe"
 
 	"elisacore/src/ast"
+	"elisacore/src/semantic"
+)
+
+// DWARF DW_ATE_* base-type encodings.
+const (
+	dwarfATEboolean  = 2
+	dwarfATEfloat    = 4
+	dwarfATEsigned   = 5
+	dwarfATEunsigned = 7
 )
 
 // debugInfo carries the DWARF emission state for a module. Phase 1 emits a compile
@@ -78,10 +119,12 @@ import (
 // source-line breakpoints, and show where execution is. Local-variable DWARF is a
 // later phase.
 type debugInfo struct {
-	g    *llvmGenerator
-	dib  C.LLVMDIBuilderRef
-	file C.LLVMMetadataRef
-	cu   C.LLVMMetadataRef
+	g         *llvmGenerator
+	dib       C.LLVMDIBuilderRef
+	file      C.LLVMMetadataRef
+	cu        C.LLVMMetadataRef
+	typeCache map[typeMemoKey]C.LLVMMetadataRef
+	voidPtr   C.LLVMMetadataRef
 }
 
 func (g *llvmGenerator) initDebugInfo() {
@@ -119,7 +162,123 @@ func (g *llvmGenerator) initDebugInfo() {
 	cu := C.elisacoreDICompileUnit(dib, file, prodC, C.size_t(len(producer)))
 	C.free(unsafe.Pointer(prodC))
 
-	g.di = &debugInfo{g: g, dib: dib, file: file, cu: cu}
+	g.di = &debugInfo{g: g, dib: dib, file: file, cu: cu, typeCache: map[typeMemoKey]C.LLVMMetadataRef{}}
+}
+
+// diType returns (and caches) the DWARF type for an Elisa type. Phase 2 emits precise
+// base types for numerics/bools and pointer types for references/optionals/pointer-like
+// values; structs and other aggregates are rendered as an opaque blob of the right size
+// for now (full DICompositeType is a later refinement). Feeds both lldb inspection and
+// the upcoming state-trace recorder.
+func (d *debugInfo) diType(t semantic.Type) C.LLVMMetadataRef {
+	if d == nil || d.dib == nil {
+		return nil
+	}
+	if t == nil {
+		return d.voidPointer()
+	}
+	key := noteTypeKeyFor(t)
+	if v, ok := d.typeCache[key]; ok {
+		return v
+	}
+	result := d.buildDIType(t)
+	d.typeCache[key] = result
+	return result
+}
+
+func (d *debugInfo) voidPointer() C.LLVMMetadataRef {
+	if d.voidPtr == nil {
+		d.voidPtr = C.elisacoreDIPointerType(d.dib, nil)
+	}
+	return d.voidPtr
+}
+
+func (d *debugInfo) basicType(name string, bits uint64, encoding C.unsigned) C.LLVMMetadataRef {
+	nameC := C.CString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	return C.elisacoreDIBasicType(d.dib, nameC, C.size_t(len(name)), C.uint64_t(bits), encoding)
+}
+
+func (d *debugInfo) buildDIType(t semantic.Type) C.LLVMMetadataRef {
+	g := d.g
+	name := debugTypeName(t)
+
+	if semantic.IsBoolType(t) {
+		return d.basicType("bool", 8, dwarfATEboolean)
+	}
+	if isNumericType(t) {
+		sizeBytes, err := g.abiSizeOfType(t)
+		if err != nil || sizeBytes == 0 {
+			sizeBytes = uint64(g.wordBits / 8)
+		}
+		enc := C.unsigned(dwarfATEunsigned)
+		switch {
+		case isFloatType(t):
+			enc = dwarfATEfloat
+		case isSignedIntegerType(t):
+			enc = dwarfATEsigned
+		}
+		return d.basicType(name, sizeBytes*8, enc)
+	}
+	if refT, ok := t.(*semantic.RefType); ok && refT != nil {
+		return C.elisacoreDIPointerType(d.dib, d.diType(refT.Elem))
+	}
+	if optT, ok := t.(*semantic.OptionalType); ok && optT != nil {
+		// Optionals are pointer-or-null at the ABI level; point at the payload type.
+		return C.elisacoreDIPointerType(d.dib, d.diType(optT.Value))
+	}
+	if isPointerLikeType(t) {
+		return d.voidPointer()
+	}
+	// Structs, arrays and other aggregates: an opaque blob sized to the type. Scalars
+	// (the values that usually matter for "what produced this") are already precise.
+	sizeBytes, err := g.abiSizeOfType(t)
+	if err != nil || sizeBytes == 0 {
+		return d.voidPointer()
+	}
+	return d.basicType(name, sizeBytes*8, dwarfATEunsigned)
+}
+
+func debugTypeName(t semantic.Type) string {
+	if b, ok := t.(*semantic.BuiltinType); ok && b != nil {
+		return b.Name
+	}
+	if t == nil {
+		return "void"
+	}
+	s := t.String()
+	if s == "" {
+		return "anon"
+	}
+	return s
+}
+
+// declareVariable associates a source variable's storage with a DWARF local/parameter
+// variable so the debugger can read it by name. argNo > 0 marks a parameter (1-based).
+func (d *debugInfo) declareVariable(state *functionState, name string, storage C.LLVMValueRef, typ semantic.Type, line, argNo int) {
+	if d == nil || d.dib == nil || state == nil || state.diScope == nil || storage == nil {
+		return
+	}
+	if name == "" || name == "_" {
+		return
+	}
+	if line <= 0 {
+		line = 1
+	}
+	dty := d.diType(typ)
+	if dty == nil {
+		return
+	}
+	nameC := C.CString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	var diVar C.LLVMMetadataRef
+	if argNo > 0 {
+		diVar = C.elisacoreDIParamVar(d.dib, state.diScope, nameC, C.size_t(len(name)), C.unsigned(argNo), d.file, C.unsigned(line), dty)
+	} else {
+		diVar = C.elisacoreDIAutoVar(d.dib, state.diScope, nameC, C.size_t(len(name)), d.file, C.unsigned(line), dty)
+	}
+	block := C.LLVMGetInsertBlock(state.builder)
+	C.elisacoreDIInsertDeclare(d.dib, d.g.context, storage, diVar, C.unsigned(line), 1, state.diScope, block)
 }
 
 // attachFunction creates a DISubprogram for a defined function, attaches it to the

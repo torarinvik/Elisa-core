@@ -43,6 +43,24 @@ def main() -> i32:
 	if !strings.Contains(ir, `name: "compute"`) || !strings.Contains(ir, `name: "main"`) {
 		t.Fatalf("expected DISubprogram entries for compute and main, got:\n%s", ir)
 	}
+
+	// Phase 2: parameters and locals must be described with base types so a debugger
+	// can read them by name.
+	for _, want := range []string{
+		"DILocalVariable",
+		"DIBasicType",
+		`name: "a"`, // parameter
+		`name: "s"`, // local
+		"arg: 1",    // first parameter marker
+	} {
+		if !strings.Contains(ir, want) {
+			t.Fatalf("debug IR missing local/param metadata %q; got:\n%s", want, ir)
+		}
+	}
+	// And a declare record must tie storage to the variable (DbgRecord or intrinsic form).
+	if !strings.Contains(ir, "dbg_declare") && !strings.Contains(ir, "llvm.dbg.declare") {
+		t.Fatalf("expected a dbg declare tying storage to variables; got:\n%s", ir)
+	}
 }
 
 // Without the debug flag the module must contain no debug metadata (default path

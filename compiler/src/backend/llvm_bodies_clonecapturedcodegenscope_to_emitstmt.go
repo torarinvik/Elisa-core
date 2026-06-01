@@ -313,6 +313,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: declType, mutable: n.Mutable})
+		if s.g.di != nil {
+			s.g.di.declareVariable(s, n.Name, alloca, declType, n.Pos().Line, 0)
+		}
 		var initValue C.LLVMValueRef
 		if n.Value != nil {
 			value, _, err := s.emitExpr(n.Value, declType)

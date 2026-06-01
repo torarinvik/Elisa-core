@@ -453,6 +453,11 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		if err := bindParam(param.Name, param.Mutable, i, i); err != nil {
 			return err
 		}
+		if g.di != nil {
+			if binding, ok := state.lookupBinding(param.Name); ok {
+				g.di.declareVariable(state, param.Name, binding.ptr, binding.typ, decl.Pos().Line, i+1)
+			}
+		}
 	}
 	for i, name := range fnType.ImplicitParamNames {
 		if err := bindParam(name, false, explicitCount+i, explicitCount+i); err != nil {
