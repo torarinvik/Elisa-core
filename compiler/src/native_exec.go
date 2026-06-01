@@ -353,7 +353,31 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		return "", func() {}, timing, fmt.Errorf("failed to link native executable: %w", err)
 	}
 	timing.Link = time.Since(linkStart)
+
+	// On Mach-O targets DWARF stays in the .o files (a "debug map" in the executable),
+	// so a debugger needs either those .o files or a .dSYM bundle. The temp .o files are
+	// about to be cleaned up, so when -g is requested, package the DWARF into <exe>.dSYM
+	// now (best-effort) so `lldb <exe>` resolves source lines, locals and our pretty-printers.
+	if debugInfo && isMachOTriple(targetTriple) {
+		if dsymPath, lookErr := exec.LookPath("dsymutil"); lookErr == nil {
+			dsymCmd := exec.Command(dsymPath, exePath)
+			dsymCmd.Stdout = stderr
+			dsymCmd.Stderr = stderr
+			_ = dsymCmd.Run()
+		}
+	}
 	return exePath, cleanup, timing, nil
+}
+
+// isMachOTriple reports whether the target produces Mach-O (Apple) binaries, where DWARF
+// lives in a debug map / .dSYM rather than embedded in the executable. An empty triple
+// means the native host.
+func isMachOTriple(targetTriple string) bool {
+	t := strings.ToLower(strings.TrimSpace(targetTriple))
+	if t == "" {
+		return runtime.GOOS == "darwin"
+	}
+	return strings.Contains(t, "apple") || strings.Contains(t, "darwin") || strings.Contains(t, "macos")
 }
 
 func compileCxxForeignFiles(clangPath string, foreignFiles []string, linkFlags []string, tempDir string, targetTriple string, stderr io.Writer) ([]string, []string, error) {

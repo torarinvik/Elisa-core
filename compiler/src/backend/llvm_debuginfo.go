@@ -264,6 +264,9 @@ func (d *debugInfo) buildDIType(t semantic.Type) C.LLVMMetadataRef {
 	if arr, ok := t.(*semantic.ArrayType); ok && arr != nil {
 		return d.buildArrayDIType(t, arr)
 	}
+	if da, ok := t.(*semantic.DArrayType); ok && da != nil {
+		return d.buildDArrayDIType(t, da)
+	}
 	// Remaining aggregates: an opaque blob sized to the type. Scalars (the values that
 	// usually matter for "what produced this") are already precise.
 	sizeBytes, err := g.abiSizeOfType(t)
@@ -315,6 +318,55 @@ func (d *debugInfo) buildStructDIType(t semantic.Type, st *semantic.StructType) 
 	}
 	realC := C.CString(st.Name)
 	real := C.elisacoreDIStruct(d.dib, d.cu, realC, C.size_t(len(st.Name)), d.file,
+		C.uint64_t(sizeBytes*8), memPtr, C.unsigned(len(members)))
+	C.free(unsafe.Pointer(realC))
+	C.elisacoreReplaceMetadata(fwd, real)
+	d.typeCache[noteTypeKeyFor(t)] = real
+	return real
+}
+
+// buildDArrayDIType describes a dynamic array (darray[T]) as a struct of its runtime
+// header -- items (pointer to T), count, capacity -- so a debugger (and the lldb
+// pretty-printer) can show length and elements instead of an opaque blob. Layout matches
+// the runtime DynArray[T] struct: items@0, count@8, capacity@16.
+func (d *debugInfo) buildDArrayDIType(t semantic.Type, da *semantic.DArrayType) C.LLVMMetadataRef {
+	g := d.g
+	sizeBytes, err := g.abiSizeOfType(t)
+	if err != nil {
+		return d.voidPointer()
+	}
+	name := "darray[" + debugTypeName(da.Elem) + "]"
+	nameC := C.CString(name)
+	fwd := C.elisacoreDIForwardStruct(d.dib, d.cu, nameC, C.size_t(len(name)), d.file, C.uint64_t(sizeBytes*8))
+	C.free(unsafe.Pointer(nameC))
+	d.typeCache[noteTypeKeyFor(t)] = fwd
+
+	llvmType, lerr := g.lowerType(t)
+	usizeT := g.result.NamedTypes["usize"]
+	members := make([]C.LLVMMetadataRef, 0, 3)
+	addMember := func(memberName string, index int, sizeBytes uint64, ty C.LLVMMetadataRef) {
+		offsetBytes := uint64(0)
+		if lerr == nil {
+			if off, oerr := g.abiOffsetOfLLVMElement(llvmType, index); oerr == nil {
+				offsetBytes = off
+			}
+		}
+		mC := C.CString(memberName)
+		members = append(members, C.elisacoreDIMember(d.dib, fwd, mC, C.size_t(len(memberName)), d.file,
+			C.uint64_t(sizeBytes*8), C.uint64_t(offsetBytes*8), ty))
+		C.free(unsafe.Pointer(mC))
+	}
+	wordBytes := uint64(d.g.wordBits / 8)
+	addMember("items", 0, wordBytes, C.elisacoreDIPointerType(d.dib, d.diType(da.Elem)))
+	addMember("count", 1, wordBytes, d.diType(usizeT))
+	addMember("capacity", 2, wordBytes, d.diType(usizeT))
+
+	var memPtr *C.LLVMMetadataRef
+	if len(members) > 0 {
+		memPtr = &members[0]
+	}
+	realC := C.CString(name)
+	real := C.elisacoreDIStruct(d.dib, d.cu, realC, C.size_t(len(name)), d.file,
 		C.uint64_t(sizeBytes*8), memPtr, C.unsigned(len(members)))
 	C.free(unsafe.Pointer(realC))
 	C.elisacoreReplaceMetadata(fwd, real)

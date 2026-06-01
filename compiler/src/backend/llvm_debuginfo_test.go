@@ -100,3 +100,23 @@ def main() -> i32:
 		t.Fatalf("expected no debug metadata without -g, got:\n%s", ir)
 	}
 }
+
+// A darray must be described as a composite with items/count/capacity members so a
+// debugger (and the elisa lldb pretty-printer) can show its length and elements.
+func TestGenerateLLVMIRDescribesDArrayHeader(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "debug_darray.elisa", `
+def use(xs: darray[i32]&) -> usize:
+	return xs.count
+`)
+	g, err := compileLLVMModuleWithTargetAndDebug(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "", true)
+	if err != nil {
+		t.Fatalf("compile with debug info returned error: %v", err)
+	}
+	defer g.dispose()
+	ir := g.printModule()
+	for _, want := range []string{`name: "darray[i32]"`, `name: "items"`, `name: "count"`, `name: "capacity"`} {
+		if !strings.Contains(ir, want) {
+			t.Fatalf("darray debug type missing %q; got:\n%s", want, ir)
+		}
+	}
+}
