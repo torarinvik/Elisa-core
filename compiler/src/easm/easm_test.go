@@ -2281,7 +2281,7 @@ export def current_stack() -> HostStackPointer abi c:
 
 export def read_fs0() -> SegmentSelfPointer abi c:
     outputs: ret = rax
-    clobbers: 
+    clobbers: memory.read
     stack: unchanged
     control: returns
     requires: x86_64.segment.fs

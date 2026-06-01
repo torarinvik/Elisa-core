@@ -344,8 +344,11 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if usesStackRegister(inst.Text) || strings.HasPrefix(op, "push") || strings.HasPrefix(op, "pop") {
 			touchesStack = true
 		}
-		if writesMemory(inst.Text) && !clobberSet["memory"] {
-			issues = append(issues, Issue{Severity: "error", Code: "memory-write-without-clobber", File: path, Line: inst.Line, Message: "memory write requires memory clobber"})
+		if writesMemory(inst.Text) && !clobberSet["memory"] && !clobberSet["memory.write"] {
+			issues = append(issues, Issue{Severity: "error", Code: "memory-write-without-clobber", File: path, Line: inst.Line, Message: "memory write requires a memory or memory.write clobber"})
+		}
+		if readsMemory(inst.Text) && !clobberSet["memory"] && !clobberSet["memory.read"] {
+			issues = append(issues, Issue{Severity: "error", Code: "memory-read-without-clobber", File: path, Line: inst.Line, Message: "memory load requires a memory or memory.read clobber"})
 		}
 		if hasMemoryOperand(inst.Text) || strings.HasPrefix(op, "call") || op == "trap" {
 			mayFault = true
@@ -1331,7 +1334,7 @@ func verifyBindings(path string, target string, fn *Function) []Issue {
 func verifyRegisterLists(path string, target string, fn *Function) []Issue {
 	var issues []Issue
 	for _, clobber := range contractFields(fn.Clobbers) {
-		if clobber == "memory" || clobber == "cc" || clobber == "flags" {
+		if clobber == "memory" || clobber == "memory.read" || clobber == "memory.write" || clobber == "cc" || clobber == "flags" {
 			continue
 		}
 		reg := strings.TrimPrefix(clobber, "%")
@@ -2406,6 +2409,53 @@ func hasMemoryOperand(text string) bool {
 		}
 	}
 	return usesSegmentOverride(text)
+}
+
+// operandIsMemory reports whether a single operand denotes a memory location: a
+// parenthesized base/index expression or a segment-relative reference.
+func operandIsMemory(operand string) bool {
+	if strings.Contains(operand, "(") && strings.Contains(operand, ")") {
+		return true
+	}
+	return usesSegmentOverride(operand)
+}
+
+// readsMemory reports whether a two-or-more-operand instruction loads a value from memory:
+// a memory source operand, or a memory destination that is read-modify-written (add/sub/...
+// to memory). lea computes an address without touching memory; a pure store (mov to memory)
+// writes without reading; and xchg with a memory operand both reads and writes it.
+//
+// Single-operand memory instructions are intentionally excluded: push/pop are governed by
+// the stack contract, and the FPU control loads/stores (ldmxcsr/fldcw/fnstcw/stmxcsr) are
+// gated by the x86_64.fpu_control capability. Their memory access is already declared.
+func readsMemory(text string) bool {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return false
+	}
+	op := normalizeOp(fields[0])
+	if op == "lea" || op == "leaq" || op == "leal" {
+		return false
+	}
+	parts := splitInstructionOperands(text)
+	if len(parts) < 2 {
+		return false
+	}
+	if op == "xchg" || op == "xchgl" || op == "xchgq" {
+		return hasMemoryOperand(text)
+	}
+	for i, operand := range parts {
+		if !operandIsMemory(operand) {
+			continue
+		}
+		if i != len(parts)-1 {
+			return true // memory source operand -> load
+		}
+		if !instructionOverwritesDestination(text) {
+			return true // read-modify-write of a memory destination
+		}
+	}
+	return false
 }
 
 func hasSuspiciousAbsoluteAddress(text string) bool {

@@ -506,6 +506,7 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 	}
 	memChecked := 0
 	mcConfirmedStore := false
+	mcConfirmedLoad := false
 	for _, text := range memWitnesses {
 		opcodeName, err := opcodeNameFor(llvmMC, text)
 		if err != nil {
@@ -521,9 +522,17 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 		if eff.mayStore {
 			mcConfirmedStore = true
 		}
+		if eff.mayLoad {
+			mcConfirmedLoad = true
+		}
 		if eff.mayStore && !writesMemory(text) {
 			t.Errorf("UNDER-DETECTED STORE: MC says %q (%s) writes memory (mayStore), but "+
 				"writesMemory=false, so the validator would not require a `memory` clobber.",
+				text, opcodeName)
+		}
+		if eff.mayLoad && !readsMemory(text) {
+			t.Errorf("UNDER-DETECTED LOAD: MC says %q (%s) reads memory (mayLoad), but "+
+				"readsMemory=false, so the validator would not require a `memory.read` clobber.",
 				text, opcodeName)
 		}
 		if (eff.mayLoad || eff.mayStore) && !hasMemoryOperand(text) {
@@ -539,6 +548,9 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 	}
 	if !mcConfirmedStore {
 		t.Fatal("MC pipeline liveness failed: no memory witness observed storing; the memory cross-check is vacuous")
+	}
+	if !mcConfirmedLoad {
+		t.Fatal("MC pipeline liveness failed: no memory witness observed loading; the load cross-check is vacuous")
 	}
 
 	t.Logf("cross-checked %d x86 EASM ops and %d memory forms against LLVM MC ground truth", checked, memChecked)
