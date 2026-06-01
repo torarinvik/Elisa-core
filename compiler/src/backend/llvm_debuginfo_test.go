@@ -12,12 +12,17 @@ import (
 // native debugger needs to symbolize backtraces and set source-line breakpoints.
 func TestGenerateLLVMIREmitsDwarfDebugInfoWhenEnabled(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "debug_info.elisa", `
+struct Point:
+	x: mutable i32
+	y: mutable i32
+
 def compute(a: i32, b: i32) -> i32:
 	s: i32 = a + b
 	return s * 2
 
 def main() -> i32:
-	return compute(3, 4)
+	p: Point = Point(3, 4)
+	return compute(p.x, p.y)
 `)
 
 	g, err := compileLLVMModuleWithTargetAndDebug(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "", true)
@@ -60,6 +65,20 @@ def main() -> i32:
 	// And a declare record must tie storage to the variable (DbgRecord or intrinsic form).
 	if !strings.Contains(ir, "dbg_declare") && !strings.Contains(ir, "llvm.dbg.declare") {
 		t.Fatalf("expected a dbg declare tying storage to variables; got:\n%s", ir)
+	}
+
+	// Struct types must be described as composite types with named members at offsets,
+	// so aggregates (and e.g. a guest-context struct) show real fields, not blobs.
+	for _, want := range []string{
+		"DICompositeType",
+		"DW_TAG_structure_type",
+		`name: "Point"`,
+		`name: "x"`, // member
+		"DW_TAG_member",
+	} {
+		if !strings.Contains(ir, want) {
+			t.Fatalf("debug IR missing struct composite metadata %q; got:\n%s", want, ir)
+		}
 	}
 }
 

@@ -94,6 +94,34 @@ static void elisacoreDIInsertDeclare(LLVMDIBuilderRef dib, LLVMContextRef ctx, L
 	LLVMMetadataRef loc = LLVMDIBuilderCreateDebugLocation(ctx, line, col, scope, NULL);
 	LLVMDIBuilderInsertDeclareRecordAtEnd(dib, storage, varInfo, expr, loc, block);
 }
+
+// A replaceable forward declaration (DW_TAG_structure_type = 0x13) used to break
+// recursion: cache it, build members (self-references resolve to it), then replace.
+static LLVMMetadataRef elisacoreDIForwardStruct(LLVMDIBuilderRef dib, LLVMMetadataRef scope,
+		const char *name, size_t nameLen, LLVMMetadataRef file, uint64_t bits) {
+	return LLVMDIBuilderCreateReplaceableCompositeType(dib, 0x13, name, nameLen, scope, file, 0, 0, bits, 0, 0, "", 0);
+}
+
+static LLVMMetadataRef elisacoreDIMember(LLVMDIBuilderRef dib, LLVMMetadataRef scope, const char *name, size_t nameLen,
+		LLVMMetadataRef file, uint64_t bits, uint64_t offsetBits, LLVMMetadataRef ty) {
+	return LLVMDIBuilderCreateMemberType(dib, scope, name, nameLen, file, 0, bits, 0, offsetBits, 0, ty);
+}
+
+static LLVMMetadataRef elisacoreDIStruct(LLVMDIBuilderRef dib, LLVMMetadataRef scope, const char *name, size_t nameLen,
+		LLVMMetadataRef file, uint64_t bits, LLVMMetadataRef *members, unsigned numMembers) {
+	return LLVMDIBuilderCreateStructType(dib, scope, name, nameLen, file, 0, bits, 0, 0, NULL, members, numMembers, 0, NULL, "", 0);
+}
+
+static void elisacoreReplaceMetadata(LLVMMetadataRef tmp, LLVMMetadataRef repl) {
+	LLVMMetadataReplaceAllUsesWith(tmp, repl);
+}
+
+static LLVMMetadataRef elisacoreDIArray(LLVMDIBuilderRef dib, uint64_t sizeBits, LLVMMetadataRef elemTy, int64_t count) {
+	LLVMMetadataRef sub = LLVMDIBuilderGetOrCreateSubrange(dib, 0, count);
+	LLVMMetadataRef subs[1];
+	subs[0] = sub;
+	return LLVMDIBuilderCreateArrayType(dib, sizeBits, 0, elemTy, subs, 1);
+}
 */
 import "C"
 
@@ -230,13 +258,82 @@ func (d *debugInfo) buildDIType(t semantic.Type) C.LLVMMetadataRef {
 	if isPointerLikeType(t) {
 		return d.voidPointer()
 	}
-	// Structs, arrays and other aggregates: an opaque blob sized to the type. Scalars
-	// (the values that usually matter for "what produced this") are already precise.
+	if st, ok := t.(*semantic.StructType); ok && st != nil && st.Decl != nil {
+		return d.buildStructDIType(t, st)
+	}
+	if arr, ok := t.(*semantic.ArrayType); ok && arr != nil {
+		return d.buildArrayDIType(t, arr)
+	}
+	// Remaining aggregates: an opaque blob sized to the type. Scalars (the values that
+	// usually matter for "what produced this") are already precise.
 	sizeBytes, err := g.abiSizeOfType(t)
 	if err != nil || sizeBytes == 0 {
 		return d.voidPointer()
 	}
 	return d.basicType(name, sizeBytes*8, dwarfATEunsigned)
+}
+
+// buildStructDIType emits a DICompositeType with one member per declared field (name,
+// type, ABI byte offset). It pre-caches a replaceable forward declaration so a field
+// that points back to the same struct resolves without infinite recursion.
+func (d *debugInfo) buildStructDIType(t semantic.Type, st *semantic.StructType) C.LLVMMetadataRef {
+	g := d.g
+	sizeBytes, err := g.abiSizeOfType(t)
+	if err != nil {
+		return d.voidPointer()
+	}
+	nameC := C.CString(st.Name)
+	fwd := C.elisacoreDIForwardStruct(d.dib, d.cu, nameC, C.size_t(len(st.Name)), d.file, C.uint64_t(sizeBytes*8))
+	C.free(unsafe.Pointer(nameC))
+	d.typeCache[noteTypeKeyFor(t)] = fwd
+
+	llvmType, lerr := g.lowerType(t)
+	members := make([]C.LLVMMetadataRef, 0, len(st.Decl.Fields))
+	if lerr == nil {
+		for i, fieldDecl := range st.Decl.Fields {
+			field, ok := st.Fields[fieldDecl.Name]
+			if !ok {
+				continue
+			}
+			offsetBytes, oerr := g.abiOffsetOfLLVMElement(llvmType, i)
+			if oerr != nil {
+				continue
+			}
+			fieldSizeBytes, _ := g.abiSizeOfType(field.Type)
+			fieldTy := d.diType(field.Type)
+			mC := C.CString(field.Name)
+			mem := C.elisacoreDIMember(d.dib, fwd, mC, C.size_t(len(field.Name)), d.file,
+				C.uint64_t(fieldSizeBytes*8), C.uint64_t(offsetBytes*8), fieldTy)
+			C.free(unsafe.Pointer(mC))
+			members = append(members, mem)
+		}
+	}
+
+	var memPtr *C.LLVMMetadataRef
+	if len(members) > 0 {
+		memPtr = &members[0]
+	}
+	realC := C.CString(st.Name)
+	real := C.elisacoreDIStruct(d.dib, d.cu, realC, C.size_t(len(st.Name)), d.file,
+		C.uint64_t(sizeBytes*8), memPtr, C.unsigned(len(members)))
+	C.free(unsafe.Pointer(realC))
+	C.elisacoreReplaceMetadata(fwd, real)
+	d.typeCache[noteTypeKeyFor(t)] = real
+	return real
+}
+
+func (d *debugInfo) buildArrayDIType(t semantic.Type, arr *semantic.ArrayType) C.LLVMMetadataRef {
+	g := d.g
+	sizeBytes, err := g.abiSizeOfType(t)
+	if err != nil {
+		return d.voidPointer()
+	}
+	elemTy := d.diType(arr.Elem)
+	count := int64(0)
+	if arr.HasConstSize {
+		count = arr.ConstSize
+	}
+	return C.elisacoreDIArray(d.dib, C.uint64_t(sizeBytes*8), elemTy, C.int64_t(count))
 }
 
 func debugTypeName(t semantic.Type) string {
