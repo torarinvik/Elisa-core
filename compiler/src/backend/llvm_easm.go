@@ -15,6 +15,7 @@ import (
 	"elisacore/src/easm"
 	"elisacore/src/semantic"
 	"fmt"
+	"os"
 	"strings"
 	"unsafe"
 )
@@ -29,6 +30,48 @@ func (g *llvmGenerator) emitEASMModule(module *easm.Module) error {
 		}
 	}
 	return nil
+}
+
+// appendAppleX64SegmentReservations emits the .zerofill segment reservations that
+// pair with the -segaddr link flags in targetLinkerArgs (native_exec.go), mirroring
+// shadPS4's asm(".zerofill ...") in address_space.cpp/tls.cpp. Without these the
+// segaddr flags are no-ops and the runtime MAP_FIXED reservations collide with
+// dyld/Rosetta. Apple x86_64 only.
+func (g *llvmGenerator) appendAppleX64SegmentReservations(targetTriple string) {
+	// Opt-in (compile-time): the reservation segments make the guest's fixed
+	// addresses real RW memory at load, which is required for the faithful
+	// AddressSpace reservation (ELISA_AS_NATIVE_RESERVE) to map there without
+	// hanging under Rosetta. But it changes the memory landscape for the default
+	// byte-buffer path, so it is gated to match the live reservation.
+	if os.Getenv("ELISACORE_X64_SEGMENT_RESERVE") == "" {
+		return
+	}
+	triple := strings.ToLower(strings.TrimSpace(targetTriple))
+	if !strings.Contains(triple, "darwin") && !strings.Contains(triple, "macos") {
+		return
+	}
+	if !strings.Contains(triple, "x86_64") && !strings.Contains(triple, "amd64") {
+		return
+	}
+	// Emit ONLY into the main program object. The runtime and debug-referee support
+	// objects are linked into the same binary, and ld SUMS identically-named zerofill
+	// sections across objects -- so emitting here in every module would multiply the
+	// reserved sizes (e.g. USER_AREA would double to 210TB, extend above image_base,
+	// and overlap the binary's own segments). address_space_arena is defined only in
+	// the main program's core/address_space.elisa, so it identifies the main module.
+	if g.result == nil || g.result.GlobalScope == nil {
+		return
+	}
+	if _, ok := g.result.GlobalScope.Lookup("address_space_arena"); !ok {
+		return
+	}
+	directives := ".zerofill TCB_SPACE,TCB_SPACE,__tcb_space,0x3FC000\n" +
+		".zerofill SYSTEM_MANAGED,SYSTEM_MANAGED,__SYSTEM_MANAGED,0x7FFBFC000\n" +
+		".zerofill SYSTEM_RESERVED,SYSTEM_RESERVED,__SYSTEM_RESERVED,0x7C0004000\n" +
+		".zerofill USER_AREA,USER_AREA,__USER_AREA,0x5F9000000000"
+	cAsm := cString(directives)
+	defer C.free(unsafe.Pointer(cAsm))
+	C.LLVMAppendModuleInlineAsm(g.module, cAsm, C.size_t(len(directives)))
 }
 
 func (g *llvmGenerator) emitEASMFunction(fn *easm.Function) error {
@@ -56,6 +99,11 @@ func (g *llvmGenerator) emitEASMFunction(fn *easm.Function) error {
 
 	asmText := easmInlineAsmText(fn)
 	constraints := easmInlineAsmConstraints(fn)
+	// Paranoia: prove the lowering communicates every clobber the validator relied on
+	// to LLVM. A divergence here is a silent register/flags miscompile, so fail loudly.
+	if err := verifyEASMConstraintsCoverClobbers(fn, constraints); err != nil {
+		return err
+	}
 	asmC := cString(asmText)
 	defer C.free(unsafe.Pointer(asmC))
 	constraintsC := cString(constraints)
@@ -321,6 +369,13 @@ func easmInlineAsmConstraints(fn *easm.Function) string {
 			}
 			if item == "memory" || item == "cc" {
 				parts = append(parts, "~{"+item+"}")
+				continue
+			}
+			if item == "flags" {
+				// The EASM validator accepts 'flags' as a synonym for the 'cc'
+				// condition-code clobber, but LLVM only recognises ~{cc} for EFLAGS.
+				// Emitting ~{flags} would leave the flags effectively unclobbered.
+				parts = append(parts, "~{cc}")
 				continue
 			}
 			item = strings.TrimPrefix(item, "%")
