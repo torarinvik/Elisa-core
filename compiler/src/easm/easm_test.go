@@ -199,6 +199,68 @@ export def swap32(ptr: uintptr, value: u32) -> u32 abi c:
 	}
 }
 
+func TestVerifyRejectsXCHGRegisterWriteWithoutClobber(t *testing.T) {
+	src := `module xchg
+target x86_64
+export def swap_regs(left: u64, right: u64) -> void abi c:
+    inputs: left = rax, right = rbx
+    clobbers: rbx
+    stack: unchanged
+    control: returns
+    requires: x86_64.atomic.rmw
+    body:
+        xchgq %rax, %rbx
+        ret
+`
+	_, issues := Parse("xchg_reg_clobber.easm", src)
+	if !containsIssue(issues, "register-write-without-clobber") {
+		t.Fatalf("expected register-write-without-clobber for xchg source register, got %#v", issues)
+	}
+}
+
+func TestVerifyRejectsXCHGMemoryWritebackRegisterWithoutClobber(t *testing.T) {
+	src := `module xchg
+target x86_64
+export def swap_mem(ptr: HostPtr[u64], value: u64) -> void abi c:
+    inputs: ptr = rdi, value = rax
+    clobbers: memory
+    stack: unchanged
+    control: returns
+    requires: x86_64.atomic.rmw
+    body:
+        xchgq %rax, (%rdi)
+        ret
+`
+	_, issues := Parse("xchg_mem_clobber.easm", src)
+	if !containsIssue(issues, "register-write-without-clobber") {
+		t.Fatalf("expected register-write-without-clobber for xchg memory writeback register, got %#v", issues)
+	}
+}
+
+func TestVerifyAcceptsExplicitQControlAliases(t *testing.T) {
+	src := `module q_aliases
+target x86_64
+export def returns_q() -> void abi c:
+    stack: unchanged
+    control: returns
+    body:
+        retq
+
+export def jumps_q(target: GuestEntryPoint) -> void abi c:
+    inputs: target = rdi
+    clobbers: memory
+    stack: noreturn
+    control: noreturn, tail_jumps
+    requires: control.indirect
+    body:
+        jmpq *%rdi
+`
+	_, issues := Parse("q_aliases.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected retq/jmpq aliases to verify, got %#v", issues)
+	}
+}
+
 func TestVerifyAcceptsShadPS4GuestEntryTailJumpTrampoline(t *testing.T) {
 	src := `module shadps4_guest
 target x86_64

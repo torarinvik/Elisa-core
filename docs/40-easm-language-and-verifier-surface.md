@@ -51,6 +51,20 @@ Memory effects are declared in `clobbers:`.
 The verifier treats `lea` as address computation, not memory access. A
 read-modify-write instruction such as `addq $1, (%rdi)` requires read coverage
 and write coverage, either via broad `memory` or both direction-specific atoms.
+Single-operand x86 FPU-control memory forms also participate in this contract:
+`fldcw` and `ldmxcsr` require `memory.read`, while `fnstcw` and `stmxcsr`
+require `memory.write`, in addition to `requires: x86_64.fpu_control`.
+Other single-operand explicit-memory forms are directional too: `incq (%rdi)`
+and `decq (%rdi)` require both read and write coverage, `pushq (%rdi)` and
+memory-indirect `call`/`jmp` require read coverage, and `popq (%rdi)` requires
+write coverage. Their implicit stack effects remain governed by the `stack:`
+contract and the broad `memory` clobber required for stack mutation.
+`xchg*` writes every register operand it names, including the source-looking
+register in `xchgq %rax, (%rdi)`, so those registers must be declared as
+clobbers or outputs.
+Concrete AT&T sign/zero-extension spellings such as `movsbl`, `movslq`,
+`movzbl`, and `movzwq` are accepted and modeled as overwriting their destination
+register.
 
 Memory base registers that come from input parameters, including through simple
 register copies and `lea`-derived addresses, must use a typed address-space
@@ -79,6 +93,9 @@ Current rule:
 ## Body surface
 
 Body accepts instruction lines, labels, and pseudo state assertions.
+For x86-64 control transfer, `callq`, `jmpq`, and `retq` are accepted as
+explicit q-suffix aliases of `call`, `jmp`, and `ret` and participate in the
+same control-flow checks.
 
 ```easm
 body:

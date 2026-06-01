@@ -123,6 +123,36 @@ export def f() -> void abi c:
         ret
 `,
 		},
+		{
+			name:      "concrete zero-extension mnemonic overwrites destination",
+			wantError: false,
+			src: `module t
+target x86_64
+export def f(x: u8) -> void abi c:
+    inputs: x = rax
+    clobbers: rcx
+    stack: unchanged
+    control: returns
+    body:
+        movzbl %al, %ecx
+        ret
+`,
+		},
+		{
+			name:      "concrete sign-extension mnemonic overwrites destination",
+			wantError: false,
+			src: `module t
+target x86_64
+export def f(x: i8) -> void abi c:
+    inputs: x = rax
+    clobbers: rcx
+    stack: unchanged
+    control: returns
+    body:
+        movsbl %al, %ecx
+        ret
+`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

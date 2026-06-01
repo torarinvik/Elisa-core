@@ -106,11 +106,13 @@ var (
 	sectionRE      = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$`)
 	allowedOps     = map[string]bool{
 		"mov": true, "movq": true, "lea": true, "push": true, "pushq": true, "pop": true, "popq": true,
-		"movb": true, "movw": true, "movl": true, "movsx": true, "movsxd": true, "movzx": true,
+		"movb": true, "movw": true, "movl": true,
+		"movsx": true, "movsxd": true, "movsbw": true, "movsbl": true, "movsbq": true, "movswl": true, "movswq": true, "movslq": true,
+		"movzx": true, "movzbw": true, "movzbl": true, "movzbq": true, "movzwl": true, "movzwq": true,
 		"xchg": true, "xchgl": true, "xchgq": true,
 		"add": true, "addq": true, "sub": true, "subq": true, "and": true, "andq": true,
 		"cmp": true, "cmpq": true, "test": true, "testq": true, "inc": true, "incq": true, "dec": true, "decq": true,
-		"xor": true, "xorq": true, "call": true, "callq": true, "jmp": true, "ret": true,
+		"xor": true, "xorq": true, "call": true, "callq": true, "jmp": true, "jmpq": true, "ret": true, "retq": true,
 		"cpuid": true, "cld": true, "std": true,
 		"lfence": true, "rdtsc": true, "pause": true, "yield": true, "mrs": true, "isb": true,
 		"fldcw": true, "fnstcw": true, "stmxcsr": true, "ldmxcsr": true, "emms": true,
@@ -402,7 +404,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			}
 			issues = append(issues, Issue{Severity: "error", Code: "register-read-uninitialized", File: path, Line: inst.Line, Message: fmt.Sprintf("register %s is read but not established (declare it as an input, write it earlier, or preserve it)", reg)})
 		}
-		if written := writtenRegister(inst.Text); written != "" {
+		for _, written := range writtenRegisters(inst.Text) {
 			canonical := canonicalX86GPR(written)
 			if isX86GPR(canonical) {
 				state.LiveRegs[canonical] = true
@@ -572,7 +574,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 				delete(state.LiveRegs, reg)
 				delete(state.KnownUInt, reg)
 			}
-		case op == "jmp":
+		case op == "jmp" || op == "jmpq":
 			if writesSegment && state.FS == "" && !requireSet["x86_64.segment.state.unchecked"] {
 				issues = append(issues, Issue{Severity: "error", Code: "segment-transfer-state-unknown", File: path, Line: inst.Line, Message: "control transfer after writing fs/gs requires an explicit machine-state assertion such as state fs: host or state fs: guest"})
 			}
@@ -587,7 +589,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			} else {
 				usesJmp = true
 			}
-		case op == "ret":
+		case op == "ret" || op == "retq":
 			if writesSegment && state.FS == "" && !requireSet["x86_64.segment.state.unchecked"] {
 				issues = append(issues, Issue{Severity: "error", Code: "segment-transfer-state-unknown", File: path, Line: inst.Line, Message: "return after writing fs/gs requires an explicit machine-state assertion such as state fs: host or state fs: guest"})
 			}
@@ -632,7 +634,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		case instructionClobbersFlags(op):
 			flagsLive = false
 		}
-		if written := writtenRegister(inst.Text); written != "" {
+		for _, written := range writtenRegisters(inst.Text) {
 			delete(clobberedByCall, canonicalX86GPR(written))
 		}
 	}
@@ -726,10 +728,10 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	if controlSet["noreturn"] && usesRet {
 		issues = append(issues, Issue{Severity: "error", Code: "noreturn-can-return", File: path, Line: fn.Line, Message: "noreturn function contains ret"})
 	}
-	if controlSet["noreturn"] && !terminalOpIs(fn.Instructions, "jmp", "trap") {
+	if controlSet["noreturn"] && !terminalOpIs(fn.Instructions, "jmp", "jmpq", "trap") {
 		issues = append(issues, Issue{Severity: "error", Code: "noreturn-missing-terminal", File: path, Line: fn.Line, Message: "noreturn function must end in jmp or trap"})
 	}
-	if controlSet["noreturn"] && terminalOpIs(fn.Instructions, "jmp") && !controlSet["tail_jumps"] {
+	if controlSet["noreturn"] && terminalOpIs(fn.Instructions, "jmp", "jmpq") && !controlSet["tail_jumps"] {
 		issues = append(issues, Issue{Severity: "error", Code: "noreturn-jump-without-tail-contract", File: path, Line: fn.Line, Message: "noreturn jmp requires tail_jumps control contract"})
 	}
 	if controlSet["returns"] && usesJmp && !controlSet["tail_jumps"] {
@@ -738,7 +740,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	if controlSet["returns"] && !usesRet {
 		issues = append(issues, Issue{Severity: "error", Code: "returns-missing-ret", File: path, Line: fn.Line, Message: "returning function must contain ret"})
 	}
-	if controlSet["returns"] && usesRet && !terminalOpIs(fn.Instructions, "ret") {
+	if controlSet["returns"] && usesRet && !terminalOpIs(fn.Instructions, "ret", "retq") {
 		issues = append(issues, Issue{Severity: "error", Code: "return-not-terminal", File: path, Line: fn.Line, Message: "returning function must end with ret"})
 	}
 	if controlSet["returns"] && hasCallImmediatelyBeforeRet(fn.Instructions) && !requireSet["call.return_address_choreography.unchecked"] {
@@ -836,19 +838,33 @@ type memoryBaseProvenance struct {
 }
 
 func updateMemoryBaseProvenance(regProvenance map[string]memoryBaseProvenance, text string) {
-	written := canonicalX86GPR(writtenRegister(text))
-	if written == "" || !isX86GPR(written) {
+	writtenRegs := writtenRegisters(text)
+	if len(writtenRegs) == 0 {
 		return
 	}
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
-		delete(regProvenance, written)
+		for _, reg := range writtenRegs {
+			delete(regProvenance, canonicalX86GPR(reg))
+		}
 		return
 	}
 	op := normalizeOp(fields[0])
 	parts := splitInstructionOperands(text)
 	if len(parts) < 2 {
-		delete(regProvenance, written)
+		for _, reg := range writtenRegs {
+			delete(regProvenance, canonicalX86GPR(reg))
+		}
+		return
+	}
+	if op == "xchg" || op == "xchgl" || op == "xchgq" {
+		for _, reg := range writtenRegs {
+			delete(regProvenance, canonicalX86GPR(reg))
+		}
+		return
+	}
+	written := canonicalX86GPR(writtenRegs[0])
+	if written == "" || !isX86GPR(written) {
 		return
 	}
 	switch op {
@@ -1147,7 +1163,7 @@ func hasCallImmediatelyBeforeRet(instructions []Instruction) bool {
 	for i := 1; i < len(instructions); i++ {
 		prev := normalizeOp(instructions[i-1].Op)
 		cur := normalizeOp(instructions[i].Op)
-		if (prev == "call" || prev == "callq") && cur == "ret" {
+		if (prev == "call" || prev == "callq") && (cur == "ret" || cur == "retq") {
 			return true
 		}
 	}
@@ -1699,7 +1715,7 @@ func checkLabelPreconditions(path string, line int, transferKind string, label s
 }
 
 func directControlTarget(op string, text string) string {
-	if op != "jmp" && !isConditionalJump(op) {
+	if op != "jmp" && op != "jmpq" && !isConditionalJump(op) {
 		return ""
 	}
 	operands := splitInstructionOperands(text)
@@ -2013,11 +2029,21 @@ func instructionOverwritesDestination(text string) bool {
 		return false
 	}
 	switch normalizeOp(fields[0]) {
-	case "mov", "movq", "movl", "movw", "movb", "movsx", "movsxd", "movzx", "lea", "pop", "popq":
+	case "mov", "movq", "movl", "movw", "movb", "lea", "pop", "popq":
 		return true
 	case "xor", "xorq":
 		parts := splitInstructionOperands(text)
 		return len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+	default:
+		return isMoveExtendOp(normalizeOp(fields[0]))
+	}
+}
+
+func isMoveExtendOp(op string) bool {
+	switch op {
+	case "movsx", "movsxd", "movsbw", "movsbl", "movsbq", "movswl", "movswq", "movslq",
+		"movzx", "movzbw", "movzbl", "movzbq", "movzwl", "movzwq":
+		return true
 	default:
 		return false
 	}
@@ -2074,27 +2100,52 @@ func registersReadBy(text string) []string {
 }
 
 func writtenRegister(text string) string {
+	regs := writtenRegisters(text)
+	if len(regs) == 0 {
+		return ""
+	}
+	return regs[0]
+}
+
+func writtenRegisters(text string) []string {
 	parts := splitInstructionOperands(text)
 	if len(parts) == 0 {
-		return ""
+		return nil
 	}
 	fields := strings.Fields(text)
 	op := ""
 	if len(fields) > 0 {
 		op = normalizeOp(fields[0])
 	}
-	if strings.HasPrefix(op, "push") || op == "call" || op == "callq" || op == "jmp" || op == "ret" {
-		return ""
+	if strings.HasPrefix(op, "push") || op == "call" || op == "callq" || op == "jmp" || op == "jmpq" || op == "ret" || op == "retq" {
+		return nil
 	}
 	if op == "cmp" || op == "cmpq" || op == "test" || op == "testq" || isConditionalJump(op) {
-		return ""
+		return nil
+	}
+	if op == "xchg" || op == "xchgl" || op == "xchgq" {
+		seen := map[string]bool{}
+		var out []string
+		for _, part := range parts {
+			reg := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(part)), "%")
+			if !isRegisterName(reg) {
+				continue
+			}
+			reg = canonicalX86GPR(reg)
+			if seen[reg] {
+				continue
+			}
+			seen[reg] = true
+			out = append(out, reg)
+		}
+		return out
 	}
 	dst := strings.TrimSpace(parts[len(parts)-1])
 	dst = strings.TrimPrefix(strings.ToLower(dst), "%")
 	if isRegisterName(dst) {
-		return dst
+		return []string{dst}
 	}
-	return ""
+	return nil
 }
 
 func updateKnownRegisterValue(state machineFactState, text string, reg string) {
@@ -2309,7 +2360,7 @@ func parseImmediate(operand string) (int64, bool) {
 
 func usesSymbolAddress(text string) bool {
 	fields := strings.Fields(text)
-	if len(fields) > 0 && (isConditionalJump(normalizeOp(fields[0])) || normalizeOp(fields[0]) == "jmp" || strings.HasPrefix(normalizeOp(fields[0]), "call")) {
+	if len(fields) > 0 && (isConditionalJump(normalizeOp(fields[0])) || normalizeOp(fields[0]) == "jmp" || normalizeOp(fields[0]) == "jmpq" || strings.HasPrefix(normalizeOp(fields[0]), "call")) {
 		return false
 	}
 	if len(fields) > 0 && normalizeOp(fields[0]) == "mrs" {
@@ -2381,7 +2432,7 @@ func writesSegmentRegister(text string) bool {
 }
 
 func isIndirectControlTransfer(op string, text string) bool {
-	if op != "jmp" && op != "call" && op != "callq" {
+	if op != "jmp" && op != "jmpq" && op != "call" && op != "callq" {
 		return false
 	}
 	parts := splitInstructionOperands(text)
@@ -2406,7 +2457,7 @@ func indirectControlTargetRegister(text string) string {
 }
 
 func isDirectSymbolControlTransfer(op string, text string) bool {
-	if op != "jmp" && op != "call" && op != "callq" {
+	if op != "jmp" && op != "jmpq" && op != "call" && op != "callq" {
 		return false
 	}
 	parts := splitInstructionOperands(text)
@@ -2480,11 +2531,24 @@ func registerTokens(text string) []string {
 }
 
 func writesMemory(text string) bool {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return false
+	}
+	op := normalizeOp(fields[0])
 	parts := splitInstructionOperands(text)
+	if len(parts) == 1 {
+		switch op {
+		case "inc", "incq", "dec", "decq", "pop", "popq":
+			return operandIsMemory(parts[0])
+		case "fnstcw", "stmxcsr":
+			return operandIsMemory(parts[0])
+		}
+		return false
+	}
 	if len(parts) < 2 {
 		return false
 	}
-	op := normalizeOp(strings.Fields(strings.TrimSpace(text))[0])
 	if op == "xchg" || op == "xchgl" || op == "xchgq" {
 		return hasMemoryOperand(text)
 	}
@@ -2541,9 +2605,9 @@ func operandIsMemory(operand string) bool {
 // to memory). lea computes an address without touching memory; a pure store (mov to memory)
 // writes without reading; and xchg with a memory operand both reads and writes it.
 //
-// Single-operand memory instructions are intentionally excluded: push/pop are governed by
-// the stack contract, and the FPU control loads/stores (ldmxcsr/fldcw/fnstcw/stmxcsr) are
-// gated by the x86_64.fpu_control capability. Their memory access is already declared.
+// Single-operand stack instructions (push/pop) are intentionally excluded: they are
+// governed by the stack contract. Single-operand FPU-control memory forms still participate
+// in memory direction checks: fldcw/ldmxcsr read memory, fnstcw/stmxcsr write memory.
 func readsMemory(text string) bool {
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
@@ -2554,6 +2618,15 @@ func readsMemory(text string) bool {
 		return false
 	}
 	parts := splitInstructionOperands(text)
+	if len(parts) == 1 {
+		switch op {
+		case "inc", "incq", "dec", "decq", "push", "pushq", "call", "callq", "jmp", "jmpq":
+			return operandIsMemory(parts[0])
+		case "fldcw", "ldmxcsr":
+			return operandIsMemory(parts[0])
+		}
+		return false
+	}
 	if len(parts) < 2 {
 		return false
 	}

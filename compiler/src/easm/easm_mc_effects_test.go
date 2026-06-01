@@ -82,7 +82,18 @@ var easmOpWitness = map[string]string{
 	"movl":     "movl %eax, %ecx",
 	"movsx":    "movsbl %al, %ecx",
 	"movsxd":   "movslq %eax, %rbx",
+	"movsbw":   "movsbw %al, %cx",
+	"movsbl":   "movsbl %al, %ecx",
+	"movsbq":   "movsbq %al, %rcx",
+	"movswl":   "movswl %ax, %ecx",
+	"movswq":   "movswq %ax, %rcx",
+	"movslq":   "movslq %eax, %rcx",
 	"movzx":    "movzbl %al, %ecx",
+	"movzbw":   "movzbw %al, %cx",
+	"movzbl":   "movzbl %al, %ecx",
+	"movzbq":   "movzbq %al, %rcx",
+	"movzwl":   "movzwl %ax, %ecx",
+	"movzwq":   "movzwq %ax, %rcx",
 	"lea":      "leaq (%rax), %rbx",
 	"push":     "pushq %rax",
 	"pushq":    "pushq %rax",
@@ -110,7 +121,9 @@ var easmOpWitness = map[string]string{
 	"call":     "callq *%rax",
 	"callq":    "callq *%rax",
 	"jmp":      "jmp *%rax",
+	"jmpq":     "jmpq *%rax",
 	"ret":      "retq",
+	"retq":     "retq",
 	"cpuid":    "cpuid",
 	"cld":      "cld",
 	"std":      "std",
@@ -205,7 +218,7 @@ var x86GPRSet = map[string]bool{
 // side-effect-requires-capability rule.
 func isControlFlowOp(op string) bool {
 	switch op {
-	case "call", "callq", "jmp", "ret", "retq":
+	case "call", "callq", "jmp", "jmpq", "ret", "retq":
 		return true
 	}
 	return isConditionalJump(op)
@@ -501,6 +514,16 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 		"xorq %rax, (%rbx)",
 		"xchgq %rax, (%rbx)",
 		"cmpq (%rax), %rbx",
+		"incq (%rax)",
+		"decq (%rax)",
+		"pushq (%rax)",
+		"popq (%rax)",
+		"callq *(%rax)",
+		"jmp *(%rax)",
+		"fldcw (%rax)",
+		"ldmxcsr (%rax)",
+		"fnstcw (%rax)",
+		"stmxcsr (%rax)",
 		"movq %rax, %rbx",   // control: register-only, no memory access
 		"leaq (%rax), %rbx", // control: address computation, NOT a memory access
 	}
@@ -525,12 +548,12 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 		if eff.mayLoad {
 			mcConfirmedLoad = true
 		}
-		if eff.mayStore && !writesMemory(text) {
+		if eff.mayStore && !mcMayStoreCanBeMachineStateOnly(opcodeName) && !mcMayStoreCanBeImplicitStackOnly(text) && !writesMemory(text) {
 			t.Errorf("UNDER-DETECTED STORE: MC says %q (%s) writes memory (mayStore), but "+
 				"writesMemory=false, so the validator would not require a `memory` clobber.",
 				text, opcodeName)
 		}
-		if eff.mayLoad && !readsMemory(text) {
+		if eff.mayLoad && !mcMayLoadCanBeImplicitStackOnly(text) && !readsMemory(text) {
 			t.Errorf("UNDER-DETECTED LOAD: MC says %q (%s) reads memory (mayLoad), but "+
 				"readsMemory=false, so the validator would not require a `memory.read` clobber.",
 				text, opcodeName)
@@ -554,4 +577,36 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 	}
 
 	t.Logf("cross-checked %d x86 EASM ops and %d memory forms against LLVM MC ground truth", checked, memChecked)
+}
+
+func mcMayStoreCanBeMachineStateOnly(opcodeName string) bool {
+	switch strings.ToUpper(strings.TrimSpace(opcodeName)) {
+	case "LDMXCSR":
+		return true
+	}
+	return false
+}
+
+func mcMayStoreCanBeImplicitStackOnly(text string) bool {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) == 0 {
+		return false
+	}
+	switch normalizeOp(fields[0]) {
+	case "push", "pushq", "call", "callq":
+		return true
+	}
+	return false
+}
+
+func mcMayLoadCanBeImplicitStackOnly(text string) bool {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) == 0 {
+		return false
+	}
+	switch normalizeOp(fields[0]) {
+	case "pop", "popq", "ret":
+		return true
+	}
+	return false
 }

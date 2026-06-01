@@ -119,6 +119,54 @@ export def f(p: HostPtr[u64]) -> void abi c:
 `,
 		},
 		{
+			name:     "single-operand fpu control load requires memory.read",
+			wantRead: true,
+			src: `module t
+target x86_64
+export def f(p: HostPtr[u16]) -> void abi c:
+    inputs: p = rdi
+    clobbers:
+    stack: unchanged
+    control: returns
+    requires: x86_64.fpu_control
+    body:
+        fldcw (%rdi)
+        ret
+`,
+		},
+		{
+			name:      "single-operand fpu control store requires memory.write",
+			wantWrite: true,
+			src: `module t
+target x86_64
+export def f(p: HostPtr[u16]) -> void abi c:
+    inputs: p = rdi
+    clobbers:
+    stack: unchanged
+    control: returns
+    requires: x86_64.fpu_control
+    body:
+        fnstcw (%rdi)
+        ret
+`,
+		},
+		{
+			name: "single-operand fpu control access accepts precise memory directions",
+			src: `module t
+target x86_64
+export def f(p: HostPtr[u16], q: HostPtr[u32]) -> void abi c:
+    inputs: p = rdi, q = rsi
+    clobbers: memory.read, memory.write
+    stack: unchanged
+    control: returns
+    requires: x86_64.fpu_control
+    body:
+        fldcw (%rdi)
+        stmxcsr (%rsi)
+        ret
+`,
+		},
+		{
 			name:     "read-modify-write declared write-only still flags the load",
 			wantRead: true,
 			src: `module t
@@ -130,6 +178,70 @@ export def f(p: HostPtr[u64]) -> void abi c:
     control: returns
     body:
         addq $1, (%rdi)
+        ret
+`,
+		},
+		{
+			name:      "single-operand memory increment requires read and write",
+			wantRead:  true,
+			wantWrite: true,
+			src: `module t
+target x86_64
+export def f(p: HostPtr[u64]) -> void abi c:
+    inputs: p = rdi
+    clobbers: cc
+    stack: unchanged
+    control: returns
+    body:
+        incq (%rdi)
+        ret
+`,
+		},
+		{
+			name:     "push from memory requires read coverage beyond stack contract",
+			wantRead: true,
+			src: `module t
+target x86_64
+export def f(p: HostPtr[u64]) -> void abi c:
+    inputs: p = rdi
+    clobbers: rax, memory.write
+    stack: unchanged
+    control: returns
+    body:
+        pushq (%rdi)
+        popq %rax
+        ret
+`,
+		},
+		{
+			name:      "pop to memory requires write coverage beyond stack contract",
+			wantWrite: true,
+			src: `module t
+target x86_64
+export def f(p: HostPtr[u64]) -> void abi c:
+    inputs: p = rdi
+    clobbers: rax, memory.read
+    stack: unchanged
+    control: returns
+    body:
+        pushq %rax
+        popq (%rdi)
+        ret
+`,
+		},
+		{
+			name:     "memory-indirect call requires read coverage for target load",
+			wantRead: true,
+			src: `module t
+target x86_64
+export def f(p: HostPtr[u64]) -> void abi c:
+    inputs: p = rdi
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory.write
+    stack: aligned 16
+    control: returns
+    requires: control.indirect
+    body:
+        call *(%rdi)
         ret
 `,
 		},
