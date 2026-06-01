@@ -75,6 +75,7 @@ func compileLLVMModuleWithTarget(result *semantic.Result, optLevel OptimizationL
 		g.dispose()
 		return nil, err
 	}
+	g.appendAppleX64SegmentReservations(targetTriple)
 	if err := g.verify(); err != nil {
 		g.dispose()
 		return nil, err
