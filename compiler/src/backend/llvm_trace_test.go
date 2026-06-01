@@ -38,6 +38,10 @@ def main() -> i32:
 	if !strings.Contains(ir, "step") || !strings.Contains(ir, "main") {
 		t.Fatalf("expected function-name string constants in the module, got:\n%s", ir)
 	}
+	// Value capture: the scalar local `y` must produce a value record.
+	if !strings.Contains(ir, "elisa_trace_record_value") {
+		t.Fatalf("expected a value record for the scalar declaration, got:\n%s", ir)
+	}
 
 	withoutTrace := parseAndAnalyzeBackendTest(t, "trace_off.elisa", src)
 	g2, err := compileLLVMModuleWithTarget(withoutTrace, OptimizationLevel0, DefaultPackedLoweringProfile(), "")

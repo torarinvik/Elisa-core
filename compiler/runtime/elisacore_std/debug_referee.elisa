@@ -83,15 +83,30 @@ extern write(fd: int, buf: void&, count: usize) -> isize effects[Console]
 
 struct ElisaTraceEntry:
     name: mutable cstr
+    var_name: mutable cstr
+    value: mutable u64
     line: mutable u32
+    has_value: mutable u8
 
 global mutable elisa_trace_ring: ElisaTraceEntry[ELISA_TRACE_CAP] = zeroed
 global mutable elisa_trace_pos: u64 = 0
 
+# Plain step record: just function + line (the execution path).
 def elisa_trace_record(name: cstr, line: u32) -> void:
     idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
     elisa_trace_ring[idx].name <- name
     elisa_trace_ring[idx].line <- line
+    elisa_trace_ring[idx].has_value <- 0u8
+    elisa_trace_pos <- elisa_trace_pos + 1u64
+
+# Value record: a variable received a (scalar/pointer) value at this step.
+def elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64) -> void:
+    idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
+    elisa_trace_ring[idx].name <- name
+    elisa_trace_ring[idx].line <- line
+    elisa_trace_ring[idx].var_name <- var_name
+    elisa_trace_ring[idx].value <- value
+    elisa_trace_ring[idx].has_value <- 1u8
     elisa_trace_pos <- elisa_trace_pos + 1u64
 
 def elisa_trace_count() -> u64:
@@ -112,7 +127,13 @@ def elisa_trace_dump() -> void:
         nm: cstr = elisa_trace_ring[idx].name
         ln: u32 = elisa_trace_ring[idx].line
         buf: mutable u8[256] = zeroed
-        w: mutable int = snprintf(buf[0], 256usize, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
+        w: mutable int = 0
+        if elisa_trace_ring[idx].has_value != 0u8:
+            vn: cstr = elisa_trace_ring[idx].var_name
+            vv: u64 = elisa_trace_ring[idx].value
+            w <- snprintf(buf[0], 256usize, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
+        else:
+            w <- snprintf(buf[0], 256usize, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
         if w > 0:
             wn: mutable usize = w.usize()
             if wn > 256usize:

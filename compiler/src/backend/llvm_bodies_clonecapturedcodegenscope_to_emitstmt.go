@@ -338,6 +338,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			}
 		}
 		s.bindImplicitTreeOwnerParam(n.Name, declType, alloca, initValue)
+		if s.g.trace != nil {
+			s.g.trace.recordValue(s, n.Pos().Line, n.Name, initValue)
+		}
 		return nil
 	case *ast.LetDestructureStmt:
 		return s.emitLetDestructureStmt(n)
@@ -460,6 +463,11 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		if err := s.storeValue(ptr, value, targetType, "assign"); err != nil {
 			return err
+		}
+		if s.g.trace != nil {
+			if id, ok := n.Target.(*ast.Ident); ok {
+				s.g.trace.recordValue(s, n.Pos().Line, id.Name, value)
+			}
 		}
 		s.bindPackedStoreValue(targetType, value)
 		if path, ok := s.packedEnumStoragePath(n.Target); ok {

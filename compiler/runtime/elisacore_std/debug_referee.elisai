@@ -157,6 +157,8 @@ extern debug_trace_boundary(label: cstr, a: uintptr, b: uintptr, c: uintptr) can
 
 extern elisa_trace_record(name: cstr, line: u32)
 
+extern elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64)
+
 extern elisa_trace_count() -> u64
 
 extern elisa_trace_dump()
