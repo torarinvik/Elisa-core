@@ -258,9 +258,10 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 				conditions = append(conditions, interpreter.BreakWhenExpr(options.debugBreak))
 			}
 			session := interpreter.NewDebugSession(interpreter.DebuggerConfig{
-				TraceLimit: options.debugTraceLimit,
-				FullTrace:  options.debugFullTrace,
-				Context:    options.debugContext,
+				TraceLimit:   options.debugTraceLimit,
+				FullTrace:    options.debugFullTrace,
+				Context:      options.debugContext,
+				BreakOnRaise: options.debugBreakRaise,
 			}, conditions...)
 			session.Run()
 			debugger = session.Debugger

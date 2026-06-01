@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -154,6 +155,16 @@ type controlSignal struct {
 	kind  signalKind
 	value Value
 }
+
+// raiseSignal is a control error produced by evaluating a `raise` expression. It unwinds the
+// interpreter to the program boundary, where the raised value becomes the program result. It
+// propagates via %w wrapping, so errors.As recovers it through annotateRuntimeError.
+type raiseSignal struct {
+	value Value
+}
+
+func (r *raiseSignal) Error() string { return "elisa: error raised (uncaught in interpreter)" }
+
 type valueSlot struct {
 	get func() Value
 	set func(Value) error
@@ -203,6 +214,14 @@ func Execute(result *semantic.Result, options Options) (*Result, error) {
 	}
 	returnValue, err := interp.callFunctionByName(entryName, nil)
 	if err != nil {
+		var raised *raiseSignal
+		if errors.As(err, &raised) {
+			// An uncaught `raise` reaching the program boundary yields the raised value as
+			// the result (the interpreter does not model error-union catch). When BreakOnRaise
+			// is set the debugger has already halted at the raise site, so this path is only
+			// taken in non-breaking runs.
+			return &Result{Return: raised.value, Stdout: stdout.String()}, nil
+		}
 		return nil, err
 	}
 	if interp.debugger != nil {

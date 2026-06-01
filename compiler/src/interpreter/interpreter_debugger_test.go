@@ -276,6 +276,41 @@ func TestDebuggerExpressionConditionSupportsHexAndArithmetic(t *testing.T) {
 	}
 }
 
+func TestDebuggerBreaksOnRaise(t *testing.T) {
+	src := `error MyError:
+    Bad
+
+def run() -> i64 error[MyError]:
+    x: mutable i64 = 5
+    x <- 7
+    raise MyError.Bad
+    return x
+`
+	result := parseAndAnalyzeInterpreterTest(t, "interpreter_debugger_raise.elisa", src)
+	debugger := interpreter.NewDebuggerWithConfig(interpreter.DebuggerConfig{BreakOnRaise: true})
+	_, err := interpreter.Execute(result, interpreter.Options{Entry: "run", Debugger: debugger})
+	var halt *interpreter.DebugHaltError
+	if !errors.As(err, &halt) {
+		t.Fatalf("expected break-on-raise halt, got %v", err)
+	}
+	if halt.Hit.StopReason != interpreter.DebugStopRaise {
+		t.Fatalf("expected raise stop reason, got %q", halt.Hit.StopReason)
+	}
+	current, ok := debugger.Current()
+	if !ok {
+		t.Fatalf("expected current snapshot at the raise")
+	}
+	if got, ok := current.LookupString("raised"); !ok || got != "MyError.Bad" {
+		t.Fatalf("expected raised=MyError.Bad, got %q ok=%v", got, ok)
+	}
+	if got, ok := current.LookupString("x"); !ok || got != "7" {
+		t.Fatalf("expected x=7 captured at the raise, got %q ok=%v", got, ok)
+	}
+	if _, ok := debugger.StepBack(); !ok {
+		t.Fatalf("expected to step backward from the raise to find the cause")
+	}
+}
+
 func TestDebugSessionSourceStepCommands(t *testing.T) {
 	src := `def inner(value: i64) -> i64:
     next: i64 = value + 1

@@ -210,6 +210,18 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 			return VoidValue(), err
 		}
 		return derefValue(value), nil
+	case *ast.RaiseExpr:
+		// `raise e` returns e through the function's error union. It diverges: evaluate the
+		// error, let the debugger break on it, then unwind via a raiseSignal that the program
+		// boundary turns into the result.
+		raised, err := i.evalExpr(frame, n.Error)
+		if err != nil {
+			return VoidValue(), err
+		}
+		if haltErr := i.debugRaise(frame, n, raised); haltErr != nil {
+			return VoidValue(), haltErr
+		}
+		return VoidValue(), &raiseSignal{value: raised}
 	case *ast.ShorthandMemberExpr:
 		if i != nil && i.result != nil && i.result.ExprTypes != nil {
 			if t, ok := i.result.ExprTypes[n]; ok {
@@ -277,6 +289,26 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	case *ast.CallExpr:
 		return i.evalCallExpr(frame, n)
 	case *ast.FieldExpr:
+		if i != nil && i.result != nil && i.result.ExprTypes != nil {
+			if t, ok := i.result.ExprTypes[n]; ok {
+				switch et := t.(type) {
+				case *semantic.ConstEnumType:
+					if et != nil {
+						if member, ok := et.Member(n.Field); ok && member != nil {
+							return IntValue(member.Value), nil
+						}
+					}
+				case *semantic.ErrorSetType:
+					// A qualified error tag (MyError.Bad) is surfaced as its name so a value
+					// raised through an error union is legible in the debugger. Payload data is
+					// not yet modeled in the interpreter.
+					if name, ok := interpreterQualifiedFieldName(n); ok {
+						return StringValue(name), nil
+					}
+					return StringValue(n.Field), nil
+				}
+			}
+		}
 		if name, ok := interpreterQualifiedFieldName(n); ok {
 			for _, candidate := range interpreterVisibleNames(frame, name) {
 				if value, ok := i.consts[candidate]; ok {

@@ -188,6 +188,7 @@ type cliOptions struct {
 	targetTriple    string
 	debug           bool
 	debugBreak      string
+	debugBreakRaise bool
 	debugFormat     string
 	debugTraceLimit int
 	debugFullTrace  bool
@@ -255,6 +256,9 @@ func parseArgs(args []string) (cliOptions, error) {
 			options.filter = strings.TrimSpace(args[i])
 		case arg == "-debug":
 			options.debug = true
+		case arg == "-debug-break-raise":
+			options.debug = true
+			options.debugBreakRaise = true
 		case strings.HasPrefix(arg, "-debug-break="):
 			options.debug = true
 			options.debugBreak = strings.TrimSpace(strings.TrimPrefix(arg, "-debug-break="))

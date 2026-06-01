@@ -21,6 +21,7 @@ type DebugEvent string
 const (
 	DebugBeforeStmt DebugEvent = "before-stmt"
 	DebugAfterStmt  DebugEvent = "after-stmt"
+	DebugRaise      DebugEvent = "raise"
 )
 
 type DebugSessionState string
@@ -44,6 +45,7 @@ const (
 	DebugStopEndOfProgram   DebugStopReason = "end-of-program"
 	DebugStopRuntimeError   DebugStopReason = "runtime-error"
 	DebugStopConditionError DebugStopReason = "condition-error"
+	DebugStopRaise          DebugStopReason = "raise"
 	DebugStopTraceExpired   DebugStopReason = "trace-window-expired"
 	DebugStopReplayOnly     DebugStopReason = "replay-only"
 )
@@ -190,6 +192,10 @@ type DebuggerConfig struct {
 	TraceLimit int
 	FullTrace  bool
 	Context    int
+	// BreakOnRaise halts the debugger at every `raise` site, so an error returned through an
+	// error union can be inspected -- and stepped backward from -- the way an exception
+	// breakpoint would, without `raise` being an exception.
+	BreakOnRaise bool
 }
 
 type Debugger struct {
@@ -841,6 +847,48 @@ func (s *DebugSession) emit(record DebugSessionEvent) {
 	for _, handler := range s.EventHandlers {
 		handler(record)
 	}
+}
+
+// debugRaise records a snapshot at a `raise` site (exposing the raised value as a synthetic
+// local "raised") so it joins the time-travel trace, and halts when BreakOnRaise is set --
+// giving an error returned through an error union the same step-backward-to-find-the-cause
+// power an exception breakpoint would, without raise being an exception.
+func (i *Interpreter) debugRaise(frame *frame, expr *ast.RaiseExpr, raised Value) error {
+	if i == nil || i.debugger == nil {
+		return nil
+	}
+	locals := debugCloneVisibleLocals(frame)
+	locals["raised"] = raised.Clone()
+	snapshot := DebugSnapshot{
+		SchemaVersion: DebugSchemaVersion,
+		Index:         len(i.debugger.Trace),
+		Step:          i.debugger.nextStep,
+		Event:         DebugRaise,
+		ThreadID:      "main",
+		Function:      debugFrameFunction(frame),
+		CallStack:     debugCallStack(frame, nil),
+		Position:      expr.Pos(),
+		StatementKind: "RaiseExpr",
+		Locals:        locals,
+		Globals:       debugCloneValues(i.globals),
+		Registers:     map[string]string{},
+	}
+	i.debugger.nextStep++
+	if previous, ok := i.debugger.lastSnapshot(); ok {
+		snapshot.Diff = debugDiffSnapshots(previous, snapshot)
+	}
+	i.debugger.appendSnapshot(snapshot)
+	if !i.debugger.Config.BreakOnRaise || i.debugger.Hit != nil {
+		return nil
+	}
+	hit := DebugHit{Condition: "raise", StopReason: DebugStopRaise, Snapshot: snapshot}
+	i.debugger.Hit = &hit
+	if i.debugger.Session != nil {
+		i.debugger.Session.State = DebugSessionHalted
+		i.debugger.emitSessionEvent(DebugSessionEventBreakpointHit, snapshot, &hit)
+		i.debugger.emitSessionEvent(DebugSessionEventHalted, snapshot, &hit)
+	}
+	return &DebugHaltError{Hit: hit}
 }
 
 func debugFrameFunction(frame *frame) string {
