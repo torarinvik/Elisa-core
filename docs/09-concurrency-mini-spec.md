@@ -131,7 +131,7 @@ place of one.
 
 Examples:
 
-- `pool workers(8u): ...`
+- `pool workers(8): ...`
 - `submit work(arg)`
 - `await task`
 - `wait all jobs`
@@ -622,13 +622,13 @@ extern fence(order: MemoryOrder) -> void can[Atomics.Fence]
 ### Pool Scope
 
 ```elisa
-pool workers(8u):
+pool workers(8):
     ...
 ```
 
 desugars to:
 
-- `workers: ThreadPool = pool_new(8u)`
+- `workers: ThreadPool = pool_new(8)`
 - block body
 - guaranteed `pool_shutdown(&workers)` on every exit path
 
@@ -760,8 +760,8 @@ statement-oriented packed destructuring forms.
 def parallel_sum(data: static i32&, mid: usize, len: usize) -> i64 can[Pool.Submit, Pool.Await, Atomics.Rmw, Atomics.Load]:
     total: atomic[i64] = atomic[i64](0)
 
-    pool workers(8u):
-        left: Task[i64, Pending] = submit sum_chunk(Chunk(0u, mid, data, &total))
+    pool workers(8):
+        left: Task[i64, Pending] = submit sum_chunk(Chunk(0, mid, data, &total))
         right: Task[i64, Pending] = submit sum_chunk(Chunk(mid, len, data, &total))
 
         _ = await left
@@ -774,14 +774,14 @@ def parallel_sum(data: static i32&, mid: usize, len: usize) -> i64 can[Pool.Subm
 
 ```elisa
 def build_index(paths: static PathJob&, count: usize) -> void can[Pool.Submit, Pool.WaitAll]:
-    pool workers(8u):
+    pool workers(8):
         jobs: TaskGroup = task_group_new()
 
         i: mutable usize = 0
         while i < count:
             t: Task[void, Pending] = submit parse_and_index(paths[i])
             task_group_add(&jobs, move t)
-            i <- i + 1u
+            i <- i + 1
 
         wait all jobs
 ```
@@ -807,7 +807,7 @@ struct BadJob:
 def bad() -> i64 can[Pool.Submit, Pool.Await]:
     local: i64 = 7
 
-    pool workers(4u):
+    pool workers(4):
         t: Task[i64, Pending] = submit use_bad(BadJob(&local))
         return await t
 ```

@@ -155,6 +155,10 @@ layout soa struct Particle:
 **Syntax meaning:**
 Requests struct-of-arrays physical layout.
 
+Legacy compatibility note:
+`soa Name:` is still accepted as older shorthand for the same declaration, but
+canonical source should use `layout soa struct Name:`.
+
 ---
 
 ## 10. Combined layout modifiers

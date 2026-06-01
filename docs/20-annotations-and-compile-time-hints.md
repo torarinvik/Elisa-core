@@ -127,6 +127,193 @@ Current rules:
 - these annotations affect caller-side CFG facts and refinement, not just the annotated function body itself
 - the named guard target must still line up with the function's declared parameters and return shape
 
+## ABI and extern annotations
+
+Extern declarations and ABI-facing functions accept explicit annotation metadata.
+
+```elisa
+@link_name(native_puts)
+extern puts(text: u8&) -> int
+
+@intrinsic(llvm.ctpop.i64)
+extern popcount64(value: u64) -> u64
+
+@callconv(winapi)
+extern winapi(value: i32) -> i32
+
+@c_abi(c)
+def c_callback(arg: void&) -> u32:
+    _ = arg
+    return 0
+
+@stdcall
+def stdcall_callback(arg: void&) -> u32:
+    _ = arg
+    return 0
+
+@c_opaque(windows.h, CRITICAL_SECTION)
+extern Win32CriticalSection
+```
+
+Current rules:
+
+- `@link_name(name)` on extern function or extern var expects one non-empty symbol name
+- `@intrinsic(name)` on extern function expects one non-empty LLVM intrinsic name that starts with `llvm.`
+- `@callconv(name)` and `@c_abi(name)` expect exactly one calling-convention name
+- `@stdcall` takes no arguments and sets the function calling convention to `stdcall`
+- unsupported calling conventions are rejected (for example `vectorcall`)
+- `@c_opaque(header, c_type)` on extern type expects exactly two non-empty arguments
+
+Extern progress classification annotations are also part of the extern annotation surface:
+
+```elisa
+@blocking
+extern waitpid(pid: i32) -> i32
+
+@nonblocking
+extern monotonic_time() -> i64
+```
+
+Current rules:
+
+- `@blocking` and `@nonblocking` take no arguments
+- an extern cannot be both `@blocking` and `@nonblocking`
+- `@blocking` adds `Blocking.RawExtern` permission to the extern signature
+- `@nonblocking` documents a non-blocking contract and does not add `Blocking.*` permissions
+
+## Main-thread scheduling annotation
+
+Functions can be marked as main-thread entry points for progress-safety checks.
+
+```elisa
+extern wait_for_worker() -> void can[Blocking.Wait]
+
+@main_thread
+def on_click() -> void:
+    wait_for_worker()
+```
+
+Current rules:
+
+- `@main_thread` takes no arguments
+- reachable `Blocking.*` paths from a `@main_thread` function are progress errors
+- intentional blocking on main thread should be wrapped in a local trusted block such as `trusted Unsafe.BlockMain:`
+
+For full progress-safety behavior, see [25-progress-safety.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/25-progress-safety.md).
+
+## Extension-method, visibility, and constructor annotations
+
+Current surface includes method-style extension hooks, internal visibility markers, and type constructor hooks.
+
+```elisa
+struct DArrayBuilder[T]:
+    marker: u8
+
+@method
+extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
+
+@internal
+def hidden_identity(value: i64) -> i64:
+    return value
+
+struct Span:
+    start: i64
+    finish: i64
+
+@init(Span)
+def make_span(start: i64, finish: i64 = 0) -> Span:
+    return Span{start, finish}
+
+def build(start: i64) -> Span:
+    return Span(start:)
+```
+
+Current rules:
+
+- `@method` takes no arguments and requires at least one receiver parameter
+- `@method` works on both `def` and `extern` functions and enables receiver-call syntax
+- `@internal` takes no arguments and marks internal-only surface
+- `@init` accepts zero arguments or one return-type name
+- `@init` function must be non-generic, non-variadic, and return a concrete struct type
+- when `@init(TypeName)` is used, the named type must exist, be a concrete struct, and match the function return type
+- paren constructor syntax `TypeName(...)` lowers through the registered `@init` hook
+
+## Test and benchmark annotations
+
+The language surface includes runner-facing function markers for tests, benches,
+fixtures, and skip controls.
+
+```elisa
+@test
+def alpha_case() -> void:
+    pass
+
+@bench
+def hot_loop() -> void:
+    pass
+
+@fixture
+def shared_seed() -> int:
+    return 7
+
+@skip(todo)
+@test
+def beta_case() -> void:
+    pass
+```
+
+Current rules:
+
+- `@test`, `@bench`, and `@fixture` mark functions for list and runner surfaces (`-emit tests`, `-emit benches`, `-emit fixtures`, `-emit test`, `-emit test-runner`)
+- `@test` and `@bench` functions are validated as runner entry functions and must return `void`
+- skip markers such as `@skip(...)` or `@ignore` are accepted and used by runner surfaces to exclude selected cases
+
+## Boundary pointer annotations
+
+Boundary pointer annotations mark function parameters that intentionally carry
+address-space pointers across unsafe ABI edges.
+
+```elisa
+@boundary_pointer_args(mutex)
+def posix_pthread_mutex_lock(mutex: GuestVAddr[void]) -> int:
+    trusted Unsafe.GuestHostPointerCast:
+        slot: mutable void&?&? = mutex.cast[mutable void&?&?]
+        _ = slot
+    return 0
+```
+
+Current rules:
+
+- `@boundary_pointer_args(...)` expects at least one parameter name
+- each listed name must refer to an existing parameter
+- each listed parameter must use a typed address-space pointer carrier, such as `GuestVAddr[T]`, `HostPtr[T]`, or `NativeMappedGuestPtr[T]`
+- host reference shapes (for example `mutable void&?&?`) and raw integers (`uintptr`) are rejected at the boundary marker
+- converting a boundary carrier to host-reference form still requires explicit unsafe grant, for example `trusted Unsafe.GuestHostPointerCast:`
+
+## Async-entry and segment-owner annotations
+
+Segment-owner safety and async-entry validation are annotation-driven.
+
+```elisa
+@async_entry
+@segment_establishing
+@reentrant_safe
+def alarm_handler() -> void:
+    return
+
+@segment_transition(guest)
+extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
+```
+
+Current rules:
+
+- `@async_entry`, `@segment_agnostic`, `@segment_establishing`, and `@reentrant_safe` take no arguments
+- `@segment_transition` requires exactly one target owner argument: `host` or `guest`
+- async-entry functions must explicitly handle segment-owner assumptions and reentrant safety
+- externs that mutate active segment state require explicit `@segment_transition(...)` so owner transitions are typed contracts
+
+For complete segment-owner behavior and permission examples, see [27-segment-owner-safety-surface.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/27-segment-owner-safety-surface.md).
+
 ## Branch hints
 
 Branch-probability hints are statement syntax rather than `@` annotations, but

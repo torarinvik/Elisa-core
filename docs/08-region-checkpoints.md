@@ -9,8 +9,8 @@ existing `region`, `new[...]`, and `destroy` operations:
 ## Syntax
 
 ```elisa
-region scratch(1024u)
-region scratch(1024u) using malloc
+region scratch(1024)
+region scratch(1024) using malloc
 
 mark scratch as cp
 temp: scratch i32& = new[scratch] 1
@@ -137,7 +137,7 @@ def bad() -> i32:
     mark scratch as cp
     value: scratch i32& = new[scratch] 1
     restore scratch from cp
-    return value[0u]
+    return value[0]
 ```
 
 Because `value` points into storage that no longer logically exists.
@@ -156,9 +156,9 @@ Nested checkpoints are allowed.
 
 ```elisa
 def nested(seed: i32) -> i32:
-    region scratch(1024u)
+    region scratch(1024)
     base: scratch i32& = new[scratch] seed
-    baseline: i32 = base[0u]
+    baseline: i32 = base[0]
 
     mark scratch as outer
     stable: scratch i32& = new[scratch] seed + 1
@@ -167,12 +167,12 @@ def nested(seed: i32) -> i32:
     temp: scratch i32& = new[scratch] seed + 2
     restore scratch from inner
 
-    kept: i32 = stable[0u]
+    kept: i32 = stable[0]
     restore scratch from outer
 
     reset scratch
     final: scratch i32& = new[scratch] seed + 3
-    return baseline + kept + final[0u]
+    return baseline + kept + final[0]
 ```
 
 Restoring an older checkpoint invalidates newer checkpoints from the same region.

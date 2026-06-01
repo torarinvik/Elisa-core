@@ -31,6 +31,7 @@ Ready today:
 - C-header prefix layout intent with `@c_bind_prefix(...)`
 - opaque C type metadata with `@c_opaque(...)`
 - C compiler backed layout verification with `-emit c-bind-check`
+- JSON layout manifest emission with `-emit c-bind-check-json`
 
 Not automatic yet:
 
@@ -93,6 +94,57 @@ extern avformat_open_input_raw(ps: mutable void&?&, url: i8&?, fmt: void&?, opti
 `extern` means “the symbol exists elsewhere.” It does not mean the call is safe.
 Keep raw native declarations close to the binding file and expose a smaller
 Elisa wrapper API to the rest of the codebase.
+
+## Boundary Pointer Carriers
+
+For unsafe boundaries that pass guest or host address-space pointers, use typed
+address-space carriers instead of raw integers or host reference shapes.
+
+```elisa
+@boundary_pointer_args(mutex)
+def posix_pthread_mutex_lock_hle(mutex: GuestVAddr[void]) -> int:
+    trusted Unsafe.GuestHostPointerCast:
+        slot: mutable void&?&? = mutex.cast[mutable void&?&?]
+        _ = slot
+    return 0
+```
+
+Current rules:
+
+- `@boundary_pointer_args(...)` marks one or more named parameters as boundary pointer carriers
+- marked parameters should use typed carriers such as `GuestVAddr[T]`, `HostPtr[T]`, or `NativeMappedGuestPtr[T]`
+- raw integer carriers such as `uintptr` are rejected for annotated boundary pointer parameters
+- host reference boundary shapes such as `mutable void&?&?` are rejected at the annotation site
+- converting boundary carriers to host reference form requires explicit unsafe grant, for example `trusted Unsafe.GuestHostPointerCast:`
+
+These boundary carriers are intentionally distinct from plain integers:
+
+```elisa
+def wrap(raw: uintptr) -> GuestVAddr[void]:
+    return raw.cast[GuestVAddr[void]]
+
+def unwrap(addr: GuestVAddr[void]) -> uintptr:
+    return addr.cast[uintptr]
+```
+
+## Segment Transition Contracts For Externs
+
+Externs that mutate the active segment owner must declare the resulting owner
+explicitly.
+
+```elisa
+@segment_transition(guest)
+extern load_guest() -> void can[Unsafe.SegmentMutation, Segment.Guest]
+
+@segment_transition(host)
+extern restore_host() -> void can[Unsafe.SegmentMutation, Segment.Host]
+```
+
+Current rules:
+
+- `@segment_transition` expects exactly one target owner argument: `host` or `guest`
+- externs that imply segment mutation through permissions must carry an explicit transition annotation
+- callers still need explicit local grants for required permissions, for example `can Unsafe.SegmentMutation, Segment.Guest:`
 
 ## C Variadic Functions
 
@@ -283,6 +335,30 @@ a contract/documentation marker and does not add blocking permissions.
 
 Unknown externs are not automatically treated as blocking today, so binding
 files should be honest about this.
+
+## Layout manifest JSON mode
+
+In addition to text checks, layout verification can emit a machine-readable
+manifest:
+
+```sh
+go run ./src -emit c-bind-check-json -target-triple x86_64-apple-darwin path/to/bindings.elisa
+```
+
+Current manifest header fields include:
+
+- `version`
+- `target_triple`
+- `structs`
+
+Each struct entry includes:
+
+- Elisa and C type names
+- Elisa and C size values
+- per-field name and Elisa/C offsets
+
+Use this mode when CI or tooling needs layout-drift detection without parsing
+human-formatted diagnostics.
 
 ## Opaque C Types
 

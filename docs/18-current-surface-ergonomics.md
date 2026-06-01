@@ -285,6 +285,10 @@ if node in store as Expr.Int(value: value):
     return value
 ```
 
+The older dedicated statement surface `open value in store as Pattern:` has
+been removed entirely. Migrate old code to `match value in store:` when the
+store proof should scope a block or a set of pattern arms.
+
 When a successful refinement needs to survive as a first-class value, packed
 enums and trees use exact view types. Packed enums spell the refined witness as
 `packedview[Enum.Variant]`. Trees use the bare exact member type, such as
@@ -300,6 +304,22 @@ def fold(node: Expr, store: Expr.Store[Frozen]) -> int:
     if node as Expr.Int:
         lit: packedview[Expr.Int] = node
         return score_lit(lit) + lit.value
+    return 0
+```
+
+Payload destructuring also works directly inside the `if value as Pattern:`
+surface, including unnamed payload positions and already-refined
+`packedview[...]` parameters.
+
+```elisa
+def read_pair(node: Expr, store: Expr.Store[Frozen]) -> int:
+    if node as Expr.Pair(left, right):
+        return left + right + node.span
+    return 0
+
+def read_view(view_node: packedview[Expr.Int]) -> int:
+    if view_node as Expr.Int(value: value):
+        return value + view_node.span
     return 0
 ```
 
@@ -319,6 +339,9 @@ Current rules:
 - exact tree variants use the bare concrete member type such as `Lua.Expr.Binary`
 - `treeview[Lua.Expr.Binary]` remains accepted as a compatibility alias, but canonical source should write `Lua.Expr.Binary`
 - these exact refined types can appear in parameters, returns, and local bindings
+- `if value as Expr.Variant(payload...)` supports both named and unnamed payload destructuring
+- exact `packedview[...]` values may be re-matched with the same `if value as Pattern:` surface
+- packed refinement can also infer active store provenance from a value that came from `store[index]`, including through an intermediate alias or field projection, so an explicit `in store` clause is not always required once the handle already carries that provenance
 
 Frozen packed stores also expose dense node keys and arena-backed per-node side
 tables. Use `dense_key(node, frozen_store)` to derive a stable `NodeKey[Expr]`
@@ -351,6 +374,11 @@ Current rules:
 - `node_table_fill` currently requires explicit specialization in v1
 - these helpers are for packed enum frozen stores rather than ordinary enums or tree stores
 
+Local packed-store roots may also produce handles through direct indexing, such
+as `node: Expr = store[index]` or `node: Expr = box.store[0]`, when the local
+store provenance remains in scope. Dense `NodeKey[...]` indexing is still tied
+to exact frozen roots rather than local stores.
+
 Frozen packed stores also expose a dense readonly tag view through `.tags`.
 This is useful for scan-oriented loops and slice-based inspection when the pass
 only needs the packed tag stream rather than the full nodes.
@@ -360,10 +388,10 @@ def count_ints(frozen: Expr.Store[Frozen]) -> usize:
     nodes: dview[Expr] = frozen[1:frozen.count]
     tags: dview[Expr.Tag] = frozen.tags
     prefix: dview[Expr.Tag] = frozen.tags[0:1]
-    count: mutable usize = 0u
+    count: mutable usize = 0
     for tag in tags:
         if tag == Expr.Tag.Int:
-            count <- count + 1u
+            count <- count + 1
     return count
 ```
 
@@ -1023,6 +1051,18 @@ id: RowId[PascalSymbols] = symbols.push(...)
 symbols.flags[id].add(PascalSymbolFlag.Routine)
 ```
 
+For `layout soa struct` stores, `push(...)` returns a typed row handle such as
+`RowId[PascalSymbols]` rather than the mutable receiver. Code may name that
+handle family directly or through a local alias such as `type SymbolRow =
+RowId[SymbolRows]` when the row id should travel through APIs.
+
+The older `soa SymbolRows:` declaration form still parses as compatibility
+syntax, but canonical source should use `layout soa struct SymbolRows:`.
+
+That typed row handle is also the indexing key for SoA columns, so expressions
+such as `symbols.flags[id]` and other `store.field[row_id]` reads stay tied to
+the originating store type rather than using an untyped integer row number.
+
 Use `Flags[T]` for typed sets of const-enum values that grow or flow through APIs. Prefer `flags.new()` plus `.add(...)`, `.remove(...)`, and `flags[Enum.Member]` membership checks over hand-built integer masks; reserve `flags_from_bits(...)` and `flags_bits(...)` for interop or serialization boundaries. Generic helpers may mention `Flags[T]` before `T` is specialized, but concrete instantiations must use a `const enum` element type. Use struct-local `bitset` groups when the flags are fixed fields of one storage object.
 
 Use `InlineVec[T, N]` for tiny hot lists where most values fit inline but occasional spill to an arena-owned `darray` is acceptable. Parser and semantic scratch lists such as params, labels, directives, and duplicate-detection sets are the intended shape.
@@ -1031,7 +1071,7 @@ Use `Builder[T] in owner` when constructing arena-owned dynamic arrays. The decl
 
 Native frontend suites should consume these helpers through the runtime surface that their runner already links, not by including implementation files such as `collections.elisa` directly into a test module. Direct implementation includes duplicate runtime globals and helper symbols when the native runner also links `native_runtime_support.elisa`. The generated `collections.elisai` interface is kept in sync with the implementation as the declaration source of truth. For native dogfood frontends, keep existing `darray` construction style until generic extern collection helpers either lower through concrete wrappers or the backend can specialize those linked runtime declarations with the same ABI as in-module generic helpers.
 
-Tree declarations have explicit data-layout controls. The default dense category layout keeps source handles compact and store-relative, while `@layout(aos)` and `@layout(soa)` let hot categories declare whether they prefer row locality or frozen column scans. Use `@hot`, `@cold`, `@index(kind)`, and `@index(field_name)` as declarative tuning metadata; the source-level tree construction and pattern APIs stay the same. After `freeze(move store)`, use category row views for scan-oriented work: `frozen.Expr` is iterable and yields category-local handles with the frozen store as implicit context, `frozen.Expr.column("kind")` returns the frozen tag column, and `frozen.Expr.column("span")` returns a common-field column for SoA categories or categories with `@index(span)`.
+Tree declarations have explicit data-layout controls. The default dense category layout keeps source handles compact and store-relative, while `@layout(aos)` and `@layout(soa)` let hot categories declare whether they prefer row locality or frozen column scans. Legacy compatibility code may also pin a tree or category to `@layout(per_variant_rows)` when handles must keep carrying store state inline across APIs; new code should prefer the dense store-relative layouts unless it is intentionally preserving the older handle shape. Nested categories inherit the nearest explicit parent layout when they do not declare one themselves; otherwise the family default remains `@layout(category_union)`. Use `@hot`, `@cold`, `@index(kind)`, and `@index(field_name)` as declarative tuning metadata; the source-level tree construction and pattern APIs stay the same. After `freeze(move store)`, use category row views for scan-oriented work: `frozen.Expr` is iterable and yields category-local handles with the frozen store as implicit context, `frozen.Expr.column("kind")` returns the frozen tag column, and `frozen.Expr.column("span")` returns a common-field column for SoA categories or categories with `@index(span)`.
 
 ```elisa
 int_count: usize = count node in frozen.Expr where node.kind == .Int
@@ -1154,6 +1194,39 @@ Current rules:
 - target-aware layout intrinsics are accepted in static assertions and checked during backend lowering
 - the optional message must be a compile-time string to appear in the diagnostic
 
+Target constants are also available inside `static if`, `static elif`, and
+`static assert` conditions:
+
+```elisa
+static if ELISA_TARGET_OS_MACOS:
+    const ABI_NAME: string = "apple"
+static elif target.features.posix:
+    const ABI_NAME: string = "posix"
+static else:
+    const ABI_NAME: string = "other"
+
+static if target.debug:
+    const BUILD_MODE: string = "debug"
+static elif DEBUG:
+    const BUILD_MODE: string = "debug-compat"
+static else:
+    const BUILD_MODE: string = "release"
+
+static if PLATFORM_WINDOWS:
+    const PLATFORM_KIND: string = "windows"
+static elif PLATFORM_APPLE and ARCH_ARM64:
+    const PLATFORM_KIND: string = "apple-arm64"
+static elif PLATFORM_LINUX and ARCH_X86_64:
+    const PLATFORM_KIND: string = "linux-x64"
+```
+
+Current rules:
+
+- `static if` and `static elif` conditions must reduce to compile-time booleans
+- legacy flat target booleans such as `ELISA_TARGET_OS_MACOS`, `ELISA_TARGET_OS_LINUX`, and `ELISA_TARGET_OS_POSIX` are available in static conditions
+- the structured `target` namespace exposes compile-time strings and booleans such as `target.os`, `target.arch`, `target.debug`, `target.release`, nested feature flags like `target.features.posix`, and target-library flags like `target.libc.gnu_strerror_r`
+- compatibility aliases such as `PLATFORM_WINDOWS`, `PLATFORM_LINUX`, `PLATFORM_APPLE`, `ARCH_X86_64`, `ARCH_ARM64`, and `DEBUG` continue to work in static conditions
+
 ## Static Reflection
 
 Static code can inspect declaration shapes without hand-maintained parallel tables. Use `variants(T)` for const enums, enums, and tree categories, and `fields(T)` for structs and record-like tree members.
@@ -1219,7 +1292,7 @@ Inside sequence rewrites, `emit` appends values into the output sequence being b
 ```elisa
 def compact(items: dview[u32]) -> darray[u32]:
     return rewrite items as sequence[u32]:
-        item when item != 0u32:
+        item when item != 0:
             emit item
 
 def concat(left: dview[u32], right: dview[u32]) -> darray[u32]:
@@ -1658,6 +1731,23 @@ def as_byte_ptr_unchecked(value: uintptr) -> heap u8&:
         return raw_pointer_cast(value)
 ```
 
+`trusted` accepts the same comma-separated permission list surface as `can`.
+This is especially relevant around globals, where plain reads use
+`Global.Read`, writes use `Global.Write`, and mutable globals additionally need
+`Unsafe.MutableGlobal`:
+
+```elisa
+global mutable counter: int = 0
+
+def read_counter() -> int:
+    trusted Global.Read, Unsafe.MutableGlobal:
+        return counter
+
+def set_counter(value: int) -> void:
+    can Global.Write, Unsafe.MutableGlobal:
+        counter <- value
+```
+
 The same distinction applies to FFI, indexing, globals, and thread sharing. A safe wrapper should check or establish the invariant nearby, then use a narrow `trusted` block only around the operation that needs authority:
 
 ```elisa
@@ -1681,12 +1771,46 @@ Current builtin unsafe capabilities are:
 
 - `Unsafe.PointerCast` for representation-changing pointer/reference casts
 - `Unsafe.PointerArithmetic` for raw pointer offset math
+- `Unsafe.GuestHostPointerCast` for crossing from guest-address or boundary pointer representations into host references
+- `Unsafe.IndirectCall` for indirect calls through reinterpretation surfaces such as `value.call_as[...]`
 - `Unsafe.UncheckedIndex` for indexing without a proven or checked bound
 - `Unsafe.RawExtern` for direct calls across a raw foreign boundary
 - `Unsafe.MutableGlobal` for shared mutable global state
 - `Unsafe.ThreadShare` for transferring mutable or non-frozen references across threads before stronger ownership facts prove safety
 - `Unsafe.StaleRef` for using a view or borrowed storage value after an invalidating container/storage operation
 - `Unsafe.Alias` for explicit mutable aliasing that violates the one-writer-or-many-readers rule
+- `Unsafe.BufferReinterpret` for reinterpreting bounded buffers as unbounded pointer/string-style views
+- `Unsafe.Leak` for intentionally abandoning a region/resource cleanup obligation
+
+Related non-unsafe permission families used by the same local-grant surface include:
+
+- `Global.Read` for reading globals
+- `Global.Write` for writing globals
+
+Examples of these narrower escape hatches:
+
+```elisa
+def run(p: void&?) -> int:
+    trusted Unsafe.IndirectCall:
+        return p.call_as[func(int) -> int](7)
+
+struct Header:
+    a: u32
+    b: u32
+
+struct Blob:
+    data: mutable darray[u8]
+
+def header_at(self: Blob&, off: usize) -> Header&:
+    trusted Unsafe.BufferReinterpret:
+        return self.data[off].ref[u8&].cast[Header&]
+```
+
+Current notes:
+
+- `value.call_as[func(...)-> T](args...)` is the indirect-call primitive; in strict unsafe-permission mode it is gated by `Unsafe.IndirectCall`
+- wider reinterpret casts from byte-buffer interior elements, such as `self.data[off].ref[u8&].cast[Header&]`, are gated by `Unsafe.BufferReinterpret` in strict mode
+- `leak region_name` satisfies the region-consumption obligation but is an explicit unsafe opt-out; in strict mode it is gated by `Unsafe.Leak`
 
 Keep trusted blocks narrow. The preferred style is to wrap only the operation whose invariant has been checked nearby, not a whole function body. This keeps low-level code inspectable without pushing every trusted implementation detail into caller-facing permissions.
 
@@ -1966,11 +2090,23 @@ tree Lua:
         Call(callee: Expr, args: darray[Expr], link source_expr: Expr)
 ```
 
+Optional tree payload fields can also use postfix `?` on the payload name:
+
+```elisa
+tree Lua:
+    @role(stmt)
+    node Stmt:
+        IfStmt(condition: Expr, else_block?: Block)
+        NumericFor(step?: Expr, args?: darray[Expr])
+```
+
 Current rules:
 
 - same-family payloads such as `left: Expr`, `right: Expr`, and `callee: Expr` are structural children by default
 - same-family element types inside sequence payloads such as `darray[Expr]` are also traversed as children
 - `link source_expr: Expr` keeps a same-family reference explicit without making it part of `children(node)` traversal
+- `name?: Type` is declaration shorthand for an optional payload field whose underlying payload type is `Type?`
+- optional payload fields still use the same inferred child-vs-link relation rules after unwrapping the optional payload type
 
 ## Tree `visit` expressions
 
@@ -2056,9 +2192,9 @@ Projected attribute reads work on child sequences too:
 ```elisa
 attribute Lua.Expr.node_count -> usize:
     Lua.Expr.Int(_):
-        return 1u
+        return 1
     Lua.Expr.Binary(expr, left, right):
-        total: mutable usize = 1u
+        total: mutable usize = 1
         for child_count in children.node_count:
             total <- total + child_count
         return total
@@ -2217,6 +2353,7 @@ Current header declarations:
 
 - `grammarenv Name over Token using ParserState:` declares reusable parser-environment defaults for grammars that share the same state/token surface
 - `grammar Name with EnvName:` applies those defaults while still allowing local grammar headers to override individual fields
+- `extend grammar Name uses OtherGrammar:` is accepted when an extension block needs to import additional productions or grammar-scoped helpers at the extension site
 - `cursor state` tells lowering which parser-state value owns the current cursor
 - `alloc alloc` supplies the active tree/arena owner expression used by generated parser helpers
 - `token_kind MyTokenKind` tells lowering which enum/type owns dotted token aliases such as `.IDENT`; it defaults to `TokenKind`
@@ -2231,13 +2368,16 @@ Current header declarations:
 - grouped token entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal such as `LPAREN "("`
 - `channel name` in a grammar header declares a generated mutable channel shared by every production in that grammar
 - `channel span: Span = $start.span + $end.span` declares a typed channel with a default expression
+- `$start` and `$end` inside a channel default refer to the first and last token values captured by the current production extent, so helpers like `span($start, $end)` and `$start.span + $end.span` can derive the production span without restating token names
 - `channel name` at the top of a production body declares a production-local channel, which is preferred for helper tuple/struct results
+- `channel_name <- term` assigns the current result of a grammar term into a declared grammar channel; this works both for nested `seq` terms and for ordinary production bodies, including direct expression assignments such as `span <- expr(tok.span)`
 - `grammar type Name[...]` declares a reusable higher-order grammar combinator; this is the canonical replacement for older `grammarfn` declarations
 - `grammar alias name = term`, `grammar alias name(params...) = term`, and their block forms give compile-time grammar terms reusable names, so call sites can say `args = call_args`, `args = expr_items(stop: RParenSync)`, or `statements = block_statement_items` while keeping the lower-level `separated_by(...)` or recovery shape available in the header
 - `infix table Name(result):` hoists a reusable named-precedence ladder into grammar header scope so productions can say `result = infix(Name)` instead of inlining every level
 - if a production falls through without an explicit `return` and its return type is either a named tuple or a known struct in the current scope, lowering synthesizes the success value from matching channel names
 - struct-return synthesis only uses channels that correspond to struct fields; unrelated grammar-wide channels such as `node` are ignored instead of producing invalid helper struct literals
 - if a nested `seq` arm ends by assigning a declared channel, the assignment is treated as channel state rather than the arm's semantic value; this keeps channel-synthesized helper productions from needing a trailing `pass`
+- bare `pass` is a valid no-op grammar term, which is useful for empty productions or for channel-driven helper productions whose semantic result is carried entirely by channels
 - `expr[T](value)` gives an inline grammar expression term an explicit result type, which lets `seq`, `separated`, and related list combinators keep transformed element types without introducing a one-off helper production
 - `singleton[T](value)` builds a one-item `darray[T]` inside grammar lowering, using the grammar allocator when one is configured
 - `empty[T]` builds a typed empty `darray[T]` in grammar space, so fallback branches do not need to escape to `expr[darray[T]]([])`
@@ -2716,18 +2856,44 @@ store PendingGotoStore:
     name_key: u32
     depth: u32
 
-def build(values: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> i64:
-    slot = values.get_or_insert(key):
-        42
-    for {name_key, depth} in pending.rows():
-        return name_key.i64() + depth.i64()
-    return slot[0u]
+def build(owner: Arena, values: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> i64:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        pending: mutable PendingGotoStore = zeroed
+        pending.reserve(8)
+        pending.push(1, 2)
+        pending.push(3, 4)
+        pending.truncate(1)
+
+        slot = values.get_or_insert(key):
+            42
+
+        for {name_key, depth} in pending.rows():
+            return name_key.i64() + depth.i64()
+
+        pending.clear()
+        return slot[0]
 ```
 
 Current rules:
 
 - `store Name:` declares a row-oriented storage surface with named fields
-- `rows()` yields readonly row values that work with ordinary field access and brace destructuring
+- `pending.reserve(n)` preallocates row capacity and requires a mutable store receiver
+- `pending.push(a, b, ...)` appends one row in declared field order
+- `pending.truncate(n)` keeps the first `n` rows
+- `pending.clear()` removes all rows
+- row-store growth helpers require an active `in <arena>:` scope
+- plain row stores return the mutable store receiver from `reserve`, `push`, `truncate`, and `clear`, so these helpers chain like other mutable collection helpers
+- `rows()` yields row values that work with ordinary field access and brace destructuring
+- SoA store roots expose `store.count` as a readonly field-style item count
+- field-style `store.rows` is accepted as a zero-argument alias for `store.rows()` and produces the same iterable row-view value
+- row values from `rows()` are mutable field projections, so `row.name_key <- ...` and `row.depth <- ...` are allowed inside an ordinary `for row in pending.rows():` loop
+- `rows()` is iterable, so ordinary helper surfaces such as `.enumerate()` and `rev(...)` compose with it
+- SOA store roots also expose `store.valid(row_id)` to check whether a `RowId[Store]` still names a live row in that exact store root
+- `for ref row in pending.rows():` is rejected; `rows()` is not an addressable array-like ref-binder source
+- the current runtime-backed dict helper family also exposes `values.get(key)`, `values.put(key, value)`, `values.contains(key)`, `values.remove(key)`, `values.clear()`, and `values.reserve(n)` when matching helper overloads are in scope
+- `values.get(key)` returns an optional mutable slot reference in the tested runtime-backed helper family, so `if let found = values.get(key): ...` is the common read/update shape
+- `values.entry(key)` exposes entry-oriented helpers such as `.found`, `.value`, `.insert(value)`, and `.get_or_insert(value)`
 - `values.get_or_insert(key): ...` rewrites the trailing block into the default-value argument for `get_or_insert`
 - `values.entry(key).get_or_insert(): ...` does the same thing for the entry API surface
 - the generic syntax parses for more than one key family, but the current runtime-backed helper surface is primarily validated for `dict[cstr[key_shape], V]` unless matching helper overloads are supplied
@@ -2785,15 +2951,20 @@ The current explicit parallel loop surface is pool-scoped rather than implicit.
 
 ```elisa
 def visit(frozen: Expr.Store[Frozen]) -> void effects[Pool.Submit, Pool.WaitAll]:
-    pool workers(2u):
+    pool workers(2):
         parallel for node in frozen:
             pass
 
 def walk_tags(tags: dview[Expr.Tag]) -> void effects[Pool.Submit, Pool.WaitAll]:
-    pool workers(2u):
+    pool workers(2):
         parallel for tag at i in tags:
             if tag == Expr.Tag.Add:
                 _ = i
+
+def sum_chunks(chunks: ChunksExactView[i32]) -> void effects[Pool.Submit, Pool.WaitAll]:
+    pool workers(2):
+        parallel for chunk in chunks:
+            _ = chunk[0] + chunk[1]
 ```
 
 Current rules:
@@ -2801,7 +2972,12 @@ Current rules:
 - `pool workers(count):` introduces the required enclosing pool scope
 - `parallel for item in source:` is the basic form
 - `parallel for item at index in source:` adds an explicit index binder
-- current sources must be either frozen packed stores or readonly contiguous exact-extent views
+- current sources must be either a frozen packed store or a readonly dense view whose facts prove readonly, contiguous, unit-stride, and exact extent
+- readonly tag views such as `frozen.tags` and readonly `ChunksExactView[...]` values are accepted through that same dense-view path
+- the body cannot mutate an outer binding such as `total <- total + 1`
+- the body cannot `return` from the enclosing function
+- the body cannot nest another `parallel for`
+- the body cannot destroy, mark, restore, or reset an outer region, and it cannot restore from an outer checkpoint
 - captured outer values must still satisfy the compiler's existing thread-transfer checks
 - this is the current implemented parallel loop feature, not just a proposal placeholder
 

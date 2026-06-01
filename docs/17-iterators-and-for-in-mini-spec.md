@@ -15,7 +15,7 @@ iterator traits.
 The goal is to generalize the existing range-shaped loop surface:
 
 ```elisa
-for index in 0u..<items.len:
+for index in 0..<items.len:
     ...
 ```
 
@@ -248,7 +248,7 @@ The first slice should stay compiler-known and builtin.
 Examples:
 
 ```elisa
-for i in 0u..<len:
+for i in 0..<len:
     ...
 ```
 
@@ -263,8 +263,8 @@ Properties:
 
 Rejected in the first slice:
 
-- `for ref i in 0u..<len:`
-- `for mutable ref i in 0u..<len:`
+- `for ref i in 0..<len:`
+- `for mutable ref i in 0..<len:`
 
 because ranges do not represent stable element storage.
 
