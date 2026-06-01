@@ -85,12 +85,26 @@ extern signal(sig: int, handler: void&?) -> void&?
 # `raise` is a reserved keyword in Elisa, so re-raise via kill(getpid(), sig).
 extern getpid() -> int
 extern kill(pid: int, sig: int) -> int
+# sigaction with SA_SIGINFO gives the handler the siginfo_t, which carries the faulting
+# address (si_addr) -- so the dump can report WHERE the fault touched memory.
+extern sigaction(sig: int, act: void&, oldact: void&?) -> int
 
 # Common signal numbers (consistent across macOS/Linux for these four).
 const ELISA_SIG_ILL: int = 4
 const ELISA_SIG_ABRT: int = 6
 const ELISA_SIG_FPE: int = 8
 const ELISA_SIG_SEGV: int = 11
+const ELISA_SA_SIGINFO: i32 = 0x40
+# Byte offset of si_addr in macOS x86_64 siginfo_t (si_signo/errno/code/pid/uid/status
+# = 6 ints = 24 bytes, then void* si_addr). On Linux x86_64 it is 16; gated below.
+const ELISA_SIGINFO_ADDR_OFFSET_DARWIN: u64 = 24u64
+
+# Matches the C `struct sigaction` byte layout used by the libc sigaction() call:
+# handler (8), sa_mask (sigset_t = u32, 4), sa_flags (int, 4) = 16 bytes.
+struct ElisaSigaction:
+    handler: mutable uintptr
+    mask: mutable u32
+    flags: mutable i32
 
 global mutable elisa_trace_fault_checked: bool = false
 
@@ -146,19 +160,36 @@ def elisa_trace_count() -> u64:
 # On a fault, print the recent trace then restore the default disposition and re-raise so
 # the original crash still happens (core dump etc.). snprintf/write in a handler is not
 # strictly async-signal-safe but is the common, useful choice for a crash dump.
-def elisa_trace_fault_handler(sig: int) -> void:
+# SA_SIGINFO handler: (int sig, siginfo_t *info, void *uctx). Reads si_addr from info,
+# prints the faulting address + signal, dumps the recent trace, then restores the default
+# disposition and re-raises so the original crash still happens.
+def elisa_trace_fault_handler(sig: int, info: uintptr, uctx: uintptr) -> void:
+    si_addr: mutable uintptr = 0u64.uintptr()
+    if info != 0u64.uintptr():
+        p: uintptr = info + ELISA_SIGINFO_ADDR_OFFSET_DARWIN.uintptr()
+        slot: uintptr& = p.cast[uintptr&]
+        si_addr <- slot
+    fbuf: mutable u8[96] = zeroed
+    fw: int = snprintf(fbuf[0], 96usize, "*** elisa fault: signal %lld at address 0x%llx ***\n", sig.i64(), si_addr.u64()) can Console.Format
+    if fw > 0:
+        _ = write(2, fbuf[0].ref[void&], fw.usize()) can Console
     elisa_trace_dump()
     _ = signal(sig, null)
     _ = kill(getpid(), sig)
 
+def elisa_trace_install_one(sig: int) -> void:
+    act: mutable ElisaSigaction = zeroed
+    act.handler <- elisa_trace_fault_handler.cast[void&?].uintptr()
+    act.flags <- ELISA_SA_SIGINFO
+    _ = sigaction(sig, act.ref[void&], null)
+
 # Install the fault handler for SIGSEGV/SIGABRT/SIGILL/SIGFPE. Callable directly (e.g. a
 # program -- or the emulator's own handler -- can opt in explicitly).
 def elisa_trace_install_fault_handler() -> void:
-    h: void&? = elisa_trace_fault_handler.cast[void&?]
-    _ = signal(ELISA_SIG_SEGV, h)
-    _ = signal(ELISA_SIG_ABRT, h)
-    _ = signal(ELISA_SIG_ILL, h)
-    _ = signal(ELISA_SIG_FPE, h)
+    elisa_trace_install_one(ELISA_SIG_SEGV)
+    elisa_trace_install_one(ELISA_SIG_ABRT)
+    elisa_trace_install_one(ELISA_SIG_ILL)
+    elisa_trace_install_one(ELISA_SIG_FPE)
 
 # Auto-install once, gated by ELISA_TRACE_ON_FAULT. Off by default so it never clobbers a
 # program's own signal handling (e.g. the emulator installs its SIGSEGV handler later,
