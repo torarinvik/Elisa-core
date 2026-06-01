@@ -46,6 +46,53 @@ export def f(p: HostPtr[u64]) -> void abi c:
 `,
 		},
 		{
+			name:      "copying a raw pointer to another register does not erase provenance",
+			wantError: true,
+			src: `module t
+target x86_64
+export def f(p: uintptr) -> void abi c:
+    inputs: p = rdi
+    clobbers: rax, rcx, memory.read
+    stack: unchanged
+    control: returns
+    body:
+        movq %rdi, %rcx
+        movq (%rcx), %rax
+        ret
+`,
+		},
+		{
+			name:      "lea-derived raw pointer base is refused",
+			wantError: true,
+			src: `module t
+target x86_64
+export def f(p: uintptr) -> void abi c:
+    inputs: p = rdi
+    clobbers: rax, rcx, memory.read
+    stack: unchanged
+    control: returns
+    body:
+        leaq 8(%rdi), %rcx
+        movq (%rcx), %rax
+        ret
+`,
+		},
+		{
+			name: "copying a typed pointer keeps the carrier proof",
+			src: `module t
+target x86_64
+export def f(p: HostPtr[u64]) -> void abi c:
+    inputs: p = rdi
+    clobbers: rax, rcx, memory.read
+    stack: unchanged
+    control: returns
+    body:
+        movq %rdi, %rcx
+        movq (%rcx), %rax
+        ret
+`,
+		},
+		{
 			name: "a GuestVAddr carrier is accepted",
 			src: `module t
 target x86_64

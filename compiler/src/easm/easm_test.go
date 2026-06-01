@@ -296,7 +296,7 @@ export def sce_fiber_setjmp(ctx: HostPtr[void], incoming_rax: u64) -> i32 abi ps
         xor %eax, %eax
         ret
 
-export def sce_fiber_switch_entry(data: uintptr, set_fpu: i32) -> void abi ps4_sysv:
+export def sce_fiber_switch_entry(data: HostPtr[void], set_fpu: i32) -> void abi ps4_sysv:
     inputs: data = rdi, set_fpu = rsi
     clobbers: rax, rbx, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15, rsp, rbp, cc, memory
     preserves: callee_saved

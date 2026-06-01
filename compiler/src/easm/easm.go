@@ -793,19 +793,20 @@ func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]boo
 		}
 	}
 	// A register dereferenced as a memory base carries an unstated "this is a valid pointer
-	// into some memory" claim. When that base comes directly from an input parameter, the
-	// parameter must use an address-space carrier (HostPtr[T], GuestVAddr[T], ...) or a
-	// pointer role that names the memory class -- not a raw scalar integer that hides which
-	// memory is being touched. Bases derived through arithmetic or further moves are a later
-	// dataflow layer; this catches the direct dereference of a raw-typed pointer parameter.
+	// into some memory" claim. Track simple register-to-register and lea-derived pointer
+	// provenance from inputs so moving a raw uintptr into another register does not erase the
+	// requirement to use a typed address-space carrier.
 	if !requireSet["memory.base.untyped"] {
-		inputRegParam := map[string]string{}
+		regProvenance := map[string]memoryBaseProvenance{}
 		for _, input := range fn.Inputs {
 			if reg := registerAfterEquals(input); reg != "" {
-				inputRegParam[canonicalX86GPR(reg)] = strings.ToLower(bindingName(input))
+				paramName := strings.ToLower(bindingName(input))
+				typ := paramTypes[paramName]
+				if rawScalarType(typ) || isAddressSpaceCarrierType(typ) || isEASMRoleType(typ) {
+					regProvenance[canonicalX86GPR(reg)] = memoryBaseProvenance{Param: paramName, Type: typ, Raw: rawScalarType(typ)}
+				}
 			}
 		}
-		flagged := map[string]bool{}
 		for _, inst := range fn.Instructions {
 			if inst.Pseudo {
 				continue
@@ -815,21 +816,72 @@ func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]boo
 					continue
 				}
 				base := memoryBaseRegister(operand)
-				if base == "" || base == "rsp" || base == "rip" || flagged[base] {
+				if base == "" || base == "rsp" || base == "rip" {
 					continue
 				}
-				paramName, ok := inputRegParam[base]
-				if !ok {
-					continue
-				}
-				if rawScalarType(paramTypes[paramName]) {
-					flagged[base] = true
-					issues = append(issues, Issue{Severity: "error", Code: "raw-memory-base", File: path, Line: inst.Line, Message: fmt.Sprintf("memory base %%%s comes from EASM parameter %s of raw type %s; use an address-space carrier such as HostPtr[T] or GuestVAddr[T] that names the memory class, or require memory.base.untyped after a manual proof", base, paramName, paramTypes[paramName])})
+				if provenance, ok := regProvenance[base]; ok && provenance.Raw {
+					issues = append(issues, Issue{Severity: "error", Code: "raw-memory-base", File: path, Line: inst.Line, Message: fmt.Sprintf("memory base %%%s comes from EASM parameter %s of raw type %s; use an address-space carrier such as HostPtr[T] or GuestVAddr[T] that names the memory class, or require memory.base.untyped after a manual proof", base, provenance.Param, provenance.Type)})
 				}
 			}
+			updateMemoryBaseProvenance(regProvenance, inst.Text)
 		}
 	}
 	return issues
+}
+
+type memoryBaseProvenance struct {
+	Param string
+	Type  string
+	Raw   bool
+}
+
+func updateMemoryBaseProvenance(regProvenance map[string]memoryBaseProvenance, text string) {
+	written := canonicalX86GPR(writtenRegister(text))
+	if written == "" || !isX86GPR(written) {
+		return
+	}
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		delete(regProvenance, written)
+		return
+	}
+	op := normalizeOp(fields[0])
+	parts := splitInstructionOperands(text)
+	if len(parts) < 2 {
+		delete(regProvenance, written)
+		return
+	}
+	switch op {
+	case "mov", "movq", "movl", "movw", "movb":
+		if src := registerOperand(parts[0]); src != "" {
+			if provenance, ok := regProvenance[src]; ok {
+				regProvenance[written] = provenance
+				return
+			}
+		}
+	case "lea", "leaq", "leal":
+		if base := memoryBaseRegister(parts[0]); base != "" {
+			if provenance, ok := regProvenance[base]; ok {
+				regProvenance[written] = provenance
+				return
+			}
+		}
+	case "add", "addq", "sub", "subq", "inc", "incq", "dec", "decq":
+		if provenance, ok := regProvenance[written]; ok {
+			regProvenance[written] = provenance
+			return
+		}
+	}
+	delete(regProvenance, written)
+}
+
+func registerOperand(operand string) string {
+	reg := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(operand)), "%")
+	reg = canonicalX86GPR(reg)
+	if isX86GPR(reg) {
+		return reg
+	}
+	return ""
 }
 
 func rawScalarType(name string) bool {

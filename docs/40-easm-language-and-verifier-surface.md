@@ -52,10 +52,11 @@ The verifier treats `lea` as address computation, not memory access. A
 read-modify-write instruction such as `addq $1, (%rdi)` requires read coverage
 and write coverage, either via broad `memory` or both direction-specific atoms.
 
-Memory base registers that come directly from input parameters must use a typed
-address-space carrier such as `HostPtr[T]`, `GuestVAddr[T]`, or
-`NativeMappedGuestPtr[T]`. Raw scalar bases such as `uintptr` are rejected unless
-the function declares `requires: memory.base.untyped` after a manual proof.
+Memory base registers that come from input parameters, including through simple
+register copies and `lea`-derived addresses, must use a typed address-space
+carrier such as `HostPtr[T]`, `GuestVAddr[T]`, or `NativeMappedGuestPtr[T]`. Raw
+scalar bases such as `uintptr` are rejected unless the function declares
+`requires: memory.base.untyped` after a manual proof.
 
 ## Inputs and outputs
 
