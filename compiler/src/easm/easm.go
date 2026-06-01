@@ -382,6 +382,23 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 			writesSegment = true
 			state.FS = ""
 		}
+		// Every register an instruction reads must be established before this point -- a
+		// declared input, written earlier in the body, a preserved callee-saved value, or a
+		// structural machine register (rsp/rip). Reading anything else consumes whatever
+		// indeterminate value the caller happened to leave. Registers a prior call trashed
+		// are owned by the more specific caller-saved-use-after-call check below.
+		for _, reg := range registersReadBy(inst.Text) {
+			if reg == "rsp" || reg == "rip" {
+				continue
+			}
+			if _, trashedByCall := clobberedByCall[reg]; trashedByCall {
+				continue
+			}
+			if state.LiveRegs[reg] || preserveSet[reg] || preserveSet["callee_saved"] {
+				continue
+			}
+			issues = append(issues, Issue{Severity: "error", Code: "register-read-uninitialized", File: path, Line: inst.Line, Message: fmt.Sprintf("register %s is read but not established (declare it as an input, write it earlier, or preserve it)", reg)})
+		}
 		if written := writtenRegister(inst.Text); written != "" {
 			canonical := canonicalX86GPR(written)
 			if isX86GPR(canonical) {
@@ -442,7 +459,11 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		}
 		for _, reg := range implicitClobbers(op) {
 			canonical := canonicalX86GPR(reg)
-			delete(state.LiveRegs, canonical)
+			if implicitResultDefines(op) && isX86GPR(canonical) {
+				state.LiveRegs[canonical] = true // instruction writes a defined result here
+			} else {
+				delete(state.LiveRegs, canonical)
+			}
 			delete(state.KnownUInt, canonical)
 			if returnReg != "" && canonicalX86GPR(reg) == returnReg {
 				returnRegWritten = true
@@ -1853,6 +1874,18 @@ func implicitUses(op string) []string {
 	}
 }
 
+// implicitResultDefines reports whether an instruction's implicit clobbers are defined
+// results it writes (cpuid, rdtsc) rather than registers it trashes to an indeterminate
+// value (a call's caller-saved set). Result writes establish the registers for later
+// reads; trashing leaves them unreadable until re-established.
+func implicitResultDefines(op string) bool {
+	switch op {
+	case "rdtsc", "cpuid":
+		return true
+	}
+	return false
+}
+
 func callerSavedGPRs() []string {
 	return []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
 }
@@ -1895,6 +1928,56 @@ func instructionOverwritesDestination(text string) bool {
 	default:
 		return false
 	}
+}
+
+// isSelfZeroingIdiom reports whether the instruction is a recognized constant-zeroing
+// idiom (xorq %r,%r / subq %r,%r) whose result is independent of the register's prior
+// value. Such an instruction establishes the register (to zero) without reading it.
+func isSelfZeroingIdiom(text string) bool {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return false
+	}
+	switch normalizeOp(fields[0]) {
+	case "xor", "xorq", "xorl", "xorw", "xorb", "sub", "subq", "subl", "subw", "subb":
+		parts := splitInstructionOperands(text)
+		return len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+	}
+	return false
+}
+
+// registersReadBy returns the canonical GPRs whose value the instruction consumes: every
+// source-operand register, plus the base/index registers of any memory operand (address
+// computation reads them, even when that operand is the destination). It excludes a
+// destination register that is purely written (mov/lea/pop) and the operands of a
+// self-zeroing idiom, neither of which depends on the prior value. This is the read set the
+// validator requires to be established -- a declared input, written earlier, or preserved.
+func registersReadBy(text string) []string {
+	parts := splitInstructionOperands(text)
+	if len(parts) == 0 || isSelfZeroingIdiom(text) {
+		return nil
+	}
+	overwrites := instructionOverwritesDestination(text)
+	seen := map[string]bool{}
+	var out []string
+	addToken := func(tok string) {
+		reg := canonicalX86GPR(tok)
+		if isX86GPR(reg) && !seen[reg] {
+			seen[reg] = true
+			out = append(out, reg)
+		}
+	}
+	for i, operand := range parts {
+		isMemory := strings.Contains(operand, "(")
+		isDest := i == len(parts)-1
+		if !isMemory && isDest && overwrites {
+			continue // destination written outright; its prior value is not read
+		}
+		for _, tok := range registerTokens(operand) {
+			addToken(tok)
+		}
+	}
+	return out
 }
 
 func writtenRegister(text string) string {

@@ -280,8 +280,8 @@ export def run_on_another_stack(arg: uintptr, entry: HostCallable, stack: GuestS
 func TestVerifyAcceptsShadPS4FiberContextInstructionSubset(t *testing.T) {
 	src := `module shadps4_fiber
 target x86_64
-export def sce_fiber_setjmp(ctx: uintptr) -> i32 abi ps4_sysv:
-    inputs: ctx = rdi
+export def sce_fiber_setjmp(ctx: uintptr, incoming_rax: u64) -> i32 abi ps4_sysv:
+    inputs: ctx = rdi, incoming_rax = rax
     outputs: ret = rax
     clobbers: rax, rdx, cc, memory
     stack: unchanged
@@ -445,7 +445,7 @@ export def good_callee_saved_proof() -> void abi c:
     control: returns
     body:
         pushq %r12
-        movq %rax, %r12
+        movq $0, %r12
         popq %r12
         ret
 `
@@ -1952,12 +1952,12 @@ export def loop(value: uintptr) -> uintptr abi c:
 func TestVerifyAcceptsSegmentLabelPrecondition(t *testing.T) {
 	src := `module segment
 target x86_64
-export def enter_host(selector: HostFsSelector) -> void abi c:
+export def enter_host(selector: HostFsSelector, entry: GuestEntryPoint) -> void abi c:
     facts:
         fs: guest
-    inputs: selector = rdi
+    inputs: selector = rdi, entry = rax
     labels:
-        host_entry: fs: host
+        host_entry: fs: host, rax
     clobbers: memory
     stack: unchanged
     control: noreturn, tail_jumps
@@ -2042,10 +2042,10 @@ export def enter_guest(selector: GuestFsSelector, target: GuestEntryPoint) -> vo
 func TestVerifyAcceptsStackAlignmentLabelPrecondition(t *testing.T) {
 	src := `module stackfacts
 target x86_64
-export def jump_when_call_aligned(value: uintptr) -> void abi c:
-    inputs: value = rdi
+export def jump_when_call_aligned(value: uintptr, entry: GuestEntryPoint) -> void abi c:
+    inputs: value = rdi, entry = rax
     labels:
-        call_ready: rsp: mod16=0
+        call_ready: rsp: mod16=0, rax
     clobbers: memory
     stack: synthetic, aligned 16
     control: noreturn, tail_jumps
