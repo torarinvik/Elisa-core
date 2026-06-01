@@ -1654,17 +1654,17 @@ func evalDebugCompareExpr(snapshot DebugSnapshot, expr string) (bool, error) {
 		if !ok {
 			continue
 		}
-		leftValue, err := evalDebugOperand(snapshot, left)
+		leftValue, err := evalDebugOperandOrArith(snapshot, left)
 		if err != nil {
 			return false, err
 		}
-		rightValue, err := evalDebugOperand(snapshot, right)
+		rightValue, err := evalDebugOperandOrArith(snapshot, right)
 		if err != nil {
 			return false, err
 		}
 		return compareDebugOperands(leftValue, rightValue, op)
 	}
-	value, err := evalDebugOperand(snapshot, expr)
+	value, err := evalDebugOperandOrArith(snapshot, expr)
 	if err != nil {
 		return false, err
 	}
@@ -1689,9 +1689,8 @@ func evalDebugOperand(snapshot DebugSnapshot, operand string) (string, error) {
 	if value, ok := snapshot.LookupString(operand); ok {
 		return value, nil
 	}
-	if operand != "" && strings.IndexFunc(operand, func(r rune) bool {
-		return (r < '0' || r > '9') && r != '-'
-	}) < 0 {
+	if _, ok := parseDebugInt(operand); ok {
+		// A decimal or hex integer literal (0xF00, 3840, -5); compareDebugOperands parses it.
 		return operand, nil
 	}
 	if looksLikeDebugPath(operand) {
@@ -1732,7 +1731,80 @@ func looksLikeDebugPath(operand string) bool {
 	return true
 }
 
+// parseDebugInt parses a decimal or hex (0x...) integer literal, including the full u64
+// range and an optional leading minus, returning the bit-equivalent int64.
+func parseDebugInt(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	if v, err := strconv.ParseInt(s, 0, 64); err == nil {
+		return v, true
+	}
+	if v, err := strconv.ParseUint(s, 0, 64); err == nil {
+		return int64(v), true
+	}
+	return 0, false
+}
+
+// evalDebugOperandOrArith evaluates one side of a comparison, supporting integer
+// arithmetic over operands -- e.g. "base + 0x1000" or "seg0 - 4" -- where each operand is
+// a hex/decimal literal or a variable path that resolves to an integer. Operators must be
+// space-separated. When the side is not arithmetic it falls back to plain operand
+// resolution (paths, literals, true/false), preserving the not-in-scope sentinel.
+func evalDebugOperandOrArith(snapshot DebugSnapshot, side string) (string, error) {
+	side = trimDebugParens(strings.TrimSpace(side))
+	if idx := strings.Index(side, " + "); idx >= 0 {
+		return combineDebugArith(snapshot, side[:idx], side[idx+3:], false)
+	}
+	if idx := strings.Index(side, " - "); idx >= 0 {
+		return combineDebugArith(snapshot, side[:idx], side[idx+3:], true)
+	}
+	return evalDebugOperand(snapshot, side)
+}
+
+func combineDebugArith(snapshot DebugSnapshot, left string, right string, subtract bool) (string, error) {
+	leftVal, err := evalDebugOperandOrArith(snapshot, left)
+	if err != nil {
+		return "", err
+	}
+	rightVal, err := evalDebugOperandOrArith(snapshot, right)
+	if err != nil {
+		return "", err
+	}
+	leftNum, leftOK := parseDebugInt(leftVal)
+	rightNum, rightOK := parseDebugInt(rightVal)
+	if !leftOK || !rightOK {
+		return "", fmt.Errorf("arithmetic requires integer operands, got %q and %q", leftVal, rightVal)
+	}
+	if subtract {
+		return strconv.FormatInt(leftNum-rightNum, 10), nil
+	}
+	return strconv.FormatInt(leftNum+rightNum, 10), nil
+}
+
 func compareDebugOperands(left string, right string, op string) (bool, error) {
+	// Integer-aware comparison first: this handles hex literals (0x...), the full u64
+	// range, and a numeric value compared against a decimal/hex literal regardless of how
+	// the snapshot stringified it.
+	if leftInt, leftOK := parseDebugInt(left); leftOK {
+		if rightInt, rightOK := parseDebugInt(right); rightOK {
+			switch op {
+			case "==":
+				return leftInt == rightInt, nil
+			case "!=":
+				return leftInt != rightInt, nil
+			case ">":
+				return leftInt > rightInt, nil
+			case ">=":
+				return leftInt >= rightInt, nil
+			case "<":
+				return leftInt < rightInt, nil
+			case "<=":
+				return leftInt <= rightInt, nil
+			}
+		}
+	}
 	switch op {
 	case "==":
 		return left == right, nil

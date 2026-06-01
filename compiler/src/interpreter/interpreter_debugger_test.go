@@ -255,6 +255,27 @@ func TestDebuggerExpressionConditionWatchesLateDeclaredLocal(t *testing.T) {
 	}
 }
 
+func TestDebuggerExpressionConditionSupportsHexAndArithmetic(t *testing.T) {
+	src := `def run() -> i64:
+    addr: i64 = 3840
+    return addr
+`
+	for _, expr := range []string{
+		"addr == 0xF00",         // hex literal
+		"addr == 0xE00 + 0x100", // hex arithmetic (0xF00)
+		"addr == 3836 + 4",      // decimal arithmetic
+		"addr > 0xEFF",          // hex in an ordered comparison
+	} {
+		result := parseAndAnalyzeInterpreterTest(t, "interpreter_debugger_arith.elisa", src)
+		debugger := interpreter.NewDebugger(interpreter.BreakWhenExpr(expr))
+		_, err := interpreter.Execute(result, interpreter.Options{Entry: "run", Debugger: debugger})
+		var halt *interpreter.DebugHaltError
+		if !errors.As(err, &halt) {
+			t.Fatalf("expected halt for condition %q, got %v", expr, err)
+		}
+	}
+}
+
 func TestDebugSessionSourceStepCommands(t *testing.T) {
 	src := `def inner(value: i64) -> i64:
     next: i64 = value + 1
