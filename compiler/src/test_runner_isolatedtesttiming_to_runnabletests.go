@@ -490,6 +490,13 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
+		// ELISA_KEEP_TEST_BINARY keeps the built test binary (and its .dSYM) instead of
+		// deleting it, and prints the path -- so it can be debugged under lldb (e.g. to
+		// inspect a fault that the test harness otherwise just reports as a panic).
+		if os.Getenv("ELISA_KEEP_TEST_BINARY") != "" {
+			fmt.Fprintf(stderr, "[ keep     ] test binary: %s\n", exePath)
+			cleanup = func() {}
+		}
 		writeTestTimingLine(stderr, "compile",
 			durationTimingField("build_runner", runnerSourceElapsed),
 			durationTimingField("compile", compileTotal),
