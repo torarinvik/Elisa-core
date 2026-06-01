@@ -424,6 +424,22 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 		if usesReservedRegister(target, inst.Text, requireSet) {
 			issues = append(issues, Issue{Severity: "error", Code: "reserved-register-use", File: path, Line: inst.Line, Message: "target-reserved register requires an explicit platform capability"})
 		}
+		// Implicit reads (e.g. cpuid's leaf in eax / subleaf in ecx) are invisible in the
+		// operand text. Require each to be a declared input or written earlier so a function
+		// cannot silently consume an indeterminate caller-left value. Checked before the
+		// implicit-clobber pass below, which then marks the same registers dead for
+		// subsequent instructions.
+		for _, reg := range implicitUses(op) {
+			canonical := canonicalX86GPR(reg)
+			if inputRegs[canonical] {
+				inputRegRead[canonical] = true
+				continue
+			}
+			if state.LiveRegs[canonical] {
+				continue
+			}
+			issues = append(issues, Issue{Severity: "error", Code: "implicit-read-uninitialized", File: path, Line: inst.Line, Message: fmt.Sprintf("instruction %q implicitly reads %s, which is not a declared input or written earlier in the body", inst.Op, canonical)})
+		}
 		for _, reg := range implicitClobbers(op) {
 			canonical := canonicalX86GPR(reg)
 			delete(state.LiveRegs, canonical)
@@ -1816,6 +1832,22 @@ func implicitClobbers(op string) []string {
 		return []string{"rax", "rbx", "rcx", "rdx"}
 	case "call", "callq":
 		return []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "cc"}
+	default:
+		return nil
+	}
+}
+
+// implicitUses returns the registers an instruction reads WITHOUT them appearing as an
+// explicit operand -- e.g. cpuid consumes the leaf in eax and the subleaf in ecx. Such
+// reads are invisible in the assembly text, so unless the validator knows about them it
+// cannot tell whether the register holds a value the function established (a declared
+// input or an earlier write) or an indeterminate value the caller happened to leave. The
+// table is cross-checked against LLVM MC's implicit_uses in easm_mc_effects_test.go so it
+// can never silently miss a read. Returned names are canonical 64-bit forms.
+func implicitUses(op string) []string {
+	switch op {
+	case "cpuid":
+		return []string{"rax", "rcx"}
 	default:
 		return nil
 	}

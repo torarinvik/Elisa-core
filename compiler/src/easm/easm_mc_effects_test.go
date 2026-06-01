@@ -59,12 +59,10 @@ int main() {
   if (!MII || !MRI) { fprintf(stderr, "create MII/MRI failed\n"); return 1; }
   for (unsigned op = 0, e = MII->getNumOpcodes(); op < e; ++op) {
     const MCInstrDesc &D = MII->get(op);
-    printf("%s\tdefs:", MII->getName(op).str().c_str());
-    bool first = true;
-    for (MCPhysReg r : D.implicit_defs()) {
-      printf("%s%s", first ? "" : ",", MRI->getName(r));
-      first = false;
-    }
+    printf("%s\tuses:", MII->getName(op).str().c_str());
+    { bool f = true; for (MCPhysReg r : D.implicit_uses()) { printf("%s%s", f ? "" : ",", MRI->getName(r)); f = false; } }
+    printf("\tdefs:");
+    { bool f = true; for (MCPhysReg r : D.implicit_defs()) { printf("%s%s", f ? "" : ",", MRI->getName(r)); f = false; } }
     printf("\tmayLoad:%d\tmayStore:%d\tside:%d\n", D.mayLoad(), D.mayStore(), D.hasUnmodeledSideEffects());
   }
   return 0;
@@ -130,6 +128,7 @@ var easmOpWitness = map[string]string{
 
 // mcEffect is one opcode's implicit effects as reported by MCInstrDesc.
 type mcEffect struct {
+	uses     []string // implicit use (read) register names, verbatim from MCRegisterInfo
 	defs     []string // implicit def register names, verbatim from MCRegisterInfo (e.g. EFLAGS, RAX, DF)
 	mayLoad  bool
 	mayStore bool
@@ -272,17 +271,20 @@ func runMCDump(t *testing.T, binPath string) map[string]mcEffect {
 			continue
 		}
 		fields := strings.Split(line, "\t")
-		if len(fields) < 5 {
+		if len(fields) < 6 {
 			continue
 		}
 		name := fields[0]
 		var eff mcEffect
-		if defs := strings.TrimPrefix(fields[1], "defs:"); defs != "" {
+		if uses := strings.TrimPrefix(fields[1], "uses:"); uses != "" {
+			eff.uses = strings.Split(uses, ",")
+		}
+		if defs := strings.TrimPrefix(fields[2], "defs:"); defs != "" {
 			eff.defs = strings.Split(defs, ",")
 		}
-		eff.mayLoad = fields[2] == "mayLoad:1"
-		eff.mayStore = fields[3] == "mayStore:1"
-		eff.side = fields[4] == "side:1"
+		eff.mayLoad = fields[3] == "mayLoad:1"
+		eff.mayStore = fields[4] == "mayStore:1"
+		eff.side = fields[5] == "side:1"
 		effects[name] = eff
 	}
 	if len(effects) == 0 {
@@ -329,6 +331,7 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 
 	checked := 0
 	mcConfirmedFlags := map[string]bool{}
+	cpuidUsesObserved := false
 	for op := range allowedOps {
 		witness, ok := easmOpWitness[op]
 		if !ok {
@@ -433,6 +436,33 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 					"set including cc and rax, got %v", op, implicitClobbers(op))
 			}
 		}
+
+		// --- Implicit GPR uses (reads) ------------------------------------------
+		// A register an instruction reads implicitly -- not as an operand -- must be in the
+		// validator's implicitUses table so it can require the register initialized. cpuid
+		// reading eax/ecx is the case in the allowed set; missing it would let a function
+		// silently consume an indeterminate caller-left value.
+		declaredUses := map[string]bool{}
+		for _, r := range implicitUses(op) {
+			declaredUses[canonicalX86GPR(r)] = true
+		}
+		for _, u := range eff.uses {
+			reg := canonicalX86GPR(strings.ToLower(u))
+			if !x86GPRSet[reg] {
+				continue // flags, rsp, rip, vector/segment -- not a GPR read we model
+			}
+			if explicit[reg] {
+				continue // visible in the source text -> an operand read, not implicit
+			}
+			if op == "cpuid" && (reg == "rax" || reg == "rcx") {
+				cpuidUsesObserved = true
+			}
+			if !declaredUses[reg] {
+				t.Errorf("UNDER-DECLARED IMPLICIT READ: MC says %s (%s) implicitly reads %s, "+
+					"but implicitUses(%q)=%v omits it; the validator cannot require it initialized.",
+					op, opcodeName, reg, op, implicitUses(op))
+			}
+		}
 	}
 
 	if checked == 0 {
@@ -446,6 +476,10 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 			t.Fatalf("MC pipeline liveness failed: %q was not observed writing flags via MC; "+
 				"the probe or llvm-mc wiring is broken and the flags cross-check is vacuous", op)
 		}
+	}
+	if !cpuidUsesObserved {
+		t.Fatal("MC pipeline liveness failed: cpuid's implicit eax/ecx reads were not observed; " +
+			"the implicit-uses probe column is broken and the read cross-check is vacuous")
 	}
 	// --- Memory effects: ground writesMemory/hasMemoryOperand in MC -------------
 	// These text predicates decide whether the validator demands a `memory` clobber. If
