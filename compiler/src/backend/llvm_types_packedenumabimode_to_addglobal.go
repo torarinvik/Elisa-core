@@ -589,7 +589,8 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 		"elisa_trace_record",
 		"elisa_trace_record_value",
 		"elisa_trace_count",
-		"elisa_trace_dump":
+		"elisa_trace_dump",
+		"elisa_trace_install_fault_handler":
 		return true
 	default:
 		return false

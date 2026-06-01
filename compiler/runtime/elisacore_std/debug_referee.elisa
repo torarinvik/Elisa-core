@@ -80,6 +80,19 @@ const ELISA_TRACE_CAP: usize = 256
 # not a stable cross-platform symbol, e.g. it is __stderrp on macOS.)
 extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
 extern write(fd: int, buf: void&, count: usize) -> isize effects[Console]
+extern getenv(name: u8&) -> u8&?
+extern signal(sig: int, handler: void&?) -> void&?
+# `raise` is a reserved keyword in Elisa, so re-raise via kill(getpid(), sig).
+extern getpid() -> int
+extern kill(pid: int, sig: int) -> int
+
+# Common signal numbers (consistent across macOS/Linux for these four).
+const ELISA_SIG_ILL: int = 4
+const ELISA_SIG_ABRT: int = 6
+const ELISA_SIG_FPE: int = 8
+const ELISA_SIG_SEGV: int = 11
+
+global mutable elisa_trace_fault_checked: bool = false
 
 struct ElisaTraceEntry:
     name: mutable cstr
@@ -93,6 +106,8 @@ global mutable elisa_trace_pos: u64 = 0
 
 # Plain step record: just function + line (the execution path).
 def elisa_trace_record(name: cstr, line: u32) -> void:
+    if not elisa_trace_fault_checked:
+        elisa_trace_maybe_install_fault_handler()
     idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
     elisa_trace_ring[idx].name <- name
     elisa_trace_ring[idx].line <- line
@@ -111,6 +126,33 @@ def elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64) 
 
 def elisa_trace_count() -> u64:
     return elisa_trace_pos
+
+# On a fault, print the recent trace then restore the default disposition and re-raise so
+# the original crash still happens (core dump etc.). snprintf/write in a handler is not
+# strictly async-signal-safe but is the common, useful choice for a crash dump.
+def elisa_trace_fault_handler(sig: int) -> void:
+    elisa_trace_dump()
+    _ = signal(sig, null)
+    _ = kill(getpid(), sig)
+
+# Install the fault handler for SIGSEGV/SIGABRT/SIGILL/SIGFPE. Callable directly (e.g. a
+# program -- or the emulator's own handler -- can opt in explicitly).
+def elisa_trace_install_fault_handler() -> void:
+    h: void&? = elisa_trace_fault_handler.cast[void&?]
+    _ = signal(ELISA_SIG_SEGV, h)
+    _ = signal(ELISA_SIG_ABRT, h)
+    _ = signal(ELISA_SIG_ILL, h)
+    _ = signal(ELISA_SIG_FPE, h)
+
+# Auto-install once, gated by ELISA_TRACE_ON_FAULT. Off by default so it never clobbers a
+# program's own signal handling (e.g. the emulator installs its SIGSEGV handler later,
+# which then overrides this one -- the emulator should call elisa_trace_dump() itself).
+def elisa_trace_maybe_install_fault_handler() -> void:
+    if elisa_trace_fault_checked:
+        return
+    elisa_trace_fault_checked <- true
+    if getenv("ELISA_TRACE_ON_FAULT".cast[u8&]) != null:
+        elisa_trace_install_fault_handler()
 
 def elisa_trace_dump() -> void:
     total: u64 = elisa_trace_pos

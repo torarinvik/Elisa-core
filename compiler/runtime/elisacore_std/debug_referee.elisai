@@ -163,4 +163,6 @@ extern elisa_trace_count() -> u64
 
 extern elisa_trace_dump()
 
+extern elisa_trace_install_fault_handler()
+
 extern debug_trace_assert_fingerprint(expected: u64) can[Debug.Trace, Abort.Panic]
