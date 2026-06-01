@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -250,10 +251,81 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitInterpret)
 			return 1
 		}
-		execResult, err := interpreter.Execute(result, interpreter.Options{Stdout: stdout})
+		var debugger *interpreter.Debugger
+		if options.debug {
+			conditions := []interpreter.DebugCondition{}
+			if strings.TrimSpace(options.debugBreak) != "" {
+				conditions = append(conditions, interpreter.BreakWhenExpr(options.debugBreak))
+			}
+			session := interpreter.NewDebugSession(interpreter.DebuggerConfig{
+				TraceLimit: options.debugTraceLimit,
+				FullTrace:  options.debugFullTrace,
+				Context:    options.debugContext,
+			}, conditions...)
+			session.Run()
+			debugger = session.Debugger
+		}
+		execResult, err := interpreter.Execute(result, interpreter.Options{Stdout: stdout, Debugger: debugger})
 		if err != nil {
+			if debugger != nil {
+				var halt *interpreter.DebugHaltError
+				if errors.As(err, &halt) {
+					if options.debugRepl {
+						if replErr := interpreter.RunDebugREPL(debugger.Session, os.Stdin, stdout, options.debugContext); replErr != nil {
+							fmt.Fprintf(stderr, "error: %s\n", replErr)
+						}
+					}
+					if saveErr := saveDebugTraceIfRequested(options, debugger); saveErr != nil {
+						fmt.Fprintf(stderr, "error: %s\n", saveErr)
+					}
+					switch options.debugFormat {
+					case "jsonl":
+						if formatErr := interpreter.WriteDebugTraceJSONL(stdout, debugger); formatErr != nil {
+							fmt.Fprintf(stderr, "error: %s\n", formatErr)
+						}
+					case "llm":
+						fmt.Fprint(stdout, interpreter.FormatDebugContextForLLM(debugger, options.debugContext))
+					default:
+						fmt.Fprint(stderr, interpreter.FormatDebugHaltHuman(debugger))
+					}
+					return 1
+				}
+				if debugger.Session != nil {
+					debugger.Session.MarkFailed(err, interpreter.DebugStopRuntimeError)
+					if saveErr := saveDebugTraceIfRequested(options, debugger); saveErr != nil {
+						fmt.Fprintf(stderr, "error: %s\n", saveErr)
+					}
+				}
+			}
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
+		}
+		if debugger != nil && debugger.Session != nil {
+			if options.debugRepl {
+				for index, snapshot := range debugger.Trace {
+					if snapshot.Event == interpreter.DebugAfterStmt {
+						debugger.Seek(index)
+						break
+					}
+				}
+				if replErr := interpreter.RunDebugREPL(debugger.Session, os.Stdin, stdout, options.debugContext); replErr != nil {
+					fmt.Fprintf(stderr, "error: %s\n", replErr)
+					return 1
+				}
+			}
+			debugger.Session.MarkCompleted()
+			if saveErr := saveDebugTraceIfRequested(options, debugger); saveErr != nil {
+				fmt.Fprintf(stderr, "error: %s\n", saveErr)
+				return 1
+			}
+			if options.debugFormat == "jsonl" {
+				if err := interpreter.WriteDebugTraceJSONL(stdout, debugger); err != nil {
+					fmt.Fprintf(stderr, "error: %s\n", err)
+					return 1
+				}
+			} else if options.debugFormat == "llm" {
+				fmt.Fprint(stdout, interpreter.FormatDebugContextForLLM(debugger, options.debugContext))
+			}
 		}
 		if !execResult.Return.IsVoid() {
 			if execResult.Stdout != "" && !strings.HasSuffix(execResult.Stdout, "\n") {
@@ -378,6 +450,17 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		printUsage(stderr)
 		return 1
 	}
+}
+
+func saveDebugTraceIfRequested(options cliOptions, debugger *interpreter.Debugger) error {
+	if strings.TrimSpace(options.debugSaveTrace) == "" || debugger == nil {
+		return nil
+	}
+	payload, err := interpreter.ExportDebugTrace(debugger)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(options.debugSaveTrace, payload, 0o644)
 }
 
 func writeOutputFile(path string, data []byte) error {

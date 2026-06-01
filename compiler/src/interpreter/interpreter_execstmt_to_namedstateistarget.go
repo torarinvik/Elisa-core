@@ -11,6 +11,20 @@ import (
 )
 
 func (i *Interpreter) execStmt(frame *frame, stmt ast.Stmt) (controlSignal, error) {
+	if err := i.debugRecord(frame, DebugBeforeStmt, stmt); err != nil {
+		return controlSignal{}, err
+	}
+	signal, err := i.execStmtCore(frame, stmt)
+	if err != nil {
+		return controlSignal{}, err
+	}
+	if err := i.debugRecord(frame, DebugAfterStmt, stmt); err != nil {
+		return controlSignal{}, err
+	}
+	return signal, nil
+}
+
+func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, error) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
 		value, err := i.evaluateInitializer(frame, n.Type, n.Value)

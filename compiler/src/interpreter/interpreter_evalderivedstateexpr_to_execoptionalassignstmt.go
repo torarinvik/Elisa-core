@@ -304,6 +304,10 @@ func (i *Interpreter) callLambda(lambda *lambdaValue, expr *ast.CallExpr, caller
 		}
 	}
 	callFrame := &frame{locals: map[string]Value{}}
+	if callerFrame != nil {
+		callFrame.namespace = callerFrame.namespace
+		callFrame.function = callerFrame.function + ".lambda"
+	}
 	for name, value := range lambda.captures {
 		callFrame.locals[name] = value.Clone()
 	}

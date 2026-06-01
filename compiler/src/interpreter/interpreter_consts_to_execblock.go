@@ -13,8 +13,9 @@ import (
 const maxLoopIterations = 1_000_000
 
 type Options struct {
-	Entry  string
-	Stdout io.Writer
+	Entry    string
+	Stdout   io.Writer
+	Debugger *Debugger
 }
 type Result struct {
 	Return Value
@@ -71,11 +72,13 @@ type Interpreter struct {
 	globals      map[string]Value
 	runtimeFuncs map[string]runtimeFuncInfo
 	nextLambdaID int
+	debugger     *Debugger
 }
 type frame struct {
 	locals    map[string]Value
 	parent    *frame
 	namespace string
+	function  string
 }
 
 func qualifiedInterpreterName(namespace string, name string) string {
@@ -172,6 +175,10 @@ func Execute(result *semantic.Result, options Options) (*Result, error) {
 		structs:   map[string]*ast.StructDecl{},
 		consts:    map[string]Value{},
 		globals:   map[string]Value{},
+		debugger:  options.Debugger,
+	}
+	if interp.debugger != nil {
+		interp.debugger.Reset()
 	}
 	interp.runtimeFuncs = map[string]runtimeFuncInfo{
 		"puts": {
@@ -197,6 +204,11 @@ func Execute(result *semantic.Result, options Options) (*Result, error) {
 	returnValue, err := interp.callFunctionByName(entryName, nil)
 	if err != nil {
 		return nil, err
+	}
+	if interp.debugger != nil {
+		if condErr := interp.debugger.deferredConditionError(); condErr != nil {
+			return nil, condErr
+		}
 	}
 	return &Result{Return: returnValue, Stdout: stdout.String()}, nil
 }
@@ -465,7 +477,7 @@ func (i *Interpreter) loweredFuncParams(name string, fn *ast.FuncDecl) []ast.Par
 	return params
 }
 func (i *Interpreter) callFunction(name string, fn *ast.FuncDecl, positional []Value, named map[string]Value) (Value, error) {
-	frame := &frame{locals: map[string]Value{}, namespace: interpreterNamespaceFromName(name)}
+	frame := &frame{locals: map[string]Value{}, namespace: interpreterNamespaceFromName(name), function: name}
 	if err := bindCallArgs(frame.locals, i.loweredFuncParams(name, fn), positional, named); err != nil {
 		return VoidValue(), fmt.Errorf("%s: %w", fn.Pos(), err)
 	}
@@ -482,7 +494,7 @@ func (i *Interpreter) callFunction(name string, fn *ast.FuncDecl, positional []V
 	return VoidValue(), fmt.Errorf("%s: reached end of function %q without return", fn.Pos(), fn.Name)
 }
 func childFrame(parent *frame) *frame {
-	return &frame{locals: map[string]Value{}, parent: parent}
+	return &frame{locals: map[string]Value{}, parent: parent, namespace: parent.namespace, function: parent.function}
 }
 func bindCallArgs(dst map[string]Value, params []ast.ParamDecl, positional []Value, named map[string]Value) error {
 	if len(named) == 0 {

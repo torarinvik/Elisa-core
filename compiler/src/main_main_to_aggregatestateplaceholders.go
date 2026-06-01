@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -174,20 +175,28 @@ const (
 )
 
 type cliOptions struct {
-	emit          string
-	filename      string
-	output        string
-	addr          string
-	filter        string
-	unsafeBudget  string
-	foreignFiles  []string
-	linkFlags     []string
-	linkNative    bool
-	runNative     bool
-	targetTriple  string
-	packedProfile backend.PackedLoweringProfile
-	optLevel      backend.OptimizationLevel
-	hasOptLevel   bool
+	emit            string
+	filename        string
+	output          string
+	addr            string
+	filter          string
+	unsafeBudget    string
+	foreignFiles    []string
+	linkFlags       []string
+	linkNative      bool
+	runNative       bool
+	targetTriple    string
+	debug           bool
+	debugBreak      string
+	debugFormat     string
+	debugTraceLimit int
+	debugFullTrace  bool
+	debugContext    int
+	debugRepl       bool
+	debugSaveTrace  string
+	packedProfile   backend.PackedLoweringProfile
+	optLevel        backend.OptimizationLevel
+	hasOptLevel     bool
 }
 
 func parseArgs(args []string) (cliOptions, error) {
@@ -244,6 +253,85 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("missing value after -filter")
 			}
 			options.filter = strings.TrimSpace(args[i])
+		case arg == "-debug":
+			options.debug = true
+		case strings.HasPrefix(arg, "-debug-break="):
+			options.debug = true
+			options.debugBreak = strings.TrimSpace(strings.TrimPrefix(arg, "-debug-break="))
+		case arg == "-debug-break":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -debug-break")
+			}
+			options.debug = true
+			options.debugBreak = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-debug-format="):
+			options.debug = true
+			options.debugFormat = strings.TrimSpace(strings.TrimPrefix(arg, "-debug-format="))
+		case arg == "-debug-format":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -debug-format")
+			}
+			options.debug = true
+			options.debugFormat = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-debug-trace-limit="):
+			options.debug = true
+			value := strings.TrimSpace(strings.TrimPrefix(arg, "-debug-trace-limit="))
+			limit, err := strconv.Atoi(value)
+			if err != nil || limit < 0 {
+				return cliOptions{}, fmt.Errorf("invalid -debug-trace-limit %q", value)
+			}
+			options.debugTraceLimit = limit
+		case arg == "-debug-trace-limit":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -debug-trace-limit")
+			}
+			options.debug = true
+			limit, err := strconv.Atoi(strings.TrimSpace(args[i]))
+			if err != nil || limit < 0 {
+				return cliOptions{}, fmt.Errorf("invalid -debug-trace-limit %q", args[i])
+			}
+			options.debugTraceLimit = limit
+		case arg == "-debug-full-trace":
+			options.debug = true
+			options.debugFullTrace = true
+		case arg == "-debug-repl":
+			options.debug = true
+			options.debugRepl = true
+		case strings.HasPrefix(arg, "-debug-context="):
+			options.debug = true
+			value := strings.TrimSpace(strings.TrimPrefix(arg, "-debug-context="))
+			context, err := strconv.Atoi(value)
+			if err != nil || context < 0 {
+				return cliOptions{}, fmt.Errorf("invalid -debug-context %q", value)
+			}
+			options.debugContext = context
+		case arg == "-debug-context":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -debug-context")
+			}
+			options.debug = true
+			context, err := strconv.Atoi(strings.TrimSpace(args[i]))
+			if err != nil || context < 0 {
+				return cliOptions{}, fmt.Errorf("invalid -debug-context %q", args[i])
+			}
+			options.debugContext = context
+		case strings.HasPrefix(arg, "-debug-save-trace="):
+			options.debug = true
+			options.debugSaveTrace = strings.TrimSpace(strings.TrimPrefix(arg, "-debug-save-trace="))
+			if options.debugSaveTrace == "" {
+				return cliOptions{}, fmt.Errorf("missing value after -debug-save-trace")
+			}
+		case arg == "-debug-save-trace":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -debug-save-trace")
+			}
+			options.debug = true
+			options.debugSaveTrace = strings.TrimSpace(args[i])
 		case strings.HasPrefix(arg, "-unsafe-budget="):
 			options.unsafeBudget = strings.TrimSpace(strings.TrimPrefix(arg, "-unsafe-budget="))
 		case arg == "-unsafe-budget":
@@ -334,6 +422,18 @@ func parseArgs(args []string) (cliOptions, error) {
 	}
 	if options.addr == "" {
 		options.addr = "127.0.0.1:8080"
+	}
+	if options.debugFormat == "" {
+		options.debugFormat = "human"
+	}
+	switch strings.ToLower(options.debugFormat) {
+	case "human", "jsonl", "llm":
+		options.debugFormat = strings.ToLower(options.debugFormat)
+	default:
+		return cliOptions{}, fmt.Errorf("unsupported -debug-format %q (expected human, jsonl, or llm)", options.debugFormat)
+	}
+	if options.debugContext == 0 {
+		options.debugContext = 1
 	}
 	return options, nil
 }
