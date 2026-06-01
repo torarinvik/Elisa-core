@@ -70,11 +70,16 @@ func compileLLVMModuleWithTarget(result *semantic.Result, optLevel OptimizationL
 }
 
 func compileLLVMModuleWithTargetAndDebug(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool) (*llvmGenerator, error) {
+	return compileLLVMModuleWithTargetDebugTrace(result, optLevel, profile, targetTriple, debugInfo, false)
+}
+
+func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (*llvmGenerator, error) {
 	g, err := newLLVMGenerator(result)
 	if err != nil {
 		return nil, err
 	}
 	g.emitDebugInfo = debugInfo
+	g.emitTrace = traceInfo
 	g.optLevel = optLevel
 	g.packedProfile = profile
 	g.packedEnumABI = profile.packedModeForStore(nil)
@@ -131,6 +136,8 @@ type llvmGenerator struct {
 	wordBits                  int
 	emitDebugInfo             bool
 	di                        *debugInfo
+	emitTrace                 bool
+	trace                     *traceState
 }
 type typeMemoKey struct {
 	id  semantic.TypeID
@@ -244,6 +251,9 @@ func (g *llvmGenerator) dispose() {
 func (g *llvmGenerator) emitModule() error {
 	if g.emitDebugInfo {
 		g.initDebugInfo()
+	}
+	if g.emitTrace {
+		g.initTrace()
 	}
 	for _, decl := range g.result.ActiveFile().Decls {
 		if err := g.predeclareDeclTypes(decl); err != nil {

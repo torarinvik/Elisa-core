@@ -63,6 +63,63 @@ global mutable debug_trace_hash: u64 = DEBUG_TRACE_HASH_INITIAL
 global mutable debug_trace_last_event: DebugTraceEvent = zeroed
 global mutable debug_trace_events: DebugTraceEvent[DEBUG_TRACE_TAPE_CAP] = zeroed
 
+# ------------------------------------------------------------
+# Execution trace ring buffer (-ftrace "rewind a few steps")
+# ------------------------------------------------------------
+# Under -ftrace the compiler emits a call to elisa_trace_record(func_name, line) at
+# every statement boundary. Only the most recent ELISA_TRACE_CAP steps are retained, so
+# memory stays bounded no matter how long the program runs. At a fault or breakpoint,
+# call elisa_trace_dump() (e.g. from lldb: `call elisa_trace_dump()`) to print the recent
+# execution path newest-first -- observational "rewind" without reversible execution.
+
+const ELISA_TRACE_CAP: usize = 256
+
+# Minimal libc externs for the trace dump. debug_referee.elisa otherwise depends only
+# on language builtins; snprintf+write resolve against libc at final link without
+# pulling in the rest of the runtime. (write(2,...) is portable; the `stderr` global is
+# not a stable cross-platform symbol, e.g. it is __stderrp on macOS.)
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
+extern write(fd: int, buf: void&, count: usize) -> isize effects[Console]
+
+struct ElisaTraceEntry:
+    name: mutable cstr
+    line: mutable u32
+
+global mutable elisa_trace_ring: ElisaTraceEntry[ELISA_TRACE_CAP] = zeroed
+global mutable elisa_trace_pos: u64 = 0
+
+def elisa_trace_record(name: cstr, line: u32) -> void:
+    idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
+    elisa_trace_ring[idx].name <- name
+    elisa_trace_ring[idx].line <- line
+    elisa_trace_pos <- elisa_trace_pos + 1u64
+
+def elisa_trace_count() -> u64:
+    return elisa_trace_pos
+
+def elisa_trace_dump() -> void:
+    total: u64 = elisa_trace_pos
+    n: mutable u64 = total
+    if n > ELISA_TRACE_CAP.u64():
+        n <- ELISA_TRACE_CAP.u64()
+    hdr: mutable u8[128] = zeroed
+    hw: int = snprintf(hdr[0], 128usize, "--- elisa trace: most recent %llu of %llu step(s) ---\n", n, total) can Console.Format
+    if hw > 0:
+        _ = write(2, hdr[0].ref[void&], hw.usize()) can Console
+    i: mutable u64 = 0u64
+    while i < n:
+        idx: usize = ((elisa_trace_pos - 1u64 - i) % ELISA_TRACE_CAP.u64()).usize()
+        nm: cstr = elisa_trace_ring[idx].name
+        ln: u32 = elisa_trace_ring[idx].line
+        buf: mutable u8[256] = zeroed
+        w: mutable int = snprintf(buf[0], 256usize, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
+        if w > 0:
+            wn: mutable usize = w.usize()
+            if wn > 256usize:
+                wn <- 256usize
+            _ = write(2, buf[0].ref[void&], wn) can Console
+        i <- i + 1u64
+
 def debug_referee_set_enabled(enabled: bool) can[Debug.Referee]:
     debug_referee_enabled <- enabled
 

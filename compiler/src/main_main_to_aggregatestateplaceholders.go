@@ -187,6 +187,7 @@ type cliOptions struct {
 	runNative       bool
 	targetTriple    string
 	debugInfo       bool
+	recordTrace     bool
 	debug           bool
 	debugBreak      string
 	debugBreakRaise bool
@@ -257,6 +258,8 @@ func parseArgs(args []string) (cliOptions, error) {
 			options.filter = strings.TrimSpace(args[i])
 		case arg == "-g" || arg == "-debug-info":
 			options.debugInfo = true
+		case arg == "-ftrace" || arg == "-record-trace":
+			options.recordTrace = true
 		case arg == "-debug":
 			options.debug = true
 		case arg == "-debug-break-raise":

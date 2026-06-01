@@ -51,6 +51,7 @@ type functionState struct {
 	builder                      C.LLVMBuilderRef
 	scope                        *codegenScope
 	diScope                      C.LLVMMetadataRef
+	traceNameGlobal              C.LLVMValueRef
 	typeMap                      map[string]semantic.Type
 	specializedFuncTypes         map[*semantic.FuncType]*semantic.FuncType
 	resultSlot                   C.LLVMValueRef
@@ -408,6 +409,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 
 	if g.di != nil {
 		g.di.attachFunction(state, decl, fnValue)
+	}
+	if g.trace != nil {
+		state.traceNameGlobal = g.trace.nameGlobalFor(decl.Name)
 	}
 
 	abiLayout, layoutErr := g.computeFuncAbiLayout(fnType)

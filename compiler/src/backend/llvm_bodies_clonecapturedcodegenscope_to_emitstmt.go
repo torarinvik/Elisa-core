@@ -291,6 +291,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	if s.g.di != nil {
 		s.g.di.setLoc(s, stmt)
 	}
+	if s.g.trace != nil {
+		s.g.trace.recordStmt(s, stmt)
+	}
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
 		var declType semantic.Type

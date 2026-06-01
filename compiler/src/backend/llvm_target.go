@@ -121,6 +121,7 @@ type LLVMObjectEmitOptions struct {
 	PackedProfile PackedLoweringProfile
 	TargetTriple  string
 	DebugInfo     bool
+	Trace         bool
 }
 
 func WriteLLVMObjectFileWithOptions(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {
@@ -130,7 +131,7 @@ func WriteLLVMObjectFileWithOptions(result *semantic.Result, outputPath string, 
 	if options.PackedProfile == (PackedLoweringProfile{}) {
 		options.PackedProfile = DefaultPackedLoweringProfile()
 	}
-	g, err := compileLLVMModuleWithTargetAndDebug(result, options.OptLevel, options.PackedProfile, strings.TrimSpace(options.TargetTriple), options.DebugInfo)
+	g, err := compileLLVMModuleWithTargetDebugTrace(result, options.OptLevel, options.PackedProfile, strings.TrimSpace(options.TargetTriple), options.DebugInfo, options.Trace)
 	if err != nil {
 		return err
 	}
