@@ -213,12 +213,63 @@ func (p *Parser) parseMatch() ast.Stmt {
 		}
 	}
 	value := p.parseMatchHeadExpr()
+	// `match <expr> as <ok>:` is sugar for a catch over an error union: the `ok:` arm
+	// binds the success value and the remaining arms handle error variants. It desugars
+	// to a CatchExpr so all of catch's semantics (ok-binding, payload binding,
+	// exhaustiveness) are reused unchanged.
+	if p.match(lexer.TOKEN_AS) {
+		return p.parseMatchAsCatch(pos, value)
+	}
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
 		store = p.parseExpr()
 	}
 	arms := p.parseMatchArms()
 	return &ast.MatchStmt{Position: pos, Value: value, Store: store, Arms: arms}
+}
+
+// parseMatchAsCatch parses `match <value> as <okName>:` with an `ok:` success arm,
+// `Err.Variant(binds):` error arms, and an optional `else:`/`_:` catch-all, building an
+// equivalent CatchExpr (wrapped in an ExprStmt).
+func (p *Parser) parseMatchAsCatch(pos lexer.Pos, value ast.Expr) ast.Stmt {
+	okName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	p.skipNewlines()
+	success := ast.CatchArm{Position: pos, Name: okName}
+	hasOk := false
+	var arms []ast.CatchArm
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		armPos := p.cur().Pos
+		// `ok:` — the success arm. Its body becomes the catch success body; the value
+		// is bound to okName from `as`.
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "ok" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			p.advance()
+			p.expect(lexer.TOKEN_COLON)
+			success.Body = p.parseCatchArmBody(armPos)
+			success.Position = armPos
+			hasOk = true
+			continue
+		}
+		// `else:` / `_:` — a catch-all bound to the whole error (error-binding arm).
+		if p.peek() == lexer.TOKEN_ELSE || (p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_") {
+			p.advance()
+			p.expect(lexer.TOKEN_COLON)
+			arms = append(arms, ast.CatchArm{Position: armPos, Name: "_", ErrorBinding: true, Body: p.parseCatchArmBody(armPos)})
+			continue
+		}
+		arms = append(arms, p.parseCatchArm())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	if !hasOk {
+		p.errorf("`match ... as` requires an `ok:` arm")
+	}
+	return &ast.ExprStmt{Position: pos, Expr: &ast.CatchExpr{Position: pos, Value: value, Success: success, Arms: arms}}
 }
 func (p *Parser) parseMatchExpr() ast.Expr {
 	pos := p.cur().Pos
