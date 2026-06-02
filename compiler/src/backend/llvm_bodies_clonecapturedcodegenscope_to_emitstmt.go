@@ -553,7 +553,13 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 				if err != nil {
 					return err
 				}
-				C.LLVMBuildRet(s.builder, zeroCode)
+				// A payloaded error set lowers the void union to a {code, payloads...}
+				// struct; wrap the success code into it so the value matches the type.
+				successValue, err := s.wrapVoidErrorUnionCode(retUnion.Errors, zeroCode)
+				if err != nil {
+					return err
+				}
+				C.LLVMBuildRet(s.builder, successValue)
 				return nil
 			}
 			C.LLVMBuildRetVoid(s.builder)

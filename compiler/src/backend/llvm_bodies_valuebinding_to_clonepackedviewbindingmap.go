@@ -503,7 +503,11 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 			if err != nil {
 				return err
 			}
-			C.LLVMBuildRet(builder, zeroCode)
+			successValue, err := state.wrapVoidErrorUnionCode(retUnion.Errors, zeroCode)
+			if err != nil {
+				return err
+			}
+			C.LLVMBuildRet(builder, successValue)
 		} else {
 			return fmt.Errorf("function %s may fall through without returning a value", decl.Name)
 		}

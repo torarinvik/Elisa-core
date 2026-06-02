@@ -720,12 +720,33 @@ func (s *functionState) buildOptionalValue(optionalType *semantic.OptionalType, 
 	value = C.LLVMBuildInsertValue(s.builder, value, payload, 1, cStringFree("optional.value"))
 	return value, nil
 }
+// wrapVoidErrorUnionCode produces the representation of a `void error[set]` value
+// from a bare error code. A payloadless set is just the code; a payloaded set is the
+// {code, payloads...} struct, so the code is inserted at field 0 (payload fields are
+// undef — never read on a void union, whose only datum is which tag fired). If the
+// value is already the struct (e.g. a `raise` built it), it is returned unchanged.
+func (s *functionState) wrapVoidErrorUnionCode(errorSet *semantic.ErrorSetType, errorCode C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if errorSet == nil || !errorSet.HasPayloads() {
+		return errorCode, nil
+	}
+	errorType, err := s.g.lowerType(errorSet)
+	if err != nil {
+		return nil, err
+	}
+	if C.LLVMTypeOf(errorCode) == errorType {
+		return errorCode, nil
+	}
+	setValue := C.LLVMGetUndef(errorType)
+	setValue = C.LLVMBuildInsertValue(s.builder, setValue, errorCode, 0, cStringFree("errset.code"))
+	return setValue, nil
+}
+
 func (s *functionState) buildErrorUnionFailure(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef) (C.LLVMValueRef, error) {
 	if unionType == nil {
 		return nil, fmt.Errorf("missing error union type")
 	}
 	if isVoidType(unionType.Value) {
-		return errorCode, nil
+		return s.wrapVoidErrorUnionCode(unionType.Errors, errorCode)
 	}
 	payload, err := s.zeroValue(unionType.Value)
 	if err != nil {
@@ -808,7 +829,10 @@ func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType,
 		return nil, fmt.Errorf("missing error union type")
 	}
 	if isVoidType(unionType.Value) {
-		return errorCode, nil
+		// A void error union is lowered to its error-set representation: a bare code
+		// when the set is payloadless, but the {code, payloads...} struct when it has
+		// payloads. Wrap a bare code into that struct so the value matches the type.
+		return s.wrapVoidErrorUnionCode(unionType.Errors, errorCode)
 	}
 	llvmType, err := s.g.lowerType(unionType)
 	if err != nil {
@@ -836,6 +860,8 @@ func (s *functionState) extractErrorUnionCode(value C.LLVMValueRef, unionType *s
 		return nil, fmt.Errorf("missing error union type")
 	}
 	if isVoidType(unionType.Value) {
+		// The void union IS the error-set value (a bare code, or the {code, payloads...}
+		// struct); callers extract the scalar code from it via extractErrorSetCode.
 		return value, nil
 	}
 	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("errunion.code")), nil

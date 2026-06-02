@@ -251,7 +251,11 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 			if err != nil {
 				return nil, err
 			}
-			C.LLVMBuildRet(builder, zeroCode)
+			successValue, err := state.wrapVoidErrorUnionCode(retUnion.Errors, zeroCode)
+			if err != nil {
+				return nil, err
+			}
+			C.LLVMBuildRet(builder, successValue)
 		} else {
 			return nil, fmt.Errorf("lambda helper %s may fall through without returning a value", helperName)
 		}
