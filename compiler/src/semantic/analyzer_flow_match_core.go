@@ -402,6 +402,33 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 
 }
 
+// bindCatchArmPayload defines the payload binders of a catch arm (`E.Bad(x, y):`) in the
+// arm scope, typed by the matched variant's payload fields. Binding is optional — an arm
+// may ignore the payload by omitting the parenthesised binders; but if it binds, the arity
+// must match.
+func (a *Analyzer) bindCatchArmPayload(scope *Scope, arm ast.CatchArm, errs *ErrorSetType, tag string) {
+	if len(arm.Payload) == 0 {
+		return
+	}
+	var fieldTypes []Type
+	if errs != nil && errs.Payloads != nil {
+		fieldTypes = errs.Payloads[tag]
+	}
+	if len(arm.Payload) != len(fieldTypes) {
+		a.errorf(arm.Position, "catch arm %q binds %d payload value(s) but the variant carries %d", arm.Name, len(arm.Payload), len(fieldTypes))
+	}
+	for i, binder := range arm.Payload {
+		if binder == "_" {
+			continue
+		}
+		fieldType := Type(invalidType)
+		if i < len(fieldTypes) {
+			fieldType = fieldTypes[i]
+		}
+		a.defineLocalInScope(scope, &Symbol{Name: binder, Kind: SymbolLocal, Type: fieldType, Mutable: false}, arm.Position)
+	}
+}
+
 func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 	valueType := a.analyzeExpr(expr.Value)
 	unionType, ok := valueType.(*ErrorUnionType)
@@ -502,7 +529,9 @@ func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 			a.errorf(arm.Position, "catch arm %q is unreachable because an earlier arm already matches it", arm.Name)
 		}
 		covered[matchedTag] = true
-		mergeArm(arm.Position, arm.Body, NewScope(a.currentScope))
+		armScope := NewScope(a.currentScope)
+		a.bindCatchArmPayload(armScope, arm, unionType.Errors, matchedTag)
+		mergeArm(arm.Position, arm.Body, armScope)
 	}
 	if !hasErrorBinding && len(covered) != len(unionType.Errors.Tags) {
 		missing := make([]string, 0, len(unionType.Errors.Tags))

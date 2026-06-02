@@ -529,6 +529,31 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 		C.LLVMAddCase(switchInst, tagConst, bodyBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		// Bind the matched variant's payload (`E.Bad(x, y):`). The error-set value is a
+		// {code, flat-per-variant-payloads} struct (see buildErrorSetValue); this variant's
+		// fields start at base = 1 + the payload counts of all earlier variants.
+		if len(arm.Payload) > 0 && unionType.Errors.HasPayloads() {
+			base := 1
+			for _, candidate := range unionType.Errors.Tags {
+				if candidate == matchedTag {
+					break
+				}
+				base += len(unionType.Errors.PayloadForTag(candidate))
+			}
+			fieldTypes := unionType.Errors.PayloadForTag(matchedTag)
+			for i, binder := range arm.Payload {
+				if binder == "_" || i >= len(fieldTypes) {
+					continue
+				}
+				fieldVal := C.LLVMBuildExtractValue(s.builder, errorValue, C.unsigned(base+i), cStringFree("catch.payload"))
+				payloadPtr, perr := s.emitStackTempValue(fieldVal, fieldTypes[i], "catch.payload")
+				if perr != nil {
+					s.popScope()
+					return nil, nil, perr
+				}
+				s.defineBinding(binder, valueBinding{ptr: payloadPtr, typ: fieldTypes[i], mutable: false})
+			}
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()

@@ -41,9 +41,19 @@ func (p *Parser) parseCatchArm() ast.CatchArm {
 		return ast.CatchArm{Position: pos, Name: name, ErrorBinding: true, Body: body}
 	}
 	name, pos := p.parseQualifiedTargetName()
+	var payload []string
+	if p.match(lexer.TOKEN_LPAREN) {
+		for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+			payload = append(payload, p.expect(lexer.TOKEN_IDENT).Text)
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	}
 	p.expect(lexer.TOKEN_COLON)
 	body := p.parseCatchArmBody(pos)
-	return ast.CatchArm{Position: pos, Name: name, Body: body}
+	return ast.CatchArm{Position: pos, Name: name, Payload: payload, Body: body}
 }
 func (p *Parser) parseCatchArmBody(pos lexer.Pos) []ast.Stmt {
 	if p.match(lexer.TOKEN_NEWLINE) {

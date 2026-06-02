@@ -67,6 +67,7 @@ type CatchArm struct {
 	Position     lexer.Pos
 	Name         string
 	ErrorBinding bool
+	Payload      []string // binder names for a matched variant's payload, e.g. `E.Bad(x, y):`
 	Body         []Stmt
 }
 type CatchExpr struct {
