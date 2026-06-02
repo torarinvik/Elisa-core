@@ -25,7 +25,10 @@ reuses one set lattice for both.
       is reserved (cannot be declared, no member access). Implemented + tested.
     - ⏳ **Phase 5b — generic *error*-set param** (`[errorset R]`): the symmetric mirror of
       permission params for error sets. Concrete error sets already flow through `func`-type
-      params; only the *polymorphic* error binder is missing. Not started.
+      params; only the *polymorphic* error binder is missing. **Decided to implement as its
+      own focused pass — see docs/64 for the grounded design note + step plan.** The one
+      delicate piece is teaching the error-set unifier to treat `R` as a binding hole
+      (today it compares error sets by exact equality); everything around it already exists.
 
 ## 0. Current state (measured 2026-06-02)
 
