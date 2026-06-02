@@ -150,11 +150,15 @@ func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, sema
 		err        error
 	)
 	if callExpr, ok := expr.Error.(*ast.CallExpr); ok {
-		if constructorErrorType, qualifiedTag, ok := s.errorConstructorInfo(callExpr); ok {
+		if _, qualifiedTag, ok := s.errorConstructorInfo(callExpr); ok {
 			mappedTag, matched := semantic.MatchErrorTag(currentUnion.Errors, qualifiedTag)
-			if !matched || !semantic.SameType(constructorErrorType, currentUnion.Errors) {
-				return nil, nil, fmt.Errorf("payload error raise currently requires destination error set %s, got %s", constructorErrorType, currentUnion.Errors)
+			if !matched {
+				return nil, nil, fmt.Errorf("payload error raise of %s has no matching tag in destination error set %s", qualifiedTag, currentUnion.Errors)
 			}
+			// emitErrorConstructorValue builds the value in the DESTINATION set's layout
+			// (buildErrorSetValue places the payload at the destination's field offset for
+			// this tag), so a payloaded tag can be raised into a wider mixed/combined set
+			// such as error[FooError{Bad1}, BarError{Bad3, Bad4}] — not only its own set.
 			errorValue, errorType, err = s.emitErrorConstructorValue(callExpr, currentUnion.Errors, mappedTag)
 		} else {
 			errorValue, errorType, err = s.emitExpr(expr.Error, currentUnion.Errors)
