@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -69,9 +70,19 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 	}
 	return runLoadedProgramWithOptions(options, program, stdout, stderr)
 }
+var frontendTimingEnabled = os.Getenv("ELISACORE_BUILD_TIMING") != ""
+
+func frontendTimingLog(label string, since time.Time) {
+	if frontendTimingEnabled {
+		fmt.Fprintf(os.Stderr, "[front-timing] %s: %v\n", label, time.Since(since).Round(time.Millisecond))
+	}
+}
+
 func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, bool) {
+	lexStart := time.Now()
 	l := lexer.New(filename, src)
 	tokens := l.Tokenize()
+	frontendTimingLog("lex", lexStart)
 	if errs := l.Errors(); len(errs) > 0 {
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)
@@ -79,8 +90,10 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 		return nil, false
 	}
 
+	parseStart := time.Now()
 	p := parser.New(tokens)
 	file := p.ParseFile(filename)
+	frontendTimingLog("parse", parseStart)
 	if errs := p.Errors(); len(errs) > 0 {
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)
@@ -99,7 +112,9 @@ func analyzeProgramWithOptions(filename string, src []byte, stderr io.Writer, op
 		return nil, nil, false
 	}
 
+	analyzeStart := time.Now()
 	result := semantic.AnalyzeWithOptions(file, options)
+	frontendTimingLog("analyze", analyzeStart)
 	if warns := result.Notices(); len(warns) > 0 {
 		for _, w := range warns {
 			if shouldSuppressDeprecatedWarningsForTests(w) {
