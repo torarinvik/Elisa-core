@@ -475,12 +475,15 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 	covered := map[string]bool{}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
-	successValue, err := s.extractErrorUnionPayload(fallibleValue, unionType)
-	if err != nil {
-		return nil, nil, err
-	}
 	s.pushScope()
+	// A void error union has no success payload to bind; only extract+bind when the
+	// ok value is non-void (otherwise extractErrorUnionPayload would fail).
 	if !isVoidType(unionType.Value) {
+		successValue, err := s.extractErrorUnionPayload(fallibleValue, unionType)
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
 		successPtr, err := s.emitStackTempValue(successValue, unionType.Value, "catch.value")
 		if err != nil {
 			s.popScope()

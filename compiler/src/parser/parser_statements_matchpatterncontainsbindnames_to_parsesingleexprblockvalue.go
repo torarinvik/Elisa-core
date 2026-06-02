@@ -577,6 +577,15 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		}
 	}
 
+	// A catch expression in statement position is always a complete statement: its
+	// arm block terminates it, and postfix forms (`<- x`, `return if`, `as <-`) do
+	// not apply. Return immediately so a following statement is not mis-parsed as a
+	// postfix continuation of the catch.
+	if _, ok := expr.(*ast.CatchExpr); ok {
+		p.expectNewlineAfterValueExpr(expr)
+		return &ast.ExprStmt{Position: pos, Expr: expr}
+	}
+
 	if p.peek() == lexer.TOKEN_RETURN {
 		returnPos := p.cur().Pos
 		p.advance()
@@ -653,7 +662,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		}}
 	}
 
-	p.expectNewline()
+	p.expectNewlineAfterValueExpr(expr)
 	return &ast.ExprStmt{Position: pos, Expr: expr}
 }
 func (p *Parser) rewriteGetOrInsertBlockValue(pos lexer.Pos, value ast.Expr) ast.Expr {

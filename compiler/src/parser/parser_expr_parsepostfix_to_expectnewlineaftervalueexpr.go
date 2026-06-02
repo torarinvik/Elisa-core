@@ -646,6 +646,13 @@ func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
 	if _, ok := expr.(*ast.ExprBlock); ok {
 		return
 	}
+	// A catch expression always ends with its arm block (COLON NEWLINE INDENT …
+	// DEDENT), so in statement position there is no trailing newline to consume —
+	// the same as ExprBlock. Without this, a statement-position `catch …:` followed
+	// by another statement fails to parse.
+	if _, ok := expr.(*ast.CatchExpr); ok {
+		return
+	}
 	if exprHasBlockRecovery(expr) {
 		return
 	}
