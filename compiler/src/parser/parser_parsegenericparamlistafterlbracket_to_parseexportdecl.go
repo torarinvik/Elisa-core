@@ -120,6 +120,32 @@ func (p *Parser) parsePermissionRef() ast.PermissionRef {
 	}
 	return ast.PermissionRef{Position: pos, Name: name, Member: member}
 }
+
+// parsePermissionRefGroup parses one permission item, expanding the member-brace sugar
+// `Family{M1, M2, ...}` into one PermissionRef per member (equivalent to repeating
+// `Family.M1, Family.M2`). `Family` and `Family.Member` yield a single ref.
+func (p *Parser) parsePermissionRefGroup() []ast.PermissionRef {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	if p.match(lexer.TOKEN_LBRACE) {
+		var refs []ast.PermissionRef
+		for p.peek() != lexer.TOKEN_RBRACE && p.peek() != lexer.TOKEN_EOF {
+			mpos := p.cur().Pos
+			member := p.expect(lexer.TOKEN_IDENT).Text
+			refs = append(refs, ast.PermissionRef{Position: mpos, Name: name, Member: member})
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RBRACE)
+		return refs
+	}
+	member := ""
+	if p.match(lexer.TOKEN_DOT) {
+		member = p.expect(lexer.TOKEN_IDENT).Text
+	}
+	return []ast.PermissionRef{{Position: pos, Name: name, Member: member}}
+}
 func (p *Parser) parseEffectsSpec() (*ast.ErrorSetExpr, []ast.PermissionRef) {
 	var errorEffects *ast.ErrorSetExpr
 	var permissions []ast.PermissionRef
@@ -186,7 +212,7 @@ func (p *Parser) parsePermissionRefs(bracketed bool) []ast.PermissionRef {
 	}
 	refs := make([]ast.PermissionRef, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 	for {
-		refs = append(refs, p.parsePermissionRef())
+		refs = append(refs, p.parsePermissionRefGroup()...)
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}

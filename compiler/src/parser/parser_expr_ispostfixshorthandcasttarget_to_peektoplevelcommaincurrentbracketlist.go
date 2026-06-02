@@ -339,7 +339,7 @@ func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {
 			p.advance()
 			break
 		}
-		tags = append(tags, p.parseErrorSetItem())
+		tags = append(tags, p.parseErrorSetItemGroup()...)
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
@@ -364,6 +364,36 @@ func (p *Parser) parseErrorSetItem() ast.ErrorTagExpr {
 		}
 	}
 	return ast.ErrorTagExpr{Position: pos, SetName: setName, Tag: tag}
+}
+
+// parseErrorSetItemGroup parses one error-set item, expanding the member-brace sugar
+// `Set{Tag1, Tag2, ...}` into one ErrorTagExpr per tag (equivalent to repeating
+// `Set.Tag1, Set.Tag2`). `Set` and `Set.Tag` yield a single tag.
+func (p *Parser) parseErrorSetItemGroup() []ast.ErrorTagExpr {
+	pos := p.cur().Pos
+	setName := p.expect(lexer.TOKEN_IDENT).Text
+	if p.match(lexer.TOKEN_LBRACE) {
+		var tags []ast.ErrorTagExpr
+		for p.peek() != lexer.TOKEN_RBRACE && p.peek() != lexer.TOKEN_EOF {
+			tpos := p.cur().Pos
+			tag := p.expect(lexer.TOKEN_IDENT).Text
+			tags = append(tags, ast.ErrorTagExpr{Position: tpos, SetName: setName, Tag: tag})
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RBRACE)
+		return tags
+	}
+	tag := ""
+	if p.match(lexer.TOKEN_DOT) {
+		if p.peek() == lexer.TOKEN_STAR {
+			tag = p.advance().Text
+		} else {
+			tag = p.expect(lexer.TOKEN_IDENT).Text
+		}
+	}
+	return []ast.ErrorTagExpr{{Position: pos, SetName: setName, Tag: tag}}
 }
 func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, string, string) {
 	switch p.peek() {
