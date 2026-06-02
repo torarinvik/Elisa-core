@@ -40,6 +40,11 @@ type cArchiveManifest struct {
 	ABIContract       string   `json:"abi_contract"`
 }
 
+// processStartTime anchors build-timing measurements (ELISACORE_BUILD_TIMING) so the
+// front-end share (parse + whole-program analysis + program load) can be read off as the
+// time from process start to the first native build.
+var processStartTime = time.Now()
+
 type nativeBuildTiming struct {
 	ObjectWrite  time.Duration
 	HeaderGen    time.Duration
@@ -214,6 +219,9 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	if result == nil {
 		return "", func() {}, nativeBuildTiming{}, fmt.Errorf("semantic result is nil")
 	}
+	if os.Getenv("ELISACORE_BUILD_TIMING") != "" {
+		fmt.Fprintf(stderr, "[build-timing] front-end (process start -> native build): %v\n", time.Since(processStartTime).Round(time.Millisecond))
+	}
 	resolvedForeignFiles, err := withDefaultNativeRuntimeForeignFiles(foreignFiles)
 	if err != nil {
 		return "", func() {}, nativeBuildTiming{}, err
@@ -314,7 +322,11 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 			foreignFiles = append([]string{easmPath}, foreignFiles...)
 		}
 	}
+	foreignStart := time.Now()
 	foreignFiles, linkFlags, err = compileCxxForeignFiles(clangPath, foreignFiles, linkFlags, tempDir, targetTriple, stderr)
+	if os.Getenv("ELISACORE_BUILD_TIMING") != "" {
+		fmt.Fprintf(stderr, "[build-timing] foreign C/C++ compile: %v\n", time.Since(foreignStart).Round(time.Millisecond))
+	}
 	if err != nil {
 		cleanup()
 		return "", func() {}, timing, err
@@ -353,6 +365,18 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		return "", func() {}, timing, fmt.Errorf("failed to link native executable: %w", err)
 	}
 	timing.Link = time.Since(linkStart)
+	if os.Getenv("ELISACORE_BUILD_TIMING") != "" {
+		fmt.Fprintf(stderr, "[build-timing] link: %v | object-write(IR-gen+llc): %v\n", timing.Link.Round(time.Millisecond), timing.ObjectWrite.Round(time.Millisecond))
+	}
+
+	// Safety diagnostic: catch the null-bind symbol-split class (the CUSA07399 boot
+	// SIGSEGV root cause) — an undefined `_sym.N` produced when two declarations of the
+	// same link symbol get LLVM-renamed; under -undefined,dynamic_lookup the duplicate
+	// flat-namespace stub binds to NULL and crashes on first call. Best-effort, darwin
+	// only, warning-only; skip with ELISACORE_NO_LINK_BINDING_CHECK=1.
+	if isMachOTriple(targetTriple) && os.Getenv("ELISACORE_NO_LINK_BINDING_CHECK") == "" {
+		warnOnSplitNullBoundSymbols(exePath, stderr)
+	}
 
 	// On Mach-O targets DWARF stays in the .o files (a "debug map" in the executable),
 	// so a debugger needs either those .o files or a .dSYM bundle. The temp .o files are
@@ -367,6 +391,44 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		}
 	}
 	return exePath, cleanup, timing, nil
+}
+
+// warnOnSplitNullBoundSymbols inspects a freshly-linked Mach-O for the symbol-split
+// null-bind hazard: an undefined external `_sym.N` (LLVM's dedup rename) that exists
+// alongside the base `_sym`. Under `-Wl,-undefined,dynamic_lookup` the `.N` flat-
+// namespace stub resolves to NULL, so the first call through it crashes (this was the
+// CUSA07399 boot SIGSEGV: `_mprotect.1`). Best-effort and warning-only.
+func warnOnSplitNullBoundSymbols(exePath string, stderr io.Writer) {
+	nmPath, err := exec.LookPath("nm")
+	if err != nil {
+		return
+	}
+	out, err := exec.Command(nmPath, "-m", exePath).Output()
+	if err != nil {
+		return
+	}
+	split := findSplitNullBoundSymbols(string(out))
+	if len(split) == 0 {
+		return
+	}
+	fmt.Fprintf(stderr, "warning: linked binary has %d undefined split-symbol(s) that may bind to NULL under dynamic_lookup (symbol-split null-bind hazard; e.g. duplicate externs sharing a link_name): %s\n", len(split), strings.Join(split, ", "))
+	fmt.Fprintf(stderr, "         this is the CUSA07399-class fault; consolidate the duplicate declaration(s). Suppress with ELISACORE_NO_LINK_BINDING_CHECK=1.\n")
+}
+
+// findSplitNullBoundSymbols extracts undefined external symbols carrying a `.<digits>`
+// LLVM dedup suffix (e.g. `_mprotect.1`) from `nm -m` output. Such a symbol is the
+// flat-namespace duplicate that binds to NULL under -undefined,dynamic_lookup.
+func findSplitNullBoundSymbols(nmOutput string) []string {
+	re := regexp.MustCompile(`\(undefined\)[^\n]*\b(_[A-Za-z0-9_$]+\.\d+)\b`)
+	seen := map[string]bool{}
+	var split []string
+	for _, m := range re.FindAllStringSubmatch(nmOutput, -1) {
+		if sym := m[1]; !seen[sym] {
+			seen[sym] = true
+			split = append(split, sym)
+		}
+	}
+	return split
 }
 
 // isMachOTriple reports whether the target produces Mach-O (Apple) binaries, where DWARF
@@ -603,17 +665,27 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 		// Fall through to the textual IR + llc path on any in-process error.
 	}
 	// Default path: generate textual IR and compile it with llc.
+	buildTiming := os.Getenv("ELISACORE_BUILD_TIMING") != ""
+	irStart := time.Now()
 	ir, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebugTrace(result, optLevel, packedProfile, targetTriple, debugInfo, traceInfo)
 	if err != nil {
 		return err
+	}
+	if buildTiming {
+		fmt.Fprintf(stderr, "[build-timing] IR-gen: %v (%d bytes IR)\n", time.Since(irStart).Round(time.Millisecond), len(ir))
 	}
 	irPath := strings.TrimSuffix(objectPath, filepath.Ext(objectPath)) + ".ll"
 	if err := os.WriteFile(irPath, []byte(ir), 0o644); err != nil {
 		return err
 	}
-	if err := writeLLVMIRObjectViaLLC(irPath, objectPath, targetTriple, stderr); err == nil {
+	llcStart := time.Now()
+	llcErr := writeLLVMIRObjectViaLLC(irPath, objectPath, targetTriple, stderr)
+	if buildTiming {
+		fmt.Fprintf(stderr, "[build-timing] llc(+cache): %v err=%v\n", time.Since(llcStart).Round(time.Millisecond), llcErr)
+	}
+	if llcErr == nil {
 		return nil
-	} else if strings.TrimSpace(targetTriple) != "" {
+	} else if err = llcErr; strings.TrimSpace(targetTriple) != "" {
 		return err
 	}
 	_ = stderr
