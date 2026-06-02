@@ -116,8 +116,18 @@ func (a *Analyzer) markSubsumedFamilies(family string, granted map[string]bool) 
 	}
 }
 
+// permissionAnyName is the reserved top (⊤) permission: a `can[any]` grant
+// satisfies every requirement (the explicit erasure escape for FFI, stored
+// heterogeneous closures, and dynamic dispatch). A `can[any]` *requirement*,
+// conversely, is only satisfied by another `any` grant (or a `trusted` block) —
+// it does not fall out of any concrete grant.
+const permissionAnyName = "any"
+
 func permissionRefGranted(ref ast.PermissionRef, granted map[string]bool) bool {
 	if ref.Name == "" {
+		return true
+	}
+	if granted[permissionAnyName] {
 		return true
 	}
 	if granted[ref.Name] {
@@ -230,6 +240,16 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 	}
 	valid := make([]ast.PermissionRef, 0, len(refs))
 	for _, ref := range refs {
+		if ref.Name == permissionAnyName {
+			if ref.Member != "" {
+				if report {
+					a.errorf(ref.Position, "the top permission %q does not support member access", permissionAnyName)
+				}
+				continue
+			}
+			valid = append(valid, ast.PermissionRef{Position: ref.Position, Name: permissionAnyName})
+			continue
+		}
 		if a.lookupPermissionParam(ref.Name) {
 			if ref.Member != "" {
 				if report {

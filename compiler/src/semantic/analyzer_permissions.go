@@ -44,6 +44,10 @@ func (a *Analyzer) collectPermissionDecls(decls []scopedDecl) {
 			continue
 		}
 		qualifiedName := joinQualifiedName(scoped.Namespace, name)
+		if qualifiedName == permissionAnyName {
+			a.errorf(pos, "%q is the reserved top permission and cannot be declared", permissionAnyName)
+			continue
+		}
 		resolvedIncludes := make([]string, 0, len(includes))
 		for _, inc := range includes {
 			resolvedIncludes = append(resolvedIncludes, joinQualifiedName(scoped.Namespace, inc))

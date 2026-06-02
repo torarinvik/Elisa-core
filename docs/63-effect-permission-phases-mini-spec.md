@@ -13,7 +13,19 @@ reuses one set lattice for both.
   transitive grant expansion + unknown/cycle validation.
 - ✅ **Phase 4** — checked `can X as Y:` cast (sound iff `Y ≥ X`); `trusted X:` drop
   was already implemented.
-- ⏳ **Phase 5** — set-polymorphism (not started).
+- 🔬 **Phase 5** — set-polymorphism. **Measured 2026-06-02: ~80% already implemented.**
+  Permission generic params (`def f[permission E](...)`), function types with `can[E]` /
+  `error[R]` annotations (`func(T) -> U can[E] error[R]`), call-site inference/binding of
+  `E`, union-with-literal addition (`can[E, Term.Write]`), and error propagation through
+  function-type params (`try f(x)`) **all already parse, analyze, and check correctly** — the
+  earlier "fails to parse" note used the wrong syntax (`(T) -> U` / `[perm E]` instead of
+  `func(T) -> U` / `[permission E]`). Two genuine deltas remained:
+    - ✅ **Phase 5a — `any`/⊤ escape** (`can[any]`): a `can[any]` grant satisfies every
+      requirement; a `can[any]` requirement is satisfied only by `any` (or `trusted`); `any`
+      is reserved (cannot be declared, no member access). Implemented + tested.
+    - ⏳ **Phase 5b — generic *error*-set param** (`[errorset R]`): the symmetric mirror of
+      permission params for error sets. Concrete error sets already flow through `func`-type
+      params; only the *polymorphic* error binder is missing. Not started.
 
 ## 0. Current state (measured 2026-06-02)
 
