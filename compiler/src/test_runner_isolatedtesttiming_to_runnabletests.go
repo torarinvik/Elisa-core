@@ -426,6 +426,56 @@ func runnableTestCases(cases []selectedTestCase) []selectedTestCase {
 	}
 	return out
 }
+func toCachedTestCases(cases []selectedTestCase) []cachedTestCase {
+	out := make([]cachedTestCase, 0, len(cases))
+	for _, tc := range cases {
+		if tc.Func == nil {
+			continue
+		}
+		out = append(out, cachedTestCase{Name: tc.Func.Name, SkipReason: tc.SkipReason})
+	}
+	return out
+}
+
+// runTestExecutableCases runs each non-skipped case against the (already built or
+// cached) test executable and reports pass/skip/fail. Shared by the normal build
+// path and the early-cache hit path, so both emit identical [ RUN ]/[ OK ]/... lines.
+func runTestExecutableCases(exePath string, cases []cachedTestCase, targetTriple string, stdout io.Writer, stderr io.Writer) (passed int, skipped int, failed int, runTotal time.Duration) {
+	writeTestPhaseLine(stderr, "selected_tests", "run_cases")
+	for _, tc := range cases {
+		if strings.TrimSpace(tc.SkipReason) != "" {
+			skipped++
+			fmt.Fprintln(stdout, formatTestLine("SKIPPED", tc.Name, fmt.Sprintf(" (%s)", tc.SkipReason)))
+			continue
+		}
+		fmt.Fprintln(stdout, formatTestLine("RUN", tc.Name, ""))
+		testStart := time.Now()
+		var testStdout bytes.Buffer
+		var testStderr bytes.Buffer
+		runCmd := nativeExecCommand(exePath, targetTriple, tc.Name)
+		runCmd.Stdout = &testStdout
+		runCmd.Stderr = &testStderr
+		runStart := time.Now()
+		runErr := runCmd.Run()
+		runDur := time.Since(runStart)
+		runTotal += runDur
+		writeTestTimingLine(stderr, tc.Name,
+			durationTimingField("total", time.Since(testStart)),
+			durationTimingField("run", runDur),
+		)
+		if runErr == nil {
+			passed++
+			fmt.Fprintln(stdout, formatTestLine("OK", tc.Name, ""))
+			continue
+		}
+		failed++
+		status, detail := classifyTestExecutionError(runErr)
+		fmt.Fprintln(stdout, formatTestLine(status, tc.Name, detail))
+		writeCapturedTestOutput(stdout, tc.Name, testStdout.String(), testStderr.String())
+	}
+	return passed, skipped, failed, runTotal
+}
+
 func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stdout io.Writer, stderr io.Writer) int {
 	suiteStart := time.Now()
 	writeTestPhaseLine(stderr, "selected_tests", "read_source")
@@ -512,47 +562,15 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		)
 		defer cleanup()
 	}
-	writeTestPhaseLine(stderr, "selected_tests", "run_cases")
-	for _, testCase := range testCases {
-		if testCase.Func == nil {
-			continue
+	cachedCases := toCachedTestCases(testCases)
+	// Publish the early (source-level) cache so the next unchanged run skips the
+	// whole front-end (parse+analyze) and jumps straight to running this binary.
+	if exePath != "" {
+		if key, keyErr := earlyTestCacheKey(source, filter, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo); keyErr == nil {
+			publishEarlyTestCache(key, exePath, cachedCases)
 		}
-		if testCase.skipped() {
-			skipped++
-			fmt.Fprintln(stdout, formatTestLine("SKIPPED", testCase.Func.Name, fmt.Sprintf(" (%s)", testCase.SkipReason)))
-			continue
-		}
-
-		fmt.Fprintln(stdout, formatTestLine("RUN", testCase.Func.Name, ""))
-		testStart := time.Now()
-		timing := isolatedTestTiming{}
-
-		var testStdout bytes.Buffer
-		var testStderr bytes.Buffer
-		runCmd := nativeExecCommand(exePath, targetTriple, testCase.Func.Name)
-		runCmd.Stdout = &testStdout
-		runCmd.Stderr = &testStderr
-		runStart := time.Now()
-		runErr := runCmd.Run()
-		timing.Run = time.Since(runStart)
-		timing.Total = time.Since(testStart)
-		runTotal += timing.Run
-		writeTestTimingLine(stderr, testCase.Func.Name,
-			durationTimingField("total", timing.Total),
-			durationTimingField("run", timing.Run),
-		)
-
-		if runErr == nil {
-			passed++
-			fmt.Fprintln(stdout, formatTestLine("OK", testCase.Func.Name, ""))
-			continue
-		}
-
-		failed++
-		status, detail := classifyTestExecutionError(runErr)
-		fmt.Fprintln(stdout, formatTestLine(status, testCase.Func.Name, detail))
-		writeCapturedTestOutput(stdout, testCase.Func.Name, testStdout.String(), testStderr.String())
 	}
+	passed, skipped, failed, runTotal = runTestExecutableCases(exePath, cachedCases, targetTriple, stdout, stderr)
 	fmt.Fprintf(stdout, "[ SUMMARY  ] %d test(s) selected; passed=%d skipped=%d failed=%d\n", len(testCases), passed, skipped, failed)
 	writeTestTimingLine(stderr, "suite",
 		durationTimingField("total", time.Since(suiteStart)),

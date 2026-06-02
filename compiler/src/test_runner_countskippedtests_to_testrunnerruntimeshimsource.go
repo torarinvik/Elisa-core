@@ -94,6 +94,11 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 		if err := publishCachedTestRunner(cacheArtifact, exePath); err == nil {
 			timing.CachePublish = time.Since(publishStart)
 			debugTestRunnerCache(stderr, "publish", cacheArtifact)
+			// Return the persistent cached path (not the temp build output, which the
+			// returned cleanup deletes) so the caller can record it in the early cache.
+			if _, statErr := os.Stat(cacheArtifact.executable); statErr == nil {
+				exePath = cacheArtifact.executable
+			}
 		} else {
 			timing.CachePublish = time.Since(publishStart)
 			if testRunnerCacheDebugEnabled() && stderr != nil {

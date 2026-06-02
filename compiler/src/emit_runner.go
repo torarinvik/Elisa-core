@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"elisacore/src/backend"
 	"elisacore/src/frontendir"
@@ -16,10 +17,52 @@ import (
 	"elisacore/src/unparse"
 )
 
+// tryEarlyCachedTestRun checks the source-level test cache for an already-built
+// executable matching this program + filter + build flags. On a hit it runs the
+// cached binary directly and returns (exitCode, true), skipping parse + analysis.
+// On any miss/uncertainty it returns (_, false) so the normal path proceeds.
+func tryEarlyCachedTestRun(program *loadedProgram, options cliOptions, stdout io.Writer, stderr io.Writer) (int, bool) {
+	if !earlyTestCacheEnabled() || program == nil || program.file != nil {
+		return 0, false
+	}
+	srcStart := time.Now()
+	source, err := readSourceWithIncludes(program.filename, map[string]bool{})
+	if err != nil {
+		return 0, false
+	}
+	frontendTimingLog("early-source-read", srcStart)
+	keyStart := time.Now()
+	key, err := earlyTestCacheKey(source, options.filter, program.easm, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace)
+	frontendTimingLog("early-key", keyStart)
+	if err != nil {
+		return 0, false
+	}
+	meta, hit := locateEarlyTestCache(key)
+	if !hit {
+		return 0, false
+	}
+	writeTestPhaseLine(stderr, "emit_test", "early_cache_hit")
+	passed, skipped, failed, _ := runTestExecutableCases(meta.Executable, meta.Cases, options.targetTriple, stdout, stderr)
+	fmt.Fprintf(stdout, "[ SUMMARY  ] %d test(s) selected; passed=%d skipped=%d failed=%d\n", len(meta.Cases), passed, skipped, failed)
+	if failed > 0 {
+		return 1, true
+	}
+	return 0, true
+}
+
 func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, stdout io.Writer, stderr io.Writer) int {
 	if options.filter != "" && !emitSupportsFilter(options.emit) {
 		fmt.Fprintf(stderr, "error: -filter is only supported for -emit %s\n", supportedFilterEmitModes())
 		return 1
+	}
+
+	// Fast path: if an unchanged source already has a built test executable in the
+	// early (source-level) cache, run it directly and skip the whole front-end
+	// (parse + whole-program analysis), which otherwise re-runs on every invocation.
+	if options.emit == emitTest {
+		if code, handled := tryEarlyCachedTestRun(program, options, stdout, stderr); handled {
+			return code
+		}
 	}
 
 	switch options.emit {

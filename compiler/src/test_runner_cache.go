@@ -5,6 +5,7 @@ import (
 	"elisacore/src/easm"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
@@ -92,8 +93,12 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 	return nil
 }
 
-func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, error) {
-	hash := sha256.New()
+// writeCommonTestRunnerCacheInputs hashes every build input that determines a test
+// executable EXCEPT the generated runner/shim source (inner cache) or the program
+// source/filter (early cache): build env, toolchain, easm, foreign-with-includes,
+// link flags, the elisacore runtime support, and the compiler's own Go sources.
+// Both cache keys layer their distinguishing inputs on top of this.
+func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) error {
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
@@ -102,11 +107,9 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModu
 	testRunnerCacheWriteString(hash, "targetTriple="+strings.TrimSpace(targetTriple))
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
-		return testRunnerCacheArtifact{}, err
+		return err
 	}
 	testRunnerCacheWriteString(hash, "clang="+clangPath)
-	testRunnerCacheWriteBytes(hash, "runner", []byte(runnerSource))
-	testRunnerCacheWriteBytes(hash, "shim", []byte(shimSource))
 	for _, module := range easmModules {
 		if module == nil {
 			continue
@@ -117,13 +120,13 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModu
 		}
 		source, err := os.ReadFile(module.Path)
 		if err != nil {
-			return testRunnerCacheArtifact{}, err
+			return err
 		}
 		testRunnerCacheWriteBytes(hash, "easm-body", source)
 	}
 	resolvedForeignFiles, err := withDefaultNativeRuntimeForeignFiles(foreignFiles)
 	if err != nil {
-		return testRunnerCacheArtifact{}, err
+		return err
 	}
 	foreignIncludeDirs := nativeIncludeDirsFromLinkFlags(linkFlags)
 	for _, foreignFile := range resolvedForeignFiles {
@@ -136,7 +139,7 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModu
 		// behind stale cached test runners.
 		foreignSource, readErr := readSourceWithIncludesWithOptions(trimmed, map[string]bool{}, sourceExpandOptions{includeDirs: foreignIncludeDirs})
 		if readErr != nil {
-			return testRunnerCacheArtifact{}, readErr
+			return readErr
 		}
 		testRunnerCacheWriteBytes(hash, "foreign-with-includes:"+trimmed, foreignSource)
 	}
@@ -150,19 +153,29 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModu
 	if runtimePath, err := defaultElisaCoreRuntimeSupportPath(); err == nil {
 		runtimeSource, readErr := readSourceWithIncludes(runtimePath, map[string]bool{})
 		if readErr != nil {
-			return testRunnerCacheArtifact{}, readErr
+			return readErr
 		}
 		testRunnerCacheWriteBytes(hash, "elisacore-runtime-support", runtimeSource)
 	} else {
-		return testRunnerCacheArtifact{}, err
+		return err
 	}
 	compilerRoot, err := compilerSourceRootForCache()
 	if err != nil {
-		return testRunnerCacheArtifact{}, err
+		return err
 	}
 	if err := testRunnerCacheHashGoFilesUnder(hash, compilerRoot); err != nil {
+		return err
+	}
+	return nil
+}
+
+func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, error) {
+	hash := sha256.New()
+	if err := writeCommonTestRunnerCacheInputs(hash, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple); err != nil {
 		return testRunnerCacheArtifact{}, err
 	}
+	testRunnerCacheWriteBytes(hash, "runner", []byte(runnerSource))
+	testRunnerCacheWriteBytes(hash, "shim", []byte(shimSource))
 	cacheRoot, err := testRunnerCacheRoot()
 	if err != nil {
 		return testRunnerCacheArtifact{}, err
