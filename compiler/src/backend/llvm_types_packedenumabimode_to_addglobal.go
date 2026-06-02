@@ -456,8 +456,19 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	if err != nil {
 		return nil, err
 	}
-	nameC := cString(g.llvmSymbolName(name))
+	symbolName := g.llvmSymbolName(name)
+	nameC := cString(symbolName)
 	defer C.free(unsafe.Pointer(nameC))
+	// Two externs can resolve to the same linker symbol — e.g. a plain
+	// `extern mprotect` and a `@link_name(mprotect)`-aliased `ge_mprotect`.
+	// LLVMAddFunction would rename the second to "mprotect.1", which on a
+	// Mach-O cross-build under `-undefined,dynamic_lookup` binds to NULL
+	// (there is no such libc symbol) and crashes when called. Reuse the
+	// existing global for the symbol so both names share one import; with
+	// opaque pointers, call sites supply their own lowered function type.
+	if existing := C.LLVMGetNamedFunction(g.module, nameC); existing != nil {
+		return existing, nil
+	}
 	value := C.LLVMAddFunction(g.module, nameC, fnType)
 	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
 	if callConv, ok := g.llvmCallConvForFunc(fn); ok {
