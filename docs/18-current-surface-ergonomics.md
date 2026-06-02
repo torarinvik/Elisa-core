@@ -1933,6 +1933,27 @@ Current rules:
 - a `can[any]` grant discharges every concrete member/family requirement
 - a `can[any]` requirement falls out of no concrete grant — only `any`/`trusted` discharge it
 
+### Grant aliases for local `can` blocks
+
+`grant Name = ref, ref` names a fixed set of permission refs for reuse in local `can` grant blocks. Unlike `effectalias` (which packages a signature `effects[...]` row) it abbreviates *local* grants, and unlike `includes` (whole-family subsumption) it captures an exact cross-family member set — the right tool for a recurring member combo such as `Segment.Host, Unsafe.SegmentMutation`.
+
+```elisa
+grant HostSeg = Segment.Host, Unsafe.SegmentMutation
+
+def map_segment() -> i64:
+    can HostSeg:                 # expands to can Segment.Host, Unsafe.SegmentMutation
+        return install_segment()
+```
+
+Current rules:
+
+- `grant Name = ...` is a top-level declaration; the right-hand side is a comma-separated permission-ref list (the same surface as `can[...]`, including brace groups like `Disk{Read, Write}`)
+- a grant alias expands to its refs wherever permission refs are resolved — local `can <alias>:` / `expr can <alias>` grants and signature `can[<alias>]` clauses alike
+- aliases may reference other aliases (expansion iterates; accidental cycles are broken by a depth cap)
+- a grant alias name may not collide with a permission family name
+- it is compile-time surface only: it expands during analysis and lowers into the existing permission model with no runtime object
+- `-emit fmt` preserves the `grant Name = ...` declaration and still inlines simple one-statement `can <alias>:` blocks into `... can <alias>` form
+
 ### Set-polymorphic effects and error sets
 
 Permission and error sets can be ordinary inferred generic parameters, so a higher-order function propagates exactly its callback's effects/errors. `[permission E]` binds an effect-set parameter; `[errorset R]` binds an error-set parameter. Function types spell trailing effects as `func(...) -> T can[E] error[R]`.

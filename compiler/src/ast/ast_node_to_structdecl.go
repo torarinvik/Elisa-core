@@ -77,6 +77,17 @@ type EffectDecl struct {
 	Name     string
 	Members  []string
 }
+
+// GrantAliasDecl names a fixed set of permission refs for reuse in local `can`
+// grant blocks: `grant HostSeg = Segment.Host, Unsafe.SegmentMutation` then
+// `can HostSeg:`. Unlike `effectalias` (signature-only) it abbreviates local
+// grants, and unlike `includes` (whole-family) it captures an exact cross-family
+// member set. Compile-time surface only: it expands to its refs during analysis.
+type GrantAliasDecl struct {
+	Position lexer.Pos
+	Name     string
+	Refs     []PermissionRef
+}
 type SignatureEffectItem struct {
 	Position     lexer.Pos
 	Alias        string

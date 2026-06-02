@@ -212,6 +212,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("effectalias") {
 		return p.parseEffectsDecl()
 	}
+	if p.peekIdentText("grant") {
+		return p.parseGrantAliasDecl()
+	}
 	if p.peekIdentText("effect") {
 		return p.parseEffectPermissionCompatDecl()
 	}
@@ -561,6 +564,15 @@ func (p *Parser) parseEffectsDecl() *ast.EffectsDecl {
 	errorEffects, permissions := p.parseEffectsSpec()
 	p.expectNewline()
 	return &ast.EffectsDecl{Position: pos, Name: name, ErrorEffects: errorEffects, Permissions: permissions}
+}
+func (p *Parser) parseGrantAliasDecl() *ast.GrantAliasDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("grant")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_ASSIGN)
+	refs := p.parsePermissionRefs(false)
+	p.expectNewline()
+	return &ast.GrantAliasDecl{Position: pos, Name: name, Refs: refs}
 }
 func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 	pos := p.cur().Pos

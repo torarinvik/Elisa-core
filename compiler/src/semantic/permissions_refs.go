@@ -238,6 +238,7 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 	if len(refs) == 0 {
 		return nil
 	}
+	refs = a.expandGrantAliases(refs)
 	valid := make([]ast.PermissionRef, 0, len(refs))
 	for _, ref := range refs {
 		if ref.Name == permissionAnyName {

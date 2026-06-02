@@ -90,6 +90,7 @@ type Analyzer struct {
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet
 	effectAliases           map[string]*EffectAlias
+	grantAliases            map[string][]ast.PermissionRef
 	contextBundles          map[string]*ContextBundle
 	paramPacks              map[string]*ParamPack
 	globalScope             *Scope
@@ -466,6 +467,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
 		effectAliases:                     map[string]*EffectAlias{},
+		grantAliases:                      map[string][]ast.PermissionRef{},
 		contextBundles:                    map[string]*ContextBundle{},
 		paramPacks:                        map[string]*ParamPack{},
 		globalScope:                       NewScope(nil),
@@ -526,6 +528,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectNamedTypes(activeDecls)
 	a.collectTypeAliases(activeDecls)
 	a.collectEffectAliases(activeDecls)
+	a.collectGrantAliases(activeDecls)
 	a.collectContextBundles(activeDecls)
 	a.collectParamPacks(activeDecls)
 	a.collectStaticInterfaces(activeDecls)
@@ -552,6 +555,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.collectNamedTypes(generatedScopedDecls)
 		a.collectTypeAliases(generatedScopedDecls)
 		a.collectEffectAliases(generatedScopedDecls)
+		a.collectGrantAliases(generatedScopedDecls)
 		a.collectContextBundles(generatedScopedDecls)
 		a.collectParamPacks(generatedScopedDecls)
 		a.collectStaticInterfaces(generatedScopedDecls)
