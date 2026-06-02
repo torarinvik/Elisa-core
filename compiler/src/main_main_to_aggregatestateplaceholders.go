@@ -260,6 +260,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			options.debugInfo = true
 		case arg == "-ftrace" || arg == "-record-trace":
 			options.recordTrace = true
+		case arg == "-fbounds-check":
+			// Force the debug index-bounds watchdog on regardless of optimization level.
+			// The watchdog gate reads this env var at codegen time (build is in-process).
+			_ = os.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "1")
 		case arg == "-debug":
 			options.debug = true
 		case arg == "-debug-break-raise":

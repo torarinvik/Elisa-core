@@ -5,6 +5,28 @@ package backend
 /*
 #include <stdlib.h>
 #include <llvm-c/Core.h>
+
+// elisacoreValueIsTriviallyValidPtr reports whether an LLVM value used as a load
+// address is provably a valid (non-null, non-near-null) pointer at compile time, so
+// the null-deref guard can skip it: stack slots (alloca), module globals/functions,
+// and constants (e.g. a constant GEP off a global) all have addresses far from the
+// near-null zone. Pointers derived at runtime (GEP off a loaded base, inttoptr, call
+// results) return 0 and get guarded.
+static int elisacoreValueIsTriviallyValidPtr(LLVMValueRef v) {
+	if (v == NULL) {
+		return 1;
+	}
+	if (LLVMIsAAllocaInst(v) != NULL) {
+		return 1;
+	}
+	if (LLVMIsAGlobalValue(v) != NULL) {
+		return 1;
+	}
+	if (LLVMIsConstant(v)) {
+		return 1;
+	}
+	return 0;
+}
 */
 import "C"
 
@@ -83,6 +105,11 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 		if err != nil {
 			return nil, nil, err
 		}
+		// Indexing through a reference dereferences basePtr; guard it so a null/near-null
+		// ref traps at the index site (covers `nullRef[i]` reads and writes).
+		if err := s.emitDebugPointerDerefGuard(basePtr); err != nil {
+			return nil, nil, err
+		}
 		if arrayElem, ok := t.Elem.(*semantic.ArrayType); ok {
 			arrayLLVMType, err := s.g.lowerType(arrayElem)
 			if err != nil {
@@ -126,7 +153,13 @@ func (s *functionState) emitRuntimeIndexedAddress(containerPtr C.LLVMValueRef, c
 // In release builds this is a no-op (zero overhead): "debug verifies what
 // release assumes." Only containers carrying a runtime count are guarded.
 func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, containerType semantic.Type, indexValue C.LLVMValueRef) error {
-	if s == nil || s.g == nil || s.g.optLevel != OptimizationLevel0 {
+	if s == nil || s.g == nil {
+		return nil
+	}
+	// Active in debug (-O0) builds, or in any build when forced via -fbounds-check
+	// (ELISACORE_FORCE_BOUNDS_CHECK). The forced mode lets optimized/cross builds trap
+	// at the offending indexing site rather than crashing later on a derived bad pointer.
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceBoundsCheck {
 		return nil
 	}
 	switch containerType.(type) {
@@ -143,6 +176,15 @@ func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, c
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.fail"))
 	C.LLVMBuildCondBr(s.builder, inBounds, okBB, failBB)
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	// When -ftrace is also on, record the offending index and the container count into
+	// the trace ring just before trapping, so the fault dump shows the exact values
+	// (e.g. `oob.index = 4294967295`, `oob.count = 1712`) at the right site.
+	if s.g.emitTrace && s.g.trace != nil {
+		usize := s.g.result.NamedTypes["usize"]
+		line := 0
+		s.g.trace.recordValue(s, line, "oob.index", indexValue, usize)
+		s.g.trace.recordValue(s, line, "oob.count", countValue, usize)
+	}
 	if err := s.emitTrapUnreachable("wd.trap"); err != nil {
 		return err
 	}
@@ -211,7 +253,51 @@ func (s *functionState) loadValue(ptr C.LLVMValueRef, t semantic.Type, name stri
 	if err != nil {
 		return nil, err
 	}
+	if err := s.emitDebugPointerDerefGuard(ptr); err != nil {
+		return nil, err
+	}
 	return C.LLVMBuildLoad2(s.builder, llvmType, ptr, cStringFree(name)), nil
+}
+
+// derefGuardNearNullLimit mirrors DEBUG_REFEREE_NEAR_NULL_LIMIT in debug_referee.elisa:
+// any host address below this is null or near-null and never a valid dereference target
+// (real stack/heap/global/guest-mapped addresses all live far above it).
+const derefGuardNearNullLimit = 0x10000
+
+// emitDebugPointerDerefGuard traps just before a load when the address is null or
+// near-null. It is the dereference analogue of the index-bounds watchdog, but is gated
+// on -fbounds-check (forceBoundsCheck) ONLY -- not plain -O0 -- because it instruments
+// every runtime-derived load. It catches null-base field/element dereferences (e.g. a
+// struct field read off a null pointer faulting at 0x8/0x68) at the deref site, with
+// the offending address recorded into the -ftrace ring, instead of letting them surface
+// later as a SIGSEGV on a derived bad address. Compile-time-valid addresses (allocas,
+// globals, constants) are skipped.
+func (s *functionState) emitDebugPointerDerefGuard(ptr C.LLVMValueRef) error {
+	if s == nil || s.g == nil || !s.g.forceBoundsCheck {
+		return nil
+	}
+	if s.builder == nil || s.fnValue == nil || ptr == nil {
+		return nil
+	}
+	if C.elisacoreValueIsTriviallyValidPtr(ptr) != 0 {
+		return nil
+	}
+	i64 := C.LLVMInt64TypeInContext(s.g.context)
+	ptrInt := C.LLVMBuildPtrToInt(s.builder, ptr, i64, cStringFree("pg.addr"))
+	limit := C.LLVMConstInt(i64, C.ulonglong(derefGuardNearNullLimit), 0)
+	valid := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGE), ptrInt, limit, cStringFree("pg.valid"))
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pg.ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pg.fail"))
+	C.LLVMBuildCondBr(s.builder, valid, okBB, failBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if s.g.emitTrace && s.g.trace != nil {
+		s.g.trace.recordValue(s, 0, "deref.nullptr", ptrInt, s.g.result.NamedTypes["usize"])
+	}
+	if err := s.emitTrapUnreachable("pg.trap"); err != nil {
+		return err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	return nil
 }
 func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, expected semantic.Type) (C.LLVMValueRef, error) {
 	if expected == nil || actual == nil || semantic.SameType(actual, expected) {

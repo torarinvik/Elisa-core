@@ -21,6 +21,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"os"
 	"unsafe"
 )
 
@@ -87,6 +88,11 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 	}
 	g.emitDebugInfo = debugInfo
 	g.emitTrace = traceInfo
+	// ELISACORE_FORCE_BOUNDS_CHECK forces the debug index-bounds watchdog on even in
+	// optimized builds (it is otherwise -O0 only). Set by the `-fbounds-check` CLI flag.
+	// Lets release/cross builds (e.g. the CUSA07399 emulator) trap at the offending
+	// indexing site instead of crashing later on a derived bad pointer.
+	g.forceBoundsCheck = os.Getenv("ELISACORE_FORCE_BOUNDS_CHECK") != ""
 	g.optLevel = optLevel
 	g.packedProfile = profile
 	g.packedEnumABI = profile.packedModeForStore(nil)
@@ -145,6 +151,7 @@ type llvmGenerator struct {
 	di                        *debugInfo
 	emitTrace                 bool
 	trace                     *traceState
+	forceBoundsCheck          bool
 }
 type typeMemoKey struct {
 	id  semantic.TypeID

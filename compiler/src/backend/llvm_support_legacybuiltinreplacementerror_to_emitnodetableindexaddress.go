@@ -172,6 +172,12 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 			s.bindPackedEnumStorage(key, enumType, objPtr)
 		}
 	}
+	// Guard the base before computing a field address: a null/near-null object base
+	// here is the store/address-of analogue of the read guard in loadValue, catching
+	// e.g. `nullObj.field <- x` at the base instead of as a downstream SIGSEGV.
+	if err := s.emitDebugPointerDerefGuard(objPtr); err != nil {
+		return nil, nil, err
+	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
 	return fieldPtr, fieldType, nil
 }
@@ -231,6 +237,11 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
 			s.bindPackedEnumStorage(key, enumType, objPtr)
 		}
+	}
+	// Guard the base for field reads too (covers reads that take the address here and
+	// load directly rather than through loadValue's guarded path).
+	if err := s.emitDebugPointerDerefGuard(objPtr); err != nil {
+		return nil, nil, err
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
 	return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
