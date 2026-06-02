@@ -136,6 +136,7 @@ type Analyzer struct {
 	resolvedCastHooks            map[ast.Expr]*Symbol
 	unsafeLifetimeWidenCasts     map[*ast.CastExpr]bool
 	unsafeBufferReinterpretCasts map[*ast.CastExpr]bool
+	sentinelFuncNameCache        map[string]bool
 	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
 	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables               map[ast.Expr]NodeTableInfo

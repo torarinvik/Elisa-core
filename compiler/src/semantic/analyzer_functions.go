@@ -134,6 +134,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	if fnType != nil && !blockDefinitelyExits(fn.Body) {
 		a.validateCurrentFuncPoststates()
 	}
+	a.checkSentinelIndex(fn)
 	if fnType != nil {
 		if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
 			fnType.ReturnProvenance = summary
