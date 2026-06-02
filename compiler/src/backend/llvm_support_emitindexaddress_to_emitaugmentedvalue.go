@@ -625,6 +625,20 @@ func (s *functionState) emitTreeRootUnionExactHandleForTarget(rootValue C.LLVMVa
 	return rootValue, nil
 }
 
+// errorSetPayloadBaseIndex returns the LLVM struct field index of the first payload
+// field of `tag` in a payloaded error set's {code, payloads...} layout (field 0 is the
+// code; per-variant payloads follow in Tags order). Mirrors buildErrorSetValue.
+func errorSetPayloadBaseIndex(set *semantic.ErrorSetType, tag string) int {
+	base := 1
+	for _, candidate := range set.Tags {
+		if candidate == tag {
+			break
+		}
+		base += len(set.PayloadForTag(candidate))
+	}
+	return base
+}
+
 func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.ErrorSetType, expected *semantic.ErrorSetType) (C.LLVMValueRef, error) {
 	if actual == nil || expected == nil {
 		return nil, fmt.Errorf("missing error set for code remap")
@@ -632,15 +646,18 @@ func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.Er
 	if semantic.SameType(actual, expected) {
 		return value, nil
 	}
-	if actual.HasPayloads() || expected.HasPayloads() {
-		return nil, fmt.Errorf("cannot remap payload-carrying error set %s into %s", actual.String(), expected.String())
-	}
 	if !semantic.ErrorSetAssignable(expected, actual) {
 		return nil, fmt.Errorf("cannot remap %s into %s", actual.String(), expected.String())
 	}
 	errorCodeType, err := s.g.lowerBuiltin("u32")
 	if err != nil {
 		return nil, err
+	}
+	// The scalar tag code lives at field 0 of a payloaded set's struct, and IS the
+	// value for a payloadless set.
+	sourceCode := value
+	if actual.HasPayloads() {
+		sourceCode = C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("errmap.srccode"))
 	}
 	mapped, err := s.errorCodeConstant(0)
 	if err != nil {
@@ -668,14 +685,42 @@ func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.Er
 			return nil, err
 		}
 		tagID := sanitizeIdentifier(tag)
-		cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), value, actualConst, cStringFree("errmap_is_"+tagID))
+		cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), sourceCode, actualConst, cStringFree("errmap_is_"+tagID))
 		mask := C.LLVMBuildZExt(s.builder, cmp, errorCodeType, cStringFree("errmap_mask_"+tagID))
 		negMask := C.LLVMBuildSub(s.builder, C.LLVMConstNull(errorCodeType), mask, cStringFree("errmap_negmask_"+tagID))
 		diff := C.LLVMBuildXor(s.builder, mapped, expectedConst, cStringFree("errmap_diff_"+tagID))
 		maskedDiff := C.LLVMBuildAnd(s.builder, diff, negMask, cStringFree("errmap_masked_"+tagID))
 		mapped = C.LLVMBuildXor(s.builder, mapped, maskedDiff, cStringFree("errmap_"+tagID))
 	}
-	return mapped, nil
+	if !expected.HasPayloads() {
+		return mapped, nil
+	}
+	// The destination is a {code, payloads...} struct. Insert the remapped code, then
+	// relocate each source payload field to its position in the destination layout. The
+	// copy is unconditional: only the active tag's payload is meaningful (selected by the
+	// code), so the inactive fields carry undef on both sides — harmless.
+	destType, err := s.g.lowerType(expected)
+	if err != nil {
+		return nil, err
+	}
+	destVal := C.LLVMGetUndef(destType)
+	destVal = C.LLVMBuildInsertValue(s.builder, destVal, mapped, 0, cStringFree("errmap.code"))
+	if actual.HasPayloads() {
+		srcFieldIdx := 1
+		for _, tag := range actual.Tags {
+			mappedTag, ok := semantic.MatchErrorTag(expected, tag)
+			if !ok {
+				return nil, fmt.Errorf("cannot remap missing tag %s into %s", tag, expected.String())
+			}
+			destBase := errorSetPayloadBaseIndex(expected, mappedTag)
+			for k := range actual.PayloadForTag(tag) {
+				fieldVal := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(srcFieldIdx), cStringFree("errmap.srcpayload"))
+				destVal = C.LLVMBuildInsertValue(s.builder, destVal, fieldVal, C.unsigned(destBase+k), cStringFree("errmap.dstpayload"))
+				srcFieldIdx++
+			}
+		}
+	}
+	return destVal, nil
 }
 func (s *functionState) buildErrorUnionSuccess(unionType *semantic.ErrorUnionType, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
 	zeroCode, err := s.errorCodeConstant(0)
