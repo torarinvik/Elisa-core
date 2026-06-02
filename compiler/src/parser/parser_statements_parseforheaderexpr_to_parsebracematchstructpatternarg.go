@@ -306,10 +306,17 @@ func (p *Parser) parseCanStmt() *ast.CanStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("can")
 	permissions := p.parsePermissionRefs(false)
+	var asTarget string
+	if p.match(lexer.TOKEN_AS) {
+		asTarget = p.expect(lexer.TOKEN_IDENT).Text
+		for p.match(lexer.TOKEN_DOT) {
+			asTarget += "." + p.expect(lexer.TOKEN_IDENT).Text
+		}
+	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body}
+	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body, As: asTarget}
 }
 func (p *Parser) parseTrustedStmt() *ast.CanStmt {
 	pos := p.cur().Pos

@@ -85,6 +85,60 @@ permission IO:
 	}
 }
 
+// Phase 4: a sound `can X as Y:` cast (Y subsumes X) discharges X in the body and
+// surfaces Y as the function's inferred requirement.
+func TestSoundCanCastReattributesToSupersetFamily(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "can_cast_sound.elisa", `
+permission Disk:
+    Read
+
+permission IO:
+    includes Disk
+
+extern read_disk() -> i64 can[Disk.Read]
+
+def build() -> i64:
+    can Disk.Read as IO:
+        return read_disk()
+`)
+	all := allDiagnostics(result)
+	if strings.Contains(all, `read_disk`) || strings.Contains(all, `explicit local effect grant`) || strings.Contains(all, `unsound`) {
+		t.Fatalf("expected sound `as IO` cast to discharge the Disk.Read call, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("build")
+	if !ok {
+		t.Fatal("expected build symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected build function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[IO]" {
+		t.Fatalf("expected cast to surface IO, got %q", got)
+	}
+}
+
+// An `as Y` where Y does not subsume X is rejected (and must suggest includes/trusted).
+func TestUnsoundCanCastIsRejected(t *testing.T) {
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "can_cast_unsound.elisa", `
+permission Disk:
+    Read
+
+permission Net:
+    Connect
+
+extern read_disk() -> i64 can[Disk.Read]
+
+def build() -> i64:
+    can Disk.Read as Net:
+        return read_disk()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "`as Net` is unsound") {
+		t.Fatalf("expected unsound-cast diagnostic, got:\n%s", all)
+	}
+}
+
 // Cyclic `includes` chains are rejected.
 func TestIncludesCycleIsRejected(t *testing.T) {
 	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "includes_cycle.elisa", `

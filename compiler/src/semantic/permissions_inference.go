@@ -149,6 +149,14 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectExpr(n.Store)
 		c.collectStmts(n.Body)
 	case *ast.CanStmt:
+		if n.As != "" {
+			// Checked cast: discharge X within the body, surface Y instead.
+			c.collectWithGrantedRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false), func() {
+				c.collectStmts(n.Body)
+			})
+			c.addRefs([]ast.PermissionRef{{Position: n.Position, Name: n.As}})
+			break
+		}
 		if n.SuppressPermissionInference {
 			c.collectWithGrantedRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false), func() {
 				c.collectStmts(n.Body)

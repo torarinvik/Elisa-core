@@ -380,6 +380,7 @@ type CanStmt struct {
 	Permissions                 []PermissionRef
 	Body                        []Stmt
 	SuppressPermissionInference bool
+	As                          string // checked `as <Family>` re-attribution target (Phase 4); "" if absent
 }
 type WithStmt struct {
 	Position      lexer.Pos

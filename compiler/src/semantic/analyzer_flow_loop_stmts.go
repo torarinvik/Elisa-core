@@ -9,6 +9,10 @@ import (
 
 func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	refs := a.resolvePermissionRefs(stmt.Permissions, true)
+	if stmt.As != "" {
+		a.analyzeCanCastStmt(stmt, refs)
+		return
+	}
 	if !stmt.SuppressPermissionInference {
 		a.recordFunctionPermissionRefs(refs)
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
@@ -38,6 +42,38 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	a.currentTrustedNonProgressDepth = savedTrustedNonProgressDepth
 	a.currentTrustedAssumeProgressDepth = savedTrustedAssumeProgressDepth
 	a.recordFunctionPermissionRefs(remainingRefs)
+}
+
+// analyzeCanCastStmt handles a checked `can X as Y:` block (Phase 4). It verifies
+// the cast is sound (Y subsumes every member of X in the lattice), grants X to the
+// body so X-uses are discharged locally, and surfaces Y — not the used members — as
+// the block's contribution to the function's inferred can[…].
+func (a *Analyzer) analyzeCanCastStmt(stmt *ast.CanStmt, refs []ast.PermissionRef) {
+	target := stmt.As
+	if _, _, ok := a.lookupVisiblePermission(target); !ok {
+		a.errorf(stmt.Position, "%s", UnknownPermissionMessage(target))
+	} else {
+		covered := map[string]bool{target: true}
+		a.markSubsumedFamilies(target, covered)
+		for _, x := range refs {
+			if !permissionRefGranted(x, covered) {
+				a.errorf(stmt.Position, "`as %s` is unsound: %q does not subsume %q; declare `permission %s: includes %s` or use `trusted`", target, target, permissionRefKey(x), target, x.Name)
+			}
+		}
+	}
+
+	granted := a.grantedPermissionRefs(refs)
+	savedUsedPermissions := a.currentFunctionUsedPermissions
+	savedUsedRefs := a.currentFunctionUsedPermissionRefs
+	a.currentFunctionUsedPermissions = map[string]bool{}
+	a.currentFunctionUsedPermissionRefs = nil
+	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+	bodyRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
+	remainingRefs := missingGrantedPermissionRefs(bodyRefs, granted)
+	a.currentFunctionUsedPermissions = savedUsedPermissions
+	a.currentFunctionUsedPermissionRefs = savedUsedRefs
+	a.recordFunctionPermissionRefs(remainingRefs)
+	a.recordFunctionPermissionRefs([]ast.PermissionRef{{Position: stmt.Position, Name: target}})
 }
 
 func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {

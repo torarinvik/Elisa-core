@@ -6,6 +6,15 @@ member-granular permission sets with a **subsumption lattice**, **checked `as` c
 It is the effect-side counterpart to the error-union work (`docs/62`), and deliberately
 reuses one set lattice for both.
 
+## Implementation status
+
+- ✅ **Phase 3a** — member-brace sugar (`can[Disk{Read,Write}]`, `error[E{A,B}]`).
+- ✅ **Phase 3b** — subsumption-declaring families (`permission IO: includes Disk`),
+  transitive grant expansion + unknown/cycle validation.
+- ✅ **Phase 4** — checked `can X as Y:` cast (sound iff `Y ≥ X`); `trusted X:` drop
+  was already implemented.
+- ⏳ **Phase 5** — set-polymorphism (not started).
+
 ## 0. Current state (measured 2026-06-02)
 
 Probed via `elisacore -emit semantic`:
