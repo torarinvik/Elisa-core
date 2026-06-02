@@ -71,7 +71,7 @@ func (c *permissionEffectCollector) collectWithGrantedRefs(refs []ast.Permission
 		collect()
 		return
 	}
-	granted := grantedPermissionRefs(refs)
+	granted := c.analyzer.grantedPermissionRefs(refs)
 	savedSeen := c.seen
 	c.seen = nil
 	collect()

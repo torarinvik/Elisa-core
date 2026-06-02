@@ -576,6 +576,7 @@ func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 	p.expect(lexer.TOKEN_INDENT)
 
 	members := make([]string, 0, p.estimateIndentedItemCount())
+	var includes []string
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -586,12 +587,24 @@ func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 			p.expectNewline()
 			continue
 		}
+		// `includes Disk, FileSystem` — families this permission subsumes.
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "includes" {
+			p.advance()
+			for {
+				includes = append(includes, p.expect(lexer.TOKEN_IDENT).Text)
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+			p.expectNewline()
+			continue
+		}
 		members = append(members, p.expect(lexer.TOKEN_IDENT).Text)
 		p.expectNewline()
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.PermissionDecl{Position: pos, Name: name, Members: members}
+	return &ast.PermissionDecl{Position: pos, Name: name, Members: members, Includes: includes}
 }
 func (p *Parser) parseEffectDecl() *ast.EffectDecl {
 	pos := p.cur().Pos

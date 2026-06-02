@@ -6,7 +6,7 @@ func isGlobalPermissionRef(ref ast.PermissionRef) bool {
 	return ref.Name == "Global" && (ref.Member == "" || ref.Member == "Read" || ref.Member == "Write")
 }
 
-func permissionRefsRequiringLocalGrant(fnType *FuncType) []ast.PermissionRef {
+func (a *Analyzer) permissionRefsRequiringLocalGrant(fnType *FuncType) []ast.PermissionRef {
 	if fnType == nil {
 		return nil
 	}
@@ -14,7 +14,7 @@ func permissionRefsRequiringLocalGrant(fnType *FuncType) []ast.PermissionRef {
 	if len(refs) == 0 {
 		return nil
 	}
-	declared := grantedPermissionRefs(fnType.DeclaredPermissionRefs)
+	declared := a.grantedPermissionRefs(fnType.DeclaredPermissionRefs)
 	filtered := make([]ast.PermissionRef, 0, len(refs))
 	for _, ref := range refs {
 		if isGlobalPermissionRef(ref) && !permissionRefGranted(ref, declared) {

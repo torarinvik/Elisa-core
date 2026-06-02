@@ -87,6 +87,7 @@ type PermissionDecl struct {
 	Position              lexer.Pos
 	Name                  string
 	Members               []string
+	Includes              []string // families this one subsumes: `includes Disk, FileSystem`
 	DeprecatedSyntax      string
 	DeprecatedReplacement string
 }

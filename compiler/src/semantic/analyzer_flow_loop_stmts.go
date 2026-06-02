@@ -14,7 +14,7 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 		return
 	}
-	granted := grantedPermissionRefs(refs)
+	granted := a.grantedPermissionRefs(refs)
 	savedUsedPermissions := a.currentFunctionUsedPermissions
 	savedUsedRefs := a.currentFunctionUsedPermissionRefs
 	savedTrustedNonProgressDepth := a.currentTrustedNonProgressDepth

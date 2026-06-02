@@ -84,15 +84,36 @@ func permissionFamiliesFromRefs(refs []ast.PermissionRef) []string {
 	return out
 }
 
-func grantedPermissionRefs(refs []ast.PermissionRef) map[string]bool {
+func (a *Analyzer) grantedPermissionRefs(refs []ast.PermissionRef) map[string]bool {
 	granted := make(map[string]bool, len(refs))
 	for _, ref := range refs {
 		if ref.Name == "" {
 			continue
 		}
 		granted[permissionRefKey(ref)] = true
+		if ref.Member == "" {
+			a.markSubsumedFamilies(ref.Name, granted)
+		}
 	}
 	return granted
+}
+
+// markSubsumedFamilies adds, into granted, every family transitively reachable
+// from `family` through `includes` declarations. A whole-family grant of `Y`
+// where `Y: includes X` therefore also grants `X` (and all of X's members). The
+// `granted` map doubles as the visited set, so include cycles terminate.
+func (a *Analyzer) markSubsumedFamilies(family string, granted map[string]bool) {
+	ps := a.permissions[family]
+	if ps == nil {
+		return
+	}
+	for _, inc := range ps.Includes {
+		if granted[inc] {
+			continue
+		}
+		granted[inc] = true
+		a.markSubsumedFamilies(inc, granted)
+	}
 }
 
 func permissionRefGranted(ref ast.PermissionRef, granted map[string]bool) bool {
@@ -312,13 +333,16 @@ func extendGrantedPermissionFamilies(granted map[string]bool, families []string)
 	return next
 }
 
-func extendGrantedPermissionRefs(granted map[string]bool, refs []ast.PermissionRef) map[string]bool {
+func (a *Analyzer) extendGrantedPermissionRefs(granted map[string]bool, refs []ast.PermissionRef) map[string]bool {
 	next := cloneGrantedPermissionFamilies(granted)
 	for _, ref := range refs {
 		if ref.Name == "" {
 			continue
 		}
 		next[permissionRefKey(ref)] = true
+		if ref.Member == "" {
+			a.markSubsumedFamilies(ref.Name, next)
+		}
 	}
 	return next
 }

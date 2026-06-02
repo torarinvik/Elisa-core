@@ -559,6 +559,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.populateEnumVariants(generatedScopedDecls)
 		a.populateTreeMembers(generatedScopedDecls)
 	}
+	a.validatePermissionSubsumption()
 	a.collectTreeAttributes(activeDecls)
 	a.synthesizeDerivedImplMembers(activeDecls)
 	a.warnOnAvoidableStructPadding(activeDecls)

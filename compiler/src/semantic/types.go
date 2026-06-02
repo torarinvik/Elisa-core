@@ -14,6 +14,7 @@ type PermissionSet struct {
 	Name      string
 	Members   []string
 	MemberSet map[string]bool
+	Includes  []string // families this one subsumes (qualified names, transitive at query time)
 	Decl      *ast.PermissionDecl
 	Builtin   bool
 }

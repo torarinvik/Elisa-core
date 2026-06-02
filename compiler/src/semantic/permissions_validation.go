@@ -226,7 +226,7 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if !n.SuppressPermissionInference {
 			a.warnOnRedundantLocalGrant(n.Pos(), "can block", refs, granted)
 		}
-		a.validatePermissionStmts(n.Body, extendGrantedPermissionRefs(granted, refs))
+		a.validatePermissionStmts(n.Body, a.extendGrantedPermissionRefs(granted, refs))
 	case *ast.SignalStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
 		a.warnOnMissingLocalGrant(n.Pos(), "signal", refs, granted)
@@ -473,7 +473,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		if !n.SuppressPermissionInference {
 			a.warnOnRedundantLocalGrant(n.Pos(), "inline can", refs, granted)
 		}
-		a.validatePermissionExpr(n.Expr, extendGrantedPermissionRefs(granted, refs))
+		a.validatePermissionExpr(n.Expr, a.extendGrantedPermissionRefs(granted, refs))
 	case *ast.MatchExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		if n.Store != nil {
@@ -518,7 +518,7 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	if a.permissionWarningsSuppressedByGenericContext(fnType, granted) {
 		return
 	}
-	requiredRefs := permissionRefsRequiringLocalGrant(fnType)
+	requiredRefs := a.permissionRefsRequiringLocalGrant(fnType)
 	missingRefs := missingGrantedPermissionRefs(requiredRefs, granted)
 	for _, ref := range missingRefs {
 		if ref.Name == "Unsafe" && ref.Member == "SegmentMutation" {
