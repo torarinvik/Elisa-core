@@ -1856,6 +1856,104 @@ Future proof sources should include enumerate-derived facts and a deliberate `as
 
 The default compiler path remains compatibility-oriented while runtime and generated sources migrate into trusted wrappers. Strict mode is the audit surface: it turns low-level footguns into named, searchable permissions without adding runtime branches or Rust-style lifetime analysis.
 
+### Member-set brace sugar
+
+`can[...]` and `error[...]` accept a brace shorthand for selecting several members of one family without repeating the family name. It expands to the dotted form, so `can[Disk{Read, Write}]` is exactly `can[Disk.Read, Disk.Write]` and `error[E{Bad1, Bad2}]` is exactly `error[E.Bad1, E.Bad2]`.
+
+```elisa
+extern scan() -> i64 can[Disk{Read, Write}]
+def read_or_fail() -> i64 error[E{Bad1, Bad2}]:
+    return 0
+```
+
+Current rules:
+
+- the brace form is pure surface sugar; it expands to the dotted refs/tags during parsing
+- a brace subset such as `error[E{Bad1}]` stays a proper subset (it does not widen to the whole family)
+- it works in both the permission-ref position (`can[...]`) and the error-set position (`error[...]`)
+
+### Subsumption-declaring families
+
+A permission family may declare that it *includes* other whole families. A whole-family grant of the including family then satisfies any required member of an included family, transitively.
+
+```elisa
+permission Disk:
+    Read
+    Write
+
+permission IO:
+    includes Disk
+
+extern read_disk() -> i64 can[Disk.Read]
+
+def build() -> i64:
+    can IO:                 # IO includes Disk -> satisfies the Disk.Read call
+        return read_disk()
+```
+
+Current rules:
+
+- `includes A, B` lines inside a `permission` body declare that family subsumes A and B
+- subsumption is transitive (`App: includes IO`, `IO: includes Disk` ⇒ `can App:` satisfies a `Disk.Read` requirement)
+- an unrelated family grant never satisfies a requirement (no spurious subsumption)
+- unknown includes and include cycles are rejected at declaration time
+- the same shared set lattice backs both permission families and error sets, with mirrored variance (errors are produced/covariant, permissions are required/contravariant)
+
+### Checked `can X as Y:` cast
+
+`can X as Y:` discharges the member uses `X` inside the block and surfaces the declared superset `Y` as the function's inferred capability instead. It is sound only when `Y` subsumes `X` (via `includes`); otherwise it is rejected and you must declare the `includes` relation or use `trusted`.
+
+```elisa
+def via_io() -> i64 can[IO]:
+    can Disk.Read as IO:    # legal because IO includes Disk
+        return read_disk()
+```
+
+Current rules:
+
+- `as` is the checked, non-trusted re-attribution path: legal iff `Y ≥ X` in the lattice
+- the block surfaces `Y` (not the concrete members used) as the inferred `can[...]`
+- an unsound cast is rejected with a suggestion to declare `includes` or use `trusted`
+- `trusted X:` remains the only drop (it removes the effect from the surface entirely); `as` never drops
+- effects are erased, so the cast has no backend cost
+
+### The `any` top permission
+
+`can[any]` is the explicit erasure escape (for FFI, stored heterogeneous closures, and dynamic dispatch). A `can[any]` grant satisfies every concrete requirement; a `can[any]` *requirement* is satisfied only by another `any` grant (or a `trusted` block), never by a concrete grant.
+
+```elisa
+def build() -> i64:
+    can any:                # satisfies any concrete requirement below
+        return read_disk()
+```
+
+Current rules:
+
+- `any` is reserved: it cannot be declared as a family and has no member access (`any.Read` is rejected)
+- a `can[any]` grant discharges every concrete member/family requirement
+- a `can[any]` requirement falls out of no concrete grant — only `any`/`trusted` discharge it
+
+### Set-polymorphic effects and error sets
+
+Permission and error sets can be ordinary inferred generic parameters, so a higher-order function propagates exactly its callback's effects/errors. `[permission E]` binds an effect-set parameter; `[errorset R]` binds an error-set parameter. Function types spell trailing effects as `func(...) -> T can[E] error[R]`.
+
+```elisa
+def run[permission E](f: func() -> void can[E]) -> void can[E]:
+    f()
+
+def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    v: i64 = try f()
+    return v * 2
+```
+
+Current rules:
+
+- the function-type spelling is `func(Params) -> Ret can[...] error[...]`; error sets ride the error-union return type
+- `[permission E]` / `[errorset R]` are inferred from the argument at each call site and substituted into the return type, so feeding an `IoErr` callback to `applyDouble` yields `error[IoErr]` and a `NetErr` callback yields `error[NetErr]`, with mismatches rejected
+- addition is union-with-a-literal (`can[E, Console.Write]` = the callback's effects plus the function's own); there is no row polymorphism and no subtraction
+- a callback that supplies nothing to bind reports `cannot infer permission/error-set parameter`
+- monomorphization resolves the parameters to concrete sets per instantiation; effects are erased and error unions reach codegen as values, so there is no runtime cost beyond the existing error-union representation
+
 ## Named bundles
 
 Bundles are the canonical model for named groups of inputs. `implicit` bundles are ambient dependencies, while `explicit` bundles are reusable named argument packs.
