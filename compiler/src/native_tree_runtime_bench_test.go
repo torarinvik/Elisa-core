@@ -129,7 +129,7 @@ func buildNativeTreeRuntimeBenchExecutable(b *testing.B, layout string) string {
 		_ = os.RemoveAll(tempDir)
 		b.Fatalf("failed to write native tree runtime benchmark shim: %v", err)
 	}
-	exePath, nativeCleanup, _, err := buildNativeExecutableWithClang(clangPath, result, []string{shimPath}, nil, filepath.Join(tempDir, "tree_runtime_bench"), backend.OptimizationLevel3, backend.DefaultPackedLoweringProfile(), "", false, &stderr)
+	exePath, nativeCleanup, _, err := buildNativeExecutableWithClang(clangPath, result, []string{shimPath}, nil, filepath.Join(tempDir, "tree_runtime_bench"), backend.OptimizationLevel3, backend.DefaultPackedLoweringProfile(), "", false, false, &stderr)
 	if err != nil {
 		_ = os.RemoveAll(tempDir)
 		b.Fatalf("failed to build native tree runtime benchmark executable:\n%s%s", err.Error(), stderr.String())
