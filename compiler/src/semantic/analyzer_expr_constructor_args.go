@@ -408,6 +408,11 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 	case *ErrorUnionType:
 		if act, ok := actual.(*ErrorUnionType); ok {
 			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+			if p.Errors != nil && p.Errors.Param && act.Errors != nil {
+				if _, exists := bindings[p.Errors.Name]; !exists {
+					bindings[p.Errors.Name] = act.Errors
+				}
+			}
 			return
 		}
 		a.collectTypeBindings(p.Value, actual, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)

@@ -327,6 +327,17 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 				collectSpecializationBindings(p.Args[i], a.Args[i], bindings)
 			}
 		}
+	case *semantic.ErrorUnionType:
+		if a, ok := actual.(*semantic.ErrorUnionType); ok {
+			collectSpecializationBindings(p.Value, a.Value, bindings)
+			if p.Errors != nil && p.Errors.Param && a.Errors != nil {
+				if _, ok := bindings[p.Errors.Name]; !ok {
+					bindings[p.Errors.Name] = a.Errors
+				}
+			}
+		} else {
+			collectSpecializationBindings(p.Value, actual, bindings)
+		}
 	case *semantic.FuncType:
 		if a, ok := actual.(*semantic.FuncType); ok {
 			limit := len(p.Params)

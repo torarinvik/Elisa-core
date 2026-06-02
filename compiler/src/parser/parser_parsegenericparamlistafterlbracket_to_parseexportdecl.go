@@ -39,7 +39,20 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 		if !isRegionParam && !isPermissionParam && !isRefStorageParam && p.matchIdentText("refstate") {
 			isRefStateParam = true
 		}
-		if isRegionParam {
+		isErrorSetParam := false
+		if !isRegionParam && !isPermissionParam && !isRefStorageParam && !isRefStateParam && p.matchIdentText("errorset") {
+			isErrorSetParam = true
+		}
+		if isErrorSetParam {
+			kind = ast.GenericParamErrorSet
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {
+				p.errorf("duplicate function generic parameter %q", name)
+			} else {
+				seenType[name] = true
+				genericParams = append(genericParams, ast.GenericParam{Position: paramPos, Kind: kind, Name: name})
+			}
+		} else if isRegionParam {
 			kind = ast.GenericParamRegion
 			name := p.expect(lexer.TOKEN_IDENT).Text
 			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {

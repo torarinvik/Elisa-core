@@ -79,7 +79,15 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 	case *semantic.RegionValueType:
 		return t
 	case *semantic.ErrorUnionType:
-		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst, impls), Errors: tt.Errors}
+		errors := tt.Errors
+		if errors != nil && errors.Param {
+			if mapped, ok := subst[errors.Name]; ok {
+				if set, isSet := mapped.(*semantic.ErrorSetType); isSet {
+					errors = set
+				}
+			}
+		}
+		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst, impls), Errors: errors}
 	case *semantic.OptionalType:
 		return &semantic.OptionalType{Value: substituteType(tt.Value, subst, impls)}
 	case *semantic.RefType:

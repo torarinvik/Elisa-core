@@ -18,6 +18,7 @@ const (
 	GenericParamRefState
 	GenericParamRegion
 	GenericParamPermission
+	GenericParamErrorSet
 	GenericParamValue
 )
 

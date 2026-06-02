@@ -83,7 +83,15 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if IsInvalidType(value) {
 			return invalidType
 		}
-		return &ErrorUnionType{Value: value, Errors: n.Errors}
+		errors := n.Errors
+		if errors != nil && errors.Param {
+			if resolved, ok := bindings[errors.Name]; ok {
+				if set, isSet := resolved.(*ErrorSetType); isSet {
+					errors = set
+				}
+			}
+		}
+		return &ErrorUnionType{Value: value, Errors: errors}
 	case *OptionalType:
 		value := a.substituteTypeWithDepth(n.Value, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(value) {

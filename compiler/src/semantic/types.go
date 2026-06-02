@@ -129,6 +129,10 @@ type ErrorSetType struct {
 	Name     string
 	Tags     []string
 	Payloads map[string][]Type
+	// Param marks this as a polymorphic error-set parameter placeholder (e.g. the
+	// `R` in `def f[errorset R](...) -> T error[R]`). A Param set is opaque inside
+	// the function body and is bound to a concrete error set at each call site.
+	Param bool
 }
 
 type ErrorUnionType struct {

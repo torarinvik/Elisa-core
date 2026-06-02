@@ -161,6 +161,7 @@ type Analyzer struct {
 	shapeParamScopes             []map[string]Shape
 	regionParamScopes            []map[string]bool
 	permissionParamScopes        []map[string]bool
+	errorSetParamScopes          []map[string]bool
 	freshShapeCounter            int
 	returnFreshShapeStatus       map[string]freshReturnStatus
 	annotatedFuncs               []*AnnotatedFunc

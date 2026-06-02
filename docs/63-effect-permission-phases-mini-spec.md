@@ -23,12 +23,15 @@ reuses one set lattice for both.
     - ✅ **Phase 5a — `any`/⊤ escape** (`can[any]`): a `can[any]` grant satisfies every
       requirement; a `can[any]` requirement is satisfied only by `any` (or `trusted`); `any`
       is reserved (cannot be declared, no member access). Implemented + tested.
-    - ⏳ **Phase 5b — generic *error*-set param** (`[errorset R]`): the symmetric mirror of
-      permission params for error sets. Concrete error sets already flow through `func`-type
-      params; only the *polymorphic* error binder is missing. **Decided to implement as its
-      own focused pass — see docs/64 for the grounded design note + step plan.** The one
-      delicate piece is teaching the error-set unifier to treat `R` as a binding hole
-      (today it compares error sets by exact equality); everything around it already exists.
+    - ✅ **Phase 5b — generic *error*-set param** (`[errorset R]`): DONE. A combinator
+      `def f[errorset R](g: func() -> T error[R]) -> T error[R]` propagates the callback's
+      exact error set; verified end-to-end (one combinator monomorphized at two distinct
+      error sets, ok + error paths, in a compiled binary). See docs/64 for the design note.
+      Implementation: `ErrorSetType.Param` placeholder, `errorset` keyword riding
+      `GenericParams`, `withErrorSetParams`/`lookupErrorSetParam`, param recognition in
+      `resolveErrorSetExpr`, binding in `collectTypeBindings` + backend
+      `collectSpecializationBindings`, substitution in both `substituteType`s, and a
+      `Param`-aware `ErrorSetAssignable`.
 
 ## 0. Current state (measured 2026-06-02)
 

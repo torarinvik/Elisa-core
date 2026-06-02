@@ -342,6 +342,14 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			a.errorf(expr.Pos(), "cannot infer permission parameter %q for call to %q", name, ft.Name)
 		}
 	}
+	for _, param := range ft.GenericParams {
+		if param.Kind != ast.GenericParamErrorSet {
+			continue
+		}
+		if _, ok := bindings[param.Name]; !ok {
+			a.errorf(expr.Pos(), "cannot infer error-set parameter %q for call to %q; pass a fallible callback whose error set it can bind to", param.Name, ft.Name)
+		}
+	}
 	appliedType, _ := a.substituteType(ft, bindings, shapeBindings, regionBindings, permissionBindings).(*FuncType)
 	if appliedType == nil {
 		appliedType = ft

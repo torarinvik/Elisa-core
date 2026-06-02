@@ -107,6 +107,13 @@ func ErrorSetAssignable(dst, src *ErrorSetType) bool {
 	if dst == nil || src == nil {
 		return dst == src
 	}
+	// A polymorphic error-set parameter is opaque: it is only compatible with the
+	// same-named parameter. Concrete binding happens via collectTypeBindings +
+	// substituteType before assignability is ever checked, so by the time we reach
+	// here a Param on either side means a genuinely unresolved set.
+	if dst.Param || src.Param {
+		return dst.Param && src.Param && dst.Name == src.Name
+	}
 	for _, tag := range src.Tags {
 		if _, ok := MatchErrorTag(dst, tag); !ok {
 			return false

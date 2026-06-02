@@ -72,6 +72,7 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 	refStateArgs := make([]Type, 0)
 	constNames := make([]string, 0)
 	constArgs := make([]Type, 0)
+	errorSetNames := make([]string, 0)
 	for i, param := range params {
 		var arg Type
 		if i < len(args) {
@@ -95,6 +96,8 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 		case ast.GenericParamRefState:
 			refStateNames = append(refStateNames, param.Name)
 			refStateArgs = append(refStateArgs, arg)
+		case ast.GenericParamErrorSet:
+			errorSetNames = append(errorSetNames, param.Name)
 		case ast.GenericParamValue:
 			constNames = append(constNames, param.Name)
 			if arg != nil {
@@ -108,7 +111,9 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 		a.withTypeParams(typeNames, typeArgs, func() {
 			a.withRefStorageParams(refStorageNames, refStorageArgs, func() {
 				a.withRefStateParams(refStateNames, refStateArgs, func() {
-					a.withConstParams(constNames, constArgs, fn)
+					a.withErrorSetParams(errorSetNames, func() {
+						a.withConstParams(constNames, constArgs, fn)
+					})
 				})
 			})
 		})
@@ -199,6 +204,41 @@ func (a *Analyzer) lookupPermissionParam(name string) bool {
 		}
 	}
 	return false
+}
+
+func (a *Analyzer) withErrorSetParams(names []string, fn func()) {
+	if len(names) == 0 {
+		fn()
+		return
+	}
+	bindings := make(map[string]bool, len(names))
+	for _, name := range names {
+		bindings[name] = true
+	}
+	a.errorSetParamScopes = append(a.errorSetParamScopes, bindings)
+	fn()
+	a.errorSetParamScopes = a.errorSetParamScopes[:len(a.errorSetParamScopes)-1]
+}
+
+func (a *Analyzer) lookupErrorSetParam(name string) bool {
+	for i := len(a.errorSetParamScopes) - 1; i >= 0; i-- {
+		if a.errorSetParamScopes[i][name] {
+			return true
+		}
+	}
+	return false
+}
+
+// errorSetParamNames extracts the error-set generic parameter names from a
+// generic-param list (error-set params ride the GenericParams slice).
+func errorSetParamNames(params []ast.GenericParam) []string {
+	var out []string
+	for _, p := range params {
+		if p.Kind == ast.GenericParamErrorSet {
+			out = append(out, p.Name)
+		}
+	}
+	return out
 }
 
 func (a *Analyzer) permissionParamsInRefs(refs []ast.PermissionRef) []string {

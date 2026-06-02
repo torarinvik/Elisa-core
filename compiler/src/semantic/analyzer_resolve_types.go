@@ -279,6 +279,11 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 		return invalidType
 	}
 	if len(expr.Tags) == 1 && expr.Tags[0].Tag == "" {
+		if !expr.HasEllipsis && a.lookupErrorSetParam(expr.Tags[0].SetName) {
+			// `error[R]` where R is a generic error-set parameter: an opaque
+			// placeholder, bound to a concrete set at each call site.
+			return &ErrorSetType{Name: expr.Tags[0].SetName, Param: true}
+		}
 		_, errSet := a.lookupDeclaredErrorSet(expr.Tags[0])
 		if errSet == nil {
 			return invalidType
