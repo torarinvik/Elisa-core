@@ -7,6 +7,14 @@ import (
 	"elisacore/src/lexer"
 )
 
+// isUnhandledErrorUnionType reports whether t is an error union carrying at least one
+// error variant. Such a value is affine in spirit: it must be consumed (handled or
+// propagated), never silently dropped.
+func isUnhandledErrorUnionType(t Type) bool {
+	eu, ok := t.(*ErrorUnionType)
+	return ok && eu != nil && eu.Errors != nil && len(eu.Errors.Tags) > 0
+}
+
 func isAffineHandleType(t Type) bool {
 	switch tt := t.(type) {
 	case *GenericInstanceType:

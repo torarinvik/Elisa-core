@@ -599,7 +599,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.applyIndexBoundsFactsForCondition(cond, true)
 			return
 		}
-		a.analyzeExpr(n.Expr)
+		exprType := a.analyzeExpr(n.Expr)
+		// An error union must be handled (`try`/`match`/`catch`) or propagated
+		// (`return`/`raise`); it cannot be silently dropped as a bare statement, or its
+		// error — and any owned payload it carries — is swallowed. `try`/`raise` already
+		// reduce to the ok type, so only a raw dropped call surfaces here.
+		if isUnhandledErrorUnionType(exprType) {
+			a.errorf(n.Pos(), "error union result must be handled with `try`, `match`, or `catch`, or propagated with `return`; it cannot be silently dropped")
+		}
 	case *ast.StaticIfStmt:
 		for _, stmt := range a.activeStmtBranch(n) {
 			a.analyzeStmt(stmt)
@@ -624,6 +631,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeStaticOnlyStmts(n.Body)
 	case *ast.DiscardStmt:
 		valueType := a.analyzeExpr(n.Value)
+		// `_ = f()` discards the value; for an error union that swallows the error (and
+		// any owned payload). The correct discard is `_ = try f() else …` (handle first,
+		// then drop the ok value).
+		if isUnhandledErrorUnionType(valueType) {
+			a.errorf(n.Pos(), "error union result must be handled with `try`, `match`, or `catch`; discarding it with `_ =` swallows the error")
+		}
 		a.consumeAffineValueExpr(n.Value, valueType, "discard")
 	}
 }
