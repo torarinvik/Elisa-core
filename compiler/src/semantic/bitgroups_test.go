@@ -205,16 +205,16 @@ struct Header:
 }
 
 func TestAnalyzeStructRegionOwnerScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_scope.elisa", `struct Expr in owner:
-	left: owner Expr&?
-	right: owner Expr&?
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_scope.elisa", `struct Expr[region owner]:
+	left: Expr&? @owner
+	right: Expr&? @owner
 
 struct Explicit[region arena]:
 	next: arena Explicit&?
 `)
 	expr := result.NamedTypes["Expr"].(*StructType)
-	if len(expr.RegionParams) != 1 || expr.RegionParams[0] != "owner" || expr.RegionOwner != "owner" {
-		t.Fatalf("expected Expr to record owner region sugar, got params=%v owner=%q", expr.RegionParams, expr.RegionOwner)
+	if len(expr.RegionParams) != 1 || expr.RegionParams[0] != "owner" || expr.RegionOwner != "" {
+		t.Fatalf("expected Expr to record explicit region parameter only, got params=%v owner=%q", expr.RegionParams, expr.RegionOwner)
 	}
 	leftRef, ok := expr.Fields["left"].Type.(*RefType)
 	if !ok {
@@ -237,8 +237,8 @@ struct Explicit[region arena]:
 }
 
 func TestAnalyzeStructRegionOwnerUseSiteInstantiation(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_use_site.elisa", `struct Expr in owner:
-	next: owner Expr&?
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_use_site.elisa", `struct Expr[region owner]:
+	next: Expr&? @owner
 
 def build() -> void:
 	region scratch(1024)
@@ -254,8 +254,8 @@ def build() -> void:
 }
 
 func TestAnalyzeStructRegionOwnerAcceptsArenaValueArgument(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_arena_value_arg.elisa", `struct Expr in owner:
-	next: owner Expr&?
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_arena_value_arg.elisa", `struct Expr[region owner]:
+	next: Expr&? @owner
 
 def build(owner: Arena) -> void:
 	head: Expr[owner] = Expr{
@@ -269,9 +269,9 @@ def build(owner: Arena) -> void:
 }
 
 func TestAnalyzeStructRegionOwnerWithTypeParams(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_type_param.elisa", `struct Box[T] in owner:
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_type_param.elisa", `struct Box[T, region owner]:
 	value: T
-	next: owner Box[T, owner]&?
+	next: Box[T, owner]&? @owner
 
 def build() -> void:
 	region scratch(1024)

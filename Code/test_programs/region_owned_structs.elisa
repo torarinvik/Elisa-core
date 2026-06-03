@@ -1,10 +1,10 @@
-struct Expr in owner:
+struct Expr[region owner]:
     value: i64
-    next: owner Expr&?
+    next: Expr&? @owner
 
-struct Box[T] in owner:
+struct Box[T, region owner]:
     value: T
-    next: owner Box[T, owner]&?
+    next: Box[T, owner]&? @owner
 
 def main() -> i64:
     region scratch(4096)

@@ -67,8 +67,8 @@ func TestLeakWithGrantIsClean(t *testing.T) {
 // use-after-free and must be rejected (the dep must not be laundered through
 // the lambda capture).
 func TestClosureCapturingRegionDepRejectedAfterDestroy(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "region_closure_uaf.elisa", `struct RegionNode in owner:
-    next: owner RegionNode&?
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "region_closure_uaf.elisa", `struct RegionNode[region owner]:
+    next: RegionNode&? @owner
     value: i32
 
 def f(seed: i32) -> i32:
@@ -85,8 +85,8 @@ def f(seed: i32) -> i32:
 
 // The same closure used while the region is still live is fine.
 func TestClosureCapturingRegionDepCleanBeforeDestroy(t *testing.T) {
-	analyzeTreeTestSource(t, "region_closure_ok.elisa", `struct RegionNode in owner:
-    next: owner RegionNode&?
+	analyzeTreeTestSource(t, "region_closure_ok.elisa", `struct RegionNode[region owner]:
+    next: RegionNode&? @owner
     value: i32
 
 def f(seed: i32) -> i32:

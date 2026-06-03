@@ -8,7 +8,7 @@ import (
 const threadRegionPrelude = `def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
     return zeroed
 extern new_arena(cap: usize) -> Arena
-struct Node in owner:
+struct Node[region owner]:
     value: i32
 def worker(r: owned Arena) -> i64:
     n: r Node[r]& = new[r] Node(7)

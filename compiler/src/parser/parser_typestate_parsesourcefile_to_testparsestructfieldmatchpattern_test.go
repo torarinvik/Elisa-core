@@ -136,7 +136,7 @@ func TestParseStructRegionOwnerForms(t *testing.T) {
 	left: owner Expr&?
 	right: owner Expr&?
 
-layout soa struct SymbolRows in owner:
+layout soa struct SymbolRows[region owner]:
 	name_id: NameId
 	span: Span
 `)
@@ -167,23 +167,23 @@ layout soa struct SymbolRows in owner:
 	if rows.Layout != ast.StructLayoutSOA {
 		t.Fatalf("expected SymbolRows to keep SOA layout, got %v", rows.Layout)
 	}
-	if rows.RegionOwner != "owner" {
-		t.Fatalf("expected sugar owner marker, got %q", rows.RegionOwner)
+	if rows.RegionOwner != "" {
+		t.Fatalf("expected explicit generic region form to keep empty RegionOwner sugar marker, got %q", rows.RegionOwner)
 	}
 	if len(rows.RegionParams) != 1 || rows.RegionParams[0] != "owner" {
-		t.Fatalf("expected sugar form to desugar to region param [owner], got %v", rows.RegionParams)
+		t.Fatalf("expected explicit region form to populate region param [owner], got %v", rows.RegionParams)
 	}
 }
 
 func TestFormatStructRegionOwnerFormsRoundTrips(t *testing.T) {
 	file, errs := parseSourceFile(t, `struct Expr[region owner]:
-	left: owner Expr&?
+	left: Expr&? @owner
 
-struct Box[T] in owner:
+struct Box[T, region owner]:
 	value: T
-	next: owner Box[T, owner]&?
+	next: Box[T, owner]&? @owner
 
-layout soa struct SymbolRows in owner:
+layout soa struct SymbolRows[region owner]:
 	name_id: NameId
 	span: Span
 `)
@@ -193,9 +193,9 @@ layout soa struct SymbolRows in owner:
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"struct Expr[region owner]:",
-		"struct Box[T] in owner:",
-		"layout soa struct SymbolRows in owner:",
-		"next: owner Box[T, owner]&?",
+		"struct Box[T, region owner]:",
+		"layout soa struct SymbolRows[region owner]:",
+		"next: Box[T, owner]&? @owner",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
@@ -211,13 +211,13 @@ layout soa struct SymbolRows in owner:
 }
 
 func TestParseStructRegionOwnerRejectsDuplicateExplicitRegion(t *testing.T) {
-	_, errs := parseSourceFile(t, `struct Expr[region owner] in owner:
-	next: owner Expr&?
+	_, errs := parseSourceFile(t, `struct Expr[region owner, region owner]:
+	next: Expr&? @owner
 `)
 	if len(errs) == 0 {
 		t.Fatalf("expected duplicate owner region diagnostic")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), `duplicate struct region parameter "owner"`) {
+	if !strings.Contains(strings.Join(errs, "\n"), `duplicate function generic parameter "owner"`) {
 		t.Fatalf("expected duplicate owner region diagnostic, got: %v", errs)
 	}
 }

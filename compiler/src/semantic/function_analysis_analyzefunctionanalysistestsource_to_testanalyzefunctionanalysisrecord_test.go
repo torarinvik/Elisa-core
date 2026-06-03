@@ -428,8 +428,8 @@ def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsProduceAndRebaseTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "produce_rebase_fact_transforms.elisa", `struct RegionNode in owner:
-	next: owner RegionNode&?
+	result := analyzeFunctionAnalysisTestSource(t, "produce_rebase_fact_transforms.elisa", `struct RegionNode[region owner]:
+	next: RegionNode&? @owner
 	value: i32
 
 packed enum Expr:
@@ -542,8 +542,8 @@ def destroy_demo() -> void:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsAliasClassTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "alias_fact_transforms.elisa", `struct RegionNode in owner:
-	next: owner RegionNode&?
+	result := analyzeFunctionAnalysisTestSource(t, "alias_fact_transforms.elisa", `struct RegionNode[region owner]:
+	next: RegionNode&? @owner
 	value: i32
 
 def alias_region_ref(seed: i32) -> i32:
@@ -566,8 +566,8 @@ def alias_region_ref(seed: i32) -> i32:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsAliasClassMutationTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "alias_mutation_fact_transforms.elisa", `struct RegionNode in owner:
-	next: owner RegionNode&?
+	result := analyzeFunctionAnalysisTestSource(t, "alias_mutation_fact_transforms.elisa", `struct RegionNode[region owner]:
+	next: RegionNode&? @owner
 	value: mutable i32
 
 def alias_region_mutation(seed: i32) -> i32:
