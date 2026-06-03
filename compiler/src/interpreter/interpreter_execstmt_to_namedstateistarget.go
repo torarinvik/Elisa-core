@@ -205,7 +205,15 @@ func (i *Interpreter) evaluateInitializer(frame *frame, typ ast.TypeExpr, expr a
 func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	switch n := expr.(type) {
 	case *ast.Ident:
-		value, err := i.lookupValue(frame, n.Name)
+		// Prefer the analyzer's recorded resolution so namespaced / using / imported
+		// names resolve (the interpreter has no namespace/using context of its own).
+		name := n.Name
+		if i.result != nil && i.result.ResolvedValueNames != nil {
+			if canonical, ok := i.result.ResolvedValueNames[n]; ok {
+				name = canonical
+			}
+		}
+		value, err := i.lookupValue(frame, name)
 		if err != nil {
 			return VoidValue(), err
 		}

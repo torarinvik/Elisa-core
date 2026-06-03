@@ -51,6 +51,7 @@ type Result struct {
 	InitCalls               map[*ast.StructLitExpr]*ast.CallExpr
 	PostfixShorthandCalls   map[*ast.CastExpr]*ast.CallExpr
 	ResolvedTypeNames       map[*ast.NamedType]string
+	ResolvedValueNames      map[*ast.Ident]string
 	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo
 	NodeTables              map[ast.Expr]NodeTableInfo
 	PackedLowering          PackedLoweringMetadata

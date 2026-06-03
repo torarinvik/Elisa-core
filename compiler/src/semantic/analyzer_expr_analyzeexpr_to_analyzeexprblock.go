@@ -94,7 +94,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = t
 			return
 		}
-		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
+		if sym, canonical, ok := a.lookupVisibleGlobal(n.Name); ok {
+			// Record the resolved canonical (namespace/using/import-qualified) name so
+			// the interpreter can resolve namespaced value/function references instead
+			// of re-deriving from the bare name without namespace context.
+			if a.resolvedValueNames != nil && canonical != "" && canonical != n.Name {
+				a.resolvedValueNames[n] = canonical
+			}
 			result = promoteWritableRefType(sym.Type, sym.Mutable)
 			if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 				a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
