@@ -477,6 +477,33 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeSliceExpr(n)
 		return
 	case *ast.CastExpr:
+		// Postfix-shorthand `recv.Name()` parses as a cast to type `Name` (this is
+		// how `x.u64()` works). But `recv.Name()` is meant to read as `Name(recv)`:
+		// when `Name` is a type it is a constructor/cast, and otherwise it is a
+		// function — including a UFCS `@method`. When the target does NOT resolve to
+		// a type, re-interpret the cast as the call `Name(recv)` so PascalCase method
+		// names work the same as the lowercase / multi-arg forms already do.
+		if n.Origin == ast.CastExprOriginPostfixShorthand {
+			if named, ok := n.Target.(*ast.NamedType); ok && named != nil && named.Name != "" {
+				// Quietly probe whether the target resolves to a real type (this
+				// covers builtins like sview/cstr/dstr that resolveType handles). If
+				// it does not, `recv.Name()` is the call `Name(recv)` instead.
+				savedSuppress := a.suppressDiagnostics
+				a.suppressDiagnostics = true
+				probe := a.resolveType(named)
+				a.suppressDiagnostics = savedSuppress
+				if IsInvalidType(probe) {
+					synth := &ast.CallExpr{
+						Position: n.Position,
+						Func:     &ast.FieldExpr{Position: n.Position, Object: n.Operand, Field: named.Name},
+					}
+					a.postfixShorthandCalls[n] = synth
+					result = a.analyzeExpr(synth)
+					a.exprTypes[n] = result
+					return
+				}
+			}
+		}
 		dst := a.resolveType(n.Target)
 		var src Type
 		if _, ok := n.Operand.(*ast.ZeroedLit); ok {

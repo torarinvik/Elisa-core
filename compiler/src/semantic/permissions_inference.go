@@ -311,6 +311,10 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		}
 		c.collectExpr(n.Owner)
 	case *ast.CastExpr:
+		if call, ok := c.analyzer.postfixShorthandCalls[n]; ok && call != nil {
+			c.collectExpr(call)
+			break
+		}
 		c.collectExpr(n.Operand)
 		src := c.analyzer.exprTypes[n.Operand]
 		dst := c.analyzer.exprTypes[n]

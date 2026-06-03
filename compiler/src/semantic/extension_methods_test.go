@@ -824,6 +824,74 @@ def read(box: Box) -> i64:
 	}
 }
 
+// `recv.PascalCase()` (zero-arg postfix shorthand) is parsed as a cast to type
+// `PascalCase`; when that name is not a type it falls back to the call
+// `PascalCase(recv)`, so PascalCase names resolve to UFCS @methods just like the
+// lowercase and multi-arg forms.
+func TestAnalyzePostfixShorthandFallsBackToPascalCaseUFCSMethod(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "postfix_pascalcase_ufcs.elisa", `
+struct Handle:
+    n: mutable i64
+
+@method
+def IsOpen(self: Handle&) -> bool:
+    return self.n != 0
+
+@method
+def Reset(self: mutable Handle&) -> void:
+    self.n <- 0
+
+def read(h: mutable Handle&) -> bool:
+    h.Reset()
+    return h.IsOpen()
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+// The postfix-shorthand cast to a real type (e.g. `x.u64()`) must keep casting,
+// not be re-interpreted as a call — the fallback only applies when the target is
+// not a type.
+func TestAnalyzePostfixShorthandStillCastsToRealType(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "postfix_cast_real_type.elisa", `
+def widen(x: i64) -> u64:
+    return x.u64()
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+// Uniform call syntax: a function overloaded by first-parameter type is callable
+// in all four forms (dot/free × each receiver), including a string literal as a
+// `cstr` receiver — `"x".open()` resolves the same as the free call `open("x")`.
+func TestAnalyzeUniformCallSyntaxOverloadIncludingStringLiteralReceiver(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "uniform_call_overload.elisa", `
+struct Door:
+    is_open: mutable bool
+
+struct File:
+    h: mutable i64
+
+def open(path: cstr) -> File?:
+    _ = path
+    return null
+
+def open(door: mutable Door&) -> void:
+    door.is_open <- true
+
+def drive(d: mutable Door&) -> void:
+    d.open()
+    open(d)
+    _ = open("file.txt")
+    _ = "file.txt".open()
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
 func TestAnalyzeOptionalChainingOnOptionalAndNullableReceivers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "optional_chaining.elisa", `
 struct Box:

@@ -516,6 +516,13 @@ func classifyRuntimeStringCompareKind(t semantic.Type) runtimeStringCompareKind 
 	return runtimeStringCompareNone
 }
 func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semantic.Type, error) {
+	// A postfix-shorthand cast `recv.Name()` whose target was not a type is lowered
+	// by the analyzer to the call `Name(recv)`; emit that call instead.
+	if s != nil && s.g != nil && s.g.result != nil && s.g.result.PostfixShorthandCalls != nil {
+		if call, ok := s.g.result.PostfixShorthandCalls[expr]; ok && call != nil {
+			return s.emitExpr(call, s.exprType(expr))
+		}
+	}
 	if s != nil && s.g != nil && s.g.result != nil && s.g.result.CastHooks != nil {
 		if sym, ok := s.g.result.CastHooks[expr]; ok && sym != nil {
 			fnType, ok := sym.Type.(*semantic.FuncType)

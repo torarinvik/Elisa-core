@@ -270,6 +270,60 @@ const (
 	extensionMethodCallRewriteInvalid
 )
 
+// rewriteFreeCallReceiverOverload gives free-call argument-based overload
+// resolution. `N(arg0, rest...)` is rewritten to the receiver form
+// `arg0.N(rest...)` when `N` is receiver-overloaded, the primary global `N` does
+// NOT accept arg0, and a UFCS overload of `N` does. The subsequent
+// rewriteExtensionMethodCall then selects the right overload and threads the
+// resolved symbol to codegen — so `open(door)` and `open("file")` both resolve to
+// the correct overload (uniform call syntax), the same as `door.open()`.
+func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
+	if a == nil || expr == nil {
+		return
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident == nil || ident.Name == "" {
+		return
+	}
+	// Every function is registered for UFCS, so only ">= 2 entries" signals an
+	// actual overload set worth disambiguating by argument type.
+	if len(a.ufcsFunctionsByName[ident.Name]) < 2 {
+		return
+	}
+	if len(expr.Args) == 0 {
+		return
+	}
+	// Keep to the simple all-positional case so the parallel arg metadata stays
+	// consistent after dropping arg0; bail on named/shorthand/pack/forward args.
+	if len(expr.ArgNames) != 0 || len(expr.ArgShorthand) != 0 || len(expr.ArgItemOrder) != 0 || len(expr.ParamPacks) != 0 || expr.HasArgForward {
+		return
+	}
+	// Probe arg0's type quietly: a context-dependent arg0 (a `.Variant` shorthand,
+	// an untyped literal, …) needs an expected type to resolve and must be left to
+	// normal resolution (which supplies the primary overload's param type).
+	savedSuppress := a.suppressDiagnostics
+	a.suppressDiagnostics = true
+	arg0Type := a.analyzeExpr(expr.Args[0])
+	a.suppressDiagnostics = savedSuppress
+	if arg0Type == nil || IsInvalidType(arg0Type) {
+		return
+	}
+	// If the primary global overload already accepts arg0, leave it as a normal
+	// free call (e.g. `open("file")` keeps resolving to the cstr overload).
+	if primary, ok := a.globalScope.Lookup(ident.Name); ok && primary != nil {
+		if fn, ok := primary.Type.(*FuncType); ok && fn != nil && len(fn.Params) > 0 && a.ufcsReceiverAssignableTo(fn.Params[0], arg0Type) {
+			return
+		}
+	}
+	// Only rewrite when a receiver-overload uniquely matches arg0.
+	if _, ok, _ := a.lookupVisibleUFCSFunction(ident.Name, arg0Type); !ok {
+		return
+	}
+	receiver := expr.Args[0]
+	expr.Func = &ast.FieldExpr{Position: ident.Position, Object: receiver, Field: ident.Name}
+	expr.Args = expr.Args[1:]
+}
+
 func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMethodCallRewriteStatus {
 	if a == nil || expr == nil {
 		return extensionMethodCallRewriteNone

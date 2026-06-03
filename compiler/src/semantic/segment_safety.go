@@ -323,6 +323,10 @@ func (a *Analyzer) validateSegmentFlowExpr(expr ast.Expr, owner *segmentOwnerSta
 		}
 		a.validateSegmentFlowExpr(n.Owner, owner)
 	case *ast.CastExpr:
+		if call, ok := a.postfixShorthandCalls[n]; ok && call != nil {
+			a.validateSegmentFlowExpr(call, owner)
+			break
+		}
 		a.validateSegmentFlowExpr(n.Operand, owner)
 	case *ast.TernaryExpr:
 		a.validateSegmentFlowExpr(n.Value, owner)

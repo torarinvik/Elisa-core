@@ -49,6 +49,7 @@ type Result struct {
 	ExprFacts               map[ast.Expr]OptimizationFacts
 	CastHooks               map[ast.Expr]*Symbol
 	InitCalls               map[*ast.StructLitExpr]*ast.CallExpr
+	PostfixShorthandCalls   map[*ast.CastExpr]*ast.CallExpr
 	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo
 	NodeTables              map[ast.Expr]NodeTableInfo
 	PackedLowering          PackedLoweringMetadata

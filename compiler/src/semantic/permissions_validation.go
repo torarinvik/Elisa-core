@@ -396,6 +396,10 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		}
 		a.validatePermissionExpr(n.Owner, granted)
 	case *ast.CastExpr:
+		if call, ok := a.postfixShorthandCalls[n]; ok && call != nil {
+			a.validatePermissionExpr(call, granted)
+			break
+		}
 		a.validatePermissionExpr(n.Operand, granted)
 		src := a.exprTypes[n.Operand]
 		dst := a.exprTypes[n]

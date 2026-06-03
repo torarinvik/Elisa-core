@@ -80,6 +80,7 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if resultType, ok := a.analyzeBuiltinSOAValidCall(expr); ok {
 		return resultType
 	}
+	a.rewriteFreeCallReceiverOverload(expr)
 	switch a.rewriteExtensionMethodCall(expr) {
 	case extensionMethodCallRewriteInvalid:
 		return invalidType

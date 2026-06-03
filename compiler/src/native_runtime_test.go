@@ -220,6 +220,148 @@ def sview_cast_string_equality_test() -> void:
 	}
 }
 
+func TestRunCLIPostfixShorthandCallsPascalCaseUFCSMethod(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "postfix_pascalcase_ufcs_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// `recv.Name()` reads as `Name(recv)`: when `Name` is a type it is a
+	// constructor/cast (the postfix-shorthand cast, e.g. `x.u64()`), and otherwise
+	// it is a function — including a UFCS `@method`. So a PascalCase method like
+	// `Bump`/`Value`/`IsZero` is callable in method position the same as the
+	// lowercase / multi-arg forms already are. `x.u64()` must keep casting.
+	src := fmt.Sprintf(`# include %q
+
+struct Counter:
+    n: mutable i64
+
+def Counter() -> Counter:
+    return Counter{n: 0}
+
+@method
+def Bump(self: mutable Counter&, by: i64) -> void:
+    self.n <- self.n + by
+
+@method
+def Value(self: Counter&) -> i64:
+    return self.n
+
+@method
+def IsZero(self: Counter&) -> bool:
+    return self.n == 0
+
+@test
+def postfix_pascalcase_ufcs_test() -> void:
+    can Abort.Panic:
+        c: mutable Counter = Counter()
+        assert_true(c.IsZero())
+        c.Bump(40)
+        c.Bump(2)
+        assert_false(c.IsZero())
+        assert_true(c.Value() == 42)
+        # postfix cast-to-type shorthand still casts (not a method call)
+        assert_true(c.Value().u64() == 42)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write postfix pascalcase UFCS fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected postfix pascalcase UFCS test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] postfix_pascalcase_ufcs_test",
+		"[       OK ] postfix_pascalcase_ufcs_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected postfix pascalcase UFCS output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIUniformCallSyntaxOverloadResolvesByArgumentType(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "uniform_call_overload_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// A function overloaded by first-parameter type resolves to the right overload
+	// in BOTH free-call and dot positions (uniform call syntax). `act(d)` selects
+	// the Door& overload (not the first-declared cstr one); `act("x")` and
+	// `"x".act()` select the cstr overload. Each overload has observable behavior.
+	src := fmt.Sprintf(`# include %q
+
+struct Door:
+    state: mutable i64
+
+def act(s: cstr) -> i64:
+    _ = s
+    return 7
+
+def act(d: mutable Door&) -> i64:
+    d.state <- d.state + 100
+    return d.state
+
+@test
+def uniform_call_overload_test() -> void:
+    can Abort.Panic:
+        d: mutable Door = Door{state: 5}
+        assert_true(act(d) == 105)          # free call, Door overload
+        assert_true(d.act() == 205)         # dot call, Door overload
+        assert_true(act("hello") == 7)      # free call, cstr overload
+        assert_true("hello".act() == 7)     # dot call, cstr overload
+        assert_true(d.state == 205)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write uniform call overload fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected uniform call overload test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] uniform_call_overload_test",
+		"[       OK ] uniform_call_overload_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected uniform call overload output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIAutoRefCoercesValuesToReferenceParams(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

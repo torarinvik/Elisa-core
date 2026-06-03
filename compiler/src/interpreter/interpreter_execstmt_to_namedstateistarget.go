@@ -413,6 +413,11 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		}
 		return ListValue(values), nil
 	case *ast.CastExpr:
+		if i != nil && i.result != nil && i.result.PostfixShorthandCalls != nil {
+			if call, ok := i.result.PostfixShorthandCalls[n]; ok && call != nil {
+				return i.evalExpr(frame, call)
+			}
+		}
 		if _, ok := n.Operand.(*ast.ZeroedLit); ok {
 			return i.zeroValueForType(n.Target)
 		}

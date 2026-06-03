@@ -141,6 +141,15 @@ func (a *Analyzer) ufcsReceiverAssignableTo(expected Type, actual Type) bool {
 	if a == nil || expected == nil || actual == nil {
 		return false
 	}
+	// A raw u8 string pointer (the type of a string literal, `static u8&`) serves
+	// as a cstr / string-view receiver, mirroring the contextual string-literal
+	// coercion used in ordinary argument position. This makes `"x".open()` resolve
+	// to `def open(s: cstr)` the same way the free call `open("x")` already does.
+	if _, ok := u8RuntimeRef(actual); ok {
+		if _, ok := contextualStringLiteralType(expected); ok {
+			return true
+		}
+	}
 	expectedBase := expected
 	if expectedRef, ok := expected.(*RefType); ok && expectedRef != nil {
 		expectedBase = expectedRef.Elem

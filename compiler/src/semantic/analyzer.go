@@ -139,6 +139,7 @@ type Analyzer struct {
 	unsafeBufferReinterpretCasts map[*ast.CastExpr]bool
 	sentinelFuncNameCache        map[string]bool
 	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
+	postfixShorthandCalls        map[*ast.CastExpr]*ast.CallExpr
 	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables               map[ast.Expr]NodeTableInfo
 	deferInfo                    map[*ast.DeferStmt]*DeferInfo
@@ -497,6 +498,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		unsafeLifetimeWidenCasts:          make(map[*ast.CastExpr]bool),
 		unsafeBufferReinterpretCasts:      make(map[*ast.CastExpr]bool),
 		loweredInitCalls:                  make(map[*ast.StructLitExpr]*ast.CallExpr, resolvedInitCallCapacity),
+		postfixShorthandCalls:             make(map[*ast.CastExpr]*ast.CallExpr),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
 		deferInfo:                         map[*ast.DeferStmt]*DeferInfo{},
@@ -599,6 +601,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ExprFacts:               a.exprFacts,
 		CastHooks:               a.resolvedCastHooks,
 		InitCalls:               a.loweredInitCalls,
+		PostfixShorthandCalls:   a.postfixShorthandCalls,
 		DenseNodeKeys:           a.exprDenseNodeKeys,
 		NodeTables:              a.exprNodeTables,
 		ParallelFor:             a.parallelForInfo,
