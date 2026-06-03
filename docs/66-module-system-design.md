@@ -197,8 +197,18 @@ PLANNED (in priority order):
    rather than a breaking deprecation of `Geo.Point`, `Foo.bar`/`Foo.bar()` on a
    namespace now gives a clear "use `Foo::bar`" diagnostic instead of "undefined
    identifier Foo". `.` = value members, `::` = namespaces.
-4. Modularize the stdlib, then drop `@method`. (Still pending — the only remaining
-   item.) DIAGNOSIS (measured by making `@method` inert + running the suite): the
+4. Drop `@method`. DONE (commit daecc5e5). All 73 annotations removed from
+   builders/collections/heap/names; overloaded methods are plain globals. The
+   final real bug was in the BACKEND: resolveCallTarget/directCallTarget resolved a
+   called ident via GlobalScope only, so a local function-value variable shadowing a
+   same-named global (frontend_lexer_core's `is_empty` local vs global `def is_empty[T]`)
+   resolved to the global generic and failed type-param binding; fixed by consulting
+   lookupBinding first for function-typed locals (the backend analogue of the analyzer
+   shadowing fix 27e019a5). The `@method` annotation itself remains a supported-but-unused
+   optional feature; stripping the UFCSOnly plumbing is a separate low-value cleanup.
+   The historical diagnosis below is kept for context.
+
+   DIAGNOSIS (measured by making `@method` inert + running the suite): the
    blocker is NOT a handful of renames. `@method` (UFCS-only) is masking real
    resolution ambiguities — dropping it breaks the stdlib in subtle ways:
    - Wrong overload selection: a call like `clear[K, T](table.items)` resolves to
