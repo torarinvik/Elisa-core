@@ -190,6 +190,15 @@ func (p *Parser) parsePromote() *ast.PromoteStmt {
 	p.expectNewline()
 	return &ast.PromoteStmt{Position: pos, Value: value, Region: region}
 }
+func (p *Parser) parseAdopt() *ast.AdoptStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT) // "adopt"
+	child := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectIdentText("into")
+	parent := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.AdoptStmt{Position: pos, Child: child, Parent: parent}
+}
 func (p *Parser) parseReturn() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_RETURN)

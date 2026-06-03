@@ -246,6 +246,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordAffineConsumption(affineValueKey{Root: sym}, "leak")
 	case *ast.PromoteStmt:
 		a.analyzePromoteStmt(n)
+	case *ast.AdoptStmt:
+		a.analyzeAdoptStmt(n)
 	case *ast.AssignStmt:
 		var targetType Type
 		// Analyzing an assignment target reads the base of a field/index path as

@@ -500,6 +500,18 @@ func (n *PromoteStmt) Pos() lexer.Pos { return n.Position }
 func (*PromoteStmt) nodeTag()         {}
 func (*PromoteStmt) stmtTag()         {}
 
+// AdoptStmt is `adopt <child-region> into <parent-region>`: splices an entire
+// child region into a longer-lived parent, consuming the child. See docs/67.
+type AdoptStmt struct {
+	Position lexer.Pos
+	Child    string
+	Parent   string
+}
+
+func (n *AdoptStmt) Pos() lexer.Pos { return n.Position }
+func (*AdoptStmt) nodeTag()         {}
+func (*AdoptStmt) stmtTag()         {}
+
 type LeakStmt struct {
 	Position lexer.Pos
 	Name     string
