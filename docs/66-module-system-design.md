@@ -184,9 +184,13 @@ PLANNED (in priority order):
    analyzer records the resolved target (qualified name / symbol / type) on the node, and
    the backend + interpreter CONSUME it instead of re-resolving. This unblocks modules
    end-to-end.
-2. Construction model: make `Type{…}` the always-available default and `Type(…)` the
-   custom-constructor form (fold the implicit all-fields positional into the overload set
-   so a custom ctor doesn't shadow it). Mechanical call-site migration.
+2. Construction model: DONE as **coexistence** (not removal). A probe found ~96k
+   positional `Type(...)` constructions in the emulator alone (mostly generated NID
+   tables), so removing positional construction in favor of braces-only is infeasible.
+   Instead the implicit all-fields positional form now COEXISTS with custom
+   `def Type(...)` constructors — defining a custom ctor no longer shadows `Type(a, b)`
+   (analyzeInitHookStructConstructor returns "not handled" on no overload match and
+   falls back to all-fields construction). `Type{…}` remains the named default.
 3. `.`/`::` split + dot-notation type args.
 4. Modularize the stdlib, then drop `@method`.
 
