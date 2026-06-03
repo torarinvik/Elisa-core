@@ -21,13 +21,24 @@ static else:
 const ARENA_REGION_DEFAULT_CAPACITY: usize = 8 * 1024
 const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
 
-# Per-region backing selector stored in Arena.backend (see `region r(...) using malloc:`).
-# DEFAULT (0) follows the compile-time ARENA_BACKEND, so a zero-initialized Arena keeps the
-# existing behavior unchanged; MALLOC overrides just this region's blocks to libc malloc/free.
-# These are intentionally distinct from the ARENA_BACKEND_* constants above: the field is a
-# per-region override, not the compile-time backend.
-const ARENA_REGION_BACKEND_DEFAULT: int = 0
-const ARENA_REGION_BACKEND_MALLOC: int = 1
+# Per-region strategy stored in Arena.strategy (the surface `region r(N) using <strategy>`).
+# This single selector encodes both the block source and the growth/stability behavior,
+# mirroring the one-selector surface (docs/68 §3). CHAINED (0) is the default, so a
+# zero-initialized Arena keeps the existing linked-block behavior unchanged. These are a
+# per-region selector, intentionally distinct from the compile-time ARENA_BACKEND_* above.
+#
+#   CHAINED        linked mmap blocks; grow by chaining a new block; a single contiguous
+#                  allocation cannot span blocks (interior refs invalidated on growth).
+#   MALLOC         like CHAINED but blocks come from libc malloc/free (retained block source).
+#   RESERVE_COMMIT one contiguous reservation; grow in place by committing pages, so the base
+#                  never moves and interior refs stay valid; panic on reservation overflow.
+#   FIXED          one block of the given capacity; no growth; panic on overflow.
+#   SCRATCH        thread-local scratch pool (interim: behaves as CHAINED until pooled).
+const ARENA_STRATEGY_CHAINED: int = 0
+const ARENA_STRATEGY_MALLOC: int = 1
+const ARENA_STRATEGY_RESERVE_COMMIT: int = 2
+const ARENA_STRATEGY_FIXED: int = 3
+const ARENA_STRATEGY_SCRATCH: int = 4
 
 error RuntimeError:
     OutOfMemory
@@ -49,9 +60,9 @@ struct Arena:
     begin:mutable heap Region&?
     end:mutable heap Region&?
     end_index: mutable usize
-    # Per-region backing selector; 0 (ARENA_REGION_BACKEND_DEFAULT) for a zero-initialized
-    # arena, so existing arenas keep the compile-time ARENA_BACKEND path unchanged.
-    backend: mutable int
+    # Per-region strategy (ARENA_STRATEGY_*); 0 (CHAINED) for a zero-initialized arena, so
+    # existing arenas keep the linked-block path. Set by the region declaration's codegen.
+    strategy: mutable int
 
 struct ArenaMark:
     region: heap Region&?
@@ -311,11 +322,12 @@ def new_region_malloc(capacity: usize) -> mutable heap Region&:
         r.global_index <- 0
         return r
 
-# Backend-dispatching region allocator. DEFAULT follows the compile-time ARENA_BACKEND (so it
-# is identical to new_region); MALLOC forces libc malloc for this region's blocks.
-def new_region_backend(capacity: usize, backend: int) -> mutable heap Region&:
+# Strategy-dispatching region allocator: chooses the block source. MALLOC draws blocks from
+# libc malloc; every other strategy (CHAINED/RESERVE_COMMIT/FIXED/SCRATCH) uses the compile-time
+# ARENA_BACKEND (mmap/VirtualAlloc), so it is identical to new_region for those.
+def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&:
     can Memory.Allocate, Abort.Panic:
-        if backend == ARENA_REGION_BACKEND_MALLOC:
+        if strategy == ARENA_STRATEGY_MALLOC:
             return new_region_malloc(capacity)
         return new_region(capacity)
 
@@ -351,11 +363,11 @@ def free_region_malloc(r: heap Region&):
         trusted Unsafe.RawExtern:
             free(arena_heap_void_from_region(r))
 
-# Backend-dispatching region free. DEFAULT follows the compile-time ARENA_BACKEND (identical to
-# free_region); MALLOC frees via libc free, matching new_region_backend's MALLOC allocation.
-def free_region_backend(r: heap Region&, backend: int):
+# Strategy-dispatching region free. MALLOC frees via libc free (matching new_region_backend's
+# MALLOC block source); every other strategy frees via free_region (munmap/VirtualFree).
+def free_region_backend(r: heap Region&, strategy: int):
     can Memory.Release, Abort.Panic:
-        if backend == ARENA_REGION_BACKEND_MALLOC:
+        if strategy == ARENA_STRATEGY_MALLOC:
             free_region_malloc(r)
             return
         trusted Unsafe.RawExtern:
@@ -365,6 +377,21 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         size: usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
 
+        # RESERVE_COMMIT / FIXED: one contiguous block, never chained. The block is created
+        # up front by the region declaration with the full reservation as its capacity, so
+        # allocation just bumps within it (pages commit on first touch under mmap). Overflowing
+        # the reservation is a hard error -- chaining a second block would break the contiguous,
+        # relocation-free layout the type system relies on, so we panic instead.
+        if a.strategy == ARENA_STRATEGY_RESERVE_COMMIT or a.strategy == ARENA_STRATEGY_FIXED:
+            assert a.end != null
+            if a.end.count + size > a.end.capacity:
+                panic("region overflow: reservation exhausted (reserve_commit/fixed)")
+            data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
+            offset_bytes: usize = a.end.count * size_of(uintptr)
+            result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
+            a.end.count <- a.end.count + size
+            return result
+
         if a.end == null:
             assert a.begin == null
 
@@ -372,7 +399,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             if capacity < size:
                 capacity <- size
 
-            a.end as & <- new_region_backend(capacity, a.backend)
+            a.end as & <- new_region_backend(capacity, a.strategy)
             a.begin <- a.end
             a.end_index <- 0
             a.end.global_index <- 0
@@ -391,7 +418,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             if capacity < size:
                 capacity <- size
 
-            a.end.next as & <- new_region_backend(capacity, a.backend)
+            a.end.next as & <- new_region_backend(capacity, a.strategy)
             a.end <- a.end.next
             a.end_index <- a.end_index + 1
             a.end.global_index <- a.end_index
@@ -402,9 +429,35 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
         a.end.count <- a.end.count + size
         return result
 
+# Slot offset of an in-region allocation from the region's data base. All pointer->int
+# casts are discharged here so callers (arena_realloc) surface no Unsafe effect.
+@internal
+def arena_tail_offset_slots(data_base: heap u8&, ptr: void&) -> usize:
+    trusted Unsafe.PointerCast:
+        return (ptr.cast[heap u8&].usize() - data_base.usize()) / size_of(uintptr)
+
 def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         arena_heap_void_from_mutable(oldptr) return if newsz <= oldsz
+
+        # RESERVE_COMMIT / FIXED grow in place: the base must never move (interior-pointer
+        # stability, docs/68 §4). When oldptr is the region's tail allocation we just advance
+        # the bump pointer to cover newsz and hand back the SAME pointer -- zero copy, no
+        # relocation, pages commit on first touch. Any other case (not the tail, or past the
+        # reservation) cannot be honored without moving data, so we panic rather than silently
+        # invalidate references the type system already proved stable.
+        if a.strategy == ARENA_STRATEGY_RESERVE_COMMIT or a.strategy == ARENA_STRATEGY_FIXED:
+            assert a.end != null
+            old_slots: usize = (oldsz + size_of(uintptr) - 1) / size_of(uintptr)
+            new_slots: usize = (newsz + size_of(uintptr) - 1) / size_of(uintptr)
+            data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
+            old_offset_slots: usize = arena_tail_offset_slots(data_base, oldptr)
+            if old_offset_slots + old_slots == a.end.count:
+                if old_offset_slots + new_slots > a.end.capacity:
+                    panic("region overflow: reservation exhausted (reserve_commit/fixed grow)")
+                a.end.count <- old_offset_slots + new_slots
+                return arena_heap_void_from_mutable(oldptr)
+            panic("reserve_commit/fixed array cannot grow in place: not the tail allocation")
 
         newptr: heap void& = arena_alloc(a, newsz)
         newptr_bytes: heap u8& = arena_heap_u8_from_void(newptr)
@@ -517,7 +570,7 @@ def arena_free(a: mutable Arena&):
                 r0: mutable heap Region& = r
                 r <- r.next
                 trusted Unsafe.RawExtern:
-                    free_region_backend(r0, a.backend)
+                    free_region_backend(r0, a.strategy)
 
         a.begin as ! <- null
         a.end as ! <- null
@@ -534,7 +587,7 @@ def arena_trim(a: mutable Arena&):
                 r0: mutable heap Region& = r
                 r <- r.next
                 trusted Unsafe.RawExtern:
-                    free_region_backend(r0, a.backend)
+                    free_region_backend(r0, a.strategy)
 
         a.end.next as ! <- null
 

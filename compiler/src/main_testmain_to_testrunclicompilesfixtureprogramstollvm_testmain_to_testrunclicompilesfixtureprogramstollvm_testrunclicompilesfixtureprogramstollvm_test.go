@@ -310,7 +310,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define %DynDict__cstr__Symbol @arena_dict_new__Symbol(ptr",
 				"define i32 @arena_dict_put__Symbol(ptr",
 				"define i1 @arena_dict_contains__Symbol(ptr",
-				"call ptr @new_region(i64 2048)",
+				"call ptr @new_region_backend(i64 2048, i64 0)",
 				"call ptr @arena_alloc(ptr",
 			},
 		},

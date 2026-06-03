@@ -96,7 +96,7 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "begin", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "end", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "end_index", typ: namedTypeExpr("usize", false), mutable: true},
-		{name: "backend", typ: namedTypeExpr("int", false), mutable: true},
+		{name: "strategy", typ: namedTypeExpr("int", false), mutable: true},
 	})
 	a.registerBuiltinStructType("ArenaMark", nil, false, []builtinFieldSpec{
 		{name: "region", typ: heapRefTypeExpr("Region", true), mutable: true},

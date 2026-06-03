@@ -34,7 +34,7 @@ const CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT: bool = false
 # Global arena state
 # ------------------------------------------------------------
 
-# 4th field is Arena.backend; 0 == ARENA_REGION_BACKEND_DEFAULT (compile-time ARENA_BACKEND).
+# 4th field is Arena.strategy; 0 == ARENA_STRATEGY_CHAINED (linked mmap blocks).
 global mutable perm_arena: Arena = Arena(null, null, 0, 0)
 global mutable scratch_arena: Arena = Arena(null, null, 0, 0)
 

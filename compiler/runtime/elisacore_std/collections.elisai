@@ -17,9 +17,15 @@ const ARENA_REGION_DEFAULT_CAPACITY: usize = (8 * 1024)
 
 const ARENA_WASM_PAGE_SIZE: usize = (64 * 1024)
 
-const ARENA_REGION_BACKEND_DEFAULT: int = 0
+const ARENA_STRATEGY_CHAINED: int = 0
 
-const ARENA_REGION_BACKEND_MALLOC: int = 1
+const ARENA_STRATEGY_MALLOC: int = 1
+
+const ARENA_STRATEGY_RESERVE_COMMIT: int = 2
+
+const ARENA_STRATEGY_FIXED: int = 3
+
+const ARENA_STRATEGY_SCRATCH: int = 4
 
 error RuntimeError:
     OutOfMemory
@@ -37,7 +43,7 @@ struct Arena:
     begin: mutable heap Region&?
     end: mutable heap Region&?
     end_index: mutable usize
-    backend: mutable int
+    strategy: mutable int
 
 struct ArenaMark:
     region: heap Region&?
@@ -84,11 +90,11 @@ extern new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable hea
 
 extern new_region(capacity: usize) -> mutable heap Region&
 
-extern new_region_backend(capacity: usize, backend: int) -> mutable heap Region&
+extern new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&
 
 extern free_region(r: heap Region&)
 
-extern free_region_backend(r: heap Region&, backend: int)
+extern free_region_backend(r: heap Region&, strategy: int)
 
 extern arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&
 

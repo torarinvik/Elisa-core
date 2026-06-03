@@ -443,6 +443,23 @@ func (s *functionState) emitPoolShutdown(poolPtr C.LLVMValueRef, poolType semant
 	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{poolPtr}, "")
 	return nil
 }
+
+// regionStrategyTag maps the surface `using <strategy>` selector to the runtime
+// ARENA_STRATEGY_* integer (see arena.elisa). "" and "chained" share CHAINED (0).
+func regionStrategyTag(allocator string) int {
+	switch allocator {
+	case "malloc":
+		return 1 // ARENA_STRATEGY_MALLOC
+	case "reserve_commit":
+		return 2 // ARENA_STRATEGY_RESERVE_COMMIT
+	case "fixed":
+		return 3 // ARENA_STRATEGY_FIXED
+	case "scratch":
+		return 4 // ARENA_STRATEGY_SCRATCH
+	default:
+		return 0 // ARENA_STRATEGY_CHAINED ("" or "chained")
+	}
+}
 func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityExpr ast.Expr, allocator string) error {
 	capacityType := s.g.result.NamedTypes["usize"]
 	var capacityValue C.LLVMValueRef
@@ -468,41 +485,31 @@ func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semant
 	if err != nil {
 		return err
 	}
-	var regionValue C.LLVMValueRef
-	if allocator == "malloc" {
-		// `region NAME(cap) using malloc:` — eagerly create the first block via the
-		// backend-dispatching allocator and record the selector in Arena.backend (field 3)
-		// so later growth (arena_alloc) and teardown (arena_free) keep using malloc.
-		// ARENA_REGION_BACKEND_MALLOC == 1 (see arena.elisa).
-		intType := s.g.result.NamedTypes["int"]
-		intLLVMType, lerr := s.g.lowerType(intType)
-		if lerr != nil {
-			return lerr
-		}
-		backendTag := C.LLVMConstInt(intLLVMType, 1, 0)
-		helperType := &semantic.FuncType{Name: "new_region_backend", Params: []semantic.Type{capacityType, intType}, Return: regionRefType}
-		callee, cerr := s.g.ensureFunctionDeclared("new_region_backend", helperType)
-		if cerr != nil {
-			return cerr
-		}
-		llvmFnType, ferr := s.g.lowerFunctionType(helperType)
-		if ferr != nil {
-			return ferr
-		}
-		regionValue = s.buildCall(llvmFnType, callee, []C.LLVMValueRef{capacityValue, backendTag}, "region.init")
-		backendPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 3, cStringFree("region.backend"))
-		C.LLVMBuildStore(s.builder, backendTag, backendPtr)
-	} else {
-		helperType := &semantic.FuncType{Name: "new_region", Params: []semantic.Type{capacityType}, Return: regionRefType}
-		callee, cerr := s.g.ensureFunctionDeclared("new_region", helperType)
-		if cerr != nil {
-			return cerr
-		}
-		llvmFnType, ferr := s.g.lowerFunctionType(helperType)
-		if ferr != nil {
-			return ferr
-		}
-		regionValue = s.buildCall(llvmFnType, callee, []C.LLVMValueRef{capacityValue}, "region.init")
+	// Map the surface `using <strategy>` selector to the runtime ARENA_STRATEGY_* tag. One
+	// eager call to new_region_backend creates the first block from the right source (MALLOC
+	// -> libc, everything else -> mmap), and the tag is recorded in Arena.strategy (field 3)
+	// so growth (arena_alloc/arena_realloc) and teardown (arena_free) honor it. CHAINED (0)
+	// leaves the zero-initialized field untouched.
+	strategyTag := regionStrategyTag(allocator)
+	intType := s.g.result.NamedTypes["int"]
+	intLLVMType, lerr := s.g.lowerType(intType)
+	if lerr != nil {
+		return lerr
+	}
+	strategyConst := C.LLVMConstInt(intLLVMType, C.ulonglong(strategyTag), 0)
+	helperType := &semantic.FuncType{Name: "new_region_backend", Params: []semantic.Type{capacityType, intType}, Return: regionRefType}
+	callee, cerr := s.g.ensureFunctionDeclared("new_region_backend", helperType)
+	if cerr != nil {
+		return cerr
+	}
+	llvmFnType, ferr := s.g.lowerFunctionType(helperType)
+	if ferr != nil {
+		return ferr
+	}
+	regionValue := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{capacityValue, strategyConst}, "region.init")
+	if strategyTag != 0 {
+		strategyPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 3, cStringFree("region.strategy"))
+		C.LLVMBuildStore(s.builder, strategyConst, strategyPtr)
 	}
 	beginPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 0, cStringFree("region.begin"))
 	endPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 1, cStringFree("region.end"))

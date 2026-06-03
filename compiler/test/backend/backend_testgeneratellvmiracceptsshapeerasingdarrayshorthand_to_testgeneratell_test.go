@@ -186,10 +186,12 @@ func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 
 	checks := []string{
 		"%Arena = type { ptr, ptr, i64, i64 }",
-		"declare ptr @new_region(i64)",
+		"declare ptr @new_region_backend(i64, i64)",
 		"declare ptr @arena_alloc(ptr, i64)",
 		"declare void @arena_free(ptr)",
-		"call ptr @new_region(i64 1024)",
+		// Every region lowers through the strategy-dispatching allocator; a plain
+		// region passes ARENA_STRATEGY_CHAINED (0), which new_region_backend routes to new_region.
+		"call ptr @new_region_backend(i64 1024, i64 0)",
 		"call ptr @arena_alloc(ptr",
 		"call void @arena_free(ptr",
 	}
