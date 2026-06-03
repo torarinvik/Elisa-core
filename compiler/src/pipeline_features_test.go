@@ -254,7 +254,7 @@ func TestRunCLICompilesRegionOwnedStructFixture(t *testing.T) {
 func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "region_owned_struct_ast.elisa")
-	src := "struct Expr[region owner]:\n    next: Expr&? @owner\n\nstruct Explicit[region arena]:\n    next: arena Explicit&?\n\nlayout soa struct Rows[region owner]:\n    value: i64\n"
+	src := "struct Expr[region owner]:\n    next: Expr&? @owner\n\nstruct Explicit[region arena]:\n    next: Explicit&? @arena\n\nlayout soa struct Rows[region owner]:\n    value: i64\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write region-owned AST fixture: %v", err)
 	}

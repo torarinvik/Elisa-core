@@ -210,7 +210,7 @@ func TestAnalyzeStructRegionOwnerScope(t *testing.T) {
 	right: Expr&? @owner
 
 struct Explicit[region arena]:
-	next: arena Explicit&?
+	next: Explicit&? @arena
 `)
 	expr := result.NamedTypes["Expr"].(*StructType)
 	if len(expr.RegionParams) != 1 || expr.RegionParams[0] != "owner" || expr.RegionOwner != "" {

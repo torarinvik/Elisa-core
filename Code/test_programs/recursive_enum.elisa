@@ -13,9 +13,9 @@ def make_sum() -> int:
 	region scratch(1024)
 	one_value: Expr = Expr.Int(1)
 	two_value: Expr = Expr.Int(2)
-	one: scratch Expr& = new[scratch] one_value
-	two: scratch Expr& = new[scratch] two_value
-	tree: scratch Expr& = new[scratch] Expr.Add(one.cast[Expr&], two.cast[Expr&])
+	one: Expr& @scratch = new[scratch] one_value
+	two: Expr& @scratch = new[scratch] two_value
+	tree: Expr& @scratch = new[scratch] Expr.Add(one.cast[Expr&], two.cast[Expr&])
 	out: int = eval(tree.cast[Expr&])
 	destroy scratch
 	return out

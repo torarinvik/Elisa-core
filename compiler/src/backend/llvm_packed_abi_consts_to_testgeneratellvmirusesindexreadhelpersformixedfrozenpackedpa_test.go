@@ -569,7 +569,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenPackedPayloadMatchInInd
 def fold_frozen_mixed() -> int:
 	region scratch(256u)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: i32& @scratch = new[scratch] 7i32
 	node: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match node in frozen:

@@ -23,7 +23,7 @@ extern wrap_indexed_node(node: Expr) -> BoxHolder
 def inspect(owner: Arena) -> int:
 	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
-	local_ref: scratch i32& = new[scratch] 7
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	wrapped: BoxHolder = wrap_indexed_node(node)
@@ -85,7 +85,7 @@ func TestAnalyzePreservesOptimizationFactsThroughAllocatedFieldProjectionExpress
 
 def inspect(buf: array[i32, 4]) -> int:
 	region scratch(1024)
-	boxed: scratch Views& = new[scratch] Views(buf[0:2], buf[2:4])
+	boxed: Views& @scratch = new[scratch] Views(buf[0:2], buf[2:4])
 	left_alloc: view[i32] = boxed.left
 	right_alloc: view[i32] = boxed.right
 	return 0
@@ -126,7 +126,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	boxed: scratch Box& = new[scratch] Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))
+	boxed: Box& @scratch = new[scratch] Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	move boxed.node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
@@ -245,7 +245,7 @@ def inspect(owner: Arena) -> int:
 	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
-	local_ref: scratch i32& = new[scratch] 7
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	items: array[Expr, 2] = [node, held]
 	frozen: Expr.Store[Frozen] = freeze(move store)

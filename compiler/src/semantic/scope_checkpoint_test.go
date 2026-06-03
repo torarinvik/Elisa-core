@@ -60,7 +60,7 @@ func TestAnalyzeInvalidatedRegionRefDiagnosticUsesFactVocabulary(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_fact_invalidated_use.elisa", `def build(seed: i32) -> i32:
     region scratch(1024)
     mark scratch as cp
-    value: scratch i32& = new[scratch] seed
+    value: i32& @scratch = new[scratch] seed
     restore scratch from cp
     return value[0u]
 `)

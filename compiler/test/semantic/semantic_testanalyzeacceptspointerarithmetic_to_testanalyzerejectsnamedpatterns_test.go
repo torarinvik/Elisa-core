@@ -31,34 +31,34 @@ func TestAnalyzeAcceptsManualRegions(t *testing.T) {
 func TestAnalyzeAcceptsExplicitRegionQualifiedRefs(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
 	region scratch(1024)
-	value: scratch i32& = new[scratch] seed + 1
-	alias: scratch i32& = value
+	value: i32& @scratch = new[scratch] seed + 1
+	alias: i32& @scratch = value
 	return value[0] + alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_explicit_ref_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExplicitRegionParamsOnFunctions(t *testing.T) {
-	src := `def id[T, region r](value: r T&) -> r T&:
-	alias: r T& = value
+	src := `def id[T, region r](value: T& @r) -> T& @r:
+	alias: T& @r = value
 	return alias
 
 def use(seed: i32) -> i32:
 	region scratch(1024)
-	value: scratch i32& = new[scratch] seed + 1
-	alias: scratch i32& = id(value)
+	value: i32& @scratch = new[scratch] seed + 1
+	alias: i32& @scratch = id(value)
 	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "function_region_params_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExplicitRegionParamsOnExternFunctions(t *testing.T) {
-	src := `extern borrow[region r](value: r i32&) -> r i32&
+	src := `extern borrow[region r](value: i32& @r) -> i32& @r
 
 def use(seed: i32) -> i32:
 	region scratch(1024)
-	value: scratch i32& = new[scratch] seed + 1
-	alias: scratch i32& = borrow(value)
+	value: i32& @scratch = new[scratch] seed + 1
+	alias: i32& @scratch = borrow(value)
 	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "extern_function_region_params_ok.elisa", src)
@@ -376,7 +376,7 @@ func TestAnalyzeAcceptsRegionSuffixOnReference(t *testing.T) {
 }
 
 func TestAnalyzeRejectsCallsWhenRegionParamCannotBeInferred(t *testing.T) {
-	src := `def id[region r](value: r i32&) -> r i32&:
+	src := `def id[region r](value: i32& @r) -> i32& @r:
 	return value
 
 def use(value: i32&) -> i32&:
@@ -394,8 +394,8 @@ func TestAnalyzeRejectsMismatchedRegionQualifiedRefs(t *testing.T) {
 	src := `def bad() -> i32:
 	region left(1024)
 	region right(1024)
-	value: left i32& = new[left] 1
-	other: right i32& = value
+	value: i32& @left = new[left] 1
+	other: i32& @right = value
 	return other[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_mismatched_ref_reject.elisa", src)
@@ -408,7 +408,7 @@ func TestAnalyzeRejectsMismatchedRegionQualifiedRefs(t *testing.T) {
 }
 func TestAnalyzeRejectsUnknownRegionQualifiedRef(t *testing.T) {
 	src := `def bad() -> void:
-	value: scratch i32&? = null
+	value: i32&? @scratch = null
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_unknown_ref_qualifier_reject.elisa", src)
 	if len(errs) == 0 {

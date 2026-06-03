@@ -440,7 +440,7 @@ packed enum Expr:
 
 def build_region(seed: i32) -> i32:
 	region scratch(1024)
-	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
+	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch](null, seed)
 	out: i32 = first.value
 	destroy scratch
 	return out
@@ -495,7 +495,7 @@ func TestAnalyzeFunctionAnalysisRecordsRegionInvalidateTransforms(t *testing.T) 
 	result := analyzeFunctionAnalysisTestSource(t, "region_invalidate_fact_transforms.elisa", `def checkpoint_demo(seed: i32) -> i32:
 	region scratch(1024)
 	mark scratch as cp
-	temp: scratch i32& = new[scratch] seed + 1
+	temp: i32& @scratch = new[scratch] seed + 1
 	restore scratch from cp
 	reset scratch
 	destroy scratch
@@ -549,8 +549,8 @@ func TestAnalyzeFunctionAnalysisRecordsAliasClassTransforms(t *testing.T) {
 
 def alias_region_ref(seed: i32) -> i32:
 	region scratch(1024)
-	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
-	alias: mutable scratch RegionNode[scratch]& = first
+	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch](null, seed)
+	alias: mutable RegionNode[scratch]& @scratch = first
 	out: i32 = alias.value
 	destroy scratch
 	return out
@@ -573,8 +573,8 @@ func TestAnalyzeFunctionAnalysisRecordsAliasClassMutationTransforms(t *testing.T
 
 def alias_region_mutation(seed: i32) -> i32:
 	region scratch(1024)
-	first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
-	alias: mutable scratch RegionNode[scratch]& = first
+	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch](null, seed)
+	alias: mutable RegionNode[scratch]& @scratch = first
 	alias.value <- alias.value + 1
 	out: i32 = first.value
 	destroy scratch

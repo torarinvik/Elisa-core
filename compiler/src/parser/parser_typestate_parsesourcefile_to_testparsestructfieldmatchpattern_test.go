@@ -133,8 +133,8 @@ layout soa struct ParticleRows:
 
 func TestParseStructRegionOwnerForms(t *testing.T) {
 	file, errs := parseSourceFile(t, `struct Expr[region owner]:
-	left: owner Expr&?
-	right: owner Expr&?
+	left: Expr&? @owner
+	right: Expr&? @owner
 
 layout soa struct SymbolRows[region owner]:
 	name_id: NameId

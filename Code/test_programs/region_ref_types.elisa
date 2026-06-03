@@ -5,9 +5,9 @@ struct RegionNode[region owner]:
 
 def region_ref_sum(seed: i32) -> i32:
     region scratch(1024)
-    first: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](null, seed)
-    second: scratch RegionNode[scratch]& = new[scratch] RegionNode[scratch](first.cast[scratch RegionNode&?], seed + 1)
-    alias: scratch RegionNode[scratch]& = second
+    first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch](null, seed)
+    second: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch](first.cast[RegionNode&? @scratch], seed + 1)
+    alias: RegionNode[scratch]& @scratch = second
     out: i32 = first.value + alias.value
     destroy scratch
     return out

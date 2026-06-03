@@ -127,8 +127,8 @@ func TestAnalyzeRecordsAliasPartitionsAndGuardedCFGEdges(t *testing.T) {
 
 def alias_flow(seed: i32, box: heap Box&?) -> i32:
 	region scratch(1024)
-	left: mutable scratch i32& = new[scratch] seed
-	alias: mutable scratch i32& = left
+	left: mutable i32& @scratch = new[scratch] seed
+	alias: mutable i32& @scratch = left
 	alias[0] <- seed
 	if box == null:
 		return left[0]

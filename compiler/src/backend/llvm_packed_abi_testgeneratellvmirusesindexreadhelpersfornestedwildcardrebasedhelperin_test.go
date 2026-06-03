@@ -30,7 +30,7 @@ extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrap
 def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
 	region scratch(256u)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: i32& @scratch = new[scratch] 7i32
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
 	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)

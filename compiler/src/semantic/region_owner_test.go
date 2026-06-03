@@ -30,7 +30,7 @@ func TestNonScopedRegionDestroyedIsClean(t *testing.T) {
 func TestScopedRegionAutoDischarges(t *testing.T) {
 	analyzeTreeTestSource(t, "region_scoped.elisa", `def f() -> void:
     region scratch(64):
-        x: scratch i32& = new[scratch] 5
+        x: i32& @scratch = new[scratch] 5
         _ = x
 `)
 }
@@ -73,7 +73,7 @@ func TestClosureCapturingRegionDepRejectedAfterDestroy(t *testing.T) {
 
 def f(seed: i32) -> i32:
     region r(64)
-    first: r RegionNode[r]& = new[r] RegionNode[r](null, seed)
+    first: RegionNode[r]& @r = new[r] RegionNode[r](null, seed)
     g: func() -> i32 = lambda () => first.value
     destroy r
     return g()
@@ -91,7 +91,7 @@ func TestClosureCapturingRegionDepCleanBeforeDestroy(t *testing.T) {
 
 def f(seed: i32) -> i32:
     region r(64)
-    first: r RegionNode[r]& = new[r] RegionNode[r](null, seed)
+    first: RegionNode[r]& @r = new[r] RegionNode[r](null, seed)
     g: func() -> i32 = lambda () => first.value
     out: i32 = g()
     destroy r
@@ -155,7 +155,7 @@ func TestLinearValueCannotBeAllocatedIntoRegion(t *testing.T) {
 
 def f() -> void:
     region r(64)
-    g: r Guard& = new[r] Guard(true)
+    g: Guard& @r = new[r] Guard(true)
     _ = g
     destroy r
 `)

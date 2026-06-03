@@ -270,7 +270,7 @@ def inspect(owner: Arena) -> int:
 	box: Box = wrap_node(node)
 	items: array[Box, 1] = [box]
 	before_freeze: Expr = node
-	local_ref: scratch i32& = new[scratch] 7
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	held_before_freeze: Expr = held
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -449,7 +449,7 @@ def inspect(owner: Arena) -> int error[ProbeError]:
 	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
-	local_ref: scratch i32& = new[scratch] 7
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	held_after_freeze: Expr = held

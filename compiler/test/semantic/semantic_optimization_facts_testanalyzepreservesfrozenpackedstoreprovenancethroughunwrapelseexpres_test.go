@@ -12,7 +12,7 @@ def inspect(owner: Arena) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	other: Expr = new[store] Expr.Int(value: 2)
-	local_ref: scratch i32& = new[scratch] 7
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	node_after_freeze: Expr = node
@@ -91,7 +91,7 @@ def inspect(owner: Arena, pick_left: bool) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	left_node: Expr = new[store] Expr.Int(value: 1)
 	right_node: Expr = new[store] Expr.Int(value: 2)
-	local_ref: scratch i32& = new[scratch] 7
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	left_after_freeze: Expr = left_node
@@ -313,7 +313,7 @@ func TestAnalyzePreservesMixedFrozenPackedStoreDepsThroughPackedMatchBinders(t *
 def inspect(owner: Arena) -> int:
 	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
-	local_ref: scratch i32& = new[scratch] 7
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	frozen: Expr.Store[Frozen] = freeze(move store)

@@ -420,10 +420,12 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		return ast.RefStorageStatic, true, tok.Text, ""
 	default:
 		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "effects" && p.tokens[p.pos+1].Text != "ensures" {
-			// The legacy `<ident> T&` prefix is a region prefix (`scratch i32&`),
-			// equivalent to the canonical `i32& @r` surface (docs/68 §7). The ident
-			// names the region.
+			// The legacy `<ident> T&` region prefix is removed (docs/68 §7): use the
+			// canonical `T& @r` suffix. Now that refstorage params are gone this prefix is
+			// unambiguously a region, so we can reject it. Recover by treating the ident as
+			// the region so the remainder of the type still parses and only this surfaces.
 			name := p.advance().Text
+			p.errorf("region prefix `%s` on a reference is no longer supported; use the `@%s` suffix instead (e.g. `T& @%s`)", name, name, name)
 			return ast.RefStorageAny, true, name, name
 		}
 		return ast.RefStorageAny, false, "", ""
