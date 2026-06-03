@@ -191,8 +191,14 @@ PLANNED (in priority order):
    `def Type(...)` constructors — defining a custom ctor no longer shadows `Type(a, b)`
    (analyzeInitHookStructConstructor returns "not handled" on no overload match and
    falls back to all-fields construction). `Type{…}` remains the named default.
-3. `.`/`::` split + dot-notation type args.
-4. Modularize the stdlib, then drop `@method`.
+3. `.`/`::` split + dot-notation type args. DONE. Dot-notation now accepts explicit
+   type args (`recv.method[T](args)`). For the `.`/`::` split: the codebase already
+   uses `::` overwhelmingly (~5.6k uses) and dotted qualified types ~never (~2), so
+   rather than a breaking deprecation of `Geo.Point`, `Foo.bar`/`Foo.bar()` on a
+   namespace now gives a clear "use `Foo::bar`" diagnostic instead of "undefined
+   identifier Foo". `.` = value members, `::` = namespaces.
+4. Modularize the stdlib, then drop `@method`. (Still pending — the only remaining
+   item; `@method` removal is blocked on this.)
 
 ## Known inconsistencies (audit — keep as the regression checklist)
 
