@@ -105,3 +105,99 @@ The symbol-index that motivated this (O(1) export lookup in the loader) does **n
 need the module system: it can use a contained darray-based open-addressing hash inside
 module.elisa (no stdlib `dict`, no compiler change). The module system is the strategic
 fix for library composition generally; the boot-speed win should not wait on it.
+
+---
+
+# Language smoothing: the agreed model (supersedes the staging above where they conflict)
+
+Goal: remove confusing flexibility — fewer, orthogonal rules. The driving principle is
+that several distinct concerns kept getting fused; each gets exactly one mechanism.
+
+## Three orthogonal axes (never fuse them)
+
+1. **Physical / files** — `import "path"` compiles a file's text into the program.
+   Dedup'd, cycle-checked (the existing textual include). A file may declare zero, one,
+   or many `module` blocks; bare top-level decls go global. **Files are pure packaging.**
+   You never "import names from a file."
+2. **Elision / qualifier removal** — `using` operates on **logical modules** (which are
+   file-independent; a module may span files). `using Geo` brings ALL of Geo's public
+   names unqualified (this is the "import *"); `using Geo::{Point, distance}` brings
+   SELECTED names. Anything not elided is still reachable as `Geo::name`. Elision ≠ hiding.
+3. **Encapsulation / hiding** — `private`/`public` inside `module` (already enforced
+   cross-namespace via `canAccessPrivateName`). The only hiding mechanism, author-side.
+
+Rejected: `from "../file.elisa" import X` (and `include … as file1` then `from file1 …`)
+— all re-fuse file=module, force per-file boundaries, and reintroduce the directory-as-
+identity pain. Because selection is **module-based**, file-loading never needs file
+boundaries, so this whole model ships WITHOUT the parse-per-file rewrite (gap 1 above is
+sidestepped for imports; it remains only if file-level `module` sugar is ever wanted).
+
+## Qualified access: `::` vs `.`
+
+- `::` → every namespace/module path, for types AND call callees: `Geo::Point`,
+  `Module::func(x)`, `Module::CONST`.
+- `.` → only value member access: fields and in-scope UFCS methods (`p.x`, `value.m()`).
+- A function from an UNIMPORTED module is callable only qualified-and-free
+  (`Module::doThing(x)`), never `value.Module::doThing()`. To get method syntax, import
+  it. Deprecate `.` as a qualified-name separator (today both `.`/`::` are accepted).
+
+## Construction: one rule each
+
+- `Type{ field: v, … }` — the default constructor. Always available; named fields; all
+  required unless a field has a default; no positional brace form. (Verified semantics.)
+- `def Type(…) -> Type` — custom/overloaded constructors (ordinary functions sharing the
+  type's name; overload by first-arg). A 1-arg `Type(x)` is just the conversion form (a
+  cast is a single-arg constructor: `x.u64()` ≡ `u64(x)`).
+- `__init__` and `@init` are REMOVED (consolidated to the above). In-place initializers
+  (`self: mutable T&`) are a separate future feature, if ever needed — not `__init__`.
+
+## UFCS / calls
+
+- Uniform call syntax: a free `def f(self: T&, …)` is callable as both `f(x)` and `x.f()`.
+- `x.Name()` ≡ `Name(x)` (type ⇒ constructor/cast, else function). DONE.
+- Free-call overload resolution by first-arg type. DONE.
+- Primitive receivers, incl. bare integer literals (`7.inc()`). DONE.
+- Dot-notation should accept explicit type args (`value.m[T](…)`). PLANNED.
+- `@method` to be REMOVED (every in-scope function is dot-callable; nothing should force
+  dot-only). **BLOCKED**: the stdlib (collections/names/heap/builders) relies on `@method`
+  to keep short method names (`builder`, `push`, `finish`, `value`, …) out of global scope
+  so they don't collide with the same words used as parameters. Removing `@method` must
+  therefore wait until those methods live in `module` blocks (then accessed via `using`).
+  Ordering: modularize the stdlib first, then drop `@method`.
+
+## Implementation status (this effort)
+
+DONE (compiler):
+- `x.Name()` cast/UFCS unification; free-call overload resolution; string-literal `cstr`
+  receivers; selective import `from Module import name` (will be re-spelled `using
+  Module::{…}` per the model above); removed `__init__`/`@init` (kept `def Type()` sugar);
+  primitive/integer-literal receivers. Full `go test ./src/...` green; emulator
+  real-self-loader 5/5; CUSA boot SIGSEGV unchanged.
+
+PLANNED (in priority order):
+1. **Resolver unification** (the highest-leverage structural fix). Today name/type
+   resolution is re-derived independently by the analyzer, the LLVM backend
+   (`resolveTypeExpr`, bare-name only), and the tree-walking interpreter (`lookupValue`,
+   no namespace/using/import). Consequence: a namespaced/imported TYPE resolves in
+   analysis + signatures but FAILS at codegen as a bare local annotation / struct literal
+   ("unknown type"); the interpreter can't resolve namespaced names at all. Fix: the
+   analyzer records the resolved target (qualified name / symbol / type) on the node, and
+   the backend + interpreter CONSUME it instead of re-resolving. This unblocks modules
+   end-to-end.
+2. Construction model: make `Type{…}` the always-available default and `Type(…)` the
+   custom-constructor form (fold the implicit all-fields positional into the overload set
+   so a custom ctor doesn't shadow it). Mechanical call-site migration.
+3. `.`/`::` split + dot-notation type args.
+4. Modularize the stdlib, then drop `@method`.
+
+## Known inconsistencies (audit — keep as the regression checklist)
+
+- **Resolver divergence** (HIGH): interpreter ignores namespaces/using/import; backend
+  re-resolves type names by bare name. Namespaced types half-usable until item 1 above.
+- **`.` vs `::`** (MED): `Module::f()` works, `Module.f()` doesn't (dot parses as value
+  field access); yet `Geo.Point` (dot) works for types. Unify per the `.`/`::` rule above.
+- **Construction overlap** (MED): declaring any `def Type()` shadows the implicit
+  all-fields positional `Type(a,b)` ("no matching __init__"); 1-arg vs multi-arg take
+  different paths; brace is named-only. Fixed by item 2.
+- **Diagnostics** (LOW): cryptic resolver-order errors; runtime numeric-suffix warning
+  leak (separate spawned fix).
