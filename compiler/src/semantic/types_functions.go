@@ -125,8 +125,6 @@ func (t *FuncType) String() string {
 			switch param.Kind {
 			case ast.GenericParamRefStorage:
 				generics = append(generics, "refstorage "+param.Name)
-			case ast.GenericParamRefState:
-				generics = append(generics, "refstate "+param.Name)
 			default:
 				if param.InterfaceBound != "" {
 					generics = append(generics, param.Name+": "+param.InterfaceBound)
@@ -141,9 +139,6 @@ func (t *FuncType) String() string {
 		}
 		for _, param := range t.RefStorageParams {
 			generics = append(generics, "refstorage "+param)
-		}
-		for _, param := range t.RefStateParams {
-			generics = append(generics, "refstate "+param)
 		}
 	}
 	for _, param := range t.RegionParams {

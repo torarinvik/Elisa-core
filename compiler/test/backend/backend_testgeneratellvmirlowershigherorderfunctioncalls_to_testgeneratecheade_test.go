@@ -485,38 +485,6 @@ def use_identity(value: i32) -> i32:
 		}
 	}
 }
-func TestGenerateLLVMIRSpecializesRefQualifierGenericFunctions(t *testing.T) {
-	src := `struct Node:
-	value: mutable i32
-
-struct Handle[refstorage Store, refstate State]:
-	ptr: Store Node&[State]
-
-def id_handle[refstorage Store, refstate State](value: Handle[Store, State]) -> Handle[Store, State]:
-	return value
-
-def use_handle(value: Handle[heap, &]) -> heap Node&:
-	kept: Handle[heap, &] = id_handle(value)
-	return kept.ptr
-`
-	result := parseAndAnalyze(t, "backend_ref_qualifier_specialization.elisa", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
-
-	checks := []string{
-		"%Handle__heap__anon = type { ptr }",
-		"define %Handle__heap__anon @id_handle__heap__anon(%Handle__heap__anon",
-		"define ptr @use_handle(%Handle__heap__anon",
-		"call %Handle__heap__anon @id_handle__heap__anon(%Handle__heap__anon",
-	}
-	for _, check := range checks {
-		if !strings.Contains(output, check) {
-			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
-		}
-	}
-}
 func TestGenerateLLVMIRLowersExportWrappers(t *testing.T) {
 	src := `struct Vec[T] layout c:
 	x: mutable T

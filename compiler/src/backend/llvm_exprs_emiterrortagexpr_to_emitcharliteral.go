@@ -718,6 +718,7 @@ func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (C.LLVMValu
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
 	return phi, resultType, nil
 }
+
 // emitGetExpr lowers the `get` prefix (the optional analog of `try`). Three
 // shapes:
 //   - `get arr[i] else <value>`: the value fallback was parsed onto the inner

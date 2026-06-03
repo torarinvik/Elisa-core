@@ -63,8 +63,6 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return nil, fmt.Errorf("type %q expects %d aggregate state arguments, got %d", baseType.String(), count, len(states))
 		}
 		return &semantic.AggregateStateType{Base: baseType, State: states[0], States: states}, nil
-	case *ast.RefStateLiteralTypeExpr:
-		return &semantic.RefStateValueType{State: semantic.RefState(n.State)}, nil
 	case *ast.RefStorageLiteralTypeExpr:
 		return &semantic.RefStorageValueType{Storage: semantic.RefStorage(n.Storage)}, nil
 	case *ast.ErrorSetExpr:
@@ -110,7 +108,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if err != nil {
 			return nil, err
 		}
-		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), StateParam: n.StateParam, Storage: semantic.RefStorage(n.Storage), StorageParam: n.StorageParam, Region: n.Region, ExplicitStorage: n.Explicit}, nil
+		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), Storage: semantic.RefStorage(n.Storage), StorageParam: n.StorageParam, Region: n.Region, ExplicitStorage: n.Explicit}, nil
 	case *ast.FuncTypeExpr:
 		params := make([]semantic.Type, 0, len(n.Params))
 		for _, param := range n.Params {

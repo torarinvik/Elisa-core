@@ -66,11 +66,6 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			return mapped
 		}
 		return t
-	case *semantic.RefStateParamType:
-		if mapped, ok := subst[tt.Name]; ok {
-			return mapped
-		}
-		return t
 	case *semantic.RegionParamType:
 		if mapped, ok := subst[tt.Name]; ok {
 			return mapped
@@ -103,18 +98,6 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			}
 		}
 		state := tt.State
-		stateParam := tt.StateParam
-		if stateParam != "" {
-			if mapped, ok := subst[stateParam]; ok {
-				switch mapped := mapped.(type) {
-				case *semantic.RefStateValueType:
-					state = mapped.State
-					stateParam = ""
-				case *semantic.RefStateParamType:
-					stateParam = mapped.Name
-				}
-			}
-		}
 		storage := tt.Storage
 		storageParam := tt.StorageParam
 		if storageParam != "" {
@@ -128,7 +111,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 				}
 			}
 		}
-		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: tt.ExplicitStorage}
+		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		elem := substituteType(tt.Elem, subst, impls)
 		if tt.ConstParam != "" {
@@ -174,7 +157,6 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			Name:                   tt.Name,
 			TypeParams:             append([]string(nil), tt.TypeParams...),
 			RefStorageParams:       append([]string(nil), tt.RefStorageParams...),
-			RefStateParams:         append([]string(nil), tt.RefStateParams...),
 			RegionParams:           append([]string(nil), tt.RegionParams...),
 			GenericParams:          append([]ast.GenericParam(nil), tt.GenericParams...),
 			ShapeParams:            append([]string(nil), tt.ShapeParams...),

@@ -178,7 +178,6 @@ func LowerProduction(grammarDecl *ast.GrammarDecl, production ast.GrammarProduct
 		Name:             production.Name,
 		TypeParams:       append([]string(nil), grammarDecl.TypeParams...),
 		RefStorageParams: append([]string(nil), grammarDecl.RefStorageParams...),
-		RefStateParams:   append([]string(nil), grammarDecl.RefStateParams...),
 		RegionParams:     append([]string(nil), grammarDecl.RegionParams...),
 		PermissionParams: append([]string(nil), grammarDecl.PermissionParams...),
 		GenericParams:    append([]ast.GenericParam(nil), grammarDecl.GenericParams...),

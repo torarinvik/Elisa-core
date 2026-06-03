@@ -195,7 +195,6 @@ func cloneGrammarDecl(decl *ast.GrammarDecl) *ast.GrammarDecl {
 	cloned := *decl
 	cloned.TypeParams = append([]string(nil), decl.TypeParams...)
 	cloned.RefStorageParams = append([]string(nil), decl.RefStorageParams...)
-	cloned.RefStateParams = append([]string(nil), decl.RefStateParams...)
 	cloned.RegionParams = append([]string(nil), decl.RegionParams...)
 	cloned.PermissionParams = append([]string(nil), decl.PermissionParams...)
 	cloned.GenericParams = append([]ast.GenericParam(nil), decl.GenericParams...)
@@ -227,9 +226,6 @@ func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.Gramm
 	}
 	if len(merged.RefStorageParams) == 0 {
 		merged.RefStorageParams = append([]string(nil), extra.RefStorageParams...)
-	}
-	if len(merged.RefStateParams) == 0 {
-		merged.RefStateParams = append([]string(nil), extra.RefStateParams...)
 	}
 	if len(merged.RegionParams) == 0 {
 		merged.RegionParams = append([]string(nil), extra.RegionParams...)

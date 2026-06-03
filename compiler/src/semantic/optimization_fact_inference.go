@@ -237,7 +237,7 @@ func typeMayCarryRegionProvenanceForOptimization(t Type) bool {
 	switch tt := t.(type) {
 	case nil:
 		return false
-	case *InvalidType, *NeverType, *NullType, *BuiltinType, *RefStorageParamType, *RefStorageValueType, *RefStateParamType, *RefStateValueType, *ErrorSetType, *ConstEnumType, *FuncType, *OpaqueType:
+	case *InvalidType, *NeverType, *NullType, *BuiltinType, *RefStorageParamType, *RefStorageValueType, *ErrorSetType, *ConstEnumType, *FuncType, *OpaqueType:
 		return false
 	case *ErrorUnionType:
 		return typeMayCarryRegionProvenanceForOptimization(tt.Value)

@@ -47,17 +47,7 @@ func AssignableTo(dst, src Type) bool {
 	if _, ok := src.(*RefStorageParamType); ok {
 		return true
 	}
-	if _, ok := dst.(*RefStateParamType); ok {
-		_, ok = src.(*RefStateValueType)
-		return ok
-	}
-	if _, ok := src.(*RefStateParamType); ok {
-		return true
-	}
 	if _, ok := dst.(*RefStorageValueType); ok {
-		return SameType(dst, src)
-	}
-	if _, ok := dst.(*RefStateValueType); ok {
 		return SameType(dst, src)
 	}
 	if SameType(dst, src) {
@@ -148,11 +138,8 @@ func AssignableTo(dst, src Type) bool {
 			if dr.Mutable && !sr.Mutable && dr.State != RefStateNull && sr.State != RefStateNull {
 				return false
 			}
-			if dr.StateParam != "" || sr.StateParam != "" {
-				return dr.StateParam == sr.StateParam && dr.StorageParam == sr.StorageParam && refRegionAssignable(dr.Region, sr.Region)
-			}
 			if dr.StorageParam != "" || sr.StorageParam != "" {
-				return dr.StateParam == sr.StateParam && dr.StorageParam == sr.StorageParam && refStateAssignable(dr.State, sr.State) && refRegionAssignable(dr.Region, sr.Region)
+				return dr.StorageParam == sr.StorageParam && refStateAssignable(dr.State, sr.State) && refRegionAssignable(dr.Region, sr.Region)
 			}
 			return refStateAssignable(dr.State, sr.State) && refStorageAssignable(dr.Storage, sr.Storage, dr.ExplicitStorage, sr.ExplicitStorage) && refRegionAssignable(dr.Region, sr.Region)
 		}

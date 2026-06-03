@@ -70,6 +70,7 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 	}
 	return runLoadedProgramWithOptions(options, program, stdout, stderr)
 }
+
 var frontendTimingEnabled = os.Getenv("ELISACORE_BUILD_TIMING") != ""
 
 func frontendTimingLog(label string, since time.Time) {
@@ -787,8 +788,8 @@ func hasAnnotation(fn *semantic.AnnotatedFunc, annotationName string) bool {
 func ind(level int) string {
 	return strings.Repeat("  ", level)
 }
-func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string) string {
-	parts := make([]string, 0, len(genericParams)+len(typeParams)+len(refStorageParams)+len(refStateParams)+len(regionParams)+len(permissionParams))
+func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, regionParams []string, permissionParams []string) string {
+	parts := make([]string, 0, len(genericParams)+len(typeParams)+len(refStorageParams)+len(regionParams)+len(permissionParams))
 	if len(genericParams) != 0 {
 		seenRegion := map[string]bool{}
 		seenPermission := map[string]bool{}
@@ -796,8 +797,6 @@ func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []stri
 			switch param.Kind {
 			case ast.GenericParamRefStorage:
 				parts = append(parts, "refstorage "+param.Name)
-			case ast.GenericParamRefState:
-				parts = append(parts, "refstate "+param.Name)
 			case ast.GenericParamRegion:
 				seenRegion[param.Name] = true
 				parts = append(parts, "region "+param.Name)
@@ -826,9 +825,6 @@ func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []stri
 		parts = append(parts, typeParams...)
 		for _, name := range refStorageParams {
 			parts = append(parts, "refstorage "+name)
-		}
-		for _, name := range refStateParams {
-			parts = append(parts, "refstate "+name)
 		}
 		for _, name := range regionParams {
 			parts = append(parts, "region "+name)

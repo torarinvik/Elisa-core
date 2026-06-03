@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"elisacore/src/ast"
 )
 
 func (*InvalidType) isType()            {}
@@ -22,8 +20,6 @@ func (*StructStateCaseType) isType()    {}
 func (*StructStateSetType) isType()     {}
 func (*RefStorageParamType) isType()    {}
 func (*RefStorageValueType) isType()    {}
-func (*RefStateParamType) isType()      {}
-func (*RefStateValueType) isType()      {}
 func (*RegionParamType) isType()        {}
 func (*RegionValueType) isType()        {}
 func (*ErrorSetType) isType()           {}
@@ -166,15 +162,6 @@ func (t *RefStorageValueType) String() string {
 		return "<invalid-refstorage>"
 	}
 	return RefStorageName(t.Storage)
-}
-func (t *RefStateParamType) String() string {
-	return t.Name
-}
-func (t *RefStateValueType) String() string {
-	if t == nil {
-		return "<invalid-refstate>"
-	}
-	return ast.RefStateMarker(ast.RefState(t.State))
 }
 func (t *ErrorSetType) String() string { return t.Name }
 func (t *ErrorUnionType) String() string {
@@ -406,9 +393,6 @@ func (t *RefType) String() string {
 		s = t.Region + " " + s
 	} else if t.Storage != RefStorageAny {
 		s = RefStorageName(t.Storage) + " " + s
-	}
-	if t.StateParam != "" {
-		return s + "&[" + t.StateParam + "]"
 	}
 	switch t.State {
 	case RefStateNullable:

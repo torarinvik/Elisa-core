@@ -122,12 +122,6 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 	case *RefStorageValueType:
 		appendKeyTag(b, "refstoragevalue")
 		appendKeyInt(b, int(tt.Storage))
-	case *RefStateParamType:
-		appendKeyTag(b, "refstateparam")
-		appendKeyString(b, tt.Name)
-	case *RefStateValueType:
-		appendKeyTag(b, "refstatevalue")
-		appendKeyInt(b, int(tt.State))
 	case *RegionParamType:
 		appendKeyTag(b, "regionparam")
 		appendKeyString(b, tt.Name)
@@ -162,7 +156,6 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		appendKeyTag(b, "ref")
 		appendKeyBool(b, tt.Mutable)
 		appendKeyInt(b, int(tt.State))
-		appendKeyString(b, tt.StateParam)
 		appendKeyInt(b, int(tt.Storage))
 		appendKeyString(b, tt.StorageParam)
 		appendKeyString(b, tt.Region)
@@ -313,7 +306,6 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		appendGenericParamSlice(b, tt.GenericParams)
 		appendKeyStringSlice(b, tt.TypeParams)
 		appendKeyStringSlice(b, tt.RefStorageParams)
-		appendKeyStringSlice(b, tt.RefStateParams)
 		appendKeyStringSlice(b, tt.RegionParams)
 		appendKeyStringSlice(b, tt.PermissionParams)
 		appendKeyStringSlice(b, tt.UsedPermissionParams)

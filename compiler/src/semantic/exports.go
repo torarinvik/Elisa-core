@@ -98,7 +98,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, lexer.Pos{}, "", nil, nil, nil, decl.Params, nil, nil, nil, nil, nil, decl.ReturnType, false)
+	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, lexer.Pos{}, "", nil, nil, nil, decl.Params, nil, nil, nil, nil, nil, decl.ReturnType, false)
 	if !isCABICompatibleFuncType(signature) {
 		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
 		return
@@ -220,7 +220,6 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		Name:                        specialized.Name,
 		TypeParams:                  nil,
 		RefStorageParams:            nil,
-		RefStateParams:              nil,
 		RegionParams:                append([]string(nil), specialized.RegionParams...),
 		GenericParams:               nil,
 		Permissions:                 append([]string(nil), specialized.Permissions...),
@@ -397,25 +396,8 @@ func substituteExportType(t Type, bindings map[string]Type) Type {
 			return resolved
 		}
 		return tt
-	case *RefStateParamType:
-		if resolved, ok := bindings[tt.Name]; ok {
-			return resolved
-		}
-		return tt
 	case *RefType:
 		state := tt.State
-		stateParam := tt.StateParam
-		if stateParam != "" {
-			if resolved, ok := bindings[stateParam]; ok {
-				switch resolved := resolved.(type) {
-				case *RefStateValueType:
-					state = resolved.State
-					stateParam = ""
-				case *RefStateParamType:
-					stateParam = resolved.Name
-				}
-			}
-		}
 		storage := tt.Storage
 		storageParam := tt.StorageParam
 		if storageParam != "" {
@@ -429,7 +411,7 @@ func substituteExportType(t Type, bindings map[string]Type) Type {
 				}
 			}
 		}
-		return &RefType{Elem: substituteExportType(tt.Elem, bindings), Mutable: tt.Mutable, State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		return &RefType{Elem: substituteExportType(tt.Elem, bindings), Mutable: tt.Mutable, State: state, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *ArrayType:
 		return &ArrayType{Elem: substituteExportType(tt.Elem, bindings), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *GenericInstanceType:

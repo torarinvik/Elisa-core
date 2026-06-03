@@ -29,26 +29,6 @@ def run() -> i64:
 	requireFunctionReturnTypeString(t, result, "wrap", "Box[T]")
 	requireFunctionReturnTypeString(t, result, "run", "i64")
 }
-func TestAnalyzeAcceptsRefQualifierGenericFunctionInference(t *testing.T) {
-	src := `struct Node:
-	value: mutable i32
-
-struct Handle[refstorage Store, refstate State]:
-	ptr: Store Node&[State]
-
-def keep_handle[refstorage Store, refstate State](value: Handle[Store, State]) -> Handle[Store, State]:
-	return value
-
-def unwrap_handle(value: Handle[heap, &]) -> heap Node&:
-	kept: Handle[heap, &] = keep_handle(value)
-	return kept.ptr
-`
-	result, errs := parseAndAnalyze(t, "ref_qualifier_generic_inference.elisa", src)
-	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "keep_handle", "Handle[Store, State]")
-	requireFunctionReturnTypeString(t, result, "unwrap_handle", "heap Node&")
-}
 func TestAnalyzeRejectsSpecializationOfNonGenericFunction(t *testing.T) {
 	src := `def id(value: i64) -> i64:
     return value

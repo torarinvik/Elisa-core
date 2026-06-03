@@ -268,7 +268,7 @@ func backendImplicitCallLikeRefUpcastType(expected *semantic.RefType, actual sem
 	if !ok || actualRef == nil {
 		return nil, false
 	}
-	if expected.StateParam != "" || expected.StorageParam != "" || actualRef.StateParam != "" || actualRef.StorageParam != "" {
+	if expected.StorageParam != "" || actualRef.StorageParam != "" {
 		return nil, false
 	}
 	if expected.Storage != semantic.RefStorageAny || actualRef.Storage == semantic.RefStorageAny {

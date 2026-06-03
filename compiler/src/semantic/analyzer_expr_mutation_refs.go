@@ -29,14 +29,14 @@ func containsTypeParam(t Type) bool {
 		return true
 	case *IDType:
 		return containsTypeParam(n.Tag) || containsTypeParam(n.Storage)
-	case *RefStorageParamType, *RefStateParamType:
+	case *RefStorageParamType:
 		return true
 	case *ErrorUnionType:
 		return containsTypeParam(n.Value)
 	case *OptionalType:
 		return containsTypeParam(n.Value)
 	case *RefType:
-		return n.StateParam != "" || n.StorageParam != "" || containsTypeParam(n.Elem)
+		return n.StorageParam != "" || containsTypeParam(n.Elem)
 	case *ArrayType:
 		return containsTypeParam(n.Elem)
 	case *DArrayType:
@@ -62,7 +62,7 @@ func containsTypeParam(t Type) bool {
 	case *AggregateStateType:
 		return containsTypeParam(n.Base)
 	case *FuncType:
-		if len(n.RefStorageParams) != 0 || len(n.RefStateParams) != 0 || len(n.GenericParams) != 0 {
+		if len(n.RefStorageParams) != 0 || len(n.GenericParams) != 0 {
 			return true
 		}
 		for _, param := range n.Params {

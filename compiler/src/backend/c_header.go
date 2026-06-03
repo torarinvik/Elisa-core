@@ -338,25 +338,8 @@ func substituteHeaderType(t semantic.Type, bindings map[string]semantic.Type) se
 			return bound
 		}
 		return tt
-	case *semantic.RefStateParamType:
-		if bound, ok := bindings[tt.Name]; ok {
-			return bound
-		}
-		return tt
 	case *semantic.RefType:
 		state := tt.State
-		stateParam := tt.StateParam
-		if stateParam != "" {
-			if bound, ok := bindings[stateParam]; ok {
-				switch bound := bound.(type) {
-				case *semantic.RefStateValueType:
-					state = bound.State
-					stateParam = ""
-				case *semantic.RefStateParamType:
-					stateParam = bound.Name
-				}
-			}
-		}
 		storage := tt.Storage
 		storageParam := tt.StorageParam
 		if storageParam != "" {
@@ -370,7 +353,7 @@ func substituteHeaderType(t semantic.Type, bindings map[string]semantic.Type) se
 				}
 			}
 		}
-		return &semantic.RefType{Elem: substituteHeaderType(tt.Elem, bindings), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		return &semantic.RefType{Elem: substituteHeaderType(tt.Elem, bindings), State: state, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		return &semantic.ArrayType{Elem: substituteHeaderType(tt.Elem, bindings), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.GenericInstanceType:

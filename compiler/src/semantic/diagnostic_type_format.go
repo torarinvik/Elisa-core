@@ -86,9 +86,6 @@ func diagnosticTypeString(t Type) string {
 		} else if tt.Storage != RefStorageAny {
 			s = RefStorageName(tt.Storage) + " " + s
 		}
-		if tt.StateParam != "" {
-			return s + "&[" + tt.StateParam + "]"
-		}
 		switch tt.State {
 		case RefStateNullable:
 			return s + "&?"
@@ -219,8 +216,6 @@ func diagnosticTypeString(t Type) string {
 				switch param.Kind {
 				case ast.GenericParamRefStorage:
 					generics = append(generics, "refstorage "+param.Name)
-				case ast.GenericParamRefState:
-					generics = append(generics, "refstate "+param.Name)
 				default:
 					if param.InterfaceBound != "" {
 						generics = append(generics, param.Name+": "+param.InterfaceBound)
@@ -235,9 +230,6 @@ func diagnosticTypeString(t Type) string {
 			}
 			for _, param := range tt.RefStorageParams {
 				generics = append(generics, "refstorage "+param)
-			}
-			for _, param := range tt.RefStateParams {
-				generics = append(generics, "refstate "+param)
 			}
 		}
 		for _, param := range tt.RegionParams {

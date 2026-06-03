@@ -60,8 +60,6 @@ func DefaultNamedStateType(t Type) Type {
 			args[i] = &RegionParamType{Name: param.Name}
 		case ast.GenericParamRefStorage:
 			args[i] = &RefStorageParamType{Name: param.Name}
-		case ast.GenericParamRefState:
-			args[i] = &RefStateParamType{Name: param.Name}
 		case ast.GenericParamState:
 			args[i] = fullNamedStateType(base)
 		case ast.GenericParamValue:

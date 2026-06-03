@@ -137,12 +137,6 @@ func SameType(a, b Type) bool {
 	case *RefStorageValueType:
 		tb, ok := b.(*RefStorageValueType)
 		return ok && ta.Storage == tb.Storage
-	case *RefStateParamType:
-		tb, ok := b.(*RefStateParamType)
-		return ok && ta.Name == tb.Name
-	case *RefStateValueType:
-		tb, ok := b.(*RefStateValueType)
-		return ok && ta.State == tb.State
 	case *RegionParamType:
 		tb, ok := b.(*RegionParamType)
 		return ok && ta.Name == tb.Name
@@ -176,7 +170,7 @@ func SameType(a, b Type) bool {
 		return ok && ta.Name == tb.Name
 	case *RefType:
 		tb, ok := b.(*RefType)
-		return ok && ta.Mutable == tb.Mutable && ta.State == tb.State && ta.StateParam == tb.StateParam && ta.Storage == tb.Storage && ta.StorageParam == tb.StorageParam && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
+		return ok && ta.Mutable == tb.Mutable && ta.State == tb.State && ta.Storage == tb.Storage && ta.StorageParam == tb.StorageParam && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
 	case *ArrayType:
 		tb, ok := b.(*ArrayType)
 		return ok && arraySizesEqual(ta, tb) && SameType(ta.Elem, tb.Elem)
@@ -262,7 +256,7 @@ func SameType(a, b Type) bool {
 		return ok && sameAggregateStateLists(aggregateStateStates(ta), aggregateStateStates(tb)) && SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
-		if !ok || ta.Variadic != tb.Variadic || funcTypeExplicitParamCount(ta) != funcTypeExplicitParamCount(tb) || len(ta.ExplicitParamNames) != len(tb.ExplicitParamNames) || len(ta.ImplicitParamNames) != len(tb.ImplicitParamNames) || len(ta.GenericParams) != len(tb.GenericParams) || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RefStorageParams) != len(tb.RefStorageParams) || len(ta.RefStateParams) != len(tb.RefStateParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.PermissionParams) != len(tb.PermissionParams) || len(ta.UsedPermissionParams) != len(tb.UsedPermissionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
+		if !ok || ta.Variadic != tb.Variadic || funcTypeExplicitParamCount(ta) != funcTypeExplicitParamCount(tb) || len(ta.ExplicitParamNames) != len(tb.ExplicitParamNames) || len(ta.ImplicitParamNames) != len(tb.ImplicitParamNames) || len(ta.GenericParams) != len(tb.GenericParams) || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RefStorageParams) != len(tb.RefStorageParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.PermissionParams) != len(tb.PermissionParams) || len(ta.UsedPermissionParams) != len(tb.UsedPermissionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
 			return false
 		}
 		for i := range ta.ExplicitParamNames {
@@ -287,11 +281,6 @@ func SameType(a, b Type) bool {
 		}
 		for i := range ta.RefStorageParams {
 			if ta.RefStorageParams[i] != tb.RefStorageParams[i] {
-				return false
-			}
-		}
-		for i := range ta.RefStateParams {
-			if ta.RefStateParams[i] != tb.RefStateParams[i] {
 				return false
 			}
 		}

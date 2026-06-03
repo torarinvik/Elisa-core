@@ -141,6 +141,7 @@ func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) seman
 	}
 	return s.exprType(expr.Value)
 }
+
 // backendOptionalBindBoundType mirrors the analyzer's optionalBindBoundType: a
 // slice operand (`if let s = arr[a:b]:`) binds the bounded view, so its slot is
 // allocated with the view type; other operands use the optional/nullable unwrap.

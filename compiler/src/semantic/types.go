@@ -109,14 +109,6 @@ type RefStorageValueType struct {
 	Storage RefStorage
 }
 
-type RefStateParamType struct {
-	Name string
-}
-
-type RefStateValueType struct {
-	State RefState
-}
-
 type RegionParamType struct {
 	Name string
 }
@@ -221,7 +213,6 @@ type RefType struct {
 	Elem            Type
 	Mutable         bool
 	State           RefState
-	StateParam      string
 	Storage         RefStorage
 	StorageParam    string
 	Region          string
@@ -467,7 +458,6 @@ type StructType struct {
 	Usings           []string
 	TypeParams       []string
 	RefStorageParams []string
-	RefStateParams   []string
 	RegionParams     []string
 	RegionOwner      string
 	GenericParams    []ast.GenericParam
@@ -479,21 +469,21 @@ type StructType struct {
 	// Droppable: `affine` (use-at-most-once, may be dropped) vs `linear`
 	// (use-exactly-once, must-consume). Only meaningful when Affine is true;
 	// defaults false so a propagation gap is over-strict (linear), never unsound.
-	Droppable bool
-	ReprC     bool
-	Layout           ast.StructLayoutMode
-	PackedLayout     bool
-	HasPackedGroups  bool
-	Alignment        int
-	HasAlignment     bool
-	CBindHeader      string
-	CBindName        string
-	CBindPrefix      bool
-	Decl             *ast.StructDecl
-	StoreDecl        *ast.StoreDecl
-	Store            bool
-	StoreFieldOrder  []string
-	Builtin          bool
+	Droppable       bool
+	ReprC           bool
+	Layout          ast.StructLayoutMode
+	PackedLayout    bool
+	HasPackedGroups bool
+	Alignment       int
+	HasAlignment    bool
+	CBindHeader     string
+	CBindName       string
+	CBindPrefix     bool
+	Decl            *ast.StructDecl
+	StoreDecl       *ast.StoreDecl
+	Store           bool
+	StoreFieldOrder []string
+	Builtin         bool
 }
 
 type OpaqueType struct {
@@ -586,7 +576,6 @@ type FuncType struct {
 	Name                         string
 	TypeParams                   []string
 	RefStorageParams             []string
-	RefStateParams               []string
 	RegionParams                 []string
 	PermissionParams             []string
 	GenericParams                []ast.GenericParam

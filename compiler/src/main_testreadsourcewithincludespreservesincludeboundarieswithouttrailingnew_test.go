@@ -79,6 +79,7 @@ func TestReadSourceWithIncludesAcceptsBareIncludeDirective(t *testing.T) {
 		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
 	}
 }
+
 // An absolute include path must be honored verbatim, not joined onto the
 // including file's directory. Regression guard: filepath.Join does not treat an
 // absolute second arg as absolute (it concatenates), which previously made

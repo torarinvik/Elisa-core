@@ -144,7 +144,6 @@ type GrammarDecl struct {
 	Name                   string
 	TypeParams             []string
 	RefStorageParams       []string
-	RefStateParams         []string
 	RegionParams           []string
 	PermissionParams       []string
 	GenericParams          []GenericParam
@@ -613,7 +612,6 @@ type StructDecl struct {
 	Name             string
 	TypeParams       []string
 	RefStorageParams []string
-	RefStateParams   []string
 	RegionParams     []string
 	RegionOwner      string
 	GenericParams    []GenericParam
@@ -627,6 +625,6 @@ type StructDecl struct {
 	// Affine is true; defaults false so a plain `linear` type is must-consume.
 	Droppable bool
 	ReprC     bool
-	Layout           StructLayoutMode
-	Fields           []FieldDecl
+	Layout    StructLayoutMode
+	Fields    []FieldDecl
 }

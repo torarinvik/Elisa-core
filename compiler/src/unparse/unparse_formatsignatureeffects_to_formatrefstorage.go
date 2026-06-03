@@ -305,10 +305,6 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 			suffix = "&?"
 		case ast.RefStateNull:
 			suffix = "!"
-		default:
-			if n.StateParam != "" {
-				suffix = "&[" + n.StateParam + "]"
-			}
 		}
 		region := ""
 		if n.Region != "" {

@@ -373,18 +373,6 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
-			name: "ref_qualifier_generics",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "ref_qualifier_generics.elisa"),
-			checks: []string{
-				"%Handle__heap__anon = type { ptr }",
-				"define %Handle__heap__anon @keep_handle__heap__anon(%Handle__heap__anon",
-				"define i32 @peek_value(%Handle__heap__anon",
-				"define i64 @keep_heap_handle(i64",
-				"call %Handle__heap__anon @keep_handle__heap__anon(%Handle__heap__anon",
-				"define i32 @peek_heap_value(i64",
-			},
-		},
-		{
 			name: "json_parser",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa"),
 			checks: []string{

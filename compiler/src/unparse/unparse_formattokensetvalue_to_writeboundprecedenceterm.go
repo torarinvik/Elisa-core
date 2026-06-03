@@ -198,7 +198,7 @@ func (f *formatter) writeGrammarFnDecl(level int, grammarFn ast.GrammarFnDecl) {
 	} else if grammarFn.TypeCtor {
 		line = "grammar type " + grammarFn.Name
 	}
-	line += formatGenericParams(grammarFn.GenericParams, grammarFn.TypeParams, nil, nil, nil, nil)
+	line += formatGenericParams(grammarFn.GenericParams, grammarFn.TypeParams, nil, nil, nil)
 	line += "(" + strings.Join(params, ", ") + ")"
 	if grammarFn.Return.Kind != "" {
 		if grammarFn.Shorthand && grammarFn.Return.Kind == "grammar" && grammarFn.Return.Result != nil {

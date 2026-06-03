@@ -199,6 +199,7 @@ func (s *functionState) regionArenaOwner(region string) (treeAllocOwnerBinding, 
 	}
 	return treeAllocOwnerBinding{}, false
 }
+
 // containerRegionName peels ref wrappers and returns the allocation region of
 // the underlying region-carrying container (darray or dict), or "" if t is not
 // such a container. Used to match a region param against a call argument's

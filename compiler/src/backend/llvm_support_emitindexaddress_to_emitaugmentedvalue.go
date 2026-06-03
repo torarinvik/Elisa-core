@@ -765,6 +765,7 @@ func (s *functionState) buildOptionalValue(optionalType *semantic.OptionalType, 
 	value = C.LLVMBuildInsertValue(s.builder, value, payload, 1, cStringFree("optional.value"))
 	return value, nil
 }
+
 // wrapVoidErrorUnionCode produces the representation of a `void error[set]` value
 // from a bare error code. A payloadless set is just the code; a payloaded set is the
 // {code, payloads...} struct, so the code is inserted at field 0 (payload fields are

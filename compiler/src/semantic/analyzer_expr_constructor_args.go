@@ -396,10 +396,6 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if _, exists := bindings[p.Name]; !exists {
 			bindings[p.Name] = actual
 		}
-	case *RefStateParamType:
-		if _, exists := bindings[p.Name]; !exists {
-			bindings[p.Name] = actual
-		}
 	case *IDType:
 		if act, ok := actual.(*IDType); ok {
 			a.collectTypeBindings(p.Tag, act.Tag, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
@@ -422,11 +418,6 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *RefType:
 		if act, ok := actual.(*RefType); ok {
-			if p.StateParam != "" {
-				if _, exists := bindings[p.StateParam]; !exists {
-					bindings[p.StateParam] = &RefStateValueType{State: act.State}
-				}
-			}
 			if p.StorageParam != "" {
 				if _, exists := bindings[p.StorageParam]; !exists {
 					bindings[p.StorageParam] = &RefStorageValueType{Storage: act.Storage}

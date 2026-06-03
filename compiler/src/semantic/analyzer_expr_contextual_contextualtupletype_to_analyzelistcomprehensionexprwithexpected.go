@@ -179,7 +179,7 @@ func implicitCallLikeRefUpcastType(expected *RefType, actual Type) (Type, bool) 
 	if !ok || actualRef == nil {
 		return nil, false
 	}
-	if expected.StateParam != "" || expected.StorageParam != "" || actualRef.StateParam != "" || actualRef.StorageParam != "" {
+	if expected.StorageParam != "" || actualRef.StorageParam != "" {
 		return nil, false
 	}
 	if expected.Storage != RefStorageAny || actualRef.Storage == RefStorageAny {

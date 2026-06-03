@@ -125,7 +125,7 @@ func (a *Analyzer) registerCastHook(namespace string, decl *ast.FuncDecl, fnType
 		a.errorf(decl.Pos(), "__cast__ hook %q must take exactly 1 parameter, got %d", qualifiedName, funcTypeExplicitParamCount(fnType))
 		return
 	}
-	if len(fnType.TypeParams) != 0 || len(fnType.RefStorageParams) != 0 || len(fnType.RefStateParams) != 0 || len(fnType.RegionParams) != 0 {
+	if len(fnType.TypeParams) != 0 || len(fnType.RefStorageParams) != 0 || len(fnType.RegionParams) != 0 {
 		a.errorf(decl.Pos(), "__cast__ hook %q must not be generic in v1", qualifiedName)
 		return
 	}
@@ -160,7 +160,7 @@ func (a *Analyzer) registerInitHook(namespace string, decl *ast.FuncDecl, lookup
 		a.errorf(decl.Pos(), "__init__ hook %q must not declare implicit parameters in v1", declName)
 		return
 	}
-	if len(fnType.TypeParams) != 0 || len(fnType.RefStorageParams) != 0 || len(fnType.RefStateParams) != 0 || len(fnType.RegionParams) != 0 || len(fnType.PermissionParams) != 0 || len(fnType.GenericParams) != 0 {
+	if len(fnType.TypeParams) != 0 || len(fnType.RefStorageParams) != 0 || len(fnType.RegionParams) != 0 || len(fnType.PermissionParams) != 0 || len(fnType.GenericParams) != 0 {
 		a.errorf(decl.Pos(), "__init__ hook %q must not be generic in v1", declName)
 		return
 	}

@@ -533,7 +533,7 @@ func grammarTypeExprEqual(left ast.TypeExpr, right ast.TypeExpr) bool {
 		return true
 	case *ast.RefType:
 		r, ok := right.(*ast.RefType)
-		return ok && l.State == r.State && l.Storage == r.Storage && l.StateParam == r.StateParam && l.StorageParam == r.StorageParam && l.Region == r.Region && grammarTypeExprEqual(l.Elem, r.Elem)
+		return ok && l.State == r.State && l.Storage == r.Storage && l.StorageParam == r.StorageParam && l.Region == r.Region && grammarTypeExprEqual(l.Elem, r.Elem)
 	case *ast.MutableType:
 		r, ok := right.(*ast.MutableType)
 		return ok && grammarTypeExprEqual(l.Elem, r.Elem)

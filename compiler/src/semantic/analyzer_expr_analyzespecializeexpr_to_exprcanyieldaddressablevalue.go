@@ -59,7 +59,6 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 	}
 	specialized.TypeParams = nil
 	specialized.RefStorageParams = nil
-	specialized.RefStateParams = nil
 	specialized.GenericParams = nil
 	return specialized
 }
@@ -135,6 +134,7 @@ func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
 		return false
 	}
 }
+
 // borrowPlaceRootsInConst reports whether the place being borrowed resolves to
 // a top-level const (read-only static storage), walking through index/field/
 // paren accessors to the root identifier. Used to reject mutable borrows of a

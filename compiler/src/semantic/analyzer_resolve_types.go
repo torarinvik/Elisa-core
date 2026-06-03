@@ -65,8 +65,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return invalidType
 		}
 		return cloneAggregateStateWithBase(baseType, states)
-	case *ast.RefStateLiteralTypeExpr:
-		return &RefStateValueType{State: RefState(n.State)}
 	case *ast.RefStorageLiteralTypeExpr:
 		return &RefStorageValueType{Storage: RefStorage(n.Storage)}
 	case *ast.ErrorSetExpr:
@@ -110,12 +108,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 				a.errorf(n.Pos(), "unknown region qualifier %q", storageParam)
 			}
 		}
-		stateParam := n.StateParam
-		if stateParam != "" {
-			if _, ok := a.lookupRefStateParam(stateParam); !ok {
-				a.errorf(n.Pos(), "unknown refstate parameter %q", stateParam)
-			}
-		}
 		if region != "" && !a.regionQualifierDefined(region) {
 			a.errorf(n.Pos(), "unknown region qualifier %q", region)
 		}
@@ -123,7 +115,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
 			a.errorf(n.Pos(), "references to values containing linear handles are not supported; got %s&", elemType)
 		}
-		return &RefType{Elem: elemType, State: RefState(n.State), StateParam: stateParam, Storage: RefStorage(n.Storage), StorageParam: storageParam, Region: region, ExplicitStorage: n.Explicit}
+		return &RefType{Elem: elemType, State: RefState(n.State), Storage: RefStorage(n.Storage), StorageParam: storageParam, Region: region, ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
 	case *ast.BuiltinTypeExpr:
@@ -147,7 +139,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		return &FuncType{
 			Name:                      "func",
 			RefStorageParams:          nil,
-			RefStateParams:            nil,
 			UsedPermissionParams:      append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
 			DeclaredPermissionRefs:    append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 			DeclaredPermissions:       append([]string(nil), permissions...),

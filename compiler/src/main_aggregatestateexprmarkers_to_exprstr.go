@@ -102,7 +102,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if n.RegionOwner != "" {
 			regionParams = nil
 		}
-		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, regionParams, nil)
+		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, regionParams, nil)
 		if n.RegionOwner != "" {
 			tparams += " in " + n.RegionOwner
 		}
@@ -133,7 +133,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
 		}
-		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams)
+		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RegionParams, n.PermissionParams)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
@@ -143,7 +143,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
 		}
-		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams)
+		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RegionParams, n.PermissionParams)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
@@ -248,9 +248,6 @@ func typeStr(t ast.TypeExpr) string {
 		case ast.RefStateNull:
 			return prefix + s + "!"
 		default:
-			if n.StateParam != "" {
-				return prefix + s + "&[" + n.StateParam + "]"
-			}
 			return prefix + s + "&"
 		}
 	case *ast.GenericType:

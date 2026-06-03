@@ -15,7 +15,6 @@ const (
 	GenericParamType GenericParamKind = iota
 	GenericParamState
 	GenericParamRefStorage
-	GenericParamRefState
 	GenericParamRegion
 	GenericParamPermission
 	GenericParamErrorSet
@@ -163,7 +162,6 @@ type FuncDecl struct {
 	Name              string
 	TypeParams        []string
 	RefStorageParams  []string
-	RefStateParams    []string
 	RegionParams      []string
 	PermissionParams  []string
 	GenericParams     []GenericParam
@@ -195,7 +193,6 @@ type ExternFuncDecl struct {
 	Name              string
 	TypeParams        []string
 	RefStorageParams  []string
-	RefStateParams    []string
 	PermissionParams  []string
 	GenericParams     []GenericParam
 	RegionParams      []string
@@ -342,7 +339,6 @@ type RefType struct {
 	Elem         TypeExpr
 	State        RefState
 	Storage      RefStorage
-	StateParam   string
 	StorageParam string
 	Region       string
 	Explicit     bool

@@ -31,6 +31,7 @@ func analyzeFunctionAnalysisTestSourceWithOptions(t *testing.T, filename string,
 	}
 	return result
 }
+
 // analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics runs analysis
 // with the given options WITHOUT failing on semantic errors, so tests can assert
 // on error-level diagnostics (e.g. Unsafe.* memory-safety gates, which are hard

@@ -93,7 +93,6 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		Name:                        base.Name,
 		TypeParams:                  nil,
 		RefStorageParams:            nil,
-		RefStateParams:              nil,
 		RegionParams:                append([]string(nil), base.RegionParams...),
 		PermissionParams:            append([]string(nil), base.PermissionParams...),
 		GenericParams:               nil,
@@ -262,10 +261,6 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		if _, ok := bindings[p.Name]; !ok {
 			bindings[p.Name] = actual
 		}
-	case *semantic.RefStateParamType:
-		if _, ok := bindings[p.Name]; !ok {
-			bindings[p.Name] = actual
-		}
 	case *semantic.IDType:
 		if a, ok := actual.(*semantic.IDType); ok {
 			collectSpecializationBindings(p.Tag, a.Tag, bindings)
@@ -278,11 +273,6 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		}
 	case *semantic.RefType:
 		if a, ok := actual.(*semantic.RefType); ok {
-			if p.StateParam != "" {
-				if _, ok := bindings[p.StateParam]; !ok {
-					bindings[p.StateParam] = &semantic.RefStateValueType{State: a.State}
-				}
-			}
 			if p.StorageParam != "" {
 				if _, ok := bindings[p.StorageParam]; !ok {
 					bindings[p.StorageParam] = &semantic.RefStorageValueType{Storage: a.Storage}

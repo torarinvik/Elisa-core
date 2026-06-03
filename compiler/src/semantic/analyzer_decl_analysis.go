@@ -490,7 +490,7 @@ func (a *Analyzer) validateFunctionInitAnnotation(annotation ast.Annotation, fn 
 		a.errorf(annotation.Position, "@init function %q must not declare implicit parameters", fn.Name)
 		return false
 	}
-	if len(signature.TypeParams) != 0 || len(signature.RefStorageParams) != 0 || len(signature.RefStateParams) != 0 || len(signature.RegionParams) != 0 || len(signature.PermissionParams) != 0 || len(signature.GenericParams) != 0 {
+	if len(signature.TypeParams) != 0 || len(signature.RefStorageParams) != 0 || len(signature.RegionParams) != 0 || len(signature.PermissionParams) != 0 || len(signature.GenericParams) != 0 {
 		a.errorf(annotation.Position, "@init function %q must not be generic", fn.Name)
 		return false
 	}

@@ -144,7 +144,6 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					Usings:           append([]string(nil), scoped.Usings...),
 					TypeParams:       append([]string(nil), n.TypeParams...),
 					RefStorageParams: append([]string(nil), n.RefStorageParams...),
-					RefStateParams:   append([]string(nil), n.RefStateParams...),
 					RegionParams:     append([]string(nil), n.RegionParams...),
 					RegionOwner:      n.RegionOwner,
 					GenericParams:    append([]ast.GenericParam(nil), n.GenericParams...),

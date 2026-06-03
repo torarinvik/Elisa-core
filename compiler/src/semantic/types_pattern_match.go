@@ -21,10 +21,6 @@ func matchTypePattern(pattern, actual Type) bool {
 		_, ok = actual.(*RefStorageValueType)
 		return ok
 	}
-	if _, ok := pattern.(*RefStateParamType); ok {
-		_, ok = actual.(*RefStateValueType)
-		return ok
-	}
 	switch p := pattern.(type) {
 	case *NeverType:
 		_, ok := actual.(*NeverType)
@@ -70,11 +66,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		if p.Mutable && !a.Mutable && p.State != RefStateNull && a.State != RefStateNull {
 			return false
 		}
-		if p.StateParam != "" || a.StateParam != "" {
-			if p.StateParam != a.StateParam {
-				return false
-			}
-		} else if !refStateAssignable(p.State, a.State) {
+		if !refStateAssignable(p.State, a.State) {
 			return false
 		}
 		if p.StorageParam != "" || a.StorageParam != "" {

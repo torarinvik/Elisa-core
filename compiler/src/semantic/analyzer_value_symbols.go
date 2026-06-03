@@ -63,7 +63,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable, Private: scoped.Private}, n.Pos())
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
 				fnType.Static = n.Static
 				initLookupName, constructorSugar := a.constructorDeclInitHookName(scoped.Namespace, n, fnType)
 				symbolName := qualifiedName
@@ -103,7 +103,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						case *ast.FuncDecl:
 							visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 							qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
+							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
 							sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 							a.functionTypes[qualifiedName] = fnType
 							a.funcDeclSymbols[fnDecl] = sym
@@ -112,7 +112,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						case *ast.ExternFuncDecl:
 							visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 							qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
+							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
 							a.applyExternFuncAnnotations(fnDecl, fnType)
 							a.markRawExternFuncType(fnDecl, fnType)
 							linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
@@ -133,14 +133,14 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					switch fnDecl := member.(type) {
 					case *ast.FuncDecl:
 						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
+						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
 						sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 						a.functionTypes[qualifiedName] = fnType
 						a.funcDeclSymbols[fnDecl] = sym
 						a.defineGlobal(sym, fnDecl.Pos())
 					case *ast.ExternFuncDecl:
 						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
+						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Effects, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ParamPacks, fnDecl.ParamItemOrder, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
 						a.applyExternFuncAnnotations(fnDecl, fnType)
 						a.markRawExternFuncType(fnDecl, fnType)
 						linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
@@ -152,7 +152,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Variadic)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Variadic)
 				a.applyExternFuncAnnotations(n, fnType)
 				a.markRawExternFuncType(n, fnType)
 				if !fnType.ReturnProvenanceKnown {

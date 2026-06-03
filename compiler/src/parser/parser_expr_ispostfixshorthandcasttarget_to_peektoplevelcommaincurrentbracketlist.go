@@ -431,21 +431,6 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		return ast.RefStorageAny, false, "", "", ""
 	}
 }
-func (p *Parser) peekRefStateParamBracket() (string, bool) {
-	if p.peek() != lexer.TOKEN_LBRACKET || p.pos+2 >= len(p.tokens) {
-		return "", false
-	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+2].Kind != lexer.TOKEN_RBRACKET {
-		return "", false
-	}
-	return p.tokens[p.pos+1].Text, true
-}
-func (p *Parser) parseRefStateParamBracket() string {
-	p.expect(lexer.TOKEN_LBRACKET)
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_RBRACKET)
-	return name
-}
 func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage ast.RefStorage, explicit bool, region string, storageParam string) (ast.TypeExpr, int) {
 	typ := base
 	count := 0
@@ -454,18 +439,10 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 		case lexer.TOKEN_AMPERSAND:
 			p.advance()
 			state := ast.RefStateNonNull
-			allowStateParam := true
 			if p.match(lexer.TOKEN_QUESTION) {
 				state = ast.RefStateNullable
-				allowStateParam = false
 			}
-			stateParam := ""
-			if allowStateParam {
-				if _, ok := p.peekRefStateParamBracket(); ok {
-					stateParam = p.parseRefStateParamBracket()
-				}
-			}
-			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, StateParam: stateParam, StorageParam: storageParam, Region: region, Explicit: explicit}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, StorageParam: storageParam, Region: region, Explicit: explicit}
 			count++
 		case lexer.TOKEN_BANG:
 			p.advance()

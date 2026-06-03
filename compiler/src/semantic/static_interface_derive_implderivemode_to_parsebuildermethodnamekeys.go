@@ -102,7 +102,6 @@ func (a *Analyzer) synthesizeDerivedImplMembers(decls []scopedDecl) {
 					Name:             methodDecl.Name,
 					TypeParams:       append([]string(nil), methodDecl.TypeParams...),
 					RefStorageParams: append([]string(nil), methodDecl.RefStorageParams...),
-					RefStateParams:   append([]string(nil), methodDecl.RefStateParams...),
 					RegionParams:     append([]string(nil), methodDecl.RegionParams...),
 					PermissionParams: append([]string(nil), methodDecl.PermissionParams...),
 					GenericParams:    append([]ast.GenericParam(nil), sig.GenericParams...),
@@ -265,7 +264,7 @@ func substituteAssocTypeExpr(expr ast.TypeExpr, assocExprs map[string]ast.TypeEx
 		}
 		return &ast.NamedType{Position: n.Position, Name: n.Name}
 	case *ast.RefType:
-		return &ast.RefType{Position: n.Position, Elem: substituteAssocTypeExpr(n.Elem, assocExprs), State: n.State, Storage: n.Storage, StateParam: n.StateParam, StorageParam: n.StorageParam, Region: n.Region, Explicit: n.Explicit}
+		return &ast.RefType{Position: n.Position, Elem: substituteAssocTypeExpr(n.Elem, assocExprs), State: n.State, Storage: n.Storage, StorageParam: n.StorageParam, Region: n.Region, Explicit: n.Explicit}
 	case *ast.RefStateLiteralTypeExpr:
 		return &ast.RefStateLiteralTypeExpr{Position: n.Position, State: n.State}
 	case *ast.RefStorageLiteralTypeExpr:

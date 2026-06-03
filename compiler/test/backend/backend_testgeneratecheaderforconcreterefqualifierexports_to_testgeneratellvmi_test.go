@@ -6,43 +6,6 @@ import (
 	"testing"
 )
 
-func TestGenerateCHeaderForConcreteRefQualifierExports(t *testing.T) {
-	src := `struct Node layout c:
-	value: mutable i32
-
-struct Handle[refstorage Store, refstate State] layout c:
-	ptr: Store Node&[State]
-
-export type Node as CtxNode
-export type Handle[heap, &] as HeapHandle
-
-def keep_handle[refstorage Store, refstate State](value: Handle[Store, State]) -> Handle[Store, State]:
-	return value
-
-export func keep_heap_handle(value: HeapHandle) -> HeapHandle = keep_handle[heap, &]
-`
-	result := parseAndAnalyze(t, "backend_ref_qualifier_export_header.elisa", src)
-	header, err := backend.GenerateCHeader(result)
-	if err != nil {
-		t.Fatalf("GenerateCHeader returned error: %v", err)
-	}
-	checks := []string{
-		"typedef struct CtxNode CtxNode;",
-		"typedef struct HeapHandle HeapHandle;",
-		"struct CtxNode {",
-		"struct HeapHandle {",
-		"CtxNode *ptr;",
-		"HeapHandle keep_heap_handle(HeapHandle arg0);",
-	}
-	for _, check := range checks {
-		if !strings.Contains(header, check) {
-			t.Fatalf("expected header to contain %q, got:\n%s", check, header)
-		}
-	}
-	if strings.Contains(header, "Handle__heap__anon") {
-		t.Fatalf("expected public header not to leak qualifier-specialized backend names, got:\n%s", header)
-	}
-}
 func TestGenerateLLVMIRLowersFloatArithmeticComparisonsAndCasts(t *testing.T) {
 	src := `global tau: f64 = 6.25
 
