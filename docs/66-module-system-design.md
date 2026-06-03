@@ -228,14 +228,21 @@ PLANNED (in priority order):
    with ZERO `.elisa` errors — only 3 fixture tests fail, and on inspection they are
    NOT 3 independent code bugs but two consequences of the `@method` -> non-UFCSOnly
    transition (the actual `@method` removal will trigger both):
-   - SYMBOL-NAME mangling change (cosmetic, test-only). An overloaded generic dropped
-     from `@method` routes through defineReceiverOverloadGlobal's non-UFCSOnly path,
-     which mangles via ReceiverOverloadSymbolName -> `__ovl__set__semantic_RefType_
-     SymbolTable_K_T__set__cstr_key_shape__FixtureSymbol` (leaks Go type-kind strings),
-     vs the clean `@method`-era `set__cstr_key_shape__FixtureSymbol`.
-     TestRunCLICompilesFixtureProgramsToLLVM/stable_symbol_table asserts the old name.
-     Real sub-task: unify the non-UFCSOnly overload mangling to the clean scheme before
-     (or as part of) the drop, then update the assertion.
+   - SYMBOL-NAME mangling. Two parts:
+     * FORMAT (DONE, commit dbc6af70): ReceiverOverloadSymbolName mangled the receiver
+       via TypeIdentityKey = `%T:%s`, leaking the Go runtime type as `semantic_RefType_`
+       into emitted names. Switched to the receiver's `String()` (the clean scheme
+       mangleGenericType already uses), so secondary-overload names are now
+       `ovl__has__SymbolTable_K_T__has__...` not `ovl__has__semantic_RefType_SymbolTable_
+       K_T__has__...`. Unique per receiver; no duplicate-symbol link errors. Tests updated.
+     * ORDER-DETERMINISM (PENDING, belongs in the drop session): which overload keeps the
+       clean BARE name (`set__...`) vs gets `ovl__...` is registration-order-dependent
+       ("first registered keeps bare"). Dropping `@method` changes overload-set membership
+       and flips which one is bare (TestRunCLICompilesFixtureProgramsToLLVM/stable_symbol_table
+       expects IndexMap.set bare). Making the bare-name choice order-independent would change
+       a broad swath of emitted names under `@method` ON too (churn + emulator link risk for
+       no present benefit), so it's deferred to the drop session where names change wholesale
+       and expectations get regenerated anyway.
    - INTERFACE-path specialization gap (partly a probe artifact). Both lexer fixtures
      fail with "missing specialization binding for type parameter T in is_empty"
      (llvm_specialize.go:27). NOT reproducible in isolated source (UFCS or free-call,
@@ -244,11 +251,12 @@ PLANNED (in priority order):
      (generated with `@method` ON; declares `extern is_empty[T]` + `extern
      is_empty[T, N: usize]`). A real drop regenerates all `.elisai` interfaces without
      `@method`, so this likely resolves on regeneration — verify, don't assume.
-   So (a) is moot, (b)+(c) are DONE. Remaining before dropping `@method`: (1) unify the
-   non-UFCSOnly overload mangling to the clean scheme; (2) strip the `@method`
-   annotations from stdlib source; (3) regenerate the `.elisai` interfaces; (4) update
-   the 3 fixtures' expectations and confirm the is_empty specialization resolves. Keep
-   `@method` until then — full `go test ./src/...` (which compiles the stdlib) is the gate.
+   So (a) is moot, (b)+(c) DONE, and the overload-mangling FORMAT is now clean (dbc6af70).
+   Remaining before dropping `@method`: (1) make the bare-name overload choice
+   order-independent; (2) strip the `@method` annotations from stdlib source;
+   (3) regenerate the `.elisai` interfaces; (4) update the 3 fixtures' expectations and
+   confirm the is_empty specialization resolves. Keep `@method` until then — full
+   `go test ./src/...` (which compiles the stdlib) is the gate.
 
 ## Known inconsistencies (audit — keep as the regression checklist)
 
