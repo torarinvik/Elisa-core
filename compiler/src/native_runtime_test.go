@@ -236,7 +236,7 @@ func TestRunCLIPostfixShorthandCallsPascalCaseUFCSMethod(t *testing.T) {
 	runtimeInclude = filepath.ToSlash(runtimeInclude)
 	// `recv.Name()` reads as `Name(recv)`: when `Name` is a type it is a
 	// constructor/cast (the postfix-shorthand cast, e.g. `x.u64()`), and otherwise
-	// it is a function — including a UFCS `@method`. So a PascalCase method like
+	// it is a function — including a UFCS ``. So a PascalCase method like
 	// `Bump`/`Value`/`IsZero` is callable in method position the same as the
 	// lowercase / multi-arg forms already are. `x.u64()` must keep casting.
 	src := fmt.Sprintf(`# include %q
@@ -247,15 +247,15 @@ struct Counter:
 def Counter() -> Counter:
     return Counter{n: 0}
 
-@method
+
 def Bump(self: mutable Counter&, by: i64) -> void:
     self.n <- self.n + by
 
-@method
+
 def Value(self: Counter&) -> i64:
     return self.n
 
-@method
+
 def IsZero(self: Counter&) -> bool:
     return self.n == 0
 
@@ -362,6 +362,70 @@ def uniform_call_overload_test() -> void:
 	}
 }
 
+func TestRunCLIZeroParamFreeFunctionOverloadsWithReceiverMethod(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "zero_param_overload_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// A zero-param free function `Flush()` and a same-named receiver method
+	// `Flush(IOFile&)` form a legal overload set, disambiguated by arity: a 0-arg
+	// call resolves to the free function (which owns the bare global name), while a
+	// 1-arg call — as UFCS dot `f.Flush()` or free `Flush(f)` — resolves to the
+	// receiver method. This is what dropping @method relies on (e.g. the emulator's
+	// `Flush()` in logging coexisting with `IOFile.Flush()`).
+	src := fmt.Sprintf(`# include %q
+
+struct IOFile:
+    fd: mutable i64
+
+def Flush() -> i64:
+    return 100
+
+def Flush(self: IOFile&) -> i64:
+    return self.fd
+
+@test
+def zero_param_overload_test() -> void:
+    can Abort.Panic:
+        f: IOFile = IOFile{fd: 7}
+        assert_true(Flush() == 100)       # 0-arg free function
+        assert_true(f.Flush() == 7)       # 1-arg method via UFCS dot
+        assert_true(Flush(f) == 7)        # 1-arg method via free call
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write zero-param overload fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected zero-param overload test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] zero_param_overload_test",
+		"[       OK ] zero_param_overload_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected zero-param overload output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIExplicitTypeArgsOverloadResolvesByReceiverType(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
@@ -381,7 +445,7 @@ func TestRunCLIExplicitTypeArgsOverloadResolvesByReceiverType(t *testing.T) {
 	// the bare `wipe(b)` form does. Regression: explicit type args parse as a
 	// SpecializeExpr wrapping the ident, which previously skipped the free-call
 	// receiver-overload rewrite and latched onto the first-declared overload
-	// (mismatched type-arity error). This is the bug that blocks dropping @method.
+	// (mismatched type-arity error). This is the bug that blocks dropping .
 	src := fmt.Sprintf(`# include %q
 
 struct Aaa[T]:
@@ -453,7 +517,7 @@ func TestRunCLILocalParamShadowsSameNamedGlobalFunction(t *testing.T) {
 	// finding the (non-function) local symbol — fell through to the global lookup
 	// and mis-bound the local to the global function's type ("field access requires
 	// struct type, got func[T](...)"). This is the local-vs-global clash that blocks
-	// dropping @method (prelude's `string_builder_append(builder: StringBuilder&)`
+	// dropping  (prelude's `string_builder_append(builder: StringBuilder&)`
 	// vs the global `def builder[T](Arena&)`).
 	src := fmt.Sprintf(`# include %q
 
@@ -708,7 +772,7 @@ func TestRunCLIDotNotationAcceptsExplicitTypeArgs(t *testing.T) {
 struct Box:
     n: mutable i64
 
-@method
+
 def type_size[T](self: Box&) -> usize:
     _ = self
     return size_of(T)

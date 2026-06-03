@@ -209,7 +209,7 @@ Current surface includes method-style extension hooks, internal visibility marke
 struct DArrayBuilder[T]:
     marker: u8
 
-@method
+
 extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
 
 @internal

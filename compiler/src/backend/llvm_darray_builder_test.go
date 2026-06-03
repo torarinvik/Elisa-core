@@ -61,7 +61,7 @@ func TestGenerateLLVMIRSpecializesGenericExternMethodBuilderPush(t *testing.T) {
 	src := `struct DArrayBuilder[T]:
     count: usize
 
-@method
+
 extern push[T](builder: mutable DArrayBuilder[T]&, item: T) -> void
 
 def build() -> void:
@@ -73,7 +73,7 @@ def build() -> void:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	if !strings.Contains(output, "call void @ovl__push") || !strings.Contains(output, "__i64(ptr %items, i64 7)") {
+	if !strings.Contains(output, "call void @push__i64(ptr %items, i64 7)") {
 		t.Fatalf("expected generic extern UFCS call to use a specialized i64 symbol, got:\n%s", output)
 	}
 	if strings.Contains(output, "DArrayBuilder_T__push(ptr %items, i64 7)") {

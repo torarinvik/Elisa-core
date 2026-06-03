@@ -246,7 +246,16 @@ func (a *Analyzer) registerUFCSFunction(visibleName string, sym *Symbol) {
 	if a == nil || visibleName == "" || sym == nil {
 		return
 	}
-	if _, ok := receiverOverloadType(sym); !ok {
+	// Track every function under its visible name, INCLUDING zero-param functions.
+	// Zero-param functions are not UFCS-callable (lookupVisibleUFCSFunction skips
+	// entries without a receiver), but they must still count toward the overload set
+	// so that a free `f()` coexisting with a method `f(x)` registers as an overload
+	// (the >= 2 entries signal) and `f(arg)` reaches receiver-based disambiguation
+	// instead of latching onto the zero-param bare global.
+	if sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc {
+		return
+	}
+	if _, ok := sym.Type.(*FuncType); !ok {
 		return
 	}
 	methods := a.ufcsFunctionsByName[visibleName]
