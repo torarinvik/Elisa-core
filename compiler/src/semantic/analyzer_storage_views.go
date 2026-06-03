@@ -130,9 +130,25 @@ func (a *Analyzer) storageViewDependencyForBorrowedPlace(place ast.Expr) (storag
 func (a *Analyzer) borrowedPlaceContainerIsRelocatable(obj ast.Expr) bool {
 	switch stripRefForBounds(a.exprTypes[obj]).(type) {
 	case *DArrayType:
-		return true
+		// A darray backed by a reserve_commit region grows by committing pages
+		// within its contiguous reservation and never relocates, so interior
+		// references into it stay valid across growth (docs/68 §4). Other backings
+		// (chained, heap) can relocate the buffer on growth.
+		return !a.containerBackingIsStable(obj)
 	}
 	return false
+}
+
+// containerBackingIsStable reports whether a container's backing region never
+// relocates its storage on growth — currently true only for reserve_commit
+// regions (docs/68 §3-§4).
+func (a *Analyzer) containerBackingIsStable(obj ast.Expr) bool {
+	dt, ok := stripRefForBounds(a.exprTypes[obj]).(*DArrayType)
+	if !ok || dt.Region == "" {
+		return false
+	}
+	_, rs := a.lookupRegionState(dt.Region)
+	return normalizeBacking(rs.Backing) == "reserve_commit"
 }
 
 func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageViewDependencyState, bool) {
