@@ -419,6 +419,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return fmt.Errorf("unknown region %q during LLVM lowering", n.Parent)
 		}
 		return s.emitArenaAdopt(parentBinding.ptr, childBinding.ptr, parentBinding.typ)
+	case *ast.PromoteStmt:
+		return s.emitPromoteStmt(n)
 	case *ast.AssignStmt:
 		if n.Optional {
 			if s.g.trace != nil {
