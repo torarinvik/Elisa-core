@@ -290,12 +290,12 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 	case *ast.NamedType:
 		return n.Name
 	case *ast.RefType:
+		// Storage classes (heap/static/stack and storage params) stay as prefixes;
+		// region provenance is emitted as the canonical `@r` suffix (docs/68 §5).
 		prefix := ""
 		switch {
 		case n.StorageParam != "":
 			prefix = n.StorageParam + " "
-		case n.Region != "":
-			prefix = n.Region + " "
 		case n.Explicit && n.Storage != ast.RefStorageAny:
 			prefix = formatRefStorage(n.Storage) + " "
 		}
@@ -310,7 +310,11 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 				suffix = "&[" + n.StateParam + "]"
 			}
 		}
-		return prefix + formatTypeExpr(n.Elem) + suffix
+		region := ""
+		if n.Region != "" {
+			region = " @" + n.Region
+		}
+		return prefix + formatTypeExpr(n.Elem) + suffix + region
 	case *ast.RefStateLiteralTypeExpr:
 		return ast.RefStateMarker(n.State)
 	case *ast.RefStorageLiteralTypeExpr:
@@ -348,7 +352,13 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		for _, arg := range n.ValueArgs {
 			parts = append(parts, formatExpr(arg))
 		}
-		return n.Name + "[" + strings.Join(parts, ", ") + "]"
+		result := n.Name + "[" + strings.Join(parts, ", ") + "]"
+		// Region provenance on a container is part of its type and must round-trip
+		// (docs/68 §5); previously it was dropped here, silently losing `@r`.
+		if n.Region != "" {
+			result += " @" + n.Region
+		}
+		return result
 	case *ast.FuncTypeExpr:
 		parts := make([]string, 0, len(n.Params)+1)
 		for _, param := range n.Params {
