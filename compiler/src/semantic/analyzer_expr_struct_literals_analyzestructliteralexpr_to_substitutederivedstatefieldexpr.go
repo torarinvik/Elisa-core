@@ -243,11 +243,12 @@ func (a *Analyzer) analyzeInitHookStructConstructor(expr *ast.StructLitExpr, tar
 		matches = append(matches, initHookMatch{sym: sym, orderedArgs: orderedArgs, defaultsUsed: defaultsUsed, knownTypeChecks: knownChecks})
 	}
 	if len(matches) == 0 {
-		for _, arg := range expr.Args {
-			a.analyzeExpr(arg)
-		}
-		a.errorf(expr.Pos(), "no matching __init__ overload for %s", targetType)
-		return targetType, true
+		// No custom constructor overload matches these args. Don't claim the
+		// construction — fall back to the implicit all-fields positional form so a
+		// custom `def Type(...)` constructor COEXISTS with `Type(a, b, ...)` instead
+		// of shadowing it. (A genuine mismatch is then reported by the all-fields
+		// construction path.)
+		return nil, false
 	}
 	bestDefaults := matches[0].defaultsUsed
 	for _, match := range matches[1:] {
