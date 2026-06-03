@@ -201,10 +201,15 @@ PLANNED (in priority order):
    item.) DIAGNOSIS (measured by making `@method` inert + running the suite): the
    blocker is NOT a handful of renames. `@method` (UFCS-only) is masking real
    resolution ambiguities — dropping it breaks the stdlib in subtle ways:
-   - Wrong overload selection: a free/internal call like `clear(map)` resolves to
+   - Wrong overload selection: a call like `clear[K, T](table.items)` resolves to
      the first-registered global `clear` (DArrayBuilder.clear, 1 type-arg) instead
-     of `IndexMap.clear` (2 type-args) — free-call overload resolution doesn't yet
-     disambiguate generic same-named methods by argument type.
+     of `IndexMap.clear` (2 type-args). ROOT CAUSE (corrected): bare-ident free-call
+     overloading already disambiguates by arg type — the bug was that the EXPLICIT
+     type-arg form `name[TypeArgs](args)` parses as a SpecializeExpr wrapping the
+     ident, which skipped rewriteFreeCallReceiverOverload entirely and latched onto
+     the primary overload. FIXED: rewriteFreeCallReceiverOverload now unwraps the
+     SpecializeExpr, disambiguates by receiver type, and re-applies the type args to
+     the rewritten FieldExpr (TestRunCLIExplicitTypeArgsOverloadResolvesByReceiverType).
    - Local-vs-global conflicts: short method names made global (`builder`, …) shadow/
      collide with the same words used as parameters/locals in unrelated runtime code
      (prelude `builder` -> the DArrayBuilder constructor function).
@@ -212,12 +217,12 @@ PLANNED (in priority order):
      collections.elisa (push/finish/builder/darray_builder) — including both is a
      duplicate regardless of `@method`.
    So this needs a dedicated effort: (a) dedup builders.elisa vs collections.elisa;
-   (b) make free-call overload resolution pick the right generic overload by arg
-   type (extend rewriteFreeCallReceiverOverload to the generic / primary-also-matches
-   cases); (c) wrap the stdlib method APIs in `module` blocks accessed via `using` so
-   the short names are namespaced rather than global; THEN drop `@method`. Keep
-   `@method` until all three land — the full `go test ./src/...` (which compiles the
-   stdlib) is the gate.
+   (b) DONE — explicit-type-arg free calls now disambiguate by receiver type
+   (rewriteFreeCallReceiverOverload handles the SpecializeExpr-wrapped ident form);
+   (c) wrap the stdlib method APIs in `module` blocks accessed via `using` so
+   the short names are namespaced rather than global (fixes the local-vs-global
+   `builder` clash); THEN drop `@method`. Keep `@method` until (a) and (c) land too —
+   the full `go test ./src/...` (which compiles the stdlib) is the gate.
 
 ## Known inconsistencies (audit — keep as the regression checklist)
 

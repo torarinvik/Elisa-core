@@ -362,6 +362,76 @@ def uniform_call_overload_test() -> void:
 	}
 }
 
+func TestRunCLIExplicitTypeArgsOverloadResolvesByReceiverType(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "explicit_typeargs_overload_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// A generic function overloaded by first-parameter type, called with EXPLICIT
+	// type args (`wipe[K, V](b)`), must disambiguate by receiver type the same way
+	// the bare `wipe(b)` form does. Regression: explicit type args parse as a
+	// SpecializeExpr wrapping the ident, which previously skipped the free-call
+	// receiver-overload rewrite and latched onto the first-declared overload
+	// (mismatched type-arity error). This is the bug that blocks dropping @method.
+	src := fmt.Sprintf(`# include %q
+
+struct Aaa[T]:
+    v: mutable T
+
+struct Bbb[K, V]:
+    k: mutable K
+    w: mutable V
+
+def wipe[T](self: Aaa[T]&) -> i64:
+    _ = self
+    return 1
+
+def wipe[K, V](self: Bbb[K, V]&) -> i64:
+    _ = self
+    return 2
+
+@test
+def explicit_typeargs_overload_test() -> void:
+    can Abort.Panic:
+        a: Aaa[i64] = Aaa[i64]{v: 0}
+        b: Bbb[i64, i64] = Bbb[i64, i64]{k: 0, w: 0}
+        assert_true(wipe[i64](a) == 1)          # explicit 1-arg form, Aaa overload
+        assert_true(wipe[i64, i64](b) == 2)     # explicit 2-arg form, Bbb overload
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write explicit type-args overload fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected explicit type-args overload test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] explicit_typeargs_overload_test",
+		"[       OK ] explicit_typeargs_overload_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected explicit type-args overload output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLISelectiveImportBringsNamedModuleMemberIntoScope(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

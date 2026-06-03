@@ -281,7 +281,24 @@ func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
 	if a == nil || expr == nil {
 		return
 	}
+	// Accept both the plain `name(args)` and the explicitly-type-argged
+	// `name[TypeArgs](args)` form (the latter parses as a SpecializeExpr wrapping
+	// the ident). Capture the type args so the rewritten FieldExpr can carry them
+	// — otherwise an overloaded free call with explicit type args never reaches
+	// receiver-based disambiguation and latches onto the primary overload.
 	ident, ok := expr.Func.(*ast.Ident)
+	var callTypeArgs []ast.TypeExpr
+	var specPos lexer.Pos
+	if !ok {
+		if spec, sok := expr.Func.(*ast.SpecializeExpr); sok && spec != nil {
+			if id, iok := spec.Operand.(*ast.Ident); iok && id != nil {
+				ident = id
+				ok = true
+				callTypeArgs = spec.TypeArgs
+				specPos = spec.Position
+			}
+		}
+	}
 	if !ok || ident == nil || ident.Name == "" {
 		return
 	}
@@ -320,7 +337,14 @@ func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
 		return
 	}
 	receiver := expr.Args[0]
-	expr.Func = &ast.FieldExpr{Position: ident.Position, Object: receiver, Field: ident.Name}
+	field := &ast.FieldExpr{Position: ident.Position, Object: receiver, Field: ident.Name}
+	if len(callTypeArgs) != 0 {
+		// Re-wrap as `receiver.name[TypeArgs]` so rewriteExtensionMethodCall (which
+		// runs next) re-applies the explicit type args to the resolved callee.
+		expr.Func = &ast.SpecializeExpr{Position: specPos, Operand: field, TypeArgs: callTypeArgs}
+	} else {
+		expr.Func = field
+	}
 	expr.Args = expr.Args[1:]
 }
 
