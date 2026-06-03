@@ -362,6 +362,19 @@ func TestAnalyzeInfersBuiltinAbortPermissionFromPanic(t *testing.T) {
 		t.Fatalf("expected local grant warning to remain, got:\n%s", warns)
 	}
 }
+// The canonical `@r` suffix on a reference (docs/68 §5) is equivalent to the legacy
+// region prefix `r T&`: both bind the reference to region parameter r, so the same
+// program analyzes cleanly written either way.
+func TestAnalyzeAcceptsRegionSuffixOnReference(t *testing.T) {
+	src := `def id[region r](value: i32& @r) -> i32& @r:
+	return value
+`
+	_, errs := parseAndAnalyze(t, "function_region_suffix_ref_ok.elisa", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected `i32& @r` suffix to analyze like `r i32&`, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsCallsWhenRegionParamCannotBeInferred(t *testing.T) {
 	src := `def id[region r](value: r i32&) -> r i32&:
 	return value

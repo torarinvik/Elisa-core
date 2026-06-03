@@ -91,15 +91,27 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		storage, explicit, label, region, storageParam := p.parseRefStorageQualifier()
 		typ = p.parseBaseType(storage, explicit, label, region, storageParam)
 	}
-	// Explicit `@r` region annotation on a container type (region-parameterized
-	// containers, Phase 2). Only meaningful on container builtins for now.
+	// Explicit `@r` region-provenance suffix (docs/68 §5): the canonical use-site
+	// notation on a container (`darray[T] @r`) or a reference (`T& @r`, `T&? @r`).
+	// On a reference it is equivalent to the legacy region prefix `r T&` -- both
+	// populate the same Region field, so the analyzer treats them identically.
 	if p.peek() == lexer.TOKEN_AT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 		p.advance() // '@'
 		regionName := p.advance().Text
-		if bt, ok := typ.(*ast.BuiltinTypeExpr); ok && bt != nil {
-			bt.Region = regionName
-		} else {
-			p.errorf("region annotation `@%s` is only supported on container types", regionName)
+		switch t := typ.(type) {
+		case *ast.BuiltinTypeExpr:
+			if t != nil {
+				t.Region = regionName
+			}
+		case *ast.RefType:
+			if t != nil {
+				if t.Region != "" {
+					p.errorf("region given twice: prefix `%s` and suffix `@%s` on the same reference", t.Region, regionName)
+				}
+				t.Region = regionName
+			}
+		default:
+			p.errorf("region annotation `@%s` is only supported on container and reference types", regionName)
 		}
 	}
 	if p.match(lexer.TOKEN_PIPE) {
