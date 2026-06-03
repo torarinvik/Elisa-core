@@ -19,7 +19,11 @@ func ExtensionMethodSymbolName(visibleName string, receiver Type, methodName str
 }
 
 func ReceiverOverloadSymbolName(visibleName string, receiver Type, methodName string) string {
-	return "__ovl__" + sanitizeStaticInterfaceSymbolFragment(visibleName) + "__" + sanitizeStaticInterfaceSymbolFragment(TypeIdentityKey(receiver)) + "__" + sanitizeStaticInterfaceSymbolFragment(methodName)
+	// Mangle the receiver by its type String() (the same clean scheme mangleGenericType
+	// uses for type args), NOT TypeIdentityKey — TypeIdentityKey prepends the Go runtime
+	// type (`%T`, e.g. `*semantic.RefType`), which leaked `semantic_RefType_...` into the
+	// emitted symbol name. String() already uniquely identifies the receiver type.
+	return "__ovl__" + sanitizeStaticInterfaceSymbolFragment(visibleName) + "__" + sanitizeStaticInterfaceSymbolFragment(receiver.String()) + "__" + sanitizeStaticInterfaceSymbolFragment(methodName)
 }
 
 func (a *Analyzer) validateExtensionMethodSignature(visibleName string, receiver Type, fnType *FuncType, decl ast.Node) bool {
