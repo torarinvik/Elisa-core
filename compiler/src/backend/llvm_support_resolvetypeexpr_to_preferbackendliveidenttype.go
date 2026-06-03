@@ -178,6 +178,13 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 				lookupName = "DArrayBuilder"
 			}
 		}
+		if s.g != nil && s.g.result != nil && s.g.result.ResolvedTypeNames != nil {
+			if canon, ok := s.g.result.ResolvedTypeNames[n]; ok {
+				// Canonicalize so the generic instance name matches the analyzer's
+				// (qualified) name used for inference + monomorphization keying.
+				lookupName = canon
+			}
+		}
 		base, ok := s.g.result.NamedTypes[lookupName]
 		if !ok {
 			return nil, fmt.Errorf("unknown type %q", n.Name)

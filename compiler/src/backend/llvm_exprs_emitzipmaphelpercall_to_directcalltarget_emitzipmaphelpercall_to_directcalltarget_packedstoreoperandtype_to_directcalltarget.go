@@ -135,10 +135,19 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 		}
 	}
 	if ident, ok := expr.Func.(*ast.Ident); ok {
-		if sym, ok := s.g.result.GlobalScope.Lookup(ident.Name); ok {
+		// Resolve through the analyzer's recorded canonical (namespace/using/import-
+		// qualified) name so a namespaced/imported call target — including a generic
+		// function that must be monomorphized — is found instead of the bare name.
+		lookupName := ident.Name
+		if s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
+			if canon, ok := s.g.result.ResolvedValueNames[ident]; ok {
+				lookupName = canon
+			}
+		}
+		if sym, ok := s.g.result.GlobalScope.Lookup(lookupName); ok {
 			fnType, ok := sym.Type.(*semantic.FuncType)
 			if !ok {
-				return nil, nil, fmt.Errorf("call target %s does not resolve to a function type", ident.Name)
+				return nil, nil, fmt.Errorf("call target %s does not resolve to a function type", lookupName)
 			}
 			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(decl.GenericParams) > 0 {
 				argTypes := make([]semantic.Type, 0, len(expr.Args))
@@ -159,7 +168,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				return value, specialized, err
 			}
 			specialized := s.specializeFunctionType(fnType)
-			value, err := s.g.ensureFunctionDeclared(ident.Name, specialized)
+			value, err := s.g.ensureFunctionDeclared(lookupName, specialized)
 			return value, specialized, err
 		}
 	}

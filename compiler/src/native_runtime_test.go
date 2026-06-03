@@ -484,6 +484,67 @@ def namespaced_type_codegen_test() -> void:
 	}
 }
 
+func TestRunCLINamespacedGenericMonomorphizes(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "namespaced_generic_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// An imported generic type AND generic function must monomorphize at codegen.
+	// The generic instance is named by its canonical (qualified) name, so a bare
+	// reference inside the module and an imported reference unify; the backend
+	// resolves the call target through the analyzer's recorded canonical name so
+	// the namespaced generic function is specialized (previously emitted as an
+	// unsubstituted %Holder__T -> LLVM verifier error).
+	src := fmt.Sprintf(`# include %q
+
+module Box:
+    struct Holder[T]:
+        value: mutable T
+    def make[T](v: T) -> Holder[T]:
+        return Holder[T]{value: v}
+
+from Box import Holder, make
+
+@test
+def namespaced_generic_test() -> void:
+    can Abort.Panic:
+        h: Holder[i64] = make(7)
+        assert_true(h.value == 7)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write namespaced generic fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected namespaced generic test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] namespaced_generic_test",
+		"[       OK ] namespaced_generic_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected namespaced generic output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIAutoRefCoercesValuesToReferenceParams(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

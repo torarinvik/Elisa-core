@@ -262,7 +262,7 @@ type Analyzer struct {
 	currentNamespace                 string
 	currentUsings                    []string
 	importAliases                    map[string]string
-	resolvedTypeNames                map[*ast.NamedType]string
+	resolvedTypeNames                map[ast.TypeExpr]string
 	resolvedValueNames               map[*ast.Ident]string
 	currentImplicitScopes            []map[string]ast.Expr
 	currentExplicitArgScopes         []map[string]ast.Expr
@@ -502,7 +502,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		unsafeBufferReinterpretCasts:      make(map[*ast.CastExpr]bool),
 		loweredInitCalls:                  make(map[*ast.StructLitExpr]*ast.CallExpr, resolvedInitCallCapacity),
 		postfixShorthandCalls:             make(map[*ast.CastExpr]*ast.CallExpr),
-		resolvedTypeNames:                 make(map[*ast.NamedType]string),
+		resolvedTypeNames:                 make(map[ast.TypeExpr]string),
 		resolvedValueNames:                make(map[*ast.Ident]string),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),

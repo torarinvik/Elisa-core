@@ -197,10 +197,20 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 				lookupName = "DArrayBuilder"
 			}
 		}
-		base, _, ok := a.lookupVisibleType(lookupName)
+		base, canonical, ok := a.lookupVisibleType(lookupName)
 		if !ok {
 			a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
 			return invalidType
+		}
+		if a.resolvedTypeNames != nil && canonical != "" && canonical != lookupName {
+			a.resolvedTypeNames[n] = canonical
+		}
+		// Use the canonical (namespace-qualified) name for the generic instance so a
+		// reference spelled bare inside the module and one spelled qualified/imported
+		// resolve to the SAME instance type (required for inference + monomorphization
+		// to unify). For top-level types canonical == lookupName, so this is a no-op.
+		if canonical != "" {
+			lookupName = canonical
 		}
 		switch base := base.(type) {
 		case *PackedEnumStoreType:
