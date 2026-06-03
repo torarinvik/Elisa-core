@@ -362,6 +362,67 @@ def uniform_call_overload_test() -> void:
 	}
 }
 
+func TestRunCLISelectiveImportBringsNamedModuleMemberIntoScope(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "selective_import_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// `from Foo import bar` brings only `bar` into scope unqualified; the importer's
+	// own `baz` does not clash with the unimported `Foo.baz`. `bar()` resolves to
+	// `Foo.bar` end-to-end (analysis + codegen).
+	src := fmt.Sprintf(`# include %q
+
+module Foo:
+    def bar() -> i64:
+        return 10
+    def baz() -> i64:
+        return 999
+
+from Foo import bar
+
+def baz() -> i64:
+    return bar() + 5
+
+@test
+def selective_import_test() -> void:
+    can Abort.Panic:
+        assert_true(bar() == 10)
+        assert_true(baz() == 15)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write selective import fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected selective import test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] selective_import_test",
+		"[       OK ] selective_import_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected selective import output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIAutoRefCoercesValuesToReferenceParams(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

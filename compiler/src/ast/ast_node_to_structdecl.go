@@ -114,6 +114,15 @@ type UsingDecl struct {
 	Position lexer.Pos
 	Name     string
 }
+
+// ImportDecl is a selective import: `from Module import a, b` brings only the
+// named members of an in-program module/namespace into scope unqualified, unlike
+// `using Module` which brings in everything.
+type ImportDecl struct {
+	Position lexer.Pos
+	Module   string
+	Names    []string
+}
 type EnumDecl struct {
 	Position    lexer.Pos
 	Annotations []Annotation

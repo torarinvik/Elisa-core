@@ -78,6 +78,21 @@ func (p *Parser) parseUsingDecl() *ast.UsingDecl {
 	p.expectNewline()
 	return &ast.UsingDecl{Position: pos, Name: name}
 }
+
+// parseImportDecl parses `from Module import a, b` — a selective import that
+// brings only the named members of an in-program module/namespace into scope.
+func (p *Parser) parseImportDecl() *ast.ImportDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("from")
+	module := p.parseQualifiedDeclName()
+	p.expectIdentText("import")
+	names := []string{p.expect(lexer.TOKEN_IDENT).Text}
+	for p.match(lexer.TOKEN_COMMA) {
+		names = append(names, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	p.expectNewline()
+	return &ast.ImportDecl{Position: pos, Module: module, Names: names}
+}
 func (p *Parser) parseAttributeDecl() *ast.AttributeDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("attribute")

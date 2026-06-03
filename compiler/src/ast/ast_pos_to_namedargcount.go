@@ -204,6 +204,7 @@ func (*ContextDecl) nodeTag()                          {}
 func (*ParamsDecl) nodeTag()                           {}
 func (*NamespaceDecl) nodeTag()                        {}
 func (*UsingDecl) nodeTag()                            {}
+func (*ImportDecl) nodeTag()                           {}
 func (*EnumDecl) nodeTag()                             {}
 func (*TreeDecl) nodeTag()                             {}
 func (*GrammarDecl) nodeTag()                          {}
@@ -409,6 +410,7 @@ func (*ContextDecl) declTag()                          {}
 func (*ParamsDecl) declTag()                           {}
 func (*NamespaceDecl) declTag()                        {}
 func (*UsingDecl) declTag()                            {}
+func (*ImportDecl) declTag()                           {}
 func (*EnumDecl) declTag()                             {}
 func (*TreeDecl) declTag()                             {}
 func (*GrammarDecl) declTag()                          {}

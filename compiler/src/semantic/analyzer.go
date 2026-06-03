@@ -261,6 +261,7 @@ type Analyzer struct {
 	loweredWithStmts                 map[*ast.WithStmt]bool
 	currentNamespace                 string
 	currentUsings                    []string
+	importAliases                    map[string]string
 	currentImplicitScopes            []map[string]ast.Expr
 	currentExplicitArgScopes         []map[string]ast.Expr
 	currentLocalParamPackScopes      []map[string]*ParamPack

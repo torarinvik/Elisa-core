@@ -236,6 +236,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("using") {
 		return p.parseUsingDecl()
 	}
+	if p.peekIdentText("from") {
+		return p.parseImportDecl()
+	}
 	if p.peekIdentText("type") {
 		return p.parseTypeAliasDecl()
 	}

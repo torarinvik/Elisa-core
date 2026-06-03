@@ -83,6 +83,9 @@ func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace 
 			out = append(out, a.flattenScopedDeclsWithVisibility(n.Decls, childNamespace, effectiveUsings, childPrivate)...)
 		case *ast.UsingDecl:
 			continue
+		case *ast.ImportDecl:
+			a.registerImportAliases(n, namespace)
+			continue
 		default:
 			a.primeScopedConstValues(decl, namespace, effectiveUsings)
 			out = append(out, scopedDecl{Decl: decl, Namespace: namespace, Usings: append([]string(nil), effectiveUsings...), Private: a.declIsPrivate(decl, inheritedPrivate)})
@@ -121,6 +124,33 @@ func (a *Analyzer) primeScopedConstValues(decl ast.Decl, namespace string, using
 	})
 }
 
+// registerImportAliases records `from Module import a, b` so that the bare names
+// resolve to Module.a / Module.b. The Module is resolved relative to the enclosing
+// namespace, mirroring how `using` qualifies its target. Aliases are program-level
+// (consulted in visibleNameCandidates) and never shadow a same-named declaration in
+// the current namespace, a `using` target, or a bare global — they only add an
+// extra resolution candidate.
+func (a *Analyzer) registerImportAliases(n *ast.ImportDecl, namespace string) {
+	if a == nil || n == nil {
+		return
+	}
+	if a.importAliases == nil {
+		a.importAliases = make(map[string]string)
+	}
+	module := joinQualifiedName(namespace, n.Module)
+	for _, name := range n.Names {
+		if name == "" {
+			continue
+		}
+		target := joinQualifiedName(module, name)
+		if existing, ok := a.importAliases[name]; ok && existing != target {
+			a.errorf(n.Pos(), "conflicting import: %q is already imported as %q, cannot also import it as %q", name, existing, target)
+			continue
+		}
+		a.importAliases[name] = target
+	}
+}
+
 func (a *Analyzer) withResolutionContext(namespace string, usings []string, fn func()) {
 	savedNamespace := a.currentNamespace
 	savedUsings := a.currentUsings
@@ -148,6 +178,9 @@ func (a *Analyzer) visibleNameCandidates(name string) []string {
 	if !strings.Contains(name, ".") {
 		for _, usingName := range a.currentUsings {
 			candidates = append(candidates, joinQualifiedName(usingName, name))
+		}
+		if target, ok := a.importAliases[name]; ok {
+			candidates = append(candidates, target)
 		}
 	}
 	candidates = append(candidates, name)

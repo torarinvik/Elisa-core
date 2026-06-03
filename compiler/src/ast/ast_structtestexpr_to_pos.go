@@ -555,6 +555,7 @@ func (n *ContextDecl) Pos() lexer.Pos    { return n.Position }
 func (n *ParamsDecl) Pos() lexer.Pos     { return n.Position }
 func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
+func (n *ImportDecl) Pos() lexer.Pos     { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
 func (n *TreeDecl) Pos() lexer.Pos       { return n.Position }
 func (n *GrammarDecl) Pos() lexer.Pos    { return n.Position }
