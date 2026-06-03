@@ -420,6 +420,11 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		return ast.RefStorageStatic, true, tok.Text, "", ""
 	default:
 		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "effects" && p.tokens[p.pos+1].Text != "ensures" {
+			// The `<ident> T&` prefix is shared by region prefixes (`scratch i32&`) AND
+			// `refstorage`/`refstate` param prefixes (`store i32&[state]`), indistinguishable
+			// at parse time. It therefore cannot be removed for regions without regressing the
+			// (used) refstorage-param feature, so the legacy region prefix is retained here even
+			// though `i32& @r` is the canonical surface (docs/68 §7).
 			name := p.advance().Text
 			return ast.RefStorageAny, true, name, "", name
 		}
