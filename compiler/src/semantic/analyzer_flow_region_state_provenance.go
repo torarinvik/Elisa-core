@@ -239,6 +239,55 @@ func invalidateRegionDependencyInState(state regionRefState, region *Symbol, pre
 	return state, changed
 }
 
+// rebaseRegionDependencyInState re-keys every dependency on `from` to instead
+// name `to` at generation `gen`, recursing through fields. It is the transfer
+// counterpart of invalidateRegionDependencyInState: where invalidation marks a
+// region's provenance dead, rebasing moves it onto a longer-lived region. This
+// is the shared static substrate for `promote` (re-keys a value's backing) and
+// `adopt` (re-keys a whole child region onto its parent). Clone-on-write: the
+// input state is never mutated. Returns the rewritten state and whether
+// anything changed.
+func rebaseRegionDependencyInState(state regionRefState, from, to *Symbol, gen int) (regionRefState, bool) {
+	if from == nil || to == nil || from == to {
+		return state, false
+	}
+	changed := false
+	if dep, ok := state.Deps[from]; ok {
+		state.Deps = cloneRegionDependencyStates(state.Deps)
+		delete(state.Deps, from)
+		dep.Generation = gen
+		if existing, ok := state.Deps[to]; ok {
+			// Value already depended on `to`: keep it live if either side is.
+			dep.Valid = dep.Valid || existing.Valid
+			if !dep.Valid && existing.InvalidatedBy != "" {
+				dep.InvalidatedBy = existing.InvalidatedBy
+			}
+		}
+		state.Deps[to] = dep
+		changed = true
+	}
+	if len(state.Fields) != 0 {
+		fieldsCloned := false
+		for name, fieldState := range state.Fields {
+			nextField, fieldChanged := rebaseRegionDependencyInState(fieldState, from, to, gen)
+			if !fieldChanged {
+				continue
+			}
+			if !fieldsCloned {
+				state.Fields = cloneRegionRefFields(state.Fields)
+				fieldsCloned = true
+			}
+			state.Fields[name] = nextField
+			changed = true
+		}
+	}
+	if changed {
+		state.PackedStoreSummaryKnown = false
+		state = withPackedStoreProvenanceSummary(state)
+	}
+	return state, changed
+}
+
 func firstNonShareablePackedStoreDependency(state regionRefState) (*Symbol, packedStoreDependencyState, bool) {
 	for store, dep := range state.StoreDeps {
 		if dep.Type == nil || !IsFrozenPackedEnumStoreType(dep.Type) {
