@@ -199,6 +199,32 @@ func (p *Parser) parseAdopt() *ast.AdoptStmt {
 	p.expectNewline()
 	return &ast.AdoptStmt{Position: pos, Child: child, Parent: parent}
 }
+
+// looksLikePromoteStmt reports whether the statement starting at the current
+// `promote` identifier is a `promote <value> into <region>` statement, by
+// scanning for a depth-0 `into` keyword before the end of the line. This lets the
+// value be an arbitrary expression (not just a bare identifier) while keeping
+// `promote` usable as an ordinary identifier elsewhere.
+func (p *Parser) looksLikePromoteStmt() bool {
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		switch p.tokens[i].Kind {
+		case lexer.TOKEN_NEWLINE:
+			return false
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_IDENT:
+			if depth == 0 && p.tokens[i].Text == "into" {
+				return true
+			}
+		}
+	}
+	return false
+}
 func (p *Parser) parseReturn() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_RETURN)

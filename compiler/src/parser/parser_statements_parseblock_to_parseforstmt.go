@@ -158,7 +158,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return p.parseReset()
 			}
 		case "promote":
-			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Text == "into" {
+			if p.looksLikePromoteStmt() {
 				return p.parsePromote()
 			}
 		case "adopt":

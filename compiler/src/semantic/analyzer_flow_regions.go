@@ -127,8 +127,11 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	sym := a.analyzeRegionDecl(stmt)
 	a.analyzeInStoreStmt(scopedArenaInStoreStmt(stmt))
 	// Scoped region: the owner is discharged automatically at block exit, so it
-	// satisfies the must-consume obligation registered in analyzeRegionDecl.
-	if sym != nil {
+	// satisfies the must-consume obligation registered in analyzeRegionDecl —
+	// unless the body already consumed it (an explicit `destroy`, or
+	// `adopt ... into <outer>`), in which case discharging again would be a
+	// double-consume.
+	if sym != nil && !a.currentRegions[sym].Destroyed {
 		a.recordAffineConsumption(affineValueKey{Root: sym}, "region scope exit")
 	}
 	a.currentScope = savedScope
