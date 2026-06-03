@@ -24,6 +24,25 @@ func TestAnalyzeAcceptsInteriorRefIntoReserveCommitDarrayAcrossPush(t *testing.T
 	}
 }
 
+// A fixed-backed darray is also single-block and grows in place (until it overflows
+// and panics), so an interior reference into it likewise survives push (docs/68 §4).
+func TestAnalyzeAcceptsInteriorRefIntoFixedDarrayAcrossPush(t *testing.T) {
+	src := `def f() -> i32:
+	region buf(1024) using fixed
+	xs: mutable darray[i32] @buf = []
+	xs.push(100)
+	e0: i32& = &xs[0]
+	xs.push(1)
+	result: i32 = e0[0]
+	destroy buf
+	return result
+`
+	_, errs := parseAndAnalyze(t, "fixed_stable_interior_ref_ok.elisa", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected interior ref into a fixed darray to survive push, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // The same code in a chained (relocatable) region must reject the stale interior
 // reference after growth.
 func TestAnalyzeRejectsInteriorRefIntoChainedDarrayAcrossPush(t *testing.T) {

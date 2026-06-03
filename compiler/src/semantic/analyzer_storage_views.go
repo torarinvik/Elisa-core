@@ -140,15 +140,23 @@ func (a *Analyzer) borrowedPlaceContainerIsRelocatable(obj ast.Expr) bool {
 }
 
 // containerBackingIsStable reports whether a container's backing region never
-// relocates its storage on growth — currently true only for reserve_commit
-// regions (docs/68 §3-§4).
+// relocates its storage on growth — true for the single-block strategies
+// reserve_commit and fixed (docs/68 §3-§4). Both occupy one contiguous block and
+// grow in place via arena_realloc's tail extension (the base never moves);
+// reserve_commit commits pages on demand, fixed panics on overflow. Chained/heap
+// backings can relocate the buffer on growth and so are not stable.
 func (a *Analyzer) containerBackingIsStable(obj ast.Expr) bool {
 	dt, ok := stripRefForBounds(a.exprTypes[obj]).(*DArrayType)
 	if !ok || dt.Region == "" {
 		return false
 	}
 	_, rs := a.lookupRegionState(dt.Region)
-	return normalizeBacking(rs.Backing) == "reserve_commit"
+	switch normalizeBacking(rs.Backing) {
+	case "reserve_commit", "fixed":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageViewDependencyState, bool) {
