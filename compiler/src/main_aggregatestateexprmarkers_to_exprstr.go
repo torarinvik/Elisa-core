@@ -228,9 +228,7 @@ func typeStr(t ast.TypeExpr) string {
 	case *ast.RefType:
 		s := typeStr(n.Elem)
 		prefix := ""
-		if n.StorageParam != "" {
-			prefix = n.StorageParam + " "
-		} else if n.Region != "" {
+		if n.Region != "" {
 			prefix = n.Region + " "
 		} else if n.Storage != ast.RefStorageAny {
 			switch n.Storage {

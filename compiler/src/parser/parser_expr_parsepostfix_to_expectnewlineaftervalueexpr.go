@@ -100,7 +100,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				castPos := pos
 				savedCastPos := p.pos
 				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: field}
-				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false, "", "")
+				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false, "")
 				if p.peek() == lexer.TOKEN_LPAREN {
 					p.errorf("legacy reference cast syntax is no longer supported; use .cast[T&] with an explicit target type instead")
 					p.advance()

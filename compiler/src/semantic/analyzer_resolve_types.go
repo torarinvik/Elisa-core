@@ -97,15 +97,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		return &TupleType{Fields: fields}
 	case *ast.RefType:
 		region := n.Region
-		storageParam := n.StorageParam
-		if storageParam != "" {
-			if a.regionQualifierDefined(storageParam) {
-				region = storageParam
-				storageParam = ""
-			} else {
-				a.errorf(n.Pos(), "unknown region qualifier %q", storageParam)
-			}
-		}
 		if region != "" && !a.regionQualifierDefined(region) {
 			a.errorf(n.Pos(), "unknown region qualifier %q", region)
 		}
@@ -113,7 +104,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
 			a.errorf(n.Pos(), "references to values containing linear handles are not supported; got %s&", elemType)
 		}
-		return &RefType{Elem: elemType, State: RefState(n.State), Storage: RefStorage(n.Storage), StorageParam: storageParam, Region: region, ExplicitStorage: n.Explicit}
+		return &RefType{Elem: elemType, State: RefState(n.State), Storage: RefStorage(n.Storage), Region: region, ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
 	case *ast.BuiltinTypeExpr:

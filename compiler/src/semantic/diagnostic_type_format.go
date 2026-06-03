@@ -79,9 +79,7 @@ func diagnosticTypeString(t Type) string {
 		if tt.Mutable {
 			s = "mutable " + s
 		}
-		if tt.StorageParam != "" {
-			s = tt.StorageParam + " " + s
-		} else if tt.Region != "" {
+		if tt.Region != "" {
 			s = tt.Region + " " + s
 		} else if tt.Storage != RefStorageAny {
 			s = RefStorageName(tt.Storage) + " " + s

@@ -268,11 +268,6 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		}
 	case *semantic.RefType:
 		if a, ok := actual.(*semantic.RefType); ok {
-			if p.StorageParam != "" {
-				if _, ok := bindings[p.StorageParam]; !ok {
-					bindings[p.StorageParam] = &semantic.RefStorageValueType{Storage: a.Storage}
-				}
-			}
 			collectSpecializationBindings(p.Elem, a.Elem, bindings)
 		} else {
 			// Parameter is `T&` but the argument is a value, auto-ref'd at the call site

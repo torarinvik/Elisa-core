@@ -290,13 +290,10 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 	case *ast.NamedType:
 		return n.Name
 	case *ast.RefType:
-		// Storage classes (heap/static/stack and storage params) stay as prefixes;
-		// region provenance is emitted as the canonical `@r` suffix (docs/68 §5).
+		// Storage classes (heap/static/stack) stay as prefixes; region provenance
+		// is emitted as the canonical `@r` suffix (docs/68 §5).
 		prefix := ""
-		switch {
-		case n.StorageParam != "":
-			prefix = n.StorageParam + " "
-		case n.Explicit && n.Storage != ast.RefStorageAny:
+		if n.Explicit && n.Storage != ast.RefStorageAny {
 			prefix = formatRefStorage(n.Storage) + " "
 		}
 		suffix := "&"

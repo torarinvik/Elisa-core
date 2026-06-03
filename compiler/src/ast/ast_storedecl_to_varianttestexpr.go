@@ -332,13 +332,12 @@ const (
 )
 
 type RefType struct {
-	Position     lexer.Pos
-	Elem         TypeExpr
-	State        RefState
-	Storage      RefStorage
-	StorageParam string
-	Region       string
-	Explicit     bool
+	Position lexer.Pos
+	Elem     TypeExpr
+	State    RefState
+	Storage  RefStorage
+	Region   string
+	Explicit bool
 }
 type RefStateLiteralTypeExpr struct {
 	Position lexer.Pos

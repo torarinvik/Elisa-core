@@ -88,8 +88,8 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	if p.peek() == lexer.TOKEN_LPAREN {
 		typ = p.parseTupleTypeExpr()
 	} else {
-		storage, explicit, label, region, storageParam := p.parseRefStorageQualifier()
-		typ = p.parseBaseType(storage, explicit, label, region, storageParam)
+		storage, explicit, label, region := p.parseRefStorageQualifier()
+		typ = p.parseBaseType(storage, explicit, label, region)
 	}
 	// Explicit `@r` region-provenance suffix (docs/68 §5): the canonical use-site
 	// notation on a container (`darray[T] @r`) or a reference (`T& @r`, `T&? @r`).
@@ -145,8 +145,8 @@ func (p *Parser) parseTypeExprWithoutErrorUnionSuffix() ast.TypeExpr {
 	if p.peek() == lexer.TOKEN_LPAREN {
 		return p.parseTupleTypeExpr()
 	}
-	storage, explicit, label, region, storageParam := p.parseRefStorageQualifier()
-	return p.parseBaseType(storage, explicit, label, region, storageParam)
+	storage, explicit, label, region := p.parseRefStorageQualifier()
+	return p.parseBaseType(storage, explicit, label, region)
 }
 func (p *Parser) parseTupleTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
@@ -407,31 +407,29 @@ func (p *Parser) parseErrorSetItemGroup() []ast.ErrorTagExpr {
 	}
 	return []ast.ErrorTagExpr{{Position: pos, SetName: setName, Tag: tag}}
 }
-func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, string, string) {
+func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, string) {
 	switch p.peek() {
 	case lexer.TOKEN_HEAP:
 		tok := p.advance()
-		return ast.RefStorageHeap, true, tok.Text, "", ""
+		return ast.RefStorageHeap, true, tok.Text, ""
 	case lexer.TOKEN_STACK:
 		tok := p.advance()
-		return ast.RefStorageStack, true, tok.Text, "", ""
+		return ast.RefStorageStack, true, tok.Text, ""
 	case lexer.TOKEN_STATIC:
 		tok := p.advance()
-		return ast.RefStorageStatic, true, tok.Text, "", ""
+		return ast.RefStorageStatic, true, tok.Text, ""
 	default:
 		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "effects" && p.tokens[p.pos+1].Text != "ensures" {
-			// The `<ident> T&` prefix is shared by region prefixes (`scratch i32&`) AND
-			// `refstorage`/`refstate` param prefixes (`store i32&[state]`), indistinguishable
-			// at parse time. It therefore cannot be removed for regions without regressing the
-			// (used) refstorage-param feature, so the legacy region prefix is retained here even
-			// though `i32& @r` is the canonical surface (docs/68 §7).
+			// The legacy `<ident> T&` prefix is a region prefix (`scratch i32&`),
+			// equivalent to the canonical `i32& @r` surface (docs/68 §7). The ident
+			// names the region.
 			name := p.advance().Text
-			return ast.RefStorageAny, true, name, "", name
+			return ast.RefStorageAny, true, name, name
 		}
-		return ast.RefStorageAny, false, "", "", ""
+		return ast.RefStorageAny, false, "", ""
 	}
 }
-func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage ast.RefStorage, explicit bool, region string, storageParam string) (ast.TypeExpr, int) {
+func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage ast.RefStorage, explicit bool, region string) (ast.TypeExpr, int) {
 	typ := base
 	count := 0
 	for {
@@ -442,11 +440,11 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 			if p.match(lexer.TOKEN_QUESTION) {
 				state = ast.RefStateNullable
 			}
-			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, StorageParam: storageParam, Region: region, Explicit: explicit}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, Region: region, Explicit: explicit}
 			count++
 		case lexer.TOKEN_BANG:
 			p.advance()
-			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull, Storage: storage, StorageParam: storageParam, Region: region, Explicit: explicit}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull, Storage: storage, Region: region, Explicit: explicit}
 			count++
 		default:
 			return typ, count
@@ -589,7 +587,7 @@ func canApplyAggregateState(typ ast.TypeExpr) bool {
 		return false
 	}
 }
-func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string, region string, storageParam string) ast.TypeExpr {
+func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string, region string) ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	for p.matchQualifiedNameSeparator() {
@@ -656,12 +654,10 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 	}
 
 	refCount := 0
-	typ, refCount = p.parseRefTypeSuffixes(typ, pos, storage, explicit, region, storageParam)
+	typ, refCount = p.parseRefTypeSuffixes(typ, pos, storage, explicit, region)
 	if explicit && refCount == 0 {
 		if region != "" {
 			p.errorf("region qualifier %q requires a pointer type", label)
-		} else if storageParam != "" {
-			p.errorf("refstorage qualifier %q requires a pointer type", label)
 		} else {
 			p.errorf("storage qualifier %q requires a pointer type", label)
 		}

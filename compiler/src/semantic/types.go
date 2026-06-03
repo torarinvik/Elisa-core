@@ -210,7 +210,6 @@ type RefType struct {
 	Mutable         bool
 	State           RefState
 	Storage         RefStorage
-	StorageParam    string
 	Region          string
 	ExplicitStorage bool
 }

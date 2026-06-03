@@ -34,7 +34,7 @@ func containsTypeParam(t Type) bool {
 	case *OptionalType:
 		return containsTypeParam(n.Value)
 	case *RefType:
-		return n.StorageParam != "" || containsTypeParam(n.Elem)
+		return containsTypeParam(n.Elem)
 	case *ArrayType:
 		return containsTypeParam(n.Elem)
 	case *DArrayType:

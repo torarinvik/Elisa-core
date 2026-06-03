@@ -108,7 +108,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if err != nil {
 			return nil, err
 		}
-		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), Storage: semantic.RefStorage(n.Storage), StorageParam: n.StorageParam, Region: n.Region, ExplicitStorage: n.Explicit}, nil
+		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), Storage: semantic.RefStorage(n.Storage), Region: n.Region, ExplicitStorage: n.Explicit}, nil
 	case *ast.FuncTypeExpr:
 		params := make([]semantic.Type, 0, len(n.Params))
 		for _, param := range n.Params {

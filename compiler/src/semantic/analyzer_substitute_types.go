@@ -95,20 +95,11 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		}
 		state := n.State
 		storage := n.Storage
-		storageParam := n.StorageParam
-		if storageParam != "" {
-			if resolved, ok := bindings[storageParam]; ok {
-				if value, ok := resolved.(*RefStorageValueType); ok {
-					storage = value.Storage
-					storageParam = ""
-				}
-			}
-		}
 		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(elem) {
 			return invalidType
 		}
-		return &RefType{Elem: elem, Mutable: n.Mutable, State: state, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: n.ExplicitStorage}
+		return &RefType{Elem: elem, Mutable: n.Mutable, State: state, Storage: storage, Region: region, ExplicitStorage: n.ExplicitStorage}
 	case *ArrayType:
 		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(elem) {

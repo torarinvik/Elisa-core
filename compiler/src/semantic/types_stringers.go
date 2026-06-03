@@ -383,9 +383,7 @@ func (t *RefType) String() string {
 	if t.Mutable {
 		s = "mutable " + s
 	}
-	if t.StorageParam != "" {
-		s = t.StorageParam + " " + s
-	} else if t.Region != "" {
+	if t.Region != "" {
 		s = t.Region + " " + s
 	} else if t.Storage != RefStorageAny {
 		s = RefStorageName(t.Storage) + " " + s

@@ -65,11 +65,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		if !refStateAssignable(p.State, a.State) {
 			return false
 		}
-		if p.StorageParam != "" || a.StorageParam != "" {
-			if p.StorageParam != a.StorageParam {
-				return false
-			}
-		} else if !refStorageAssignable(p.Storage, a.Storage, p.ExplicitStorage, a.ExplicitStorage) {
+		if !refStorageAssignable(p.Storage, a.Storage, p.ExplicitStorage, a.ExplicitStorage) {
 			return false
 		}
 		if !refRegionAssignable(p.Region, a.Region) {

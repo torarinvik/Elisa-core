@@ -167,7 +167,7 @@ func SameType(a, b Type) bool {
 		return ok && ta.Name == tb.Name
 	case *RefType:
 		tb, ok := b.(*RefType)
-		return ok && ta.Mutable == tb.Mutable && ta.State == tb.State && ta.Storage == tb.Storage && ta.StorageParam == tb.StorageParam && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
+		return ok && ta.Mutable == tb.Mutable && ta.State == tb.State && ta.Storage == tb.Storage && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
 	case *ArrayType:
 		tb, ok := b.(*ArrayType)
 		return ok && arraySizesEqual(ta, tb) && SameType(ta.Elem, tb.Elem)

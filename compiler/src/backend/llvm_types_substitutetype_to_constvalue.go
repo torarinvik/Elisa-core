@@ -94,16 +94,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		}
 		state := tt.State
 		storage := tt.Storage
-		storageParam := tt.StorageParam
-		if storageParam != "" {
-			if mapped, ok := subst[storageParam]; ok {
-				if value, ok := mapped.(*semantic.RefStorageValueType); ok {
-					storage = value.Storage
-					storageParam = ""
-				}
-			}
-		}
-		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: tt.ExplicitStorage}
+		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, Storage: storage, Region: region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		elem := substituteType(tt.Elem, subst, impls)
 		if tt.ConstParam != "" {

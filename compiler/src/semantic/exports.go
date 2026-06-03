@@ -390,18 +390,7 @@ func substituteExportType(t Type, bindings map[string]Type) Type {
 		}
 		return tt
 	case *RefType:
-		state := tt.State
-		storage := tt.Storage
-		storageParam := tt.StorageParam
-		if storageParam != "" {
-			if resolved, ok := bindings[storageParam]; ok {
-				if value, ok := resolved.(*RefStorageValueType); ok {
-					storage = value.Storage
-					storageParam = ""
-				}
-			}
-		}
-		return &RefType{Elem: substituteExportType(tt.Elem, bindings), Mutable: tt.Mutable, State: state, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		return &RefType{Elem: substituteExportType(tt.Elem, bindings), Mutable: tt.Mutable, State: tt.State, Storage: tt.Storage, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *ArrayType:
 		return &ArrayType{Elem: substituteExportType(tt.Elem, bindings), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *GenericInstanceType:

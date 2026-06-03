@@ -131,9 +131,6 @@ func AssignableTo(dst, src Type) bool {
 			if dr.Mutable && !sr.Mutable && dr.State != RefStateNull && sr.State != RefStateNull {
 				return false
 			}
-			if dr.StorageParam != "" || sr.StorageParam != "" {
-				return dr.StorageParam == sr.StorageParam && refStateAssignable(dr.State, sr.State) && refRegionAssignable(dr.Region, sr.Region)
-			}
 			return refStateAssignable(dr.State, sr.State) && refStorageAssignable(dr.Storage, sr.Storage, dr.ExplicitStorage, sr.ExplicitStorage) && refRegionAssignable(dr.Region, sr.Region)
 		}
 	}

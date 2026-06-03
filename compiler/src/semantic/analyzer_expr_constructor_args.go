@@ -414,11 +414,6 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *RefType:
 		if act, ok := actual.(*RefType); ok {
-			if p.StorageParam != "" {
-				if _, exists := bindings[p.StorageParam]; !exists {
-					bindings[p.StorageParam] = &RefStorageValueType{Storage: act.Storage}
-				}
-			}
 			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		} else {

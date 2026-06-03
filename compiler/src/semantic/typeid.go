@@ -154,7 +154,6 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		appendKeyBool(b, tt.Mutable)
 		appendKeyInt(b, int(tt.State))
 		appendKeyInt(b, int(tt.Storage))
-		appendKeyString(b, tt.StorageParam)
 		appendKeyString(b, tt.Region)
 		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
 			return false

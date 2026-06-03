@@ -123,9 +123,6 @@ func MergeTypes(a, b Type) Type {
 	if ar, ok := a.(*RefType); ok {
 		if br, ok := b.(*RefType); ok && SameType(ar.Elem, br.Elem) {
 			mutable := ar.Mutable && br.Mutable
-			if ar.StorageParam != br.StorageParam {
-				return invalidType
-			}
 			storage, explicit, okStorage := mergeRefStorages(ar.Storage, br.Storage, ar.ExplicitStorage, br.ExplicitStorage)
 			if !okStorage {
 				return invalidType
@@ -135,7 +132,7 @@ func MergeTypes(a, b Type) Type {
 				return invalidType
 			}
 			if state, ok := mergeRefStates(ar.State, br.State); ok {
-				return &RefType{Elem: ar.Elem, Mutable: mutable, State: state, Storage: storage, StorageParam: ar.StorageParam, Region: region, ExplicitStorage: explicit}
+				return &RefType{Elem: ar.Elem, Mutable: mutable, State: state, Storage: storage, Region: region, ExplicitStorage: explicit}
 			}
 		}
 	}

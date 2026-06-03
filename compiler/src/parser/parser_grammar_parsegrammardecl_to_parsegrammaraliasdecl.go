@@ -356,7 +356,7 @@ func (p *Parser) parseGrammarErrorHeaderDecl() ast.TypeExpr {
 }
 func (p *Parser) parseGrammarHeaderTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
-	base := p.parseBaseType(ast.RefStorageAny, false, "", "", "")
+	base := p.parseBaseType(ast.RefStorageAny, false, "", "")
 	if base == nil {
 		p.errorf("expected grammar header type")
 		return &ast.NamedType{Position: pos, Name: "<invalid>"}

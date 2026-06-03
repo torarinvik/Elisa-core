@@ -157,8 +157,8 @@ layout soa struct SymbolRows[region owner]:
 	if !ok {
 		t.Fatalf("expected left field to parse as ref type, got %T", expr.Fields[0].Type)
 	}
-	if leftType.Region != "owner" && leftType.StorageParam != "owner" {
-		t.Fatalf("expected left field to carry owner qualifier, got region=%q storageParam=%q", leftType.Region, leftType.StorageParam)
+	if leftType.Region != "owner" {
+		t.Fatalf("expected left field to carry owner region qualifier, got region=%q", leftType.Region)
 	}
 	rows, ok := file.Decls[1].(*ast.StructDecl)
 	if !ok {

@@ -42,7 +42,7 @@ func (a *Analyzer) mergeTrackedValueTypesWithSeen(left Type, right Type, seen ma
 		return merged, true
 	case *RefType:
 		rt, ok := right.(*RefType)
-		if !ok || lt.StorageParam != rt.StorageParam {
+		if !ok {
 			return nil, false
 		}
 		storage, explicit, okStorage := mergeRefStorages(lt.Storage, rt.Storage, lt.ExplicitStorage, rt.ExplicitStorage)
@@ -51,7 +51,7 @@ func (a *Analyzer) mergeTrackedValueTypesWithSeen(left Type, right Type, seen ma
 		if !okStorage || !okRegion || !okState {
 			return nil, false
 		}
-		merged := &RefType{Mutable: lt.Mutable && rt.Mutable, State: state, Storage: storage, StorageParam: lt.StorageParam, Region: region, ExplicitStorage: explicit}
+		merged := &RefType{Mutable: lt.Mutable && rt.Mutable, State: state, Storage: storage, Region: region, ExplicitStorage: explicit}
 		seen[pair] = merged
 		elem, ok := a.mergeTrackedValueTypesWithSeen(lt.Elem, rt.Elem, seen)
 		if !ok || elem == nil {
