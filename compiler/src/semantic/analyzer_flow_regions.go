@@ -283,10 +283,10 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 			a.errorf(stmt.Capacity.Pos(), "region capacity must be numeric, got %s", capacityType)
 		}
 	}
-	// Only the libc-malloc backing override is currently supported; an empty allocator
-	// keeps the compile-time default backend.
-	if stmt.Allocator != "" && stmt.Allocator != "malloc" {
-		a.errorf(stmt.Pos(), "unknown region allocator %q (expected \"malloc\")", stmt.Allocator)
+	// Validate the backing strategy (docs/68 §3). An empty selector and the legacy
+	// "malloc" override both denote chained-block backing.
+	if !validRegionBacking(stmt.Allocator) {
+		a.errorf(stmt.Pos(), "unknown region backing %q (expected one of fixed, chained, reserve_commit, scratch, malloc)", stmt.Allocator)
 	}
 	arenaType, ok := a.namedTypes["Arena"]
 	if !ok {
@@ -296,7 +296,7 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	sym := &Symbol{Name: stmt.Name, Kind: SymbolRegion, Type: arenaType, Node: stmt, Mutable: false}
 	a.defineLocal(sym, stmt.Pos())
 	if a.currentRegions != nil {
-		a.currentRegions[sym] = regionState{}
+		a.currentRegions[sym] = regionState{Backing: normalizeBacking(stmt.Allocator)}
 	}
 	// Record this region's lifetime ordinal (declaration order == nesting order
 	// for live regions). Outer regions get lower ordinals and thus outlive inner

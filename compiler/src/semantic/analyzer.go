@@ -285,6 +285,10 @@ type regionState struct {
 	Destroyed  bool
 	Generation int
 	Allocated  bool
+	// Backing is the normalized backing strategy (chained / fixed / reserve_commit
+	// / scratch; docs/68 §3). It governs adopt's backing-family check and the
+	// pointer-stability rule.
+	Backing string
 }
 
 type regionMarkState struct {

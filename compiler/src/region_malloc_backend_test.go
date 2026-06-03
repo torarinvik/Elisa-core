@@ -104,7 +104,7 @@ func TestRunCLIRegionRejectsUnknownAllocator(t *testing.T) {
 		t.Fatalf("expected analysis of an unknown region allocator to fail, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
 	combined := stdout.String() + stderr.String()
-	if !strings.Contains(combined, "unknown region allocator") {
-		t.Fatalf("expected an \"unknown region allocator\" diagnostic, got:\n%s", combined)
+	if !strings.Contains(combined, "unknown region backing") {
+		t.Fatalf("expected an \"unknown region backing\" diagnostic, got:\n%s", combined)
 	}
 }

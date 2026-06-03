@@ -36,10 +36,13 @@ func (a *Analyzer) analyzeAdoptStmt(n *ast.AdoptStmt) {
 		return
 	}
 
-	// TODO(backing-strategies, task #1): once regions carry a backing strategy,
-	// require a compatible backing family (chained<->chained, reserve_commit<->
-	// reserve_commit). Until then every region shares the default backing, so
-	// adoption always composes.
+	// adopt requires a compatible backing family — you can only splice storage
+	// between regions whose backing can transfer (docs/67 §3.5).
+	if !backingFamiliesCompatible(childState.Backing, parentState.Backing) {
+		a.errorf(n.Pos(), "adopt: region %q (%s) and %q (%s) have incompatible backing families; cannot adopt",
+			n.Child, normalizeBacking(childState.Backing), n.Parent, normalizeBacking(parentState.Backing))
+		return
+	}
 
 	reason := fmt.Sprintf("adopt of region %q into %q", n.Child, n.Parent)
 	// The child's storage now lives under the parent's lifetime: rebase every
