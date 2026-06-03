@@ -50,6 +50,7 @@ type Result struct {
 	CastHooks               map[ast.Expr]*Symbol
 	InitCalls               map[*ast.StructLitExpr]*ast.CallExpr
 	PostfixShorthandCalls   map[*ast.CastExpr]*ast.CallExpr
+	ResolvedTypeNames       map[*ast.NamedType]string
 	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo
 	NodeTables              map[ast.Expr]NodeTableInfo
 	PackedLowering          PackedLoweringMetadata

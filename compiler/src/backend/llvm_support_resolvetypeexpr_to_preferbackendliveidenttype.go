@@ -27,6 +27,15 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if bound, ok := s.typeMap[n.Name]; ok {
 			return bound, nil
 		}
+		// Prefer the analyzer's recorded resolution (handles namespace / using /
+		// import qualification that the bare-name lookup below cannot see).
+		if s.g != nil && s.g.result != nil && s.g.result.ResolvedTypeNames != nil {
+			if canonical, ok := s.g.result.ResolvedTypeNames[n]; ok {
+				if t, ok := s.g.result.NamedTypes[canonical]; ok {
+					return semantic.DefaultStatefulType(t), nil
+				}
+			}
+		}
 		if t, ok := s.g.result.NamedTypes[n.Name]; ok {
 			return semantic.DefaultStatefulType(t), nil
 		}

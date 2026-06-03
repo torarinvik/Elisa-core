@@ -32,7 +32,13 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if t, ok := a.lookupInterfaceAssocType(n.Name); ok {
 			return t
 		}
-		if t, _, ok := a.lookupVisibleType(n.Name); ok {
+		if t, canonical, ok := a.lookupVisibleType(n.Name); ok {
+			// Record the resolved canonical (possibly namespace/using/import-qualified)
+			// name so the backend and interpreter consume the analyzer's resolution
+			// instead of re-resolving the bare name without namespace context.
+			if a.resolvedTypeNames != nil && canonical != "" && canonical != n.Name {
+				a.resolvedTypeNames[n] = canonical
+			}
 			return DefaultStatefulType(t)
 		}
 		if t, ok := a.resolveProjectedAssociatedType(n); ok {

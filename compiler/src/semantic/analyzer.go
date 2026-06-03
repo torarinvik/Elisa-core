@@ -262,6 +262,7 @@ type Analyzer struct {
 	currentNamespace                 string
 	currentUsings                    []string
 	importAliases                    map[string]string
+	resolvedTypeNames                map[*ast.NamedType]string
 	currentImplicitScopes            []map[string]ast.Expr
 	currentExplicitArgScopes         []map[string]ast.Expr
 	currentLocalParamPackScopes      []map[string]*ParamPack
@@ -500,6 +501,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		unsafeBufferReinterpretCasts:      make(map[*ast.CastExpr]bool),
 		loweredInitCalls:                  make(map[*ast.StructLitExpr]*ast.CallExpr, resolvedInitCallCapacity),
 		postfixShorthandCalls:             make(map[*ast.CastExpr]*ast.CallExpr),
+		resolvedTypeNames:                 make(map[*ast.NamedType]string),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
 		deferInfo:                         map[*ast.DeferStmt]*DeferInfo{},
@@ -603,6 +605,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		CastHooks:               a.resolvedCastHooks,
 		InitCalls:               a.loweredInitCalls,
 		PostfixShorthandCalls:   a.postfixShorthandCalls,
+		ResolvedTypeNames:       a.resolvedTypeNames,
 		DenseNodeKeys:           a.exprDenseNodeKeys,
 		NodeTables:              a.exprNodeTables,
 		ParallelFor:             a.parallelForInfo,

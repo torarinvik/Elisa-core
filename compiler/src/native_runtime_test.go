@@ -423,6 +423,67 @@ def selective_import_test() -> void:
 	}
 }
 
+func TestRunCLINamespacedTypeResolvesAtCodegen(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "namespaced_type_codegen_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// A namespaced/imported type used unqualified (local annotation + struct literal)
+	// must lower at codegen. The backend consumes the analyzer's recorded resolution
+	// (Geo.Point) instead of re-resolving the bare name "Point" without namespace
+	// context — previously this failed with "unknown type".
+	src := fmt.Sprintf(`# include %q
+
+module Geo:
+    struct Point:
+        x: mutable i64
+        y: mutable i64
+    def make(x: i64, y: i64) -> Point:
+        return Point{x: x, y: y}
+
+from Geo import Point, make
+
+@test
+def namespaced_type_codegen_test() -> void:
+    can Abort.Panic:
+        a: Point = make(3, 4)
+        b: Point = Point{x: 1, y: 2}
+        assert_true(a.x + a.y + b.x + b.y == 10)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write namespaced type fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected namespaced type test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] namespaced_type_codegen_test",
+		"[       OK ] namespaced_type_codegen_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected namespaced type output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIAutoRefCoercesValuesToReferenceParams(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
