@@ -892,6 +892,24 @@ def drive(d: mutable Door&) -> void:
 	}
 }
 
+// Primitive values are valid UFCS receivers — including a bare integer literal,
+// whose untyped `int` type is accepted against an integer-typed first parameter.
+func TestAnalyzePrimitiveAndLiteralReceiversResolveUFCS(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "primitive_receiver.elisa", `
+def inc(n: i64) -> i64:
+    return n + 1
+
+def via_value(x: i64) -> i64:
+    return x.inc()
+
+def via_literal() -> i64:
+    return 7.inc()
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
 func TestAnalyzeOptionalChainingOnOptionalAndNullableReceivers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "optional_chaining.elisa", `
 struct Box:
