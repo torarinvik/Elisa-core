@@ -325,15 +325,18 @@ func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
 	if arg0Type == nil || IsInvalidType(arg0Type) {
 		return
 	}
-	// If the primary global overload already accepts arg0, leave it as a normal
-	// free call (e.g. `open("file")` keeps resolving to the cstr overload).
-	if primary, ok := a.globalScope.Lookup(ident.Name); ok && primary != nil {
-		if fn, ok := primary.Type.(*FuncType); ok && fn != nil && len(fn.Params) > 0 && a.ufcsReceiverAssignableTo(fn.Params[0], arg0Type) {
-			return
-		}
+	// Pick the best-matching overload for arg0 by arity + specificity (most concrete
+	// wins). The call provides len(expr.Args) arguments to the resolved function.
+	best, ok, _ := a.lookupVisibleUFCSFunctionWithArity(ident.Name, arg0Type, len(expr.Args))
+	if !ok || best == nil {
+		return
 	}
-	// Only rewrite when a receiver-overload uniquely matches arg0.
-	if _, ok, _ := a.lookupVisibleUFCSFunction(ident.Name, arg0Type); !ok {
+	// If the best match IS the bare global primary, normal resolution already
+	// selects it — leave it as a normal free call (e.g. `open("file")` keeps
+	// resolving to the bare cstr overload, and a generic primary that is genuinely
+	// the most specific match stays a direct call). Rewrite to UFCS only when a more
+	// specific NON-primary overload should win.
+	if primary, pok := a.globalScope.Lookup(ident.Name); pok && primary == best {
 		return
 	}
 	receiver := expr.Args[0]
@@ -427,7 +430,7 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		return extensionMethodCallRewriteInvalid
 	}
 	if !ok || method == nil || method.Symbol == nil {
-		ufcsSym, ufcsOK, ufcsErr := a.lookupVisibleUFCSFunction(fieldExpr.Field, receiverType)
+		ufcsSym, ufcsOK, ufcsErr := a.lookupVisibleUFCSFunctionWithArity(fieldExpr.Field, receiverType, 1+len(expr.Args))
 		if ufcsErr != nil {
 			a.errorf(expr.Pos(), "%s", ufcsErr.Error())
 			for _, arg := range expr.Args {

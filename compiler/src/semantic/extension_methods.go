@@ -92,23 +92,42 @@ func (a *Analyzer) lookupVisibleExtensionMethod(name string, actualReceiver Type
 }
 
 func (a *Analyzer) lookupVisibleUFCSFunction(name string, actualReceiver Type) (*Symbol, bool, error) {
+	return a.lookupVisibleUFCSFunctionWithArity(name, actualReceiver, -1)
+}
+
+// lookupVisibleUFCSFunctionWithArity resolves an overloaded receiver function by
+// two combined criteria:
+//   - arity: when requiredArity >= 0, a candidate with a fixed (non-variadic, no
+//     default) parameter list whose explicit count differs from requiredArity is
+//     excluded — e.g. a 1-arg `x.f()` never selects `f(a, b)`. Variadic/defaulted
+//     candidates are conservatively kept (the normal arg-count check validates them).
+//   - specificity ("most concrete wins"): among candidates whose first parameter
+//     accepts the receiver, a concrete/structured receiver (e.g. `f64`, `IOFile&`,
+//     `IndexMap[K,T]&`) outranks a bare type-parameter receiver (`T`, which matches
+//     anything). The strictly most-specific candidate wins; a tie at the top rank is
+//     reported as ambiguous.
+func (a *Analyzer) lookupVisibleUFCSFunctionWithArity(name string, actualReceiver Type, requiredArity int) (*Symbol, bool, error) {
 	if a == nil || name == "" || actualReceiver == nil || a.globalScope == nil {
 		return nil, false, nil
 	}
+	type ranked struct {
+		sym  *Symbol
+		name string
+	}
 	var (
-		matched        *Symbol
-		matchedName    string
-		ambiguousNames []string
+		best     []ranked
+		bestRank int
+		seen     = map[*Symbol]bool{}
 	)
 	for _, candidate := range a.visibleNameCandidates(name) {
 		candidates := a.ufcsFunctionsByName[candidate]
 		if len(candidates) == 0 {
 			if sym, ok := a.globalScope.Lookup(candidate); ok && sym != nil {
-				candidates = append(candidates, sym)
+				candidates = []*Symbol{sym}
 			}
 		}
 		for _, sym := range candidates {
-			if sym == nil {
+			if sym == nil || seen[sym] {
 				continue
 			}
 			if sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc {
@@ -118,27 +137,74 @@ func (a *Analyzer) lookupVisibleUFCSFunction(name string, actualReceiver Type) (
 			if !ok || fnType == nil || len(fnType.Params) == 0 {
 				continue
 			}
-			if !a.ufcsReceiverAssignableTo(fnType.Params[0], actualReceiver) {
+			if requiredArity >= 0 && !funcTypeAcceptsArgCount(fnType, requiredArity) {
 				continue
 			}
-			if matched != nil {
-				if len(ambiguousNames) == 0 {
-					ambiguousNames = append(ambiguousNames, matchedName)
-				}
-				ambiguousNames = append(ambiguousNames, candidate)
+			rank := a.receiverMatchRank(fnType.Params[0], actualReceiver)
+			if rank == 0 {
 				continue
 			}
-			matched = sym
-			matchedName = candidate
+			seen[sym] = true
+			switch {
+			case rank > bestRank:
+				bestRank = rank
+				best = []ranked{{sym: sym, name: candidate}}
+			case rank == bestRank:
+				best = append(best, ranked{sym: sym, name: candidate})
+			}
 		}
 	}
-	if len(ambiguousNames) != 0 {
-		return nil, false, fmt.Errorf("UFCS call %q on %s is ambiguous: %s", name, diagnosticTypeString(actualReceiver), strings.Join(ambiguousNames, ", "))
+	if len(best) > 1 {
+		names := make([]string, 0, len(best))
+		for _, b := range best {
+			names = append(names, b.name)
+		}
+		return nil, false, fmt.Errorf("UFCS call %q on %s is ambiguous: %s", name, diagnosticTypeString(actualReceiver), strings.Join(names, ", "))
 	}
-	if matched == nil {
-		return nil, false, nil
+	if len(best) == 1 {
+		return best[0].sym, true, nil
 	}
-	return matched, true, nil
+	return nil, false, nil
+}
+
+// funcTypeAcceptsArgCount reports whether ft can be called with n explicit
+// arguments. It only excludes simple fixed-arity functions (no variadic, no
+// defaults) whose explicit parameter count differs from n; variadic or defaulted
+// signatures are conservatively accepted (the normal arg-count check validates
+// them) so the overload arity filter never wrongly drops a legitimate candidate.
+func funcTypeAcceptsArgCount(ft *FuncType, n int) bool {
+	if ft == nil {
+		return false
+	}
+	if ft.Variadic {
+		return true
+	}
+	for _, hasDefault := range ft.ExplicitParamHasDefault {
+		if hasDefault {
+			return true
+		}
+	}
+	return funcTypeExplicitParamCount(ft) == n
+}
+
+// receiverMatchRank scores how specifically a receiver-parameter type matches an
+// actual receiver: 0 = no match, 1 = match via a bare type parameter (a wildcard
+// `T` that matches anything), 2 = match via a concrete or structured type (a
+// builtin, struct, or generic instance with a fixed base). Higher is more
+// specific, so "most concrete wins" overload resolution prefers rank 2 over rank 1.
+func (a *Analyzer) receiverMatchRank(expected, actual Type) int {
+	if !a.ufcsReceiverAssignableTo(expected, actual) {
+		return 0
+	}
+	base := expected
+	if ref, ok := base.(*RefType); ok && ref != nil {
+		base = ref.Elem
+	}
+	base = StripAggregateStateType(base)
+	if _, ok := base.(*TypeParamType); ok {
+		return 1
+	}
+	return 2
 }
 
 func (a *Analyzer) ufcsReceiverAssignableTo(expected Type, actual Type) bool {

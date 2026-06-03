@@ -536,7 +536,7 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 	if methodOK && method != nil {
 		resolvedSym = method.Symbol
 	} else {
-		resolvedSym, methodOK, err = a.lookupVisibleUFCSFunction(fieldExpr.Field, baseReceiverType)
+		resolvedSym, methodOK, err = a.lookupVisibleUFCSFunctionWithArity(fieldExpr.Field, baseReceiverType, 1+len(expr.Args))
 		if err != nil {
 			a.errorf(expr.Pos(), "%s", err.Error())
 			for _, arg := range expr.Args {

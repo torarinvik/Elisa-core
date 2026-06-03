@@ -362,6 +362,81 @@ def uniform_call_overload_test() -> void:
 	}
 }
 
+func TestRunCLIOverloadResolutionByArityAndMostConcrete(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "overload_arity_concrete_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// Overloads resolve by arity AND specificity ("most concrete wins"):
+	//   - a concrete first-param (f64) outranks a generic wildcard (T) at the same
+	//     arity, so Flush(1.5, 5) selects Flush(f64, i64);
+	//   - a receiver whose first-param type only the generic matches (Widget) falls
+	//     to the generic Flush[T];
+	//   - arity disambiguates a 1-arg receiver call (g.Tag()) from the 2-arg generic
+	//     Tag[T](a, b), which the wildcard T would otherwise also match.
+	src := fmt.Sprintf(`# include %q
+
+struct Widget:
+    n: mutable i64
+
+def Flush[T](a: T, b: i64) -> i64:
+    _ = a
+    return b
+
+def Flush(a: f64, b: i64) -> i64:
+    _ = a
+    return b + 1000
+
+def Tag(self: Widget&) -> i64:
+    return self.n
+
+def Tag[T](a: T, b: i64) -> i64:
+    _ = a
+    return b + 5
+
+@test
+def overload_arity_concrete_test() -> void:
+    can Abort.Panic:
+        w: Widget = Widget{n: 9}
+        assert_true(Flush(1.5, 5) == 1005)    # concrete f64 beats generic T
+        assert_true(Flush(w, 7) == 7)         # only generic T matches Widget
+        assert_true(w.Tag() == 9)             # 1-arg method, not the 2-arg generic
+        assert_true(Tag(w, 3) == 8)           # 2-arg generic
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write overload arity/concrete fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected overload arity/concrete test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] overload_arity_concrete_test",
+		"[       OK ] overload_arity_concrete_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected overload arity/concrete output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIZeroParamFreeFunctionOverloadsWithReceiverMethod(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
