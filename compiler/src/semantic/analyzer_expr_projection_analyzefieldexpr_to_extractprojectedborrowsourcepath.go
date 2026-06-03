@@ -9,6 +9,19 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if expr != nil && expr.Safe {
 		return a.analyzeSafeFieldExpr(expr)
 	}
+	// `.` accesses value members; namespaces are qualified with `::`. If the object
+	// is a bare name that is NOT a value but `Name.Field` names a global, the user
+	// wrote `Foo.bar` for a namespaced member — point them at `Foo::bar` instead of
+	// the cryptic "undefined identifier Foo".
+	if ident, isIdent := expr.Object.(*ast.Ident); isIdent && ident != nil && ident.Name != "" && expr.Field != "" {
+		if !a.identNameResolvesAsValue(ident.Name) {
+			qualified := joinQualifiedName(ident.Name, expr.Field)
+			if _, found := a.globalScope.Lookup(qualified); found {
+				a.errorf(expr.Pos(), "%q is a namespace; write %s::%s (`.` accesses value members, `::` accesses namespaces)", ident.Name, ident.Name, expr.Field)
+				return invalidType
+			}
+		}
+	}
 	objType := a.analyzeExpr(expr.Object)
 	if constType, ok := objType.(*ConstValueType); ok && constType != nil {
 		if expr.Field == "count" && (constType.Value.Kind == ConstList || constType.Value.Kind == ConstTuple) {

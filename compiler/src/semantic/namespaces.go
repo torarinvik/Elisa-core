@@ -232,6 +232,24 @@ func (a *Analyzer) lookupVisibleParamPack(name string) (*ParamPack, string, bool
 	return nil, "", false
 }
 
+// identNameResolvesAsValue reports whether a bare name is bound as a value in the
+// current scope or as a visible global value/symbol (used to distinguish a real
+// value receiver from a namespace prefix in `Name.Field`).
+func (a *Analyzer) identNameResolvesAsValue(name string) bool {
+	if a == nil || name == "" {
+		return false
+	}
+	if a.currentScope != nil {
+		if _, ok := a.currentScope.Lookup(name); ok {
+			return true
+		}
+	}
+	if _, _, ok := a.lookupVisibleGlobal(name); ok {
+		return true
+	}
+	return false
+}
+
 func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if sym, ok := a.globalScope.Lookup(candidate); ok {

@@ -70,6 +70,24 @@ def baz() -> i64:
 	}
 }
 
+// `Foo.bar(...)` (dot) on a namespace points the user at `::` rather than the
+// cryptic "undefined identifier Foo" — `.` is value member access, `::` qualifies
+// namespaces.
+func TestNamespaceDotAccessSuggestsScopeOperator(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ns_dot_hint.elisa", `
+module Foo:
+    def bar() -> i64:
+        return 1
+
+def run() -> i64:
+    return Foo.bar()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "is a namespace") || !strings.Contains(all, "Foo::bar") {
+		t.Fatalf("expected namespace `::` suggestion, got:\n%s", all)
+	}
+}
+
 // Importing the same bare name from two different modules is a conflict.
 func TestSelectiveImportConflictingNamesReported(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "selective_import_conflict.elisa", `

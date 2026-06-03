@@ -17,6 +17,17 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if lambda, ok := unwrapLambdaExpr(expr.Func); ok && lambdaHasUntypedParams(lambda) {
 		return a.analyzeDirectLambdaCallExpr(expr, lambda)
 	}
+	// `Foo.bar(...)` where Foo is a namespace (not a value) is a namespaced call
+	// spelled with `.`; direct the user to `Foo::bar(...)` before any receiver
+	// analysis reports a cryptic "undefined identifier Foo".
+	if fieldExpr, ok := expr.Func.(*ast.FieldExpr); ok && fieldExpr != nil && !fieldExpr.Safe {
+		if recvIdent, ok := fieldExpr.Object.(*ast.Ident); ok && recvIdent != nil && fieldExpr.Field != "" && !a.identNameResolvesAsValue(recvIdent.Name) {
+			if _, found := a.globalScope.Lookup(joinQualifiedName(recvIdent.Name, fieldExpr.Field)); found {
+				a.errorf(expr.Pos(), "%q is a namespace; write %s::%s(...) (`.` accesses value members, `::` accesses namespaces)", recvIdent.Name, recvIdent.Name, fieldExpr.Field)
+				return invalidType
+			}
+		}
+	}
 	switch a.rewriteBuiltinDictMethodCall(expr) {
 	case builtinDictMethodRewriteApplied:
 		return a.analyzeCallExpr(expr)
