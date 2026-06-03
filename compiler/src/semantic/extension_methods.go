@@ -188,23 +188,81 @@ func funcTypeAcceptsArgCount(ft *FuncType, n int) bool {
 }
 
 // receiverMatchRank scores how specifically a receiver-parameter type matches an
-// actual receiver: 0 = no match, 1 = match via a bare type parameter (a wildcard
-// `T` that matches anything), 2 = match via a concrete or structured type (a
-// builtin, struct, or generic instance with a fixed base). Higher is more
-// specific, so "most concrete wins" overload resolution prefers rank 2 over rank 1.
+// actual receiver. 0 = no match. Otherwise the score is 1 + typeSpecificityScore,
+// so a bare type parameter (`T`, wildcard) scores lowest (1), a concrete leaf
+// (`f64`, a struct) scores 2, and a generic instance scores higher the more of its
+// type arguments are themselves concrete — e.g. for a `Box[i64,i64]` receiver,
+// `Box[i64,i64]&` (fully bound) outranks `Box[A,B]&` (both args generic). Higher is
+// more specific, so "most concrete wins" overload resolution prefers it.
 func (a *Analyzer) receiverMatchRank(expected, actual Type) int {
 	if !a.ufcsReceiverAssignableTo(expected, actual) {
 		return 0
 	}
-	base := expected
-	if ref, ok := base.(*RefType); ok && ref != nil {
-		base = ref.Elem
+	eBase := StripAggregateStateType(unwrapReceiverRef(expected))
+	// Precision refinement for generic-instance receivers: ufcsReceiverAssignableTo
+	// matches by base name alone, so `Box[i64,i64]&` is accepted for a `Box[f64,i64]`
+	// actual. Require the type arguments to structurally match (matchTypePattern,
+	// which treats the receiver's own type params as wildcards) so a non-fitting
+	// specialization scores 0 instead of out-ranking the real generic match. Scoped
+	// to same-base generic instances so autoref/literal coercions are untouched.
+	if eInst, ok := eBase.(*GenericInstanceType); ok {
+		aBase := StripAggregateStateType(unwrapReceiverRef(actual))
+		if aInst, ok := aBase.(*GenericInstanceType); ok && eInst.Name == aInst.Name {
+			if !matchTypePattern(eBase, aBase) {
+				return 0
+			}
+		}
 	}
-	base = StripAggregateStateType(base)
-	if _, ok := base.(*TypeParamType); ok {
+	return 1 + typeSpecificityScore(eBase)
+}
+
+func unwrapReceiverRef(t Type) Type {
+	if ref, ok := t.(*RefType); ok && ref != nil {
+		return ref.Elem
+	}
+	return t
+}
+
+// typeSpecificityScore measures how concrete a type is, for "most concrete wins"
+// overload ranking. A bare type parameter (wildcard) scores 0; a concrete leaf
+// scores 1; a structured type scores 1 plus the score of its components, so a fully
+// bound generic instance (`Box[i64,i64]`, score 3) outscores a partially generic one
+// (`Box[i64,B]`, score 2) which outscores a fully generic one (`Box[A,B]`, score 1).
+func typeSpecificityScore(t Type) int {
+	switch n := t.(type) {
+	case nil:
+		return 0
+	case *TypeParamType:
+		return 0
+	case *RefType:
+		return typeSpecificityScore(n.Elem)
+	case *AggregateStateType:
+		return typeSpecificityScore(n.Base)
+	case *OptionalType:
+		return 1 + typeSpecificityScore(n.Value)
+	case *ArrayType:
+		return 1 + typeSpecificityScore(n.Elem)
+	case *DArrayType:
+		return 1 + typeSpecificityScore(n.Elem)
+	case *ViewType:
+		return 1 + typeSpecificityScore(n.Elem)
+	case *DArrayViewType:
+		return 1 + typeSpecificityScore(n.Elem)
+	case *TupleType:
+		score := 1
+		for _, field := range n.Fields {
+			score += typeSpecificityScore(field.Type)
+		}
+		return score
+	case *GenericInstanceType:
+		score := 1
+		for _, arg := range n.Args {
+			score += typeSpecificityScore(arg)
+		}
+		return score
+	default:
 		return 1
 	}
-	return 2
 }
 
 func (a *Analyzer) ufcsReceiverAssignableTo(expected Type, actual Type) bool {

@@ -403,6 +403,22 @@ def Tag[T](a: T, b: i64) -> i64:
     _ = a
     return b + 5
 
+struct Box[A, B]:
+    a: mutable A
+    b: mutable B
+
+def graded[A, B](x: Box[A, B]&) -> i64:
+    _ = x
+    return 1
+
+def graded[B](x: Box[i64, B]&) -> i64:
+    _ = x
+    return 2
+
+def graded(x: Box[i64, i64]&) -> i64:
+    _ = x
+    return 3
+
 @test
 def overload_arity_concrete_test() -> void:
     can Abort.Panic:
@@ -411,6 +427,12 @@ def overload_arity_concrete_test() -> void:
         assert_true(Flush(w, 7) == 7)         # only generic T matches Widget
         assert_true(w.Tag() == 9)             # 1-arg method, not the 2-arg generic
         assert_true(Tag(w, 3) == 8)           # 2-arg generic
+        b_ii: Box[i64, i64] = Box[i64, i64]{a: 0, b: 0}
+        b_if: Box[i64, f64] = Box[i64, f64]{a: 0, b: 0.0}
+        b_ff: Box[f64, f64] = Box[f64, f64]{a: 0.0, b: 0.0}
+        assert_true(b_ii.graded() == 3)       # fully bound Box[i64,i64] most specific
+        assert_true(b_if.graded() == 2)       # partially bound Box[i64,B]
+        assert_true(b_ff.graded() == 1)       # fully generic Box[A,B]
 `, runtimeInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write overload arity/concrete fixture: %v", err)
