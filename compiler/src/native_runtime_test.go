@@ -545,6 +545,65 @@ def namespaced_generic_test() -> void:
 	}
 }
 
+func TestRunCLIDotNotationAcceptsExplicitTypeArgs(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "dot_type_args_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// A UFCS method call may carry explicit type arguments: `recv.method[T](args)`
+	// resolves to `method[T](recv, args)`. Here T is supplied ONLY by the type
+	// argument (not inferable from a value arg), so it must thread through.
+	src := fmt.Sprintf(`# include %q
+
+struct Box:
+    n: mutable i64
+
+@method
+def type_size[T](self: Box&) -> usize:
+    _ = self
+    return size_of(T)
+
+@test
+def dot_type_args_test() -> void:
+    can Abort.Panic:
+        b: Box = Box{n: 0}
+        assert_true(b.type_size[i64]() == 8)
+        assert_true(b.type_size[u8]() == 1)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write dot type args fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected dot type args test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] dot_type_args_test",
+		"[       OK ] dot_type_args_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected dot type args output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIAutoRefCoercesValuesToReferenceParams(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

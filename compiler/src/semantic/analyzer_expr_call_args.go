@@ -329,8 +329,27 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		return extensionMethodCallRewriteNone
 	}
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	// `recv.method[TypeArgs](args)` parses as a SpecializeExpr wrapping the FieldExpr.
+	// Capture the explicit type args and unwrap to the FieldExpr so UFCS resolution
+	// proceeds; the resolved callee is re-wrapped with the type args below.
+	var callTypeArgs []ast.TypeExpr
+	if !ok {
+		if spec, sok := expr.Func.(*ast.SpecializeExpr); sok && spec != nil {
+			if fe, fok := spec.Operand.(*ast.FieldExpr); fok && fe != nil {
+				fieldExpr = fe
+				callTypeArgs = spec.TypeArgs
+				ok = true
+			}
+		}
+	}
 	if !ok || fieldExpr == nil || fieldExpr.Object == nil || fieldExpr.Field == "" {
 		return extensionMethodCallRewriteNone
+	}
+	withCallTypeArgs := func(fn ast.Expr) ast.Expr {
+		if len(callTypeArgs) == 0 {
+			return fn
+		}
+		return &ast.SpecializeExpr{Position: fieldExpr.Position, Operand: fn, TypeArgs: callTypeArgs}
 	}
 	if a.exprResolvesToTypePath(fieldExpr.Object) {
 		return extensionMethodCallRewriteNone
@@ -372,7 +391,7 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 			}
 			expr.ArgItemOrder = prependedItems
 		}
-		expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: fieldExpr.Field}
+		expr.Func = withCallTypeArgs(&ast.Ident{Position: fieldExpr.Position, Name: fieldExpr.Field})
 		return extensionMethodCallRewriteApplied
 	}
 	method, ok, err := a.lookupVisibleExtensionMethod(fieldExpr.Field, receiverType)
@@ -429,7 +448,7 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 			}
 			expr.ArgItemOrder = prependedItems
 		}
-		expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: ufcsSym.Name}
+		expr.Func = withCallTypeArgs(&ast.Ident{Position: fieldExpr.Position, Name: ufcsSym.Name})
 		return extensionMethodCallRewriteApplied
 	}
 	prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
@@ -461,7 +480,7 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		}
 		expr.ArgItemOrder = prependedItems
 	}
-	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: method.Symbol.Name}
+	expr.Func = withCallTypeArgs(&ast.Ident{Position: fieldExpr.Position, Name: method.Symbol.Name})
 	return extensionMethodCallRewriteApplied
 }
 
