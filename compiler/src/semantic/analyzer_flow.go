@@ -244,6 +244,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// gated by Unsafe.Leak.
 		a.recordFunctionPermissionRefs(unsafeLeakRefs(n.Position))
 		a.recordAffineConsumption(affineValueKey{Root: sym}, "leak")
+	case *ast.PromoteStmt:
+		a.analyzePromoteStmt(n)
 	case *ast.AssignStmt:
 		var targetType Type
 		// Analyzing an assignment target reads the base of a field/index path as

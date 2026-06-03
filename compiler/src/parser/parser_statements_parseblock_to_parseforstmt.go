@@ -157,6 +157,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 				return p.parseReset()
 			}
+		case "promote":
+			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Text == "into" {
+				return p.parsePromote()
+			}
 		}
 	}
 	switch p.peek() {

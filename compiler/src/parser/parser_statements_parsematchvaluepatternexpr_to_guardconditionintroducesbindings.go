@@ -181,6 +181,15 @@ func (p *Parser) parseReset() *ast.ResetStmt {
 	p.expectNewline()
 	return &ast.ResetStmt{Position: pos, Name: name}
 }
+func (p *Parser) parsePromote() *ast.PromoteStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT) // "promote"
+	value := p.parseExpr()
+	p.expectIdentText("into")
+	region := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.PromoteStmt{Position: pos, Value: value, Region: region}
+}
 func (p *Parser) parseReturn() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_RETURN)

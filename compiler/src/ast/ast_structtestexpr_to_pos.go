@@ -486,6 +486,20 @@ type DestroyStmt struct {
 	Position lexer.Pos
 	Name     string
 }
+
+// PromoteStmt is `promote <value> into <region>`: a copy-promote that relocates a
+// value's own backing storage into a longer-lived region and re-types its
+// provenance to that region. See docs/67.
+type PromoteStmt struct {
+	Position lexer.Pos
+	Value    Expr
+	Region   string
+}
+
+func (n *PromoteStmt) Pos() lexer.Pos { return n.Position }
+func (*PromoteStmt) nodeTag()         {}
+func (*PromoteStmt) stmtTag()         {}
+
 type LeakStmt struct {
 	Position lexer.Pos
 	Name     string
