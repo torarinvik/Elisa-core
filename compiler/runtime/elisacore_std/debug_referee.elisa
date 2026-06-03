@@ -13,8 +13,8 @@ const DEBUG_TRACE_KIND_CHECKPOINT: int = 1
 const DEBUG_TRACE_KIND_VALUE: int = 2
 const DEBUG_TRACE_KIND_BOUNDARY: int = 3
 
-const DEBUG_TRACE_HASH_INITIAL: u64 = 0x12345678.u64()
-const DEBUG_TRACE_HASH_PRIME: u64 = 16777619.u64()
+const DEBUG_TRACE_HASH_INITIAL: u64 = 0x12345678
+const DEBUG_TRACE_HASH_PRIME: u64 = 16777619
 
 const DEBUG_REFEREE_KIND_CHECK_CALLABLE: int = 1
 const DEBUG_REFEREE_KIND_CHECK_POINTER: int = 2
@@ -26,12 +26,12 @@ const DEBUG_REFEREE_REASON_POISON: int = 1
 const DEBUG_REFEREE_REASON_NEAR_NULL: int = 2
 const DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64: int = 3
 
-const DEBUG_REFEREE_NEAR_NULL_LIMIT: uintptr = 0x10000.uintptr()
-const DEBUG_REFEREE_POISON_GENERIC: uintptr = 0x0000800000000000.uintptr()
-const DEBUG_REFEREE_POISON_GOT: uintptr = 0x0000800000000001.uintptr()
-const DEBUG_REFEREE_POISON_TLS: uintptr = 0x0000800000000002.uintptr()
-const DEBUG_REFEREE_POISON_TCB: uintptr = 0x0000800000000003.uintptr()
-const DEBUG_REFEREE_POISON_DTV: uintptr = 0x0000800000000004.uintptr()
+const DEBUG_REFEREE_NEAR_NULL_LIMIT: uintptr = 0x10000
+const DEBUG_REFEREE_POISON_GENERIC: uintptr = 0x0000800000000000
+const DEBUG_REFEREE_POISON_GOT: uintptr = 0x0000800000000001
+const DEBUG_REFEREE_POISON_TLS: uintptr = 0x0000800000000002
+const DEBUG_REFEREE_POISON_TCB: uintptr = 0x0000800000000003
+const DEBUG_REFEREE_POISON_DTV: uintptr = 0x0000800000000004
 
 struct DebugRefereeEvent:
     sequence: mutable u64
@@ -97,7 +97,7 @@ const ELISA_SIG_SEGV: int = 11
 const ELISA_SA_SIGINFO: i32 = 0x40
 # Byte offset of si_addr in macOS x86_64 siginfo_t (si_signo/errno/code/pid/uid/status
 # = 6 ints = 24 bytes, then void* si_addr). On Linux x86_64 it is 16; gated below.
-const ELISA_SIGINFO_ADDR_OFFSET_DARWIN: u64 = 24u64
+const ELISA_SIGINFO_ADDR_OFFSET_DARWIN: u64 = 24
 
 # Matches the C `struct sigaction` byte layout used by the libc sigaction() call:
 # handler (8), sa_mask (sigset_t = u32, 4), sa_flags (int, 4) = 16 bytes.
@@ -124,35 +124,35 @@ global mutable elisa_trace_total: u64 = 0   # actual steps recorded (counts dedu
 def elisa_trace_record(name: cstr, line: u32) -> void:
     if not elisa_trace_fault_checked:
         elisa_trace_maybe_install_fault_handler()
-    elisa_trace_total <- elisa_trace_total + 1u64
+    elisa_trace_total <- elisa_trace_total + 1
     # Collapse a consecutive run of the same plain step (e.g. a hot loop body) into a
     # single entry with a repeat count, so a tight loop does not flush the whole ring.
-    if elisa_trace_pos > 0u64:
-        last: usize = ((elisa_trace_pos - 1u64) % ELISA_TRACE_CAP.u64()).usize()
+    if elisa_trace_pos > 0:
+        last: usize = ((elisa_trace_pos - 1) % ELISA_TRACE_CAP.u64()).usize()
         # Compare the name by POINTER (the compiler passes one constant string per
         # function, so identity == same function) -- cheap, and avoids a string compare on
         # the hot path. cstr `==` would do a ctx_streq.
-        if elisa_trace_ring[last].has_value == 0u8 and elisa_trace_ring[last].line == line and elisa_trace_ring[last].name.cast[uintptr] == name.cast[uintptr]:
-            elisa_trace_ring[last].repeat <- elisa_trace_ring[last].repeat + 1u32
+        if elisa_trace_ring[last].has_value == 0 and elisa_trace_ring[last].line == line and elisa_trace_ring[last].name.cast[uintptr] == name.cast[uintptr]:
+            elisa_trace_ring[last].repeat <- elisa_trace_ring[last].repeat + 1
             return
     idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
     elisa_trace_ring[idx].name <- name
     elisa_trace_ring[idx].line <- line
-    elisa_trace_ring[idx].repeat <- 0u32
-    elisa_trace_ring[idx].has_value <- 0u8
-    elisa_trace_pos <- elisa_trace_pos + 1u64
+    elisa_trace_ring[idx].repeat <- 0
+    elisa_trace_ring[idx].has_value <- 0
+    elisa_trace_pos <- elisa_trace_pos + 1
 
 # Value record: a variable received a (scalar/pointer) value at this step.
 def elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64) -> void:
-    elisa_trace_total <- elisa_trace_total + 1u64
+    elisa_trace_total <- elisa_trace_total + 1
     idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
     elisa_trace_ring[idx].name <- name
     elisa_trace_ring[idx].line <- line
     elisa_trace_ring[idx].var_name <- var_name
     elisa_trace_ring[idx].value <- value
-    elisa_trace_ring[idx].repeat <- 0u32
-    elisa_trace_ring[idx].has_value <- 1u8
-    elisa_trace_pos <- elisa_trace_pos + 1u64
+    elisa_trace_ring[idx].repeat <- 0
+    elisa_trace_ring[idx].has_value <- 1
+    elisa_trace_pos <- elisa_trace_pos + 1
 
 def elisa_trace_count() -> u64:
     return elisa_trace_total
@@ -164,16 +164,16 @@ def elisa_trace_count() -> u64:
 # prints the faulting address + signal, dumps the recent trace, then restores the default
 # disposition and re-raises so the original crash still happens.
 def elisa_trace_fault_handler(sig: int, info: uintptr, uctx: uintptr) -> void:
-    si_addr: mutable uintptr = 0u64.uintptr()
-    if info != 0u64.uintptr():
+    si_addr: mutable uintptr = 0
+    if info != 0:
         p: uintptr = info + ELISA_SIGINFO_ADDR_OFFSET_DARWIN.uintptr()
         slot: uintptr& = p.cast[uintptr&]
         si_addr <- slot
     fbuf: mutable u8[96] = zeroed
-    fw: int = snprintf(fbuf[0], 96usize, "*** elisa fault: signal %lld at address 0x%llx ***\n", sig.i64(), si_addr.u64()) can Console.Format
+    fw: int = snprintf(fbuf[0], 96, "*** elisa fault: signal %lld at address 0x%llx ***\n", sig.i64(), si_addr.u64()) can Console.Format
     if fw > 0:
         _ = write(2, fbuf[0].ref[void&], fw.usize()) can Console
-    elisa_trace_dump()
+    elisa_trace_dump() can Console
     _ = signal(sig, null)
     _ = kill(getpid(), sig)
 
@@ -207,31 +207,31 @@ def elisa_trace_dump() -> void:
     if n > ELISA_TRACE_CAP.u64():
         n <- ELISA_TRACE_CAP.u64()
     hdr: mutable u8[160] = zeroed
-    hw: int = snprintf(hdr[0], 160usize, "--- elisa trace: most recent %llu entries (%llu step(s)) ---\n", n, elisa_trace_total) can Console.Format
+    hw: int = snprintf(hdr[0], 160, "--- elisa trace: most recent %llu entries (%llu step(s)) ---\n", n, elisa_trace_total) can Console.Format
     if hw > 0:
         _ = write(2, hdr[0].ref[void&], hw.usize()) can Console
-    i: mutable u64 = 0u64
+    i: mutable u64 = 0
     while i < n:
-        idx: usize = ((elisa_trace_pos - 1u64 - i) % ELISA_TRACE_CAP.u64()).usize()
+        idx: usize = ((elisa_trace_pos - 1 - i) % ELISA_TRACE_CAP.u64()).usize()
         nm: cstr = elisa_trace_ring[idx].name
         ln: u32 = elisa_trace_ring[idx].line
         rep: u32 = elisa_trace_ring[idx].repeat
         buf: mutable u8[256] = zeroed
         w: mutable int = 0
-        if elisa_trace_ring[idx].has_value != 0u8:
+        if elisa_trace_ring[idx].has_value != 0:
             vn: cstr = elisa_trace_ring[idx].var_name
             vv: u64 = elisa_trace_ring[idx].value
-            w <- snprintf(buf[0], 256usize, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
-        elif rep != 0u32:
-            w <- snprintf(buf[0], 256usize, "  [-%llu] %s:%u (x%u)\n", i, nm, ln, rep + 1u32) can Console.Format
+            w <- snprintf(buf[0], 256, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
+        elif rep != 0:
+            w <- snprintf(buf[0], 256, "  [-%llu] %s:%u (x%u)\n", i, nm, ln, rep + 1) can Console.Format
         else:
-            w <- snprintf(buf[0], 256usize, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
+            w <- snprintf(buf[0], 256, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
         if w > 0:
             wn: mutable usize = w.usize()
-            if wn > 256usize:
-                wn <- 256usize
+            if wn > 256:
+                wn <- 256
             _ = write(2, buf[0].ref[void&], wn) can Console
-        i <- i + 1u64
+        i <- i + 1
 
 def debug_referee_set_enabled(enabled: bool) can[Debug.Referee]:
     debug_referee_enabled <- enabled
@@ -242,7 +242,7 @@ def debug_referee_set_trace_enabled(enabled: bool) can[Debug.Referee]:
 def debug_referee_reset() can[Debug.Referee]:
     debug_referee_sequence <- 0
     debug_referee_event_count <- 0
-    debug_referee_last_event <- DebugRefereeEvent(0.u64(), 0, 0, 0.uintptr(), "")
+    debug_referee_last_event <- DebugRefereeEvent(0, 0, 0, 0, "")
 
 def debug_referee_last_reason() -> int:
     return debug_referee_last_event.reason
@@ -258,7 +258,7 @@ def debug_referee_trace_count() -> usize:
 
 def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
     if index >= DEBUG_REFEREE_TRACE_CAP:
-        return DebugRefereeEvent(0.u64(), 0, 0, 0.uintptr(), "")
+        return DebugRefereeEvent(0, 0, 0, 0, "")
     return debug_referee_events[index]
 
 def debug_referee_is_poison(value: uintptr) -> bool:
@@ -275,14 +275,14 @@ def debug_referee_is_poison(value: uintptr) -> bool:
     return false
 
 def debug_referee_is_near_null(value: uintptr) -> bool:
-    return value != 0.uintptr() and value < DEBUG_REFEREE_NEAR_NULL_LIMIT
+    return value != 0 and value < DEBUG_REFEREE_NEAR_NULL_LIMIT
 
 def debug_referee_is_noncanonical_x86_64(value: uintptr) -> bool:
-    high: uintptr = value >> 48.uintptr()
-    sign: uintptr = (value >> 47.uintptr()) & 1.uintptr()
-    if sign == 0.uintptr():
-        return high != 0.uintptr()
-    return high != 0xffff.uintptr()
+    high: uintptr = value >> 48
+    sign: uintptr = (value >> 47) & 1
+    if sign == 0:
+        return high != 0
+    return high != 0xffff
 
 def debug_referee_pointer_reason(value: uintptr) -> int:
     if debug_referee_is_poison(value):
@@ -311,7 +311,7 @@ def debug_referee_trace_value(label: cstr, value: uintptr) can[Debug.Referee]:
 def debug_referee_checkpoint(label: cstr) can[Debug.Referee]:
     can Debug.Referee:
         if debug_referee_trace_enabled:
-            debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0.uintptr(), label)
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0, label)
 
 def debug_referee_check_pointer(label: cstr, value: uintptr) -> bool can[Debug.Referee]:
     can Debug.Referee:
@@ -357,7 +357,7 @@ def debug_trace_reset() can[Debug.Trace]:
     debug_trace_event_count <- 0
     debug_trace_overflowed <- false
     debug_trace_hash <- DEBUG_TRACE_HASH_INITIAL
-    debug_trace_last_event <- DebugTraceEvent(0.u64(), 0, 0.uintptr(), 0.uintptr(), 0.uintptr(), "")
+    debug_trace_last_event <- DebugTraceEvent(0, 0, 0, 0, 0, "")
 
 def debug_trace_count() -> usize:
     return debug_trace_event_count
@@ -370,7 +370,7 @@ def debug_trace_did_overflow() -> bool:
 
 def debug_trace_event_at(index: usize) -> DebugTraceEvent:
     if index >= DEBUG_TRACE_TAPE_CAP:
-        return DebugTraceEvent(0.u64(), 0, 0.uintptr(), 0.uintptr(), 0.uintptr(), "")
+        return DebugTraceEvent(0, 0, 0, 0, 0, "")
     return debug_trace_events[index]
 
 def debug_trace_event_kind_at(index: usize) -> int:
@@ -380,17 +380,17 @@ def debug_trace_event_kind_at(index: usize) -> int:
 
 def debug_trace_event_a_at(index: usize) -> uintptr:
     if index >= DEBUG_TRACE_TAPE_CAP:
-        return 0.uintptr()
+        return 0
     return debug_trace_events[index].a
 
 def debug_trace_event_b_at(index: usize) -> uintptr:
     if index >= DEBUG_TRACE_TAPE_CAP:
-        return 0.uintptr()
+        return 0
     return debug_trace_events[index].b
 
 def debug_trace_event_c_at(index: usize) -> uintptr:
     if index >= DEBUG_TRACE_TAPE_CAP:
-        return 0.uintptr()
+        return 0
     return debug_trace_events[index].c
 
 def debug_trace_last_kind() -> int:
@@ -422,11 +422,11 @@ def debug_trace_record(kind: int, label: cstr, a: uintptr, b: uintptr, c: uintpt
 
 def debug_trace_checkpoint(label: cstr) can[Debug.Trace]:
     can Debug.Trace:
-        debug_trace_record(DEBUG_TRACE_KIND_CHECKPOINT, label, 0.uintptr(), 0.uintptr(), 0.uintptr())
+        debug_trace_record(DEBUG_TRACE_KIND_CHECKPOINT, label, 0, 0, 0)
 
 def debug_trace_value(label: cstr, value: uintptr) can[Debug.Trace]:
     can Debug.Trace:
-        debug_trace_record(DEBUG_TRACE_KIND_VALUE, label, value, 0.uintptr(), 0.uintptr())
+        debug_trace_record(DEBUG_TRACE_KIND_VALUE, label, value, 0, 0)
 
 def debug_trace_boundary(label: cstr, a: uintptr, b: uintptr, c: uintptr) can[Debug.Trace]:
     can Debug.Trace:
