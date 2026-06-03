@@ -201,7 +201,7 @@ empty_decls = empty[Pascal.Decl]
 one_decl = singleton[Pascal.Decl](decl)
 ids = [token.lexeme_key for token in names]
 decls = [build_decl(token) for token in names if token.kind == TokenKind.IDENT]
-decls = [build_decl(token) for token in names if token.kind == TokenKind.IDENT] in alloc
+decls: darray[Pascal.Decl] @alloc = [build_decl(token) for token in names if token.kind == TokenKind.IDENT]
 ```
 
 Use `empty[T]` for no items, `singleton[T](value)` for one item, `[value for item in items]` for mapped lists, and `[value for item in items if cond]` for filtered list construction.

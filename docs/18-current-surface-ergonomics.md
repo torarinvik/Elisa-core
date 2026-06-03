@@ -1010,7 +1010,7 @@ params.push(param)
 ```
 
 ```elisa
-builder: Builder[Pascal.Decl] in owner
+builder: Builder[Pascal.Decl] @owner
 builder.push(decl)
 decls: darray[Pascal.Decl] = builder.finish()
 
@@ -1067,7 +1067,7 @@ Use `Flags[T]` for typed sets of const-enum values that grow or flow through API
 
 Use `InlineVec[T, N]` for tiny hot lists where most values fit inline but occasional spill to an arena-owned `darray` is acceptable. Parser and semantic scratch lists such as params, labels, directives, and duplicate-detection sets are the intended shape.
 
-Use `Builder[T] in owner` when constructing arena-owned dynamic arrays. The declaration creates a mutable builder from the owner while keeping the owner relationship visible at the declaration site. `Builder[T]` is the idiomatic surface name for the arena-backed dynamic-array builder; it lowers through the same `DArrayBuilder[T]` runtime storage and helper methods. `owner.builder()` remains available when an expression form is clearer.
+Use `Builder[T] @owner` when constructing arena-owned dynamic arrays. The declaration creates a mutable builder from the owner while keeping the owner relationship visible at the declaration site. `Builder[T]` is the idiomatic surface name for the arena-backed dynamic-array builder; it lowers through the same `DArrayBuilder[T]` runtime storage and helper methods. `owner.builder()` remains available when an expression form is clearer.
 
 Native frontend suites should consume these helpers through the runtime surface that their runner already links, not by including implementation files such as `collections.elisa` directly into a test module. Direct implementation includes duplicate runtime globals and helper symbols when the native runner also links `native_runtime_support.elisa`. The generated `collections.elisai` interface is kept in sync with the implementation as the declaration source of truth. For native dogfood frontends, keep existing `darray` construction style until generic extern collection helpers either lower through concrete wrappers or the backend can specialize those linked runtime declarations with the same ABI as in-module generic helpers.
 
@@ -3404,10 +3404,10 @@ For one-off dynamic array literals, the owner can also be attached directly to
 the literal:
 
 ```elisa
-values: darray[int] = [1, 2, 3] in owner
-mapped: darray[int] = [value + 1 for value in values if value > 0] in owner
-prepended: darray[int] = [first, ...rest] in owner
-combined: darray[int] = [...left, ...right] in owner
+values: darray[int] @owner = [1, 2, 3]
+mapped: darray[int] @owner = [value + 1 for value in values if value > 0]
+prepended: darray[int] @owner = [first, ...rest]
+combined: darray[int] @owner = [...left, ...right]
 ```
 
 The direct owner form is only for arena-backed dynamic array literals and
@@ -3417,20 +3417,21 @@ comprehensions. Fixed array literals remain pure values:
 values: int[3] = [1, 2, 3]
 ```
 
-Region-owned structs use the same owner vocabulary. `struct Expr in owner:` is
-sugar for `struct Expr[region owner]:`, and `Expr[scratch]` / `Expr[owner]`
-specialize that owner to a named region, region parameter, or visible `Arena`
-value.
+Region-owned structs declare their region in the bracket list —
+`struct Expr[region owner]:` (several with `[region a, region b]`). Use sites carry
+the region with the `@r` suffix — `Expr @scratch` / `Expr @owner` — naming a region,
+region parameter, or visible `Arena` value (see
+[68-region-memory-model.md §5](68-region-memory-model.md)).
 
-When the struct also has type parameters, keep the type parameters in brackets
-and put the owner-region sugar after them.
+When the struct also has type parameters, the brackets hold the type arguments and
+the `@r` suffix carries the region.
 
 ```elisa
-struct Box[T] in owner:
+struct Box[T, region owner]:
     value: T
-    next: owner Box[T, owner]&?
+    next: Box[T]&? @owner
 
-box: Box[i64, scratch] = Box{
+box: Box[i64] @scratch = Box{
     value: 42,
     next: null
 }

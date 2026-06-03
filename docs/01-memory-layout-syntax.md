@@ -215,27 +215,28 @@ Declares a named allocation region.
 ## 13. `struct T in Region`
 
 ```elisa
-struct Expr in owner:
+struct Expr[region owner]:
     kind: ExprKind
-    left: owner Expr&?
-    right: owner Expr&?
+    left: Expr&? @owner
+    right: Expr&? @owner
 
-struct Box[T] in owner:
+struct Box[T, region owner]:
     value: T
-    next: owner Box[T, owner]&?
+    next: Box[T]&? @owner
 ```
 
 **Syntax meaning:**
-Declares a struct with an owner-region parameter using sugar for
-`struct Expr[region owner]: ...`. If the struct also has ordinary type
-parameters, keep those in brackets and put the owner-region sugar after them:
-`struct Box[T] in owner:`.
+Declares a struct with an owner-region parameter. Region parameters go in the
+bracket list beside type parameters, each prefixed with `region`, and scale to
+several: `struct Edge[region a, region b]:`. Use sites carry the region with the
+`@r` suffix (`Expr @owner`, `left: Expr&? @owner`), never as a bracket argument.
+See [68-region-memory-model.md §5](68-region-memory-model.md) for the full rule.
 
 The owner argument can be a named `region`, a region parameter, or a visible
 `Arena` / non-null `Arena&` value:
 
 ```elisa
-def make(owner: Arena) -> Expr[owner]:
+def make(owner: Arena) -> Expr @owner:
     return Expr{
         kind: ExprKind.Leaf,
         left: null,
@@ -248,7 +249,7 @@ def make(owner: Arena) -> Expr[owner]:
 ## 14. `layout ... in Region`
 
 ```elisa
-layout soa struct Particle in owner:
+layout soa struct Particle[region owner]:
     x: f32
     y: f32
     z: f32
@@ -258,8 +259,9 @@ layout soa struct Particle in owner:
 ```
 
 **Syntax meaning:**
-Combines physical layout selection with an owner-region parameter, using sugar
-for `layout soa struct Particle[region owner]: ...`.
+Combines physical layout selection with an owner-region parameter. As with plain
+structs, the region parameter goes in the bracket list:
+`layout soa struct Particle[region owner]:`.
 
 ---
 

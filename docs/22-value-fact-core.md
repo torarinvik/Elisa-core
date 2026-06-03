@@ -24,7 +24,7 @@ Every value can carry facts from several orthogonal classes:
 | Ref state | non-null, maybe-null, null | `T&`, `T&?`, `T!` |
 | Shape | exact length identity, const extent, view bounds | `darray[T, shape]`, `cstr[key_shape]`, dense views |
 | Typestate | domain/protocol state | `Player[Alive]`, `Thread[T, Joinable]` |
-| Storage | stack, heap, static, named region | `heap T&`, `scratch T&`, `new[scratch]` |
+| Storage | stack, heap, static, named region | `heap T&`, `T& @scratch`, `new[scratch]` |
 | Region deps | arena generation/checkpoint dependencies | `region`, `mark`, `restore`, `reset` |
 | Store deps | packed tree/IR store provenance | `Expr.Store[Local]`, `Expr.Store[Frozen]`, `in store:` |
 | Alias class | which paths may refer to the same mutable cell | ref params, mutable references, call boundaries |
@@ -194,7 +194,7 @@ require use(p): RefState non-null
 
 ```elisacore
 mark scratch as cp
-tmp: scratch Node& = new[scratch] Node(...)
+tmp: Node& @scratch = new[scratch] Node(...)
 restore scratch from cp
 ```
 

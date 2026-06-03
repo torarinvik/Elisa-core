@@ -1,5 +1,9 @@
 # Region checkpoints, scope statements, and rollback blocks
 
+> This doc covers `mark`/`restore`/`reset`/`leak` and checkpoint blocks. For the
+> region model itself — backing strategies, the `@r` provenance notation, and
+> `promote`/`adopt` — see [68-region-memory-model.md](68-region-memory-model.md).
+
 The current compiler supports two related statement families on top of the
 existing `region`, `new[...]`, and `destroy` operations:
 
@@ -10,10 +14,10 @@ existing `region`, `new[...]`, and `destroy` operations:
 
 ```elisa
 region scratch(1024)
-region scratch(1024) using malloc
+region scratch(1024) using reserve_commit
 
 mark scratch as cp
-temp: scratch i32& = new[scratch] 1
+temp: i32& @scratch = new[scratch] 1
 restore scratch from cp
 
 reset scratch
@@ -48,10 +52,10 @@ Supported forms:
 
 All of these are statements, not expressions.
 
-Region declarations also accept an optional backing selector with `using <allocator>`. This keeps the ordinary region surface while choosing a different runtime-backed allocator for the region storage.
+Region declarations accept an optional backing strategy with `using <strategy>` — `fixed`, `chained`, or `reserve_commit` (default `chained`). See [68-region-memory-model.md §3](68-region-memory-model.md) for the full set and semantics.
 
 ```elisa
-region scratch(2) using malloc
+region scratch(2) using chained
 ```
 
 ## Scope statements
@@ -135,7 +139,7 @@ That means code like this is rejected:
 def bad() -> i32:
     region scratch
     mark scratch as cp
-    value: scratch i32& = new[scratch] 1
+    value: i32& @scratch = new[scratch] 1
     restore scratch from cp
     return value[0]
 ```
@@ -157,21 +161,21 @@ Nested checkpoints are allowed.
 ```elisa
 def nested(seed: i32) -> i32:
     region scratch(1024)
-    base: scratch i32& = new[scratch] seed
+    base: i32& @scratch = new[scratch] seed
     baseline: i32 = base[0]
 
     mark scratch as outer
-    stable: scratch i32& = new[scratch] seed + 1
+    stable: i32& @scratch = new[scratch] seed + 1
 
     mark scratch as inner
-    temp: scratch i32& = new[scratch] seed + 2
+    temp: i32& @scratch = new[scratch] seed + 2
     restore scratch from inner
 
     kept: i32 = stable[0]
     restore scratch from outer
 
     reset scratch
-    final: scratch i32& = new[scratch] seed + 3
+    final: i32& @scratch = new[scratch] seed + 3
     return baseline + kept + final[0]
 ```
 
