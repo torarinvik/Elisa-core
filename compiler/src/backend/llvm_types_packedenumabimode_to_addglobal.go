@@ -577,6 +577,7 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 		"arena_reset",
 		"arena_rewind",
 		"arena_free",
+		"arena_adopt",
 		"arena_trim",
 		"alloc_perm",
 		"alloc_scratch",

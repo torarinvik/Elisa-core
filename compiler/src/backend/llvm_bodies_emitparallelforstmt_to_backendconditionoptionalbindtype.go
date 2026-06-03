@@ -569,6 +569,20 @@ func (s *functionState) emitArenaReset(arenaPtr C.LLVMValueRef, arenaType semant
 	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr}, "")
 	return nil
 }
+func (s *functionState) emitArenaAdopt(parentPtr C.LLVMValueRef, childPtr C.LLVMValueRef, arenaType semantic.Type) error {
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "arena_adopt", Params: []semantic.Type{arenaRefType, arenaRefType}, Return: s.g.result.NamedTypes["void"]}
+	callee, err := s.g.ensureFunctionDeclared("arena_adopt", helperType)
+	if err != nil {
+		return err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return err
+	}
+	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{parentPtr, childPtr}, "")
+	return nil
+}
 func (s *functionState) attachBranchHintMetadata(branch C.LLVMValueRef, hint ast.BranchHint) {
 	if s == nil || s.g == nil || branch == nil || hint == ast.BranchHintNone {
 		return

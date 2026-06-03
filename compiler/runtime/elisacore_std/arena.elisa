@@ -538,6 +538,39 @@ def arena_trim(a: mutable Arena&):
 
         a.end.next as ! <- null
 
+# Splice an entire child region's block chain onto the parent (docs/67 adopt).
+# Zero-copy: the child's blocks (and the data they already hold) are appended to
+# the parent's chain and will be freed when the parent is freed. Each adopted
+# block is marked owned so the parent's bump allocator skips it and never
+# overwrites its data. The child is then emptied, so its own cleanup is a no-op.
+# The semantic layer has already proven the child is consumed and that the two
+# backings are compatible (so the parent's free can reclaim the adopted blocks).
+def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
+    if child.begin == null:
+        return
+
+    c: mutable heap Region&? = child.begin
+    trusted Unsafe.AssumeProgress:
+        while c != null:
+            c.owner_tag <- 1.uintptr()
+            c <- c.next
+
+    if parent.begin == null:
+        parent.begin <- child.begin
+        parent.end <- child.begin
+        parent.end_index <- 0
+    else:
+        last: mutable heap Region&? = parent.begin
+        trusted Unsafe.AssumeProgress:
+            while last != null and last.next != null:
+                last <- last.next
+        if last != null:
+            last.next as & <- child.begin
+
+    child.begin as ! <- null
+    child.end as ! <- null
+    child.end_index <- 0
+
 # ------------------------------------------------------------
 # Optional stdio formatting stubs
 # ------------------------------------------------------------

@@ -114,6 +114,8 @@ extern arena_free(a: mutable Arena&)
 
 extern arena_trim(a: mutable Arena&)
 
+extern arena_adopt(parent: mutable Arena&, child: mutable Arena&)
+
 extern va_list
 
 extern va_copy(args: va_list) -> va_list
