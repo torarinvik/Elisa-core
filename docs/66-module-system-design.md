@@ -225,12 +225,30 @@ PLANNED (in priority order):
      real DArrayBuilder provider, and the two never co-compile. The earlier "duplicate"
      finding was a probe artifact (manually including both in one file).
    STATUS (measured 2026-06-03): with `@method` made inert, the stdlib now compiles
-   with ZERO `.elisa` errors — only 3 larger fixture tests fail
-   (TestRunCLICompilesFixtureProgramsToLLVM, two lexer-harness tests), a much smaller
-   surface than the original ~3500-error prelude cascade. So (a) is moot and (b)+(c)
-   are DONE. Remaining before dropping `@method`: resolve those 3 fixtures, then strip
-   the `@method` annotations from the stdlib source. Keep `@method` until then — the
-   full `go test ./src/...` (which compiles the stdlib) is the gate.
+   with ZERO `.elisa` errors — only 3 fixture tests fail, and on inspection they are
+   NOT 3 independent code bugs but two consequences of the `@method` -> non-UFCSOnly
+   transition (the actual `@method` removal will trigger both):
+   - SYMBOL-NAME mangling change (cosmetic, test-only). An overloaded generic dropped
+     from `@method` routes through defineReceiverOverloadGlobal's non-UFCSOnly path,
+     which mangles via ReceiverOverloadSymbolName -> `__ovl__set__semantic_RefType_
+     SymbolTable_K_T__set__cstr_key_shape__FixtureSymbol` (leaks Go type-kind strings),
+     vs the clean `@method`-era `set__cstr_key_shape__FixtureSymbol`.
+     TestRunCLICompilesFixtureProgramsToLLVM/stable_symbol_table asserts the old name.
+     Real sub-task: unify the non-UFCSOnly overload mangling to the clean scheme before
+     (or as part of) the drop, then update the assertion.
+   - INTERFACE-path specialization gap (partly a probe artifact). Both lexer fixtures
+     fail with "missing specialization binding for type parameter T in is_empty"
+     (llvm_specialize.go:27). NOT reproducible in isolated source (UFCS or free-call,
+     with/without the const-param sibling overload — all pass). The trigger is the
+     checked-in `collections.elisai` interface, which under the probe is STALE
+     (generated with `@method` ON; declares `extern is_empty[T]` + `extern
+     is_empty[T, N: usize]`). A real drop regenerates all `.elisai` interfaces without
+     `@method`, so this likely resolves on regeneration — verify, don't assume.
+   So (a) is moot, (b)+(c) are DONE. Remaining before dropping `@method`: (1) unify the
+   non-UFCSOnly overload mangling to the clean scheme; (2) strip the `@method`
+   annotations from stdlib source; (3) regenerate the `.elisai` interfaces; (4) update
+   the 3 fixtures' expectations and confirm the is_empty specialization resolves. Keep
+   `@method` until then — full `go test ./src/...` (which compiles the stdlib) is the gate.
 
 ## Known inconsistencies (audit — keep as the regression checklist)
 
