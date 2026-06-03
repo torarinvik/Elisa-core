@@ -62,3 +62,41 @@ func TestAnalyzeRejectsPromoteOfNonRegionValue(t *testing.T) {
 		t.Fatalf("expected non-region-backed diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// A `darray[T] @r` binding carries its region in the type; promote rebases that
+// provenance into the longer-lived region, so the array stays valid after the
+// source region is destroyed (the elements are plain values — shallow promote).
+func TestAnalyzeAcceptsPromoteRebasesDarrayProvenance(t *testing.T) {
+	src := `def f() -> i64:
+	region keep(1024)
+	region scratch(1024)
+	xs: mutable darray[i64] @scratch = []
+	xs.push(7)
+	promote xs into keep
+	destroy scratch
+	answer: i64 = xs[0]
+	destroy keep
+	return answer
+`
+	_, errs := parseAndAnalyze(t, "promote_darray_rebase_ok.elisa", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected darray promote to rebase provenance with no errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// Container `@r` provenance is now tracked like a `new[r]` borrow: using a darray
+// after its region is destroyed is a use-after-free and must be rejected (it was
+// silently accepted before container deps were threaded into the flow analysis).
+func TestAnalyzeRejectsDarrayUseAfterRegionDestroy(t *testing.T) {
+	src := `def f() -> i64:
+	region scratch(1024)
+	xs: mutable darray[i64] @scratch = []
+	xs.push(7)
+	destroy scratch
+	return xs[0]
+`
+	_, errs := parseAndAnalyze(t, "darray_use_after_destroy_reject.elisa", src)
+	if !strings.Contains(strings.Join(errs, "\n"), "region dependency facts were invalidated") {
+		t.Fatalf("expected a use-after-destroy diagnostic for a darray, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

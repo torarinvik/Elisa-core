@@ -108,11 +108,55 @@ func (a *Analyzer) recordRegionRefBinding(sym *Symbol, value ast.Expr) {
 		a.recordResolvedRegionRefBinding(sym, regionRefStateFromPackedStoreDependency(sym, storeType))
 		return
 	}
-	if state, ok := a.regionRefStateForExpr(value); ok {
+	state, ok := a.regionRefStateForExpr(value)
+	if ok && hasRegionProvenance(state) {
+		a.recordResolvedRegionRefBinding(sym, state)
+		return
+	}
+	// Container `@r` provenance lives in the declared TYPE (DArrayType.Region etc.),
+	// not the initializer expression (`= []` carries none). Derive the region
+	// dependency from the type so a `darray[T] @r` binding is tracked exactly like a
+	// `new[r]` borrow: invalidated when r is destroyed/reset, and recognized as
+	// region-backed by promote.
+	if cstate, cok := a.containerRegionDependency(sym.Type); cok {
+		a.recordResolvedRegionRefBinding(sym, cstate)
+		return
+	}
+	if ok {
 		a.recordResolvedRegionRefBinding(sym, state)
 		return
 	}
 	delete(a.currentRegionRefs, sym)
+}
+
+// containerRegionDependency derives a region dependency from a binding's declared
+// container type (DArrayType/DictType/DStrType/SViewType all carry a `.Region`).
+// Returns false for non-container types, region params not resolvable to a concrete
+// live region, or an already-destroyed region.
+func (a *Analyzer) containerRegionDependency(typ Type) (regionRefState, bool) {
+	region := containerTypeRegion(typ)
+	if region == "" {
+		return regionRefState{}, false
+	}
+	sym, state := a.lookupRegionState(region)
+	if sym == nil || state.Destroyed {
+		return regionRefState{}, false
+	}
+	return regionRefStateFromDependency(sym, state.Generation), true
+}
+
+func containerTypeRegion(typ Type) string {
+	switch t := stripRefForBounds(typ).(type) {
+	case *DArrayType:
+		return t.Region
+	case *DictType:
+		return t.Region
+	case *DStrType:
+		return t.Region
+	case *SViewType:
+		return t.Region
+	}
+	return ""
 }
 
 func (a *Analyzer) freezeMovedPackedStoreSource(expr ast.Expr) (*Symbol, *PackedEnumStoreType, bool) {

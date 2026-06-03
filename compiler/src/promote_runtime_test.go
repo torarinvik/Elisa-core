@@ -11,11 +11,12 @@ import (
 
 // End-to-end: `promote <value> into <region>` bitwise-relocates the value's own
 // backing storage into the longer-lived region and rebinds it, so the value stays
-// valid after the source region is destroyed (docs/67 §2). This covers the canonical
-// reference shape (the pointee is relocated and the binding repointed).
+// valid after the source region is destroyed (docs/67 §2). Covers both promotable
+// shapes: a reference (pointee relocated) and a darray (buffer relocated, header
+// repointed).
 //
-// The discriminator is `destroy scratch` BEFORE reading the promoted value: if the
-// relocation or rebind were missing, value would still point into the freed scratch
+// The discriminator is `destroy scratch` BEFORE reading the promoted values: if the
+// relocation or rebind were missing, value/xs would still point into the freed scratch
 // region and read garbage (or fault), tripping the panic.
 func TestRunCLIPromoteRelocatesValueIntoLongerLivedRegion(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
@@ -30,9 +31,15 @@ def promote_runtime_test() -> void:
         region scratch(4096)
         value: i32& = new[scratch] 7
         promote value into keep
+        xs: mutable darray[i64] @scratch = []
+        xs.push(11i64)
+        xs.push(22i64)
+        promote xs into keep
         destroy scratch
         if value[0] != 7:
             panic("promote ref: value corrupted after source region destroyed")
+        if xs[0] != 11i64 or xs[1] != 22i64:
+            panic("promote darray: buffer corrupted after source region destroyed")
         destroy keep
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
