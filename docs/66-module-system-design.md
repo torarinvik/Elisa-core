@@ -210,19 +210,27 @@ PLANNED (in priority order):
      the primary overload. FIXED: rewriteFreeCallReceiverOverload now unwraps the
      SpecializeExpr, disambiguates by receiver type, and re-applies the type args to
      the rewritten FieldExpr (TestRunCLIExplicitTypeArgsOverloadResolvesByReceiverType).
-   - Local-vs-global conflicts: short method names made global (`builder`, …) shadow/
-     collide with the same words used as parameters/locals in unrelated runtime code
-     (prelude `builder` -> the DArrayBuilder constructor function).
-   - Duplicate definitions: builders.elisa re-defines the same DArrayBuilder API as
-     collections.elisa (push/finish/builder/darray_builder) — including both is a
-     duplicate regardless of `@method`.
-   So this needs a dedicated effort: (a) dedup builders.elisa vs collections.elisa;
-   (b) DONE — explicit-type-arg free calls now disambiguate by receiver type
-   (rewriteFreeCallReceiverOverload handles the SpecializeExpr-wrapped ident form);
-   (c) wrap the stdlib method APIs in `module` blocks accessed via `using` so
-   the short names are namespaced rather than global (fixes the local-vs-global
-   `builder` clash); THEN drop `@method`. Keep `@method` until (a) and (c) land too —
-   the full `go test ./src/...` (which compiles the stdlib) is the gate.
+   - Local-vs-global conflicts: a parameter/local named `builder` (prelude's
+     `string_builder_append(builder: heap StringBuilder&?)`) must shadow a same-named
+     global generic function `def builder[T](Arena&)`. ROOT CAUSE: binding the param
+     into a typed local (`b: StringBuilder& = builder`) recorded the init expr;
+     reading the local re-resolved `builder` via functionValueTypeForExpr, which —
+     after finding the (non-function) local symbol — fell through to lookupVisibleGlobal
+     and mis-bound the local to the global function's type. FIXED: functionValueTypeForExpr
+     now short-circuits (returns not-a-function-value) once the name resolves to a local,
+     never consulting the global (TestRunCLILocalParamShadowsSameNamedGlobalFunction).
+   - Duplicate definitions: NOT A REAL BLOCKER. builders.elisa is a standalone
+     interface-emission test fixture (TestRuntimeBuildersInterfaceMatchesImplementation,
+     `-emit iface`), NOT part of the stdlib include graph — collections.elisa is the
+     real DArrayBuilder provider, and the two never co-compile. The earlier "duplicate"
+     finding was a probe artifact (manually including both in one file).
+   STATUS (measured 2026-06-03): with `@method` made inert, the stdlib now compiles
+   with ZERO `.elisa` errors — only 3 larger fixture tests fail
+   (TestRunCLICompilesFixtureProgramsToLLVM, two lexer-harness tests), a much smaller
+   surface than the original ~3500-error prelude cascade. So (a) is moot and (b)+(c)
+   are DONE. Remaining before dropping `@method`: resolve those 3 fixtures, then strip
+   the `@method` annotations from the stdlib source. Keep `@method` until then — the
+   full `go test ./src/...` (which compiles the stdlib) is the gate.
 
 ## Known inconsistencies (audit — keep as the regression checklist)
 

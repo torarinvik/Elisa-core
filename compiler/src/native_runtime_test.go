@@ -432,6 +432,77 @@ def explicit_typeargs_overload_test() -> void:
 	}
 }
 
+func TestRunCLILocalParamShadowsSameNamedGlobalFunction(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "param_shadows_global_fn_fixture.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	// A parameter `widget` whose type is NOT a function must shadow a same-named
+	// global generic function `widget[T]`. Regression: binding the param into a
+	// typed local (`g: Gadget& = widget`) recorded the init expr, and reading the
+	// local re-resolved `widget` through functionValueTypeForExpr, which — after
+	// finding the (non-function) local symbol — fell through to the global lookup
+	// and mis-bound the local to the global function's type ("field access requires
+	// struct type, got func[T](...)"). This is the local-vs-global clash that blocks
+	// dropping @method (prelude's `string_builder_append(builder: StringBuilder&)`
+	// vs the global `def builder[T](Arena&)`).
+	src := fmt.Sprintf(`# include %q
+
+struct Wid[T]:
+    v: mutable T
+
+def widget[T](owner: mutable Arena&) -> Wid[T]:
+    _ = owner
+    w: mutable Wid[T] = zeroed
+    return w
+
+struct Gadget:
+    n: mutable i64
+
+def use_it(widget: Gadget&) -> i64:
+    g: Gadget& = widget
+    return g.n
+
+@test
+def param_shadows_global_fn_test() -> void:
+    can Abort.Panic:
+        gg: Gadget = Gadget{n: 42}
+        assert_true(use_it(gg) == 42)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write param-shadow fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected param-shadow test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] param_shadows_global_fn_test",
+		"[       OK ] param_shadows_global_fn_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected param-shadow output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLISelectiveImportBringsNamedModuleMemberIntoScope(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

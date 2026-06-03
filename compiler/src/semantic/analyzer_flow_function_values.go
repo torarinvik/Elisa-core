@@ -204,6 +204,12 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 					}
 					return cloned, true
 				}
+				// The name resolved to a local/param that is not a function value
+				// (e.g. a parameter `builder: StringBuilder&` that shadows a global
+				// `def builder[T](...)`). It must shadow the global — do NOT fall
+				// through to the global lookup below, which would mis-bind the local
+				// to the same-named global function's type.
+				return nil, false
 			}
 		}
 		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
