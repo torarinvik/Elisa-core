@@ -7,7 +7,6 @@ def darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
     result.owner as & <- owner
     return result
 
-@method
 def builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
     return darray_builder[T](owner)
 
@@ -18,7 +17,6 @@ def darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T):
         in owner:
             builder.items.push(item)
 
-@method
 def push[T](builder: mutable DArrayBuilder[T]&, item: T):
     can Memory.Allocate, Abort.Panic:
         darray_builder_push[T](builder, item)
@@ -26,6 +24,5 @@ def push[T](builder: mutable DArrayBuilder[T]&, item: T):
 def darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
     return builder.items
 
-@method
 def finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
     return darray_builder_finish[T](builder)

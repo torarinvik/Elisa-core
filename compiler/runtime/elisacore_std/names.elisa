@@ -104,87 +104,70 @@ def name_table_text(table: NameTable&, name_id: NameId) -> sview:
     return table.entries[(!name_id).usize() - 1].text
 
 
-@method
 def valid_id(table: NameTable&, name_id: NameId) -> bool:
     return name_table_valid_id(table, name_id)
 
 
-@method
 def text(table: NameTable&, name_id: NameId) -> sview:
     return name_table_text(table, name_id)
 
 
-@method
 def interned(table: NameTable&, name_id: NameId) -> InternedName:
     return InternedName{table: table, id: name_id}
 
 
-@method
 def valid(name_id: NameId) -> bool:
     return name_id != NAME_TABLE_INVALID_ID
 
 
-@method
 def invalid(name_id: NameId) -> bool:
     return name_id == NAME_TABLE_INVALID_ID
 
 
-@method
 def text(name_id: NameId, table: NameTable&) -> sview:
     return table.text(name_id)
 
 
-@method
 def matches_view(name_id: NameId, table: NameTable&, text: sview, policy: NameCasePolicy) -> bool:
     return table.has_text_view(name_id, text, policy)
 
 
-@method
 def matches(name_id: NameId, table: NameTable&, text: cstr, policy: NameCasePolicy) -> bool:
     return name_id.matches_view(table, name_cstr_view(text), policy)
 
 
-@method
 def matches_cs(name_id: NameId, table: NameTable&, text: cstr) -> bool:
     return name_id.matches(table, text, NameCasePolicy.CaseSensitive)
 
 
-@method
 def matches_ci(name_id: NameId, table: NameTable&, text: cstr) -> bool:
     return name_id.matches(table, text, NameCasePolicy.AsciiCaseInsensitive)
 
 
-@method
 def valid(name: InternedName) -> bool:
     return name.table.valid_id(name.id)
 
 
-@method
 def value(name: InternedName) -> NameId:
     return name.id
 
 
-@method
 def text(name: InternedName) -> sview:
     return name.table.text(name.id)
 
 
-@method
 def matches_view(name: InternedName, text: sview, policy: NameCasePolicy) -> bool:
     return name.table.has_text_view(name.id, text, policy)
 
 
-@method
 def matches(name: InternedName, text: cstr, policy: NameCasePolicy) -> bool:
     return name.matches_view(name_cstr_view(text), policy)
 
 
-@method
 def matches_cs(name: InternedName, text: cstr) -> bool:
     return name.matches(text, NameCasePolicy.CaseSensitive)
 
 
-@method
 def matches_ci(name: InternedName, text: cstr) -> bool:
     return name.matches(text, NameCasePolicy.AsciiCaseInsensitive)
 
@@ -261,7 +244,6 @@ def name_table_intern_view(table: mutable NameTable&, text: sview, policy: NameC
             return name_id
 
 
-@method
 def intern_view(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
         return name_table_intern_view(table, text, policy)
@@ -288,7 +270,6 @@ def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameC
             return name_id
 
 
-@method
 def intern_copy(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
         return name_table_intern_copy(table, text, policy)
@@ -299,35 +280,29 @@ def name_table_intern(table: mutable NameTable&, text: sview, policy: NameCasePo
         return table.name_table_intern_copy(text, policy)
 
 
-@method
 def intern(table: mutable NameTable&, text: cstr, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
         return name_table_intern(table, name_cstr_view(text), policy)
 
 
-@method
 def intern_ci(table: mutable NameTable&, text: cstr) -> NameId:
     can Memory.Allocate, Abort.Panic:
         return name_table_intern(table, name_cstr_view(text), NameCasePolicy.AsciiCaseInsensitive)
 
 
-@method
 def has_text_view(table: NameTable&, name_id: NameId, text: sview, policy: NameCasePolicy) -> bool:
     false return if not name_table_valid_id(table, name_id)
     entry: NameEntry = name_table_entry(table, name_id)
     return name_text_eq(entry.text, text, policy)
 
 
-@method
 def has_text(table: NameTable&, name_id: NameId, text: cstr, policy: NameCasePolicy) -> bool:
     return table.has_text_view(name_id, name_cstr_view(text), policy)
 
 
-@method
 def has_text_cs(table: NameTable&, name_id: NameId, text: cstr) -> bool:
     return table.has_text(name_id, text, NameCasePolicy.CaseSensitive)
 
 
-@method
 def has_text_ci(table: NameTable&, name_id: NameId, text: cstr) -> bool:
     return table.has_text(name_id, text, NameCasePolicy.AsciiCaseInsensitive)

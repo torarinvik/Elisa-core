@@ -298,7 +298,6 @@ def darray_view[T](da: darray[T]) -> dview[T]:
     return DynArrayView(collections_void_from_items[T](da.items), da.count, elem_size)
 
 
-@method
 def view[T](da: darray[T]) -> dview[T]:
     return darray_view[T](da)
 
@@ -315,7 +314,6 @@ def array_view[T, N: usize](arr: T[N]&) -> dview[T]:
         return DynArrayView(collections_void_from_items[T](arr[0].ref[T&]), N, elem_size)
 
 
-@method
 def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
     return FilteredView[S, T](source, predicate)
 
@@ -335,7 +333,6 @@ def new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[
     return darray_builder[T](owner)
 
 
-@method
 def builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
     return darray_builder[T](owner)
 
@@ -344,7 +341,6 @@ def darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize:
     return builder.items.count
 
 
-@method
 def count[T](builder: DArrayBuilder[T]&) -> usize:
     return darray_builder_count[T](builder)
 
@@ -353,7 +349,6 @@ def darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool:
     return builder.items.count == 0
 
 
-@method
 def is_empty[T](builder: DArrayBuilder[T]&) -> bool:
     return darray_builder_is_empty[T](builder)
 
@@ -363,7 +358,6 @@ def darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
     return builder.items[index]
 
 
-@method
 def get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
     return darray_builder_get[T](builder, index)
 
@@ -376,7 +370,6 @@ def darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usiz
             _ = builder.items.reserve(capacity)
 
 
-@method
 def reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize):
     can Memory.Allocate, Abort.Panic:
         darray_builder_reserve[T](builder, capacity)
@@ -390,7 +383,6 @@ def darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T):
             builder.items.push(item)
 
 
-@method
 def push[T](builder: mutable DArrayBuilder[T]&, item: T):
     can Memory.Allocate, Abort.Panic:
         darray_builder_push[T](builder, item)
@@ -402,7 +394,6 @@ def darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]:
     return DynArrayView(collections_void_from_items[T](builder.items.items), builder.items.count, elem_size)
 
 
-@method
 def view[T](builder: DArrayBuilder[T]&) -> dview[T]:
     return darray_builder_view[T](builder)
 
@@ -411,7 +402,6 @@ def darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
     return builder.items
 
 
-@method
 def finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
     return darray_builder_finish[T](builder)
 
@@ -420,7 +410,6 @@ def darray_builder_clear[T](builder: mutable DArrayBuilder[T]&):
     builder.items.count <- 0
 
 
-@method
 def clear[T](builder: mutable DArrayBuilder[T]&):
     darray_builder_clear[T](builder)
 
@@ -444,7 +433,6 @@ def inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
     return vec.len
 
 
-@method
 def count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
     return inline_vec_count[T, N](vec)
 
@@ -453,7 +441,6 @@ def inline_vec_is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
     return vec.len == 0
 
 
-@method
 def is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
     return inline_vec_is_empty[T, N](vec)
 
@@ -462,7 +449,6 @@ def inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
     return vec.is_spilled
 
 
-@method
 def spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
     return inline_vec_spilled[T, N](vec)
 
@@ -476,7 +462,6 @@ def inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
         return vec.inline_items[index]
 
 
-@method
 def get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
     return inline_vec_get[T, N](vec, index)
 
@@ -491,7 +476,6 @@ def inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, ite
             vec.inline_items[index] <- item
 
 
-@method
 def set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
     inline_vec_set[T, N](vec, index, item)
 
@@ -536,7 +520,6 @@ def inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
         vec.len <- vec.len + 1
 
 
-@method
 def push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
     can Memory.Allocate, Abort.Panic:
         inline_vec_push[T, N](vec, item)
@@ -553,7 +536,6 @@ def inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
         return vec.inline_items[vec.len]
 
 
-@method
 def pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
     return inline_vec_pop[T, N](vec)
 
@@ -563,7 +545,6 @@ def inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T:
     return inline_vec_get[T, N](vec, vec.len - 1)
 
 
-@method
 def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
     return inline_vec_last[T, N](vec)
 
@@ -578,7 +559,6 @@ def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
         return DynArrayView(collections_void_from_items[T](vec.inline_items[0].ref[T&]), vec.len, elem_size)
 
 
-@method
 def view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
     return inline_vec_view[T, N](vec)
 
@@ -590,7 +570,6 @@ def inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&):
     vec.is_spilled <- false
 
 
-@method
 def clear[T, N: usize](vec: mutable InlineVec[T, N]&):
     inline_vec_clear[T, N](vec)
 
@@ -702,7 +681,6 @@ def darray_pop[T](da: mutable darray[T]&) -> T:
         da.count <- da.count - 1
         return da[da.count]
 
-@method
 def pop[T](da: mutable darray[T]&) -> T:
     can Abort.Panic:
         trusted Unsafe.UncheckedIndex:
@@ -720,7 +698,6 @@ def darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T:
         da.count <- da.count - 1
         return removed
 
-@method
 def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
     can Abort.Panic:
         trusted Unsafe.UncheckedIndex:
@@ -730,21 +707,18 @@ def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
 # `func(T) -> bool`, so a named function or a `lambda` works. These replace
 # hand-rolled scan loops and transliterate std::any_of / all_of / count_if /
 # find_if directly (`v.any_of(pred)` reads as `std::any_of(v..., pred)`).
-@method
 def any_of[T](da: darray[T], pred: func(T) -> bool) -> bool:
     for x in da:
         if pred(x):
             return true
     return false
 
-@method
 def all_of[T](da: darray[T], pred: func(T) -> bool) -> bool:
     for x in da:
         if not pred(x):
             return false
     return true
 
-@method
 def count_if[T](da: darray[T], pred: func(T) -> bool) -> usize:
     n: mutable usize = 0
     for x in da:
@@ -754,7 +728,6 @@ def count_if[T](da: darray[T], pred: func(T) -> bool) -> usize:
 
 # Returns the first element satisfying `pred`, or `null` if none does
 # (std::find_if, returning the element rather than an iterator).
-@method
 def find_if[T](da: darray[T], pred: func(T) -> bool) -> T?:
     for x in da:
         if pred(x):
@@ -764,7 +737,6 @@ def find_if[T](da: darray[T], pred: func(T) -> bool) -> T?:
 # Left fold / reduce over the range (std::accumulate): `da.fold(init, f)` returns
 # f(... f(f(init, e0), e1) ..., en). The accumulator type is inferred from `init`,
 # so it composes with any element type. Read-only, allocation-free.
-@method
 def fold[T, A](da: darray[T], init: A, f: func(A, T) -> A) -> A:
     acc: mutable A = init
     for x in da:
@@ -797,7 +769,6 @@ def darray_sift_down[T](da: mutable darray[T]&, less: func(T, T) -> bool, start:
                 root <- largest
 
 # In-place sort ascending by `less` (std::sort). O(n log n) heapsort, no allocation.
-@method
 def sort[T](da: mutable darray[T]&, less: func(T, T) -> bool):
     can Abort.Panic:
         n: usize = da.count
@@ -820,7 +791,6 @@ def sort[T](da: mutable darray[T]&, less: func(T, T) -> bool):
                     darray_sift_down[T](da, less, 0, e)
 
 # Reverse the elements in place (std::reverse).
-@method
 def reverse[T](da: mutable darray[T]&):
     n: usize = da.count
     if n < 2:
@@ -836,7 +806,6 @@ def reverse[T](da: mutable darray[T]&):
             j <- j - 1
 
 # True if no element compares `less` than its predecessor (std::is_sorted).
-@method
 def is_sorted[T](da: darray[T], less: func(T, T) -> bool) -> bool:
     i: mutable usize = 1
     trusted Unsafe.AssumeProgress:
@@ -848,7 +817,6 @@ def is_sorted[T](da: darray[T], less: func(T, T) -> bool) -> bool:
 
 # Smallest / largest element by `less`, or `null` if empty (std::min_element /
 # std::max_element, returning the element rather than an iterator).
-@method
 def min_element[T](da: darray[T], less: func(T, T) -> bool) -> T?:
     if da.count == 0:
         return null
@@ -861,7 +829,6 @@ def min_element[T](da: darray[T], less: func(T, T) -> bool) -> T?:
             i <- i + 1
     return best
 
-@method
 def max_element[T](da: darray[T], less: func(T, T) -> bool) -> T?:
     if da.count == 0:
         return null
@@ -876,7 +843,6 @@ def max_element[T](da: darray[T], less: func(T, T) -> bool) -> T?:
 
 # Binary-search lookups over a range already sorted by the same `less`
 # (std::lower_bound / std::binary_search). O(log n).
-@method
 def lower_bound[T](da: darray[T], target: T, less: func(T, T) -> bool) -> usize:
     lo: mutable usize = 0
     hi: mutable usize = da.count
@@ -889,7 +855,6 @@ def lower_bound[T](da: darray[T], target: T, less: func(T, T) -> bool) -> usize:
                 hi <- mid
     return lo
 
-@method
 def binary_search[T](da: darray[T], target: T, less: func(T, T) -> bool) -> bool:
     idx: mutable usize = 0
     trusted Unsafe.UncheckedIndex:
@@ -1207,17 +1172,14 @@ def index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
     return map.entries.view()
 
 
-@method
 def entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
     return index_map_entry[K, T](map, index)
 
 
-@method
 def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
     return index_map_value[K, T](map, index)
 
 
-@method
 def entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
     return index_map_entries[K, T](map)
 
@@ -1358,17 +1320,14 @@ def symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry
     return index_map_entries[K, T](table.items)
 
 
-@method
 def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
     return symbol_table_entry[K, T](table, symbol_id)
 
 
-@method
 def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
     return symbol_table_value[K, T](table, symbol_id)
 
 
-@method
 def entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]:
     return symbol_table_entries[K, T](table)
 

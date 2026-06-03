@@ -134,10 +134,14 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 			return value, fnType, err
 		}
 	}
-	if ident, ok := expr.Func.(*ast.Ident); ok {
-		// Resolve through the analyzer's recorded canonical (namespace/using/import-
-		// qualified) name so a namespaced/imported call target — including a generic
-		// function that must be monomorphized — is found instead of the bare name.
+	if ident, ok := expr.Func.(*ast.Ident); ok && !s.identIsLocalBinding(ident.Name) {
+		// A local binding (a function-value variable) shadows a same-named global
+		// function — fall through to the function-value path below so the call
+		// dispatches through the local value, not the global (which, if generic,
+		// would also fail to bind its type params). Resolve through the analyzer's
+		// recorded canonical (namespace/using/import-qualified) name so a
+		// namespaced/imported call target — including a generic function that must be
+		// monomorphized — is found instead of the bare name.
 		lookupName := ident.Name
 		if s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
 			if canon, ok := s.g.result.ResolvedValueNames[ident]; ok {
@@ -199,9 +203,34 @@ func (s *functionState) directCallTarget(expr ast.Expr) bool {
 	if !ok || s == nil || s.g == nil || s.g.result == nil {
 		return false
 	}
+	// A local binding (function-value variable) shadows a same-named global
+	// function: the call lowers through the function-value path, not a direct call.
+	if s.identIsLocalBinding(ident.Name) {
+		return false
+	}
 	sym, ok := s.g.result.GlobalScope.Lookup(ident.Name)
 	if !ok {
 		return false
 	}
 	return sym.Kind == semantic.SymbolFunc || sym.Kind == semantic.SymbolExternFunc
+}
+
+// identIsLocalBinding reports whether name resolves to a local FUNCTION-VALUE
+// binding in the current codegen scope chain. Such a local shadows any same-named
+// global function, so a call through it must dispatch on the local value rather
+// than re-resolving (and specializing) the global by bare name. Only function-
+// typed locals divert a call: a non-function local of the same name (e.g. a
+// `builder: Builder[i32]` shadowing a global `def builder[T](...)`) is not a call
+// target, so calls to the global must still resolve normally — matching how the
+// analyzer resolved them.
+func (s *functionState) identIsLocalBinding(name string) bool {
+	if s == nil {
+		return false
+	}
+	binding, ok := s.lookupBinding(name)
+	if !ok {
+		return false
+	}
+	_, isFunc := binding.typ.(*semantic.FuncType)
+	return isFunc
 }

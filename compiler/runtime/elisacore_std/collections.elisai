@@ -296,59 +296,48 @@ extern arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, sha
 
 extern darray_view[T](da: darray[T]) -> dview[T]
 
-@method
 extern view[T](da: darray[T]) -> dview[T]
 
 extern array_view[T, N: usize](arr: T[N]&) -> dview[T]
 
-@method
 extern where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]
 
 extern darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
 
 extern new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[T]
 
-@method
 extern builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
 
 extern darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize
 
-@method
 extern count[T](builder: DArrayBuilder[T]&) -> usize
 
 extern darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool
 
-@method
 extern is_empty[T](builder: DArrayBuilder[T]&) -> bool
 
 extern darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T
 
-@method
 extern get[T](builder: DArrayBuilder[T]&, index: usize) -> T
 
 extern darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize)
 
-@method
 extern reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize)
 
 extern darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T)
 
-@method
 extern push[T](builder: mutable DArrayBuilder[T]&, item: T)
 
 extern darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]
 
-@method
 extern view[T](builder: DArrayBuilder[T]&) -> dview[T]
 
 extern darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]
 
-@method
 extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
 
 extern darray_builder_clear[T](builder: mutable DArrayBuilder[T]&)
 
-@method
 extern clear[T](builder: mutable DArrayBuilder[T]&)
 
 extern inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]
@@ -357,54 +346,44 @@ extern new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> Inlin
 
 extern inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize
 
-@method
 extern count[T, N: usize](vec: InlineVec[T, N]&) -> usize
 
 extern inline_vec_is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool
 
-@method
 extern is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool
 
 extern inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool
 
-@method
 extern spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool
 
 extern inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T
 
-@method
 extern get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T
 
 extern inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T)
 
-@method
 extern set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T)
 
 extern inline_vec_spill[T, N: usize](vec: mutable InlineVec[T, N]&)
 
 extern inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T)
 
-@method
 extern push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T)
 
 extern inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T
 
-@method
 extern pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T
 
 extern inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T
 
-@method
 extern last[T, N: usize](vec: InlineVec[T, N]&) -> T
 
 extern inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]
 
-@method
 extern view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]
 
 extern inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&)
 
-@method
 extern clear[T, N: usize](vec: mutable InlineVec[T, N]&)
 
 extern flags_new[T](api: FlagsNamespace) -> Flags[T]
@@ -449,50 +428,36 @@ extern arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, i
 
 extern darray_pop[T](da: mutable darray[T]&) -> T
 
-@method
 extern pop[T](da: mutable darray[T]&) -> T
 
 extern darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T
 
-@method
 extern remove_at[T](da: mutable darray[T]&, index: usize) -> T
 
-@method
 extern any_of[T](da: darray[T], pred: func(T) -> bool) -> bool
 
-@method
 extern all_of[T](da: darray[T], pred: func(T) -> bool) -> bool
 
-@method
 extern count_if[T](da: darray[T], pred: func(T) -> bool) -> usize
 
-@method
 extern find_if[T](da: darray[T], pred: func(T) -> bool) -> T?
 
-@method
 extern fold[T, A](da: darray[T], init: A, f: func(A, T) -> A) -> A
 
 extern darray_sift_down[T](da: mutable darray[T]&, less: func(T, T) -> bool, start: usize, end: usize)
 
-@method
 extern sort[T](da: mutable darray[T]&, less: func(T, T) -> bool)
 
-@method
 extern reverse[T](da: mutable darray[T]&)
 
-@method
 extern is_sorted[T](da: darray[T], less: func(T, T) -> bool) -> bool
 
-@method
 extern min_element[T](da: darray[T], less: func(T, T) -> bool) -> T?
 
-@method
 extern max_element[T](da: darray[T], less: func(T, T) -> bool) -> T?
 
-@method
 extern lower_bound[T](da: darray[T], target: T, less: func(T, T) -> bool) -> usize
 
-@method
 extern binary_search[T](da: darray[T], target: T, less: func(T, T) -> bool) -> bool
 
 extern arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&
@@ -571,13 +536,10 @@ extern index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T
 
 extern index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]
 
-@method
 extern entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]
 
-@method
 extern value[K, T](map: IndexMap[K, T]&, index: usize) -> T
 
-@method
 extern entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]
 
 extern index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
@@ -628,13 +590,10 @@ extern symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTabl
 
 extern symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]
 
-@method
 extern entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]
 
-@method
 extern value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
 
-@method
 extern entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]
 
 extern symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId

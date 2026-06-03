@@ -4,15 +4,12 @@ struct DArrayBuilder[T]:
 
 extern darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
 
-@method
 extern builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
 
 extern darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T)
 
-@method
 extern push[T](builder: mutable DArrayBuilder[T]&, item: T)
 
 extern darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]
 
-@method
 extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
