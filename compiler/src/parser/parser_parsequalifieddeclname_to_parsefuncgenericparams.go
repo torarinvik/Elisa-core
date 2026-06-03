@@ -560,7 +560,6 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
 	var typeParams []string
-	var refStorageParams []string
 	var regionParams []string
 	var genericParams []ast.GenericParam
 	hasStateParam := false
@@ -580,7 +579,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 		namedStateCases = p.parseNamedStructStateBracket(name)
 		genericParams = append(genericParams, ast.GenericParam{Position: pos, Kind: ast.GenericParamState, Name: "state", StateCases: append([]string(nil), namedStateCases...), StateOwner: name})
 	} else if p.match(lexer.TOKEN_LBRACKET) {
-		typeParams, refStorageParams, regionParams, _, genericParams = p.parseGenericParamListAfterLBracket(true, false)
+		typeParams, regionParams, _, genericParams = p.parseGenericParamListAfterLBracket(true, false)
 		p.expect(lexer.TOKEN_RBRACKET)
 		if states, ok := p.peekAggregateStateBracketList(); ok {
 			states = p.parseAggregateStateBracketList()
@@ -656,7 +655,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RegionParams: regionParams, RegionOwner: regionOwner, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, Affine: affine, Droppable: droppable, ReprC: reprC, Layout: layout, Fields: fields}
+	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RegionParams: regionParams, RegionOwner: regionOwner, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, Affine: affine, Droppable: droppable, ReprC: reprC, Layout: layout, Fields: fields}
 }
 func (p *Parser) peekNamedStructStateBracket() bool {
 	return p.peek() == lexer.TOKEN_LBRACKET && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "state"
@@ -783,11 +782,11 @@ func (p *Parser) parseBitGroupDecl() *ast.BitGroupDecl {
 func (p *Parser) parseFuncDecl() *ast.FuncDecl {
 	return p.parseFuncDeclWithAnnotations(nil)
 }
-func (p *Parser) parseFuncGenericParams() ([]string, []string, []string, []string, []ast.GenericParam) {
+func (p *Parser) parseFuncGenericParams() ([]string, []string, []string, []ast.GenericParam) {
 	if !p.match(lexer.TOKEN_LBRACKET) {
-		return nil, nil, nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	typeParams, refStorageParams, regionParams, permissionParams, genericParams := p.parseGenericParamListAfterLBracket(true, true)
+	typeParams, regionParams, permissionParams, genericParams := p.parseGenericParamListAfterLBracket(true, true)
 	p.expect(lexer.TOKEN_RBRACKET)
-	return typeParams, refStorageParams, regionParams, permissionParams, genericParams
+	return typeParams, regionParams, permissionParams, genericParams
 }

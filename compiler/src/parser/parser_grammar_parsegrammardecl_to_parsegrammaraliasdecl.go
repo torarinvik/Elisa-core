@@ -13,7 +13,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	}
 	p.expectIdentText("grammar")
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	typeParams, refStorageParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
+	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 	var envType ast.TypeExpr
 	var overType ast.TypeExpr
 	var usingType ast.TypeExpr
@@ -156,7 +156,6 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		Extend:                 extend,
 		Name:                   name,
 		TypeParams:             typeParams,
-		RefStorageParams:       refStorageParams,
 		RegionParams:           regionParams,
 		PermissionParams:       permissionParams,
 		GenericParams:          genericParams,

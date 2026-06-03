@@ -61,11 +61,6 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 			return resolved
 		}
 		return projected
-	case *RefStorageParamType:
-		if resolved, ok := bindings[n.Name]; ok {
-			return resolved
-		}
-		return n
 	case *RegionParamType:
 		if resolved, ok := bindings[n.Name]; ok {
 			return resolved
@@ -103,12 +98,9 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		storageParam := n.StorageParam
 		if storageParam != "" {
 			if resolved, ok := bindings[storageParam]; ok {
-				switch resolved := resolved.(type) {
-				case *RefStorageValueType:
-					storage = resolved.Storage
+				if value, ok := resolved.(*RefStorageValueType); ok {
+					storage = value.Storage
 					storageParam = ""
-				case *RefStorageParamType:
-					storageParam = resolved.Name
 				}
 			}
 		}
@@ -230,7 +222,7 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if IsInvalidType(returnType) {
 			return invalidType
 		}
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RefStorageParams: append([]string(nil), n.RefStorageParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Static: n.Static, InlineMode: n.InlineMode, HasInlineMode: n.HasInlineMode, HasNoRecurse: n.HasNoRecurse, HasAsyncEntry: n.HasAsyncEntry, HasSegmentAgnostic: n.HasSegmentAgnostic, HasSegmentEstablishing: n.HasSegmentEstablishing, HasReentrantSafe: n.HasReentrantSafe, SegmentTransition: n.SegmentTransition, TemperatureMode: n.TemperatureMode, HasTemperatureMode: n.HasTemperatureMode, CallConv: n.CallConv, IntrinsicName: n.IntrinsicName, GuardEffects: cloneFuncGuardEffects(n.GuardEffects), BoundaryPointerParamIndices: append([]int(nil), n.BoundaryPointerParamIndices...), Poststates: cloneFuncPoststates(n.Poststates), Params: params, ExplicitParamCount: n.ExplicitParamCount, ExplicitParamNames: append([]string(nil), n.ExplicitParamNames...), ExplicitParamDefaultExprs: append([]ast.Expr(nil), n.ExplicitParamDefaultExprs...), ExplicitParamHasDefault: append([]bool(nil), n.ExplicitParamHasDefault...), ImplicitParamNames: append([]string(nil), n.ImplicitParamNames...), Return: returnType, Variadic: n.Variadic, SinkParams: append([]bool(nil), n.SinkParams...), SinkParamsKnown: n.SinkParamsKnown, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown, ReturnIsolation: n.ReturnIsolation, ReturnIsolationKnown: n.ReturnIsolationKnown, ReturnsOwnedRegion: n.ReturnsOwnedRegion, OwnedParams: append([]bool(nil), n.OwnedParams...)}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Static: n.Static, InlineMode: n.InlineMode, HasInlineMode: n.HasInlineMode, HasNoRecurse: n.HasNoRecurse, HasAsyncEntry: n.HasAsyncEntry, HasSegmentAgnostic: n.HasSegmentAgnostic, HasSegmentEstablishing: n.HasSegmentEstablishing, HasReentrantSafe: n.HasReentrantSafe, SegmentTransition: n.SegmentTransition, TemperatureMode: n.TemperatureMode, HasTemperatureMode: n.HasTemperatureMode, CallConv: n.CallConv, IntrinsicName: n.IntrinsicName, GuardEffects: cloneFuncGuardEffects(n.GuardEffects), BoundaryPointerParamIndices: append([]int(nil), n.BoundaryPointerParamIndices...), Poststates: cloneFuncPoststates(n.Poststates), Params: params, ExplicitParamCount: n.ExplicitParamCount, ExplicitParamNames: append([]string(nil), n.ExplicitParamNames...), ExplicitParamDefaultExprs: append([]ast.Expr(nil), n.ExplicitParamDefaultExprs...), ExplicitParamHasDefault: append([]bool(nil), n.ExplicitParamHasDefault...), ImplicitParamNames: append([]string(nil), n.ImplicitParamNames...), Return: returnType, Variadic: n.Variadic, SinkParams: append([]bool(nil), n.SinkParams...), SinkParamsKnown: n.SinkParamsKnown, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown, ReturnIsolation: n.ReturnIsolation, ReturnIsolationKnown: n.ReturnIsolationKnown, ReturnsOwnedRegion: n.ReturnsOwnedRegion, OwnedParams: append([]bool(nil), n.OwnedParams...)}
 	default:
 		return t
 	}

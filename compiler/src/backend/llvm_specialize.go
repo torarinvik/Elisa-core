@@ -92,7 +92,6 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 	specialized := &semantic.FuncType{
 		Name:                        base.Name,
 		TypeParams:                  nil,
-		RefStorageParams:            nil,
 		RegionParams:                append([]string(nil), base.RegionParams...),
 		PermissionParams:            append([]string(nil), base.PermissionParams...),
 		GenericParams:               nil,
@@ -256,10 +255,6 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 			if value, ok := actual.(*semantic.ConstValueType); ok {
 				bindings[p.Name] = value
 			}
-		}
-	case *semantic.RefStorageParamType:
-		if _, ok := bindings[p.Name]; !ok {
-			bindings[p.Name] = actual
 		}
 	case *semantic.IDType:
 		if a, ok := actual.(*semantic.IDType); ok {

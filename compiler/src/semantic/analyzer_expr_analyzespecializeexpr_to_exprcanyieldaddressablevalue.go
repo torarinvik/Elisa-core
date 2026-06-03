@@ -58,7 +58,6 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 		return invalidType
 	}
 	specialized.TypeParams = nil
-	specialized.RefStorageParams = nil
 	specialized.GenericParams = nil
 	return specialized
 }

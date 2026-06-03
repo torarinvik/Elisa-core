@@ -40,13 +40,6 @@ func AssignableTo(dst, src Type) bool {
 	if _, ok := src.(*StructStateSetType); ok {
 		return SameType(dst, src)
 	}
-	if _, ok := dst.(*RefStorageParamType); ok {
-		_, ok = src.(*RefStorageValueType)
-		return ok
-	}
-	if _, ok := src.(*RefStorageParamType); ok {
-		return true
-	}
 	if _, ok := dst.(*RefStorageValueType); ok {
 		return SameType(dst, src)
 	}

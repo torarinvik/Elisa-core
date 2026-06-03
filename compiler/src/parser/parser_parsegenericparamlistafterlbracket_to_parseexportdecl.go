@@ -5,15 +5,13 @@ import (
 	"elisacore/src/lexer"
 )
 
-func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermission bool) ([]string, []string, []string, []string, []ast.GenericParam) {
+func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermission bool) ([]string, []string, []string, []ast.GenericParam) {
 	paramCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET)
 	typeParams := make([]string, 0, paramCapacity)
-	refStorageParams := make([]string, 0, paramCapacity)
 	regionParams := make([]string, 0, paramCapacity)
 	permissionParams := make([]string, 0, paramCapacity)
 	genericParams := make([]ast.GenericParam, 0, paramCapacity)
 	seenType := map[string]bool{}
-	seenRefStorage := map[string]bool{}
 	seenRegion := map[string]bool{}
 	seenPermission := map[string]bool{}
 	seenValue := map[string]bool{}
@@ -29,18 +27,14 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 		if !isRegionParam && allowPermission && p.matchIdentText("permission") {
 			isPermissionParam = true
 		}
-		isRefStorageParam := false
-		if !isRegionParam && !isPermissionParam && p.matchIdentText("refstorage") {
-			isRefStorageParam = true
-		}
 		isErrorSetParam := false
-		if !isRegionParam && !isPermissionParam && !isRefStorageParam && p.matchIdentText("errorset") {
+		if !isRegionParam && !isPermissionParam && p.matchIdentText("errorset") {
 			isErrorSetParam = true
 		}
 		if isErrorSetParam {
 			kind = ast.GenericParamErrorSet
 			name := p.expect(lexer.TOKEN_IDENT).Text
-			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] {
+			if seenRegion[name] || seenType[name] || seenPermission[name] {
 				p.errorf("duplicate function generic parameter %q", name)
 			} else {
 				seenType[name] = true
@@ -49,26 +43,16 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 		} else if isRegionParam {
 			kind = ast.GenericParamRegion
 			name := p.expect(lexer.TOKEN_IDENT).Text
-			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] {
+			if seenRegion[name] || seenType[name] || seenPermission[name] {
 				p.errorf("duplicate function generic parameter %q", name)
 			} else {
 				seenRegion[name] = true
 				regionParams = append(regionParams, name)
 			}
-		} else if isRefStorageParam {
-			kind = ast.GenericParamRefStorage
-			name := p.expect(lexer.TOKEN_IDENT).Text
-			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] {
-				p.errorf("duplicate function generic parameter %q", name)
-			} else {
-				seenRefStorage[name] = true
-				refStorageParams = append(refStorageParams, name)
-				genericParams = append(genericParams, ast.GenericParam{Position: paramPos, Kind: kind, Name: name})
-			}
 		} else if isPermissionParam {
 			kind = ast.GenericParamPermission
 			name := p.expect(lexer.TOKEN_IDENT).Text
-			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] {
+			if seenRegion[name] || seenType[name] || seenPermission[name] {
 				p.errorf("duplicate function generic parameter %q", name)
 			} else {
 				seenPermission[name] = true
@@ -80,7 +64,7 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 			if p.match(lexer.TOKEN_COLON) {
 				boundName = p.parseQualifiedDeclName()
 			}
-			if seenType[name] || seenRegion[name] || seenPermission[name] || seenRefStorage[name] || seenValue[name] {
+			if seenType[name] || seenRegion[name] || seenPermission[name] || seenValue[name] {
 				p.errorf("duplicate function generic parameter %q", name)
 			} else if boundName != "" && isBuiltinValueGenericParamTypeName(boundName) {
 				seenValue[name] = true
@@ -95,7 +79,7 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 			break
 		}
 	}
-	return typeParams, refStorageParams, regionParams, permissionParams, genericParams
+	return typeParams, regionParams, permissionParams, genericParams
 }
 
 func isBuiltinValueGenericParamTypeName(name string) bool {
@@ -295,7 +279,7 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 	p.expect(lexer.TOKEN_DEF)
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
-	typeParams, refStorageParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
+	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
 	params, paramPacks, paramItemOrder, _ := p.parseExplicitSignatureParamList(true, false)
@@ -352,7 +336,7 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 	} else {
 		body = p.parseFuncBodyAfterColon()
 	}
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseFuncBodyAfterColon() []ast.Stmt {
@@ -508,7 +492,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 		return &ast.ExternVarDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Type: typ}
 	}
 
-	typeParams, refStorageParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
+	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	// extern name(params...) [-> RetType]  (function)
 	p.expect(lexer.TOKEN_LPAREN)
@@ -555,7 +539,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Variadic: variadic}
 }
 func (p *Parser) parseExportDecl() ast.Decl {
 	pos := p.cur().Pos

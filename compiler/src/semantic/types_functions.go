@@ -122,23 +122,15 @@ func (t *FuncType) String() string {
 	generics := make([]string, 0, len(t.GenericParams)+len(t.RegionParams)+len(t.PermissionParams))
 	if len(t.GenericParams) != 0 {
 		for _, param := range t.GenericParams {
-			switch param.Kind {
-			case ast.GenericParamRefStorage:
-				generics = append(generics, "refstorage "+param.Name)
-			default:
-				if param.InterfaceBound != "" {
-					generics = append(generics, param.Name+": "+param.InterfaceBound)
-				} else {
-					generics = append(generics, param.Name)
-				}
+			if param.InterfaceBound != "" {
+				generics = append(generics, param.Name+": "+param.InterfaceBound)
+			} else {
+				generics = append(generics, param.Name)
 			}
 		}
 	} else {
 		for _, param := range t.TypeParams {
 			generics = append(generics, param)
-		}
-		for _, param := range t.RefStorageParams {
-			generics = append(generics, "refstorage "+param)
 		}
 	}
 	for _, param := range t.RegionParams {

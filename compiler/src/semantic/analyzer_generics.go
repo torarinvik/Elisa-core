@@ -174,22 +174,6 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 		return &ConstValueType{Value: value}
 	case ast.GenericParamState:
 		return a.resolveNamedStateGenericArg(expr, param)
-	case ast.GenericParamRefStorage:
-		switch n := expr.(type) {
-		case *ast.NamedType:
-			if t, ok := a.lookupRefStorageParam(n.Name); ok {
-				return t
-			}
-		}
-		resolved := a.resolveType(expr)
-		if _, ok := resolved.(*RefStorageParamType); ok {
-			return resolved
-		}
-		if _, ok := resolved.(*RefStorageValueType); ok {
-			return resolved
-		}
-		a.errorf(expr.Pos(), "generic argument %q for refstorage parameter %q must be a refstorage literal or parameter", resolved, param.Name)
-		return invalidType
 	case ast.GenericParamRegion:
 		named, ok := expr.(*ast.NamedType)
 		if !ok {
@@ -206,10 +190,6 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 		return invalidType
 	default:
 		resolved := a.resolveType(expr)
-		if _, ok := resolved.(*RefStorageParamType); ok {
-			a.errorf(expr.Pos(), "refstorage parameter %q cannot be used as a type argument", resolved)
-			return invalidType
-		}
 		if _, ok := resolved.(*RefStorageValueType); ok {
 			a.errorf(expr.Pos(), "refstorage literal %q cannot be used as a type argument", resolved)
 			return invalidType

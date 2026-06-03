@@ -339,11 +339,6 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			a.errorf(expr.Pos(), interfaceConformanceFactMessage(bound.String(), iface.Name, "call to "+quoteFactTarget(ft.Name)))
 		}
 	}
-	for _, name := range ft.RefStorageParams {
-		if _, ok := bindings[name]; !ok {
-			a.errorf(expr.Pos(), "cannot infer refstorage parameter %q for call to %q", name, ft.Name)
-		}
-	}
 	for _, name := range ft.PermissionParams {
 		if _, ok := permissionBindings[name]; !ok {
 			a.errorf(expr.Pos(), "cannot infer permission parameter %q for call to %q", name, ft.Name)

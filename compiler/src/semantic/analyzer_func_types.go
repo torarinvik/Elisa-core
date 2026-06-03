@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, effectAliasPos lexer.Pos, effectAlias string, effects []ast.SignatureEffectItem, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, effectAliasPos lexer.Pos, effectAlias string, effects []ast.SignatureEffectItem, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for i, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
@@ -62,7 +62,6 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 	return &FuncType{
 		Name:                      name,
 		TypeParams:                append([]string(nil), typeParams...),
-		RefStorageParams:          append([]string(nil), refStorageParams...),
 		RegionParams:              append([]string(nil), regionParams...),
 		PermissionParams:          append([]string(nil), permissionParams...),
 		GenericParams:             append([]ast.GenericParam(nil), resolvedGenericParams...),

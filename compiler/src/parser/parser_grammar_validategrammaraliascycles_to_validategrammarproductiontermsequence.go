@@ -175,7 +175,7 @@ func (p *Parser) parseGrammarFnDecl(typeCtor bool) ast.GrammarFnDecl {
 		p.expectIdentText("grammarfn")
 	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	typeParams, _, _, _, genericParams := p.parseFuncGenericParams()
+	typeParams, _, _, genericParams := p.parseFuncGenericParams()
 	p.expect(lexer.TOKEN_LPAREN)
 	params := p.parseGrammarFnParamsUntilRParen()
 	var ret ast.GrammarFnType
@@ -191,7 +191,7 @@ func (p *Parser) parseGrammarHelperDecl() ast.GrammarFnDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("grammar")
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	typeParams, _, _, _, genericParams := p.parseFuncGenericParams()
+	typeParams, _, _, genericParams := p.parseFuncGenericParams()
 	p.expect(lexer.TOKEN_LPAREN)
 	params := p.parseGrammarFnParamsUntilRParen()
 	if !p.match(lexer.TOKEN_ARROW) {

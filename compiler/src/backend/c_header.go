@@ -333,23 +333,15 @@ func substituteHeaderType(t semantic.Type, bindings map[string]semantic.Type) se
 			return bound
 		}
 		return tt
-	case *semantic.RefStorageParamType:
-		if bound, ok := bindings[tt.Name]; ok {
-			return bound
-		}
-		return tt
 	case *semantic.RefType:
 		state := tt.State
 		storage := tt.Storage
 		storageParam := tt.StorageParam
 		if storageParam != "" {
 			if bound, ok := bindings[storageParam]; ok {
-				switch bound := bound.(type) {
-				case *semantic.RefStorageValueType:
-					storage = bound.Storage
+				if value, ok := bound.(*semantic.RefStorageValueType); ok {
+					storage = value.Storage
 					storageParam = ""
-				case *semantic.RefStorageParamType:
-					storageParam = bound.Name
 				}
 			}
 		}

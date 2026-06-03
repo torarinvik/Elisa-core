@@ -213,23 +213,15 @@ func diagnosticTypeString(t Type) string {
 		generics := make([]string, 0, len(tt.GenericParams)+len(tt.RegionParams)+len(tt.PermissionParams))
 		if len(tt.GenericParams) != 0 {
 			for _, param := range tt.GenericParams {
-				switch param.Kind {
-				case ast.GenericParamRefStorage:
-					generics = append(generics, "refstorage "+param.Name)
-				default:
-					if param.InterfaceBound != "" {
-						generics = append(generics, param.Name+": "+param.InterfaceBound)
-					} else {
-						generics = append(generics, param.Name)
-					}
+				if param.InterfaceBound != "" {
+					generics = append(generics, param.Name+": "+param.InterfaceBound)
+				} else {
+					generics = append(generics, param.Name)
 				}
 			}
 		} else {
 			for _, param := range tt.TypeParams {
 				generics = append(generics, param)
-			}
-			for _, param := range tt.RefStorageParams {
-				generics = append(generics, "refstorage "+param)
 			}
 		}
 		for _, param := range tt.RegionParams {

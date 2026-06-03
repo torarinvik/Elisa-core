@@ -17,10 +17,6 @@ func matchTypePattern(pattern, actual Type) bool {
 		_, ok = actual.(*ConstValueType)
 		return ok
 	}
-	if _, ok := pattern.(*RefStorageParamType); ok {
-		_, ok = actual.(*RefStorageValueType)
-		return ok
-	}
 	switch p := pattern.(type) {
 	case *NeverType:
 		_, ok := actual.(*NeverType)

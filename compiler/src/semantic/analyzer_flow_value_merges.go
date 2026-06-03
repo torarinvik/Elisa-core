@@ -158,10 +158,10 @@ func functionValueMergeCompatible(dst *FuncType, src *FuncType) bool {
 	if dst == nil || src == nil {
 		return false
 	}
-	if dst.Variadic != src.Variadic || funcTypeExplicitParamCount(dst) != funcTypeExplicitParamCount(src) || len(dst.ImplicitParamNames) != len(src.ImplicitParamNames) || len(dst.GenericParams) != len(src.GenericParams) || len(dst.TypeParams) != len(src.TypeParams) || len(dst.RefStorageParams) != len(src.RefStorageParams) || len(dst.RegionParams) != len(src.RegionParams) || len(dst.PermissionParams) != len(src.PermissionParams) || len(dst.UsedPermissionParams) != len(src.UsedPermissionParams) || len(dst.ShapeParams) != len(src.ShapeParams) || len(dst.FreshReturnShapeParams) != len(src.FreshReturnShapeParams) || len(dst.Params) != len(src.Params) || !SameType(dst.Return, src.Return) {
+	if dst.Variadic != src.Variadic || funcTypeExplicitParamCount(dst) != funcTypeExplicitParamCount(src) || len(dst.ImplicitParamNames) != len(src.ImplicitParamNames) || len(dst.GenericParams) != len(src.GenericParams) || len(dst.TypeParams) != len(src.TypeParams) || len(dst.RegionParams) != len(src.RegionParams) || len(dst.PermissionParams) != len(src.PermissionParams) || len(dst.UsedPermissionParams) != len(src.UsedPermissionParams) || len(dst.ShapeParams) != len(src.ShapeParams) || len(dst.FreshReturnShapeParams) != len(src.FreshReturnShapeParams) || len(dst.Params) != len(src.Params) || !SameType(dst.Return, src.Return) {
 		return false
 	}
-	if !sameStringSlice(dst.ImplicitParamNames, src.ImplicitParamNames) || !sameStringSlice(dst.TypeParams, src.TypeParams) || !sameStringSlice(dst.RefStorageParams, src.RefStorageParams) || !sameStringSlice(dst.RegionParams, src.RegionParams) || !sameStringSlice(dst.PermissionParams, src.PermissionParams) || !sameStringSlice(dst.UsedPermissionParams, src.UsedPermissionParams) || !sameStringSlice(dst.ShapeParams, src.ShapeParams) || !sameStringSlice(dst.FreshReturnShapeParams, src.FreshReturnShapeParams) {
+	if !sameStringSlice(dst.ImplicitParamNames, src.ImplicitParamNames) || !sameStringSlice(dst.TypeParams, src.TypeParams) || !sameStringSlice(dst.RegionParams, src.RegionParams) || !sameStringSlice(dst.PermissionParams, src.PermissionParams) || !sameStringSlice(dst.UsedPermissionParams, src.UsedPermissionParams) || !sameStringSlice(dst.ShapeParams, src.ShapeParams) || !sameStringSlice(dst.FreshReturnShapeParams, src.FreshReturnShapeParams) {
 		return false
 	}
 	for i := range dst.GenericParams {

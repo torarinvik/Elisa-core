@@ -99,9 +99,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		region := n.Region
 		storageParam := n.StorageParam
 		if storageParam != "" {
-			if _, ok := a.lookupRefStorageParam(storageParam); ok {
-				region = ""
-			} else if a.regionQualifierDefined(storageParam) {
+			if a.regionQualifierDefined(storageParam) {
 				region = storageParam
 				storageParam = ""
 			} else {
@@ -138,7 +136,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		return &FuncType{
 			Name:                      "func",
-			RefStorageParams:          nil,
 			UsedPermissionParams:      append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
 			DeclaredPermissionRefs:    append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 			DeclaredPermissions:       append([]string(nil), permissions...),

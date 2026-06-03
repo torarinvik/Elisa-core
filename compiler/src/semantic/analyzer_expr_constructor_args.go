@@ -392,10 +392,6 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 				bindings[p.Name] = value
 			}
 		}
-	case *RefStorageParamType:
-		if _, exists := bindings[p.Name]; !exists {
-			bindings[p.Name] = actual
-		}
 	case *IDType:
 		if act, ok := actual.(*IDType); ok {
 			a.collectTypeBindings(p.Tag, act.Tag, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)

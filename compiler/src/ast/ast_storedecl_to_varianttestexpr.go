@@ -14,7 +14,6 @@ type GenericParamKind int
 const (
 	GenericParamType GenericParamKind = iota
 	GenericParamState
-	GenericParamRefStorage
 	GenericParamRegion
 	GenericParamPermission
 	GenericParamErrorSet
@@ -161,7 +160,6 @@ type FuncDecl struct {
 	Override          bool
 	Name              string
 	TypeParams        []string
-	RefStorageParams  []string
 	RegionParams      []string
 	PermissionParams  []string
 	GenericParams     []GenericParam
@@ -192,7 +190,6 @@ type ExternFuncDecl struct {
 	Override          bool
 	Name              string
 	TypeParams        []string
-	RefStorageParams  []string
 	PermissionParams  []string
 	GenericParams     []GenericParam
 	RegionParams      []string

@@ -154,7 +154,6 @@ type Analyzer struct {
 	typeParamScopes              []map[string]Type
 	typeParamInterfaceScopes     []map[string]*StaticInterface
 	interfaceAssocTypeScopes     []map[string]Type
-	refStorageParamScopes        []map[string]Type
 	constParamScopes             []map[string]Type
 	constEvalScopes              []map[string]ConstValue
 	staticContextDepth           int

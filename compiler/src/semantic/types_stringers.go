@@ -18,7 +18,6 @@ func (*ConstParamType) isType()         {}
 func (*ConstValueType) isType()         {}
 func (*StructStateCaseType) isType()    {}
 func (*StructStateSetType) isType()     {}
-func (*RefStorageParamType) isType()    {}
 func (*RefStorageValueType) isType()    {}
 func (*RegionParamType) isType()        {}
 func (*RegionValueType) isType()        {}
@@ -153,9 +152,6 @@ func (t *StructStateSetType) String() string {
 		return "<invalid-struct-state-set>"
 	}
 	return strings.Join(t.Cases, " | ")
-}
-func (t *RefStorageParamType) String() string {
-	return t.Name
 }
 func (t *RefStorageValueType) String() string {
 	if t == nil {

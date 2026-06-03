@@ -98,7 +98,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, lexer.Pos{}, "", nil, nil, nil, decl.Params, nil, nil, nil, nil, nil, decl.ReturnType, false)
+	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, lexer.Pos{}, "", nil, nil, nil, decl.Params, nil, nil, nil, nil, nil, decl.ReturnType, false)
 	if !isCABICompatibleFuncType(signature) {
 		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
 		return
@@ -217,10 +217,8 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		return base
 	}
 	return &FuncType{
-		Name:                        specialized.Name,
-		TypeParams:                  nil,
-		RefStorageParams:            nil,
-		RegionParams:                append([]string(nil), specialized.RegionParams...),
+		Name:       specialized.Name,
+		TypeParams: nil, RegionParams: append([]string(nil), specialized.RegionParams...),
 		GenericParams:               nil,
 		Permissions:                 append([]string(nil), specialized.Permissions...),
 		ShapeParams:                 append([]string(nil), specialized.ShapeParams...),
@@ -391,23 +389,15 @@ func substituteExportType(t Type, bindings map[string]Type) Type {
 			return resolved
 		}
 		return tt
-	case *RefStorageParamType:
-		if resolved, ok := bindings[tt.Name]; ok {
-			return resolved
-		}
-		return tt
 	case *RefType:
 		state := tt.State
 		storage := tt.Storage
 		storageParam := tt.StorageParam
 		if storageParam != "" {
 			if resolved, ok := bindings[storageParam]; ok {
-				switch resolved := resolved.(type) {
-				case *RefStorageValueType:
-					storage = resolved.Storage
+				if value, ok := resolved.(*RefStorageValueType); ok {
+					storage = value.Storage
 					storageParam = ""
-				case *RefStorageParamType:
-					storageParam = resolved.Name
 				}
 			}
 		}

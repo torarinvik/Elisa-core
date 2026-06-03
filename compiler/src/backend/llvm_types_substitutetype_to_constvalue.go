@@ -61,11 +61,6 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			return resolved
 		}
 		return projected
-	case *semantic.RefStorageParamType:
-		if mapped, ok := subst[tt.Name]; ok {
-			return mapped
-		}
-		return t
 	case *semantic.RegionParamType:
 		if mapped, ok := subst[tt.Name]; ok {
 			return mapped
@@ -102,12 +97,9 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		storageParam := tt.StorageParam
 		if storageParam != "" {
 			if mapped, ok := subst[storageParam]; ok {
-				switch mapped := mapped.(type) {
-				case *semantic.RefStorageValueType:
-					storage = mapped.Storage
+				if value, ok := mapped.(*semantic.RefStorageValueType); ok {
+					storage = value.Storage
 					storageParam = ""
-				case *semantic.RefStorageParamType:
-					storageParam = mapped.Name
 				}
 			}
 		}
@@ -156,7 +148,6 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		return &semantic.FuncType{
 			Name:                   tt.Name,
 			TypeParams:             append([]string(nil), tt.TypeParams...),
-			RefStorageParams:       append([]string(nil), tt.RefStorageParams...),
 			RegionParams:           append([]string(nil), tt.RegionParams...),
 			GenericParams:          append([]ast.GenericParam(nil), tt.GenericParams...),
 			ShapeParams:            append([]string(nil), tt.ShapeParams...),

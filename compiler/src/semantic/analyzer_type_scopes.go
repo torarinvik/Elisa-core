@@ -22,24 +22,6 @@ func (a *Analyzer) withTypeParams(names []string, args []Type, fn func()) {
 	a.typeParamScopes = a.typeParamScopes[:len(a.typeParamScopes)-1]
 }
 
-func (a *Analyzer) withRefStorageParams(names []string, args []Type, fn func()) {
-	if len(names) == 0 {
-		fn()
-		return
-	}
-	bindings := make(map[string]Type, len(names))
-	for i, name := range names {
-		if i < len(args) && args[i] != nil {
-			bindings[name] = args[i]
-		} else {
-			bindings[name] = &RefStorageParamType{Name: name}
-		}
-	}
-	a.refStorageParamScopes = append(a.refStorageParamScopes, bindings)
-	fn()
-	a.refStorageParamScopes = a.refStorageParamScopes[:len(a.refStorageParamScopes)-1]
-}
-
 func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn func()) {
 	if len(params) == 0 {
 		fn()
@@ -48,8 +30,6 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 	typeNames := make([]string, 0)
 	typeArgs := make([]Type, 0)
 	typeInterfaces := make(map[string]*StaticInterface)
-	refStorageNames := make([]string, 0)
-	refStorageArgs := make([]Type, 0)
 	constNames := make([]string, 0)
 	constArgs := make([]Type, 0)
 	errorSetNames := make([]string, 0)
@@ -70,9 +50,6 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 					typeInterfaces[param.Name] = iface
 				}
 			}
-		case ast.GenericParamRefStorage:
-			refStorageNames = append(refStorageNames, param.Name)
-			refStorageArgs = append(refStorageArgs, arg)
 		case ast.GenericParamErrorSet:
 			errorSetNames = append(errorSetNames, param.Name)
 		case ast.GenericParamValue:
@@ -86,10 +63,8 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 	}
 	a.withTypeParamInterfaces(typeInterfaces, func() {
 		a.withTypeParams(typeNames, typeArgs, func() {
-			a.withRefStorageParams(refStorageNames, refStorageArgs, func() {
-				a.withErrorSetParams(errorSetNames, func() {
-					a.withConstParams(constNames, constArgs, fn)
-				})
+			a.withErrorSetParams(errorSetNames, func() {
+				a.withConstParams(constNames, constArgs, fn)
 			})
 		})
 	})
@@ -125,15 +100,6 @@ func (a *Analyzer) lookupConstParam(name string) (Type, bool) {
 func (a *Analyzer) lookupTypeParam(name string) (Type, bool) {
 	for i := len(a.typeParamScopes) - 1; i >= 0; i-- {
 		if t, ok := a.typeParamScopes[i][name]; ok {
-			return t, true
-		}
-	}
-	return nil, false
-}
-
-func (a *Analyzer) lookupRefStorageParam(name string) (Type, bool) {
-	for i := len(a.refStorageParamScopes) - 1; i >= 0; i-- {
-		if t, ok := a.refStorageParamScopes[i][name]; ok {
 			return t, true
 		}
 	}

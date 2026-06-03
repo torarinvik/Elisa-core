@@ -116,9 +116,6 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		appendKeyTag(b, "structstateset")
 		appendKeyString(b, tt.StructName)
 		appendKeyStringSlice(b, tt.Cases)
-	case *RefStorageParamType:
-		appendKeyTag(b, "refstorageparam")
-		appendKeyString(b, tt.Name)
 	case *RefStorageValueType:
 		appendKeyTag(b, "refstoragevalue")
 		appendKeyInt(b, int(tt.Storage))
@@ -305,7 +302,6 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		appendKeyStringSlice(b, tt.ImplicitParamNames)
 		appendGenericParamSlice(b, tt.GenericParams)
 		appendKeyStringSlice(b, tt.TypeParams)
-		appendKeyStringSlice(b, tt.RefStorageParams)
 		appendKeyStringSlice(b, tt.RegionParams)
 		appendKeyStringSlice(b, tt.PermissionParams)
 		appendKeyStringSlice(b, tt.UsedPermissionParams)

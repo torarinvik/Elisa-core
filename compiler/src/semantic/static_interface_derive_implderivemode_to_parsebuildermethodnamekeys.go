@@ -101,7 +101,6 @@ func (a *Analyzer) synthesizeDerivedImplMembers(decls []scopedDecl) {
 					Position:         methodDecl.Position,
 					Name:             methodDecl.Name,
 					TypeParams:       append([]string(nil), methodDecl.TypeParams...),
-					RefStorageParams: append([]string(nil), methodDecl.RefStorageParams...),
 					RegionParams:     append([]string(nil), methodDecl.RegionParams...),
 					PermissionParams: append([]string(nil), methodDecl.PermissionParams...),
 					GenericParams:    append([]ast.GenericParam(nil), sig.GenericParams...),
