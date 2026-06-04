@@ -230,6 +230,12 @@ func (s *functionState) emitRegionDecl(n *ast.RegionStmt) error {
 	s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
 	s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
 	s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: alloca}
+	// A lazy region (e.g. `in auto:`) is left zero-initialized: arena_alloc creates its
+	// first block on demand, and arena_free over a never-allocated arena is a no-op. So a
+	// region that never allocates costs nothing beyond the stack slot.
+	if n.Lazy {
+		return nil
+	}
 	return s.emitRegionInit(alloca, arenaType, n.Capacity, n.Allocator)
 }
 func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {

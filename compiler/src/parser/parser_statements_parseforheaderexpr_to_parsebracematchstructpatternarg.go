@@ -307,7 +307,7 @@ func (p *Parser) parseInStore() ast.Stmt {
 	// (docs/68). A value that escapes the block is caught by the normal region
 	// destroy/outlives checks — inference's slack becomes a diagnostic, not a leak.
 	if ident, ok := store.(*ast.Ident); ok && ident.Name == "auto" {
-		return &ast.RegionStmt{Position: pos, Name: synthesizedAutoRegionName(pos), Body: body}
+		return &ast.RegionStmt{Position: pos, Name: synthesizedAutoRegionName(pos), Lazy: true, Body: body}
 	}
 	return &ast.InStoreStmt{Position: pos, Store: store, Body: body}
 }

@@ -480,7 +480,11 @@ type RegionStmt struct {
 	// Allocator selects the region's backing allocator via `region NAME(cap) using <name>:`.
 	// Empty means the compile-time default backend; "malloc" backs blocks with libc malloc.
 	Allocator string
-	Body      []Stmt
+	// Lazy marks a compiler-synthesized region (e.g. `in auto:`) whose first block is
+	// created on demand by arena_alloc rather than eagerly at the declaration. A region
+	// that never allocates costs only a zero-initialized Arena slot and an empty free.
+	Lazy bool
+	Body []Stmt
 }
 type DestroyStmt struct {
 	Position lexer.Pos
