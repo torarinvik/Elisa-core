@@ -154,6 +154,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
 		fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
 		fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
+		a.checkHotContract(fn, fnType)
 		a.finalizeFunctionAnalysis(fn, fnType)
 	}
 	a.finishFunctionProgressSummary(fn, a.currentFunctionUsedPermissionRefs)
