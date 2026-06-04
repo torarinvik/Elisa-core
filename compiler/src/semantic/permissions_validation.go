@@ -115,7 +115,20 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 	a.warnf(pos, msg)
 }
 
+// isRuntimeStdPermissionInternal reports whether a source file is part of the trusted
+// runtime standard library (the `elisacore_std` directory). The stdlib is the trusted
+// foundation — like Rust's `std`, it implements the safe abstractions with raw-memory
+// internals — so its unsafe operations are exempt from the Unsafe.* grant requirement that
+// is ENFORCED for ordinary user code. This is what lets `EnforceUnsafePermissions` be on
+// for every build path (the user-facing "loud escape hatch" contract) without forcing the
+// runtime's ~hundreds of internal raw-pointer ops to each carry a grant.
 func isRuntimeStdPermissionInternal(path string) bool {
+	// Real builds carry the full include path, so the parent directory identifies the whole
+	// stdlib (every file, not a hand-maintained subset).
+	if filepath.Base(filepath.Dir(path)) == "elisacore_std" {
+		return true
+	}
+	// Fallback for contexts that carry an unqualified file name (e.g. analyzer unit tests).
 	switch filepath.Base(path) {
 	case "arena.elisa", "heap.elisa", "collections.elisa", "elisacore_runtime.elisa", "elisacore_runtime_prelude.elisa":
 		return true

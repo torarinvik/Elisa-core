@@ -393,3 +393,28 @@ func sameStringSlice(left []string, right []string) bool {
 	}
 	return true
 }
+
+// filterOutUnsafePermissionRefs drops the Unsafe.* refs from a permission ref list, used to
+// encapsulate the trusted runtime's raw-memory internals out of its public effect signature.
+func filterOutUnsafePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
+	out := refs[:0:0]
+	for _, ref := range refs {
+		if ref.Name == "Unsafe" {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
+}
+
+// filterOutPermissionFamily drops a permission family name from a families list.
+func filterOutPermissionFamily(families []string, drop string) []string {
+	out := families[:0:0]
+	for _, fam := range families {
+		if fam == drop {
+			continue
+		}
+		out = append(out, fam)
+	}
+	return out
+}
