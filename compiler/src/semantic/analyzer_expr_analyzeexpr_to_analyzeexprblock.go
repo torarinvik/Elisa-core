@@ -530,6 +530,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src, dst)
 		}
+		// A cast is the explicit way to truncate, so runtime narrowing stays silent. But a
+		// cast of a compile-time constant that cannot fit the (sub-64-bit) target type
+		// silently changes its value — almost always a bug. Warn-on-lossy. (64-bit targets
+		// are skipped: a u64 const above int64 is stored as a negative bit pattern.)
+		if _, width, ok := BitIntInfo(dst); ok && width < 64 {
+			if value, vok := a.evalConstExpr(n.Operand); vok && value.Kind == ConstInt && !IntegerTypeFitsValue(dst, value.Int) {
+				a.warnf(n.Pos(), "constant %d does not fit in %s and is truncated by this cast", value.Int, dst)
+			}
+		}
 		// Const-correctness: `const_place.ref[mutable T&]` parses to a cast of a
 		// freshly-taken borrow (AddrOfExpr) to a mutable ref. A const lives in
 		// read-only storage, so handing out a mutable pointer into it would

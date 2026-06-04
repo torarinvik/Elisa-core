@@ -113,6 +113,21 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 		return a.analyzeContextualTernaryExpr(ternary, expected)
 	}
 	if contextualExpected, ok := contextualIntLiteralType(expected); ok {
+		// A compile-time integer being adapted to a narrower integer type must be
+		// representable: `y: i8 = 1000` silently truncated to -24 before. There is no
+		// explicit cast here (the literal is implicitly taking the target type), so an
+		// out-of-range value is unambiguously a bug — reject it (cf. Rust's overflowing
+		// literal error). Explicit truncation must go through a cast.
+		//
+		// Only sub-64-bit targets are checked: a 64-bit literal that exceeds int64
+		// (e.g. a u64 hash constant 0xcbf2...) is stored as a negative bit pattern in the
+		// int64 const value, so the fit test would be wrong; and any literal the lexer
+		// accepted always fits a 64-bit type anyway.
+		if _, width, ok := BitIntInfo(contextualExpected); ok && width < 64 {
+			if value, ok := a.evalConstExpr(expr); ok && value.Kind == ConstInt && !IntegerTypeFitsValue(contextualExpected, value.Int) {
+				a.errorf(expr.Pos(), "integer literal %d does not fit in %s", value.Int, contextualExpected)
+			}
+		}
 		if contextualType, ok := a.analyzeContextualIntValueExpr(expr, contextualExpected); ok {
 			return contextualType
 		}
