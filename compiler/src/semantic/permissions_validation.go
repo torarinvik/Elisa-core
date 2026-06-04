@@ -128,13 +128,23 @@ func isRuntimeStdPermissionInternal(path string) bool {
 	if filepath.Base(filepath.Dir(path)) == "elisacore_std" {
 		return true
 	}
-	// Fallback for contexts that carry an unqualified file name (e.g. analyzer unit tests).
-	switch filepath.Base(path) {
-	case "arena.elisa", "heap.elisa", "collections.elisa", "elisacore_runtime.elisa", "elisacore_runtime_prelude.elisa":
-		return true
-	default:
-		return false
-	}
+	// Fallback for contexts that carry an unqualified file name (test harnesses that load
+	// the stdlib by bare name). Lists every elisacore_std source.
+	return runtimeStdBaseNames[filepath.Base(path)]
+}
+
+// runtimeStdBaseNames is the set of trusted stdlib source files, by bare name. Keep in sync
+// with runtime/elisacore_std/*.elisa (the directory check above covers full-path builds).
+var runtimeStdBaseNames = map[string]bool{
+	"allocator.elisa": true, "arena.elisa": true, "builders.elisa": true,
+	"collections.elisa": true, "cxx_parity.elisa": true, "debug_referee.elisa": true,
+	"deque.elisa": true, "elisacore_runtime.elisa": true, "elisacore_runtime_concurrency.elisa": true,
+	"elisacore_runtime_prelude.elisa": true, "elisacore_runtime_strings.elisa": true,
+	"elisacore_runtime_system_bridge.elisa": true, "heap.elisa": true, "names.elisa": true,
+	"native_runtime_support.elisa": true, "runtime.elisa": true, "stores.elisa": true,
+	"stores_core.elisa": true, "stores_packed_dense.elisa": true, "stores_packed_encoding.elisa": true,
+	"stores_packed_sparse.elisa": true, "stores_rows.elisa": true, "stores_types.elisa": true,
+	"test.elisa": true,
 }
 
 // allUnsafeFamilies reports whether every missing permission family is the
