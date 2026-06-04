@@ -318,6 +318,131 @@ func (p *Parser) parseInStore() ast.Stmt {
 func synthesizedAutoRegionName(pos lexer.Pos) string {
 	return fmt.Sprintf("__auto_%d", pos.Offset)
 }
+
+// maybeWrapFunctionBodyInAutoRegion implements inference-by-default: a function whose body
+// contains a region-less allocation (a container local with no `@r` and no enclosing region
+// scope) is wrapped in a compiler-synthesized lazy auto region, so the allocation just works
+// without an explicit `region`/`in auto:`. The region is freed at function exit; an escaping
+// value is still caught by the existing region escape checks. Functions that don't allocate
+// region-lessly are left untouched (no overhead, no IR churn) — and since a bare allocation
+// currently errors, no existing program is changed, only previously-rejected ones enabled.
+func (p *Parser) maybeWrapFunctionBodyInAutoRegion(body []ast.Stmt, params []ast.ParamDecl, pos lexer.Pos) []ast.Stmt {
+	// A function that explicitly receives an allocator (an `Arena` parameter) manages
+	// allocation itself — its region-less container locals are hand-assembled headers
+	// whose buffers it places via arena_alloc, not allocations needing inference. So
+	// inference-by-default applies only to functions that DON'T thread an allocator.
+	if hasArenaParam(params) || !functionBodyNeedsAutoRegion(body) {
+		return body
+	}
+	return []ast.Stmt{&ast.RegionStmt{Position: pos, Name: synthesizedAutoRegionName(pos), Lazy: true, Body: body}}
+}
+
+// hasArenaParam reports whether any parameter's type is an Arena (by value or by ref).
+func hasArenaParam(params []ast.ParamDecl) bool {
+	for _, param := range params {
+		if typeMentionsArena(param.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func typeMentionsArena(typ ast.TypeExpr) bool {
+	switch t := typ.(type) {
+	case *ast.NamedType:
+		return t.Name == "Arena"
+	case *ast.MutableType:
+		return typeMentionsArena(t.Elem)
+	case *ast.RefType:
+		return typeMentionsArena(t.Elem)
+	case *ast.OwnedType:
+		return typeMentionsArena(t.Elem)
+	}
+	return false
+}
+
+// functionBodyNeedsAutoRegion reports whether a statement list contains a region-less
+// allocation. It recurses through control flow but NOT into nested region scopes
+// (`region NAME:` / `in <owner>:`), whose allocations already have an ambient owner.
+func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.RegionStmt:
+			if len(s.Body) != 0 {
+				continue // scoped region owns its body's allocations
+			}
+		case *ast.InStoreStmt:
+			continue // `in <owner>:` establishes an ambient owner
+		case *ast.CanStmt:
+			if functionBodyNeedsAutoRegion(s.Body) {
+				return true
+			}
+		case *ast.IfStmt:
+			if functionBodyNeedsAutoRegion(s.Then) || functionBodyNeedsAutoRegion(s.Else) {
+				return true
+			}
+		case *ast.ForStmt:
+			if functionBodyNeedsAutoRegion(s.Body) {
+				return true
+			}
+		case *ast.WhileStmt:
+			if functionBodyNeedsAutoRegion(s.Body) {
+				return true
+			}
+		case *ast.ScopeStmt:
+			if functionBodyNeedsAutoRegion(s.Body) {
+				return true
+			}
+		case *ast.MatchStmt:
+			for _, arm := range s.Arms {
+				if functionBodyNeedsAutoRegion(arm.Body) {
+					return true
+				}
+			}
+		case *ast.VarDeclStmt:
+			// Only an allocating literal initializer (`= []`, `= [a, b]`, `= {}`, a
+			// comprehension) actually allocates and needs a region. A container local
+			// assigned from a view/copy/call (`= other`) does not — excluding those avoids
+			// false positives on inspection/forwarding code.
+			if isRegionlessContainerType(s.Type) && isAllocatingLiteral(s.Value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isAllocatingLiteral reports whether an initializer is a container literal or
+// comprehension — the forms that actually allocate a backing buffer.
+func isAllocatingLiteral(value ast.Expr) bool {
+	switch value.(type) {
+	case *ast.ListLitExpr, *ast.ListComprehensionExpr:
+		return true
+	}
+	return false
+}
+
+// isRegionlessContainerType reports whether a declared type is a growable container
+// builtin with no `@r` region annotation — the signal that it will allocate and needs
+// an ambient region.
+func isRegionlessContainerType(typ ast.TypeExpr) bool {
+	for {
+		mt, ok := typ.(*ast.MutableType)
+		if !ok {
+			break
+		}
+		typ = mt.Elem
+	}
+	bt, ok := typ.(*ast.BuiltinTypeExpr)
+	if !ok {
+		return false
+	}
+	switch bt.Name {
+	case "darray", "dict", "dstr":
+		return bt.Region == ""
+	}
+	return false
+}
 func (p *Parser) parseCanStmt() *ast.CanStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("can")

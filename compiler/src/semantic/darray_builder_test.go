@@ -204,15 +204,20 @@ func TestAnalyzeRejectsSpreadInArrayLiteral(t *testing.T) {
 	}
 }
 
-func TestAnalyzeRejectsDArrayPushOutsideArenaScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_push_requires_scope.elisa", `def build() -> void:
+// Inference-by-default: a function with a bare allocation (a container literal with no
+// `@r` and no explicit region scope, and which doesn't thread an allocator) is wrapped in
+// a synthesized lazy auto region, so a region-less `darray = []` + push just works — no
+// `region`/`in auto:` annotation required. The old "requires an active in <arena>: scope"
+// rejection is exactly what inference now removes.
+func TestAnalyzeInfersRegionForBareDArrayPush(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_push_infers_region.elisa", `def build() -> void:
     xs: mutable darray[i64] = []
     xs.push(1)
 `)
 
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `darray push requires an active in <arena>: scope`) {
-		t.Fatalf("expected darray push scope diagnostic, got:\n%s", all)
+	if strings.Contains(all, `requires an active in <arena>: scope`) {
+		t.Fatalf("expected inference to supply a region for the bare push, got:\n%s", all)
 	}
 }
 

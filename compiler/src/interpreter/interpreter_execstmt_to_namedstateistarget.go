@@ -157,6 +157,11 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 		return i.execBlock(frame, n.Body)
 	case *ast.WithStmt:
 		return i.execBlock(frame, n.Body)
+	case *ast.RegionStmt:
+		// The interpreter has its own (GC'd) memory model, so a region scope — whether
+		// written explicitly or synthesized by inference (`in auto:`, the per-function auto
+		// region) — is just a transparent block: run its body, no separate arena.
+		return i.execBlock(frame, n.Body)
 	case *ast.StaticIfStmt:
 		cond, err := i.evalExpr(frame, n.Cond)
 		if err != nil {
