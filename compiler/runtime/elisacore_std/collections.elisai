@@ -637,3 +637,15 @@ impl[T] Store for Deque[T]:
     type Handle = usize
     def store_get(s: Deque[T]&, h: usize) -> T&
     def store_count(s: Deque[T]&) -> usize
+
+static interface KeyedStore:
+    type Key
+    type Elem
+    def store_find(s: Self&, k: Key) -> Elem&?
+    def store_count(s: Self&) -> usize
+
+impl[K, T] KeyedStore for dict[K, T]:
+    type Key = K
+    type Elem = T
+    def store_find(s: dict[K, T]&, k: K) -> T&?
+    def store_count(s: dict[K, T]&) -> usize

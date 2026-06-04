@@ -1401,3 +1401,23 @@ impl[T] Store for Deque[T]:
         return arena_deque_at(s, h)
     def store_count(s: Deque[T]&) -> usize:
         return arena_deque_len(s)
+
+
+# --- KeyedStore: the partial-lookup sub-protocol (docs/69) ----------------------
+# Some stores are addressed by a KEY that may or may not be present, so their lookup is
+# partial: `store_find` returns an optional element rather than the total `store_get`. This
+# is the orthogonality the core Store preserves — dict is keyed/partial, not a total
+# handle→element store, so it implements KeyedStore instead of distorting the core.
+static interface KeyedStore:
+    type Key
+    type Elem
+    def store_find(s: Self&, k: Key) -> Elem&?
+    def store_count(s: Self&) -> usize
+
+impl[K, T] KeyedStore for dict[K, T]:
+    type Key = K
+    type Elem = T
+    def store_find(s: dict[K, T]&, k: K) -> T&?:
+        return arena_dict_get(s, k)
+    def store_count(s: dict[K, T]&) -> usize:
+        return s.count
