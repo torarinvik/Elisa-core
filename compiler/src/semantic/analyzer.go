@@ -243,6 +243,7 @@ type Analyzer struct {
 	inCompileTimeQueryPredicate      bool
 	enforceUnsafePermissions         bool
 	enforceProgressSafety            bool
+	enforcePerfLints                 bool
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool
@@ -423,8 +424,12 @@ type poolScopeState struct {
 type AnalyzeOptions struct {
 	EnforceUnsafePermissions bool
 	EnforceProgressSafety    bool
-	TargetTriple             string
-	TargetDebug              bool
+	// EnforcePerfLints promotes the performance-friction lints (pointer-graph, allocation
+	// churn) from warnings to hard errors — the `-Wperf` graduated-strictness level for
+	// shipped code (docs/70). Off by default so prototyping stays fluid.
+	EnforcePerfLints bool
+	TargetTriple     string
+	TargetDebug      bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -519,6 +524,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
 		enforceUnsafePermissions:          options.EnforceUnsafePermissions,
 		enforceProgressSafety:             options.EnforceProgressSafety,
+		enforcePerfLints:                  options.EnforcePerfLints,
 		loweredWithStmts:                  map[*ast.WithStmt]bool{},
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},

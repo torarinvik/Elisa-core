@@ -18,7 +18,12 @@
   NOT flagged. Opt-out is the new `@intrusive` struct annotation (the "painful but possible"
   acknowledgment) — the runtime's free-list/queue/cache primitives carry it. Caught 9 real
   raw structures on first run.
-- ⏭ Next: churn lint (`new`/alloc in a loop), `slow:` quarantine blocks, graduated `-Wperf`.
+- ✅ **Allocation-churn lint LANDED** (commit 31760ece): individual `new` boxing inside a
+  loop is warned toward batch allocation; precise — `push` accumulation and packed-node sugar
+  are not flagged, single `new` outside a loop is silent. Zero noise (nothing in
+  stdlib/fixtures uses `new` in a loop).
+- ⏭ Next: `slow:` quarantine blocks, graduated `-Wperf` (turn the lint warnings into
+  enforceable errors for shipped code).
 
 ## Thesis
 

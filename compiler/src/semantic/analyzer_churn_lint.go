@@ -58,7 +58,7 @@ func (a *Analyzer) flagChurnAllocations(loopBody []ast.Stmt) {
 		if !ok || alloc == nil || alloc.NodeSugar {
 			return false
 		}
-		a.warnf(alloc.Position, "`new` boxes a value on every iteration of this loop (per-object allocation). Prefer one batch allocation — push into a preallocated `darray`/`Store`, allocate into a packed enum, or hoist the allocation and reuse it. If each iteration needs a genuinely distinct fresh box, this is fine")
+		a.perfLint(alloc.Position, "`new` boxes a value on every iteration of this loop (per-object allocation). Prefer one batch allocation — push into a preallocated `darray`/`Store`, allocate into a packed enum, or hoist the allocation and reuse it. If each iteration needs a genuinely distinct fresh box, this is fine")
 		return false
 	})
 }

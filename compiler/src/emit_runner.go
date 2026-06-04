@@ -143,7 +143,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		}
 		return 0
 	case emitIR:
-		file, _, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple, TargetDebug: effectiveOptimizationLevel(options) == backend.OptimizationLevel0})
+		file, _, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple, TargetDebug: effectiveOptimizationLevel(options) == backend.OptimizationLevel0, EnforcePerfLints: options.perfStrict})
 		if !ok {
 			return 1
 		}
@@ -217,7 +217,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		return 0
 	}
 
-	_, result, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple, TargetDebug: effectiveOptimizationLevel(options) == backend.OptimizationLevel0})
+	_, result, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple, TargetDebug: effectiveOptimizationLevel(options) == backend.OptimizationLevel0, EnforcePerfLints: options.perfStrict})
 	if !ok {
 		return 1
 	}

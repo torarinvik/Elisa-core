@@ -1,6 +1,21 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+)
+
+// perfLint emits a performance-friction diagnostic at the configured severity: a warning by
+// default (a nudge that keeps prototyping fluid), or a hard error under `-Wperf`
+// (EnforcePerfLints) so shipped code can ban the anti-pattern outright. The graduated lever
+// from docs/70 — same diagnostic, different teeth.
+func (a *Analyzer) perfLint(pos lexer.Pos, format string, args ...interface{}) {
+	if a.enforcePerfLints {
+		a.errorf(pos, format, args...)
+		return
+	}
+	a.warnf(pos, format, args...)
+}
 
 // The pointer-graph lint (docs/70). A struct that references itself through a ref field with
 // NO region provenance is a raw self-referential pointer graph — the classic linked
@@ -32,7 +47,7 @@ func (a *Analyzer) checkPointerGraphStruct(stDecl *ast.StructDecl, st *StructTyp
 		if !rawSelfReferentialRef(resolved.Type, st) {
 			continue
 		}
-		a.warnf(field.Position, "field %q makes %q a raw self-referential pointer graph (a linked node / tree of bare pointers — unsafe to outlive and cache-hostile to traverse). Prefer a handle into a store: a packed enum, or an index into a `darray`/`Store`. For a region-unified graph instead, give the field provenance — `struct %s[region owner]` with `%s: ... @owner`", field.Name, st.Name, st.Name, field.Name)
+		a.perfLint(field.Position, "field %q makes %q a raw self-referential pointer graph (a linked node / tree of bare pointers — unsafe to outlive and cache-hostile to traverse). Prefer a handle into a store: a packed enum, or an index into a `darray`/`Store`. For a region-unified graph instead, give the field provenance — `struct %s[region owner]` with `%s: ... @owner`", field.Name, st.Name, st.Name, field.Name)
 	}
 }
 

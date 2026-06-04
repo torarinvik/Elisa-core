@@ -216,6 +216,7 @@ type cliOptions struct {
 	packedProfile   backend.PackedLoweringProfile
 	optLevel        backend.OptimizationLevel
 	hasOptLevel     bool
+	perfStrict      bool
 }
 
 func parseArgs(args []string) (cliOptions, error) {
@@ -280,6 +281,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Force the debug index-bounds watchdog on regardless of optimization level.
 			// The watchdog gate reads this env var at codegen time (build is in-process).
 			_ = os.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "1")
+		case arg == "-Wperf":
+			// Graduated strictness (docs/70): promote the performance-friction lints
+			// (pointer-graph, allocation churn) from warnings to hard errors for shipped code.
+			options.perfStrict = true
 		case arg == "-debug":
 			options.debug = true
 		case arg == "-debug-break-raise":
