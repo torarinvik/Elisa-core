@@ -93,6 +93,10 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 			})
 		})
 	}
+	// After every struct's fields are resolved, run the program-wide pointer-graph cycle
+	// pass (docs/70): mutual-recursion raw-ref loops (A→B→A) that the per-struct direct
+	// self-reference check cannot see.
+	a.checkPointerGraphCycles(decls)
 }
 
 func (a *Analyzer) resolveBitGroupType(name string, groupDecl *ast.BitGroupDecl) *BitGroupType {
