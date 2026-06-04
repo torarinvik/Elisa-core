@@ -192,7 +192,17 @@ func storageViewDependencyFromSource(source ast.Expr) (storageViewDependencyStat
 
 func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason string) {
 	key := optimizationExprString(source)
-	if key == "" || len(a.currentStorageViewDeps) == 0 {
+	if key == "" {
+		return
+	}
+	// Iterator invalidation: relocating the buffer of a container that is being iterated
+	// would leave the live iteration reading freed/stale memory. Reject it at this single
+	// chokepoint that every relocating mutation (push/extend/reserve/clear/truncate) funnels
+	// through — the same machinery that invalidates interior references.
+	if _, iterated := a.currentIteratedSources[key]; iterated {
+		a.errorf(source.Pos(), "cannot mutate %q while it is being iterated: %s would move its buffer out from under the loop. Iterate by index up to a saved count, collect into a separate darray, or back it with a stable region (reserve_commit/fixed)", key, reason)
+	}
+	if len(a.currentStorageViewDeps) == 0 {
 		return
 	}
 	for sym, dep := range a.currentStorageViewDeps {

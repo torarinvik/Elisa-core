@@ -439,6 +439,22 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 	var bodySnapshot affineFlowSnapshot
+	// Lock a relocatable darray iterand for the loop body: a push/extend/reserve/clear that
+	// moves its buffer mid-iteration is the iterator-invalidation bug. A stable backing
+	// (reserve_commit/fixed) never relocates, so it is left unlocked (mutation there is safe).
+	iterLockKey := ""
+	if _, isDArray := stripRefForBounds(sourceType).(*DArrayType); isDArray && !a.containerBackingIsStable(stmt.Source) {
+		iterLockKey = optimizationExprString(stmt.Source)
+	}
+	var iterLockPrior lexer.Pos
+	iterLockHadPrior := false
+	if iterLockKey != "" {
+		if a.currentIteratedSources == nil {
+			a.currentIteratedSources = map[string]lexer.Pos{}
+		}
+		iterLockPrior, iterLockHadPrior = a.currentIteratedSources[iterLockKey]
+		a.currentIteratedSources[iterLockKey] = stmt.Pos()
+	}
 	a.loopDepth++
 	if stmt.Filter != nil {
 		bodySnapshot = a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.Filter, true)
@@ -448,6 +464,13 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		bodySnapshot = a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	}
 	a.loopDepth--
+	if iterLockKey != "" {
+		if iterLockHadPrior {
+			a.currentIteratedSources[iterLockKey] = iterLockPrior
+		} else {
+			delete(a.currentIteratedSources, iterLockKey)
+		}
+	}
 	if !blockDefinitelyExits(stmt.Body) {
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)

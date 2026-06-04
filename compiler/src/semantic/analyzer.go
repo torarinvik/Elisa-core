@@ -198,7 +198,13 @@ type Analyzer struct {
 	currentSpecializedValueTypes  map[*Symbol]Type
 	currentValueBindings          map[*Symbol]ast.Expr
 	currentStorageViewDeps        map[*Symbol]storageViewDependencyState
-	currentAliasAccesses          map[string]aliasAccessState
+	// currentIteratedSources keys (by optimizationExprString) the relocatable containers
+	// currently being iterated by an enclosing `for` loop, to the loop position. A
+	// relocating mutation (push/extend/reserve/clear/truncate) of such a container would
+	// move its buffer out from under the live iteration — the iterator-invalidation gap —
+	// so it is rejected at invalidateStorageViewsForSource, the universal mutation chokepoint.
+	currentIteratedSources map[string]lexer.Pos
+	currentAliasAccesses   map[string]aliasAccessState
 	currentAliasBindings          map[*Symbol]aliasAccessBinding
 	currentPackedVariantViews     map[*Symbol]*PackedVariantViewType
 	currentPackedStores           map[string]*PackedEnumStoreType
