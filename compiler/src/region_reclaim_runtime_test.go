@@ -87,3 +87,70 @@ def region_loop() -> void:
 	}
 	t.Logf("region-in-loop peak RSS = %d MB over %d iterations (bounded)", maxRSSBytes/(1024*1024), iterations)
 }
+
+// Automatic loop-body region tightening: a loop-local allocation with NO manual `in auto:` is
+// auto-wrapped so it reclaims per iteration. Without the auto-wrap it would accumulate in the
+// function region for the whole loop (~GBs at 1M iters); with it, peak RSS stays a few MB.
+func TestRegionAutoWrapLoopBoundsMemory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy memory test; skipped under -short")
+	}
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := "include \"" + std + "\"\n" + `
+@test
+def auto_loop() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        acc: mutable i64 = 0
+        for i in 0..<1000000:
+            xs: mutable darray[i64] = []
+            xs.push(7)
+            xs.push(11)
+            acc <- acc + xs[0] + xs[1]
+        if acc != 18000000:
+            panic("auto loop produced wrong result")
+`
+	path := filepath.Join(t.TempDir(), "auto_loop.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\n%s\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+	cmd := exec.Command(exePath, "auto_loop")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("auto_loop run failed: %v", err)
+	}
+	ru, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage)
+	if !ok {
+		t.Skip("rusage unavailable")
+	}
+	maxRSSBytes := int64(ru.Maxrss)
+	if runtime.GOOS == "linux" {
+		maxRSSBytes *= 1024
+	}
+	if maxRSSBytes > 512*1024*1024 {
+		t.Fatalf("auto-wrapped loop peak RSS = %d MB over 1M iterations — expected bounded (<512 MB); loop-body auto-tightening did not apply",
+			maxRSSBytes/(1024*1024))
+	}
+	t.Logf("auto-wrapped loop peak RSS = %d MB over 1M iterations (bounded, no manual `in auto:`)", maxRSSBytes/(1024*1024))
+}

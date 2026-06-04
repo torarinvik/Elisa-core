@@ -108,10 +108,11 @@ func TestRegionLifetimeFixViaExplicitRegionAnnotation(t *testing.T) {
 	}
 }
 
-// Retention hint: a fresh allocation declared in a loop body, used only within the iteration,
-// accumulates in the enclosing inferred region for the whole loop — nudge to wrap the loop body.
-func TestRegionRetentionHintsLoopLocalAllocation(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rt_churn.elisa", `def f() -> void:
+// Auto-wrap: a loop-local allocation (no manual `in auto:`) is automatically wrapped in an
+// inferred region so it reclaims per iteration. It must compile cleanly — the wrap is gated so it
+// never introduces an escape error.
+func TestRegionAutoWrapLoopLocalCompilesClean(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "aw_local.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         for i in 0..<100:
             tmp: mutable darray[i64] = []
@@ -119,39 +120,27 @@ func TestRegionRetentionHintsLoopLocalAllocation(t *testing.T) {
             sink: i64 = tmp.count.i64()
             if sink < 0:
                 panic("x")
-`, AnalyzeOptions{})
-	if !strings.Contains(allDiagnostics(result), "accumulates in the enclosing inferred region") {
-		t.Fatalf("expected loop-local retention hint, got:\n%s", allDiagnostics(result))
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("auto-wrapped loop-local allocation must compile cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
-// No hint once the loop body is already wrapped in `in auto:` (the fix), and the fix compiles.
-func TestRegionRetentionNoHintWhenWrapped(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rt_wrapped.elisa", `def f() -> void:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
-        for i in 0..<100:
-            in auto:
-                tmp: mutable darray[i64] = []
-                tmp.push(i.i64())
-`, AnalyzeOptions{})
-	if strings.Contains(allDiagnostics(result), "accumulates in the enclosing") {
-		t.Fatalf("already-wrapped loop body must not be hinted, got:\n%s", allDiagnostics(result))
-	}
-}
-
-// No hint when the loop body grows an OUTER container (the accumulator) — wrapping would itself
-// be a growth-escape error, so suggesting it would be wrong.
-func TestRegionRetentionNoHintWhenGrowingOuterContainer(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rt_acc.elisa", `def f() -> void:
+// Auto-wrap is suppressed when the loop grows an OUTER container (the accumulator) — wrapping
+// there would be a growth-escape error. The function must still compile (left unwrapped).
+func TestRegionAutoWrapSkipsAccumulator(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "aw_acc.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         outer: mutable darray[i64] = []
         for i in 0..<100:
             tmp: mutable darray[i64] = []
             tmp.push(i.i64())
             outer.push(tmp.count.i64())
-`, AnalyzeOptions{})
-	if strings.Contains(allDiagnostics(result), "accumulates in the enclosing") {
-		t.Fatalf("loop growing an outer container must not be hinted (fix would error), got:\n%s", allDiagnostics(result))
+        if outer.count.i64() < 0:
+            panic("x")
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("accumulator loop must compile cleanly (auto-wrap suppressed), got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 

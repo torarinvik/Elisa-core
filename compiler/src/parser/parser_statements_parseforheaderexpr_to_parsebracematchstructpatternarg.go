@@ -337,6 +337,85 @@ func (p *Parser) maybeWrapFunctionBodyInAutoRegion(body []ast.Stmt, params []ast
 	return []ast.Stmt{&ast.RegionStmt{Position: pos, Name: synthesizedAutoRegionName(pos), Lazy: true, Body: body}}
 }
 
+// wrapReclaimableLoopBodies auto-tightens loops: a loop body whose fresh allocations are all
+// iteration-local (and which doesn't grow an outer container) is wrapped in a synthesized lazy
+// `in auto:` region, so those allocations are reclaimed each iteration (scope-exit free) instead
+// of accumulating in the enclosing region for the whole loop. It is CONSERVATIVE — it leaves a
+// loop untouched on any doubt. Safety: the escape checker remains the hard backstop (a too-eager
+// wrap would surface as a compile error, never a use-after-free), and wrapping a body that turns
+// out not to region-allocate is a harmless lazy no-op region.
+func wrapReclaimableLoopBodies(stmts []ast.Stmt) []ast.Stmt {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.ForStmt:
+			s.Body = tightenLoopBody(s.Body)
+		case *ast.WhileStmt:
+			s.Body = tightenLoopBody(s.Body)
+		case *ast.IterForStmt:
+			s.Body = tightenLoopBody(s.Body)
+		case *ast.IfStmt:
+			s.Then = wrapReclaimableLoopBodies(s.Then)
+			s.Else = wrapReclaimableLoopBodies(s.Else)
+		case *ast.CanStmt:
+			s.Body = wrapReclaimableLoopBodies(s.Body)
+		case *ast.ScopeStmt:
+			s.Body = wrapReclaimableLoopBodies(s.Body)
+		case *ast.MatchStmt:
+			for i := range s.Arms {
+				s.Arms[i].Body = wrapReclaimableLoopBodies(s.Arms[i].Body)
+			}
+		case *ast.RegionStmt:
+			s.Body = wrapReclaimableLoopBodies(s.Body)
+		case *ast.InStoreStmt:
+			s.Body = wrapReclaimableLoopBodies(s.Body)
+		}
+	}
+	return stmts
+}
+
+func tightenLoopBody(body []ast.Stmt) []ast.Stmt {
+	body = wrapReclaimableLoopBodies(body) // tighten nested loops first
+	if !loopBodyIsReclaimable(body) {
+		return body
+	}
+	pos := body[0].Pos()
+	return []ast.Stmt{&ast.RegionStmt{Position: pos, Name: synthesizedAutoRegionName(pos), Lazy: true, Body: body}}
+}
+
+// loopBodyIsReclaimable reports whether wrapping the loop body in `in auto:` is safe and useful:
+// it has at least one top-level fresh region allocation, every such allocation is iteration-local,
+// it does not grow an outer container, and it is not already region/store-scoped.
+func loopBodyIsReclaimable(body []ast.Stmt) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if len(body) == 1 {
+		switch b := body[0].(type) {
+		case *ast.RegionStmt:
+			if len(b.Body) != 0 {
+				return false
+			}
+		case *ast.InStoreStmt:
+			return false
+		}
+	}
+	if ast.LoopBodyGrowsOuterContainer(body) {
+		return false
+	}
+	found := false
+	for _, stmt := range body {
+		vd, ok := stmt.(*ast.VarDeclStmt)
+		if !ok || !isRegionlessContainerType(vd.Type) || !isAllocatingLiteral(vd.Value) {
+			continue
+		}
+		if !ast.AllocationIsIterationLocal(vd.Name, body) {
+			return false
+		}
+		found = true
+	}
+	return found
+}
+
 // hasArenaParam reports whether any parameter's type is an Arena (by value or by ref).
 func hasArenaParam(params []ast.ParamDecl) bool {
 	for _, param := range params {
