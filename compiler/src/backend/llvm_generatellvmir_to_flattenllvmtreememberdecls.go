@@ -403,6 +403,11 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 	case *ast.InterfaceDecl:
 		return nil
 	case *ast.ImplDecl:
+		if len(n.GenericParams) > 0 {
+			// Parametric impl: its methods reference the impl's type params and are
+			// monomorphized per concrete receiver at the call site, not emitted standalone.
+			return nil
+		}
 		for _, member := range n.Members {
 			switch fnDecl := member.(type) {
 			case *ast.FuncDecl, *ast.ExternFuncDecl:
@@ -588,6 +593,11 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 	case *ast.InterfaceDecl:
 		return nil
 	case *ast.ImplDecl:
+		if len(n.GenericParams) > 0 {
+			// Parametric impl: methods are monomorphized at the call site (see
+			// resolveStaticInterfaceMethod), so skip standalone body emission with unbound T.
+			return nil
+		}
 		for _, member := range n.Members {
 			switch fnDecl := member.(type) {
 			case *ast.FuncDecl:

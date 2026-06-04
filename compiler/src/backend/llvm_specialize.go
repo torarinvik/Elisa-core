@@ -53,6 +53,49 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	return fnValue, specializedType, nil
 }
 
+// ensureSpecializedImplMethod monomorphizes a parametric static-impl method. Unlike a
+// generic function, the method's type params come from the enclosing `impl[T] ...`, not the
+// method's own GenericParams, so args are ordered by implTypeParams. Otherwise it mirrors
+// ensureSpecializedFunction: mangle a per-binding name, specialize the signature, and emit
+// the body with the bindings in scope so references to T resolve. Returns the specialized
+// symbol name so callers can declare/call it.
+func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *semantic.FuncType, implTypeParams []string, typeBindings map[string]semantic.Type) (C.LLVMValueRef, string, *semantic.FuncType, error) {
+	if decl == nil || base == nil {
+		return nil, "", nil, fmt.Errorf("impl-method specialization requires a function declaration and type")
+	}
+	orderedArgs := make([]semantic.Type, 0, len(implTypeParams))
+	for _, name := range implTypeParams {
+		bound, ok := typeBindings[name]
+		if !ok {
+			return nil, "", nil, fmt.Errorf("missing specialization binding for impl type parameter %s in %s", name, decl.Name)
+		}
+		orderedArgs = append(orderedArgs, bound)
+	}
+	specializationBase := decl.Name
+	if base.Name != "" {
+		specializationBase = base.Name
+	}
+	specializedName := mangleGenericType(specializationBase, orderedArgs)
+	specializedType := g.specializedFuncTypes[specializedName]
+	if specializedType == nil {
+		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
+		g.specializedFuncTypes[specializedName] = specializedType
+	}
+	if existing, ok := g.functions[specializedName]; ok {
+		return existing, specializedName, specializedType, nil
+	}
+	fnValue, err := g.addFunction(specializedName, specializedType)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	g.setDefinedFunctionLinkage(specializedName, fnValue, specializedType)
+	g.functions[specializedName] = fnValue
+	if err := g.defineFunctionBodyWithBindings(decl, specializedType, fnValue, typeBindings); err != nil {
+		return nil, "", nil, err
+	}
+	return fnValue, specializedName, specializedType, nil
+}
+
 func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl, base *semantic.FuncType, typeBindings map[string]semantic.Type) (C.LLVMValueRef, *semantic.FuncType, error) {
 	if decl == nil || base == nil {
 		return nil, nil, fmt.Errorf("generic extern specialization requires a function declaration and type")

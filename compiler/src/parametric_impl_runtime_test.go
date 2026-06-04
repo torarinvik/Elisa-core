@@ -58,3 +58,51 @@ def parametric_impl_test() -> void:
 		}
 	}
 }
+
+// A parametric impl method whose BODY references the impl type param T (`def wrap(value: T)
+// -> T`) is monomorphized per concrete receiver at the call site rather than emitted
+// standalone with an unbound T. This is the form the Store impls need (`store_get -> Elem&`
+// with `Elem = T`).
+func TestRunCLIParametricImplMonomorphizesTReferencingMethod(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "parametric_impl_tref_fixture.elisa")
+	src := `static interface Holder:
+    type Item
+    def wrap(value: Item) -> Item
+
+struct BoxTag[T]:
+    tag: T
+
+impl[T] Holder for BoxTag[T]:
+    type Item = T
+    def wrap(value: T) -> T:
+        return value
+
+def use_holder[H: Holder](value: H.Item) -> H.Item:
+    return H.wrap(value)
+
+@test
+def holder_test() -> void:
+    can Abort.Panic:
+        if use_holder[BoxTag[i64]](42i64) != 42i64:
+            panic("T-referencing parametric method (i64) wrong")
+        if use_holder[BoxTag[u8]](5u8) != 5u8:
+            panic("T-referencing parametric method (u8) wrong")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write T-referencing fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected T-referencing parametric method test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[       OK ] holder_test") {
+		t.Fatalf("expected holder_test to pass, got:\n%s", stdout.String())
+	}
+}

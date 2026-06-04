@@ -41,7 +41,7 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 	if receiver == nil {
 		return nil, nil, true, fmt.Errorf("missing receiver type for static interface method %s.%s", ref.InterfaceName, ref.MethodName)
 	}
-	impl, _, ok := semantic.LookupStaticImplUnifying(s.g.result.StaticImpls, ref.InterfaceName, receiver)
+	impl, subst, ok := semantic.LookupStaticImplUnifying(s.g.result.StaticImpls, ref.InterfaceName, receiver)
 	if !ok || impl == nil {
 		return nil, nil, true, fmt.Errorf("type %s does not implement interface %s", receiver.String(), ref.InterfaceName)
 	}
@@ -52,6 +52,20 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 	fnType, ok := sym.Type.(*semantic.FuncType)
 	if !ok || fnType == nil {
 		return nil, nil, true, fmt.Errorf("static interface method %s.%s does not resolve to a function type", ref.InterfaceName, ref.MethodName)
+	}
+	if len(impl.TypeParams) > 0 && len(subst) > 0 {
+		// Parametric impl: the method body references the impl's type params, so it was not
+		// emitted standalone. Monomorphize it here for this concrete receiver and hand back a
+		// synthetic symbol naming the specialized function.
+		methodDecl, ok := sym.Node.(*ast.FuncDecl)
+		if !ok || methodDecl == nil {
+			return nil, nil, true, fmt.Errorf("parametric impl method %s.%s has no body to specialize", ref.InterfaceName, ref.MethodName)
+		}
+		_, specializedName, specializedType, err := s.g.ensureSpecializedImplMethod(methodDecl, fnType, impl.TypeParams, subst)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return &semantic.Symbol{Name: specializedName, Kind: sym.Kind, Type: specializedType, Node: sym.Node}, specializedType, true, nil
 	}
 	return sym, fnType, true, nil
 }
