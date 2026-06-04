@@ -108,7 +108,14 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
 	case *ast.BuiltinTypeExpr:
-		return a.resolveBuiltinSurfaceType(n)
+		resolved := a.resolveBuiltinSurfaceType(n)
+		// `@r` is only meaningful on types that actually carry a region (containers and
+		// region-parameterized generics). On a scalar builtin like `i32 @r` the region
+		// was silently dropped; reject it so the notation means one thing everywhere.
+		if n.Region != "" && !IsInvalidType(resolved) && !typeCanCarryRegion(resolved) {
+			a.errorf(n.Pos(), "region annotation `@%s` applies to containers, references, and region-parameterized types; %s cannot carry a region", n.Region, resolved)
+		}
+		return resolved
 	case *ast.FuncTypeExpr:
 		ptypes := make([]Type, 0, len(n.Params))
 		for _, param := range n.Params {

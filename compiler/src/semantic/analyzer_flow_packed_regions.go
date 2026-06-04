@@ -161,6 +161,17 @@ func containerTypeRegion(typ Type) string {
 	return ""
 }
 
+// typeCanCarryRegion reports whether a type has a region field at all — i.e. whether
+// a `@r` annotation on it is meaningful. References carry a region too, but they are
+// resolved on a separate path; this gates the builtin/scalar case (`i32 @r` is rejected).
+func typeCanCarryRegion(typ Type) bool {
+	switch StripAggregateStateType(typ).(type) {
+	case *DArrayType, *DictType, *DStrType, *SViewType, *GenericInstanceType, *RefType:
+		return true
+	}
+	return false
+}
+
 func (a *Analyzer) freezeMovedPackedStoreSource(expr ast.Expr) (*Symbol, *PackedEnumStoreType, bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {

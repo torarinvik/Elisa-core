@@ -79,18 +79,21 @@ func diagnosticTypeString(t Type) string {
 		if tt.Mutable {
 			s = "mutable " + s
 		}
-		if tt.Region != "" {
-			s = tt.Region + " " + s
-		} else if tt.Storage != RefStorageAny {
+		// Storage class stays a prefix; region provenance is the canonical `@r` suffix.
+		if tt.Storage != RefStorageAny {
 			s = RefStorageName(tt.Storage) + " " + s
+		}
+		region := ""
+		if tt.Region != "" {
+			region = " @" + tt.Region
 		}
 		switch tt.State {
 		case RefStateNullable:
-			return s + "&?"
+			return s + "&?" + region
 		case RefStateNull:
-			return s + "!"
+			return s + "!" + region
 		default:
-			return s + "&"
+			return s + "&" + region
 		}
 	case *ArrayType:
 		if tt == nil || tt.Elem == nil {

@@ -383,9 +383,9 @@ func (t *RefType) String() string {
 	if t.Mutable {
 		s = "mutable " + s
 	}
-	if t.Region != "" {
-		s = t.Region + " " + s
-	} else if t.Storage != RefStorageAny {
+	// Storage class stays a prefix (heap/static/stack); region provenance renders as
+	// the canonical `@r` suffix (docs/68 §5), matching the surface notation.
+	if t.Storage != RefStorageAny {
 		s = RefStorageName(t.Storage) + " " + s
 	}
 	switch t.State {
@@ -395,6 +395,9 @@ func (t *RefType) String() string {
 		s += "!"
 	default:
 		s += "&"
+	}
+	if t.Region != "" {
+		s += " @" + t.Region
 	}
 	return s
 }

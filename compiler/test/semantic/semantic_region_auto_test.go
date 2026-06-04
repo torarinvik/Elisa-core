@@ -37,3 +37,20 @@ func TestAnalyzeRejectsValueEscapingInAutoBlock(t *testing.T) {
 		t.Fatalf("expected an escape diagnostic for a value leaving the `in auto:` block, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// `@r` is only meaningful on types that carry a region (containers, references,
+// region-parameterized generics). On a type that can't — a fixed-size array, which is
+// stack/inline — it's rejected, so the notation means one thing everywhere rather than
+// being silently dropped.
+func TestAnalyzeRejectsRegionAnnotationOnNonRegionType(t *testing.T) {
+	src := `def f() -> i64:
+	region r(64)
+	xs: array[i64, 4] @r = zeroed
+	destroy r
+	return xs[0]
+`
+	_, errs := parseAndAnalyze(t, "region_on_array_reject.elisa", src)
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot carry a region") {
+		t.Fatalf("expected `@r` on a fixed array to be rejected, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

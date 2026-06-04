@@ -402,7 +402,7 @@ func TestAnalyzeRejectsMismatchedRegionQualifiedRefs(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "variable \"other\" expects right i32&, got left i32&") {
+	if !strings.Contains(strings.Join(errs, "\n"), "variable \"other\" expects i32& @right, got i32& @left") {
 		t.Fatalf("expected region-qualified mismatch diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
