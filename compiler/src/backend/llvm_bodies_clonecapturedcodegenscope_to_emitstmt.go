@@ -240,6 +240,7 @@ func (s *functionState) emitRegionDecl(n *ast.RegionStmt) error {
 }
 func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	s.pushScope()
+	scope := s.scope
 	defer s.popScope()
 	savedTreeOwner := s.treeAllocOwner
 	defer func() {
@@ -248,7 +249,18 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	if err := s.emitRegionDecl(n); err != nil {
 		return err
 	}
-	return s.emitInStore(backendScopedArenaInStoreStmt(n))
+	// Reclaim the region at SCOPE exit rather than deferring to function return. The escape
+	// checker guarantees nothing escapes a scoped region, so this is sound; registering it as a
+	// scoped cleanup makes it fire on every exit path (normal, break, continue, return), and the
+	// idempotent arena_free + s.regions function-return safety net make any overlap a no-op. This
+	// bounds memory for regions in loops, which previously leaked one arena per iteration.
+	if binding, ok := s.lookupBinding(n.Name); ok && binding.ptr != nil {
+		s.registerScopedCleanup(scopedCleanupBinding{kind: scopedCleanupRegion, name: n.Name, ptr: binding.ptr, typ: binding.typ})
+	}
+	if err := s.emitInStore(backendScopedArenaInStoreStmt(n)); err != nil {
+		return err
+	}
+	return s.emitScopeCleanups(scope)
 }
 func (s *functionState) emitDeferredBody(binding *deferredBodyBinding) error {
 	if binding == nil || binding.stmt == nil {

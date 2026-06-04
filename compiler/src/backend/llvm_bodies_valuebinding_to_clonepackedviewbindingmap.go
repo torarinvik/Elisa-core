@@ -178,6 +178,9 @@ const (
 	scopedCleanupThreadPool
 	scopedCleanupDeferBody
 	scopedCleanupValue
+	// scopedCleanupRegion frees a scoped region's arena at block exit (every exit path), so a
+	// `region`/`in auto:` scope reclaims at scope exit instead of leaking until function return.
+	scopedCleanupRegion
 )
 
 type scopedCleanupBinding struct {
@@ -597,6 +600,11 @@ func (s *functionState) emitActiveScopedCleanup() error {
 func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
 	if binding.kind == scopedCleanupDeferBody {
 		return s.emitDeferredBody(binding.deferBody)
+	}
+	if binding.kind == scopedCleanupRegion {
+		// arena_free is idempotent (nulls begin/end) and an adopted/destroyed region is already
+		// zeroed, so freeing here is safe even though the function-return cleanup also frees it.
+		return s.emitArenaFree(binding.ptr, binding.typ)
 	}
 	ops := semantic.CreateTypeBoundOps(binding.typ)
 	if len(ops) == 0 {
