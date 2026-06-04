@@ -8,9 +8,9 @@ import (
 )
 
 // Interleaved lifetimes in an inferred region: `a` is born first, `b` second, `a` dies before
-// `b` — their lifetimes cross and cannot be tightened into a LIFO region stack. Flagged (warn).
-func TestRegionLifetimeFlagsInterleaved(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_inter.elisa", `def f() -> void:
+// `b` — their lifetimes cross and cannot be placed on a LIFO region stack. REJECTED (hard error).
+func TestRegionLifetimeRejectsInterleaved(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rl_inter.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
             a: mutable darray[i64] = []
@@ -19,9 +19,9 @@ func TestRegionLifetimeFlagsInterleaved(t *testing.T) {
             b.push(2)
             a.push(3)
             b.push(4)
-`, AnalyzeOptions{})
-	if !strings.Contains(allDiagnostics(result), "interleaved object lifetimes") {
-		t.Fatalf("expected interleaved-lifetime warning, got:\n%s", allDiagnostics(result))
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "interleaved object lifetimes") {
+		t.Fatalf("expected interleaved-lifetime error, got:\n%s", all)
 	}
 }
 
@@ -156,9 +156,9 @@ func generateInterleaveScope(rng *rand.Rand) (string, bool) {
 	return b.String(), crossed
 }
 
-// Under -Wperf (EnforcePerfLints) the warning becomes a hard error.
-func TestRegionLifetimeWperfPromotesToError(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_wperf.elisa", `def f() -> void:
+// Interleaving is rejected by default (no special flag needed) — it is a hard error.
+func TestRegionLifetimeRejectedByDefault(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rl_default.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
             a: mutable darray[i64] = []
@@ -167,8 +167,8 @@ func TestRegionLifetimeWperfPromotesToError(t *testing.T) {
             b.push(2)
             a.push(3)
             b.push(4)
-`, AnalyzeOptions{EnforcePerfLints: true})
+`)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "interleaved object lifetimes") {
-		t.Fatalf("expected -Wperf to promote interleaving to an error, got:\n%s", all)
+		t.Fatalf("expected interleaving to be rejected by default, got:\n%s", all)
 	}
 }

@@ -14,16 +14,16 @@ import (
 // stack can only free in LIFO order, so it can tighten any set of object lifetimes that NEST
 // or are DISJOINT. The patterns it cannot tighten are INTERLEAVED lifetimes: object A is born,
 // then B is born, then A dies, then B dies — A and B overlap but neither contains the other.
-// These are the "strange lifetimes" that forced MLKit toward a GC. Coarsening them into one
-// enclosing region is always memory-SAFE (it just retains longer), so this is reported through
-// the graduated `-Wperf` lever (warn by default, hard error under -Wperf) rather than a hard
-// ban — see docs/70 and [[performance-friction-design]].
-//
-// Phase 1 changes nothing about what compiles (warnings only) and no codegen. It also yields
-// the frequency data that decides whether interleaving should become a default error (Phase 3).
+// These are the "strange lifetimes" that forced MLKit toward a GC. Rather than fall back to a
+// GC for them, Elisa REJECTS them (a hard error): they are rare (0 in a 1139-file sweep) and
+// usually a code smell, and Elisa's explicit allocation keeps the banned surface small. The fix
+// is local — put one object in an explicit region so the lifetimes nest, or reorder so one
+// contains the other.
 //
 // Explicit regions (`region r(...)`, `def f[region r]`, an `@r` type annotation) are NOT
-// inferred and are exempt: the user keeps full manual control.
+// inferred and are exempt: the user keeps full manual control. With interleaving banned, every
+// inferred region's surviving objects nest or are disjoint — a clean forest the auto-tightening
+// transform (Phase 2) relies on.
 
 // checkRegionLifetimes analyzes every inferred (synthesized `in auto:`) region in fn.
 func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
@@ -97,8 +97,8 @@ func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt) {
 					continue
 				}
 				flagged[j] = true
-				a.perfLint(declPosFor(region, lj.name),
-					"interleaved object lifetimes in an inferred region: %q is still live when %q is created but is last used before %q dies — their lifetimes cross, so they cannot be placed in lifetime-tightened nested regions. Give one an explicit region (`in r:` / `region r(...)`), or accept that both are retained until scope exit.",
+				a.errorf(declPosFor(region, lj.name),
+					"interleaved object lifetimes in an inferred region: %q is still live when %q is created but is last used before %q dies — their lifetimes cross, so they cannot be placed on a region stack (a region frees in LIFO order). Put one in an explicit region (`in r:` / `region r(...)`) so the lifetimes nest, or reorder so one fully contains the other.",
 					li.name, lj.name, lj.name)
 			}
 		}
