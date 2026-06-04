@@ -164,6 +164,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	mergedStorageViewDeps := a.cloneStorageViewDeps()
 	a.loopDepth++
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	a.loopDepth--
@@ -175,11 +176,17 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 		mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
 		mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+		// A storage-view interior reference invalidated by a mutation inside the loop body (e.g. a
+		// darray push or relocating dict insert) stays invalid after the loop — the body may have
+		// run. Without this merge the invalidation was discarded at block exit, leaving a stale
+		// reference usable after the loop (use-after-realloc).
+		mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, bodySnapshot.StorageViewDeps)
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.currentStorageViewDeps = mergedStorageViewDeps
 }
 
 type iterLoopSourceInfo struct {
@@ -438,6 +445,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	mergedStorageViewDeps := a.cloneStorageViewDeps()
 	var bodySnapshot affineFlowSnapshot
 	// Lock a relocatable darray iterand for the loop body: a push/extend/reserve/clear that
 	// moves its buffer mid-iteration is the iterator-invalidation bug. A stable backing
@@ -476,11 +484,14 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 		mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
 		mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+		// Propagate interior-reference invalidations out of the loop (see the range-loop merge).
+		mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, bodySnapshot.StorageViewDeps)
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.currentStorageViewDeps = mergedStorageViewDeps
 }
 
 func (a *Analyzer) rewriteFrozenTreeRowFieldFilterShorthand(scope *Scope, pattern ast.MoveBindPattern, sourceType Type, expr ast.Expr) ast.Expr {

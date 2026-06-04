@@ -163,8 +163,24 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 	if call == nil {
 		return storageViewDependencyState{}, false
 	}
-	name := callIdentName(call)
+	name := callBaseName(call)
 	switch name {
+	case "arena_dict_get":
+		// arena_dict_get returns `&items[i].value` — an interior reference into the dict's bucket
+		// array. A later relocating insert (arena_dict_put*/get_or_insert resize → realloc) moves
+		// that array, dangling the reference. Record a dependency on the dict so the insert
+		// invalidates it (the dict analogue of darray interior-ref-after-push).
+		if len(call.Args) >= 1 {
+			return storageViewDependencyFromSource(dictContainerArgBase(call.Args[0]))
+		}
+		return storageViewDependencyState{}, false
+	case "arena_dict_put", "arena_dict_put_checked", "arena_dict_get_or_insert":
+		// These also return an interior ref into the (post-resize) bucket array — depends on the
+		// dict (arg 1, after the Arena) so a subsequent insert invalidates it.
+		if len(call.Args) >= 2 {
+			return storageViewDependencyFromSource(dictContainerArgBase(call.Args[1]))
+		}
+		return storageViewDependencyState{}, false
 	case "darray_view", "arena_da_view":
 		if len(call.Args) == 0 {
 			return storageViewDependencyState{}, false
@@ -180,6 +196,64 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 		return storageViewDependencyFromSource(field.Object)
 	}
 	return storageViewDependencyState{}, false
+}
+
+// callBaseName returns a call's function name for both plain `f(...)` and specialized `f[T](...)`
+// (SpecializeExpr) call forms — callIdentName only handles the plain form.
+func callBaseName(call *ast.CallExpr) string {
+	if call == nil {
+		return ""
+	}
+	switch f := call.Func.(type) {
+	case *ast.Ident:
+		return f.Name
+	case *ast.SpecializeExpr:
+		if id, ok := f.Operand.(*ast.Ident); ok && id != nil {
+			return id.Name
+		}
+	}
+	return ""
+}
+
+// dictContainerArgBase peels a dict argument (`m.ref[mutable dict&]` = cast of &m, or a bare
+// `m`) down to the underlying container lvalue, so the dependency source key matches between the
+// borrow-producing get and the invalidating insert.
+func dictContainerArgBase(expr ast.Expr) ast.Expr {
+	for {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.CastExpr:
+			expr = n.Operand
+		case *ast.MoveExpr:
+			expr = n.Operand
+		case *ast.AddrOfExpr:
+			expr = n.Operand
+		default:
+			return expr
+		}
+	}
+}
+
+// invalidateStorageViewsForRelocatingDictCall invalidates interior references into a dict when a
+// relocating insert (arena_dict_put/put_checked/get_or_insert, which can resize → realloc the
+// bucket array) is performed on it — so a stale `arena_dict_get` reference used afterward is a
+// stale-ref error rather than a silent use-after-realloc.
+func (a *Analyzer) invalidateStorageViewsForRelocatingDictCall(call *ast.CallExpr) {
+	if call == nil {
+		return
+	}
+	switch callBaseName(call) {
+	case "arena_dict_put", "arena_dict_put_checked", "arena_dict_get_or_insert":
+	default:
+		return
+	}
+	if len(call.Args) < 2 {
+		return
+	}
+	base := dictContainerArgBase(call.Args[1])
+	a.invalidateStorageViewsForSource(base, "dict insert (may rehash and relocate the bucket array)")
+	a.invalidateIndexBoundsForContainer(base)
 }
 
 func storageViewDependencyFromSource(source ast.Expr) (storageViewDependencyState, bool) {
