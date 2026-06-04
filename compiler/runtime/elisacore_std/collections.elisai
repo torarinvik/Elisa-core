@@ -631,3 +631,9 @@ impl[T] Store for darray[T]:
     type Handle = usize
     def store_get(s: darray[T]&, h: usize) -> T&
     def store_count(s: darray[T]&) -> usize
+
+impl[T] Store for Deque[T]:
+    type Elem = T
+    type Handle = usize
+    def store_get(s: Deque[T]&, h: usize) -> T&
+    def store_count(s: Deque[T]&) -> usize

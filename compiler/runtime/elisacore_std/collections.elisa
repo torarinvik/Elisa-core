@@ -1390,3 +1390,14 @@ impl[T] Store for darray[T]:
         return s[h]
     def store_count(s: darray[T]&) -> usize:
         return s.count
+
+# Deque is a second Store backing: a ring buffer rather than a contiguous darray, yet the
+# same surface — a usize handle resolves to an element and there's a count. arena_deque_at
+# maps the logical handle through the ring's head/wrap. (Deque comes from the include above.)
+impl[T] Store for Deque[T]:
+    type Elem = T
+    type Handle = usize
+    def store_get(s: Deque[T]&, h: usize) -> T&:
+        return arena_deque_at(s, h)
+    def store_count(s: Deque[T]&) -> usize:
+        return arena_deque_len(s)

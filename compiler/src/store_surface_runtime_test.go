@@ -65,3 +65,59 @@ def store_over_darray() -> void:
 		}
 	}
 }
+
+// A second Store backing: Deque (a ring buffer, collections.elisa) implements the same
+// surface as darray, so the very same generic `[S: Store]` code works on it — handle
+// (usize logical index) → element, mapped through the ring's head/wrap. This proves the
+// unification generalizes beyond darray to a structurally different container.
+func TestRunCLIStoreSurfaceOverDeque(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	rel := func(name string) string {
+		p, err := filepath.Rel(fixtureDir, filepath.Join(std, name))
+		if err != nil {
+			t.Fatalf("rel include %s: %v", name, err)
+		}
+		return filepath.ToSlash(p)
+	}
+	preamble := fmt.Sprintf("# include %q\n# include %q\n# include %q\n",
+		rel("test.elisa"), rel("elisacore_runtime.elisa"), rel("deque.elisa"))
+	src := preamble + `
+def get_at[S: Store](s: S&, h: S.Handle) -> S.Elem&:
+    return S.store_get(s, h)
+
+def how_many[S: Store](s: S&) -> usize:
+    return S.store_count(s)
+
+@test
+def store_over_deque() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region r:
+            a: mutable Arena& = &r
+            dq: mutable Deque[i64] = arena_deque_with_capacity[i64](a, 8)
+            _ = arena_deque_push_back[i64](a, dq, 100)
+            _ = arena_deque_push_back[i64](a, dq, 200)
+            _ = arena_deque_push_back[i64](a, dq, 300)
+            n: usize = how_many[Deque[i64]](dq)
+            v0: i64 = get_at[Deque[i64]](dq, 0u)
+            v2: i64 = get_at[Deque[i64]](dq, 2u)
+            if n != 3:
+                panic("Store.store_count over deque wrong")
+            if v0 != 100i64:
+                panic("Store.store_get[0] over deque wrong")
+            if v2 != 300i64:
+                panic("Store.store_get[2] over deque wrong")
+`
+	fixturePath := filepath.Join(fixtureDir, "store_over_deque.elisa")
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected Store-over-deque test to pass, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[       OK ] store_over_deque") {
+		t.Fatalf("expected store_over_deque to pass, got:\n%s", stdout.String())
+	}
+}
