@@ -108,6 +108,53 @@ func TestRegionLifetimeFixViaExplicitRegionAnnotation(t *testing.T) {
 	}
 }
 
+// Retention hint: a fresh allocation declared in a loop body, used only within the iteration,
+// accumulates in the enclosing inferred region for the whole loop — nudge to wrap the loop body.
+func TestRegionRetentionHintsLoopLocalAllocation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rt_churn.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        for i in 0..<100:
+            tmp: mutable darray[i64] = []
+            tmp.push(i.i64())
+            sink: i64 = tmp.count.i64()
+            if sink < 0:
+                panic("x")
+`, AnalyzeOptions{})
+	if !strings.Contains(allDiagnostics(result), "accumulates in the enclosing inferred region") {
+		t.Fatalf("expected loop-local retention hint, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// No hint once the loop body is already wrapped in `in auto:` (the fix), and the fix compiles.
+func TestRegionRetentionNoHintWhenWrapped(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rt_wrapped.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        for i in 0..<100:
+            in auto:
+                tmp: mutable darray[i64] = []
+                tmp.push(i.i64())
+`, AnalyzeOptions{})
+	if strings.Contains(allDiagnostics(result), "accumulates in the enclosing") {
+		t.Fatalf("already-wrapped loop body must not be hinted, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// No hint when the loop body grows an OUTER container (the accumulator) — wrapping would itself
+// be a growth-escape error, so suggesting it would be wrong.
+func TestRegionRetentionNoHintWhenGrowingOuterContainer(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rt_acc.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        outer: mutable darray[i64] = []
+        for i in 0..<100:
+            tmp: mutable darray[i64] = []
+            tmp.push(i.i64())
+            outer.push(tmp.count.i64())
+`, AnalyzeOptions{})
+	if strings.Contains(allDiagnostics(result), "accumulates in the enclosing") {
+		t.Fatalf("loop growing an outer container must not be hinted (fix would error), got:\n%s", allDiagnostics(result))
+	}
+}
+
 // Differential fuzz: generate random straight-line `in auto:` scopes with several darrays and
 // a random push sequence, compute whether any lifetimes cross with an independent Go oracle
 // (statement-index intervals), and assert the analyzer's verdict matches exactly.
