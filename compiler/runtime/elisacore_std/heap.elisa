@@ -12,6 +12,7 @@ struct FixedBufferAllocator:
 struct FixedBufferMark:
     end_index: usize
 
+@intrusive
 struct MemoryPoolFreeNode:
     next: mutable heap MemoryPoolFreeNode&?
 

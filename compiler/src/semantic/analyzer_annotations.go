@@ -187,7 +187,7 @@ func isSupportedEnumAnnotation(name string) bool {
 
 func isSupportedStructAnnotation(name string) bool {
 	switch name {
-	case "align", "cacheline_aligned", "fixed_layout", "c_bind", "c_bind_prefix", "abi_layout":
+	case "align", "cacheline_aligned", "fixed_layout", "c_bind", "c_bind_prefix", "abi_layout", "intrusive":
 		return true
 	default:
 		return false

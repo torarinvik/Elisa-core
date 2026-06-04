@@ -5,6 +5,7 @@ struct FactPlayer[state Alive | Dead]:
         Alive when self.health > 0
         Dead when self.health <= 0
 
+@intrusive
 struct FactNode:
     next: FactNode&?
     value: mutable int

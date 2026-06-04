@@ -2,6 +2,7 @@ struct FuzzPair:
     left: mutable int
     right: mutable int
 
+@intrusive
 struct HeapPairNode:
     pair: mutable FuzzPair
     next: mutable heap HeapPairNode&?

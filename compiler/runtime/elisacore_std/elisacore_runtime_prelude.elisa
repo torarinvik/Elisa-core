@@ -42,11 +42,13 @@ global mutable scratch_arena: Arena = Arena(null, null, 0, 0)
 # Struct definitions
 # ------------------------------------------------------------
 
+@intrusive
 struct SmallStringCacheEntry:
 	next: mutable heap SmallStringCacheEntry&?
 	len: mutable usize
 	text: mutable tail u8
 
+@intrusive
 struct StringLenCacheEntry:
 	next: mutable heap StringLenCacheEntry&?
 	ptr: mutable u8&

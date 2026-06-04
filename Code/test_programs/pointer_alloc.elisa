@@ -1,3 +1,4 @@
+@intrusive
 struct Node:
     value: mutable int
     next: mutable heap Node&?

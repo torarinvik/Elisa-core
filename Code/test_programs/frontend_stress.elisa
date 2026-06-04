@@ -29,6 +29,7 @@ struct Symbol:
     depth: mutable int
     first_kind: mutable TokenKind
 
+@intrusive
 struct Scope:
     parent: mutable Scope&?
     symbols: mutable dict[cstr, Symbol]

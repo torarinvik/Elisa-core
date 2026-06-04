@@ -88,6 +88,7 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 						}
 					}
 					a.validateStructDerivedStates(stDecl, st)
+					a.checkPointerGraphStruct(stDecl, st)
 				})
 			})
 		})

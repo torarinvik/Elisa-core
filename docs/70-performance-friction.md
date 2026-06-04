@@ -1,5 +1,19 @@
 # 70 — Performance friction: the pit of success for speed
 
+## Implementation status
+
+- ✅ **`@hot` fast contract LANDED** (commit a31a8186): a hot function may use no allocation
+  (`Memory.Allocate`/`Release`) and no raw-pointer/indirect-dispatch `Unsafe.*` effect,
+  transitively; fast-unsafe (`Unsafe.UncheckedIndex`) and cold branches (`Abort.Panic`) stay
+  allowed. Enforced as an effect upper bound at `analyzer_functions.go`.
+- ⚠ **`Memory.Heap` split DROPPED.** Stage 1 assumed a malloc path to gate, but all-region
+  Elisa has none — `using malloc` normalizes to chained (`region_backing.go`), so
+  `Memory.Allocate` *is* the only allocation effect. `@hot` banning it directly is the real
+  "no allocation on the hot path" guarantee; a separate `Memory.Heap` would gate nothing.
+  The taxonomy table below keeps `Memory.Heap` as a hypothetical for if a raw-heap path is
+  ever added.
+- ⏭ Next: `slow:` quarantine blocks, the pointer-graph + churn lints, graduated `-Wperf`.
+
 ## Thesis
 
 Make **fast, safe code the frictionless default** and **slow, unsafe code painful but

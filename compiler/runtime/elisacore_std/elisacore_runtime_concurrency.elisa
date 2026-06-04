@@ -43,10 +43,12 @@ struct ConcurrencyWorkStart1:
 	result_bits: mutable void&
 	refs: mutable atomic[i64]
 
+@intrusive
 struct ConcurrencyTaskGroupNode:
 	next: mutable heap ConcurrencyTaskGroupNode&?
 	state_bits: mutable void&
 
+@intrusive
 struct ConcurrencyRawTaskNode:
 	next: mutable heap ConcurrencyRawTaskNode&?
 	handle: mutable uintptr
