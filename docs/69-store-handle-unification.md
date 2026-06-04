@@ -1,5 +1,22 @@
 # 69 — Store / Handle unification (shared surface, distinct backings)
 
+## Implementation status
+
+- ✅ Total `Store` (`Elem`/`Handle` + `store_get -> Elem&` + `store_count`) with backings
+  **darray** and **Deque** (commits in the parametric-impl / store series).
+- ✅ Partial `KeyedStore` (`store_find -> Elem&?`) with backing **dict** (commit fc3e394e) —
+  the keyed/may-miss tier beside the total core.
+- ❌ **pool is NOT a Store backing — principled exclusion.** A `Pooled[T]` handle is *affine*,
+  and the affine checker forbids `Pooled[T]&` ("references to values containing linear handles
+  are not supported"). So a handle-resolving op can neither *borrow* the handle (illegal) nor
+  take it *by value* (consumes it). The canonical idiom accesses `h.ptr` **directly** on the
+  owning local — the handle IS the resource, not an index into a store. This is the
+  orthogonality of `docs/10`: the pool lives on the *usage* (affine ownership) axis, not the
+  *layout* (handle-indexing) axis, so it correctly does not unify with Store.
+- ⏭ Remaining: **packed store** — needs groundwork (`UnifyTypePattern` doesn't yet cover
+  `PackedEnumStoreType`; the type is compiler-special, not a plain struct) before an impl is
+  expressible. The handle is a copyable encoded `uintptr`, so it WOULD fit the total core.
+
 ## Goal
 
 Give the four "handle-into-store" abstractions one **shared user-facing surface** while
