@@ -1369,3 +1369,24 @@ def update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, va
 
 def symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&):
     clear[K, T](table.items)
+
+
+# --- Store / Handle unification (docs/69) -----------------------------------
+# `Store` is the shared surface over every handle-into-store container: a handle
+# resolves to an element, and the store has a size. darray is the first backing
+# (Handle = usize index); dict/pool/packed stores implement the same interface
+# with their own Handle representations. Layout/provenance/usage stay orthogonal:
+# the core surface is read + size only and says nothing about growth or ownership.
+static interface Store:
+    type Elem
+    type Handle
+    def store_get(s: Self&, h: Handle) -> Elem&
+    def store_count(s: Self&) -> usize
+
+impl[T] Store for darray[T]:
+    type Elem = T
+    type Handle = usize
+    def store_get(s: darray[T]&, h: usize) -> T&:
+        return s[h]
+    def store_count(s: darray[T]&) -> usize:
+        return s.count

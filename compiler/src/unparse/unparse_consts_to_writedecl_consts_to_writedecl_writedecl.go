@@ -441,10 +441,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	case *ast.ImplDecl:
 		f.writeAnnotations(level, n.Annotations)
 		header := ""
+		implParams := formatGenericParams(n.GenericParams, nil, nil, nil)
 		if n.IsExtension() {
-			header = "impl " + formatTypeExpr(n.ForType) + ":"
+			header = "impl" + implParams + " " + formatTypeExpr(n.ForType) + ":"
 		} else {
-			header = "impl " + n.InterfaceName + " for " + formatTypeExpr(n.ForType) + ":"
+			header = "impl" + implParams + " " + n.InterfaceName + " for " + formatTypeExpr(n.ForType) + ":"
 		}
 		f.writeLine(level, header)
 		for _, member := range n.Members {

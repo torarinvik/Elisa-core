@@ -440,6 +440,10 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 			}
 			a.staticInterfaces[qualifiedName] = iface
 			assocBindings := map[string]Type{}
+			// `Self` in a method signature is a stand-in for the implementing type; it
+			// resolves to a placeholder type param here and is substituted to the concrete
+			// receiver by specializeInterfaceMethodSignature at the use/impl site.
+			assocBindings[staticInterfaceSelfName] = &TypeParamType{Name: staticInterfaceSelfName}
 			for _, member := range decl.Members {
 				assocDecl, ok := member.(*ast.AssociatedTypeDecl)
 				if !ok {

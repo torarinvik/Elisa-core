@@ -95,7 +95,7 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Effects: append([]ast.SignatureEffectItem(nil), m.Effects...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
 			}
 		}
-		return &ast.ImplDecl{Position: n.Position, Annotations: append([]ast.Annotation(nil), n.Annotations...), InterfaceName: n.InterfaceName, ForType: n.ForType, Members: members}
+		return &ast.ImplDecl{Position: n.Position, Annotations: append([]ast.Annotation(nil), n.Annotations...), InterfaceName: n.InterfaceName, GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), ForType: n.ForType, Members: members}
 	case *ast.GlobalDecl:
 		return &ast.ExternVarDecl{Position: n.Position, Name: n.Name, Type: n.Type}
 	case *ast.NamespaceDecl:

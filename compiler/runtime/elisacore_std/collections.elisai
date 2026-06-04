@@ -619,3 +619,15 @@ extern symbol_table_replace[K, T](table: mutable SymbolTable[K, T]&, symbol_id: 
 extern update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool
 
 extern symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&)
+
+static interface Store:
+    type Elem
+    type Handle
+    def store_get(s: Self&, h: Handle) -> Elem&
+    def store_count(s: Self&) -> usize
+
+impl[T] Store for darray[T]:
+    type Elem = T
+    type Handle = usize
+    def store_get(s: darray[T]&, h: usize) -> T&
+    def store_count(s: darray[T]&) -> usize
