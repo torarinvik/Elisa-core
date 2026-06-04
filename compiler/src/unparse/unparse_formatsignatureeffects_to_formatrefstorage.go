@@ -317,7 +317,11 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		for _, arg := range n.Args {
 			parts = append(parts, formatTypeExpr(arg))
 		}
-		return n.Name + "[" + strings.Join(parts, ", ") + "]"
+		result := n.Name + "[" + strings.Join(parts, ", ") + "]"
+		if n.Region != "" {
+			result += " @" + n.Region
+		}
+		return result
 	case *ast.AggregateStateTypeExpr:
 		parts := make([]string, 0, len(n.States))
 		if len(n.States) != 0 {

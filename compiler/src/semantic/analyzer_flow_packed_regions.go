@@ -146,7 +146,7 @@ func (a *Analyzer) containerRegionDependency(typ Type) (regionRefState, bool) {
 }
 
 func containerTypeRegion(typ Type) string {
-	switch t := stripRefForBounds(typ).(type) {
+	switch t := StripAggregateStateType(stripRefForBounds(typ)).(type) {
 	case *DArrayType:
 		return t.Region
 	case *DictType:
@@ -154,6 +154,8 @@ func containerTypeRegion(typ Type) string {
 	case *DStrType:
 		return t.Region
 	case *SViewType:
+		return t.Region
+	case *GenericInstanceType:
 		return t.Region
 	}
 	return ""

@@ -100,3 +100,22 @@ func TestAnalyzeRejectsDarrayUseAfterRegionDestroy(t *testing.T) {
 		t.Fatalf("expected a use-after-destroy diagnostic for a darray, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// The `@r` suffix on a generic user type (`Box[i64] @r`, docs/68 §5) carries region
+// provenance like a container does, so using the value after its region is destroyed
+// is rejected.
+func TestAnalyzeRejectsGenericRegionValueUseAfterDestroy(t *testing.T) {
+	src := `struct Box[T]:
+	value: T
+
+def f() -> i64:
+	region scratch(1024)
+	b: Box[i64] @scratch = Box[i64]{value: 7}
+	destroy scratch
+	return b.value
+`
+	_, errs := parseAndAnalyze(t, "generic_region_use_after_destroy_reject.elisa", src)
+	if !strings.Contains(strings.Join(errs, "\n"), "region dependency facts were invalidated") {
+		t.Fatalf("expected a use-after-destroy diagnostic for a @r-annotated generic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

@@ -230,13 +230,13 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 					}
 				}
 			}
-			return DefaultAggregateStateType(&GenericInstanceType{Name: lookupName, Base: base, Args: args})
+			return DefaultAggregateStateType(&GenericInstanceType{Name: lookupName, Base: base, Args: args, Region: n.Region})
 		case *OpaqueType:
 			if len(n.Args) != 0 {
 				a.errorf(n.Pos(), "type %q expects 0 type arguments, got %d", n.Name, len(n.Args))
 				return invalidType
 			}
-			return &GenericInstanceType{Name: surfaceName, Base: base, Args: args}
+			return &GenericInstanceType{Name: surfaceName, Base: base, Args: args, Region: n.Region}
 		default:
 			a.errorf(n.Pos(), "type %q cannot be used with generic arguments", n.Name)
 			return invalidType

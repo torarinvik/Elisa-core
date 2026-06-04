@@ -351,6 +351,9 @@ type GenericType struct {
 	Position lexer.Pos
 	Name     string
 	Args     []TypeExpr
+	// Region is the `@r` allocation-region suffix on a generic-type use site
+	// (`Box[i64] @r`, docs/68 §5), mirroring BuiltinTypeExpr.Region for containers.
+	Region string
 }
 type GenericValueArgTypeExpr struct {
 	Position lexer.Pos

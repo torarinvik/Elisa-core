@@ -103,6 +103,10 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 			if t != nil {
 				t.Region = regionName
 			}
+		case *ast.GenericType:
+			if t != nil {
+				t.Region = regionName
+			}
 		case *ast.RefType:
 			if t != nil {
 				if t.Region != "" {
@@ -111,7 +115,7 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 				t.Region = regionName
 			}
 		default:
-			p.errorf("region annotation `@%s` is only supported on container and reference types", regionName)
+			p.errorf("region annotation `@%s` is only supported on container, generic, and reference types", regionName)
 		}
 	}
 	if p.match(lexer.TOKEN_PIPE) {

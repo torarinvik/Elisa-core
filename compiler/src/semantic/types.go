@@ -490,6 +490,10 @@ type GenericInstanceType struct {
 	Name string
 	Base Type
 	Args []Type
+	// Region is the `@r` allocation region of a generic-type use site (`Box[i64] @r`,
+	// docs/68 §5). Inert in SameType/AssignableTo (Phase 1), like DArrayType.Region —
+	// it only feeds region provenance (destroy-invalidation, promote) via the flow analysis.
+	Region string
 }
 
 type AggregateStateType struct {
