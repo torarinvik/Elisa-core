@@ -112,8 +112,19 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 		return // caller-owned region — fine.
 	}
 	if sym, _ := a.lookupRegionState(region); sym != nil {
-		a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", region, via)
+		if isSynthesizedAutoRegion(region) {
+			a.errorf(valueExpr.Pos(), "value escapes its `in auto:` scope via %s; the inferred region is freed at scope exit. Give it an explicit lifetime — copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region", via)
+		} else {
+			a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", region, via)
+		}
 	}
+}
+
+// isSynthesizedAutoRegion reports whether a region name is one the compiler created
+// for an `in auto:` block (see synthesizedAutoRegionName in the parser).
+func isSynthesizedAutoRegion(name string) bool {
+	const prefix = "__auto_"
+	return len(name) > len(prefix) && name[:len(prefix)] == prefix
 }
 
 // regionLifetimeOrdinal returns a region's position in the outlives-lattice: a

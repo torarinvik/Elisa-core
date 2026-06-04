@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"fmt"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"strings"
@@ -293,14 +295,28 @@ func (p *Parser) parseMatchHeadExpr() ast.Expr {
 	}
 	return &ast.TupleExpr{Position: first.Pos(), Elems: elems}
 }
-func (p *Parser) parseInStore() *ast.InStoreStmt {
+func (p *Parser) parseInStore() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IN)
 	store := p.parseExpr()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
+	// `in auto:` is region inference: it desugars to a compiler-synthesized scoped
+	// region that owns every allocation in the block and is freed (O(1)) at block exit
+	// (docs/68). A value that escapes the block is caught by the normal region
+	// destroy/outlives checks — inference's slack becomes a diagnostic, not a leak.
+	if ident, ok := store.(*ast.Ident); ok && ident.Name == "auto" {
+		return &ast.RegionStmt{Position: pos, Name: synthesizedAutoRegionName(pos), Body: body}
+	}
 	return &ast.InStoreStmt{Position: pos, Store: store, Body: body}
+}
+
+// synthesizedAutoRegionName builds a unique, source-located name for an `in auto:`
+// region. The reserved `__auto_` prefix plus the byte offset makes nested/sibling
+// auto scopes distinct and avoids collision with any plausible user region name.
+func synthesizedAutoRegionName(pos lexer.Pos) string {
+	return fmt.Sprintf("__auto_%d", pos.Offset)
 }
 func (p *Parser) parseCanStmt() *ast.CanStmt {
 	pos := p.cur().Pos
