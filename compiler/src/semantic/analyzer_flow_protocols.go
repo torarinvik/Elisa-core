@@ -403,7 +403,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 	case *StructType:
 		paths := map[string]Type{}
 		for _, field := range tt.Fields {
-			if !a.containsProtocolLeakValues(field.Type) {
+			if !a.containsTrackedProtocolCarrierValues(field.Type, mapsCloneBool(seen)) {
 				continue
 			}
 			for childPath, liveType := range a.protocolLiveLeafPaths(field.Type, field.Name, mapsCloneBool(seen)) {
@@ -414,7 +414,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 	case *EnumType:
 		paths := map[string]Type{}
 		for _, field := range tt.Common {
-			if !a.containsProtocolLeakValues(field.Type) {
+			if !a.containsTrackedProtocolCarrierValues(field.Type, mapsCloneBool(seen)) {
 				continue
 			}
 			for childPath, liveType := range a.protocolLiveLeafPaths(field.Type, field.Name, mapsCloneBool(seen)) {
@@ -424,7 +424,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 		for _, variant := range tt.Variants {
 			for i, payloadType := range variant.Payload {
 				label := variant.PayloadLabel(i)
-				if label == "" || !a.containsProtocolLeakValues(payloadType) {
+				if label == "" || !a.containsTrackedProtocolCarrierValues(payloadType, mapsCloneBool(seen)) {
 					continue
 				}
 				for childPath, liveType := range a.protocolLiveLeafPaths(payloadType, label, mapsCloneBool(seen)) {
@@ -449,7 +449,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 				if len(bindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 				}
-				if !a.containsProtocolLeakValues(fieldType) {
+				if !a.containsTrackedProtocolCarrierValues(fieldType, mapsCloneBool(seen)) {
 					continue
 				}
 				for childPath, liveType := range a.protocolLiveLeafPaths(fieldType, field.Name, mapsCloneBool(seen)) {
