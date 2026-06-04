@@ -13,9 +13,33 @@
   owning local — the handle IS the resource, not an index into a store. This is the
   orthogonality of `docs/10`: the pool lives on the *usage* (affine ownership) axis, not the
   *layout* (handle-indexing) axis, so it correctly does not unify with Store.
-- ⏭ Remaining: **packed store** — needs groundwork (`UnifyTypePattern` doesn't yet cover
-  `PackedEnumStoreType`; the type is compiler-special, not a plain struct) before an impl is
-  expressible. The handle is a copyable encoded `uintptr`, so it WOULD fit the total core.
+- ❌ **packed store is NOT a Store backing — principled exclusion** (corrects an earlier
+  guess that it "would fit"). The *handle* is fine (a copyable encoded value), but there is no
+  `Elem&`: a packed-enum element is a tagged variant decomposed into SoA columns, so it has no
+  contiguous value to reference. Confirmed empirically — `impl Store for Expr.Store[Local]`
+  with `def store_get(…) -> Expr& : return h` fails with *"return type expects Expr&, got
+  Expr"* (the handle is a value, not a reference to a contiguous node). Access is `match h in
+  store:` — variant reconstruction from columns — not a method returning a reference. This is
+  the *layout* axis of `docs/10`: packedness is exactly the choice that removes a uniform
+  `Elem&`.
+
+## Final boundary — the unification is complete
+
+Both non-members are excluded for a *different axis* of the same orthogonality principle, and
+the type system enforces each boundary:
+
+| Container | In Store family? | Axis it lives on | Why it's excluded (if so) |
+|-----------|------------------|------------------|----------------------------|
+| `darray`  | ✅ total Store   | layout (contiguous) | — |
+| `Deque`   | ✅ total Store   | layout (ring)       | — |
+| `dict`    | ✅ KeyedStore    | layout (keyed/partial) | — |
+| pool      | ❌               | **usage** (affine)  | handle is linear: can't borrow (`Pooled[T]&` illegal) or consume-and-keep |
+| packed store | ❌            | **layout** (SoA)    | no `Elem&`: element is a variant in columns, accessed by `match`, not a ref |
+
+The Store family is exactly the plain value containers with a uniform, dereferenceable
+element. The two exclusions are precisely the two non-(uniform-layout) axes — affine usage
+and SoA layout — so the unification's boundary *is* the docs/10 orthogonality. Nothing further
+to add; the set is closed.
 
 ## Goal
 
