@@ -135,6 +135,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.validateCurrentFuncPoststates()
 	}
 	a.checkSentinelIndex(fn)
+	a.checkAllocationChurn(fn)
 	if fnType != nil {
 		if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
 			fnType.ReturnProvenance = summary

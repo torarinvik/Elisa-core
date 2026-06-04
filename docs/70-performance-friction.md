@@ -12,7 +12,13 @@
   "no allocation on the hot path" guarantee; a separate `Memory.Heap` would gate nothing.
   The taxonomy table below keeps `Memory.Heap` as a hypothetical for if a raw-heap path is
   ever added.
-- ⏭ Next: `slow:` quarantine blocks, the pointer-graph + churn lints, graduated `-Wperf`.
+- ✅ **Pointer-graph lint LANDED** (commit 8b054746): a struct with a self-referential ref
+  field carrying no region provenance (raw `heap Node&?` / bare `Node&?`) is warned, pointing
+  at the packed-enum/`Store` cure. A `@owner`-tracked self-ref (sound single-region graph) is
+  NOT flagged. Opt-out is the new `@intrusive` struct annotation (the "painful but possible"
+  acknowledgment) — the runtime's free-list/queue/cache primitives carry it. Caught 9 real
+  raw structures on first run.
+- ⏭ Next: churn lint (`new`/alloc in a loop), `slow:` quarantine blocks, graduated `-Wperf`.
 
 ## Thesis
 
