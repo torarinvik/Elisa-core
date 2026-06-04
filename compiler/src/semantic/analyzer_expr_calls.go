@@ -288,6 +288,28 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		} else {
 			argType = a.analyzeExpr(orderedArgs[i])
 		}
+		// The spawned CLOSURE itself (fn = arg 0 of spawn1 / arg 1 of pool_submit1): closures
+		// capture by value, so a captured reference or container header still aliases the
+		// original — sending the closure to a thread is a data race. (CapturesThreadUnsafe was
+		// computed at the lambda site via closureCaptureSharesMutableState.)
+		if (ft.Name == "spawn1" && i == 0) || (ft.Name == "pool_submit1" && i == 1) {
+			capturesUnsafe := false
+			if ftArg, ok := argType.(*FuncType); ok && ftArg.CapturesThreadUnsafe {
+				capturesUnsafe = true
+			}
+			// A closure bound to a local (`w = lambda …; spawn1(w, …)`) carries its capture
+			// safety on the tracked function value, not the declared parameter type.
+			if ident, ok := orderedArgs[i].(*ast.Ident); ok && a.currentScope != nil {
+				if sym, ok := a.currentScope.Lookup(ident.Name); ok {
+					if fv, ok := a.currentFunctionValues[sym]; ok && fv != nil && fv.CapturesThreadUnsafe {
+						capturesUnsafe = true
+					}
+				}
+			}
+			if capturesUnsafe {
+				a.errorf(orderedArgs[i].Pos(), "the closure passed to %q captures state that cannot be shared across threads (a mutable reference, or a container that aliases its buffer). Closures capture by value, so the captured handle still points at the original — a data race. Pass the data by value, move ownership into the thread, or guard it with a Mutex", ft.Name)
+			}
+		}
 		if (ft.Name == "spawn1" && i == 1) || (ft.Name == "pool_submit1" && i == 2) {
 			if a.enforceUnsafePermissions && threadTransferRequiresUnsafeThreadShare(argType, map[string]bool{}) {
 				a.recordFunctionPermissionRefs(unsafeThreadShareRefs(orderedArgs[i].Pos()))

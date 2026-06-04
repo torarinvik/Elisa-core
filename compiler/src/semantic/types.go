@@ -584,6 +584,12 @@ type FuncType struct {
 	ShapeParams                  []string
 	FreshReturnShapeParams       []string
 	Static                       bool
+	// CapturesThreadUnsafe marks a closure that captures a value which is not safe to
+	// share across threads (a non-static mutable ref, a darray/dict, etc.). Closures
+	// capture by value, so capturing such a *reference* copies the pointer and shares its
+	// referent — passing the closure to a thread is therefore a data race unless gated by
+	// Unsafe.ThreadShare. The flag flows into threadTransferRequiresUnsafeThreadShare.
+	CapturesThreadUnsafe         bool
 	InlineMode                   FuncInlineMode
 	HasInlineMode                bool
 	HasNoRecurse                 bool

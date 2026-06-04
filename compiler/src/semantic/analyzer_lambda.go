@@ -116,6 +116,15 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 		a.lambdaInfo = map[*ast.LambdaExpr]*LambdaInfo{}
 	}
 	a.lambdaInfo[expr] = &LambdaInfo{Captures: captureNames(captures)}
+	// A closure that captures a value which still aliases shared mutable state when copied
+	// (a non-static reference, a darray/dict/view header) shares it when sent to a thread.
+	// Record it on the func type so spawning the closure is rejected as a data race.
+	for _, capture := range captures {
+		if closureCaptureSharesMutableState(capture.typ, map[string]bool{}) {
+			fnType.CapturesThreadUnsafe = true
+			break
+		}
+	}
 
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn

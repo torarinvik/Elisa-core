@@ -102,8 +102,57 @@ func threadTransferRequiresUnsafeThreadShare(t Type, seen map[string]bool) bool 
 	}
 	seen[key] = true
 	switch tt := t.(type) {
+	case *FuncType:
+		// A closure carrying thread-unsafe captures shares them with the spawned thread.
+		return tt.CapturesThreadUnsafe
 	case *RefType:
 		return tt.Storage != RefStorageStatic
+	}
+	return threadTransferRequiresUnsafeThreadShareSwitch(t, seen)
+}
+
+// closureCaptureSharesMutableState reports whether a value captured BY VALUE into a closure
+// still aliases shared mutable state, so sending the closure to a thread is a data race.
+// Unlike threadTransferRequiresUnsafeThreadShare (which assumes a MOVED argument and only
+// looks through to a container's element), a captured container HEADER or reference copies a
+// pointer the original still holds — so the container/ref itself is the sharing.
+func closureCaptureSharesMutableState(t Type, seen map[string]bool) bool {
+	if t == nil || IsInvalidType(t) || isBlessedThreadTransferCarrierType(t) {
+		return false
+	}
+	key := t.String()
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *RefType:
+		return tt.Storage != RefStorageStatic // a copied non-static ref still aliases its referent
+	case *DArrayType, *DictType, *ViewType, *DArrayViewType:
+		return true // a copied header aliases the shared backing buffer
+	case *ArrayType:
+		return closureCaptureSharesMutableState(tt.Elem, seen) // inline array: shares iff element does
+	case *StructType:
+		for _, f := range tt.Fields {
+			if closureCaptureSharesMutableState(f.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *GenericInstanceType:
+		for _, arg := range tt.Args {
+			if closureCaptureSharesMutableState(arg, seen) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false // plain values (i64, bool, char, frozen stores, …) copy safely
+	}
+}
+
+func threadTransferRequiresUnsafeThreadShareSwitch(t Type, seen map[string]bool) bool {
+	switch tt := t.(type) {
 	case *ArrayType:
 		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
 	case *DArrayType:
