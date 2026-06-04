@@ -106,7 +106,7 @@ func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 func TestGenerateLLVMIRLowersDArrayLiteralWithExplicitOwner(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    xs: darray[i64] = [1, 2, 3] in alloc
+    xs: darray[i64] @alloc = [1, 2, 3]
     return xs.count
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_darray_literal_explicit_owner.elisa", src)
@@ -122,7 +122,7 @@ func TestGenerateLLVMIRLowersDArrayLiteralWithExplicitOwner(t *testing.T) {
 func TestGenerateLLVMIRLowersDArrayLiteralWithSpreadElements(t *testing.T) {
 	src := `def build(owner: Arena, first: i64, rest: darray[i64]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    xs: darray[i64] = [first, ...rest] in alloc
+    xs: darray[i64] @alloc = [first, ...rest]
     return xs.count
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_darray_literal_spread.elisa", src)
@@ -164,7 +164,7 @@ func TestGenerateLLVMIRLowersListComprehensionExpr(t *testing.T) {
 func TestGenerateLLVMIRLowersListComprehensionExprWithExplicitOwner(t *testing.T) {
 	src := `def build(owner: Arena, items: darray[i64]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    xs = [item + 1 for item in items if item > 0] in alloc
+    xs: darray[i64] @alloc = [item + 1 for item in items if item > 0]
     return xs.count
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_list_comprehension_explicit_owner.elisa", src)

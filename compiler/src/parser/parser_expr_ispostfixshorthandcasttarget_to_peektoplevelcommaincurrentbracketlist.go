@@ -206,7 +206,10 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	p.expect(lexer.TOKEN_RBRACKET)
 	var owner ast.Expr
 	if p.match(lexer.TOKEN_IN) {
+		// The comprehension allocation owner `[...] in <owner>` is removed (docs/68 §7):
+		// annotate the binding type with `@<owner>` instead. Recover to keep parsing.
 		owner = p.withInMembershipDisabled(p.parseExpr)
+		p.errorf("comprehension allocation owner `[...] in <owner>` is no longer supported; annotate the binding type instead (e.g. `xs: darray[T] @<owner> = [...]`)")
 	}
 	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner}
 }

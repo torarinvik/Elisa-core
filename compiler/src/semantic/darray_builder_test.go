@@ -140,7 +140,7 @@ def build(owner: Arena) -> i64:
 func TestAnalyzeDArrayLiteralWithExplicitOwner(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_explicit_owner.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    xs: darray[i64] = [1, 2, 3] in alloc
+    xs: darray[i64] @alloc = [1, 2, 3]
     return xs.count
 `)
 
@@ -171,7 +171,7 @@ func TestAnalyzeDArrayLiteralWithExplicitOwner(t *testing.T) {
 func TestAnalyzeDArrayLiteralWithSpreadElements(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_spread.elisa", `def build(owner: Arena, first: i64, rest: darray[i64]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    xs: darray[i64] = [first, ...rest] in alloc
+    xs: darray[i64] @alloc = [first, ...rest]
     return xs.count
 `)
 
@@ -264,7 +264,7 @@ func TestAnalyzeListComprehensionExpr(t *testing.T) {
 func TestAnalyzeListComprehensionExprWithExplicitOwner(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_list_comprehension_explicit_owner.elisa", `def build(owner: Arena, items: darray[i64]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    xs = [item + 1 for item in items if item > 0] in alloc
+    xs: darray[i64] @alloc = [item + 1 for item in items if item > 0]
     return xs.count
 `)
 
@@ -286,9 +286,9 @@ func TestAnalyzeListComprehensionExprWithExplicitOwner(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected list comprehension initializer, got %T", varDecl.Value)
 	}
-	if comp.Owner == nil {
-		t.Fatal("expected explicit owner on list comprehension")
-	}
+	// The allocation owner is now carried by the binding type (`darray[i64] @alloc`),
+	// not by the comprehension node, since the `[...] in <owner>` expression form was
+	// removed (docs/68 §7). The comprehension still resolves to its darray type.
 	compType, ok := result.ExprTypes[comp].(*DArrayType)
 	if !ok || compType == nil {
 		t.Fatalf("expected list comprehension to resolve to darray type, got %T %#v", result.ExprTypes[comp], result.ExprTypes[comp])

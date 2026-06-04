@@ -460,6 +460,13 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 			break
 		}
 	}
+	if expr.Owner == nil && len(expr.Elems) > 0 && useExpectedDArray && expectedDArray.Region != "" {
+		// A `darray[T] @r` binding type supplies a NON-EMPTY literal's allocation owner,
+		// so `xs: darray[T] @r = [a, b]` allocates in r. This replaces the removed
+		// `[...] in r` expression-owner form (docs/68 §5/§7). Empty literals allocate
+		// nothing, so they keep relying on the binding type's provenance alone.
+		expr.Owner = &ast.Ident{Position: expr.Position, Name: expectedDArray.Region}
+	}
 	if expr.Owner != nil {
 		owner, _, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
 		if !ok || owner.Kind != treeAllocOwnerArena {

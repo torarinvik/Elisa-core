@@ -287,7 +287,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.expect(lexer.TOKEN_RBRACKET)
 		var owner ast.Expr
 		if p.match(lexer.TOKEN_IN) {
+			// The expression-owner `[...] in <owner>` is removed (docs/68 §7): annotate
+			// the binding type with `@<owner>` instead. Recover by keeping the owner so the
+			// rest still analyzes and only this diagnostic surfaces.
 			owner = p.withInMembershipDisabled(p.parseExpr)
+			p.errorf("list allocation owner `[...] in <owner>` is no longer supported; annotate the binding type instead (e.g. `xs: darray[T] @<owner> = [...]`)")
 		}
 		return &ast.ListLitExpr{Position: pos, Elems: elems, Spreads: spreads, Owner: owner}
 	case lexer.TOKEN_LBRACE:

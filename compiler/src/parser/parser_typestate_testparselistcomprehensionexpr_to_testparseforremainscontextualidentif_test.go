@@ -75,34 +75,17 @@ func TestParseListComprehensionExprOverRange(t *testing.T) {
 	}
 }
 
-func TestParseListComprehensionExprWithExplicitOwner(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep(owner: Arena, items: darray[i64]) -> void:\n    alloc: mutable Arena& = (&owner).cast[mutable Arena&]\n    values = [item + 1 for item in items if item > 0] in alloc\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	fn := file.Decls[0].(*ast.FuncDecl)
-	decl, ok := fn.Body[1].(*ast.VarDeclStmt)
-	if !ok {
-		t.Fatalf("expected var decl stmt, got %T", fn.Body[1])
-	}
-	comp, ok := decl.Value.(*ast.ListComprehensionExpr)
-	if !ok {
-		t.Fatalf("expected list comprehension expr, got %T", decl.Value)
-	}
-	if comp.Owner == nil {
-		t.Fatal("expected explicit owner on list comprehension")
-	}
-	if ident, ok := comp.Owner.(*ast.Ident); !ok || ident.Name != "alloc" {
-		t.Fatalf("expected owner ident alloc, got %T %#v", comp.Owner, comp.Owner)
-	}
-	formatted := unparse.FormatStmt(fn.Body[1])
-	if !strings.Contains(formatted, "] in alloc") {
-		t.Fatalf("expected formatter to preserve explicit comprehension owner, got:\n%s", formatted)
+// The comprehension allocation owner `[...] in <owner>` is removed (docs/68 §7):
+// annotate the binding type with `@<owner>` instead (`xs: darray[T] @owner = [...]`).
+func TestParseRejectsListComprehensionExpressionOwner(t *testing.T) {
+	_, errs := parseSourceFile(t, "def keep(owner: Arena, items: darray[i64]) -> void:\n    alloc: mutable Arena& = (&owner).cast[mutable Arena&]\n    values = [item + 1 for item in items if item > 0] in alloc\n")
+	if !strings.Contains(strings.Join(errs, "\n"), "no longer supported") {
+		t.Fatalf("expected comprehension allocation owner `in <owner>` to be rejected, got: %v", errs)
 	}
 }
 
 func TestParseListLiteralSpreadElements(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep(owner: Arena, first: i64, rest: darray[i64]) -> void:\n    alloc: mutable Arena& = (&owner).cast[mutable Arena&]\n    values = [first, ...rest] in alloc\n")
+	file, errs := parseSourceFile(t, "def keep(owner: Arena, first: i64, rest: darray[i64]) -> void:\n    alloc: mutable Arena& = (&owner).cast[mutable Arena&]\n    values = [first, ...rest]\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -119,7 +102,7 @@ func TestParseListLiteralSpreadElements(t *testing.T) {
 		t.Fatalf("expected second list literal element to be spread, got %#v", lit.Spreads)
 	}
 	formatted := unparse.FormatStmt(fn.Body[1])
-	if !strings.Contains(formatted, "[first, ...rest] in alloc") {
+	if !strings.Contains(formatted, "[first, ...rest]") {
 		t.Fatalf("expected formatter to preserve spread literal syntax, got:\n%s", formatted)
 	}
 }
