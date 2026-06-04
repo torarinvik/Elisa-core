@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // A scoped region (`in auto:` / `region`) is freed at SCOPE exit, so a region inside a loop
@@ -153,4 +154,63 @@ def auto_loop() -> void:
 			maxRSSBytes/(1024*1024))
 	}
 	t.Logf("auto-wrapped loop peak RSS = %d MB over 1M iterations (bounded, no manual `in auto:`)", maxRSSBytes/(1024*1024))
+}
+
+// A region inside a hot loop reuses its arena across iterations (reset, not free+realloc), so it
+// does NOT pay an mmap/munmap per iteration. Measured: 20M iterations runs in ~0.17 s with reuse
+// vs ~28 s (mostly syscalls) with per-iteration free. The 10 s bound has a huge margin yet still
+// catches a reuse regression.
+func TestRegionLoopReclaimReusesArenaIsFast(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing test; skipped under -short")
+	}
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := "include \"" + std + "\"\n" + `
+@test
+def hot_loop() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        acc: mutable i64 = 0
+        for i in 0..<20000000:
+            xs: mutable darray[i64] = []
+            xs.push(i.i64())
+            acc <- acc + xs[0]
+        if acc < 0:
+            panic("hot loop wrong")
+`
+	path := filepath.Join(t.TempDir(), "hot_loop.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\n%s\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+	start := time.Now()
+	if err := exec.Command(exePath, "hot_loop").Run(); err != nil {
+		t.Fatalf("hot_loop run failed: %v", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed > 10*time.Second {
+		t.Fatalf("hot region loop took %s for 20M iterations — expected fast arena reuse (~0.2s); per-iteration free+realloc regression", elapsed)
+	}
+	t.Logf("hot region loop: 20M iterations in %s (arena reused per iteration)", elapsed)
 }

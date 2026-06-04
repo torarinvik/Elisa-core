@@ -181,6 +181,9 @@ const (
 	// scopedCleanupRegion frees a scoped region's arena at block exit (every exit path), so a
 	// `region`/`in auto:` scope reclaims at scope exit instead of leaking until function return.
 	scopedCleanupRegion
+	// scopedCleanupRegionReset resets (not frees) a loop-entered lazy region at block exit, so its
+	// blocks are reused next iteration (no mmap/munmap churn); function-return arena_free releases.
+	scopedCleanupRegionReset
 )
 
 type scopedCleanupBinding struct {
@@ -605,6 +608,10 @@ func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
 		// arena_free is idempotent (nulls begin/end) and an adopted/destroyed region is already
 		// zeroed, so freeing here is safe even though the function-return cleanup also frees it.
 		return s.emitArenaFree(binding.ptr, binding.typ)
+	}
+	if binding.kind == scopedCleanupRegionReset {
+		// Keep the blocks for next iteration; the function-return arena_free releases them.
+		return s.emitArenaReset(binding.ptr, binding.typ)
 	}
 	ops := semantic.CreateTypeBoundOps(binding.typ)
 	if len(ops) == 0 {

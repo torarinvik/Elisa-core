@@ -214,19 +214,36 @@ func backendScopedArenaInStoreStmt(stmt *ast.RegionStmt) *ast.InStoreStmt {
 	}
 }
 func (s *functionState) emitRegionDecl(n *ast.RegionStmt) error {
+	return s.emitRegionDeclImpl(n, false)
+}
+
+// emitRegionDeclImpl lowers a region declaration. When loopReset is true (a lazy region entered in
+// a loop), the arena slot is zeroed ONCE in the entry block instead of on every iteration — so the
+// region's blocks, reset (not freed) at each scope exit, are reused across iterations.
+func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) error {
 	arenaType := s.g.result.NamedTypes["Arena"]
 	if arenaType == nil {
 		return fmt.Errorf("missing builtin Arena type for region %s", n.Name)
 	}
-	alloca, err := s.createEntryAlloca(n.Name, arenaType)
-	if err != nil {
-		return err
+	var alloca C.LLVMValueRef
+	var err error
+	if loopReset {
+		// Zero once in the entry block; do NOT re-zero per iteration (that would lose the blocks).
+		alloca, err = s.createEntryAllocaZeroed(n.Name, arenaType)
+		if err != nil {
+			return err
+		}
+	} else {
+		alloca, err = s.createEntryAlloca(n.Name, arenaType)
+		if err != nil {
+			return err
+		}
+		zero, zerr := s.zeroValue(arenaType)
+		if zerr != nil {
+			return zerr
+		}
+		C.LLVMBuildStore(s.builder, zero, alloca)
 	}
-	zero, err := s.zeroValue(arenaType)
-	if err != nil {
-		return err
-	}
-	C.LLVMBuildStore(s.builder, zero, alloca)
 	s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
 	s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
 	s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: alloca}
@@ -246,16 +263,25 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	defer func() {
 		s.treeAllocOwner = savedTreeOwner
 	}()
-	if err := s.emitRegionDecl(n); err != nil {
-		return err
-	}
 	// Reclaim the region at SCOPE exit rather than deferring to function return. The escape
 	// checker guarantees nothing escapes a scoped region, so this is sound; registering it as a
 	// scoped cleanup makes it fire on every exit path (normal, break, continue, return), and the
-	// idempotent arena_free + s.regions function-return safety net make any overlap a no-op. This
-	// bounds memory for regions in loops, which previously leaked one arena per iteration.
+	// idempotent arena_free + s.regions function-return safety net make any overlap a no-op.
+	//
+	// For a LAZY region entered inside a loop, reset-and-reuse: zero the arena once (in the entry
+	// block) and arena_reset (keep blocks) at each scope exit, so iterations 2..N reuse the blocks
+	// with zero mmap/munmap syscalls; the function-return arena_free releases them. Otherwise free
+	// at scope exit (releases memory promptly for non-loop scopes).
+	loopReset := n.Lazy && len(s.continueTargets) > 0
+	if err := s.emitRegionDeclImpl(n, loopReset); err != nil {
+		return err
+	}
 	if binding, ok := s.lookupBinding(n.Name); ok && binding.ptr != nil {
-		s.registerScopedCleanup(scopedCleanupBinding{kind: scopedCleanupRegion, name: n.Name, ptr: binding.ptr, typ: binding.typ})
+		kind := scopedCleanupRegion
+		if loopReset {
+			kind = scopedCleanupRegionReset
+		}
+		s.registerScopedCleanup(scopedCleanupBinding{kind: kind, name: n.Name, ptr: binding.ptr, typ: binding.typ})
 	}
 	if err := s.emitInStore(backendScopedArenaInStoreStmt(n)); err != nil {
 		return err

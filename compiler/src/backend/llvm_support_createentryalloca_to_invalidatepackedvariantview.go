@@ -35,6 +35,35 @@ func (s *functionState) createEntryAlloca(name string, t semantic.Type) (C.LLVMV
 	s.g.applyTypeAlignment(alloca, t)
 	return alloca, nil
 }
+
+// createEntryAllocaZeroed allocas in the entry block AND stores a zero value there, so the slot is
+// initialized exactly ONCE per function call. Used for loop-reset regions: the arena is zeroed
+// before the loop, then reset (not re-created) each iteration so its blocks are reused.
+func (s *functionState) createEntryAllocaZeroed(name string, t semantic.Type) (C.LLVMValueRef, error) {
+	llvmType, err := s.g.lowerType(t)
+	if err != nil {
+		return nil, err
+	}
+	zero, err := s.zeroValue(t)
+	if err != nil {
+		return nil, err
+	}
+	builder := C.LLVMCreateBuilderInContext(s.g.context)
+	defer C.LLVMDisposeBuilder(builder)
+	entry := C.LLVMGetEntryBasicBlock(s.fnValue)
+	first := C.LLVMGetFirstInstruction(entry)
+	if first != nil {
+		C.LLVMPositionBuilderBefore(builder, first)
+	} else {
+		C.LLVMPositionBuilderAtEnd(builder, entry)
+	}
+	nameC := cString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	alloca := C.LLVMBuildAlloca(builder, llvmType, nameC)
+	s.g.applyTypeAlignment(alloca, t)
+	C.LLVMBuildStore(builder, zero, alloca)
+	return alloca, nil
+}
 func (s *functionState) currentBlockTerminated() bool {
 	block := C.LLVMGetInsertBlock(s.builder)
 	if block == nil {
