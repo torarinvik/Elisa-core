@@ -583,7 +583,15 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			C.LLVMBuildRetVoid(s.builder)
 			return nil
 		}
-		value, valueType, err := s.emitExpr(n.Value, nil)
+		// When the function returns a reference (`T&`), pass that as the expected type so
+		// a value-typed lvalue (e.g. `return s[h]`) is materialized as the element's
+		// address rather than reinterpreted as a pointer. Other return types keep the
+		// untyped (nil) path so emitFunctionReturn drives coercion.
+		var returnExpected semantic.Type
+		if _, ok := s.fnType.Return.(*semantic.RefType); ok {
+			returnExpected = s.fnType.Return
+		}
+		value, valueType, err := s.emitExpr(n.Value, returnExpected)
 		if err != nil {
 			return err
 		}

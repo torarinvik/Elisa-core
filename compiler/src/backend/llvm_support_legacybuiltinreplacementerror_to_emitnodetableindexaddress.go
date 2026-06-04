@@ -17,6 +17,25 @@ import (
 func legacyBuiltinReplacementError(oldName, replacement string) error {
 	return fmt.Errorf("legacy built-in %q has been replaced; use %q instead", oldName, replacement)
 }
+// backendIsAddressableLValue reports whether expr denotes a storage location whose
+// address emitAddress can take (mirroring emitAddress's supported node kinds). Used to
+// decide when materializing a `T&` from a value-typed expression should take the
+// element's address rather than reinterpret a loaded value as a pointer.
+func backendIsAddressableLValue(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return true
+	case *ast.FieldExpr:
+		return true
+	case *ast.IndexExpr:
+		return true
+	case *ast.ParenExpr:
+		return backendIsAddressableLValue(n.Inner)
+	default:
+		return false
+	}
+}
+
 func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
 	switch n := expr.(type) {
 	case *ast.Ident:

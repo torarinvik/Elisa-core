@@ -292,6 +292,22 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, err := s.zeroValue(expected)
 		return value, expected, err
 	}
+	// Materializing a reference (`T&`) from a value-typed lvalue -- e.g. `return s[h]`
+	// in a `-> T&` function, or binding a value field/element to a `T&`. Take the
+	// element's address rather than letting coerceValue reinterpret the loaded value
+	// as a pointer (inttoptr), which would yield a reference to the *contents* of the
+	// element instead of the element itself. Only applies when the expression is a
+	// genuine addressable lvalue whose value type matches the reference's element type;
+	// expressions already producing a reference (calls returning `T&`, ref-typed
+	// idents) keep their existing pointer-to-pointer path.
+	if refExpected, ok := expected.(*semantic.RefType); ok && actualType != nil {
+		if _, actualIsRef := actualType.(*semantic.RefType); !actualIsRef &&
+			semantic.SameType(actualType, refExpected.Elem) && backendIsAddressableLValue(expr) {
+			if addr, _, aerr := s.emitAddress(expr); aerr == nil && addr != nil {
+				return addr, expected, nil
+			}
+		}
+	}
 
 	var (
 		value C.LLVMValueRef

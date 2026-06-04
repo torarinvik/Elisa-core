@@ -505,6 +505,15 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 		return value, actualType, err
 	}
 	operandType := s.binaryOperandType(expr.Op, leftType, rightType)
+	// Auto-deref a reference operand to its numeric/bool pointee for `==`/`!=`.
+	// binaryOperandType leaves a ref as-is for equality (so the genuine pointer/null
+	// comparison in emitPointerCompareExpr keeps pointer operands); but that path has
+	// already bailed by now, so any remaining ref-vs-value equality must compare the
+	// pointee. Without this, `someRef != 300` (e.g. a `T&` returned inline from a call)
+	// would emit the operand as a raw pointer and the icmp would compare the address.
+	if expr.Op == lexer.TOKEN_EQEQ || expr.Op == lexer.TOKEN_BANGEQ {
+		operandType = backendValueContextOperandType(operandType)
+	}
 
 	left, _, err := s.emitExpr(expr.Left, operandType)
 	if err != nil {
