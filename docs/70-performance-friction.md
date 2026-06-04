@@ -18,6 +18,11 @@
   NOT flagged. Opt-out is the new `@intrusive` struct annotation (the "painful but possible"
   acknowledgment) — the runtime's free-list/queue/cache primitives carry it. Caught 9 real
   raw structures on first run.
+- ✅ **Mutual-recursion cycle detection LANDED** (commit 615b9cbc / cherry-pick 83972457):
+  extends the lint beyond direct self-reference to indirect raw-ref cycles (`A → B → A`) via a
+  program-wide `checkPointerGraphCycles` pass (raw-ref digraph + DFS back-edges; `@intrusive`
+  nodes cut the graph; `@owner` refs and buffer pointers never create edges). Zero new
+  `@intrusive` needed (no latent cross-type raw cycles in stdlib/fixtures).
 - ✅ **Allocation-churn lint LANDED** (commit 31760ece): individual `new` boxing inside a
   loop is warned toward batch allocation; precise — `push` accumulation and packed-node sugar
   are not flagged, single `new` outside a loop is silent. Zero noise (nothing in
