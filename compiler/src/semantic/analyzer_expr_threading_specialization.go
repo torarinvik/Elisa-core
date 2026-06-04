@@ -25,14 +25,19 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 		return tt.Storage == RefStorageStatic
 	case *ArrayType:
 		return a.typeStructurallyThreadShareable(tt.Elem, seen)
-	case *DArrayType:
-		return a.typeStructurallyThreadShareable(tt.Elem, seen)
+	case *DArrayType, *DictType:
+		// A growable owned container is a header over a heap backing buffer it can mutate:
+		// copying it across a thread boundary aliases that buffer, so it is NOT structurally
+		// shareable (it would be a data race / lifetime hole). Transfer must go through a
+		// frozen packed store, an owned-region move, or a Mutex/CondVar guard. This mirrors
+		// closureCaptureSharesMutableState so the direct-arg and closure-capture paths agree.
+		// (Views — ViewType/DArrayViewType — recurse: their safety is governed by the
+		// region- and packed-store-dependency checks in validateThreadTransferArg.)
+		return false
 	case *ViewType:
 		return a.typeStructurallyThreadShareable(tt.Elem, seen)
 	case *DArrayViewType:
 		return a.typeStructurallyThreadShareable(tt.Elem, seen)
-	case *DictType:
-		return a.typeStructurallyThreadShareable(tt.Key, seen) && a.typeStructurallyThreadShareable(tt.Value, seen)
 	case *EnumType:
 		if tt.Packed {
 			return true
@@ -116,7 +121,7 @@ func threadTransferRequiresUnsafeThreadShare(t Type, seen map[string]bool) bool 
 // Unlike threadTransferRequiresUnsafeThreadShare (which assumes a MOVED argument and only
 // looks through to a container's element), a captured container HEADER or reference copies a
 // pointer the original still holds — so the container/ref itself is the sharing.
-func closureCaptureSharesMutableState(t Type, seen map[string]bool) bool {
+func (a *Analyzer) closureCaptureSharesMutableState(t Type, seen map[string]bool) bool {
 	if t == nil || IsInvalidType(t) || isBlessedThreadTransferCarrierType(t) {
 		return false
 	}
@@ -131,17 +136,35 @@ func closureCaptureSharesMutableState(t Type, seen map[string]bool) bool {
 	case *DArrayType, *DictType, *ViewType, *DArrayViewType:
 		return true // a copied header aliases the shared backing buffer
 	case *ArrayType:
-		return closureCaptureSharesMutableState(tt.Elem, seen) // inline array: shares iff element does
+		return a.closureCaptureSharesMutableState(tt.Elem, seen) // inline array: shares iff element does
 	case *StructType:
 		for _, f := range tt.Fields {
-			if closureCaptureSharesMutableState(f.Type, seen) {
+			if a.closureCaptureSharesMutableState(f.Type, seen) {
 				return true
 			}
 		}
 		return false
 	case *GenericInstanceType:
+		// A generic struct instance shares iff any of its (substituted) FIELDS shares —
+		// the type arguments alone miss a `Holder[T]{items: darray[T]}` whose darray
+		// field aliases its backing. Mirror typeStructurallyThreadShareable so the
+		// generic and non-generic struct paths agree.
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := genericBindingsForStructInstance(base, tt.Args)
+			regionBindings := regionBindingsForStructInstance(base, tt.Args)
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
+				}
+				if a.closureCaptureSharesMutableState(fieldType, seen) {
+					return true
+				}
+			}
+			return false
+		}
 		for _, arg := range tt.Args {
-			if closureCaptureSharesMutableState(arg, seen) {
+			if a.closureCaptureSharesMutableState(arg, seen) {
 				return true
 			}
 		}

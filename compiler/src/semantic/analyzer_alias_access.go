@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strings"
+
 	"elisacore/src/ast"
 )
 
@@ -99,6 +101,31 @@ func typeExprHasExplicitMutableRef(expr ast.TypeExpr) bool {
 	}
 }
 
+// aliasRootsOverlap reports whether two alias roots name overlapping memory. Exact
+// equality aside, a whole-object root (`node`) overlaps any of its field/element roots
+// (`node.value`) — borrowing both mutably aliases the same storage. Disjoint fields
+// (`node.x` vs `node.y`) do not overlap.
+func aliasRootsOverlap(a string, b string) bool {
+	if a == b {
+		return true
+	}
+	return strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
+}
+
+// aliasMapHasOverlapConflict reports whether any root in `accesses` that overlaps `root`
+// (including `root` itself) holds an access conflicting with `mode`.
+func aliasMapHasOverlapConflict(accesses map[string]aliasAccessState, root string, mode aliasAccessMode) bool {
+	for other, state := range accesses {
+		if !aliasRootsOverlap(root, other) {
+			continue
+		}
+		if aliasAccessConflicts(state, mode) {
+			return true
+		}
+	}
+	return false
+}
+
 func aliasAccessConflicts(existing aliasAccessState, mode aliasAccessMode) bool {
 	if mode == aliasAccessWrite {
 		return existing.WriteExclusive > 0 || existing.ReadShared > 0
@@ -153,7 +180,21 @@ func (a *Analyzer) recordLocalRefAliasBinding(stmt ast.Stmt, sym *Symbol, value 
 	}
 	a.releaseLocalAliasBinding(sym)
 	existing := a.currentAliasAccesses[root]
-	if aliasAccessConflicts(existing, mode) {
+	conflict := aliasAccessConflicts(existing, mode)
+	if !conflict {
+		// A live borrow on an OVERLAPPING root (whole-object vs one of its fields)
+		// aliases the same storage even though the root strings differ.
+		for otherRoot, state := range a.currentAliasAccesses {
+			if otherRoot == root || !aliasRootsOverlap(root, otherRoot) {
+				continue
+			}
+			if aliasAccessConflicts(state, mode) {
+				conflict = true
+				break
+			}
+		}
+	}
+	if conflict {
 		a.recordUnsafeAliasStmt(stmt)
 	}
 	a.currentAliasAccesses[root] = aliasAccessStateWith(existing, mode)
@@ -245,16 +286,28 @@ func (a *Analyzer) validateCallArgAliasAccess(call *ast.CallExpr, paramTypes []T
 		if root == "" {
 			continue
 		}
+		// Exact-root live state, discounting the arg's own outstanding binding so
+		// `&x` doesn't self-conflict with x's own borrow.
 		if existingLive := a.liveAliasAccessStateForArg(root, args[i]); aliasAccessConflicts(existingLive, mode) {
 			a.recordUnsafeAliasExpr(call)
 			return
 		}
-		existing := seen[root]
-		if aliasAccessConflicts(existing, mode) {
+		// Overlapping (whole-object vs field) live borrows on a DIFFERENT root.
+		for other, state := range a.currentAliasAccesses {
+			if other == root || !aliasRootsOverlap(root, other) {
+				continue
+			}
+			if aliasAccessConflicts(state, mode) {
+				a.recordUnsafeAliasExpr(call)
+				return
+			}
+		}
+		// Earlier args of THIS call, exact or overlapping (e.g. update(node, node.value)).
+		if aliasMapHasOverlapConflict(seen, root, mode) {
 			a.recordUnsafeAliasExpr(call)
 			return
 		}
-		seen[root] = aliasAccessStateWith(existing, mode)
+		seen[root] = aliasAccessStateWith(seen[root], mode)
 	}
 }
 
