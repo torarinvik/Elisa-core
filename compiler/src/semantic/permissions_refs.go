@@ -123,8 +123,20 @@ func (a *Analyzer) markSubsumedFamilies(family string, granted map[string]bool) 
 // it does not fall out of any concrete grant.
 const permissionAnyName = "any"
 
+// isAmbientPermission reports whether a permission is implicitly granted everywhere, so it
+// never needs a `can` declaration. Region allocation/freeing (Memory.Allocate / Memory.Release)
+// is the frictionless default — it is the universal allocation primitive, not an explicit
+// opt-in like raw malloc — so it is ambient. The effect is still INFERRED into a function's
+// signature (so @hot(noalloc) can forbid it), it just carries no declaration burden.
+func isAmbientPermission(ref ast.PermissionRef) bool {
+	return ref.Name == "Memory" && (ref.Member == "Allocate" || ref.Member == "Release")
+}
+
 func permissionRefGranted(ref ast.PermissionRef, granted map[string]bool) bool {
 	if ref.Name == "" {
+		return true
+	}
+	if isAmbientPermission(ref) {
 		return true
 	}
 	if granted[permissionAnyName] {
@@ -415,6 +427,18 @@ func filterOutPermissionFamily(families []string, drop string) []string {
 			continue
 		}
 		out = append(out, fam)
+	}
+	return out
+}
+
+// filterOutAmbientPermissionRefs drops ambient (always-granted) permissions from a ref list.
+func filterOutAmbientPermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
+	out := refs[:0:0]
+	for _, ref := range refs {
+		if isAmbientPermission(ref) {
+			continue
+		}
+		out = append(out, ref)
 	}
 	return out
 }

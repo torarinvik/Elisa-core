@@ -21,10 +21,25 @@ def dot(xs: darray[i64]&, ys: darray[i64]&, n: usize) -> i64:
 	}
 }
 
-// Allocation on the hot path is rejected — @hot makes region growth/realloc illegal so the
-// hot loop can't silently allocate.
-func TestAnalyzeHotContractRejectsAllocation(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "hot_alloc.elisa", `@hot
+// Region allocation is the frictionless default, so plain @hot ALLOWS it — only @hot(noalloc)
+// is the strict zero-allocation kernel. A @hot function that grows a darray analyzes cleanly.
+func TestAnalyzeHotContractAllowsAllocation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "hot_alloc_ok.elisa", `@hot
+def grow() -> i64:
+    can Abort.Panic:
+        xs: mutable darray[i64] = []
+        xs.push(7)
+        return xs[0]
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected plain @hot to permit region allocation, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// @hot(noalloc) is the strict variant — allocation on the hot path is rejected so the kernel
+// can't silently grow a region.
+func TestAnalyzeHotContractNoAllocRejectsAllocation(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "hot_alloc.elisa", `@hot(noalloc)
 def bad() -> i64:
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
@@ -32,28 +47,28 @@ def bad() -> i64:
         return xs[0]
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "@hot function") || !strings.Contains(all, "Memory.Allocate") {
-		t.Fatalf("expected a @hot allocation rejection, got:\n%s", all)
+	if !strings.Contains(all, "@hot(noalloc) function") || !strings.Contains(all, "Memory.Allocate") {
+		t.Fatalf("expected a @hot(noalloc) allocation rejection, got:\n%s", all)
 	}
 }
 
-// The ban is transitive: a @hot function that calls an allocating function is rejected too,
-// so the guarantee holds across call boundaries.
-func TestAnalyzeHotContractRejectsTransitiveAllocation(t *testing.T) {
+// The ban is transitive: a @hot(noalloc) function that calls an allocating function is
+// rejected too, so the guarantee holds across call boundaries.
+func TestAnalyzeHotContractNoAllocRejectsTransitiveAllocation(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "hot_transitive.elisa", `def allocates() -> i64:
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
         xs.push(1)
         return xs[0]
 
-@hot
+@hot(noalloc)
 def caller() -> i64:
     can Memory.Allocate, Abort.Panic:
         return allocates()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `@hot function "caller"`) || !strings.Contains(all, "Memory.Allocate") {
-		t.Fatalf("expected a transitive @hot allocation rejection, got:\n%s", all)
+	if !strings.Contains(all, `@hot(noalloc) function "caller"`) || !strings.Contains(all, "Memory.Allocate") {
+		t.Fatalf("expected a transitive @hot(noalloc) allocation rejection, got:\n%s", all)
 	}
 }
 

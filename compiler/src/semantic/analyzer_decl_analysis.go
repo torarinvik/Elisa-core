@@ -430,9 +430,20 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
-	if annotation.Name == "hot" || annotation.Name == "cold" {
+	if annotation.Name == "hot" {
+		// @hot takes an optional `noalloc` argument: a strict zero-allocation hot kernel
+		// (forbids region allocation too). Plain @hot allows region allocation.
+		for _, arg := range annotation.Args {
+			if strings.ToLower(strings.TrimSpace(arg)) != "noalloc" {
+				a.errorf(annotation.Position, "@hot on function %q only accepts the optional `noalloc` argument", fn.Name)
+				return false
+			}
+		}
+		return true
+	}
+	if annotation.Name == "cold" {
 		if len(annotation.Args) != 0 {
-			a.errorf(annotation.Position, "@%s on function %q does not take arguments", annotation.Name, fn.Name)
+			a.errorf(annotation.Position, "@cold on function %q does not take arguments", fn.Name)
 			return false
 		}
 		return true

@@ -163,6 +163,10 @@ func allUnsafeFamilies(families []string) bool {
 
 func (a *Analyzer) warnOnRedundantLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
 	refs = canonicalizePermissionRefs(refs)
+	// Ambient permissions (region allocation) are granted everywhere by construction, so
+	// declaring them is always technically redundant — but a legacy/explicit `can
+	// Memory.Allocate` is harmless and must not warn. Only non-ambient grants can be redundant.
+	refs = filterOutAmbientPermissionRefs(refs)
 	if len(refs) == 0 {
 		return
 	}

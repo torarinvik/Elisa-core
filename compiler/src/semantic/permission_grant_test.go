@@ -24,31 +24,31 @@ func analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t *testing.T, fil
 
 func TestDeclaredCallPermissionRequiresTopLevelGrant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_local_grant.elisa", `
-extern alloc_value() -> i64 can[Abort.Panic, Memory.Allocate]
+extern alloc_value() -> i64 can[Abort.Panic, Atomics.Load]
 
 def build() -> i64:
 	return alloc_value()
 `)
 	all := allDiagnostics(result)
-	if !strings.Contains(all, `call to "alloc_value" requires can[Abort, Memory] and has no explicit local effect grant; add  can[Abort.Panic, Memory.Allocate] or a surrounding can ...: block`) {
+	if !strings.Contains(all, `call to "alloc_value" requires can[Abort, Atomics] and has no explicit local effect grant; add  can[Abort.Panic, Atomics.Load] or a surrounding can ...: block`) {
 		t.Fatalf("expected missing top-level grant warning on call, got:\n%s", all)
 	}
 }
 
 func TestDeclaredCallPermissionCanInheritOuterExplicitGrant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_inner_local_grant.elisa", `
-extern alloc_value() -> i64 can[Abort.Panic, Memory.Allocate]
+extern alloc_value() -> i64 can[Abort.Panic, Atomics.Load]
 
 def build() -> i64:
-    can Abort.Panic, Memory.Allocate:
-        can Memory.Allocate:
+    can Abort.Panic, Atomics.Load:
+        can Atomics.Load:
             return alloc_value()
 `)
 	all := allDiagnostics(result)
 	if strings.Contains(all, `alloc_value`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected outer explicit grant to satisfy nested call, got:\n%s", all)
 	}
-	if !strings.Contains(all, `can block grants can Memory.Allocate redundantly`) {
+	if !strings.Contains(all, `can block grants can Atomics.Load redundantly`) {
 		t.Fatalf("expected redundant nested grant warning, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("build")
@@ -59,7 +59,7 @@ def build() -> i64:
 	if !ok {
 		t.Fatalf("expected build function type, got %T", sym.Type)
 	}
-	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Abort.Panic, Memory.Allocate]" {
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Abort.Panic, Atomics.Load]" {
 		t.Fatalf("expected inferred build permissions, got %q", got)
 	}
 	analysis, ok := result.FunctionAnalysisByName("build")
@@ -69,8 +69,8 @@ def build() -> i64:
 	if !hasFactTransform(analysis.FactTransforms, FactTransformRequire, FactEffects, "Abort.Panic", "requires effect authority") {
 		t.Fatalf("expected function analysis to expose Abort.Panic require transform, got %#v", analysis.FactTransforms)
 	}
-	if !hasFactTransform(analysis.FactTransforms, FactTransformRequire, FactEffects, "Memory.Allocate", "requires effect authority") {
-		t.Fatalf("expected function analysis to expose Memory.Allocate require transform, got %#v", analysis.FactTransforms)
+	if !hasFactTransform(analysis.FactTransforms, FactTransformRequire, FactEffects, "Atomics.Load", "requires effect authority") {
+		t.Fatalf("expected function analysis to expose Atomics.Load require transform, got %#v", analysis.FactTransforms)
 	}
 }
 
@@ -1506,15 +1506,15 @@ def build() -> void:
 func TestDeclaredPanicPermissionCanInheritOuterExplicitGrant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "declared_panic_permission_local_grant.elisa", `
 def build() -> void:
-    can Abort.Panic, Memory.Allocate:
-        can Memory.Allocate:
+    can Abort.Panic, Atomics.Load:
+        can Atomics.Load:
             panic("boom")
 `)
 	all := allDiagnostics(result)
 	if strings.Contains(all, `panic requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected outer explicit grant to satisfy nested panic, got:\n%s", all)
 	}
-	if !strings.Contains(all, `can block grants can Memory.Allocate redundantly`) {
+	if !strings.Contains(all, `can block grants can Atomics.Load redundantly`) {
 		t.Fatalf("expected redundant nested grant warning, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("build")
@@ -1525,7 +1525,7 @@ def build() -> void:
 	if !ok {
 		t.Fatalf("expected build function type, got %T", sym.Type)
 	}
-	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Abort.Panic, Memory.Allocate]" {
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Abort.Panic, Atomics.Load]" {
 		t.Fatalf("expected inferred build permissions, got %q", got)
 	}
 }
@@ -1554,14 +1554,14 @@ def build() -> void:
 
 func TestRedundantInlinePermissionGrantWarnsInsideGrantedScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "redundant_inline_permission_grant.elisa", `
-extern alloc_value() -> i64 can[Memory.Allocate]
+extern alloc_value() -> i64 can[Atomics.Load]
 
 def build() -> i64:
-    can Memory.Allocate:
-        return alloc_value() can Memory.Allocate
+    can Atomics.Load:
+        return alloc_value() can Atomics.Load
 `)
 	all := allDiagnostics(result)
-	if !strings.Contains(all, `inline can grants can Memory.Allocate redundantly`) {
+	if !strings.Contains(all, `inline can grants can Atomics.Load redundantly`) {
 		t.Fatalf("expected redundant inline grant warning, got:\n%s", all)
 	}
 	if strings.Contains(all, `call to "alloc_value" requires`) {
