@@ -112,8 +112,15 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		// `@r` is only meaningful on types that actually carry a region (containers and
 		// region-parameterized generics). On a scalar builtin like `i32 @r` the region
 		// was silently dropped; reject it so the notation means one thing everywhere.
-		if n.Region != "" && !IsInvalidType(resolved) && !typeCanCarryRegion(resolved) {
-			a.errorf(n.Pos(), "region annotation `@%s` applies to containers, references, and region-parameterized types; %s cannot carry a region", n.Region, resolved)
+		if n.Region != "" && !IsInvalidType(resolved) {
+			if !typeCanCarryRegion(resolved) {
+				a.errorf(n.Pos(), "region annotation `@%s` applies to containers, references, and region-parameterized types; %s cannot carry a region", n.Region, resolved)
+			} else if !a.regionQualifierDefined(n.Region) {
+				// An unknown region name silently bypassed the nested-region escape check
+				// (`darray[u8] @misnamed = inner_value` was accepted where `@outer` is
+				// rejected). Diagnose it like RefType already does.
+				a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
+			}
 		}
 		return resolved
 	case *ast.FuncTypeExpr:
@@ -197,6 +204,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		// to unify). For top-level types canonical == lookupName, so this is a no-op.
 		if canonical != "" {
 			lookupName = canonical
+		}
+		// A `@r` provenance on a generic instance (e.g. `Box[i64] @r`) must name a region
+		// that actually exists; an unknown name silently bypassed the escape check.
+		if n.Region != "" && !a.regionQualifierDefined(n.Region) {
+			a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
 		}
 		switch base := base.(type) {
 		case *PackedEnumStoreType:
