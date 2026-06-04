@@ -35,6 +35,23 @@ type StaticImpl struct {
 	AssociatedTypes map[string]Type
 	Methods         map[string]*Symbol
 	Decl            *ast.ImplDecl
+	// TypeParams names the impl's own type parameters (from `impl[T] ... for Box[T]`).
+	// When non-empty the impl is parametric: its Receiver pattern carries these as free
+	// TypeParamType leaves, and a concrete receiver is matched by unifying against them.
+	TypeParams []string
+}
+
+// implTypeParamNames returns the impl's type-parameter names, for use as the free-variable
+// set when unifying a concrete receiver against the impl's Receiver pattern.
+func (impl *StaticImpl) implTypeParamNames() map[string]bool {
+	if impl == nil || len(impl.TypeParams) == 0 {
+		return nil
+	}
+	free := make(map[string]bool, len(impl.TypeParams))
+	for _, name := range impl.TypeParams {
+		free[name] = true
+	}
+	return free
 }
 
 type InterfaceMethodRef struct {
@@ -70,16 +87,133 @@ func LookupStaticImpl(impls map[string]*StaticImpl, interfaceName string, receiv
 	return impl, ok && impl != nil
 }
 
+// UnifyTypePattern structurally matches a concrete type against a pattern type whose
+// free variables are named in freeVars (the type params of a parametric impl), producing
+// the substitution that makes them equal. Returns ok=false if the head constructors don't
+// line up (so the impl does not apply). A free var bound twice must agree (SameType).
+func UnifyTypePattern(pattern, actual Type, freeVars map[string]bool) (map[string]Type, bool) {
+	subst := map[string]Type{}
+	if !unifyTypePattern(pattern, actual, freeVars, subst) {
+		return nil, false
+	}
+	return subst, true
+}
+
+func unifyTypePattern(pattern, actual Type, freeVars map[string]bool, subst map[string]Type) bool {
+	if pattern == nil || actual == nil {
+		return pattern == nil && actual == nil
+	}
+	if tp, ok := pattern.(*TypeParamType); ok && freeVars[tp.Name] {
+		if existing, seen := subst[tp.Name]; seen {
+			return SameType(existing, actual)
+		}
+		subst[tp.Name] = actual
+		return true
+	}
+	switch p := pattern.(type) {
+	case *GenericInstanceType:
+		a, ok := actual.(*GenericInstanceType)
+		if !ok || p.Name != a.Name || len(p.Args) != len(a.Args) {
+			return false
+		}
+		for i := range p.Args {
+			if !unifyTypePattern(p.Args[i], a.Args[i], freeVars, subst) {
+				return false
+			}
+		}
+		return true
+	case *DArrayType:
+		a, ok := actual.(*DArrayType)
+		return ok && unifyTypePattern(p.Elem, a.Elem, freeVars, subst)
+	case *DictType:
+		a, ok := actual.(*DictType)
+		return ok && unifyTypePattern(p.Key, a.Key, freeVars, subst) && unifyTypePattern(p.Value, a.Value, freeVars, subst)
+	case *RefType:
+		a, ok := actual.(*RefType)
+		return ok && unifyTypePattern(p.Elem, a.Elem, freeVars, subst)
+	case *ViewType:
+		a, ok := actual.(*ViewType)
+		return ok && unifyTypePattern(p.Elem, a.Elem, freeVars, subst)
+	default:
+		return SameType(pattern, actual)
+	}
+}
+
+// LookupStaticImplUnifying resolves an impl for a concrete receiver, trying an exact
+// (concrete-impl) hit first, then matching any parametric impl by unifying its Receiver
+// pattern against the concrete receiver. On a parametric match it returns the substitution
+// {T: i64, …}; for an exact match the substitution is empty.
+func LookupStaticImplUnifying(impls map[string]*StaticImpl, interfaceName string, receiver Type) (*StaticImpl, map[string]Type, bool) {
+	if impl, ok := LookupStaticImpl(impls, interfaceName, receiver); ok {
+		return impl, nil, true
+	}
+	for _, impl := range impls {
+		if impl == nil || impl.InterfaceName != interfaceName || len(impl.TypeParams) == 0 {
+			continue
+		}
+		if subst, ok := UnifyTypePattern(impl.Receiver, receiver, impl.implTypeParamNames()); ok {
+			return impl, subst, true
+		}
+	}
+	return nil, nil, false
+}
+
+// substituteTypeParamsByName replaces free TypeParamType leaves named in subst, copying
+// composite types field-by-field so unrelated fields (shape, region, storage) are kept.
+// It is a small self-contained substituter for the free static-interface resolvers, which
+// run without an *Analyzer.
+func substituteTypeParamsByName(t Type, subst map[string]Type) Type {
+	if t == nil || len(subst) == 0 {
+		return t
+	}
+	switch tt := t.(type) {
+	case *TypeParamType:
+		if r, ok := subst[tt.Name]; ok && r != nil {
+			return r
+		}
+		return t
+	case *GenericInstanceType:
+		clone := *tt
+		clone.Args = make([]Type, len(tt.Args))
+		for i, a := range tt.Args {
+			clone.Args[i] = substituteTypeParamsByName(a, subst)
+		}
+		return &clone
+	case *DArrayType:
+		clone := *tt
+		clone.Elem = substituteTypeParamsByName(tt.Elem, subst)
+		return &clone
+	case *DictType:
+		clone := *tt
+		clone.Key = substituteTypeParamsByName(tt.Key, subst)
+		clone.Value = substituteTypeParamsByName(tt.Value, subst)
+		return &clone
+	case *RefType:
+		clone := *tt
+		clone.Elem = substituteTypeParamsByName(tt.Elem, subst)
+		return &clone
+	case *ViewType:
+		clone := *tt
+		clone.Elem = substituteTypeParamsByName(tt.Elem, subst)
+		return &clone
+	default:
+		return t
+	}
+}
+
 func ResolveAssociatedTypeProjection(proj *AssociatedTypeProjection, impls map[string]*StaticImpl) (Type, bool) {
 	if proj == nil || proj.Receiver == nil || proj.InterfaceName == "" || proj.Name == "" {
 		return nil, false
 	}
-	impl, ok := LookupStaticImpl(impls, proj.InterfaceName, proj.Receiver)
+	impl, subst, ok := LookupStaticImplUnifying(impls, proj.InterfaceName, proj.Receiver)
 	if !ok || impl == nil {
 		return nil, false
 	}
 	resolved, ok := impl.AssociatedTypes[proj.Name]
-	return resolved, ok && resolved != nil
+	if !ok || resolved == nil {
+		return nil, false
+	}
+	return substituteTypeParamsByName(resolved, subst), true
 }
 
 func sanitizeStaticInterfaceSymbolFragment(value string) string {
@@ -351,101 +485,116 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 				a.errorf(decl.Pos(), "%s", UnknownInterfaceMessage(decl.InterfaceName))
 				return
 			}
-			receiver := a.resolveType(decl.ForType)
-			if receiver == nil || IsInvalidType(receiver) {
-				return
-			}
-			key := StaticImplLookupKey(interfaceName, receiver)
-			if _, exists := a.staticImpls[key]; exists {
-				a.errorf(decl.Pos(), "duplicate impl of interface %q for %s", interfaceName, receiver.String())
-				return
-			}
-			impl := &StaticImpl{
-				InterfaceName:   interfaceName,
-				Receiver:        receiver,
-				AssociatedTypes: map[string]Type{},
-				Methods:         map[string]*Symbol{},
-				Decl:            decl,
-			}
-			seenAssoc := map[string]bool{}
-			seenMethods := map[string]bool{}
-			methodDecls := make([]ast.Node, 0, len(decl.Members))
-			for _, member := range decl.Members {
-				switch n := member.(type) {
-				case *ast.ImplAssociatedTypeDecl:
-					if seenAssoc[n.Name] {
-						a.errorf(n.Pos(), "duplicate impl associated type %q in impl of %q", n.Name, interfaceName)
+			a.withGenericParams(decl.GenericParams, nil, func() {
+				receiver := a.resolveType(decl.ForType)
+				if receiver == nil || IsInvalidType(receiver) {
+					return
+				}
+				key := StaticImplLookupKey(interfaceName, receiver)
+				if _, exists := a.staticImpls[key]; exists {
+					a.errorf(decl.Pos(), "duplicate impl of interface %q for %s", interfaceName, receiver.String())
+					return
+				}
+				impl := &StaticImpl{
+					InterfaceName:   interfaceName,
+					Receiver:        receiver,
+					TypeParams:      implTypeParamNamesFromDecl(decl.GenericParams),
+					AssociatedTypes: map[string]Type{},
+					Methods:         map[string]*Symbol{},
+					Decl:            decl,
+				}
+				seenAssoc := map[string]bool{}
+				seenMethods := map[string]bool{}
+				methodDecls := make([]ast.Node, 0, len(decl.Members))
+				for _, member := range decl.Members {
+					switch n := member.(type) {
+					case *ast.ImplAssociatedTypeDecl:
+						if seenAssoc[n.Name] {
+							a.errorf(n.Pos(), "duplicate impl associated type %q in impl of %q", n.Name, interfaceName)
+							continue
+						}
+						seenAssoc[n.Name] = true
+						if _, ok := iface.AssociatedTypes[n.Name]; !ok {
+							a.errorf(n.Pos(), "interface %q has no associated type %q", interfaceName, n.Name)
+							continue
+						}
+						impl.AssociatedTypes[n.Name] = a.resolveType(n.Type)
+					case *ast.FuncDecl:
+						methodDecls = append(methodDecls, n)
+						if seenMethods[n.Name] {
+							a.errorf(n.Pos(), "duplicate impl method %q in impl of %q", n.Name, interfaceName)
+							continue
+						}
+						seenMethods[n.Name] = true
+					case *ast.ExternFuncDecl:
+						methodDecls = append(methodDecls, n)
+						if seenMethods[n.Name] {
+							a.errorf(n.Pos(), "duplicate impl method %q in impl of %q", n.Name, interfaceName)
+							continue
+						}
+						seenMethods[n.Name] = true
+					}
+				}
+				a.staticImpls[key] = impl
+				for _, member := range methodDecls {
+					var name string
+					var pos ast.Node
+					switch n := member.(type) {
+					case *ast.FuncDecl:
+						name = n.Name
+						pos = n
+					case *ast.ExternFuncDecl:
+						name = n.Name
+						pos = n
+					default:
 						continue
 					}
-					seenAssoc[n.Name] = true
-					if _, ok := iface.AssociatedTypes[n.Name]; !ok {
-						a.errorf(n.Pos(), "interface %q has no associated type %q", interfaceName, n.Name)
+					methodInfo, ok := iface.Methods[name]
+					if !ok || methodInfo == nil {
+						a.errorf(pos.Pos(), "interface %q has no method %q", interfaceName, name)
 						continue
 					}
-					impl.AssociatedTypes[n.Name] = a.resolveType(n.Type)
-				case *ast.FuncDecl:
-					methodDecls = append(methodDecls, n)
-					if seenMethods[n.Name] {
-						a.errorf(n.Pos(), "duplicate impl method %q in impl of %q", n.Name, interfaceName)
+					symbolName := StaticImplMethodSymbolName(interfaceName, receiver, name)
+					sym, ok := a.globalScope.Lookup(symbolName)
+					if !ok || sym == nil {
+						a.errorf(pos.Pos(), "internal error: missing impl method symbol %q", symbolName)
 						continue
 					}
-					seenMethods[n.Name] = true
-				case *ast.ExternFuncDecl:
-					methodDecls = append(methodDecls, n)
-					if seenMethods[n.Name] {
-						a.errorf(n.Pos(), "duplicate impl method %q in impl of %q", n.Name, interfaceName)
+					actualSig, ok := sym.Type.(*FuncType)
+					if !ok || actualSig == nil {
+						a.errorf(pos.Pos(), "impl method %q does not resolve to a function signature", name)
 						continue
 					}
-					seenMethods[n.Name] = true
+					expectedSig := a.specializeInterfaceMethodSignature(methodInfo.Signature, receiver)
+					if !SameType(expectedSig, actualSig) {
+						a.errorf(pos.Pos(), "impl method %q for interface %q expects %s, got %s", name, interfaceName, expectedSig, actualSig)
+						continue
+					}
+					impl.Methods[name] = sym
 				}
-			}
-			a.staticImpls[key] = impl
-			for _, member := range methodDecls {
-				var name string
-				var pos ast.Node
-				switch n := member.(type) {
-				case *ast.FuncDecl:
-					name = n.Name
-					pos = n
-				case *ast.ExternFuncDecl:
-					name = n.Name
-					pos = n
-				default:
-					continue
+				for name := range iface.AssociatedTypes {
+					if _, ok := impl.AssociatedTypes[name]; !ok {
+						a.errorf(decl.Pos(), "impl of interface %q for %s is missing associated type %q", interfaceName, receiver, name)
+					}
 				}
-				methodInfo, ok := iface.Methods[name]
-				if !ok || methodInfo == nil {
-					a.errorf(pos.Pos(), "interface %q has no method %q", interfaceName, name)
-					continue
+				for name := range iface.Methods {
+					if _, ok := impl.Methods[name]; !ok {
+						a.errorf(decl.Pos(), "impl of interface %q for %s is missing method %q", interfaceName, receiver, name)
+					}
 				}
-				symbolName := StaticImplMethodSymbolName(interfaceName, receiver, name)
-				sym, ok := a.globalScope.Lookup(symbolName)
-				if !ok || sym == nil {
-					a.errorf(pos.Pos(), "internal error: missing impl method symbol %q", symbolName)
-					continue
-				}
-				actualSig, ok := sym.Type.(*FuncType)
-				if !ok || actualSig == nil {
-					a.errorf(pos.Pos(), "impl method %q does not resolve to a function signature", name)
-					continue
-				}
-				expectedSig := a.specializeInterfaceMethodSignature(methodInfo.Signature, receiver)
-				if !SameType(expectedSig, actualSig) {
-					a.errorf(pos.Pos(), "impl method %q for interface %q expects %s, got %s", name, interfaceName, expectedSig, actualSig)
-					continue
-				}
-				impl.Methods[name] = sym
-			}
-			for name := range iface.AssociatedTypes {
-				if _, ok := impl.AssociatedTypes[name]; !ok {
-					a.errorf(decl.Pos(), "impl of interface %q for %s is missing associated type %q", interfaceName, receiver, name)
-				}
-			}
-			for name := range iface.Methods {
-				if _, ok := impl.Methods[name]; !ok {
-					a.errorf(decl.Pos(), "impl of interface %q for %s is missing method %q", interfaceName, receiver, name)
-				}
-			}
+			})
 		})
 	}
+}
+
+// implTypeParamNamesFromDecl extracts the plain type-parameter names declared on an impl
+// (`impl[T, U] ...`), used to mark the impl parametric and as the unification free-var set.
+func implTypeParamNamesFromDecl(params []ast.GenericParam) []string {
+	var names []string
+	for _, param := range params {
+		if param.Kind == ast.GenericParamType {
+			names = append(names, param.Name)
+		}
+	}
+	return names
 }

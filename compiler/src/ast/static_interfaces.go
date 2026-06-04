@@ -23,6 +23,10 @@ type ImplDecl struct {
 	Position      lexer.Pos
 	Annotations   []Annotation
 	InterfaceName string
+	// GenericParams are the impl's own type parameters, from `impl[T] Iface for Box[T]:`.
+	// They scope ForType and the impl members, making the impl a parametric (blanket) impl
+	// that matches every instantiation of ForType's head constructor.
+	GenericParams []GenericParam
 	ForType       TypeExpr
 	Members       []ImplMember
 }

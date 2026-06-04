@@ -41,7 +41,7 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 	if receiver == nil {
 		return nil, nil, true, fmt.Errorf("missing receiver type for static interface method %s.%s", ref.InterfaceName, ref.MethodName)
 	}
-	impl, ok := semantic.LookupStaticImpl(s.g.result.StaticImpls, ref.InterfaceName, receiver)
+	impl, _, ok := semantic.LookupStaticImplUnifying(s.g.result.StaticImpls, ref.InterfaceName, receiver)
 	if !ok || impl == nil {
 		return nil, nil, true, fmt.Errorf("type %s does not implement interface %s", receiver.String(), ref.InterfaceName)
 	}
@@ -92,14 +92,30 @@ func (s *functionState) resolveStaticAssociatedType(name string) (semantic.Type,
 	var matched semantic.Type
 	matchCount := 0
 	for _, impl := range s.g.result.StaticImpls {
-		if impl == nil || impl.Receiver == nil || !semantic.SameType(impl.Receiver, receiver) {
+		if impl == nil || impl.Receiver == nil {
+			continue
+		}
+		var subst map[string]semantic.Type
+		if semantic.SameType(impl.Receiver, receiver) {
+			// exact (concrete impl) match — no substitution
+		} else if len(impl.TypeParams) > 0 {
+			free := make(map[string]bool, len(impl.TypeParams))
+			for _, name := range impl.TypeParams {
+				free[name] = true
+			}
+			s2, ok := semantic.UnifyTypePattern(impl.Receiver, receiver, free)
+			if !ok {
+				continue
+			}
+			subst = s2
+		} else {
 			continue
 		}
 		assocType, ok := impl.AssociatedTypes[assocName]
 		if !ok || assocType == nil {
 			continue
 		}
-		matched = assocType
+		matched = substituteType(assocType, subst, s.g.result.StaticImpls)
 		matchCount++
 	}
 	if matchCount == 0 {

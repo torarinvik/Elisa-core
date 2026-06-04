@@ -153,6 +153,12 @@ func (p *Parser) parseImplDecl() *ast.ImplDecl {
 func (p *Parser) parseImplDeclWithAnnotations(annotations []ast.Annotation) *ast.ImplDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("impl")
+	var genericParams []ast.GenericParam
+	if p.peek() == lexer.TOKEN_LBRACKET {
+		// `impl[T] Iface for Box[T]:` — parametric impl. Reuse the function generic-param
+		// grammar; only the plain type params are relevant for impl matching.
+		_, _, _, genericParams = p.parseFuncGenericParams()
+	}
 	interfaceName := ""
 	var forType ast.TypeExpr
 	if p.peekQualifiedDeclNameFollowedBy("for") {
@@ -208,7 +214,7 @@ func (p *Parser) parseImplDeclWithAnnotations(annotations []ast.Annotation) *ast
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.ImplDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), InterfaceName: interfaceName, ForType: forType, Members: members}
+	return &ast.ImplDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), InterfaceName: interfaceName, GenericParams: genericParams, ForType: forType, Members: members}
 }
 
 func (p *Parser) parseImplAssociatedTypeDecl() *ast.ImplAssociatedTypeDecl {

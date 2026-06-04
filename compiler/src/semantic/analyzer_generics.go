@@ -154,7 +154,7 @@ func (a *Analyzer) typeSatisfiesStaticInterface(candidate Type, iface *StaticInt
 		boundIface, ok := a.lookupTypeParamInterface(typeParam.Name)
 		return ok && boundIface != nil && boundIface.Name == iface.Name
 	}
-	_, ok := LookupStaticImpl(a.staticImpls, iface.Name, candidate)
+	_, _, ok := LookupStaticImplUnifying(a.staticImpls, iface.Name, candidate)
 	return ok
 }
 
