@@ -22,8 +22,15 @@
   loop is warned toward batch allocation; precise — `push` accumulation and packed-node sugar
   are not flagged, single `new` outside a loop is silent. Zero noise (nothing in
   stdlib/fixtures uses `new` in a loop).
-- ⏭ Next: `slow:` quarantine blocks, graduated `-Wperf` (turn the lint warnings into
-  enforceable errors for shipped code).
+- ✅ **`-Wperf` graduated strictness LANDED** (commit d1636cdb): the pointer-graph and churn
+  lints are warnings by default but `-Wperf` promotes them to hard errors (via
+  AnalyzeOptions.EnforcePerfLints + the `perfLint` helper), so shipped code can ban the
+  anti-patterns outright — the "illegal" half of the goal.
+- The model is now functionally complete: `@hot` (slow effects, always enforced),
+  pointer-graph + churn lints (slow structure / alloc pattern), `-Wperf` (enforcement lever).
+- **`slow:` quarantine block: DROPPED** — like `Memory.Heap` it was premised on a malloc
+  path that doesn't exist; raw-pointer work is already quarantined by `trusted Unsafe.*:`, so
+  it would largely duplicate it. Revisit only if a distinct slow-but-safe op appears.
 
 ## Thesis
 
