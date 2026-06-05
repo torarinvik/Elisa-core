@@ -162,7 +162,12 @@ func (a *Analyzer) analyzeAutoAllocExpr(expr *ast.AllocExpr, expected Type) Type
 			a.errorf(expr.Pos(), "packed enum %q is missing store layout metadata", enumType.Name)
 			return invalidType
 		}
-		return a.analyzePackedAllocExpr(expr, PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"]))
+		localStoreType := PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"])
+		// Register the implicit region-backed store as the active store for this enum (docs/74), so
+		// subsequent `new[auto] Expr.V` and storeless `match node:` in the region resolve to it
+		// without an explicit `in Store:` clause.
+		a.bindActivePackedStoreType(localStoreType)
+		return a.analyzePackedAllocExpr(expr, localStoreType)
 	}
 	valueType := a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
 	// Same constraint as an explicit region: a region bulk-frees without running destructors or

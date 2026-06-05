@@ -9,6 +9,78 @@ import (
 	"testing"
 )
 
+// docs/74 steps 2-3, single function (no cross-function threading): `new[auto] Expr.V(...)` for a
+// packed enum allocates into an implicit region-backed store (columns on the `in auto:` arena), and
+// storeless `match node:` (no `in Store:`) recovers that store from the active binding. Builds
+// Add(Int 5, Int 7) and reads it back via nested storeless matches → 12. A broken store binding
+// would read garbage or fail to compile.
+func TestRegionBackedPackedEnumSingleFunction(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := "include \"" + std + "\"\n" + `
+packed enum Expr:
+    common:
+        span: int
+    Int(value: int)
+    Add(left: Expr, right: Expr)
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Expr = new[auto] Expr.Int(span: 0, value: 5)
+            b: Expr = new[auto] Expr.Int(span: 0, value: 7)
+            root: Expr = new[auto] Expr.Add(span: 0, left: a, right: b)
+            sum: mutable i64 = 0
+            match root:
+                Expr.Int(value: v):
+                    sum <- v
+                Expr.Add(left: l, right: r):
+                    match l:
+                        Expr.Int(value: lv):
+                            sum <- sum + lv
+                        Expr.Add(left: l2, right: r2):
+                            sum <- sum + 100
+                    match r:
+                        Expr.Int(value: rv):
+                            sum <- sum + rv
+                        Expr.Add(left: l3, right: r3):
+                            sum <- sum + 100
+            if sum != 12:
+                panic("region-backed packed enum produced wrong sum")
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bt_packed.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+	if out, err := exec.Command(exePath, "bt").CombinedOutput(); err != nil {
+		t.Fatalf("region-backed packed enum run failed: %v\noutput:\n%s", err, string(out))
+	}
+}
+
 // docs/75: a recursive `new[auto]` builder. `make` is region-polymorphic — it threads the caller's
 // region (the `in auto:` in `bt`) through every recursive call, so all 101 nodes land in ONE region
 // and each survives to be read by the next level. depth-100 adds 1 per level → value 101. If

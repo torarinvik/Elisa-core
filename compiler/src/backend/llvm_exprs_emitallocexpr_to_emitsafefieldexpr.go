@@ -82,6 +82,9 @@ import (
 
 func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if expr.AutoRegion {
+		if s.isAutoRegionPackedConstructor(expr.Value) {
+			return s.emitAutoRegionPackedAllocExpr(expr)
+		}
 		return s.emitRegionStructAlloc(expr, s.autoRegionBinding())
 	}
 	if expr.Owner == nil {
@@ -194,6 +197,80 @@ func (s *functionState) emitRegionStructAlloc(expr *ast.AllocExpr, binding value
 	C.LLVMBuildStore(s.builder, value, allocPtr)
 	return allocPtr, s.exprType(expr), nil
 }
+// isAutoRegionPackedConstructor reports whether a `new[auto]` value is a packed enum constructor
+// (vs a plain struct). Packed constructors take the region-backed implicit-store path (docs/74);
+// structs take the arena path.
+func (s *functionState) isAutoRegionPackedConstructor(value ast.Expr) bool {
+	switch n := value.(type) {
+	case *ast.FieldExpr:
+		enumType, variant, ok := s.enumConstructorInfoFromField(n)
+		return ok && enumType != nil && variant != nil && enumType.Packed
+	case *ast.CallExpr:
+		enumType, variant, ok := s.enumConstructorInfo(n)
+		return ok && enumType != nil && variant != nil && enumType.Packed
+	}
+	return false
+}
+
+// emitAutoRegionPackedAllocExpr lowers `new[auto] Expr.V(...)` (docs/74): get-or-create the implicit
+// region-backed store for the enum (its columns backed by the active inferred region's arena, its
+// lifetime = the region), then push the node row into it. The first new[auto] for an enum in a
+// region creates the store; the rest reuse it, so all nodes share one store and their u32 handles
+// stay mutually valid.
+func (s *functionState) emitAutoRegionPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+	switch n := expr.Value.(type) {
+	case *ast.FieldExpr:
+		enumType, variant, ok := s.enumConstructorInfoFromField(n)
+		if !ok || enumType == nil || variant == nil || !enumType.Packed {
+			return nil, nil, fmt.Errorf("new[auto] expects a packed enum constructor")
+		}
+		store, err := s.getOrCreateRegionPackedStore(enumType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitPackedEnumConstructorAlloc(nil, store.value, enumType, variant, nil, nil)
+	case *ast.CallExpr:
+		enumType, variant, ok := s.enumConstructorInfo(n)
+		if !ok || enumType == nil || variant == nil || !enumType.Packed {
+			return nil, nil, fmt.Errorf("new[auto] expects a packed enum constructor")
+		}
+		store, err := s.getOrCreateRegionPackedStore(enumType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitPackedEnumConstructorAlloc(n, store.value, enumType, variant, n.Args, n.ArgNames)
+	default:
+		return nil, nil, fmt.Errorf("new[auto] expects a packed enum constructor")
+	}
+}
+
+// getOrCreateRegionPackedStore returns the implicit packed store for enumType active in the current
+// region, creating it (backed by the active inferred region's arena) on first use and registering it
+// as the active store so subsequent new[auto] allocations and storeless `match` resolve to it.
+func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType) (packedStoreBinding, error) {
+	if binding, ok := s.lookupPackedStore(enumType); ok {
+		return binding, nil
+	}
+	arenaPtr := s.treeAllocOwner.arenaRef
+	if arenaPtr == nil {
+		return packedStoreBinding{}, fmt.Errorf("new[auto] packed allocation has no active inferred region arena")
+	}
+	if enumType.StoreType == nil {
+		return packedStoreBinding{}, fmt.Errorf("packed enum %s is missing store layout metadata", enumType.Name)
+	}
+	storeType := semantic.PackedEnumStoreWithState(enumType.StoreType, s.g.result.NamedTypes["Local"])
+	storeValue, err := s.emitPackedStoreValueFromArenaPtr(arenaPtr, storeType)
+	if err != nil {
+		return packedStoreBinding{}, err
+	}
+	if s.packedStores == nil {
+		s.packedStores = map[string]packedStoreBinding{}
+	}
+	binding := packedStoreBinding{value: storeValue, typ: storeType}
+	s.packedStores[enumType.Name] = binding
+	return binding, nil
+}
+
 func (s *functionState) emitScopedPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
 	switch n := expr.Value.(type) {
 	case *ast.FieldExpr:

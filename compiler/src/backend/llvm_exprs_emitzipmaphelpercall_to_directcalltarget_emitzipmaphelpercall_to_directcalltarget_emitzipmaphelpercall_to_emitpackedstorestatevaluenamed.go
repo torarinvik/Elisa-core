@@ -408,6 +408,20 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 	if err != nil {
 		return nil, err
 	}
+	return s.emitPackedStoreValueFromArenaPtr(arenaPtr, storeType)
+}
+
+// emitPackedStoreValueFromArenaPtr builds a fresh PackedStoreState backed by the given Arena pointer
+// (the `{arena, row_bytes, state}` triple). Used both by an explicit `Expr.Store(arena)` and by the
+// implicit region-backed store created for `new[auto] Expr.V(...)` (docs/74), which threads the
+// active inferred region's arena directly as a value rather than re-emitting an arena expression.
+func (s *functionState) emitPackedStoreValueFromArenaPtr(arenaPtr C.LLVMValueRef, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing packed enum store type")
+	}
+	if arenaPtr == nil {
+		return nil, fmt.Errorf("missing arena for region-backed packed store")
+	}
 	if storeType.Enum == nil {
 		return nil, fmt.Errorf("packed enum store %s is missing enum metadata", storeType.Name)
 	}
