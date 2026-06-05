@@ -236,6 +236,12 @@ type regionLifetimeLocal struct {
 	name  string
 	birth int // declaration offset
 	death int // last-use offset (loop-clamped); == birth if never used after decl
+	// firstUse is the earliest use offset (raw, not loop-clamped); -1 if never used. With
+	// firstUseInLoop it decides whether a concrete disjoint-reorder remedy is provably legal:
+	// declaring this object just below an earlier object's last use is safe only when this
+	// object's first use is straight-line (not inside a loop) and already past that point.
+	firstUse       int
+	firstUseInLoop bool
 }
 
 // analyzeRegionLifetimes flags interleaved object lifetimes within one inferred region.
@@ -253,7 +259,7 @@ func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt, asn RegionStac
 			continue // top-level shadowing — skip, can't disambiguate by name
 		}
 		byName[vd.Name] = len(locals)
-		locals = append(locals, regionLifetimeLocal{name: vd.Name, birth: vd.Position.Offset, death: vd.Position.Offset})
+		locals = append(locals, regionLifetimeLocal{name: vd.Name, birth: vd.Position.Offset, death: vd.Position.Offset, firstUse: -1})
 	}
 	if len(locals) < 2 {
 		return // need at least two objects to interleave
@@ -273,6 +279,10 @@ func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt, asn RegionStac
 		}
 		if death > locals[u.localIdx].death {
 			locals[u.localIdx].death = death
+		}
+		if loc := &locals[u.localIdx]; loc.firstUse < 0 || u.stmtOff < loc.firstUse {
+			loc.firstUse = u.stmtOff
+			loc.firstUseInLoop = u.loop != nil
 		}
 	}
 
@@ -302,9 +312,21 @@ func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt, asn RegionStac
 					continue
 				}
 				flagged[j] = true
-				a.errorf(declPosFor(region, lj.name),
-					"interleaved object lifetimes in an inferred region: %q is still live when %q is created but is last used before %q dies — their lifetimes cross, and the region's stack budget (%d) is exhausted so they cannot be separated. Put one in an explicit region (`in r:` / `region r(...)`) so the lifetimes nest, or reorder so one fully contains the other.",
-					li.name, lj.name, lj.name, regionStackCap)
+				// Name the specific remedy. The one legal reorder lever is moving lj's BIRTH:
+				// declaring lj below li's last use makes the two ranges disjoint. That is provably
+				// safe only when lj is not touched until after li dies AND its first use is
+				// straight-line (we have no loop-start offset, so an in-loop first use can't be
+				// shown to sit past li's death). Otherwise the ranges genuinely overlap and only
+				// a separate region or a reservation can split them.
+				if !lj.firstUseInLoop && lj.firstUse > li.death {
+					a.errorf(declPosFor(region, lj.name),
+						"interleaved object lifetimes in an inferred region: %q is created while %q is still live, but %q is last used before %q is first used — their lifetimes cross and the region's stack budget (%d) is exhausted, so they cannot share a bump-stack. Move %q's declaration below %q's last use (their live ranges are disjoint, so this makes the lifetimes nest), or put one in an explicit region (`in r:` / `region r(...)`), or reserve() one of them.",
+						lj.name, li.name, li.name, lj.name, regionStackCap, lj.name, li.name)
+				} else {
+					a.errorf(declPosFor(region, lj.name),
+						"interleaved object lifetimes in an inferred region: %q is created while %q is still live and their live ranges overlap, and the region's stack budget (%d) is exhausted, so they cannot share a bump-stack. Put one in an explicit region (`in r:` / `region r(...)`) so the lifetimes nest, or reserve() one of them (a reserved container is fixed-footprint and shares the base stack).",
+						lj.name, li.name, regionStackCap)
+				}
 			}
 		}
 	}

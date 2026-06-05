@@ -294,3 +294,69 @@ func TestRegionGrowthTailOrderNoWarning(t *testing.T) {
 		t.Fatalf("tail-ordered growth must not warn, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// When the stack budget is exhausted and two merge-stack residents cross, the error names the
+// SPECIFIC remedy. If the later object is not touched until after the earlier one dies (a
+// straight-line gap), a concrete disjoint-reorder is provably legal, so the message says exactly
+// which declaration to move — modeled on the struct-padding "consider ordering ..." lint.
+func TestInterleavedErrorNamesConcreteReorderWhenLegal(t *testing.T) {
+	// Six unreserved growables: a..d take stacks 1-4, e and g share the merge stack. g's first use
+	// is after e's last use, so their live ranges are disjoint once g's decl moves down.
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "xreorder.elisa", `def prog() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        c: mutable darray[i64] = []
+        d: mutable darray[i64] = []
+        e: mutable darray[i64] = []
+        g: mutable darray[i64] = []
+        a.push(1)
+        b.push(1)
+        c.push(1)
+        d.push(1)
+        e.push(1)
+        e.push(2)
+        g.push(1)
+        g.push(2)
+`, AnalyzeOptions{})
+	diag := allDiagnostics(result)
+	if !strings.Contains(diag, "interleaved object lifetimes") {
+		t.Fatalf("expected an interleaved-lifetime error for the over-budget merge-stack crossing, got:\n%s", diag)
+	}
+	if !strings.Contains(diag, `Move "g"'s declaration below "e"'s last use`) {
+		t.Fatalf("expected the message to name the concrete reorder, got:\n%s", diag)
+	}
+}
+
+// When the two crossing objects' live ranges genuinely OVERLAP (the later one is used before the
+// earlier one dies), no declaration move can separate them, so the message must NOT claim a reorder
+// is available — it offers only the always-valid remedies (separate region / reserve).
+func TestInterleavedErrorOmitsReorderWhenRangesOverlap(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "xoverlap.elisa", `def prog() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        c: mutable darray[i64] = []
+        d: mutable darray[i64] = []
+        e: mutable darray[i64] = []
+        g: mutable darray[i64] = []
+        a.push(1)
+        b.push(1)
+        c.push(1)
+        d.push(1)
+        e.push(1)
+        g.push(1)
+        e.push(2)
+        g.push(2)
+`, AnalyzeOptions{})
+	diag := allDiagnostics(result)
+	if !strings.Contains(diag, "interleaved object lifetimes") {
+		t.Fatalf("expected an interleaved-lifetime error, got:\n%s", diag)
+	}
+	if strings.Contains(diag, "declaration below") {
+		t.Fatalf("ranges overlap — no reorder is legal, so the message must not suggest one; got:\n%s", diag)
+	}
+	if !strings.Contains(diag, "their live ranges overlap") || !strings.Contains(diag, "reserve()") {
+		t.Fatalf("expected the overlap message to offer the region/reserve remedies, got:\n%s", diag)
+	}
+}
