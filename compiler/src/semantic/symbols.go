@@ -50,6 +50,7 @@ type Result struct {
 	CastHooks               map[ast.Expr]*Symbol
 	InitCalls               map[*ast.StructLitExpr]*ast.CallExpr
 	PostfixShorthandCalls   map[*ast.CastExpr]*ast.CallExpr
+	RegionStacks            map[*ast.RegionStmt]RegionStackAssignment
 	ResolvedTypeNames       map[ast.TypeExpr]string
 	ResolvedValueNames      map[*ast.Ident]string
 	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo

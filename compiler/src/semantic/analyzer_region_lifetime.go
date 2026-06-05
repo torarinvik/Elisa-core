@@ -33,6 +33,13 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 	for _, region := range collectSynthesizedRegions(fn.Body) {
 		a.analyzeRegionLifetimes(region)
 		a.analyzeRegionGrowthDiscipline(region)
+		asn := a.assignRegionStacks(region)
+		if a.regionStacks != nil {
+			a.regionStacks[region] = asn
+		}
+		if dumpRegionStacks {
+			a.dumpRegionStackAssignment(region, asn)
+		}
 	}
 }
 

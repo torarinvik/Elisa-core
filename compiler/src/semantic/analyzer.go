@@ -140,6 +140,7 @@ type Analyzer struct {
 	sentinelFuncNameCache        map[string]bool
 	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
 	postfixShorthandCalls        map[*ast.CastExpr]*ast.CallExpr
+	regionStacks                 map[*ast.RegionStmt]RegionStackAssignment
 	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables               map[ast.Expr]NodeTableInfo
 	deferInfo                    map[*ast.DeferStmt]*DeferInfo
@@ -515,6 +516,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		unsafeBufferReinterpretCasts:      make(map[*ast.CastExpr]bool),
 		loweredInitCalls:                  make(map[*ast.StructLitExpr]*ast.CallExpr, resolvedInitCallCapacity),
 		postfixShorthandCalls:             make(map[*ast.CastExpr]*ast.CallExpr),
+		regionStacks:                      make(map[*ast.RegionStmt]RegionStackAssignment),
 		resolvedTypeNames:                 make(map[ast.TypeExpr]string),
 		resolvedValueNames:                make(map[*ast.Ident]string),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
@@ -621,6 +623,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		CastHooks:               a.resolvedCastHooks,
 		InitCalls:               a.loweredInitCalls,
 		PostfixShorthandCalls:   a.postfixShorthandCalls,
+		RegionStacks:            a.regionStacks,
 		ResolvedTypeNames:       a.resolvedTypeNames,
 		ResolvedValueNames:      a.resolvedValueNames,
 		DenseNodeKeys:           a.exprDenseNodeKeys,
