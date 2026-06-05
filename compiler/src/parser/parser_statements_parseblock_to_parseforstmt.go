@@ -19,7 +19,7 @@ func (p *Parser) parseBlock() []ast.Stmt {
 		}
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return stmts
+	return autoReserveBoundedFills(stmts)
 }
 func (p *Parser) parseContextualStmt() ast.Stmt {
 	if p.staticFunctionDepth > 0 {
