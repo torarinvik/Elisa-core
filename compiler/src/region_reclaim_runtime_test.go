@@ -330,6 +330,68 @@ def return_defer() -> void:
 		"return-from-loop skipped an enclosing defer (cleanup floor wrongly applied to return)")
 }
 
+// Matrix hardening: a `return` from a DOUBLY-NESTED loop must still run the function-level defer.
+// The floor at the return is the innermost loop's; return must ignore it (floor 0) at every depth.
+func TestReturnFromNestedLoopRunsEnclosingDefer(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	src := `
+def run(out: mutable i64&) -> i64:
+    can Abort.Panic:
+        defer block:
+            out <- 7
+        i: mutable i64 = 0
+        while i < 5:
+            j: mutable i64 = 0
+            while j < 5:
+                if i == 2 and j == 3:
+                    return 1
+                j <- j + 1
+            i <- i + 1
+        return 0
+@test
+def ret_nested_defer() -> void:
+    can Abort.Panic:
+        x: mutable i64 = 0
+        if run((&x).cast[mutable i64&]) != 1:
+            panic("wrong return")
+        if x != 7:
+            panic("nested-loop return skipped the function defer")
+`
+	runSingleTestProgramExpectOK(t, "ret_nested_defer", src,
+		"return from a nested loop skipped the function defer")
+}
+
+// Matrix hardening: a `continue` must run the defer scoped INSIDE the loop body (it exits the
+// iteration scope), but must NOT skip it — the floor includes loop-body cleanups (>= floor).
+func TestContinueRunsInLoopDefer(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	src := `
+def run(out: mutable i64&) -> void:
+    can Abort.Panic:
+        i: mutable i64 = 0
+        while i < 5:
+            defer block:
+                out <- out + 10
+            i <- i + 1
+            if i % 2 == 0:
+                continue
+            out <- out + 1
+@test
+def cont_inloop_defer() -> void:
+    can Abort.Panic:
+        x: mutable i64 = 0
+        run((&x).cast[mutable i64&])
+        if x != 53:
+            panic("continue dropped or duplicated the in-loop defer")
+`
+	runSingleTestProgramExpectOK(t, "cont_inloop_defer", src,
+		"continue mishandled the in-loop-scoped defer")
+}
+
 // runSingleTestProgramExpectOK builds `src` as a native test binary, runs the single @test named
 // `testName`, and fails if the child exits non-zero (a segfault/panic from the regression).
 func runSingleTestProgramExpectOK(t *testing.T, testName, src, failHint string) {
