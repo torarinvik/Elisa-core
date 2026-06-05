@@ -804,7 +804,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if len(s.breakTargets) == 0 {
 			return fmt.Errorf("break outside loop during LLVM lowering")
 		}
-		if err := s.emitActiveScopedCleanup(); err != nil {
+		if err := s.emitLoopExitCleanup(); err != nil {
 			return err
 		}
 		if !s.currentBlockTerminated() {
@@ -815,7 +815,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if len(s.continueTargets) == 0 {
 			return fmt.Errorf("continue outside loop during LLVM lowering")
 		}
-		if err := s.emitActiveScopedCleanup(); err != nil {
+		if err := s.emitLoopExitCleanup(); err != nil {
 			return err
 		}
 		if !s.currentBlockTerminated() {

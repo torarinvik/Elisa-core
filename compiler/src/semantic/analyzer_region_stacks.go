@@ -441,14 +441,12 @@ func stripParenExpr(e ast.Expr) ast.Expr {
 // contributes 0.
 func (asn RegionStackAssignment) regionLifetimeClasses() int {
 	earlyOffsets := map[int]bool{}
-	earlyStacks := map[int]bool{}
-	for stack, off := range asn.StackEarlyFreeAfter {
+	for _, off := range asn.StackEarlyFreeAfter {
 		earlyOffsets[off] = true
-		earlyStacks[stack] = true
 	}
 	survivesToExit := false
 	for _, stack := range asn.StackOf {
-		if !earlyStacks[stack] {
+		if _, early := asn.StackEarlyFreeAfter[stack]; !early {
 			survivesToExit = true
 			break
 		}

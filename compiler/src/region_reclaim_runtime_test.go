@@ -296,6 +296,40 @@ def break_region() -> void:
 		"break freed an enclosing region (use-after-free regression)")
 }
 
+// The per-loop cleanup floor must apply ONLY to break/continue (which stay inside enclosing
+// scopes), never to `return` (which exits the whole function and must run EVERY enclosing
+// cleanup). This pins the other direction: a `defer` registered before a loop must still run when
+// the function returns from inside the loop. With the floor wrongly shared by the return path,
+// the defer is skipped — `out` stays 0 and the test panics.
+func TestReturnFromLoopRunsEnclosingDefer(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	src := `
+def run(out: mutable i64&) -> i64:
+    can Abort.Panic:
+        defer block:
+            out <- 999
+        i: mutable i64 = 0
+        while i < 10:
+            if i == 3:
+                return 5
+            i <- i + 1
+        return 0
+@test
+def return_defer() -> void:
+    can Abort.Panic:
+        x: mutable i64 = 0
+        r: i64 = run((&x).cast[mutable i64&])
+        if r != 5:
+            panic("wrong return value")
+        if x != 999:
+            panic("enclosing defer skipped on return-from-loop")
+`
+	runSingleTestProgramExpectOK(t, "return_defer", src,
+		"return-from-loop skipped an enclosing defer (cleanup floor wrongly applied to return)")
+}
+
 // runSingleTestProgramExpectOK builds `src` as a native test binary, runs the single @test named
 // `testName`, and fails if the child exits non-zero (a segfault/panic from the regression).
 func runSingleTestProgramExpectOK(t *testing.T, testName, src, failHint string) {

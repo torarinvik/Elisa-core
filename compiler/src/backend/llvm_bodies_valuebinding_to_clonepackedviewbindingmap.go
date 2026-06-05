@@ -608,7 +608,28 @@ func (s *functionState) popLoopTargets() {
 	s.loopCleanupFloors = s.loopCleanupFloors[:len(s.loopCleanupFloors)-1]
 }
 
+// emitActiveScopedCleanup runs ALL active scoped cleanups. This is the function-EXIT semantics:
+// a return / function return / lambda return leaves every enclosing scope, so every registered
+// cleanup (defers, mutex unlocks, pool shutdowns, region frees) must fire — including those of
+// scopes that enclose a loop the return sits inside. Break/continue must NOT use this (they stay
+// within the loop's enclosing scopes); they use emitLoopExitCleanup, which stops at the loop floor.
 func (s *functionState) emitActiveScopedCleanup() error {
+	return s.emitScopedCleanupsFrom(0)
+}
+
+// emitLoopExitCleanup runs only the cleanups registered INSIDE the innermost loop (indices >= its
+// floor). break/continue transfer control to a point still inside every enclosing scope, so firing
+// an enclosing scope's cleanup (e.g. a region that wraps the loop) would free a still-live owner —
+// a use-after-free. When not inside a loop the floor is 0 (identical to emitActiveScopedCleanup).
+func (s *functionState) emitLoopExitCleanup() error {
+	floor := 0
+	if len(s.loopCleanupFloors) > 0 {
+		floor = s.loopCleanupFloors[len(s.loopCleanupFloors)-1]
+	}
+	return s.emitScopedCleanupsFrom(floor)
+}
+
+func (s *functionState) emitScopedCleanupsFrom(floor int) error {
 	if s.cleanupDepth != 0 {
 		return nil
 	}
@@ -616,11 +637,6 @@ func (s *functionState) emitActiveScopedCleanup() error {
 	defer func() {
 		s.cleanupDepth--
 	}()
-	// On break/continue, only run cleanups registered inside the innermost loop (>= its floor).
-	floor := 0
-	if len(s.loopCleanupFloors) > 0 {
-		floor = s.loopCleanupFloors[len(s.loopCleanupFloors)-1]
-	}
 	for i := len(s.scopedCleanups) - 1; i >= floor; i-- {
 		if s.currentBlockTerminated() {
 			break
