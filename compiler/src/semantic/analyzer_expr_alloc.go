@@ -153,6 +153,17 @@ func (a *Analyzer) analyzeAutoAllocExpr(expr *ast.AllocExpr, expected Type) Type
 		a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
 		return invalidType
 	}
+	// `new[auto] Expr.Variant(...)` for a PACKED enum (docs/74): the node is stored in the inferred
+	// region as packed columns (no explicit Store, no `in store:`). Type-check it against the enum's
+	// store layout and return the bare handle type (Expr); region provenance is attached by the
+	// region-provenance pass (the AutoRegion case there records a dependency on the active region).
+	if enumType, _, ok := a.packedAllocConstructorInfo(expr.Value); ok && enumType != nil && enumType.Packed {
+		if enumType.StoreType == nil {
+			a.errorf(expr.Pos(), "packed enum %q is missing store layout metadata", enumType.Name)
+			return invalidType
+		}
+		return a.analyzePackedAllocExpr(expr, PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"]))
+	}
 	valueType := a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
 	// Same constraint as an explicit region: a region bulk-frees without running destructors or
 	// consuming linear handles, so a value carrying a must-consume handle cannot live in it.
