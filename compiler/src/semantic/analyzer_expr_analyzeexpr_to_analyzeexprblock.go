@@ -539,6 +539,21 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				a.warnf(n.Pos(), "constant %d does not fit in %s and is truncated by this cast", value.Int, dst)
 			}
 		}
+		// `value.cast[T&]` where the value's own type IS T reinterprets the value's bits as a
+		// pointer (a wild pointer), not a reference to it — `.cast` does not take an address.
+		// Almost always a mistake for `&value`. A genuine int->ptr cast targets a DIFFERENT
+		// pointee type (e.g. `addr.cast[u8&]`), so it is not flagged.
+		if n.Origin == ast.CastExprOriginExplicitCast {
+			if dstRef, ok := dst.(*RefType); ok {
+				_, srcIsRef := src.(*RefType)
+				// Exclude pointer-width address types (uintptr/usize): a value of that type IS an
+				// address, so `addr.cast[uintptr&]` is a legitimate int->ptr, not a missed `&`.
+				srcIsAddress := SameType(src, a.namedTypes["uintptr"]) || SameType(src, a.namedTypes["usize"])
+				if !srcIsRef && !srcIsAddress && !IsInvalidType(src) && SameType(src, dstRef.Elem) {
+					a.warnf(n.Pos(), "casting a value to a reference of its own type reinterprets it as a raw pointer, not a reference to it; use the `&` operator to take a reference (e.g. `&x`)")
+				}
+			}
+		}
 		// Const-correctness: `const_place.ref[mutable T&]` parses to a cast of a
 		// freshly-taken borrow (AddrOfExpr) to a mutable ref. A const lives in
 		// read-only storage, so handing out a mutable pointer into it would
