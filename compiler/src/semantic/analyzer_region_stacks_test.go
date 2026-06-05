@@ -107,6 +107,33 @@ func TestRegionStacksUnboundedGrowableGetsDefaultReserveCommit(t *testing.T) {
 	}
 }
 
+// docs/73 §5: the default reserve_commit backing relies on mmap overcommit (lazy page commit),
+// which holds on POSIX but not on Windows VirtualAlloc, where a 256 MiB reservation would commit
+// eagerly. On a Windows target the growable must stay CHAINED (the strategy the checker reads, so
+// trust and runtime stay consistent). A POSIX target gets reserve_commit.
+func TestDefaultBackingFallsBackToChainedOnWindows(t *testing.T) {
+	src := `def f(n: usize) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            xs: mutable darray[i64] = []
+            i: mutable usize = 0u
+            while i < n:
+                xs.push(i.i64())
+                i <- i + 1u
+            return xs.count.i64()
+`
+	win := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_win.elisa", src,
+		AnalyzeOptions{TargetTriple: "x86_64-pc-windows-msvc"})
+	if got := onlyRegionStack(t, win).stackStrategy(onlyRegionStack(t, win).StackOf["xs"]); got != "chained" {
+		t.Fatalf("Windows target must keep the chained default (no mmap overcommit), got %q", got)
+	}
+	posix := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_posix.elisa", src,
+		AnalyzeOptions{TargetTriple: "x86_64-unknown-linux-gnu"})
+	if got := onlyRegionStack(t, posix).stackStrategy(onlyRegionStack(t, posix).StackOf["xs"]); got != "reserve_commit" {
+		t.Fatalf("POSIX target must use the reserve_commit default, got %q", got)
+	}
+}
+
 // docs/73: an interior ref across growth into a non-loop growable is now SOUND and accepted — the
 // default reserve_commit backing has a stable base, so the ref survives growth (overflow panics,
 // never relocates). The previously-required "view invalidated" error is gone for this case. (The

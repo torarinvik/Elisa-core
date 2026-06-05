@@ -48,6 +48,18 @@ var dumpRegionStacks = os.Getenv("ELISA_DUMP_REGION_STACKS") != ""
 // gets its own stack, all reserved (fixed-footprint) allocations share stack 0, and growables
 // beyond regionStackCap share a merge stack. Analysis-only (B1a) — recorded for codegen and
 // inspection; no behavior change yet.
+// targetMmapOvercommit reports whether the target reserves virtual memory lazily (anonymous mmap
+// overcommit). The default reserve_commit backing (docs/73) reserves a generous range whose pages
+// commit on first touch; that is free on POSIX but NOT on Windows VirtualAlloc or the libc-malloc
+// backend, where it would commit eagerly. On those targets the default growable stays chained.
+// Defaults to false (chained) when the target const is absent — the safe, portable choice.
+func (a *Analyzer) targetMmapOvercommit() bool {
+	if v, ok := a.constValues["ELISA_TARGET_OS_POSIX"]; ok && v.Kind == ConstBool {
+		return v.Bool
+	}
+	return false
+}
+
 func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool) RegionStackAssignment {
 	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackEarlyFreeAfter: map[int]int{}, StackCount: 1}
 	order := make([]string, 0, 4)
@@ -122,7 +134,12 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 		// and the base stable (interior refs survive). Applies in loops too: codegen sets the
 		// strategy lazily (no eager reserve) and arena_reset keeps the reservation across
 		// iterations. Only the merge stack (multiple growables sharing one stack) stays chained.
-		asn.StackStrategy[next] = "reserve_commit"
+		// docs/73 §5: gated on mmap-overcommit targets (POSIX). On Windows (VirtualAlloc) and the
+		// libc-malloc backend a 256 MiB reservation would commit eagerly, so those keep chained —
+		// the checker reads this same strategy, so trust and runtime stay consistent everywhere.
+		if a.targetMmapOvercommit() {
+			asn.StackStrategy[next] = "reserve_commit"
+		}
 		next++
 	}
 	// Phase B2 (docs/71): an own growable stack whose object provably dies before region exit and

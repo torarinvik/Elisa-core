@@ -88,14 +88,23 @@ to size it, or restructure so the growth is bounded. This is the intended perfor
 | 3 | Lazy reservation (reserve on first alloc) so empty/tiny regions cost nothing. | medium |
 | 4 | Storage-view checker: treat the default backing as stable (drop false invalidations). | medium (safety) |
 | L | Loop-body regions: also default `reserve_commit`, reserved once and reused via `arena_reset` per iteration (lazy makes this trivial — set strategy, reserve on first touch, reset keeps it). | medium |
-| 5 | 32-bit / Windows: smaller reservation or `chained` fallback where address space is scarce. | low |
+| 5 | Non-overcommit targets keep `chained`: the default is gated on `ELISA_TARGET_OS_POSIX`. | low |
 
-Steps 1→2→3→4 and L have LANDED — the default is an in-place `reserve_commit` bump stack
-everywhere (function-scope and loop-body), reserved lazily and reused across loop iterations
-(20M-iteration hot loop stays at ~0.17 s and 1 MB RSS — no per-iteration mmap). Step 5 (32-bit /
-Windows) is the remaining portability tail. Routing loop-body `reserve_commit` through the lazy
-default also closed a latent gap where a bounded reserve_commit in a loop was marked stable but ran
-chained — now every reserve_commit the checker trusts is actually reserve_commit at runtime.
+Steps 1→2→3→4, L, and 5 have LANDED — the default is an in-place `reserve_commit` bump stack
+everywhere (function-scope and loop-body) on POSIX, reserved lazily and reused across loop
+iterations (20M-iteration hot loop stays at ~0.17 s and 1 MB RSS — no per-iteration mmap). Routing
+loop-body `reserve_commit` through the lazy default also closed a latent gap where a bounded
+reserve_commit in a loop was marked stable but ran chained — now every reserve_commit the checker
+trusts is actually reserve_commit at runtime.
+
+**§5 (portability).** The lazy 256 MiB reservation relies on anonymous-mmap **overcommit** (pages
+commit on first touch) — true on POSIX (Linux/macOS/FreeBSD), but NOT on Windows `VirtualAlloc` or
+the libc-malloc backend, where the reservation would commit eagerly. So the default flip is gated
+on `ELISA_TARGET_OS_POSIX` *in the analyzer* (`targetMmapOvercommit`), which keeps the storage-view
+checker and codegen reading the same strategy — sound on every target. On Windows / libc-malloc the
+growable keeps the prior `chained` default (correct, just without the no-fragmentation guarantee).
+32-bit is moot: only 64-bit arches (x86_64, arm64) are targeted. A future Windows commit-on-touch
+path (or a smaller eagerly-committed reservation) could extend the in-place default there.
 
 ## Interactions
 
