@@ -403,6 +403,16 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		if refState, ok := a.regionRefStateForExpr(n.Value); ok {
 			if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil {
+				// docs/75 step 1 (detection): a value built with `new[auto]` carries a
+				// synthesized inferred region (`__auto_*`) local to this function. Returning
+				// it is the signature of a *region-polymorphic* function — the region will be
+				// threaded from the caller so the result outlives the call. Record that
+				// classification now. The escape error still fires until threading (steps
+				// 2-3) makes the return sound; an explicitly-named local region (`in
+				// scratch:`) is never region-polymorphic and always errors.
+				if isSynthesizedAutoRegion(region.Name) && a.currentFuncType != nil {
+					a.currentFuncType.RegionPolymorphic = true
+				}
 				if _, isRef := valueType.(*RefType); isRef {
 					a.errorf(n.Pos(), localRegionEscapeMessage("reference", region.Name))
 				} else {

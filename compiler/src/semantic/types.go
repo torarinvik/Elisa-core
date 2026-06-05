@@ -632,4 +632,12 @@ type FuncType struct {
 	// empty/false so a propagation gap is over-strict (the caller keeps the
 	// must-consume obligation -> a compile error), never a silent double-free.
 	OwnedParams []bool
+	// RegionPolymorphic is set (docs/75) when a value-returning path hands back a
+	// value whose region dependency is a *synthesized inferred* region (`__auto_*`)
+	// local to this function — i.e. the function allocates with `new[auto]` and
+	// returns the result. Such a function is implicitly parameterized over the
+	// region its result lives in: the region is threaded as a hidden param and
+	// bound at the call site to the caller's ambient region. Step 1 (detection)
+	// only records the classification; threading is layered on top.
+	RegionPolymorphic bool
 }
