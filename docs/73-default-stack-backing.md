@@ -87,9 +87,15 @@ to size it, or restructure so the growth is bounded. This is the intended perfor
 | 2 | Codegen: emit the default-capacity `reserve_commit` init; overflow panic message. | medium |
 | 3 | Lazy reservation (reserve on first alloc) so empty/tiny regions cost nothing. | medium |
 | 4 | Storage-view checker: treat the default backing as stable (drop false invalidations). | medium (safety) |
+| L | Loop-body regions: also default `reserve_commit`, reserved once and reused via `arena_reset` per iteration (lazy makes this trivial — set strategy, reserve on first touch, reset keeps it). | medium |
 | 5 | 32-bit / Windows: smaller reservation or `chained` fallback where address space is scarce. | low |
 
-Land 1→2→3 as the core; 4 is the expressiveness win; 5 is the portability tail.
+Steps 1→2→3→4 and L have LANDED — the default is an in-place `reserve_commit` bump stack
+everywhere (function-scope and loop-body), reserved lazily and reused across loop iterations
+(20M-iteration hot loop stays at ~0.17 s and 1 MB RSS — no per-iteration mmap). Step 5 (32-bit /
+Windows) is the remaining portability tail. Routing loop-body `reserve_commit` through the lazy
+default also closed a latent gap where a bounded reserve_commit in a loop was marked stable but ran
+chained — now every reserve_commit the checker trusts is actually reserve_commit at runtime.
 
 ## Interactions
 

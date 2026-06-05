@@ -396,13 +396,17 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 		// growth. Skipped under loopReset (a per-iteration reset region) — chained stays correct
 		// there. The strategy is only assigned when the footprint is provably <= N (docs/72), so
 		// the reservation can never overflow.
-		if !loopReset && asn.StackStrategy[k] == "reserve_commit" {
+		if asn.StackStrategy[k] == "reserve_commit" {
 			var initErr error
-			if asn.StackCapacity[k] != nil {
-				// Bounded (Phase C): reservation sized to the proven footprint.
+			if asn.StackCapacity[k] != nil && !loopReset {
+				// Bounded (Phase C), non-loop: eager reservation sized to the proven footprint.
 				initErr = s.emitReserveCommitStackInit(alloca, arenaType, asn.StackCapacity[k], asn.StackElemType[k])
 			} else {
-				// Default (docs/73): no inferred bound, reserve a fixed generous range.
+				// Default (docs/73) — and ALL loop-body reserve_commit: lazy. Set the strategy only;
+				// the runtime reserves the default range on first alloc and arena_reset keeps it
+				// across iterations (reserve once, reset per iteration — no per-iteration mmap). A
+				// loop-body bound is intentionally ignored here: an eager loop-variable-dependent
+				// reservation can't be hoisted, and the lazy default is sound (stable base) anyway.
 				initErr = s.emitDefaultReserveCommitStackInit(alloca, arenaType)
 			}
 			if initErr != nil {

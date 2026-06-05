@@ -48,7 +48,7 @@ var dumpRegionStacks = os.Getenv("ELISA_DUMP_REGION_STACKS") != ""
 // gets its own stack, all reserved (fixed-footprint) allocations share stack 0, and growables
 // beyond regionStackCap share a merge stack. Analysis-only (B1a) — recorded for codegen and
 // inspection; no behavior change yet.
-func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool, inLoop bool) RegionStackAssignment {
+func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool) RegionStackAssignment {
 	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackEarlyFreeAfter: map[int]int{}, StackCount: 1}
 	order := make([]string, 0, 4)
 	seen := map[string]bool{}
@@ -119,12 +119,10 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 		// docs/73: the DEFAULT backing for an unreserved own-growable tail is reserve_commit — a
 		// contiguous bump stack that grows in place (no relocate-and-leave-a-hole), with a default
 		// reservation (StackCapacity left nil). This makes fragmentation structurally impossible
-		// for the common case and the base stable (interior refs survive). Excluded: regions reset
-		// per loop iteration (chained there, so flipping would mislead the storage-view checker)
-		// and the merge stack (multiple growables can't share one in-place tail — stays chained).
-		if !inLoop {
-			asn.StackStrategy[next] = "reserve_commit"
-		}
+		// and the base stable (interior refs survive). Applies in loops too: codegen sets the
+		// strategy lazily (no eager reserve) and arena_reset keeps the reservation across
+		// iterations. Only the merge stack (multiple growables sharing one stack) stays chained.
+		asn.StackStrategy[next] = "reserve_commit"
 		next++
 	}
 	// Phase B2 (docs/71): an own growable stack whose object provably dies before region exit and

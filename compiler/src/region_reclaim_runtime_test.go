@@ -422,6 +422,40 @@ def iref() -> void:
 		"interior ref into a default reserve_commit growable did not survive growth (base relocated)")
 }
 
+// docs/73 loop-body: a growable inside a loop body is also a default reserve_commit stack (the
+// reservation is made once on the first iteration's first alloc and arena_reset reuses it each
+// iteration). This pins both halves: (1) an interior ref into the loop-body growable is sound
+// within an iteration — the base is stable across within-iteration growth (5000 pushes), so the
+// anchor still reads its element; (2) it works across many iterations (reservation reused, not
+// re-mmap'd). Pre-docs/73 this would have been a compile error (loop-body growable was chained).
+func TestLoopBodyReserveCommitInteriorRefSurvivesGrowth(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	src := `
+def run(n: usize, m: usize) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        total: mutable i64 = 0
+        for i in 0..<n:
+            xs: mutable darray[i64] = []
+            xs.push(100)
+            anchor: i64& = &xs[0]
+            j: mutable usize = 1u
+            while j < m:
+                xs.push(j.i64())
+                j <- j + 1u
+            total <- total + anchor[0]
+        return total
+@test
+def lbiref() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if run(50u, 5000u) != 5000:
+            panic("loop-body interior ref invalidated within iteration (base moved)")
+`
+	runSingleTestProgramExpectOK(t, "lbiref", src,
+		"loop-body reserve_commit interior ref did not survive within-iteration growth")
+}
+
 // runSingleTestProgramExpectOK builds `src` as a native test binary, runs the single @test named
 // `testName`, and fails if the child exits non-zero (a segfault/panic from the regression).
 func runSingleTestProgramExpectOK(t *testing.T, testName, src, failHint string) {
