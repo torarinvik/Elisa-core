@@ -456,10 +456,11 @@ def lbiref() -> void:
 		"loop-body reserve_commit interior ref did not survive within-iteration growth")
 }
 
-// new[auto] heap-allocates a struct into the inferred region (the native stack arena). In a
-// loop-body `in auto:` the region is reserved once and reset-reused per iteration, so 100k
-// allocations are correct (and, as measured, churn-free). This pins end-to-end correctness.
-func TestNewAutoLoopAllocatesCorrectly(t *testing.T) {
+// new[auto] is inference-driven: with NO explicit `in auto:`, a function using it gets its region
+// synthesized, and an iteration-local new[auto] inside a loop is auto-tightened into a PER-ITERATION
+// region (reserved once, reset-reused) — its lifetime detected and placed in the matching region
+// exactly like a container. 100k allocations are correct and (as measured) churn- and growth-free.
+func TestNewAutoInferredLoopAllocatesCorrectly(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -471,9 +472,8 @@ def go() -> i64:
         total: mutable i64 = 0
         i: mutable i64 = 0
         while i < 100000:
-            in auto:
-                b: Box& = new[auto] Box(7)
-                total <- total + b.value
+            b: Box& = new[auto] Box(7)
+            total <- total + b.value
             i <- i + 1
         return total
 @test

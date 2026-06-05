@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"reflect"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -405,7 +406,14 @@ func loopBodyIsReclaimable(body []ast.Stmt) bool {
 	found := false
 	for _, stmt := range body {
 		vd, ok := stmt.(*ast.VarDeclStmt)
-		if !ok || !isRegionlessContainerType(vd.Type) || !isAllocatingLiteral(vd.Value) {
+		if !ok {
+			continue
+		}
+		// A loop-local fresh allocation is either a container literal or a `new[auto]` struct — both
+		// participate in the same per-iteration tightening when their lifetime is iteration-local.
+		isContainer := isRegionlessContainerType(vd.Type) && isAllocatingLiteral(vd.Value)
+		isAuto := isAutoAllocValue(vd.Value)
+		if !isContainer && !isAuto {
 			continue
 		}
 		if !ast.AllocationIsIterationLocal(vd.Name, body) {
@@ -444,6 +452,9 @@ func typeMentionsArena(typ ast.TypeExpr) bool {
 // allocation. It recurses through control flow but NOT into nested region scopes
 // (`region NAME:` / `in <owner>:`), whose allocations already have an ambient owner.
 func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
+	if bodyContainsAutoAlloc(stmts) {
+		return true
+	}
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *ast.RegionStmt:
@@ -489,6 +500,61 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 		}
 	}
 	return false
+}
+
+// isAutoAllocValue reports whether an initializer is a `new[auto] T(...)` allocation — a fresh
+// inferred-region heap allocation, the AllocExpr analogue of a container literal. It makes the
+// region-synthesis treat new[auto] exactly like a container: its lifetime is detected (function
+// scope vs per-iteration) and it is placed in the matching inferred region, no explicit `in auto:`.
+func isAutoAllocValue(value ast.Expr) bool {
+	for {
+		paren, ok := value.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		value = paren.Inner
+	}
+	alloc, ok := value.(*ast.AllocExpr)
+	return ok && alloc != nil && alloc.AutoRegion
+}
+
+// bodyContainsAutoAlloc reports whether any statement in the body contains a `new[auto]` allocation
+// anywhere. Used to trigger the function-scope auto region (an over-wrap — e.g. a new[auto] nested
+// in its own region — is a harmless lazy no-op outer region).
+func bodyContainsAutoAlloc(stmts []ast.Stmt) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && alloc.AutoRegion {
+				found = true
+				return
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
 }
 
 // isAllocatingLiteral reports whether an initializer is a container literal or

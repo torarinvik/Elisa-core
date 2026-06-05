@@ -38,21 +38,19 @@ def f() -> Box&:
 	}
 }
 
-// new[auto] needs an enclosing inferred region (the native stack arena); without one it is a clear
-// error pointing at `in auto:` rather than an "undefined identifier auto".
-func TestNewAutoRequiresEnclosingRegion(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "na_noreg.elisa", `struct Box:
+// new[auto] is inference-driven like a container: a function that uses it WITHOUT any explicit
+// `in auto:` has the region synthesized for it automatically (the lifetime is detected and the
+// allocation placed in the matching inferred region). So it compiles cleanly — no "undefined
+// identifier auto", no "needs a region".
+func TestNewAutoInfersRegionWithoutInAuto(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "na_inf.elisa", `struct Box:
     value: i64
 def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         b: Box& = new[auto] Box(7)
         return b.value
 `, AnalyzeOptions{})
-	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "needs an enclosing inferred region") {
-		t.Fatalf("new[auto] with no enclosing region must error helpfully, got:\n%s", all)
-	}
-	if strings.Contains(all, "undefined identifier") {
-		t.Fatalf("new[auto] must not surface as an undefined identifier, got:\n%s", all)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("new[auto] must work without an explicit in-auto (region synthesized by inference), got:\n%s", strings.Join(errs, "\n"))
 	}
 }
