@@ -32,11 +32,14 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 	}
 	for _, region := range collectSynthesizedRegions(fn.Body) {
 		a.analyzeRegionLifetimes(region)
-		a.analyzeRegionGrowthDiscipline(region)
 		asn := a.assignRegionStacks(region)
 		if a.regionStacks != nil {
 			a.regionStacks[region] = asn
 		}
+		// The growth check must reflect the actual arena routing: two growables in separate
+		// stacks (each its own tail) never reallocate, so only an in-the-same-stack collision
+		// (e.g. the merge stack) is a real interior growth.
+		a.analyzeRegionGrowthDiscipline(region, asn)
 		if dumpRegionStacks {
 			a.dumpRegionStackAssignment(region, asn)
 		}
@@ -57,7 +60,7 @@ var regionGrowthMethods = map[string]bool{
 // forces a reallocation. Because an arena never frees mid-region, a container is sealed for the
 // rest of the region as soon as ANY later sibling is born. `reserve()` pre-sizes a container so
 // it never relocates, and suppresses the warning (the canonical size-then-freeze idiom).
-func (a *Analyzer) analyzeRegionGrowthDiscipline(region *ast.RegionStmt) {
+func (a *Analyzer) analyzeRegionGrowthDiscipline(region *ast.RegionStmt, asn RegionStackAssignment) {
 	// Top-level fresh allocations in source (== arena) order.
 	birthByName := map[string]int{}
 	order := make([]string, 0, 4)
@@ -90,6 +93,13 @@ func (a *Analyzer) analyzeRegionGrowthDiscipline(region *ast.RegionStmt) {
 		blockerBirth := 0
 		for _, other := range order {
 			ob := birthByName[other]
+			// Only a sibling SHARING g's stack can seal it: with multi-stack regions each
+			// unreserved growable gets its own arena (its own tail), so a sibling in a
+			// different stack never forces a reallocation. Same-stack collisions (e.g. the
+			// over-split merge stack) are the real interior growths.
+			if asn.StackOf[other] != asn.StackOf[g.name] {
+				continue
+			}
 			if ob > xb && ob < g.off { // a sibling born after x, before this push -> x is sealed
 				if blocker == "" || ob < blockerBirth {
 					blocker, blockerBirth = other, ob

@@ -229,6 +229,27 @@ func (s *functionState) regionArenaOwner(region string) (treeAllocOwnerBinding, 
 	return treeAllocOwnerBinding{}, false
 }
 
+// darrayGrowthOwner resolves the arena a darray growth op (push/reserve/resize/...) allocates into.
+// Multi-stack regions (Phase B1b): a fresh inferred-region darray routed to its own parallel
+// arena allocates there (kept consistent across all its growth ops, so a realloc never straddles
+// arenas). Falls back to the existing region/ambient resolution for everything else. All parallel
+// arenas share one region lifetime, so routing is layout-only and cannot affect when memory frees.
+func (s *functionState) darrayGrowthOwner(receiver ast.Expr, darrayType *semantic.DArrayType) (treeAllocOwnerBinding, bool) {
+	if id, ok := receiver.(*ast.Ident); ok && s.darrayStackTag != nil {
+		if tag, ok := s.darrayStackTag[id.Name]; ok {
+			if owner, ok := s.regionArenaOwner(tag); ok {
+				return owner, true
+			}
+		}
+	}
+	if darrayType != nil {
+		if owner, ok := s.regionArenaOwner(darrayType.Region); ok {
+			return owner, true
+		}
+	}
+	return s.lookupTreeAllocOwner()
+}
+
 // containerRegionName peels ref wrappers and returns the allocation region of
 // the underlying region-carrying container (darray or dict), or "" if t is not
 // such a container. Used to match a region param against a call argument's

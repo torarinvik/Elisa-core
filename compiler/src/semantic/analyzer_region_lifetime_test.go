@@ -209,11 +209,11 @@ func TestRegionLifetimeRejectedByDefault(t *testing.T) {
 	}
 }
 
-// Growth-discipline (tail-growth) check: once a later sibling is allocated on top of an
-// inferred-region container, growing the earlier one forces a reallocation (a dead hole, or a
-// panic under interior-pointer-stable regions). Flagged as a warning.
-func TestRegionGrowthFlagsInteriorRealloc(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_interior.elisa", `def f() -> void:
+// Two unreserved growables now get separate parallel stacks (multi-stack regions), so each is its
+// own tail and interleaved growth no longer reallocates — the compiler auto-resolves what used to
+// be a tail-growth warning. The warning must NOT fire here anymore.
+func TestRegionGrowthTwoGrowablesAutoSplitNoWarning(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_split.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
             a: mutable darray[i64] = []
@@ -222,8 +222,31 @@ func TestRegionGrowthFlagsInteriorRealloc(t *testing.T) {
             b.push(2)
             a.push(3)
 `, AnalyzeOptions{})
+	if strings.Contains(allDiagnostics(result), "no longer the arena tail") {
+		t.Fatalf("two growables now get separate stacks; the interior-growth warning must not fire, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// The warning survives only for a genuine same-stack collision: beyond the over-split cap, the
+// overflow growables share one merge stack, where interior growth does relocate. Six growables
+// (cap 4) push the last two into the merge stack; growing the earlier of that pair after the later
+// one is allocated still warns.
+func TestRegionGrowthMergeStackStillWarns(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_merge.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: mutable darray[i64] = []
+            b: mutable darray[i64] = []
+            c: mutable darray[i64] = []
+            d: mutable darray[i64] = []
+            e: mutable darray[i64] = []
+            e.push(1)
+            g: mutable darray[i64] = []
+            g.push(2)
+            e.push(3)
+`, AnalyzeOptions{})
 	if !strings.Contains(allDiagnostics(result), "no longer the arena tail") {
-		t.Fatalf("expected an interior-growth reallocation warning, got:\n%s", allDiagnostics(result))
+		t.Fatalf("merge-stack interior growth must still warn, got:\n%s", allDiagnostics(result))
 	}
 }
 

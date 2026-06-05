@@ -101,10 +101,7 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 	// today's code a container's region == its ambient scope, so this resolves
 	// to the same arena (behavior-preserving); it becomes load-bearing once a
 	// helper pushes through a borrow whose region differs from the ambient one.
-	owner, ok := s.regionArenaOwner(darrayType.Region)
-	if !ok {
-		owner, ok = s.lookupTreeAllocOwner()
-	}
+	owner, ok := s.darrayGrowthOwner(fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray push requires an active in <arena>: scope")
 	}
@@ -167,10 +164,7 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("darray extend expects 1 argument, got %d", len(expr.Args))
 	}
-	owner, ok := s.regionArenaOwner(darrayType.Region)
-	if !ok {
-		owner, ok = s.lookupTreeAllocOwner()
-	}
+	owner, ok := s.darrayGrowthOwner(fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray extend requires an active in <arena>: scope")
 	}
@@ -347,10 +341,7 @@ func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVM
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("darray reserve expects 1 argument, got %d", len(expr.Args))
 	}
-	owner, ok := s.regionArenaOwner(darrayType.Region)
-	if !ok {
-		owner, ok = s.lookupTreeAllocOwner()
-	}
+	owner, ok := s.darrayGrowthOwner(fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray reserve requires an active in <arena>: scope")
 	}
@@ -394,10 +385,7 @@ func (s *functionState) emitBuiltinDArrayResizeCall(expr *ast.CallExpr) (C.LLVMV
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("darray resize expects 1 argument, got %d", len(expr.Args))
 	}
-	owner, ok := s.regionArenaOwner(darrayType.Region)
-	if !ok {
-		owner, ok = s.lookupTreeAllocOwner()
-	}
+	owner, ok := s.darrayGrowthOwner(fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray resize requires an active in <arena>: scope")
 	}

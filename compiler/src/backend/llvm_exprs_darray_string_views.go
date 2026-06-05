@@ -93,10 +93,7 @@ func (s *functionState) emitBuiltinDArrayCstrCall(expr *ast.CallExpr) (C.LLVMVal
 	if !ok || darrayType == nil {
 		return nil, nil, false, nil
 	}
-	owner, ok := s.regionArenaOwner(darrayType.Region)
-	if !ok {
-		owner, ok = s.lookupTreeAllocOwner()
-	}
+	owner, ok := s.darrayGrowthOwner(fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray cstr requires an active in <arena>: scope to NUL-terminate")
 	}

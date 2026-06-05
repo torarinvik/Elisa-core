@@ -283,10 +283,85 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 		}
 		s.registerScopedCleanup(scopedCleanupBinding{kind: kind, name: n.Name, ptr: binding.ptr, typ: binding.typ})
 	}
+	restoreTags, err := s.emitRegionExtraStacks(n, loopReset)
+	if err != nil {
+		return err
+	}
+	defer restoreTags()
 	if err := s.emitInStore(backendScopedArenaInStoreStmt(n)); err != nil {
 		return err
 	}
 	return s.emitScopeCleanups(scope)
+}
+
+// emitRegionExtraStacks lowers the parallel arenas of a multi-stack region (Phase B1b, docs/71):
+// stack 0 is the region's main arena (already emitted); each growable/merge stack 1..N-1 gets its
+// own lazy arena, freed with the region. It returns a closure that restores the darray->arena tag
+// routing map to its prior state on region exit (handling nested same-name regions).
+func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool) (func(), error) {
+	noop := func() {}
+	asn, ok := s.g.result.RegionStacks[n]
+	if !ok || asn.StackCount <= 1 {
+		return noop, nil
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	if arenaType == nil {
+		return noop, fmt.Errorf("missing builtin Arena type for region %s", n.Name)
+	}
+	for k := 1; k < asn.StackCount; k++ {
+		name := fmt.Sprintf("%s#%d", n.Name, k)
+		var alloca C.LLVMValueRef
+		var err error
+		if loopReset {
+			alloca, err = s.createEntryAllocaZeroed(name, arenaType)
+			if err != nil {
+				return noop, err
+			}
+		} else {
+			alloca, err = s.createEntryAlloca(name, arenaType)
+			if err != nil {
+				return noop, err
+			}
+			zero, zerr := s.zeroValue(arenaType)
+			if zerr != nil {
+				return noop, zerr
+			}
+			C.LLVMBuildStore(s.builder, zero, alloca)
+		}
+		// Lazy arena: first block allocated on demand, free is a no-op if unused -> an unused
+		// parallel stack costs only the stack slot.
+		s.regions = append(s.regions, regionBinding{name: name, ptr: alloca, typ: arenaType})
+		kind := scopedCleanupRegion
+		if loopReset {
+			kind = scopedCleanupRegionReset
+		}
+		s.registerScopedCleanup(scopedCleanupBinding{kind: kind, name: name, ptr: alloca, typ: arenaType})
+	}
+	if s.darrayStackTag == nil {
+		s.darrayStackTag = map[string]string{}
+	}
+	type prevTag struct {
+		value string
+		had   bool
+	}
+	saved := map[string]prevTag{}
+	for allocName, stackID := range asn.StackOf {
+		if stackID <= 0 {
+			continue // stack 0 = the main arena (ambient); no tag needed
+		}
+		v, had := s.darrayStackTag[allocName]
+		saved[allocName] = prevTag{value: v, had: had}
+		s.darrayStackTag[allocName] = fmt.Sprintf("%s#%d", n.Name, stackID)
+	}
+	return func() {
+		for name, p := range saved {
+			if p.had {
+				s.darrayStackTag[name] = p.value
+			} else {
+				delete(s.darrayStackTag, name)
+			}
+		}
+	}, nil
 }
 func (s *functionState) emitDeferredBody(binding *deferredBodyBinding) error {
 	if binding == nil || binding.stmt == nil {
