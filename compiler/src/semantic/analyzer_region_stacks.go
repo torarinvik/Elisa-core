@@ -60,20 +60,49 @@ func (a *Analyzer) targetMmapOvercommit() bool {
 	return false
 }
 
+// isFreshAutoStructAllocation reports whether vd binds a `new[auto] T(...)` allocation — a
+// fixed-footprint heap struct placed in the inferred region. It is tracked like a reserved/fixed
+// container: it lives on the shared stack 0 and is reclaimed in bulk at region exit/reset (it never
+// grows, so it gets no own growable stack and no per-object early-free).
+func isFreshAutoStructAllocation(vd *ast.VarDeclStmt) bool {
+	if vd == nil || vd.Value == nil {
+		return false
+	}
+	v := vd.Value
+	for {
+		paren, ok := v.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		v = paren.Inner
+	}
+	alloc, ok := v.(*ast.AllocExpr)
+	return ok && alloc != nil && alloc.AutoRegion
+}
+
 func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool) RegionStackAssignment {
 	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackEarlyFreeAfter: map[int]int{}, StackCount: 1}
 	order := make([]string, 0, 4)
 	seen := map[string]bool{}
 	elemTypeByName := map[string]Type{}
+	fixedStruct := map[string]bool{} // new[auto] structs: fixed-footprint, shared stack 0
 	for _, stmt := range flattenRegionTopLevel(region.Body) {
 		vd, ok := stmt.(*ast.VarDeclStmt)
-		if !ok || !a.isFreshRegionAllocation(vd) || seen[vd.Name] {
+		if !ok || seen[vd.Name] {
 			continue
 		}
-		seen[vd.Name] = true
-		order = append(order, vd.Name)
-		if dt, ok := StripAggregateStateType(a.exprTypes[vd.Value]).(*DArrayType); ok {
-			elemTypeByName[vd.Name] = dt.Elem
+		if a.isFreshRegionAllocation(vd) {
+			seen[vd.Name] = true
+			order = append(order, vd.Name)
+			if dt, ok := StripAggregateStateType(a.exprTypes[vd.Value]).(*DArrayType); ok {
+				elemTypeByName[vd.Name] = dt.Elem
+			}
+			continue
+		}
+		if isFreshAutoStructAllocation(vd) {
+			seen[vd.Name] = true
+			order = append(order, vd.Name)
+			fixedStruct[vd.Name] = true
 		}
 	}
 	if len(order) == 0 {
@@ -95,6 +124,13 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 	next := 1
 	mergeStack := -1
 	for _, n := range order {
+		// new[auto] structs are fixed-footprint: they share stack 0 (the region's main arena) and
+		// are reclaimed in bulk at region exit/reset — no own growable stack, no per-object early
+		// free. This counts them as tracked region members (so the lifetime-class summary is exact).
+		if fixedStruct[n] {
+			asn.StackOf[n] = 0
+			continue
+		}
 		// Phase C (docs/72): a darray with an interior reference taken into it gets a
 		// reserve_commit stack (stable base) ONLY when its maximum footprint is PROVABLE — its
 		// sole element growth is a single counting-loop push, bound N. A bare `reserve(n)` is a

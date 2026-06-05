@@ -54,3 +54,24 @@ def f() -> i64:
 		t.Fatalf("new[auto] must work without an explicit in-auto (region synthesized by inference), got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// new[auto] structs are tracked as fixed-footprint members of the inferred region: assigned to the
+// shared stack 0 (reclaimed in bulk at region exit) and counted, so the lifetime-class summary is
+// exact (a region holding only new[auto] structs has one class — the region exit).
+func TestNewAutoTrackedAsFixedFootprintMember(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "na_track.elisa", `struct Box:
+    value: i64
+def f() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        b: Box& = new[auto] Box(7)
+        c: Box& = new[auto] Box(8)
+        return b.value + c.value
+`, AnalyzeOptions{})
+	asn := onlyRegionStack(t, result)
+	if asn.StackOf["b"] != 0 || asn.StackOf["c"] != 0 {
+		t.Fatalf("new[auto] structs must be tracked on the shared stack 0, got StackOf=%v", asn.StackOf)
+	}
+	if got := asn.regionLifetimeClasses(); got != 1 {
+		t.Fatalf("a region holding new[auto] structs must count 1 lifetime class (region exit), got %d", got)
+	}
+}
