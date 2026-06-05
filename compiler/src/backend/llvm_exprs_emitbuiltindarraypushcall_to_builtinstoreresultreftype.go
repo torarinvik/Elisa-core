@@ -374,6 +374,58 @@ func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVM
 	}
 	return darrayPtr, resultType, true, nil
 }
+
+// emitBuiltinDArrayResizeCall lowers `da.resize(n)`: ensure capacity >= n (one growth, like
+// reserve) then seal count := n (like clear, but storing n instead of 0). The result is a
+// fixed-length array filled by index — no per-element push.
+func (s *functionState) emitBuiltinDArrayResizeCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "resize" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("darray resize expects 1 argument, got %d", len(expr.Args))
+	}
+	owner, ok := s.regionArenaOwner(darrayType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
+		return nil, nil, true, fmt.Errorf("darray resize requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.resize.owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
+	}
+	darrayPtr, resultType, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	neededValue, _, err := s.emitExpr(expr.Args[0], s.g.result.NamedTypes["usize"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if err := s.emitBuiltinDArrayEnsureCapacity(darrayPtr, darrayType, owner.arenaRef, neededValue, "darray.resize"); err != nil {
+		return nil, nil, true, err
+	}
+	countPtr, _, err := s.emitBuiltinDArrayCountPtr(darrayPtr, darrayType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	C.LLVMBuildStore(s.builder, neededValue, countPtr)
+	return darrayPtr, resultType, true, nil
+}
 func (s *functionState) emitBuiltinDArrayClearCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil

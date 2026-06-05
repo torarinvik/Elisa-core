@@ -413,6 +413,69 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 	return resultType, true
 }
 
+// analyzeBuiltinDarrayResizeCall handles `da.resize(n)`: presize to exactly n live
+// elements in one allocation (capacity >= n, count := n), so a fill loop writes by
+// index with no per-element push/capacity-check. Mirrors reserve, then seals the length.
+func (a *Analyzer) analyzeBuiltinDarrayResizeCall(expr *ast.CallExpr) (Type, bool) {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "resize" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "darray resize expects 1 argument, got %d", len(expr.Args))
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if expr.NamedArgCount() != 0 {
+		a.errorf(expr.Pos(), "darray resize does not support named arguments")
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "darray resize requires a mutable darray receiver")
+	}
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !a.regionAvailableForContainer(darrayType) {
+		a.errorf(expr.Pos(), "darray resize requires an active in <arena>: scope")
+	}
+	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "resize")
+	usizeType := a.namedTypes["usize"]
+	argType := a.analyzeValueExpr(expr.Args[0], usizeType)
+	if !AssignableTo(usizeType, argType) {
+		a.errorf(expr.Args[0].Pos(), "darray resize expects %s, got %s", usizeType, argType)
+	}
+	resultType := receiverRefType
+	if resultType == nil {
+		resultType = &RefType{
+			Elem:            darrayType,
+			Mutable:         true,
+			State:           RefStateNonNull,
+			Storage:         RefStorageAny,
+			ExplicitStorage: true,
+		}
+	}
+	a.exprTypes[expr.Func] = &FuncType{
+		Name:   "darray.resize",
+		Params: []Type{resultType, usizeType},
+		Return: resultType,
+	}
+	a.exprTypes[expr] = resultType
+	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray resize"))
+	a.invalidateIndexBoundsForContainer(fieldExpr.Object)
+	return resultType, true
+}
+
 func (a *Analyzer) analyzeBuiltinDarrayClearCall(expr *ast.CallExpr) (Type, bool) {
 	if a == nil || expr == nil {
 		return nil, false
