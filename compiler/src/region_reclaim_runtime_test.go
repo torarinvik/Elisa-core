@@ -392,6 +392,36 @@ def cont_inloop_defer() -> void:
 		"continue mishandled the in-loop-scoped defer")
 }
 
+// docs/73 soundness: under the default reserve_commit backing an interior reference into a growable
+// survives growth, because the base is fixed (contiguous reservation, in-place growth) — it never
+// relocates. 100k pushes force many capacity doublings; if the base moved, `anchor[0]` would read
+// garbage. Under the old chained default this would have been a use-after-free (hence the compiler
+// rejected it); now it is allowed and must actually be safe at runtime.
+func TestDefaultReserveCommitInteriorRefSurvivesGrowth(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	src := `
+def f(n: usize) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        xs: mutable darray[i64] = []
+        xs.push(42)
+        anchor: i64& = &xs[0]
+        i: mutable usize = 1u
+        while i < n:
+            xs.push(i.i64())
+            i <- i + 1u
+        return anchor[0]
+@test
+def iref() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if f(100000u) != 42:
+            panic("interior ref invalidated under default reserve_commit (base moved)")
+`
+	runSingleTestProgramExpectOK(t, "iref", src,
+		"interior ref into a default reserve_commit growable did not survive growth (base relocated)")
+}
+
 // runSingleTestProgramExpectOK builds `src` as a native test binary, runs the single @test named
 // `testName`, and fails if the child exits non-zero (a segfault/panic from the regression).
 func runSingleTestProgramExpectOK(t *testing.T, testName, src, failHint string) {

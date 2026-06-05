@@ -53,8 +53,9 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 		paramNames[p.Name] = true
 	}
 	reserveCommitDeclOffsets := map[int]bool{}
+	loopRegions := regionsInsideLoops(fn.Body)
 	for _, region := range collectSynthesizedRegions(fn.Body) {
-		asn := a.assignRegionStacks(region, paramNames)
+		asn := a.assignRegionStacks(region, paramNames, loopRegions[region])
 		if a.regionStacks != nil {
 			a.regionStacks[region] = asn
 		}
@@ -496,6 +497,52 @@ func isLoopStmtNode(n ast.Node) bool {
 
 // collectSynthesizedRegions returns every compiler-synthesized (`in auto:`) region anywhere in
 // the given statements, including nested ones.
+// regionsInsideLoops returns the set of synthesized regions lexically nested inside a loop. Such
+// regions are reset-and-reused per iteration (loopReset codegen), which keeps a chained backing;
+// they must NOT be flipped to the default reserve_commit stack (docs/73), or the storage-view
+// checker would trust a stability the runtime does not provide. Conservative: a region anywhere
+// under a loop node (header or body) is treated as in-loop.
+func regionsInsideLoops(root []ast.Stmt) map[*ast.RegionStmt]bool {
+	inLoop := map[*ast.RegionStmt]bool{}
+	var rec func(v reflect.Value, depth int)
+	rec = func(v reflect.Value, depth int) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			next := depth
+			switch n := v.Interface().(type) {
+			case *ast.RegionStmt:
+				if depth > 0 && n.Lazy && isSynthesizedAutoRegion(n.Name) {
+					inLoop[n] = true
+				}
+			case *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt, *ast.ParallelForStmt:
+				next = depth + 1
+			}
+			rec(v.Elem(), next)
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem(), depth)
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i), depth)
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i), depth)
+			}
+		}
+	}
+	rec(reflect.ValueOf(root), 0)
+	return inLoop
+}
+
 func collectSynthesizedRegions(root []ast.Stmt) []*ast.RegionStmt {
 	var out []*ast.RegionStmt
 	var rec func(v reflect.Value)

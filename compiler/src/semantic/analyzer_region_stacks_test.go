@@ -85,10 +85,11 @@ func TestRegionStacksReserveCommitForHardBoundedInteriorRef(t *testing.T) {
 	}
 }
 
-// An interior ref into an UNBOUNDED darray (growth not a single counting-loop push) must NOT get a
-// reserve_commit stack — reserve_commit there would panic on overflow. It stays chained, and the
-// honest interior-ref invalidation error remains (resolved only by an explicit reserve_commit region).
-func TestRegionStacksUnboundedInteriorRefStaysChained(t *testing.T) {
+// docs/73: an unbounded non-loop own-growable (no proven bound) gets the DEFAULT reserve_commit
+// stack — a contiguous in-place bump stack with a stable base — not chained. (The previous Phase-C
+// behavior kept it chained; the default reserve_commit makes the base stable so interior refs
+// survive growth, and overflow panics instead of relocating and leaving a hole.)
+func TestRegionStacksUnboundedGrowableGetsDefaultReserveCommit(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_unbounded.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
@@ -101,27 +102,28 @@ func TestRegionStacksUnboundedInteriorRefStaysChained(t *testing.T) {
                 panic("x")
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
-	if asn.stackStrategy(asn.StackOf["xs"]) == "reserve_commit" {
-		t.Fatalf("unbounded darray must not get a reserve_commit stack (panic risk), got %v", asn.StackStrategy)
+	if asn.stackStrategy(asn.StackOf["xs"]) != "reserve_commit" {
+		t.Fatalf("unbounded non-loop growable must get the default reserve_commit stack, got %v", asn.StackStrategy)
 	}
 }
 
-// Soundness of the deferred-invalidation flow (Phase C1b): an interior ref across growth into an
-// UNBOUNDED darray must STILL be rejected — the error is dropped only for a reserve_commit-backed
-// (provably bounded) source, never unsoundly. Here xs has two push sites (push + loop) so it is not
-// hard-bounded; the invalidation error must survive.
-func TestReserveCommitInferenceUnboundedStillErrors(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rc_unsound.elisa", `def build(n: usize) -> i64:
-    can Memory.Allocate, Abort.Panic:
+// docs/73: an interior ref across growth into a non-loop growable is now SOUND and accepted — the
+// default reserve_commit backing has a stable base, so the ref survives growth (overflow panics,
+// never relocates). The previously-required "view invalidated" error is gone for this case. (The
+// loop-body case stays chained and the invalidation error still applies there — see the !inLoop
+// guard in assignRegionStacks.) Runtime soundness is pinned by TestDefaultReserveCommitInteriorRef.
+func TestDefaultReserveCommitAcceptsInteriorRefAcrossGrowth(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rc_stable.elisa", `def build(n: usize) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
         xs: mutable darray[i64] = []
         xs.push(0)
         anchor: i64& = &xs[0]
         for i in 1..<n:
             xs.push(i.i64())
         return anchor[0]
-`)
-	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "cannot be used") {
-		t.Fatalf("unbounded interior-ref-across-growth must still error, got:\n%s", all)
+`, AnalyzeOptions{})
+	if all := strings.Join(result.Errors(), "\n"); strings.Contains(all, "cannot be used") {
+		t.Fatalf("interior ref across growth into a default reserve_commit growable must be accepted (stable base), got:\n%s", all)
 	}
 }
 

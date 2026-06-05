@@ -331,6 +331,25 @@ func (s *functionState) emitReserveCommitStackInit(arenaPtr C.LLVMValueRef, aren
 	return s.emitRegionInitValue(arenaPtr, arenaType, slots, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */)
 }
 
+// defaultReserveCommitSlots is the reservation (in 8-byte uintptr slots) for an unreserved growable
+// with no inferred bound (docs/73): 256 MiB of contiguous virtual address space. The reservation is
+// PROT_NONE; pages commit on first touch, so this costs address space, not physical memory.
+// Overflowing it panics — the intended friction for genuinely-unbounded growth.
+const defaultReserveCommitSlots = 32 * 1024 * 1024 // 256 MiB / 8
+
+// emitDefaultReserveCommitStackInit reserves the fixed default range for a default-backed growable
+// tail stack (docs/73), so it grows in place with a stable base like the bounded reserve_commit
+// case, but without a proven element bound.
+func (s *functionState) emitDefaultReserveCommitStackInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVM, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	slots := C.LLVMConstInt(usizeLLVM, C.ulonglong(defaultReserveCommitSlots), 0)
+	return s.emitRegionInitValue(arenaPtr, arenaType, slots, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */)
+}
+
 func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool) (func(), error) {
 	noop := func() {}
 	asn, ok := s.g.result.RegionStacks[n]
@@ -377,8 +396,16 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 		// there. The strategy is only assigned when the footprint is provably <= N (docs/72), so
 		// the reservation can never overflow.
 		if !loopReset && asn.StackStrategy[k] == "reserve_commit" {
-			if err := s.emitReserveCommitStackInit(alloca, arenaType, asn.StackCapacity[k], asn.StackElemType[k]); err != nil {
-				return noop, err
+			var initErr error
+			if asn.StackCapacity[k] != nil {
+				// Bounded (Phase C): reservation sized to the proven footprint.
+				initErr = s.emitReserveCommitStackInit(alloca, arenaType, asn.StackCapacity[k], asn.StackElemType[k])
+			} else {
+				// Default (docs/73): no inferred bound, reserve a fixed generous range.
+				initErr = s.emitDefaultReserveCommitStackInit(alloca, arenaType)
+			}
+			if initErr != nil {
+				return noop, initErr
 			}
 		}
 	}
