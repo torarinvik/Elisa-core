@@ -7,13 +7,13 @@ def std_mutex_condvar_native_smoke():
 		cv: CondVar = condvar()
 		assert mu.handle != null
 		assert cv.handle != null
-		guard: MutexGuard[Held] = mutex_lock(mu.ref[mutable Mutex&])
-		notify_one(cv.ref[mutable CondVar&])
-		notify_all(cv.ref[mutable CondVar&])
+		guard: MutexGuard[Held] = mutex_lock((&mu).cast[mutable Mutex&])
+		notify_one((&cv).cast[mutable CondVar&])
+		notify_all((&cv).cast[mutable CondVar&])
 		mutex_unlock(move guard)
 		yield_thread()
 		sleep_usec(1)
-		condvar_dispose(cv.ref[mutable CondVar&])
-		mutex_dispose(mu.ref[mutable Mutex&])
+		condvar_dispose((&cv).cast[mutable CondVar&])
+		mutex_dispose((&mu).cast[mutable Mutex&])
 		assert mu.handle == null
 		assert cv.handle == null

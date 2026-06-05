@@ -44,7 +44,7 @@ def mutate_32_explicit_list_view_temp() -> i32:
 def mutate_251_manual_pair_value() -> int error[MemoryError, DiskError, NetError]:
     live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     live.pair <- FuzzPair(251, 252)
-    total: int = try mutate_203_checked_any_pair(live.pair.ref[FuzzPair&])
+    total: int = try mutate_203_checked_any_pair((&live.pair).cast[FuzzPair&])
     handle: mutable heap HeapPairNode&? = live
     mutate_202_release_heap_pair_node(handle)
     return total
@@ -88,7 +88,7 @@ def mutate_254_manual_heap_buffer_bits() -> uintptr error[MemoryError, FormatErr
 
 def mutate_255_manual_stack_heap_bits() -> uintptr error[MemoryError, FormatError]:
     local: u8[16] = zeroed
-    stack_bits: uintptr = local[0].ref[u8&].uintptr()
+    stack_bits: uintptr = (&local[0]).uintptr()
     heap_bits: uintptr = try mutate_254_manual_heap_buffer_bits()
     static_bits: uintptr = mutate_184_static_as_any_bits("m255")
     return stack_bits + heap_bits + static_bits
@@ -116,7 +116,7 @@ def mutate_257_manual_pair_chain_from_globals() -> int error[MemoryError, LogicE
 def mutate_258_manual_reborrow_pair_field() -> int error[MemoryError, DiskError, NetError]:
     live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     live.pair <- FuzzPair(258, 259)
-    pair_ref: FuzzPair& = live.pair.ref[FuzzPair&]
+    pair_ref: FuzzPair& = (&live.pair).cast[FuzzPair&]
     total: int = try mutate_203_checked_any_pair(pair_ref)
     handle: mutable heap HeapPairNode&? = live
     mutate_202_release_heap_pair_node(handle)

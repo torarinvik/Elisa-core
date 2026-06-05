@@ -1,5 +1,5 @@
 def packed_store_tag_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
-    return state.tags.ref[darray[u32]&]
+    return &state.tags
 def packed_store_append_tag(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32):
     can Memory.Allocate, Abort.Panic:
         tags: mutable darray[u32]& = packed_store_tag_table(state)

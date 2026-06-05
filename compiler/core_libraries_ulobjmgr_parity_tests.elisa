@@ -7,11 +7,11 @@ const POSIX_EINVAL: int = 22
 def ulobjmgr_register_contracts() -> void:
     can Abort.Panic:
         out: mutable u32 = 123u32
-        assert _sceUlobjmgrRegisterObject(1u64, 1, out.ref[mutable u32&]) == ORBIS_OK
+        assert _sceUlobjmgrRegisterObject(1u64, 1, (&out).cast[mutable u32&]) == ORBIS_OK
         assert out == 0u32
 
-        assert _sceUlobjmgrRegisterObject(0u64, 1, out.ref[mutable u32&]) == POSIX_EINVAL
-        assert _sceUlobjmgrRegisterObject(1u64, 0, out.ref[mutable u32&]) == POSIX_EINVAL
+        assert _sceUlobjmgrRegisterObject(0u64, 1, (&out).cast[mutable u32&]) == POSIX_EINVAL
+        assert _sceUlobjmgrRegisterObject(1u64, 0, (&out).cast[mutable u32&]) == POSIX_EINVAL
         assert _sceUlobjmgrRegisterObject(1u64, 1, null) == POSIX_EINVAL
 
 @test
@@ -30,7 +30,7 @@ def ulobjmgr_misc_contracts() -> void:
 
 def main() -> int:
     out: mutable u32 = 99u32
-    if _sceUlobjmgrRegisterObject(1u64, 1, out.ref[mutable u32&]) != ORBIS_OK:
+    if _sceUlobjmgrRegisterObject(1u64, 1, (&out).cast[mutable u32&]) != ORBIS_OK:
         return 1
     if out != 0u32:
         return 2

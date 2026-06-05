@@ -126,14 +126,14 @@ def progress_leave_recursion(budget: mutable ProgressBudget&):
 
 def alloc_perm(size: i64) -> mutable heap void&:
 	resolved: usize = size.usize() if size > 0 else 1
-	return arena_alloc(perm_arena.ref[Arena&], resolved) can Memory.Allocate, Abort.Panic
+	return arena_alloc(&perm_arena, resolved) can Memory.Allocate, Abort.Panic
 
 def alloc_scratch(size: i64) -> mutable heap void&:
 	resolved: usize = size.usize() if size > 0 else 1
-	return arena_alloc(scratch_arena.ref[Arena&], resolved) can Memory.Allocate, Abort.Panic
+	return arena_alloc(&scratch_arena, resolved) can Memory.Allocate, Abort.Panic
 
 def reset_scratch():
-	arena_reset(scratch_arena.ref[Arena&])
+	arena_reset(&scratch_arena)
 
 # ------------------------------------------------------------
 # String length cache (pointer-keyed hash table)
@@ -239,13 +239,13 @@ def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
 
 		if len > 0 and len <= 8:
 			text: u8[9]
-			snprintf(text[0].ref[u8&], len.usize() + 1, "%lld", value)
-			return intern_small_string(text[0].ref[u8&], len.usize())
+			snprintf(&text[0], len.usize() + 1, "%lld", value)
+			return intern_small_string(&text[0], len.usize())
 
 		out: heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]
 		snprintf(out.cast[u8&?], len.usize() + 1, "%lld", value)
 
-		if arena == perm_arena.ref[Arena&]:
+		if arena == &perm_arena:
 			register_perm_string_len(out.cast[u8&], len.usize())
 
 		return out
@@ -260,7 +260,7 @@ def char_to_string_into(arena: Arena&, value: i64) -> heap u8&:
 		text: u8[2]
 		text[0] <- value.u8()
 		text[1] <- 0
-		return intern_small_string(text[0].ref[u8&], 1)
+		return intern_small_string(&text[0], 1)
 
 # ------------------------------------------------------------
 # String builder

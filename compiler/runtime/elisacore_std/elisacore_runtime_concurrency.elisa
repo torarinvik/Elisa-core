@@ -161,7 +161,7 @@ static if ELISA_TARGET_OS_POSIX:
 	def ctx_thread_join(thread: uintptr) -> int:
 		can Thread.Join:
 			ret: mutable void&? = null
-			return pthread_join(thread, ret.ref[mutable void&?])
+			return pthread_join(thread, (&ret).cast[mutable void&?])
 
 	def ctx_thread_detach(thread: uintptr) -> int:
 		can Thread.Detach:
@@ -330,7 +330,7 @@ def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
 def mutex() -> Mutex:
 	can Memory.Allocate, Memory.Release:
 		out: Mutex = zeroed
-		mutex_init(out.ref[mutable Mutex&])
+		mutex_init((&out).cast[mutable Mutex&])
 		return move out
 
 def mutex_dispose(mu: mutable Mutex&):
@@ -361,7 +361,7 @@ def mutex_unlock(g: MutexGuard[Held]):
 def condvar() -> CondVar:
 	can Memory.Allocate, Memory.Release:
 		out: CondVar = zeroed
-		condvar_init(out.ref[mutable CondVar&])
+		condvar_init((&out).cast[mutable CondVar&])
 		return move out
 
 def condvar_dispose(cv: mutable CondVar&):
@@ -414,7 +414,7 @@ def ctx_concurrency_join_handle(handle: uintptr):
 def spawn_raw(entry: void&, arg: void&?) -> Thread[void&?, Joinable]:
 	can Thread.Spawn, Abort.Panic:
 		out: Thread[void&?, Joinable] = zeroed
-		status: int = ctx_thread_create(out.handle.ref[mutable uintptr&], entry, arg)
+		status: int = ctx_thread_create(&out.handle, entry, arg)
 		if status != 0:
 			panic("thread create failed")
 		out.state <- arg
@@ -479,7 +479,7 @@ def spawn_native_callback_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> Th
 		if ctx == null:
 			panic("native callback context allocation failed")
 		out: Thread[u32, Joinable] = zeroed
-		status: int = native_callback_context_start_u32_voidp(ctx, out.handle.ref[mutable uintptr&])
+		status: int = native_callback_context_start_u32_voidp(ctx, &out.handle)
 		if status != 0:
 			native_callback_context_free(ctx)
 			panic("native callback context start failed")
@@ -579,7 +579,7 @@ def ctx_concurrency_work1_release(state_bits: mutable void&?):
 			return
 		live_bits: void& = state_bits.cast[void&]
 		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
-		remaining: i64 = ctx_concurrency_ref_release(state.refs.ref[atomic[i64]&])
+		remaining: i64 = ctx_concurrency_ref_release(&state.refs)
 		if remaining == 0:
 			free(state.arg_bits.cast[heap void&])
 			free(state.result_bits.cast[heap void&])

@@ -258,7 +258,7 @@ def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
     forest: FrozenMlAstForest = build_ml_ast_forest(type_store, pattern_store, expr_store, clause_store, stmt_store, decl_store, module_store, root_store)
     total: mutable i64 = 0
     for iteration in 0..<iterations:
-        total <- total + checksum_root_range(0, forest.roots.count, forest.ref[FrozenMlAstForest&])
+        total <- total + checksum_root_range(0, forest.roots.count, (&forest).cast[FrozenMlAstForest&])
     return total
 
 def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
@@ -308,11 +308,11 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
                     span <- span + 1
 
                 end: usize = start + span
-                forest_bits: uintptr = forest.ref[FrozenMlAstForest&].uintptr()
-                result_bits: uintptr = partials[slot].ref[i64&].uintptr()
+                forest_bits: uintptr = (&forest).cast[FrozenMlAstForest&].uintptr()
+                result_bits: uintptr = (&partials[slot]).uintptr()
                 job: MlAstParallelJob = MlAstParallelJob(forest_bits, start, end, iterations, result_bits)
                 task: Task[i64, Pending] = submit ml_ast_parallel_worker(job)
-                task_group_add(group.ref[TaskGroup&], move task)
+                task_group_add(&group, move task)
                 start <- end
 
             wait all group

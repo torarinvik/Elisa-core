@@ -172,7 +172,7 @@ def elisa_trace_fault_handler(sig: int, info: uintptr, uctx: uintptr) -> void:
     fbuf: mutable u8[96] = zeroed
     fw: int = snprintf(fbuf[0], 96, "*** elisa fault: signal %lld at address 0x%llx ***\n", sig.i64(), si_addr.u64()) can Console.Format
     if fw > 0:
-        _ = write(2, fbuf[0].ref[void&], fw.usize()) can Console
+        _ = write(2, (&fbuf[0]).cast[void&], fw.usize()) can Console
     elisa_trace_dump() can Console
     _ = signal(sig, null)
     _ = kill(getpid(), sig)
@@ -181,7 +181,7 @@ def elisa_trace_install_one(sig: int) -> void:
     act: mutable ElisaSigaction = zeroed
     act.handler <- elisa_trace_fault_handler.cast[void&?].uintptr()
     act.flags <- ELISA_SA_SIGINFO
-    _ = sigaction(sig, act.ref[void&], null)
+    _ = sigaction(sig, (&act).cast[void&], null)
 
 # Install the fault handler for SIGSEGV/SIGABRT/SIGILL/SIGFPE. Callable directly (e.g. a
 # program -- or the emulator's own handler -- can opt in explicitly).
@@ -209,7 +209,7 @@ def elisa_trace_dump() -> void:
     hdr: mutable u8[160] = zeroed
     hw: int = snprintf(hdr[0], 160, "--- elisa trace: most recent %llu entries (%llu step(s)) ---\n", n, elisa_trace_total) can Console.Format
     if hw > 0:
-        _ = write(2, hdr[0].ref[void&], hw.usize()) can Console
+        _ = write(2, (&hdr[0]).cast[void&], hw.usize()) can Console
     i: mutable u64 = 0
     while i < n:
         idx: usize = ((elisa_trace_pos - 1 - i) % ELISA_TRACE_CAP.u64()).usize()
@@ -230,7 +230,7 @@ def elisa_trace_dump() -> void:
             wn: mutable usize = w.usize()
             if wn > 256:
                 wn <- 256
-            _ = write(2, buf[0].ref[void&], wn) can Console
+            _ = write(2, (&buf[0]).cast[void&], wn) can Console
         i <- i + 1
 
 def debug_referee_set_enabled(enabled: bool) can[Debug.Referee]:

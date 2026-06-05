@@ -255,9 +255,9 @@ def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
 def frontend_case_char_literals() -> bool:
     can Memory.Allocate, Abort.Panic:
         region scratch(4096)
-        a: mutable Arena& = scratch.ref[mutable Arena&]
+        a: mutable Arena& = (&scratch).cast[mutable Arena&]
         bytes: u8[26] = [39, 97, 39, 32, 39, 92, 110, 39, 32, 39, 92, 120, 52, 49, 39, 32, 39, 92, 117, 48, 48, 52, 49, 39, 10, 0]
-        tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, bytes[0].ref[u8&])
+        tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, &bytes[0])
         if not frontend_expect_token_count(tokens, 6):
             destroy scratch
             return false

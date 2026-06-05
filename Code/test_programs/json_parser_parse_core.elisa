@@ -87,13 +87,13 @@ def json_parse_string_lexeme_at(source: u8&, source_len: usize, source_offset: u
         return json_invalid_lexeme()
     cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
     cursor.pos <- source_offset.usize()
-    return json_parse_string_lexeme(cursor.ref[mutable JsonCursor&])
+    return json_parse_string_lexeme((&cursor).cast[mutable JsonCursor&])
 def json_parse_number_lexeme_at(source: u8&, source_len: usize, source_offset: u32) -> JsonLexemeResult:
     if source_offset.u64() > JSON_MAX_INLINE_SOURCE_OFFSET or source_offset.usize() >= source_len:
         return json_invalid_lexeme()
     cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
     cursor.pos <- source_offset.usize()
-    return json_parse_number_lexeme(cursor.ref[mutable JsonCursor&])
+    return json_parse_number_lexeme((&cursor).cast[mutable JsonCursor&])
 def json_parse_value_after_ws(cursor: mutable JsonCursor&) -> i64:
     ch: i64 = json_cur_char(cursor)
     if ch == JSON_CH_DQUOTE:
@@ -446,7 +446,7 @@ def json_parser_ast_node_count_impl(source: u8&) -> i64:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
         store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-        arena: mutable Arena& = scratch.ref[mutable Arena&]
+        arena: mutable Arena& = (&scratch).cast[mutable Arena&]
         result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
         if result.checksum < 0:
             destroy scratch

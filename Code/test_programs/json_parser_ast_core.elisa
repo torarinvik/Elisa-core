@@ -28,7 +28,7 @@ def json_field_view_ref(fields: dview[JsonField], index: usize) -> JsonField&:
     return (fields.data.cast[u8&] + index * fields.elem_size).cast[JsonField&]
 def json_node_copy_ref(node_ref: JsonNode&) -> JsonNode:
     out: mutable JsonNode = zeroed
-    arena_memcpy(out.ref[void&], node_ref.cast[void&], size_of(JsonNode))
+    arena_memcpy((&out).cast[void&], node_ref.cast[void&], size_of(JsonNode))
     return move out
 def json_field_key_ref(field_ref: JsonField&) -> JsonNode&:
     return (field_ref.cast[u8&] + offset_of(JsonField, key)).cast[JsonNode&]
@@ -65,7 +65,7 @@ def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -
     total: mutable i64 = 0
     for index in 0..<readonly_items.len:
         item: mutable JsonNode = zeroed
-        arena_memcpy(item.ref[void&], json_node_view_ref(readonly_items, index).cast[void&], size_of(JsonNode))
+        arena_memcpy((&item).cast[void&], json_node_view_ref(readonly_items, index).cast[void&], size_of(JsonNode))
         item_count: i64 = json_ast_node_count(item, store)
         if item_count < 0:
             return -1
@@ -79,8 +79,8 @@ def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]
         field_ref: JsonField& = json_field_view_ref(readonly_fields, index)
         key_node: mutable JsonNode = zeroed
         value_node: mutable JsonNode = zeroed
-        arena_memcpy(key_node.ref[void&], json_field_key_ref(field_ref).cast[void&], size_of(JsonNode))
-        arena_memcpy(value_node.ref[void&], json_field_value_ref(field_ref).cast[void&], size_of(JsonNode))
+        arena_memcpy((&key_node).cast[void&], json_field_key_ref(field_ref).cast[void&], size_of(JsonNode))
+        arena_memcpy((&value_node).cast[void&], json_field_value_ref(field_ref).cast[void&], size_of(JsonNode))
         key_count: i64 = json_ast_node_count(key_node, store)
         if key_count < 0:
             return -1

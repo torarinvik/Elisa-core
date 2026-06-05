@@ -311,7 +311,7 @@ def array_view[T, N: usize](arr: T[N]&) -> dview[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if N == 0
     trusted Unsafe.UncheckedIndex:
-        return DynArrayView(collections_void_from_items[T](arr[0].ref[T&]), N, elem_size)
+        return DynArrayView(collections_void_from_items[T](&arr[0]), N, elem_size)
 
 
 def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
@@ -556,7 +556,7 @@ def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
         assert vec.overflow.items != null
         return DynArrayView(collections_void_from_items[T](vec.overflow.items), vec.len, elem_size)
     trusted Unsafe.UncheckedIndex:
-        return DynArrayView(collections_void_from_items[T](vec.inline_items[0].ref[T&]), vec.len, elem_size)
+        return DynArrayView(collections_void_from_items[T](&vec.inline_items[0]), vec.len, elem_size)
 
 
 def view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:

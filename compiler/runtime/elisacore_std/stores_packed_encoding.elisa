@@ -1,5 +1,5 @@
 def packed_store_handle_table(state: mutable PackedStoreState&) -> mutable darray[uintptr]&:
-    return state.handles.ref[darray[uintptr]&]
+    return &state.handles
 def packed_store_append_handle(a: mutable Arena&, state: mutable PackedStoreState&, handle: uintptr):
     can Memory.Allocate, Abort.Panic:
         handles: mutable darray[uintptr]& = packed_store_handle_table(state)

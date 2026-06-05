@@ -539,6 +539,28 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				a.warnf(n.Pos(), "constant %d does not fit in %s and is truncated by this cast", value.Int, dst)
 			}
 		}
+		// The `x.ref[T]` reference shorthand is deprecated in favor of the explicit
+		// `&x` (borrow) / `(&x).cast[T]` (reinterpret) forms. Warn on every use.
+		// Classify so the message points at the right replacement: BORROW (-> `&x`)
+		// iff matching pointee (ignoring mutability), the target is not the universal
+		// `void&` type-erasure pointer, and `&x`'s mutability suffices — `&x`'s real
+		// mutability is exactly `exprCanYieldWritableRef(x)` (the predicate AddrOf
+		// uses), so a mutable target on a non-writable place is a mutability-forcing
+		// reinterpret, not a borrow. Everything else -> `(&x).cast[T]`.
+		if n.RefShorthand {
+			replacement := "`(&x).cast[T]` to reinterpret"
+			if addr, ok := n.Operand.(*ast.AddrOfExpr); ok {
+				voidElem := a.namedTypes["void"]
+				if srcRef, sok := src.(*RefType); sok {
+					if dstRef, dok := dst.(*RefType); dok && !SameType(dstRef.Elem, voidElem) && SameType(srcRef.Elem, dstRef.Elem) {
+						if !dstRef.Mutable || a.exprCanYieldWritableRef(addr.Operand) {
+							replacement = "`&x` to borrow"
+						}
+					}
+				}
+			}
+			a.deprecatedf(n.Pos(), "`x.ref[T]` reference shorthand is deprecated; use %s", replacement)
+		}
 		// `value.cast[T&]` where the value's own type IS T reinterprets the value's bits as a
 		// pointer (a wild pointer), not a reference to it — `.cast` does not take an address.
 		// Almost always a mistake for `&value`. A genuine int->ptr cast targets a DIFFERENT

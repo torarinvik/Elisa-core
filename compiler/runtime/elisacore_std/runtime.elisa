@@ -7,22 +7,22 @@
 # ------------------------------------------------------------
 
 def int_to_string(value: i64) -> heap u8&:
-    return int_to_string_into(perm_arena.ref[Arena&], value) can Memory.Allocate, Console.Format, Abort.Panic
+    return int_to_string_into(&perm_arena, value) can Memory.Allocate, Console.Format, Abort.Panic
 
 def int_to_string_scratch(value: i64) -> heap u8&:
-    return int_to_string_into(scratch_arena.ref[Arena&], value) can Memory.Allocate, Console.Format, Abort.Panic
+    return int_to_string_into(&scratch_arena, value) can Memory.Allocate, Console.Format, Abort.Panic
 
 def bool_to_string(value: int) -> u8&:
-    return bool_to_string_into(perm_arena.ref[Arena&], value)
+    return bool_to_string_into(&perm_arena, value)
 
 def bool_to_string_scratch(value: int) -> u8&:
-    return bool_to_string_into(scratch_arena.ref[Arena&], value)
+    return bool_to_string_into(&scratch_arena, value)
 
 def char_to_string(value: i64) -> heap u8&:
-    return char_to_string_into(perm_arena.ref[Arena&], value) can Memory.Allocate, Abort.Panic
+    return char_to_string_into(&perm_arena, value) can Memory.Allocate, Abort.Panic
 
 def char_to_string_scratch(value: i64) -> heap u8&:
-    return char_to_string_into(scratch_arena.ref[Arena&], value) can Memory.Allocate, Abort.Panic
+    return char_to_string_into(&scratch_arena, value) can Memory.Allocate, Abort.Panic
 
 # ------------------------------------------------------------
 # Basic string predicates

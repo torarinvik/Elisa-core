@@ -15,7 +15,7 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
             FrontendKeywordEntry("or", FrontendTokenKind.Or),
             FrontendKeywordEntry("to", FrontendTokenKind.To)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 5, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 5, text)
 
     if text.len == 3:
         entries: FrontendKeywordEntry[4] = [
@@ -24,7 +24,7 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
             FrontendKeywordEntry("not", FrontendTokenKind.Not),
             FrontendKeywordEntry("try", FrontendTokenKind.Try)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 4, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 4, text)
 
     if text.len == 4:
         entries: FrontendKeywordEntry[10] = [
@@ -39,7 +39,7 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
             FrontendKeywordEntry("true", FrontendTokenKind.True),
             FrontendKeywordEntry("with", FrontendTokenKind.With)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 10, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 10, text)
 
     if text.len == 5:
         entries: FrontendKeywordEntry[10] = [
@@ -54,7 +54,7 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
             FrontendKeywordEntry("stack", FrontendTokenKind.Stack),
             FrontendKeywordEntry("while", FrontendTokenKind.While)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 10, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 10, text)
 
     if text.len == 6:
         entries: FrontendKeywordEntry[9] = [
@@ -68,7 +68,7 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
             FrontendKeywordEntry("struct", FrontendTokenKind.Struct),
             FrontendKeywordEntry("zeroed", FrontendTokenKind.Zeroed)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 9, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 9, text)
 
     if text.len == 7:
         entries: FrontendKeywordEntry[4] = [
@@ -77,14 +77,14 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
             FrontendKeywordEntry("context", FrontendTokenKind.Context),
             FrontendKeywordEntry("mutable", FrontendTokenKind.Mutable)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 4, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 4, text)
 
     if text.len == 8:
         entries: FrontendKeywordEntry[2] = [
             FrontendKeywordEntry("continue", FrontendTokenKind.Continue),
             FrontendKeywordEntry("offsetof", FrontendTokenKind.Offsetof)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 2, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 2, text)
 
     return FrontendTokenKind.Ident
 @inline(always)

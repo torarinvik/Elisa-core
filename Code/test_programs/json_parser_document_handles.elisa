@@ -7,10 +7,10 @@ def json_number_value_can_materialize_i64(value: JsonNumberValue) -> bool:
     return value.kind == JsonNumberKind.SIGNED or (value.kind == JsonNumberKind.UNSIGNED and value.unsigned_value <= i64_max_u64)
 def json_parser_checksum_impl(source: u8&) -> i64:
     cursor: mutable JsonCursor = json_new_cursor(source)
-    checksum: i64 = json_parse_value(cursor.ref[mutable JsonCursor&])
+    checksum: i64 = json_parse_value((&cursor).cast[mutable JsonCursor&])
     if checksum < 0:
         return -1
-    json_skip_ws(cursor.ref[mutable JsonCursor&])
+    json_skip_ws((&cursor).cast[mutable JsonCursor&])
     if cursor.pos != cursor.source_len:
         return -1
     return checksum
@@ -37,8 +37,8 @@ def json_parser_document_source_len(impl: heap JsonParserDocumentInternal&) -> u
     return impl.source_len
 def json_parser_document_store(impl: heap JsonParserDocumentInternal&) -> JsonNode.Store[Local]:
     store: mutable JsonNode.Store[Local] = zeroed
-    words: mutable uintptr& = json_node_store_words(store.ref[JsonNode.Store[Local]&]).cast[mutable uintptr&]
-    words[0] <- impl.arena.ref[u8&].uintptr()
+    words: mutable uintptr& = json_node_store_words((&store).cast[JsonNode.Store[Local]&]).cast[mutable uintptr&]
+    words[0] <- (&impl.arena).uintptr()
     words[1] <- impl.store_row_bytes.uintptr()
     words[2] <- impl.store_state_bits
     return move store
@@ -59,26 +59,26 @@ def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out
 
         internal: mutable heap JsonParserDocumentInternal& = packed_store_region_data(first_region).cast[mutable heap JsonParserDocumentInternal&]
         arena_owner: mutable Arena = Arena(first_region, first_region, 0, 0)
-        source_copy: heap u8& = arena_alloc(arena_owner.ref[mutable Arena&], source_len + 1).cast[heap u8&]
+        source_copy: heap u8& = arena_alloc(&arena_owner, source_len + 1).cast[heap u8&]
         if source_len > 0:
             memcpy(source_copy.cast[void&], source.cast[void&], source_len)
         source_copy[source_len] <- 0
 
-        arena: mutable Arena& = arena_owner.ref[mutable Arena&]
+        arena: mutable Arena& = &arena_owner
         store: JsonNode.Store[Local] = JsonNode.Store(arena_owner)
-        json_node_store_reserve(arena, store.ref[JsonNode.Store[Local]&], json_ast_estimated_node_reserve(source_len))
+        json_node_store_reserve(arena, (&store).cast[JsonNode.Store[Local]&], json_ast_estimated_node_reserve(source_len))
         result: JsonParseNodeResult = json_parse_document_node_with_len(source_copy.cast[u8&], source_len, arena, store)
         if result.checksum < 0:
             arena_to_free: mutable Arena = arena_owner
             out[0] <- json_parser_document_null()
-            arena_free(arena_to_free.ref[mutable Arena&])
+            arena_free(&arena_to_free)
             return 0
 
         internal.source <- source_copy.cast[u8&]
         internal.source_len <- source_len
         internal.arena <- arena_owner
-        internal.store_row_bytes <- json_node_store_row_bytes(store.ref[JsonNode.Store[Local]&])
-        internal.store_state_bits <- json_node_store_state_bits(store.ref[JsonNode.Store[Local]&])
+        internal.store_row_bytes <- json_node_store_row_bytes((&store).cast[JsonNode.Store[Local]&])
+        internal.store_state_bits <- json_node_store_state_bits((&store).cast[JsonNode.Store[Local]&])
         internal.root <- result.node
         internal.checksum <- result.checksum
         out[0] <- JsonParserDocument(internal.uintptr())
@@ -94,7 +94,7 @@ def json_parser_document_destroy_impl(doc: mutable JsonParserDocument&):
         impl: heap JsonParserDocumentInternal& = impl_bits.cast[heap JsonParserDocumentInternal&]
         arena_to_free: mutable Arena = impl.arena
         doc[0].impl_bits <- 0.uintptr()
-        arena_free(arena_to_free.ref[mutable Arena&])
+        arena_free(&arena_to_free)
 def json_parser_document_destroy_handle_impl(doc_bits: uintptr) -> i64:
     can Memory.Release, Abort.Panic:
         if doc_bits == 0.uintptr():
@@ -102,7 +102,7 @@ def json_parser_document_destroy_handle_impl(doc_bits: uintptr) -> i64:
 
         impl: heap JsonParserDocumentInternal& = doc_bits.cast[heap JsonParserDocumentInternal&]
         arena_to_free: mutable Arena = impl.arena
-        arena_free(arena_to_free.ref[mutable Arena&])
+        arena_free(&arena_to_free)
         return 1
 def json_parser_document_checksum_impl(doc: JsonParserDocument&) -> i64:
     if doc[0].impl_bits == 0.uintptr():

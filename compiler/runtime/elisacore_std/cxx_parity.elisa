@@ -226,7 +226,7 @@ def cxx_u32_map_get[T](map: CxxU32Map[T]&, key: u32) -> mutable T&?:
     index: usize = cxx_u32_map_find_index[T](map, key)
     if index >= map.entries.count:
         return null
-    return map.entries[index].value.ref[mutable T&]
+    return (&map.entries[index].value).cast[mutable T&]
 
 def cxx_u32_map_contains[T](map: CxxU32Map[T]&, key: u32) -> bool:
     return cxx_u32_map_find_index[T](map, key) < map.entries.count
@@ -240,7 +240,7 @@ def cxx_u32_map_put[T](a: mutable Arena&, map: mutable CxxU32Map[T]&, key: u32, 
         entry: CxxU32MapEntry[T] = zeroed
         entry.key <- key
         entry.value <- value
-        _ = arena_da_append[CxxU32MapEntry[T]](a, map.entries.ref[darray[CxxU32MapEntry[T]]&], entry)
+        _ = arena_da_append[CxxU32MapEntry[T]](a, &map.entries, entry)
         return true
 
 def cxx_u32_map_remove[T](map: mutable CxxU32Map[T]&, key: u32) -> bool:
@@ -248,7 +248,7 @@ def cxx_u32_map_remove[T](map: mutable CxxU32Map[T]&, key: u32) -> bool:
         index: usize = cxx_u32_map_find_index[T](map, key)
         if index >= map.entries.count:
             return false
-        _ = darray_remove_at[CxxU32MapEntry[T]](map.entries.ref[darray[CxxU32MapEntry[T]]&], index)
+        _ = darray_remove_at[CxxU32MapEntry[T]](&map.entries, index)
         return true
 
 def cxx_u32_map_clear[T](map: mutable CxxU32Map[T]&):

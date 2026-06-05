@@ -423,7 +423,7 @@ def frontend_tokenize_with_len(a: mutable Arena&, filename: u8&, source: u8&, so
             tokens: mutable darray[FrontendToken] = []
 
             while true:
-                token: FrontendToken = frontend_next_token(lexer.ref[mutable FrontendLexer&])
+                token: FrontendToken = frontend_next_token((&lexer).cast[mutable FrontendLexer&])
                 tokens.push(token)
                 match token.kind:
                     FrontendTokenKind.Eof:

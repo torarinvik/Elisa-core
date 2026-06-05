@@ -53,7 +53,7 @@ def json_parser_parity_suite_impl() -> int:
         source_len: usize = runtime_strlen(source_any)
         region scratch(json_ast_scratch_capacity(source_len))
         store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-        arena: mutable Arena& = scratch.ref[mutable Arena&]
+        arena: mutable Arena& = (&scratch).cast[mutable Arena&]
         result: JsonParseNodeResult = json_parse_document_node_with_len(source_any, source_len, arena, store)
         if result.checksum < 0:
             destroy scratch
@@ -81,7 +81,7 @@ def json_parser_parity_suite_impl() -> int:
         numbers_len: usize = runtime_strlen(numbers_any)
         region numbers_scratch(json_ast_scratch_capacity(numbers_len))
         numbers_store: JsonNode.Store[Local] = JsonNode.Store(numbers_scratch)
-        numbers_arena: mutable Arena& = numbers_scratch.ref[mutable Arena&]
+        numbers_arena: mutable Arena& = (&numbers_scratch).cast[mutable Arena&]
         numbers_result: JsonParseNodeResult = json_parse_document_node_with_len(numbers_any, numbers_len, numbers_arena, numbers_store)
         if numbers_result.checksum < 0:
             destroy numbers_scratch

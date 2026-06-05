@@ -32,7 +32,7 @@ def save_data_init_progress_terminate_contracts() -> void:
     can Abort.Panic:
         assert sceSaveDataInitialize(null) == SAVE_DATA_OK
         progress: mutable i64 = 0
-        assert sceSaveDataGetProgress(progress.ref[mutable i64&].cast[void&?]) == SAVE_DATA_OK
+        assert sceSaveDataGetProgress((&progress).cast[mutable i64&].cast[void&?]) == SAVE_DATA_OK
         assert sceSaveDataGetProgress(null) == SAVE_DATA_PARAMETER
         assert sceSaveDataTerminate() == SAVE_DATA_OK
 
@@ -41,7 +41,7 @@ def main() -> int:
         return 1
 
     progress: mutable i64 = 0
-    if sceSaveDataGetProgress(progress.ref[mutable i64&].cast[void&?]) != SAVE_DATA_OK:
+    if sceSaveDataGetProgress((&progress).cast[mutable i64&].cast[void&?]) != SAVE_DATA_OK:
         return 2
     if sceSaveDataGetProgress(null) != SAVE_DATA_PARAMETER:
         return 3

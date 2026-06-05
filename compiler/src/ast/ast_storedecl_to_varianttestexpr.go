@@ -629,6 +629,10 @@ type CastExpr struct {
 	Operand  Expr
 	Target   TypeExpr
 	Origin   CastExprOrigin
+	// RefShorthand marks a cast parsed from the deprecated `x.ref[T]` reference
+	// shorthand (desugared to `(&x).cast[T]`). The analyzer emits a deprecation
+	// pointing at the `&x` / `(&x).cast[T]` replacement.
+	RefShorthand bool
 }
 type CascadeExpr struct {
 	Position lexer.Pos

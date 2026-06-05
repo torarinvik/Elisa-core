@@ -8,15 +8,15 @@ def frontend_require_arena(lexer: mutable FrontendLexer&) -> mutable Arena&:
 @inline(always)
 def frontend_pending_is_empty(lexer: FrontendLexer&) -> bool:
     is_empty: func(Deque[FrontendToken]&) -> bool = arena_deque_is_empty.specialize[FrontendToken]()
-    return is_empty(lexer.pending_tokens.ref[Deque[FrontendToken]&])
+    return is_empty((&lexer.pending_tokens).cast[Deque[FrontendToken]&])
 def frontend_pending_push_back(lexer: mutable FrontendLexer&, token: FrontendToken):
     push_back: func(mutable Arena&, mutable Deque[FrontendToken]&, FrontendToken) -> mutable Deque[FrontendToken]& effects[Memory.Allocate, Abort.Panic] = arena_deque_push_back.specialize[FrontendToken]()
-    _ = push_back(frontend_require_arena(lexer), lexer.pending_tokens.ref[mutable Deque[FrontendToken]&], token) can Memory.Allocate, Abort.Panic
+    _ = push_back(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[mutable Deque[FrontendToken]&], token) can Memory.Allocate, Abort.Panic
 def frontend_pending_pop_front(lexer: mutable FrontendLexer&) -> FrontendToken:
     can Abort.Panic:
         pop_front: func(mutable Deque[FrontendToken]&, mutable FrontendToken&) -> bool effects[Abort.Panic] = arena_deque_pop_front.specialize[FrontendToken]()
         token: mutable FrontendToken = zeroed
-        ok: bool = pop_front(lexer.pending_tokens.ref[mutable Deque[FrontendToken]&], token.ref[mutable FrontendToken&])
+        ok: bool = pop_front((&lexer.pending_tokens).cast[mutable Deque[FrontendToken]&], (&token).cast[mutable FrontendToken&])
         assert ok
         return token
 @inline(always)

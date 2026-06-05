@@ -71,13 +71,13 @@ def parser_advance(state: mutable ParserState&) -> TokenKind:
 
 def scope_define(a: Arena&, scope: mutable Scope&, name: cstr, kind: SymbolKind, first_kind: TokenKind) -> bool error[RuntimeError]:
     entry: Symbol = Symbol(name, kind, scope.depth, first_kind)
-    slot: Symbol&? = try arena_dict_put__Symbol(a, scope.symbols.ref[dict[cstr, Symbol]&], name, entry) else null
+    slot: Symbol&? = try arena_dict_put__Symbol(a, &scope.symbols, name, entry) else null
     return slot != null
 
 def scope_contains(scope: Scope&, name: cstr) -> bool:
     current: mutable Scope&? = scope
     while current != null:
-        if arena_dict_contains__Symbol(current.symbols.ref[dict[cstr, Symbol]&], name):
+        if arena_dict_contains__Symbol(&current.symbols, name):
             return true
         current <- current.parent
     return false
@@ -88,7 +88,7 @@ def make_tokens() -> view[Token]:
 
 def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[RuntimeError]:
     region parse(4096)
-    parse_arena: Arena& = parse.ref[Arena&]
+    parse_arena: Arena& = &parse
 
     root: mutable Scope& @parse = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8), 0)
     child: mutable Scope& @parse = new[parse] Scope(root.cast[Scope&?], arena_dict_new__Symbol(parse_arena, 8), root.depth + 1)
@@ -100,7 +100,7 @@ def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[R
             return false
 
     first_kind: TokenKind = parser_advance(parser.cast[mutable ParserState&])
-    try arena_dict_reserve__Symbol(parse_arena, root.symbols.ref[dict[cstr, Symbol]&], 16)
+    try arena_dict_reserve__Symbol(parse_arena, &root.symbols, 16)
 
     global_ok: bool = try scope_define(parse_arena, root.cast[mutable Scope&], "parse_file", SymbolKind.Func, TokenKind.Def)
     local_ok: bool = try scope_define(parse_arena, child.cast[mutable Scope&], local_name, SymbolKind.Local, first_kind)

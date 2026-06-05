@@ -192,7 +192,7 @@ def json_decoded_string_len(source: u8&, source_offset: usize, source_len: usize
         if likely ch != JSON_CH_BSLASH:
             total <- total + 1
         else:
-            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, pos.ref[mutable usize&])
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, &pos)
             if codepoint < 0:
                 return -1
             utf8_size: usize = json_utf8_codepoint_size(codepoint)
@@ -221,7 +221,7 @@ def json_decode_string_into(source: u8&, source_offset: usize, source_len: usize
             dst[out_pos] <- ch.u8()
             out_pos <- out_pos + 1
         else:
-            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, pos.ref[mutable usize&])
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, &pos)
             if codepoint < 0:
                 return -1
             out_pos <- out_pos + json_write_utf8_codepoint(dst, out_pos, codepoint)
@@ -244,11 +244,11 @@ def json_string_matches_literal(source: u8&, source_offset: usize, source_len: u
                 return false
             literal_pos <- literal_pos + 1
         else:
-            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, pos.ref[mutable usize&])
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, &pos)
             if codepoint < 0:
                 return false
             utf8: u8[4] = zeroed
-            encoded_len: usize = json_write_utf8_codepoint(utf8[0].ref[mutable u8&], 0, codepoint)
+            encoded_len: usize = json_write_utf8_codepoint(&utf8[0], 0, codepoint)
             if literal_pos + encoded_len > literal_len:
                 return false
             for i in 0..<encoded_len:

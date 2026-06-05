@@ -1,5 +1,5 @@
 def packed_store_variant_rows_table(state: mutable PackedStoreState&) -> mutable darray[PackedStoreVariantRows]&:
-    return state.variant_rows.ref[darray[PackedStoreVariantRows]&]
+    return &state.variant_rows
 def packed_store_find_variant_rows(state: mutable PackedStoreState&, tag: u32) -> mutable PackedStoreVariantRows&?:
     variants: darray[PackedStoreVariantRows]& = packed_store_variant_rows_table(state)
     null return if variants.items == null
@@ -24,7 +24,7 @@ def packed_store_get_or_create_variant_rows(a: mutable Arena&, state: mutable Pa
 def packed_store_append_variant_row(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32, row: void&) -> u32:
     can Memory.Allocate, Abort.Panic:
         variant_rows: PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
-        rows: mutable darray[uintptr]& = variant_rows.rows.ref[mutable darray[uintptr]&]
+        rows: mutable darray[uintptr]& = &variant_rows.rows
         slot: u32 = rows.count.u32()
         in a:
             rows.push(row.cast[u8&].uintptr())
@@ -34,7 +34,7 @@ def packed_store_variant_row_ptr(state: mutable PackedStoreState&, tag: u32, slo
         variant_rows: PackedStoreVariantRows&? = packed_store_find_variant_rows(state, tag)
         assert variant_rows != null
 
-        rows: darray[uintptr]& = variant_rows.rows.ref[darray[uintptr]&]
+        rows: darray[uintptr]& = &variant_rows.rows
         slot_index: usize = slot.usize()
         assert rows.items != null
         assert slot_index < rows.count

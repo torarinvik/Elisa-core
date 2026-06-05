@@ -127,7 +127,7 @@ def memory_pool_init[T]() -> MemoryPool[T]:
 
 def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T]:
     out: mutable MemoryPool[T] = zeroed
-    memory_pool_add_capacity(out.ref[MemoryPool[T]&], count) can Memory.Allocate, Abort.Panic
+    memory_pool_add_capacity(&out, count) can Memory.Allocate, Abort.Panic
     return out
 
 def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
@@ -137,7 +137,7 @@ def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
             item_size <- size_of(MemoryPoolFreeNode)
 
         for i in 0..<count:
-            raw: heap void& = arena_alloc(pool.arena.ref[Arena&], item_size)
+            raw: heap void& = arena_alloc(&pool.arena, item_size)
             trusted Unsafe.PointerCast:
                 node: heap MemoryPoolFreeNode& = raw.cast[heap MemoryPoolFreeNode&]
                 node.next <- pool.free_list
@@ -157,7 +157,7 @@ def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T&:
         if item_size < size_of(MemoryPoolFreeNode):
             item_size <- size_of(MemoryPoolFreeNode)
 
-        raw: heap void& = arena_alloc(pool.arena.ref[Arena&], item_size)
+        raw: heap void& = arena_alloc(&pool.arena, item_size)
         trusted Unsafe.PointerCast:
             item: heap T& = raw.cast[heap T&]
             item[0] <- zeroed
@@ -171,11 +171,11 @@ def memory_pool_destroy[T](pool: mutable MemoryPool[T]&, ptr: mutable heap T&):
         pool.free_list as & <- node
 
 def memory_pool_reset[T](pool: mutable MemoryPool[T]&):
-    arena_reset(pool.arena.ref[Arena&])
+    arena_reset(&pool.arena)
     pool.free_list <- null
 
 def memory_pool_deinit[T](pool: mutable MemoryPool[T]&):
-    arena_free(pool.arena.ref[Arena&]) can Memory.Release, Abort.Panic
+    arena_free(&pool.arena) can Memory.Release, Abort.Panic
     pool.arena <- zeroed
     pool.free_list <- null
 

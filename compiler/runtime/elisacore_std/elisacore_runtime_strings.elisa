@@ -20,10 +20,10 @@ def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
 
         if left_len + right_len <= 8:
             text: u8[9]
-            memcpy(text[0].ref[mutable void&], left.cast[void&], left_len)
+            memcpy((&text[0]).cast[mutable void&], left.cast[void&], left_len)
             memcpy((&text[0] + left_len).cast[mutable void&], right.cast[void&], right_len)
             text[left_len + right_len] <- 0
-            return intern_small_string(text[0].ref[u8&], left_len + right_len).cast[u8&]
+            return intern_small_string(&text[0], left_len + right_len).cast[u8&]
 
         out: u8& = alloc_perm((left_len + right_len + 1).i64()).cast[u8&]
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
@@ -46,10 +46,10 @@ def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
 
         if left_len + right_len <= 8:
             text: u8[9]
-            memcpy(text[0].ref[mutable void&], left.cast[void&], left_len)
+            memcpy((&text[0]).cast[mutable void&], left.cast[void&], left_len)
             memcpy((&text[0] + left_len).cast[mutable void&], right.cast[void&], right_len)
             text[left_len + right_len] <- 0
-            return intern_small_string(text[0].ref[u8&], left_len + right_len).cast[u8&]
+            return intern_small_string(&text[0], left_len + right_len).cast[u8&]
 
         out: u8& = alloc_scratch((left_len + right_len + 1).i64()).cast[u8&]
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
@@ -357,7 +357,7 @@ def bytes_view(buf: darray[u8]) -> sview:
     if n == 0:
         return sview("", 0, 0)
     trusted Unsafe.UncheckedIndex:
-        return StringView(buf[0].ref[u8&], n.i64())
+        return StringView(&buf[0], n.i64())
 
 # FNV-1a 64-bit hash of the bytes of `value` (std::hash<std::string_view>). Deterministic
 # and order-sensitive; to hash a C-string / dstr, take a `sview` of its bytes first.

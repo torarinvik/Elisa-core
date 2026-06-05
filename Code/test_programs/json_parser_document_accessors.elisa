@@ -4,10 +4,10 @@ def json_parse_document_node_with_len(source: u8&, source_len: usize, arena: mut
         if source_len > JSON_MAX_INLINE_SOURCE_OFFSET.usize():
             return json_parse_node_result(invalid_node, -1)
         cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
-        result: JsonParseNodeResult = json_parse_value_node(cursor.ref[mutable JsonCursor&], arena, store, invalid_node)
+        result: JsonParseNodeResult = json_parse_value_node((&cursor).cast[mutable JsonCursor&], arena, store, invalid_node)
         if result.checksum < 0:
             return result
-        json_skip_ws(cursor.ref[mutable JsonCursor&])
+        json_skip_ws((&cursor).cast[mutable JsonCursor&])
         if cursor.pos != cursor.source_len:
             return json_parse_node_result(invalid_node, -1)
         return result

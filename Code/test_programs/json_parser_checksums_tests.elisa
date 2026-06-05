@@ -24,10 +24,10 @@ def json_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: us
                 if slot < extra_repeats:
                     repeats <- repeats + 1
 
-                result_bits: uintptr = partials[slot].ref[i64&].uintptr()
+                result_bits: uintptr = (&partials[slot]).uintptr()
                 job: JsonParallelJob = JsonParallelJob(source_bits, repeats, result_bits, mode)
                 task: Task[i64, Pending] = submit json_parallel_worker(job)
-                task_group_add(group.ref[TaskGroup&], move task)
+                task_group_add(&group, move task)
 
             wait all group
 

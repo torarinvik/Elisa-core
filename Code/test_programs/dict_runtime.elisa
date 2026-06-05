@@ -25,15 +25,15 @@ def arena_dict_clear__i32(m: dict[cstr[key_shape], i32]&):
 
 def touch_dict(a: Arena&, key: cstr[key_shape]) -> bool error[RuntimeError]:
     values: mutable dict[cstr[key_shape], i32] = arena_dict_new__i32(a, 4)
-    try arena_dict_reserve__i32(a, values.ref[dict[cstr[key_shape], i32]&], 8)
+    try arena_dict_reserve__i32(a, &values, 8)
 
-    slot: i32&? = try arena_dict_put__i32(a, values.ref[dict[cstr[key_shape], i32]&], key, 7) else null
+    slot: i32&? = try arena_dict_put__i32(a, &values, key, 7) else null
     if slot == null:
         return false
 
-    present: bool = arena_dict_contains__i32(values.ref[dict[cstr[key_shape], i32]&], key)
-    fetched: i32&? = arena_dict_get__i32(values.ref[dict[cstr[key_shape], i32]&], key)
-    removed: bool = arena_dict_remove__i32(values.ref[dict[cstr[key_shape], i32]&], key)
-    arena_dict_clear__i32(values.ref[dict[cstr[key_shape], i32]&])
+    present: bool = arena_dict_contains__i32(&values, key)
+    fetched: i32&? = arena_dict_get__i32(&values, key)
+    removed: bool = arena_dict_remove__i32(&values, key)
+    arena_dict_clear__i32(&values)
 
     return present and fetched != null and removed

@@ -50,9 +50,10 @@ func (p *Parser) parsePostfix() ast.Expr {
 				target := p.parseTypeExpr()
 				p.expect(lexer.TOKEN_RBRACKET)
 				expr = &ast.CastExpr{
-					Position: pos,
-					Operand:  &ast.AddrOfExpr{Position: pos, Operand: expr},
-					Target:   target,
+					Position:     pos,
+					Operand:      &ast.AddrOfExpr{Position: pos, Operand: expr},
+					Target:       target,
+					RefShorthand: true,
 				}
 				continue
 			}

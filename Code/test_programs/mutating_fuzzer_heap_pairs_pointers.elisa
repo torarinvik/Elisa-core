@@ -17,7 +17,7 @@ def mutate_203_checked_any_pair(slot: FuzzPair&) -> int error[DiskError, NetErro
 
 
 def mutate_204_recursive_pair_node_sum(node: heap HeapPairNode&) -> int error[LogicError, DiskError, NetError]:
-    value: int = try mutate_203_checked_any_pair(node.pair.ref[FuzzPair&])
+    value: int = try mutate_203_checked_any_pair((&node.pair).cast[FuzzPair&])
     if node.next == null:
         return value
     next: heap HeapPairNode& = node.next
@@ -47,7 +47,7 @@ def mutate_206_build_pair_chain_sum() -> int error[MemoryError, LogicError, Disk
 
 def mutate_207_stack_buffer_format() -> int error[FormatError]:
     buffer: u8[32] = zeroed
-    return try mutate_181_checked_write_into(buffer[0].ref[u8&], 32, "stack=%d")
+    return try mutate_181_checked_write_into(&buffer[0], 32, "stack=%d")
 
 
 def mutate_208_stack_buffer_format_or_minus_one() -> int:
@@ -100,7 +100,7 @@ def mutate_213_build_three_pair_chain_count() -> int error[MemoryError, LogicErr
 def mutate_214_heap_pair_any_roundtrip() -> bool error[MemoryError]:
     live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     live.pair <- root_pair
-    same: bool = live.pair.ref[FuzzPair&].uintptr() == live.pair.ref[FuzzPair&].uintptr()
+    same: bool = (&live.pair).cast[FuzzPair&].uintptr() == (&live.pair).cast[FuzzPair&].uintptr()
     handle: mutable heap HeapPairNode&? = live
     mutate_202_release_heap_pair_node(handle)
     return same
@@ -134,13 +134,13 @@ def mutate_218_recursive_any_pair_sum(depth: int, pair: FuzzPair&) -> int error[
 
 
 def mutate_219_use_static_any_pair_sum() -> int:
-    return try mutate_218_recursive_any_pair_sum(2, root_pair.ref[FuzzPair&]) else 0
+    return try mutate_218_recursive_any_pair_sum(2, (&root_pair).cast[FuzzPair&]) else 0
 
 
 def mutate_220_use_heap_pair_any_sum() -> int error[MemoryError, DiskError, NetError]:
     live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     live.pair <- root_pair
-    total: int = try mutate_218_recursive_any_pair_sum(2, live.pair.ref[FuzzPair&])
+    total: int = try mutate_218_recursive_any_pair_sum(2, (&live.pair).cast[FuzzPair&])
     handle: mutable heap HeapPairNode&? = live
     mutate_202_release_heap_pair_node(handle)
     return total
@@ -168,7 +168,7 @@ def mutate_223_recursive_buffer_write_fallback(depth: int) -> int:
 
 def mutate_224_mixed_stack_heap_static_any() -> uintptr error[MemoryError, FormatError]:
     local: u8[32] = zeroed
-    stack_bits: uintptr = local[0].ref[u8&].uintptr()
+    stack_bits: uintptr = (&local[0]).uintptr()
     heap_bits: uintptr = try mutate_191_heap_bytes_format_bits()
     static_bits: uintptr = mutate_184_static_as_any_bits("mix")
     return stack_bits + heap_bits + static_bits
@@ -212,12 +212,12 @@ def mutate_230_recursive_logic_and_memory(depth: int) -> int error[MemoryError, 
 
 def mutate_231_stack_buffer_ptr_compare() -> bool:
     buffer: u8[4] = zeroed
-    return buffer[0].ref[u8&].uintptr() != buffer[1].ref[u8&].uintptr()
+    return (&buffer[0]).uintptr() != (&buffer[1]).uintptr()
 
 
 def mutate_232_static_vs_stack_bits() -> bool:
     buffer: u8[4] = zeroed
-    return buffer[0].ref[u8&].uintptr() != mutate_184_static_as_any_bits("stack")
+    return (&buffer[0]).uintptr() != mutate_184_static_as_any_bits("stack")
 
 
 def mutate_233_heap_not_zero_any_void() -> bool error[MemoryError]:

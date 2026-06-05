@@ -8,15 +8,15 @@ const PACKED_STORE_MIN_ROWS_PER_REGION: usize = 64
 def packed_store_region_data(r: heap Region&) -> heap u8&:
     return (r.cast[heap u8&] + size_of(Region)).cast[heap u8&]
 def packed_store_region_table(state: mutable PackedStoreState&) -> mutable darray[heap Region&?]&:
-    return state.regions.ref[darray[heap Region&?]&]
+    return &state.regions
 def packed_store_index_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
-    return state.indices.ref[darray[u32]&]
+    return &state.indices
 def packed_store_variant_slot_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
-    return state.variant_slots.ref[darray[u32]&]
+    return &state.variant_slots
 def packed_store_prefix_column_table(state: mutable PackedStoreState&) -> mutable darray[uintptr]&:
-    return state.prefix_columns.ref[darray[uintptr]&]
+    return &state.prefix_columns
 def packed_store_side_column_table(state: mutable PackedStoreState&) -> mutable darray[uintptr]&:
-    return state.side_columns.ref[darray[uintptr]&]
+    return &state.side_columns
 def packed_store_ensure_metadata_capacity(a: mutable Arena&, state: mutable PackedStoreState&, needed_rows: usize):
     can Memory.Allocate, Abort.Panic:
         handles: mutable darray[uintptr]& = packed_store_handle_table(state)
