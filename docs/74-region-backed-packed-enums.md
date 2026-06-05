@@ -77,6 +77,34 @@ as an independent outlives obligation; codegen decodes that field against region
 bare children against the parent's region. The entire escape/outlives layer (`deps(v)` flow,
 `regionRefStateFromDependency`, return-escape) is reused unchanged.
 
+## Revision: the store is made implicit, not eliminated (handle-representation constraint)
+
+The original framing ("drop the bespoke store; the region IS the store; provenance rides on the
+handle's pointer lane") assumed a store-carrying handle. The current implementation uses two
+columnar ABIs (`packedEnumABIIndexSOA`, `packedEnumABIVariantSparse`) and **both represent a handle
+as a bare `u32` row-index** — the store pointer is *not* in the handle. A `u32` index is only
+meaningful against one specific `PackedStoreState` (the object holding the column `darray`s), so a
+handle returned by `make` is readable in `build`/`eval` only if they share that **same** state
+object.
+
+Two ways to honor that:
+- **Store-carrying handle** (`{store_ptr, u32}` carrier): handle is self-describing, storeless match
+  recovers the store from it, nothing threads. But the handle grows from 4 to ~16 bytes — every
+  child edge 4× larger, worse cache behavior — which **defeats the density that is the entire point
+  of packed enums**. Rejected on efficiency.
+- **Implicit, region-backed, threaded store** (chosen): keep the dense `u32` handle. Keep a
+  `PackedStoreState`, but make it *implicit* — created once at the region scope, its columns backed
+  by the region arena — and *auto-thread* it across region-polymorphic calls (the same mechanism
+  `tree` uses for its hidden store param, and docs/75 uses for the region). The store object lives
+  under the hood; the source surface stays ceremony-free: `new[auto] Expr.V(...)` and `match node:`
+  with no `Store`, no `in store:`, no threaded param written by hand.
+
+So "region-backed packed enum" means: **the store is implicit and region-backed (lifetime = the
+region; backing = the region arena), and threaded by inference** — not that the store object ceases
+to exist. The handle stays a dense index; *which* store it indexes is carried by inference
+(active-store binding + region-poly threading), never by the handle bits. This is the robust and
+efficient reading of the decision and supersedes the "pointer lane" language above.
+
 ## Staging
 
 | Step | Delivers | Risk |
