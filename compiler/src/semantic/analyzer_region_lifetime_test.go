@@ -208,3 +208,57 @@ func TestRegionLifetimeRejectedByDefault(t *testing.T) {
 		t.Fatalf("expected interleaving to be rejected by default, got:\n%s", all)
 	}
 }
+
+// Growth-discipline (tail-growth) check: once a later sibling is allocated on top of an
+// inferred-region container, growing the earlier one forces a reallocation (a dead hole, or a
+// panic under interior-pointer-stable regions). Flagged as a warning.
+func TestRegionGrowthFlagsInteriorRealloc(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_interior.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: mutable darray[i64] = []
+            a.push(1)
+            b: mutable darray[i64] = []
+            b.push(2)
+            a.push(3)
+`, AnalyzeOptions{})
+	if !strings.Contains(allDiagnostics(result), "no longer the arena tail") {
+		t.Fatalf("expected an interior-growth reallocation warning, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// reserve() pre-sizes a container so it never relocates — the size-then-freeze idiom suppresses
+// the warning even when a later sibling sits on top.
+func TestRegionGrowthReserveSuppresses(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_reserve.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: mutable darray[i64] = []
+            a.reserve(8u)
+            a.push(1)
+            b: mutable darray[i64] = []
+            b.push(2)
+            a.push(3)
+`, AnalyzeOptions{})
+	if strings.Contains(allDiagnostics(result), "no longer the arena tail") {
+		t.Fatalf("reserve() must suppress the growth warning, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Tail-ordered growth (each container grown fully before the next is born) respects the stack
+// discipline and must never warn.
+func TestRegionGrowthTailOrderNoWarning(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_tail.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: mutable darray[i64] = []
+            a.push(1)
+            a.push(2)
+            b: mutable darray[i64] = []
+            b.push(3)
+            b.push(4)
+`, AnalyzeOptions{})
+	if strings.Contains(allDiagnostics(result), "no longer the arena tail") {
+		t.Fatalf("tail-ordered growth must not warn, got:\n%s", allDiagnostics(result))
+	}
+}

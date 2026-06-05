@@ -32,6 +32,135 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 	}
 	for _, region := range collectSynthesizedRegions(fn.Body) {
 		a.analyzeRegionLifetimes(region)
+		a.analyzeRegionGrowthDiscipline(region)
+	}
+}
+
+// regionGrowthMethods are the darray/dict operations that may REALLOCATE the backing buffer.
+// In a shared bump arena a buffer can only grow in place while it is the tail (top) allocation;
+// growing an interior buffer relocates it (leaving a dead hole under the CHAINED strategy) or
+// panics (under the interior-pointer-stable RESERVE_COMMIT/FIXED strategies — arena.elisa:460).
+var regionGrowthMethods = map[string]bool{
+	"push": true, "push_back": true, "push_front": true,
+	"insert": true, "append": true, "extend": true,
+}
+
+// analyzeRegionGrowthDiscipline (Phase 1 — diagnostics) enforces tail-growth discipline: once a
+// later sibling is allocated on top of an inferred-region container, growing the earlier one
+// forces a reallocation. Because an arena never frees mid-region, a container is sealed for the
+// rest of the region as soon as ANY later sibling is born. `reserve()` pre-sizes a container so
+// it never relocates, and suppresses the warning (the canonical size-then-freeze idiom).
+func (a *Analyzer) analyzeRegionGrowthDiscipline(region *ast.RegionStmt) {
+	// Top-level fresh allocations in source (== arena) order.
+	birthByName := map[string]int{}
+	order := make([]string, 0, 4)
+	for _, stmt := range region.Body {
+		vd, ok := stmt.(*ast.VarDeclStmt)
+		if !ok || !a.isFreshRegionAllocation(vd) {
+			continue
+		}
+		if _, dup := birthByName[vd.Name]; dup {
+			continue
+		}
+		birthByName[vd.Name] = vd.Position.Offset
+		order = append(order, vd.Name)
+	}
+	if len(order) < 2 {
+		return // need a later sibling to seal an earlier container
+	}
+
+	scan := &regionGrowthScan{tracked: birthByName, reserved: map[string]bool{}}
+	scan.walkGrowth(reflect.ValueOf(region.Body))
+
+	sort.SliceStable(scan.growths, func(x, y int) bool { return scan.growths[x].off < scan.growths[y].off })
+	warned := map[string]bool{}
+	for _, g := range scan.growths {
+		if scan.reserved[g.name] || warned[g.name] {
+			continue // user pre-sized it, or already reported once per container
+		}
+		xb := birthByName[g.name]
+		blocker := ""
+		blockerBirth := 0
+		for _, other := range order {
+			ob := birthByName[other]
+			if ob > xb && ob < g.off { // a sibling born after x, before this push -> x is sealed
+				if blocker == "" || ob < blockerBirth {
+					blocker, blockerBirth = other, ob
+				}
+			}
+		}
+		if blocker != "" {
+			warned[g.name] = true
+			a.warnf(g.pos,
+				"growing %q after %q was allocated on top of it in the same inferred region forces a reallocation: %q is no longer the arena tail, so this relocates its buffer (a dead hole under the default region, or a panic under an interior-pointer-stable one). reserve() %q's capacity up front, finish growing it before %q is created, or give one its own region.",
+				g.name, blocker, g.name, g.name, blocker)
+		}
+	}
+}
+
+type regionGrowth struct {
+	name string
+	off  int
+	pos  lexer.Pos
+}
+
+// regionGrowthScan collects growth-method calls and reserve() suppressors on tracked containers.
+type regionGrowthScan struct {
+	tracked  map[string]int
+	growths  []regionGrowth
+	reserved map[string]bool
+}
+
+// growthCallTarget reports the receiver name of a `recv.method(...)` call when recv is a tracked
+// container and method is a known growth/reserve op, plus whether it is a reserve (suppressor).
+func (s *regionGrowthScan) growthCallTarget(call *ast.CallExpr) (name string, isReserve, isGrowth bool) {
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok {
+		return "", false, false
+	}
+	recv, ok := field.Object.(*ast.Ident)
+	if !ok {
+		return "", false, false
+	}
+	if _, tracked := s.tracked[recv.Name]; !tracked {
+		return "", false, false
+	}
+	switch {
+	case field.Field == "reserve":
+		return recv.Name, true, false
+	case regionGrowthMethods[field.Field]:
+		return recv.Name, false, true
+	}
+	return "", false, false
+}
+
+func (s *regionGrowthScan) walkGrowth(v reflect.Value) {
+	if !v.IsValid() || !v.CanInterface() {
+		return
+	}
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if v.IsNil() {
+			return
+		}
+		if call, ok := v.Interface().(*ast.CallExpr); ok {
+			if name, isReserve, isGrowth := s.growthCallTarget(call); name != "" {
+				if isReserve {
+					s.reserved[name] = true
+				} else if isGrowth {
+					s.growths = append(s.growths, regionGrowth{name: name, off: call.Pos().Offset, pos: call.Pos()})
+				}
+			}
+		}
+		s.walkGrowth(v.Elem())
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			s.walkGrowth(v.Field(i))
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			s.walkGrowth(v.Index(i))
+		}
 	}
 }
 
