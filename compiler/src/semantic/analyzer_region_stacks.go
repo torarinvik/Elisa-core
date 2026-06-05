@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // regionStackCap bounds the number of own (growable-tail) stacks per region before the overflow
@@ -20,9 +21,10 @@ const regionStackCap = 4
 // as its tail so it can grow freely. When the over-split cap is hit, the overflow growables share
 // one merge stack and Merged is set. B1a computes and records this; B1b consumes it in codegen.
 type RegionStackAssignment struct {
-	StackOf       map[string]int    // allocation name -> stack id (0 == shared fixed/reserved stack)
-	StackKind     map[int]string    // stack id -> "shared" | "growable" | "merge"
-	StackStrategy map[int]string    // stack id -> "chained" (default) | "reserve_commit" (Phase C)
+	StackOf       map[string]int      // allocation name -> stack id (0 == shared fixed/reserved stack)
+	StackKind     map[int]string      // stack id -> "shared" | "growable" | "merge"
+	StackStrategy map[int]string      // stack id -> "chained" (default) | "reserve_commit" (Phase C)
+	StackCapacity map[int]ast.Expr    // reserve_commit stack id -> proven element-count bound N
 	StackCount    int
 	Merged        bool
 }
@@ -42,7 +44,7 @@ var dumpRegionStacks = os.Getenv("ELISA_DUMP_REGION_STACKS") != ""
 // beyond regionStackCap share a merge stack. Analysis-only (B1a) — recorded for codegen and
 // inspection; no behavior change yet.
 func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt) RegionStackAssignment {
-	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCount: 1}
+	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackCount: 1}
 	order := make([]string, 0, 4)
 	seen := map[string]bool{}
 	for _, stmt := range region.Body {
@@ -72,15 +74,22 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt) RegionStackAssignm
 	next := 1
 	mergeStack := -1
 	for _, n := range order {
-		if scan.reserved[n] {
-			if interiorRef[n] {
-				// bounded + interior ref -> own reserve_commit stack (Phase C, docs/72)
+		// Phase C (docs/72): a darray with an interior reference taken into it gets a
+		// reserve_commit stack (stable base) ONLY when its maximum footprint is PROVABLE — its
+		// sole element growth is a single counting-loop push, bound N. A bare `reserve(n)` is a
+		// hint, not a hard limit, so it is NOT sufficient; reserve_commit on an unbounded darray
+		// would panic on overflow (worse than the current compile error).
+		if interiorRef[n] {
+			if bound, ok := hardBoundForName(region.Body, n); ok {
 				asn.StackOf[n] = next
 				asn.StackKind[next] = "growable"
 				asn.StackStrategy[next] = "reserve_commit"
+				asn.StackCapacity[next] = bound
 				next++
 				continue
 			}
+		}
+		if scan.reserved[n] {
 			asn.StackOf[n] = 0 // shared fixed/reserved stack
 			continue
 		}
@@ -142,6 +151,110 @@ func collectInteriorRefNames(body []ast.Stmt, tracked map[string]bool) map[strin
 	}
 	walk(reflect.ValueOf(body))
 	return names
+}
+
+// hardBoundForName returns the provable maximum element count N for a fresh darray `name` when its
+// ONLY element growth is a single `name.push(...)` located inside exactly one counting loop
+// `for _ in 0..<N` (N a pure ident/int) — with no other push/extend/append/insert anywhere, and not
+// nested in a deeper loop. Such a darray can never hold more than N elements, so a reserve_commit
+// reservation sized to N can never overflow. Returns the N expression and ok; otherwise ok=false.
+func hardBoundForName(body []ast.Stmt, name string) (ast.Expr, bool) {
+	s := &hardBoundScan{name: name}
+	s.walk(reflect.ValueOf(body))
+	if s.disqualified || s.pushSites != 1 || s.bound == nil {
+		return nil, false
+	}
+	return s.bound, true
+}
+
+type hardBoundScan struct {
+	name         string
+	loopStack    []ast.Node // enclosing loops at the current position
+	pushSites    int
+	bound        ast.Expr
+	disqualified bool
+}
+
+func (s *hardBoundScan) checkCall(call *ast.CallExpr) {
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok {
+		return
+	}
+	recv, ok := field.Object.(*ast.Ident)
+	if !ok || recv.Name != s.name {
+		return
+	}
+	switch field.Field {
+	case "push":
+		s.pushSites++
+		if len(s.loopStack) != 1 { // outside a loop, or nested in a deeper loop -> not provably <= N
+			s.disqualified = true
+			return
+		}
+		b, ok := countingLoopBound(s.loopStack[0])
+		if !ok {
+			s.disqualified = true
+			return
+		}
+		s.bound = b
+	case "push_back", "push_front", "extend", "append", "append_many", "insert":
+		s.disqualified = true // adds an unbounded / non-counting amount
+	}
+}
+
+func (s *hardBoundScan) walk(v reflect.Value) {
+	if s.disqualified || !v.IsValid() || !v.CanInterface() {
+		return
+	}
+	switch v.Kind() {
+	case reflect.Interface:
+		// Unwrap to the concrete pointer only — the checks below run at the Pointer case so each
+		// AST node is processed exactly once (a node reached as both interface and pointer would
+		// otherwise push its loop onto loopStack twice).
+		if !v.IsNil() {
+			s.walk(v.Elem())
+		}
+	case reflect.Pointer:
+		if v.IsNil() {
+			return
+		}
+		iface := v.Interface()
+		if call, ok := iface.(*ast.CallExpr); ok {
+			s.checkCall(call)
+		}
+		if node, ok := iface.(ast.Node); ok && isLoopStmtNode(node) {
+			s.loopStack = append(s.loopStack, node)
+			s.walk(v.Elem())
+			s.loopStack = s.loopStack[:len(s.loopStack)-1]
+			return
+		}
+		s.walk(v.Elem())
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			s.walk(v.Field(i))
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			s.walk(v.Index(i))
+		}
+	}
+}
+
+// countingLoopBound returns the exclusive end N of a `for _ in 0..<N` loop with a pure ident/int
+// bound (the same shape auto-reservation uses), or ok=false for any other loop.
+func countingLoopBound(node ast.Node) (ast.Expr, bool) {
+	loop, ok := node.(*ast.ForStmt)
+	if !ok || loop.Reverse || loop.Op != lexer.TOKEN_RANGE_LT || loop.Step != nil {
+		return nil, false
+	}
+	if start, ok := loop.Start.(*ast.IntLit); !ok || start.Value != "0" {
+		return nil, false
+	}
+	switch loop.End.(type) {
+	case *ast.Ident, *ast.IntLit:
+		return loop.End, true
+	}
+	return nil, false
 }
 
 func stripParenExpr(e ast.Expr) ast.Expr {
