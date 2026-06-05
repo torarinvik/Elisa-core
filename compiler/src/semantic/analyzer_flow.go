@@ -410,13 +410,23 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				// classification now. The escape error still fires until threading (steps
 				// 2-3) makes the return sound; an explicitly-named local region (`in
 				// scratch:`) is never region-polymorphic and always errors.
+				regionPoly := a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic
 				if isSynthesizedAutoRegion(region.Name) && a.currentFuncType != nil {
+					// Belt-and-suspenders: the pre-pass already set this from a syntactic scan, but
+					// keep the flow-based confirmation so the classification never under-reports.
 					a.currentFuncType.RegionPolymorphic = true
+					regionPoly = true
 				}
-				if _, isRef := valueType.(*RefType); isRef {
-					a.errorf(n.Pos(), localRegionEscapeMessage("reference", region.Name))
-				} else {
-					a.errorf(n.Pos(), localRegionEscapeMessage("value", region.Name))
+				// docs/75: in a region-polymorphic function the synthesized `__auto_*` region is
+				// threaded from the caller (the hidden `__region_auto` Arena& param), so the result
+				// outlives the call — no escape. Suppress the error. Explicitly-named local regions
+				// are never region-polymorphic and still error.
+				if !regionPoly {
+					if _, isRef := valueType.(*RefType); isRef {
+						a.errorf(n.Pos(), localRegionEscapeMessage("reference", region.Name))
+					} else {
+						a.errorf(n.Pos(), localRegionEscapeMessage("value", region.Name))
+					}
 				}
 			}
 			if summary, ok := abstractParamOnlyRegionRefState(refState); ok {

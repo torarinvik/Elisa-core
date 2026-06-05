@@ -67,6 +67,11 @@ type functionState struct {
 	earlyFreeByOffset map[int]C.LLVMValueRef
 	packedStores                 map[string]packedStoreBinding
 	treeAllocOwner               treeAllocOwnerBinding
+	// regionPolyOwner is the region threaded into a region-polymorphic function via the hidden
+	// `__region_auto` Arena& param (docs/75). The function's synthesized `__auto_*` region adopts it
+	// rather than creating a fresh, locally-freed arena, so `new[auto]` allocates into the caller's
+	// region and the returned handle outlives the call. Zero value (nil arenaRef) for ordinary fns.
+	regionPolyOwner              treeAllocOwnerBinding
 	implicitTreeStoreOwners      map[string]treeAllocOwnerBinding
 	treeRewriteDefault           *treeRewriteDefaultContext
 	currentSequenceRewrite       *sequenceRewriteCodegenContext

@@ -598,6 +598,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectExportTypeAliases(activeDecls)
 	a.collectValueSymbols(activeDecls)
 	a.collectStaticImpls(activeDecls)
+	a.classifyRegionPolymorphicFunctions(activeDecls)
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
 	if options.EnforceProgressSafety {

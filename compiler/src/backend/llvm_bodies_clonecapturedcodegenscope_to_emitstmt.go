@@ -255,6 +255,20 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 	}
 	return s.emitRegionInit(alloca, arenaType, n.Capacity, n.Allocator)
 }
+// regionPolyAutoAdopts reports whether this synthesized `__auto_*` region, inside a
+// region-polymorphic function (docs/75), should ADOPT the threaded caller region (`__region_auto`)
+// instead of creating its own arena. When true the region allocates nothing, frees nothing, and is
+// NOT added to s.regions (the caller owns it) — `new[auto]` in its body lands in the caller's arena.
+func (s *functionState) regionPolyAutoAdopts(n *ast.RegionStmt) bool {
+	return s != nil && s.fnType != nil && s.fnType.RegionPolymorphic &&
+		n != nil && n.Lazy && backendIsSynthesizedAutoRegion(n.Name) && s.regionPolyOwner.arenaRef != nil
+}
+
+func backendIsSynthesizedAutoRegion(name string) bool {
+	const prefix = "__auto_"
+	return len(name) > len(prefix) && name[:len(prefix)] == prefix
+}
+
 func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	s.pushScope()
 	scope := s.scope
@@ -263,6 +277,18 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	defer func() {
 		s.treeAllocOwner = savedTreeOwner
 	}()
+	if s.regionPolyAutoAdopts(n) {
+		// Adopt the threaded caller region: bind the region name to it, route new[auto] to it, emit
+		// the body, and run scope cleanups — but create no arena and register no free (the caller
+		// reclaims it). This is what makes a recursive `new[auto]` builder land its whole tree in the
+		// caller's region instead of a per-call arena freed on return.
+		s.defineBinding(n.Name, valueBinding{ptr: s.regionPolyOwner.arenaRef, typ: s.g.result.NamedTypes["Arena"]})
+		s.treeAllocOwner = s.regionPolyOwner
+		if err := s.emitInStore(backendScopedArenaInStoreStmt(n)); err != nil {
+			return err
+		}
+		return s.emitScopeCleanups(scope)
+	}
 	// Reclaim the region at SCOPE exit rather than deferring to function return. The escape
 	// checker guarantees nothing escapes a scoped region, so this is sound; registering it as a
 	// scoped cleanup makes it fire on every exit path (normal, break, continue, return), and the

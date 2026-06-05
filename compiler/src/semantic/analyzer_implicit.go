@@ -186,6 +186,17 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 		if !ok || argExpr == nil {
 			if fallback, found := a.lookupSameNameImplicitExpr(name, working); found {
 				argExpr = fallback
+			} else if name == regionPolymorphicImplicitParamName {
+				// docs/75: thread the caller's ambient inferred region into a region-polymorphic
+				// callee. A region-polymorphic caller threads its own `__region_auto` (resolved above
+				// via the same-name lookup); otherwise the active `in auto:` region supplies it.
+				if regionArg, found := a.regionPolymorphicCallerRegionArg(); found {
+					a.exprTypes[regionArg] = expectedType
+					resolved = append(resolved, regionArg)
+					continue
+				}
+				a.errorf(expr.Pos(), "call to region-polymorphic %q must occur inside an inferred region (open one with `in auto:`) or another region-polymorphic function", ft.Name)
+				continue
 			} else if storeType, isTreeStore := expectedType.(*TreeStoreType); isTreeStore && storeType != nil {
 				if ownerArg, found := a.recoverImplicitTreeStoreOwnerArg(expr, ft, explicitCount); found {
 					resolved = append(resolved, ownerArg)

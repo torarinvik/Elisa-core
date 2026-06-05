@@ -117,6 +117,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
+					if fnType != nil && fnType.RegionPolymorphic {
+						a.defineRegionPolymorphicParamSymbol(fn, fnType)
+					}
 					savedBodyTreeOwner := a.currentTreeAllocOwner
 					if owner, ok := a.inferFunctionTreeAllocOwnerFromParams(allParamDecls, fnType); ok {
 						a.currentTreeAllocOwner = owner

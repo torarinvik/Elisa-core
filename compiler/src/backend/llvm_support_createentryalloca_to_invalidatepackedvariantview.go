@@ -379,7 +379,8 @@ func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type,
 	if s == nil || s.treeAllocOwner.isPerm || s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.arenaRefPtr != nil || s.treeAllocOwner.storeValue != nil {
 		return
 	}
-	if name != "owner" && name != "alloc" {
+	isRegionParam := name == semantic.RegionPolymorphicImplicitParamName
+	if name != "owner" && name != "alloc" && !isRegionParam {
 		return
 	}
 	if storeType, ok := t.(*semantic.TreeStoreType); ok && storeType != nil && storeType.Family != nil && value != nil {
@@ -392,10 +393,18 @@ func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type,
 	}
 	if semantic.SameType(t, arenaType) {
 		s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: ptr}
+		if isRegionParam {
+			// docs/75: remember the threaded region so the function's synthesized `__auto_*`
+			// region adopts it (instead of creating a fresh, locally-freed arena).
+			s.regionPolyOwner = s.treeAllocOwner
+		}
 		return
 	}
 	if refType, ok := t.(*semantic.RefType); ok && refType != nil && semantic.SameType(refType.Elem, arenaType) && value != nil {
 		s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: value, arenaRefPtr: ptr}
+		if isRegionParam {
+			s.regionPolyOwner = s.treeAllocOwner
+		}
 	}
 }
 func (s *functionState) lookupPackedStore(enumType *semantic.EnumType) (packedStoreBinding, bool) {
