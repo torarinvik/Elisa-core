@@ -548,6 +548,12 @@ func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, source
 }
 
 func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
+	// Auto-reservation (region inference, Phase A): presize the fill target before the loop.
+	if stmt.PreReserve != nil {
+		if err := s.emitStmt(stmt.PreReserve); err != nil {
+			return err
+		}
+	}
 	sourceType := s.exprType(stmt.Source)
 	if sourceType == nil {
 		return fmt.Errorf("missing semantic type for iterable loop source")

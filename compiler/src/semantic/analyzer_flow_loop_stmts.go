@@ -392,6 +392,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, store.rows(), frozen tree row view, string-like iterable, ChunksExactView, source.enumerate(), children(node), or a projected tree attribute sequence, got %s", sourceType)
 		info.ItemType = invalidType
 	}
+	a.maybeAutoReserveIterFill(stmt, sourceType)
 	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
 		a.errorf(stmt.Pos(), "for value iteration does not support affine element type %s; use ref or mutable ref", info.ItemType)
 	}

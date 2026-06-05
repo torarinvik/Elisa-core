@@ -350,6 +350,10 @@ type IterForStmt struct {
 	WhereFilter          Expr
 	Filter               Expr
 	Body                 []Stmt
+	// PreReserve is a compiler-synthesized `ys.reserve(src.count)` emitted before the loop when
+	// auto-reservation infers a bounded fill over this iterable (region inference, Phase A). Set
+	// by the analyzer, emitted by codegen; nil when the loop is not an eligible fill.
+	PreReserve Stmt
 }
 type ParallelForStmt struct {
 	Position  lexer.Pos
