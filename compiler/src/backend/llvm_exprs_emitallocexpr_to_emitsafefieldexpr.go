@@ -81,6 +81,9 @@ import (
 )
 
 func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr.AutoRegion {
+		return s.emitRegionStructAlloc(expr, s.autoRegionBinding())
+	}
 	if expr.Owner == nil {
 		return s.emitScopedPackedAllocExpr(expr)
 	}
@@ -132,13 +135,32 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 	if !ok {
 		return nil, nil, fmt.Errorf("only region-backed new[...] is lowered so far")
 	}
-	binding, ok := s.lookupBinding(ownerIdent.Name)
-	if !ok {
+	binding, found := s.lookupBinding(ownerIdent.Name)
+	if !found {
 		return nil, nil, fmt.Errorf("unknown region %q during LLVM lowering", ownerIdent.Name)
+	}
+	return s.emitRegionStructAlloc(expr, binding)
+}
+
+// autoRegionBinding returns the arena binding for new[auto]: the innermost active inferred region's
+// arena (the native stack arena set up by the enclosing synthesized/in-auto region — the same arena
+// containers allocate into). A nil ptr means no active region; emitRegionStructAlloc reports it.
+func (s *functionState) autoRegionBinding() valueBinding {
+	return valueBinding{ptr: s.treeAllocOwner.arenaRef, typ: s.g.result.NamedTypes["Arena"]}
+}
+
+// emitRegionStructAlloc lowers a plain-struct allocation into a region's arena (arena_alloc(size)
+// then store the constructed value). Shared by new[region] and new[auto].
+func (s *functionState) emitRegionStructAlloc(expr *ast.AllocExpr, binding valueBinding) (C.LLVMValueRef, semantic.Type, error) {
+	if binding.ptr == nil {
+		return nil, nil, fmt.Errorf("new[auto] has no active inferred region arena during LLVM lowering")
+	}
+	if binding.typ == nil {
+		return nil, nil, fmt.Errorf("missing Arena type for region allocation")
 	}
 	valueType := s.exprType(expr.Value)
 	if valueType == nil {
-		return nil, nil, fmt.Errorf("missing semantic type for region allocation value in %q", ownerIdent.Name)
+		return nil, nil, fmt.Errorf("missing semantic type for region allocation value")
 	}
 	value, _, err := s.emitExpr(expr.Value, valueType)
 	if err != nil {

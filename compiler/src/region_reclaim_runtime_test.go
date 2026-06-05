@@ -456,6 +456,35 @@ def lbiref() -> void:
 		"loop-body reserve_commit interior ref did not survive within-iteration growth")
 }
 
+// new[auto] heap-allocates a struct into the inferred region (the native stack arena). In a
+// loop-body `in auto:` the region is reserved once and reset-reused per iteration, so 100k
+// allocations are correct (and, as measured, churn-free). This pins end-to-end correctness.
+func TestNewAutoLoopAllocatesCorrectly(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	src := `
+struct Box:
+    value: i64
+def go() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        total: mutable i64 = 0
+        i: mutable i64 = 0
+        while i < 100000:
+            in auto:
+                b: Box& = new[auto] Box(7)
+                total <- total + b.value
+            i <- i + 1
+        return total
+@test
+def na_loop() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if go() != 700000:
+            panic("new[auto] loop produced wrong result")
+`
+	runSingleTestProgramExpectOK(t, "na_loop", src, "new[auto] loop produced wrong result")
+}
+
 // runSingleTestProgramExpectOK builds `src` as a native test binary, runs the single @test named
 // `testName`, and fails if the child exits non-zero (a segfault/panic from the regression).
 func runSingleTestProgramExpectOK(t *testing.T, testName, src, failHint string) {

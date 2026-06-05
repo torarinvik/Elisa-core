@@ -40,6 +40,20 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		state = a.canonicalizeStoredRegionRefBinding(stateSym, state)
 		return state, true
 	case *ast.AllocExpr:
+		if n.AutoRegion {
+			// new[auto] depends on the innermost active inferred region exactly like new[region]
+			// depends on its named region — so the same return-escape / invalidation checks reject
+			// letting the reference outlive that region.
+			region := a.activeContainerRegionName()
+			if region == "" {
+				return regionRefState{}, false
+			}
+			sym, state := a.lookupRegionState(region)
+			if sym == nil || state.Destroyed {
+				return regionRefState{}, false
+			}
+			return regionRefStateFromDependency(sym, state.Generation), true
+		}
 		if n.Owner != nil {
 			if _, _, _, ok := a.treeAllocConstructorInfo(n.Value); ok {
 				if isTreeAllocPermExpr(n.Owner) {

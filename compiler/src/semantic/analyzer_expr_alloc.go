@@ -32,6 +32,9 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 	if expr == nil {
 		return invalidType
 	}
+	if expr.AutoRegion {
+		return a.analyzeAutoAllocExpr(expr, expected)
+	}
 	if expr.Owner == nil {
 		return a.analyzeScopedPackedAllocExpr(expr)
 	}
@@ -137,6 +140,26 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		a.errorf(expr.Value.Pos(), "cannot allocate a value containing linear handles into region %q: a region frees its contents in bulk (destroy/reset) without consuming them, so the linear value could never be consumed; keep it outside the region and store a borrow, or consume it explicitly", ident.Name)
 	}
 	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, Region: ident.Name, ExplicitStorage: true}
+}
+
+// analyzeAutoAllocExpr lowers `new[auto] T(...)`: heap-allocate T into the INNERMOST active
+// inferred region (the native stack arena), with no explicit region name or pool — the region is
+// inferred exactly like a container's backing. The result is a region-qualified reference, so the
+// existing region-provenance/escape machinery keeps it from outliving that region.
+func (a *Analyzer) analyzeAutoAllocExpr(expr *ast.AllocExpr, expected Type) Type {
+	region := a.activeContainerRegionName()
+	if region == "" {
+		a.errorf(expr.Pos(), "new[auto] needs an enclosing inferred region (the native stack arena); wrap it in `in auto:` (or a scope that already opens one)")
+		a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
+		return invalidType
+	}
+	valueType := a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
+	// Same constraint as an explicit region: a region bulk-frees without running destructors or
+	// consuming linear handles, so a value carrying a must-consume handle cannot live in it.
+	if a.containsAffineHandleValues(valueType, map[string]bool{}) {
+		a.errorf(expr.Value.Pos(), "cannot allocate a value containing linear handles via new[auto]: an inferred region frees its contents in bulk without consuming them")
+	}
+	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, Region: region, ExplicitStorage: true}
 }
 
 func stripTreeAllocOwnerExpr(expr ast.Expr) ast.Expr {

@@ -899,12 +899,20 @@ func (p *Parser) parseAllocExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
 	var owner ast.Expr
+	autoRegion := false
 	if p.match(lexer.TOKEN_LBRACKET) {
 		owner = p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
+		// `new[auto]`: infer the region (native stack arena) like a container's backing. Represent
+		// it with the AutoRegion flag and a nil Owner so no pass tries to resolve `auto` as an
+		// identifier; the flag disambiguates the nil Owner from a bracket-less packed `new`.
+		if ident, ok := owner.(*ast.Ident); ok && ident != nil && ident.Name == "auto" {
+			owner = nil
+			autoRegion = true
+		}
 	}
 	value := p.parseExpr()
-	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value}
+	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value, AutoRegion: autoRegion}
 }
 func (p *Parser) looksLikeNodeAllocExpr() bool {
 	if p.pos+1 >= len(p.tokens) {
