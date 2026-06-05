@@ -254,7 +254,53 @@ def continue_region() -> void:
         if scan(s, 24u) != 3:
             panic("continue freed the enclosing region mid-loop")
 `
-	path := filepath.Join(t.TempDir(), "continue_region.elisa")
+	runSingleTestProgramExpectOK(t, "continue_region", src,
+		"continue freed an enclosing region (use-after-free regression)")
+}
+
+// `break` out of an inner loop is the same shape as the continue bug: the break exits only the
+// inner loop and stays inside the enclosing function region, so it must not free that region.
+// Confirmed to segfault without the per-loop cleanup floor.
+func TestBreakDoesNotFreeEnclosingRegion(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	// The quote branch advances past the string in a nested inner `while`, `break`ing at the
+	// closing quote; `kinds` accumulates in the function region across the outer loop.
+	src := `
+def scan(src: static u8&, n: usize) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        kinds: mutable darray[i32] = []
+        i: mutable usize = 0u
+        while i < n:
+            c: u8 = src[i]
+            if c == 34u8:
+                kinds.push(7)
+                i <- i + 1u
+                while i < n:
+                    if src[i] == 34u8:
+                        break
+                    i <- i + 1u
+                i <- i + 1u
+                continue
+            i <- i + 1u
+        return kinds.count.i64()
+@test
+def break_region() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        s: static u8& = "x\"hello\"y\"world\"z\"three\"q"
+        if scan(s, 24u) != 3:
+            panic("break freed the enclosing region mid-loop")
+`
+	runSingleTestProgramExpectOK(t, "break_region", src,
+		"break freed an enclosing region (use-after-free regression)")
+}
+
+// runSingleTestProgramExpectOK builds `src` as a native test binary, runs the single @test named
+// `testName`, and fails if the child exits non-zero (a segfault/panic from the regression).
+func runSingleTestProgramExpectOK(t *testing.T, testName, src, failHint string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), testName+".elisa")
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
@@ -275,7 +321,7 @@ def continue_region() -> void:
 	}
 	defer os.Remove(exePath)
 	defer os.RemoveAll(exePath + ".dSYM")
-	if err := exec.Command(exePath, "continue_region").Run(); err != nil {
-		t.Fatalf("continue_region run failed: %v — continue/break freed an enclosing region (use-after-free regression)", err)
+	if err := exec.Command(exePath, testName).Run(); err != nil {
+		t.Fatalf("%s run failed: %v — %s", testName, err, failHint)
 	}
 }
