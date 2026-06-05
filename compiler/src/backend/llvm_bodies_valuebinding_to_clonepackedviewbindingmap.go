@@ -96,6 +96,7 @@ type functionState struct {
 	poolScopes                   []activePoolBinding
 	breakTargets                 []C.LLVMBasicBlockRef
 	continueTargets              []C.LLVMBasicBlockRef
+	loopCleanupFloors            []int
 	cleanupDepth                 int
 	scopePool                    []*codegenScope
 }
@@ -590,6 +591,23 @@ func (s *functionState) emitRegionCleanup() error {
 	}
 	return nil
 }
+// pushLoopTargets records the break/continue targets for a loop along with the current scoped
+// cleanup floor — the number of cleanups registered by ENCLOSING scopes. A break/continue must
+// only run cleanups registered INSIDE the loop body (indices >= floor); firing an enclosing
+// scope's cleanup (e.g. a function-body region that wraps the loop) on a continue that stays
+// within the loop would free a still-live region — a use-after-free.
+func (s *functionState) pushLoopTargets(breakBB, continueBB C.LLVMBasicBlockRef) {
+	s.breakTargets = append(s.breakTargets, breakBB)
+	s.continueTargets = append(s.continueTargets, continueBB)
+	s.loopCleanupFloors = append(s.loopCleanupFloors, len(s.scopedCleanups))
+}
+
+func (s *functionState) popLoopTargets() {
+	s.breakTargets = s.breakTargets[:len(s.breakTargets)-1]
+	s.continueTargets = s.continueTargets[:len(s.continueTargets)-1]
+	s.loopCleanupFloors = s.loopCleanupFloors[:len(s.loopCleanupFloors)-1]
+}
+
 func (s *functionState) emitActiveScopedCleanup() error {
 	if s.cleanupDepth != 0 {
 		return nil
@@ -598,7 +616,12 @@ func (s *functionState) emitActiveScopedCleanup() error {
 	defer func() {
 		s.cleanupDepth--
 	}()
-	for i := len(s.scopedCleanups) - 1; i >= 0; i-- {
+	// On break/continue, only run cleanups registered inside the innermost loop (>= its floor).
+	floor := 0
+	if len(s.loopCleanupFloors) > 0 {
+		floor = s.loopCleanupFloors[len(s.loopCleanupFloors)-1]
+	}
+	for i := len(s.scopedCleanups) - 1; i >= floor; i-- {
 		if s.currentBlockTerminated() {
 			break
 		}

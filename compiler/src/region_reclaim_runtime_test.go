@@ -214,3 +214,68 @@ def hot_loop() -> void:
 	}
 	t.Logf("hot region loop: 20M iterations in %s (arena reused per iteration)", elapsed)
 }
+
+// A `break`/`continue` must only run cleanups registered INSIDE the loop body, never a cleanup
+// from a scope that ENCLOSES the loop. The function body here is wrapped in an inferred region
+// that owns `kinds` (a darray that accumulates across iterations); the outer `while` has a
+// `continue` reached through a nested inner `while`. The continue stays inside the loop, so it
+// must NOT free the enclosing region. Before the fix, emitActiveScopedCleanup fired ALL active
+// cleanups on continue — freeing `kinds`'s arena mid-loop, so the next push reallocated freed
+// memory and the program segfaulted. The fix records a per-loop cleanup floor so continue/break
+// only reclaim cleanups at or above the floor. This builds and runs the program; a fault (the
+// regression) makes the child exit non-zero.
+func TestContinueDoesNotFreeEnclosingRegion(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	// scan tokenizes a string with quoted runs: the quote branch advances past the string via a
+	// nested inner `while` (reading the param across the push), then `continue`s. `kinds` lives
+	// in the function region and accumulates one entry per quote.
+	src := `
+def scan(src: static u8&, n: usize) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        kinds: mutable darray[i32] = []
+        i: mutable usize = 0u
+        while i < n:
+            c: u8 = src[i]
+            if c == 34u8:
+                kinds.push(7)
+                i <- i + 1u
+                while i < n and src[i] != 34u8:
+                    i <- i + 1u
+                i <- i + 1u
+                continue
+            i <- i + 1u
+        return kinds.count.i64()
+@test
+def continue_region() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        s: static u8& = "x\"hello\"y\"world\"z\"three\"q"
+        if scan(s, 24u) != 3:
+            panic("continue freed the enclosing region mid-loop")
+`
+	path := filepath.Join(t.TempDir(), "continue_region.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\n%s\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+	if err := exec.Command(exePath, "continue_region").Run(); err != nil {
+		t.Fatalf("continue_region run failed: %v — continue/break freed an enclosing region (use-after-free regression)", err)
+	}
+}
