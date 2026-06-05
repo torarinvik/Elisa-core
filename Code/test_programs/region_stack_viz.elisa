@@ -1,0 +1,146 @@
+# Region-stack visualizer: each stack (an inferred bump-arena) holds SEVERAL different heap object
+# types (darrays of i64, of small/large structs). Each is drawn as a colored segment; the segments
+# stack up to the arena's total live size, with the byte count labeled on top. Watching it animate
+# shows heterogeneous heap objects growing and shrinking and the arena size tracking their sum.
+# Build & run (opens a window):
+#   elisacore -emit test -O0 -L /opt/homebrew/lib -l raylib \
+#     -link -framework -link Cocoa -link -framework -link IOKit -link -framework -link CoreVideo \
+#     -link -framework -link CoreAudio -link -framework -link OpenGL  region_stack_viz.elisa
+# (as a @test so the native-exec path links the runtime; close the window to finish.)
+
+extern InitWindow(width: i32, height: i32, title: u8&)
+extern WindowShouldClose() -> bool
+extern BeginDrawing()
+extern EndDrawing()
+extern ClearBackground(color: u32)
+extern DrawRectangle(x: i32, y: i32, width: i32, height: i32, color: u32)
+extern DrawRectangleLines(x: i32, y: i32, width: i32, height: i32, color: u32)
+extern DrawText(text: u8&, posX: i32, posY: i32, fontSize: i32, color: u32)
+extern SetTargetFPS(fps: i32)
+extern CloseWindow()
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
+
+# Different heap object types (different per-element byte footprints).
+struct Pixel:
+    r: u8
+    g: u8
+    b: u8
+    a: u8
+struct Node:
+    a: i64
+    b: i64
+struct Vec3:
+    x: i64
+    y: i64
+    z: i64
+
+# Integer triangle wave in [0, amp], period frames.
+def triangle(t: i64, period: i64, amp: i64) -> i64:
+    p: i64 = t % period
+    half: i64 = period / 2
+    if p < half:
+        return p * amp / half
+    return (period - p) * amp / half
+
+# Draw one heap object as a segment stacked above acc_bytes; returns the new accumulated bytes.
+def draw_seg(x: i64, base_y: i64, acc_bytes: i64, bytes: i64, color: u32) -> i64:
+    py: i64 = 6                      # bytes per pixel
+    seg_h: i64 = bytes / py
+    top: i64 = base_y - acc_bytes / py - seg_h
+    if seg_h > 0:
+        DrawRectangle(x.i32(), top.i32(), 150, seg_h.i32(), color)
+    return acc_bytes + bytes
+
+# Label the total live byte size above a stack.
+def label_size(x: i64, base_y: i64, total_bytes: i64, name: u8&) -> void:
+    can Console.Format, Abort.Panic:
+        py: i64 = 6
+        buf: u8[32] = zeroed
+        snprintf(&buf[0], 32u, "%lld B", total_bytes)
+        top: i64 = base_y - total_bytes / py - 30
+        DrawText(&buf[0], x.i32(), top.i32(), 20, 0xFFFFFFFFu32)
+        DrawText(name, x.i32(), (base_y + 12).i32(), 20, 0xFFAAAAAAu32)
+
+@test
+def region_stack_viz() -> void:
+    can Memory.Allocate, Memory.Release, Console.Format, Abort.Panic:
+        InitWindow(1040, 700, "Elisa region stacks - heterogeneous heap objects, live byte size")
+        SetTargetFPS(60)
+        # element sizes
+        sz_i64: i64 = size_of(i64).i64()
+        sz_px: i64 = size_of(Pixel).i64()
+        sz_node: i64 = size_of(Node).i64()
+        sz_vec: i64 = size_of(Vec3).i64()
+        # colors per object type
+        c_i64: u32 = 0xFF4488FFu32
+        c_px: u32 = 0xFF44CC88u32
+        c_node: u32 = 0xFFFFAA44u32
+        c_vec: u32 = 0xFFEE5577u32
+        # stack 0: i64 + Pixel + Vec3
+        a0: mutable darray[i64] = []
+        a1: mutable darray[Pixel] = []
+        a2: mutable darray[Vec3] = []
+        # stack 1: Node + i64
+        b0: mutable darray[Node] = []
+        b1: mutable darray[i64] = []
+        # stack 2: Vec3 + Pixel
+        c0: mutable darray[Vec3] = []
+        c1: mutable darray[Pixel] = []
+        # stack 3: i64 + Node + Pixel
+        d0: mutable darray[i64] = []
+        d1: mutable darray[Node] = []
+        d2: mutable darray[Pixel] = []
+        frame: mutable i64 = 0
+        trusted Unsafe.AssumeProgress:
+            while not WindowShouldClose():
+                frame <- frame + 1
+                # animate each object independently (grow/shrink)
+                _ = a0.resize(triangle(frame, 240, 50).usize())
+                _ = a1.resize(triangle(frame, 120, 80).usize())
+                _ = a2.resize(triangle(frame + 30, 200, 30).usize())
+                _ = b0.resize(triangle(frame, 90, 40).usize())
+                _ = b1.resize((frame % 70).usize())
+                _ = c0.resize(triangle(frame + 60, 180, 25).usize())
+                _ = c1.resize(triangle(frame, 50, 120).usize())
+                _ = d0.resize(triangle(frame + 45, 160, 35).usize())
+                _ = d1.resize(triangle(frame, 110, 30).usize())
+                _ = d2.resize(triangle(frame + 90, 140, 90).usize())
+
+                BeginDrawing()
+                ClearBackground(0xFF161620u32)
+                DrawText("Elisa region stacks - each bar is one arena; segments are different heap object types; label = live bytes", 24, 22, 20, 0xFFEEEEEEu32)
+                DrawText("blue = darray[i64]   green = darray[Pixel](4B)   orange = darray[Node](16B)   red = darray[Vec3](24B)", 24, 50, 18, 0xFF999999u32)
+                base_y: i64 = 600
+
+                # stack 0
+                x0: i64 = 70
+                t0: mutable i64 = 0
+                t0 <- draw_seg(x0, base_y, t0, a0.count.i64() * sz_i64, c_i64)
+                t0 <- draw_seg(x0, base_y, t0, a1.count.i64() * sz_px, c_px)
+                t0 <- draw_seg(x0, base_y, t0, a2.count.i64() * sz_vec, c_vec)
+                label_size(x0, base_y, t0, "stack 0")
+
+                # stack 1
+                x1: i64 = 300
+                t1: mutable i64 = 0
+                t1 <- draw_seg(x1, base_y, t1, b0.count.i64() * sz_node, c_node)
+                t1 <- draw_seg(x1, base_y, t1, b1.count.i64() * sz_i64, c_i64)
+                label_size(x1, base_y, t1, "stack 1")
+
+                # stack 2
+                x2: i64 = 530
+                t2: mutable i64 = 0
+                t2 <- draw_seg(x2, base_y, t2, c0.count.i64() * sz_vec, c_vec)
+                t2 <- draw_seg(x2, base_y, t2, c1.count.i64() * sz_px, c_px)
+                label_size(x2, base_y, t2, "stack 2")
+
+                # stack 3
+                x3: i64 = 760
+                t3: mutable i64 = 0
+                t3 <- draw_seg(x3, base_y, t3, d0.count.i64() * sz_i64, c_i64)
+                t3 <- draw_seg(x3, base_y, t3, d1.count.i64() * sz_node, c_node)
+                t3 <- draw_seg(x3, base_y, t3, d2.count.i64() * sz_px, c_px)
+                label_size(x3, base_y, t3, "stack 3")
+
+                EndDrawing()
+        CloseWindow()
