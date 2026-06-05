@@ -123,16 +123,26 @@ becomes sugar expressible in this lower layer rather than a bespoke mechanism.
 
 ## Staging
 
-| Step | Delivers | Risk |
-|------|----------|------|
-| 1 | Detect: the return-escape check recognizes "deps include a local inferred region" and, instead of erroring, records `f` as region-polymorphic over a single `ρ` (the unified local region). Diagnostics only — no codegen change, no threading yet. | medium |
-| 2 | Bind: at call sites, resolve `ρ` from the result's flow (assignment target region / ambient `in R:` / innermost inferred). Reject the genuinely-ambiguous multi-region case with a "needs `-> T @r`" error. | medium |
-| 3 | Thread: lower `ρ` to a hidden leading `Arena&` param, reusing `tree`'s store-param plumbing + `treeAllocOwner`; `new[auto]` in the body resolves to it; pass it at every call. | high |
-| 4 | Recursion + packed-enum payoff: the docs/74 recursive `make` compiles and runs with zero ceremony; binary-trees benchmark. | medium |
-| 5 | Explicit `-> T @r` pin form for multi-region returns; `tree` reframed as sugar over this layer. | low |
+| Step | Delivers | Risk | Status |
+|------|----------|------|--------|
+| 1 | Detect: a value-returning path whose result carries a synthesized `__auto_*` region marks `f` `RegionPolymorphic` on its `FuncType`. | medium | **DONE** |
+| 2+3 | Pre-pass `classifyRegionPolymorphicFunctions` (fixpoint, before any body is analyzed) injects a hidden `__region_auto` Arena& param; call sites thread the caller's region (recursive → own `__region_auto`, root → active `in auto:`); the body's synthesized `__auto_*` region ADOPTS the threaded arena (no per-call arena, no premature free); escape error suppressed for region-poly fns. | high | **DONE** — verified end-to-end on a depth-100 recursive struct builder |
+| 4 | Packed-enum payoff: the docs/74 recursive `make` compiles and runs. **Blocked on docs/74 steps 2-3** (region-backed packed allocation + storeless `match node:`); the *threading* already works, but `new[auto] Expr.V(...)` has no region-backed store to lower into yet. | medium | blocked on docs/74 |
+| 5 | Explicit `-> T @r` pin form for multi-region returns; ambiguous-multi-region detection; `tree` reframed as sugar over this layer. | low | TODO |
 
-Land 1→2→3→4 as the milestone (a region-allocated value becomes returnable; recursion builds one
-coherent tree). Step 5 is the multi-region / `tree`-unification tail.
+Steps 1-3 are the milestone for *any* region-polymorphic value (structs work today). Step 4 — the
+recursive packed-enum tree (the binary-trees benchmark) — needs the docs/74 region-backed packed
+store (alloc into region column-stacks + `match` recovering the store from the handle). The two
+features compose: docs/75 threads the region; docs/74 lowers a packed node into it.
+
+## What is verified (structs) vs pending (packed enums)
+
+`new[auto] Box(...)` (a struct) lowers via the region arena and threads correctly — a recursive
+builder runs and every node lives in the one caller-threaded region. `new[auto] Expr.V(...)` (a
+packed enum) currently type-checks but does not codegen: it is still misroutable to the struct alloc
+path and there is no per-region packed store to push columns onto. That is docs/74 step 2; storeless
+`match node:` is docs/74 step 3. Both are required before the recursive packed tree builds and the
+binary-trees benchmark can run.
 
 ## Non-goals
 
