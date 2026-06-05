@@ -331,23 +331,24 @@ func (s *functionState) emitReserveCommitStackInit(arenaPtr C.LLVMValueRef, aren
 	return s.emitRegionInitValue(arenaPtr, arenaType, slots, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */)
 }
 
-// defaultReserveCommitSlots is the reservation (in 8-byte uintptr slots) for an unreserved growable
-// with no inferred bound (docs/73): 256 MiB of contiguous virtual address space. The reservation is
-// PROT_NONE; pages commit on first touch, so this costs address space, not physical memory.
-// Overflowing it panics — the intended friction for genuinely-unbounded growth.
-const defaultReserveCommitSlots = 32 * 1024 * 1024 // 256 MiB / 8
-
-// emitDefaultReserveCommitStackInit reserves the fixed default range for a default-backed growable
-// tail stack (docs/73), so it grows in place with a stable base like the bounded reserve_commit
-// case, but without a proven element bound.
+// emitDefaultReserveCommitStackInit marks a default-backed growable tail stack as reserve_commit
+// WITHOUT reserving here (docs/73 §3, lazy). It only sets Arena.strategy (field 3); the runtime
+// arena_alloc reserves the default contiguous range on first allocation (ARENA_DEFAULT_RESERVE_
+// COMMIT_SLOTS), so an empty or never-grown region costs nothing — not even an mmap. The base is
+// still stable (one contiguous reservation, grows in place) and overflow still panics.
 func (s *functionState) emitDefaultReserveCommitStackInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
-	usizeType := s.g.result.NamedTypes["usize"]
-	usizeLLVM, err := s.g.lowerType(usizeType)
+	arenaLLVMType, err := s.g.lowerType(arenaType)
 	if err != nil {
 		return err
 	}
-	slots := C.LLVMConstInt(usizeLLVM, C.ulonglong(defaultReserveCommitSlots), 0)
-	return s.emitRegionInitValue(arenaPtr, arenaType, slots, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */)
+	intType := s.g.result.NamedTypes["int"]
+	intLLVM, err := s.g.lowerType(intType)
+	if err != nil {
+		return err
+	}
+	strategyPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 3, cStringFree("region.strategy.lazy"))
+	C.LLVMBuildStore(s.builder, C.LLVMConstInt(intLLVM, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */, 0), strategyPtr)
+	return nil
 }
 
 func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool) (func(), error) {

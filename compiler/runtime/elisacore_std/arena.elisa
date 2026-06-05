@@ -40,6 +40,11 @@ const ARENA_STRATEGY_RESERVE_COMMIT: int = 2
 const ARENA_STRATEGY_FIXED: int = 3
 const ARENA_STRATEGY_SCRATCH: int = 4
 
+# Default reservation (in 8-byte slots) for a reserve_commit arena with no inferred bound (docs/73):
+# 256 MiB of contiguous virtual address space, reserved LAZILY on first allocation. Pages commit on
+# first touch, so this costs address space, not physical memory; overflowing it panics.
+const ARENA_DEFAULT_RESERVE_COMMIT_SLOTS: usize = 33554432
+
 error RuntimeError:
     OutOfMemory
 
@@ -383,6 +388,17 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
         # the reservation is a hard error -- chaining a second block would break the contiguous,
         # relocation-free layout the type system relies on, so we panic instead.
         if a.strategy == ARENA_STRATEGY_RESERVE_COMMIT or a.strategy == ARENA_STRATEGY_FIXED:
+            # Lazy default reservation (docs/73 §3): a reserve_commit arena whose block has not been
+            # created yet reserves its default contiguous range on first touch, so empty/tiny regions
+            # cost nothing. FIXED and bounded reserve_commit are reserved up front by the region
+            # declaration, so they already have a block here.
+            if a.end == null:
+                cap: mutable usize = ARENA_DEFAULT_RESERVE_COMMIT_SLOTS
+                if cap < size:
+                    cap <- size
+                a.end as & <- new_region_backend(cap, a.strategy)
+                a.begin <- a.end
+                a.end_index <- 0
             assert a.end != null
             if a.end.count + size > a.end.capacity:
                 panic("region overflow: reservation exhausted (reserve_commit/fixed)")

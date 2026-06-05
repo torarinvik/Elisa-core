@@ -27,6 +27,8 @@ const ARENA_STRATEGY_FIXED: int = 3
 
 const ARENA_STRATEGY_SCRATCH: int = 4
 
+const ARENA_DEFAULT_RESERVE_COMMIT_SLOTS: usize = 33554432
+
 error RuntimeError:
     OutOfMemory
 
