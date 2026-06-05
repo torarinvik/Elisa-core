@@ -25,15 +25,49 @@ import (
 // inferred region's surviving objects nest or are disjoint — a clean forest the auto-tightening
 // transform (Phase 2) relies on.
 
+// flattenRegionTopLevel flattens a region body through transparent effect-grant blocks (`can ...:`)
+// so allocations declared inside them count as the region's top level — most function bodies wrap
+// their allocations in a `can` block. It does NOT descend into loops/ifs/sub-regions, which are
+// genuine sub-scopes rather than the region's own top level.
+func flattenRegionTopLevel(body []ast.Stmt) []ast.Stmt {
+	out := make([]ast.Stmt, 0, len(body))
+	for _, stmt := range body {
+		if can, ok := stmt.(*ast.CanStmt); ok {
+			out = append(out, flattenRegionTopLevel(can.Body)...)
+			continue
+		}
+		out = append(out, stmt)
+	}
+	return out
+}
+
 // checkRegionLifetimes analyzes every inferred (synthesized `in auto:`) region in fn.
 func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
+	// Names in scope at every region entry: function parameters. A reserve_commit reservation
+	// (sized from the proven bound) is emitted at region entry, so its bound must resolve there.
+	paramNames := map[string]bool{}
+	for _, p := range fn.Params {
+		paramNames[p.Name] = true
+	}
+	reserveCommitDeclOffsets := map[int]bool{}
 	for _, region := range collectSynthesizedRegions(fn.Body) {
-		asn := a.assignRegionStacks(region)
+		asn := a.assignRegionStacks(region, paramNames)
 		if a.regionStacks != nil {
 			a.regionStacks[region] = asn
+		}
+		// Record the decl offsets of darrays given a reserve_commit stack: a deferred interior-ref
+		// invalidation whose source is one of these is stable (the base never moves) and is dropped.
+		for _, stmt := range flattenRegionTopLevel(region.Body) {
+			vd, ok := stmt.(*ast.VarDeclStmt)
+			if !ok {
+				continue
+			}
+			if stack, ok := asn.StackOf[vd.Name]; ok && asn.stackStrategy(stack) == "reserve_commit" {
+				reserveCommitDeclOffsets[vd.Position.Offset] = true
+			}
 		}
 		// Both checks reflect the actual arena routing: crossing-lifetime / interleaved-growth
 		// objects in separate stacks (each its own tail) are auto-resolved, so only an
@@ -44,6 +78,23 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 			a.dumpRegionStackAssignment(region, asn)
 		}
 	}
+	a.resolvePendingStorageViewErrors(reserveCommitDeclOffsets)
+}
+
+// resolvePendingStorageViewErrors emits the deferred invalidated-view-use errors, dropping any whose
+// source darray was given a reserve_commit stack (its base never moves, so the reference stays
+// valid). Suppress iff the backing is provably stable — the soundness invariant (docs/72).
+func (a *Analyzer) resolvePendingStorageViewErrors(reserveCommitDeclOffsets map[int]bool) {
+	for _, p := range a.pendingStorageViewErrors {
+		if p.hasSourceDecl && reserveCommitDeclOffsets[p.sourceDeclOffset] {
+			continue // reserve_commit-backed source -> stable -> drop the error
+		}
+		if a.storageViewStaleUses != nil {
+			a.storageViewStaleUses[p.expr] = p.dep
+		}
+		a.errorf(p.expr.Pos(), storageViewInvalidatedMessage(p.viewName, p.dep.InvalidatedBy))
+	}
+	a.pendingStorageViewErrors = nil
 }
 
 // regionGrowthMethods are the darray/dict operations that may REALLOCATE the backing buffer.
@@ -64,7 +115,7 @@ func (a *Analyzer) analyzeRegionGrowthDiscipline(region *ast.RegionStmt, asn Reg
 	// Top-level fresh allocations in source (== arena) order.
 	birthByName := map[string]int{}
 	order := make([]string, 0, 4)
-	for _, stmt := range region.Body {
+	for _, stmt := range flattenRegionTopLevel(region.Body) {
 		vd, ok := stmt.(*ast.VarDeclStmt)
 		if !ok || !a.isFreshRegionAllocation(vd) {
 			continue
@@ -193,7 +244,7 @@ func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt, asn RegionStac
 	// those belong to sub-scopes or are churn, out of scope for interleaving).
 	locals := make([]regionLifetimeLocal, 0, 4)
 	byName := map[string]int{}
-	for _, stmt := range region.Body {
+	for _, stmt := range flattenRegionTopLevel(region.Body) {
 		vd, ok := stmt.(*ast.VarDeclStmt)
 		if !ok || !a.isFreshRegionAllocation(vd) {
 			continue
@@ -303,7 +354,7 @@ func typeExprHasExplicitRegion(te ast.TypeExpr) bool {
 // declPosFor returns the declaration position of a top-level local in region (falls back to
 // the region position).
 func declPosFor(region *ast.RegionStmt, name string) lexer.Pos {
-	for _, stmt := range region.Body {
+	for _, stmt := range flattenRegionTopLevel(region.Body) {
 		if vd, ok := stmt.(*ast.VarDeclStmt); ok && vd.Name == name {
 			return vd.Position
 		}

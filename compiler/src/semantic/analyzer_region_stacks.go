@@ -21,10 +21,11 @@ const regionStackCap = 4
 // as its tail so it can grow freely. When the over-split cap is hit, the overflow growables share
 // one merge stack and Merged is set. B1a computes and records this; B1b consumes it in codegen.
 type RegionStackAssignment struct {
-	StackOf       map[string]int      // allocation name -> stack id (0 == shared fixed/reserved stack)
-	StackKind     map[int]string      // stack id -> "shared" | "growable" | "merge"
-	StackStrategy map[int]string      // stack id -> "chained" (default) | "reserve_commit" (Phase C)
-	StackCapacity map[int]ast.Expr    // reserve_commit stack id -> proven element-count bound N
+	StackOf       map[string]int   // allocation name -> stack id (0 == shared fixed/reserved stack)
+	StackKind     map[int]string   // stack id -> "shared" | "growable" | "merge"
+	StackStrategy map[int]string   // stack id -> "chained" (default) | "reserve_commit" (Phase C)
+	StackCapacity map[int]ast.Expr // reserve_commit stack id -> proven element-count bound N
+	StackElemType map[int]Type     // reserve_commit stack id -> the darray's element type (for sizing)
 	StackCount    int
 	Merged        bool
 }
@@ -43,17 +44,21 @@ var dumpRegionStacks = os.Getenv("ELISA_DUMP_REGION_STACKS") != ""
 // gets its own stack, all reserved (fixed-footprint) allocations share stack 0, and growables
 // beyond regionStackCap share a merge stack. Analysis-only (B1a) — recorded for codegen and
 // inspection; no behavior change yet.
-func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt) RegionStackAssignment {
-	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackCount: 1}
+func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool) RegionStackAssignment {
+	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackCount: 1}
 	order := make([]string, 0, 4)
 	seen := map[string]bool{}
-	for _, stmt := range region.Body {
+	elemTypeByName := map[string]Type{}
+	for _, stmt := range flattenRegionTopLevel(region.Body) {
 		vd, ok := stmt.(*ast.VarDeclStmt)
 		if !ok || !a.isFreshRegionAllocation(vd) || seen[vd.Name] {
 			continue
 		}
 		seen[vd.Name] = true
 		order = append(order, vd.Name)
+		if dt, ok := StripAggregateStateType(a.exprTypes[vd.Value]).(*DArrayType); ok {
+			elemTypeByName[vd.Name] = dt.Elem
+		}
 	}
 	if len(order) == 0 {
 		return asn
@@ -80,13 +85,16 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt) RegionStackAssignm
 		// hint, not a hard limit, so it is NOT sufficient; reserve_commit on an unbounded darray
 		// would panic on overflow (worse than the current compile error).
 		if interiorRef[n] {
-			if bound, ok := hardBoundForName(region.Body, n); ok {
-				asn.StackOf[n] = next
-				asn.StackKind[next] = "growable"
-				asn.StackStrategy[next] = "reserve_commit"
-				asn.StackCapacity[next] = bound
-				next++
-				continue
+			if bound, ok := hardBoundForName(region.Body, n); ok && boundInScopeAtRegionEntry(bound, paramNames) {
+				if elem, ok := elemTypeByName[n]; ok {
+					asn.StackOf[n] = next
+					asn.StackKind[next] = "growable"
+					asn.StackStrategy[next] = "reserve_commit"
+					asn.StackCapacity[next] = bound
+					asn.StackElemType[next] = elem
+					next++
+					continue
+				}
 			}
 		}
 		if scan.reserved[n] {
@@ -238,6 +246,21 @@ func (s *hardBoundScan) walk(v reflect.Value) {
 			s.walk(v.Index(i))
 		}
 	}
+}
+
+// boundInScopeAtRegionEntry reports whether a reservation bound can be evaluated at the region's
+// entry (where the reserve_commit arena is created): an integer literal always, or an identifier
+// that is a function parameter. A local declared inside the region body is not yet in scope there,
+// so it does not qualify for reserve_commit (the darray stays chained — a sound, graceful fallback;
+// deferring the reservation to the darray's first use to support local bounds is a follow-up).
+func boundInScopeAtRegionEntry(bound ast.Expr, paramNames map[string]bool) bool {
+	switch b := bound.(type) {
+	case *ast.IntLit:
+		return true
+	case *ast.Ident:
+		return paramNames[b.Name]
+	}
+	return false
 }
 
 // countingLoopBound returns the exclusive end N of a `for _ in 0..<N` loop with a pure ident/int

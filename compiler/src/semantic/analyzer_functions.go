@@ -16,6 +16,11 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.errorf(fn.Pos(), "internal error: function %q does not resolve to a function type", fn.Name)
 		return
 	}
+	// Deferred storage-view errors are scoped per function: a nested function resolves its own
+	// pending uses at its checkRegionLifetimes; restore the enclosing function's pending afterward.
+	savedPending := a.pendingStorageViewErrors
+	a.pendingStorageViewErrors = nil
+	defer func() { a.pendingStorageViewErrors = savedPending }()
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedFuncDecl := a.currentFuncDecl

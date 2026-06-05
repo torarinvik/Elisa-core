@@ -298,6 +298,39 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 // stack 0 is the region's main arena (already emitted); each growable/merge stack 1..N-1 gets its
 // own lazy arena, freed with the region. It returns a closure that restores the darray->arena tag
 // routing map to its prior state on region exit (handling nested same-name regions).
+// emitReserveCommitStackInit eagerly creates a reserve_commit arena whose contiguous reservation is
+// sized to hold the darray's proven maximum footprint. The bound N is an element count; the buffer
+// after arena_da_reserve's power-of-two growth is at most nextPow2(N) <= 2N elements, so the
+// reservation is sized to 2*N*sizeof(elem) bytes plus headroom (in uintptr slots). reserve_commit
+// commits pages lazily, so over-reserving costs only virtual address space.
+func (s *functionState) emitReserveCommitStackInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, boundExpr ast.Expr, elemType semantic.Type) error {
+	if boundExpr == nil || elemType == nil {
+		return fmt.Errorf("reserve_commit stack missing bound or element type")
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVM, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	nValue, _, err := s.emitExpr(boundExpr, usizeType)
+	if err != nil {
+		return err
+	}
+	elemBytes, err := s.sizeOfType(elemType)
+	if err != nil {
+		return err
+	}
+	if elemBytes == 0 {
+		elemBytes = 1
+	}
+	twoN := C.LLVMBuildMul(s.builder, nValue, C.LLVMConstInt(usizeLLVM, 2, 0), cStringFree("rc.2n"))
+	bytes := C.LLVMBuildMul(s.builder, twoN, C.LLVMConstInt(usizeLLVM, C.ulonglong(elemBytes), 0), cStringFree("rc.bytes"))
+	bytes = C.LLVMBuildAdd(s.builder, bytes, C.LLVMConstInt(usizeLLVM, 4096, 0), cStringFree("rc.bytes.headroom"))
+	slots := C.LLVMBuildUDiv(s.builder, bytes, C.LLVMConstInt(usizeLLVM, 8, 0), cStringFree("rc.slots"))
+	slots = C.LLVMBuildAdd(s.builder, slots, C.LLVMConstInt(usizeLLVM, 8, 0), cStringFree("rc.slots.pad"))
+	return s.emitRegionInitValue(arenaPtr, arenaType, slots, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */)
+}
+
 func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool) (func(), error) {
 	noop := func() {}
 	asn, ok := s.g.result.RegionStacks[n]
@@ -336,6 +369,16 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 			kind = scopedCleanupRegionReset
 		}
 		s.registerScopedCleanup(scopedCleanupBinding{kind: kind, name: name, ptr: alloca, typ: arenaType})
+		// Phase C1c: a reserve_commit stack is eagerly initialized with a contiguous reservation
+		// sized to its proven element bound, so the base never moves and interior refs survive
+		// growth. Skipped under loopReset (a per-iteration reset region) — chained stays correct
+		// there. The strategy is only assigned when the footprint is provably <= N (docs/72), so
+		// the reservation can never overflow.
+		if !loopReset && asn.StackStrategy[k] == "reserve_commit" {
+			if err := s.emitReserveCommitStackInit(alloca, arenaType, asn.StackCapacity[k], asn.StackElemType[k]); err != nil {
+				return noop, err
+			}
+		}
 	}
 	if s.darrayStackTag == nil {
 		s.darrayStackTag = map[string]string{}

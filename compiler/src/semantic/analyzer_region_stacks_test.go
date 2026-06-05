@@ -1,6 +1,9 @@
 package semantic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // onlyRegionStack returns the single region's stack assignment from an analysis result (test
 // fixtures here have exactly one inferred region).
@@ -100,5 +103,24 @@ func TestRegionStacksUnboundedInteriorRefStaysChained(t *testing.T) {
 	asn := onlyRegionStack(t, result)
 	if asn.stackStrategy(asn.StackOf["xs"]) == "reserve_commit" {
 		t.Fatalf("unbounded darray must not get a reserve_commit stack (panic risk), got %v", asn.StackStrategy)
+	}
+}
+
+// Soundness of the deferred-invalidation flow (Phase C1b): an interior ref across growth into an
+// UNBOUNDED darray must STILL be rejected — the error is dropped only for a reserve_commit-backed
+// (provably bounded) source, never unsoundly. Here xs has two push sites (push + loop) so it is not
+// hard-bounded; the invalidation error must survive.
+func TestReserveCommitInferenceUnboundedStillErrors(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rc_unsound.elisa", `def build(n: usize) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        xs: mutable darray[i64] = []
+        xs.push(0)
+        anchor: i64& = &xs[0]
+        for i in 1..<n:
+            xs.push(i.i64())
+        return anchor[0]
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "cannot be used") {
+		t.Fatalf("unbounded interior-ref-across-growth must still error, got:\n%s", all)
 	}
 }

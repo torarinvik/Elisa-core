@@ -199,6 +199,10 @@ type Analyzer struct {
 	currentSpecializedValueTypes  map[*Symbol]Type
 	currentValueBindings          map[*Symbol]ast.Expr
 	currentStorageViewDeps        map[*Symbol]storageViewDependencyState
+	// pendingStorageViewErrors holds invalidated-view uses deferred until the per-function region
+	// stack assignment is known (Phase C1b): a use whose source darray got a reserve_commit stack
+	// is stable and the error is dropped; otherwise it is emitted. Scoped per function.
+	pendingStorageViewErrors []pendingStorageViewError
 	// currentIteratedSources keys (by optimizationExprString) the relocatable containers
 	// currently being iterated by an enclosing `for` loop, to the loop position. A
 	// relocating mutation (push/extend/reserve/clear/truncate) of such a container would

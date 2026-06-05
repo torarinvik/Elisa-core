@@ -476,6 +476,14 @@ func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semant
 		}
 		capacityValue = C.LLVMConstInt(usizeLLVMType, 8*1024, 0)
 	}
+	return s.emitRegionInitValue(arenaPtr, arenaType, capacityValue, regionStrategyTag(allocator))
+}
+
+// emitRegionInitValue eagerly initializes a region's first block from a precomputed slot capacity
+// and strategy tag (used for inferred reserve_commit stacks, where the capacity is a derived value
+// rather than a surface expression).
+func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityValue C.LLVMValueRef, strategyTag int) error {
+	capacityType := s.g.result.NamedTypes["usize"]
 	regionType := s.g.result.NamedTypes["Region"]
 	if regionType == nil {
 		return fmt.Errorf("missing builtin Region type for region initialization")
@@ -485,12 +493,9 @@ func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semant
 	if err != nil {
 		return err
 	}
-	// Map the surface `using <strategy>` selector to the runtime ARENA_STRATEGY_* tag. One
-	// eager call to new_region_backend creates the first block from the right source (MALLOC
-	// -> libc, everything else -> mmap), and the tag is recorded in Arena.strategy (field 3)
-	// so growth (arena_alloc/arena_realloc) and teardown (arena_free) honor it. CHAINED (0)
-	// leaves the zero-initialized field untouched.
-	strategyTag := regionStrategyTag(allocator)
+	// The ARENA_STRATEGY_* tag selects the block source (MALLOC -> libc, everything else -> mmap)
+	// and is recorded in Arena.strategy (field 3) so growth (arena_alloc/arena_realloc) and
+	// teardown (arena_free) honor it. CHAINED (0) leaves the zero-initialized field untouched.
 	intType := s.g.result.NamedTypes["int"]
 	intLLVMType, lerr := s.g.lowerType(intType)
 	if lerr != nil {

@@ -13,6 +13,17 @@ func storageViewInvalidatedMessage(name string, reason string) string {
 	return fmt.Sprintf("view %q cannot be used: storage dependency facts were invalidated by %s", name, reason)
 }
 
+// pendingStorageViewError is an invalidated-view use whose final verdict waits on the region stack
+// assignment (Phase C1b). sourceDeclOffset is the byte offset of the source darray's declaration —
+// a precise identity (no name collisions) for matching against reserve_commit decls in the post-pass.
+type pendingStorageViewError struct {
+	expr            ast.Expr
+	viewName        string
+	dep             storageViewDependencyState
+	sourceDeclOffset int
+	hasSourceDecl    bool
+}
+
 func (a *Analyzer) reportInvalidStorageViewUse(expr ast.Expr) {
 	ident, ok := stripOptimizationParens(expr).(*ast.Ident)
 	if !ok || ident == nil || a.currentScope == nil || a.currentStorageViewDeps == nil {
@@ -26,14 +37,22 @@ func (a *Analyzer) reportInvalidStorageViewUse(expr ast.Expr) {
 	if !ok || dep.Valid {
 		return
 	}
-	if a.storageViewStaleUses != nil {
-		a.storageViewStaleUses[expr] = dep
-	}
 	if a.enforceUnsafePermissions {
+		if a.storageViewStaleUses != nil {
+			a.storageViewStaleUses[expr] = dep
+		}
 		a.recordFunctionPermissionRefs(unsafeStaleRefRefs(expr.Pos()))
 		return
 	}
-	a.errorf(expr.Pos(), storageViewInvalidatedMessage(ident.Name, dep.InvalidatedBy))
+	// Defer: if the source darray is given a reserve_commit stack (stable base) by the per-function
+	// region inference, the view stays valid across growth and this error is dropped in the
+	// post-pass; otherwise it is emitted there. The decl offset identifies the source precisely.
+	pending := pendingStorageViewError{expr: expr, viewName: ident.Name, dep: dep}
+	if srcSym, ok := a.currentScope.Lookup(dep.Source); ok && srcSym.Node != nil {
+		pending.sourceDeclOffset = srcSym.Node.Pos().Offset
+		pending.hasSourceDecl = true
+	}
+	a.pendingStorageViewErrors = append(a.pendingStorageViewErrors, pending)
 }
 
 func (a *Analyzer) storageViewUseRequiresUnsafeStaleRef(expr ast.Expr) bool {
