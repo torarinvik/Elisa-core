@@ -432,6 +432,50 @@ func stripParenExpr(e ast.Expr) ast.Expr {
 	}
 }
 
+// regionLifetimeClasses counts the DISTINCT lifetime equivalence classes a single region resolves
+// its allocations to. A class is a distinct death-point at which live objects are reclaimed:
+//   - one per distinct B2 early-free offset (objects that die before region exit), plus
+//   - one for the region exit itself, iff some allocated stack survives to it.
+// Stacks within a region are layout (all freed together at region exit, docs/71) and do NOT count
+// as separate lifetimes — only distinct *death-points* do. A region with no fresh allocations
+// contributes 0.
+func (asn RegionStackAssignment) regionLifetimeClasses() int {
+	earlyOffsets := map[int]bool{}
+	earlyStacks := map[int]bool{}
+	for stack, off := range asn.StackEarlyFreeAfter {
+		earlyOffsets[off] = true
+		earlyStacks[stack] = true
+	}
+	survivesToExit := false
+	for _, stack := range asn.StackOf {
+		if !earlyStacks[stack] {
+			survivesToExit = true
+			break
+		}
+	}
+	classes := len(earlyOffsets)
+	if survivesToExit {
+		classes++
+	}
+	return classes
+}
+
+// dumpRegionLifetimeSummary prints the program-wide unified-lifetime count: the total number of
+// distinct lifetime equivalence classes that every inferred allocation resolves to (regions
+// refined by B2 early-free), alongside the raw region/stack/allocation totals so the layout axis
+// (stacks) is not mistaken for the lifetime axis (classes).
+func (a *Analyzer) dumpRegionLifetimeSummary() {
+	regions, stacks, allocations, classes := 0, 0, 0, 0
+	for _, asn := range a.regionStacks {
+		regions++
+		stacks += asn.StackCount
+		allocations += len(asn.StackOf)
+		classes += asn.regionLifetimeClasses()
+	}
+	fmt.Fprintf(os.Stderr, "region lifetime summary: %d allocation(s) across %d region(s) (%d stack(s) for layout) -> %d unified lifetime class(es)\n",
+		allocations, regions, stacks, classes)
+}
+
 func (a *Analyzer) dumpRegionStackAssignment(region *ast.RegionStmt, asn RegionStackAssignment) {
 	note := ""
 	if asn.Merged {

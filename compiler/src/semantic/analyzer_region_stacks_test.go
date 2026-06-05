@@ -166,3 +166,73 @@ func TestRegionStacksDoesNotEarlyFreeAliasedObject(t *testing.T) {
 		t.Fatalf("an aliased object must not be early-freed (dangling-pointer risk), got %v", asn.StackEarlyFreeAfter)
 	}
 }
+
+// regionLifetimeClasses counts distinct death-points (lifetime equivalence classes), not stacks:
+// one per distinct B2 early-free offset, plus one for the region exit iff a live stack survives to
+// it. Stacks that share a region are layout (freed together) and must NOT inflate the count.
+func TestRegionLifetimeClassesCountsDeathPoints(t *testing.T) {
+	cases := []struct {
+		name string
+		asn  RegionStackAssignment
+		want int
+	}{
+		{"two growables, none early-freed -> one class (both die at region exit)",
+			RegionStackAssignment{StackOf: map[string]int{"foo": 1, "bar": 2}, StackEarlyFreeAfter: map[int]int{}}, 1},
+		{"some early-freed at one offset + a survivor -> two classes",
+			RegionStackAssignment{StackOf: map[string]int{"a": 1, "b": 2, "c": 3}, StackEarlyFreeAfter: map[int]int{1: 100, 2: 100}}, 2},
+		{"two distinct early-free offsets + a survivor -> three classes",
+			RegionStackAssignment{StackOf: map[string]int{"a": 1, "b": 2, "c": 3}, StackEarlyFreeAfter: map[int]int{1: 100, 2: 200}}, 3},
+		{"everything early-freed at one offset, nothing survives -> one class",
+			RegionStackAssignment{StackOf: map[string]int{"a": 1, "b": 2}, StackEarlyFreeAfter: map[int]int{1: 100, 2: 100}}, 1},
+		{"no fresh allocations -> zero classes",
+			RegionStackAssignment{StackOf: map[string]int{}, StackEarlyFreeAfter: map[int]int{}}, 0},
+	}
+	for _, tc := range cases {
+		if got := tc.asn.regionLifetimeClasses(); got != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// End to end: four same-lifetime darrays in one scope unify into ONE class (the 5 stacks are pure
+// layout); add a loop-local cohort and an early-freed cohort and the count tracks death-points.
+func TestRegionLifetimeClassesEndToEnd(t *testing.T) {
+	total := func(result *Result) int {
+		sum := 0
+		for _, asn := range result.RegionStacks {
+			sum += asn.regionLifetimeClasses()
+		}
+		return sum
+	}
+	// 4 darrays, all live to function return -> 1 class, despite 5 layout stacks.
+	four := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "lc_four.elisa", `def f() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        c: mutable darray[i64] = []
+        d: mutable darray[i64] = []
+        a.push(1)
+        b.push(1)
+        c.push(1)
+        d.push(1)
+        return a.count.i64() + b.count.i64() + c.count.i64() + d.count.i64()
+`, AnalyzeOptions{})
+	if got := total(four); got != 1 {
+		t.Fatalf("four same-lifetime darrays: expected 1 unified lifetime class, got %d", got)
+	}
+	// Function-scope cohort + a loop-iteration-local cohort -> 2 classes (2 distinct scopes).
+	withLoop := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "lc_loop.elisa", `def f(n: usize) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        a: mutable darray[i64] = []
+        a.push(1)
+        acc: mutable i64 = a.count.i64()
+        for i in 0..<n:
+            t: mutable darray[i64] = []
+            t.push(i.i64())
+            acc <- acc + t[0]
+        return acc
+`, AnalyzeOptions{})
+	if got := total(withLoop); got != 2 {
+		t.Fatalf("function cohort + loop-local cohort: expected 2 unified lifetime classes, got %d", got)
+	}
+}

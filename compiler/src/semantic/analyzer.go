@@ -606,6 +606,9 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	}
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
+	if dumpRegionStacks {
+		a.dumpRegionLifetimeSummary()
+	}
 	return &Result{
 		File:                    file,
 		LoweredFile:             loweredFile,

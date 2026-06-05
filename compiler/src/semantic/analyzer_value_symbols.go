@@ -63,6 +63,15 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable, Private: scoped.Private}, n.Pos())
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				// A `def` whose name is a builtin scalar type (f32, i32, u8, …) is unreachable
+				// by call: a call site `name(x)` resolves to the type cast, not to this function.
+				// Warn at the definition rather than letting the function silently vanish.
+				if t, isType := a.namedTypes[n.Name]; isType {
+					switch t.(type) {
+					case *BuiltinType, *BitIntType:
+						a.warnf(n.Pos(), "function %q shadows the builtin type name %q; a call `%s(...)` resolves to the type cast, not this function, so this function can never be called", n.Name, n.Name, n.Name)
+					}
+				}
 				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
 				fnType.Static = n.Static
 				initLookupName, constructorSugar := a.constructorDeclInitHookName(scoped.Namespace, n, fnType)
