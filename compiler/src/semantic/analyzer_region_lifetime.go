@@ -31,14 +31,14 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 		return
 	}
 	for _, region := range collectSynthesizedRegions(fn.Body) {
-		a.analyzeRegionLifetimes(region)
 		asn := a.assignRegionStacks(region)
 		if a.regionStacks != nil {
 			a.regionStacks[region] = asn
 		}
-		// The growth check must reflect the actual arena routing: two growables in separate
-		// stacks (each its own tail) never reallocate, so only an in-the-same-stack collision
-		// (e.g. the merge stack) is a real interior growth.
+		// Both checks reflect the actual arena routing: crossing-lifetime / interleaved-growth
+		// objects in separate stacks (each its own tail) are auto-resolved, so only an
+		// in-the-same-stack collision (the over-split merge stack) is a real conflict.
+		a.analyzeRegionLifetimes(region, asn)
 		a.analyzeRegionGrowthDiscipline(region, asn)
 		if dumpRegionStacks {
 			a.dumpRegionStackAssignment(region, asn)
@@ -188,7 +188,7 @@ type regionLifetimeLocal struct {
 }
 
 // analyzeRegionLifetimes flags interleaved object lifetimes within one inferred region.
-func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt) {
+func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt, asn RegionStackAssignment) {
 	// 1. Top-level fresh allocations in this region (not nested in loops/ifs/sub-regions —
 	// those belong to sub-scopes or are churn, out of scope for interleaving).
 	locals := make([]regionLifetimeLocal, 0, 4)
@@ -242,10 +242,18 @@ func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt) {
 				if flagged[j] {
 					continue
 				}
+				// Multi-stack regions auto-resolve crossing lifetimes: if the two objects are
+				// assigned to different parallel stacks (each its own arena), there is no LIFO
+				// conflict to reject. The error survives only when they are forced into the SAME
+				// stack — i.e. the over-split merge stack — where the region genuinely cannot
+				// separate them.
+				if asn.StackOf[li.name] != asn.StackOf[lj.name] {
+					continue
+				}
 				flagged[j] = true
 				a.errorf(declPosFor(region, lj.name),
-					"interleaved object lifetimes in an inferred region: %q is still live when %q is created but is last used before %q dies — their lifetimes cross, so they cannot be placed on a region stack (a region frees in LIFO order). Put one in an explicit region (`in r:` / `region r(...)`) so the lifetimes nest, or reorder so one fully contains the other.",
-					li.name, lj.name, lj.name)
+					"interleaved object lifetimes in an inferred region: %q is still live when %q is created but is last used before %q dies — their lifetimes cross, and the region's stack budget (%d) is exhausted so they cannot be separated. Put one in an explicit region (`in r:` / `region r(...)`) so the lifetimes nest, or reorder so one fully contains the other.",
+					li.name, lj.name, lj.name, regionStackCap)
 			}
 		}
 	}

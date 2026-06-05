@@ -7,10 +7,11 @@ import (
 	"testing"
 )
 
-// Interleaved lifetimes in an inferred region: `a` is born first, `b` second, `a` dies before
-// `b` — their lifetimes cross and cannot be placed on a LIFO region stack. REJECTED (hard error).
-func TestRegionLifetimeRejectsInterleaved(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rl_inter.elisa", `def f() -> void:
+// Interleaved lifetimes (`a` born, `b` born, `a` dies before `b`) used to be a hard error. With
+// multi-stack regions the two growables are auto-split into separate parallel stacks, so the
+// crossing dissolves — the program now compiles with no interleaved-lifetime error.
+func TestRegionLifetimeAutoSplitsInterleaved(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_inter.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
             a: mutable darray[i64] = []
@@ -19,9 +20,9 @@ func TestRegionLifetimeRejectsInterleaved(t *testing.T) {
             b.push(2)
             a.push(3)
             b.push(4)
-`)
-	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "interleaved object lifetimes") {
-		t.Fatalf("expected interleaved-lifetime error, got:\n%s", all)
+`, AnalyzeOptions{})
+	if strings.Contains(allDiagnostics(result), "interleaved object lifetimes") {
+		t.Fatalf("multi-stack regions must auto-split crossing growables; no error expected, got:\n%s", allDiagnostics(result))
 	}
 }
 
@@ -144,17 +145,18 @@ func TestRegionAutoWrapSkipsAccumulator(t *testing.T) {
 	}
 }
 
-// Differential fuzz: generate random straight-line `in auto:` scopes with several darrays and
-// a random push sequence, compute whether any lifetimes cross with an independent Go oracle
-// (statement-index intervals), and assert the analyzer's verdict matches exactly.
-func TestRegionLifetimeFuzzMatchesOracle(t *testing.T) {
+// Differential fuzz: generate random straight-line `in auto:` scopes with 2-4 darrays and a random
+// push sequence. Every darray here is an unreserved growable, and 4 <= the stack cap, so multi-stack
+// regions give each its own parallel stack — ALL crossings auto-split. The analyzer must therefore
+// never raise an interleaved-lifetime error on these, regardless of how the (oracle-computed)
+// lifetimes cross.
+func TestRegionLifetimeFuzzAutoSplitsAllSmallScopes(t *testing.T) {
 	for seed := int64(1); seed <= 60; seed++ {
-		src, crossed := generateInterleaveScope(rand.New(rand.NewSource(seed)))
+		src, _ := generateInterleaveScope(rand.New(rand.NewSource(seed)))
 		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, fmt.Sprintf("rl_fuzz_%d.elisa", seed), src, AnalyzeOptions{})
-		flagged := strings.Contains(allDiagnostics(result), "interleaved object lifetimes")
-		if flagged != crossed {
-			t.Fatalf("seed %d: analyzer flagged=%v, oracle crossed=%v\n--- program ---\n%s\n--- diagnostics ---\n%s",
-				seed, flagged, crossed, src, allDiagnostics(result))
+		if strings.Contains(allDiagnostics(result), "interleaved object lifetimes") {
+			t.Fatalf("seed %d: <=cap growables must all auto-split; no interleaved error expected\n--- program ---\n%s\n--- diagnostics ---\n%s",
+				seed, src, allDiagnostics(result))
 		}
 	}
 }
@@ -192,20 +194,27 @@ func generateInterleaveScope(rng *rand.Rand) (string, bool) {
 	return b.String(), crossed
 }
 
-// Interleaving is rejected by default (no special flag needed) — it is a hard error.
-func TestRegionLifetimeRejectedByDefault(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rl_default.elisa", `def f() -> void:
+// The interleaved-lifetime error survives only when the crossing pair cannot be auto-split: beyond
+// the stack cap (4), the overflow growables share one merge stack, so two crossing growables forced
+// into it are still rejected. Six growables push the last two (e, g) into the merge stack, and they
+// cross — the hard error stands.
+func TestRegionLifetimeRejectsCrossingInMergeStack(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rl_merge.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
             a: mutable darray[i64] = []
             b: mutable darray[i64] = []
-            a.push(1)
-            b.push(2)
-            a.push(3)
-            b.push(4)
+            c: mutable darray[i64] = []
+            d: mutable darray[i64] = []
+            e: mutable darray[i64] = []
+            e.push(1)
+            g: mutable darray[i64] = []
+            g.push(2)
+            e.push(3)
+            g.push(4)
 `)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "interleaved object lifetimes") {
-		t.Fatalf("expected interleaving to be rejected by default, got:\n%s", all)
+		t.Fatalf("a crossing forced into the merge stack must still be rejected, got:\n%s", all)
 	}
 }
 
