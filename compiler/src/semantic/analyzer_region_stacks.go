@@ -26,8 +26,12 @@ type RegionStackAssignment struct {
 	StackStrategy map[int]string   // stack id -> "chained" (default) | "reserve_commit" (Phase C)
 	StackCapacity map[int]ast.Expr // reserve_commit stack id -> proven element-count bound N
 	StackElemType map[int]Type     // reserve_commit stack id -> the darray's element type (for sizing)
-	StackCount    int
-	Merged        bool
+	// StackEarlyFreeAfter (Phase B2): own-stack id -> byte offset of the top-level statement after
+	// which the stack's arena can be freed early (the object dies before region exit and nothing
+	// references it past then). Absent when the stack must live to region exit.
+	StackEarlyFreeAfter map[int]int
+	StackCount          int
+	Merged              bool
 }
 
 // stackStrategy returns the backing strategy for a stack (chained unless Phase C assigned one).
@@ -45,7 +49,7 @@ var dumpRegionStacks = os.Getenv("ELISA_DUMP_REGION_STACKS") != ""
 // beyond regionStackCap share a merge stack. Analysis-only (B1a) — recorded for codegen and
 // inspection; no behavior change yet.
 func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool) RegionStackAssignment {
-	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackCount: 1}
+	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackEarlyFreeAfter: map[int]int{}, StackCount: 1}
 	order := make([]string, 0, 4)
 	seen := map[string]bool{}
 	elemTypeByName := map[string]Type{}
@@ -114,6 +118,20 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 		asn.StackKind[next] = "growable"
 		next++
 	}
+	// Phase B2 (docs/71): an own growable stack whose object provably dies before region exit and
+	// is never aliased can have its arena freed early — right after its last use — rather than at
+	// region exit. The escape check is the conservative D-merge: if the object is aliased (address
+	// taken, copied, or passed out), it stays to region exit.
+	topLevel := flattenRegionTopLevel(region.Body)
+	for n, stack := range asn.StackOf {
+		if stack <= 0 || asn.StackKind[stack] == "merge" {
+			continue // shared/merge stacks hold more than one object; cannot free individually
+		}
+		if off, ok := earlyFreeableObject(topLevel, n); ok {
+			asn.StackEarlyFreeAfter[stack] = off
+		}
+	}
+
 	maxStack := 0
 	for _, s := range asn.StackOf {
 		if s > maxStack {
@@ -122,6 +140,130 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 	}
 	asn.StackCount = maxStack + 1
 	return asn
+}
+
+// earlyFreeableObject returns the byte offset of the last top-level statement referencing `name`,
+// when that object can be freed there: it is referenced ONLY as a method/field receiver or an index
+// base (never aliased — no address taken, no bare-value use that could copy its buffer pointer), and
+// it dies strictly before the region's final statement. ok=false means keep it to region exit.
+func earlyFreeableObject(topLevel []ast.Stmt, name string) (int, bool) {
+	if objectMayEscape(topLevel, name) {
+		return 0, false
+	}
+	lastRef := -1
+	for i, stmt := range topLevel {
+		if subtreeReferencesIdent(stmt, name) {
+			lastRef = i
+		}
+	}
+	if lastRef < 0 || lastRef >= len(topLevel)-1 {
+		return 0, false // unused, or still live in the final statement (dies at region exit)
+	}
+	return topLevel[lastRef].Pos().Offset, true
+}
+
+// objectMayEscape reports whether any reference to `name` could outlive an early free: an address-of
+// (`&name` / `&name[i]`), or any occurrence of the identifier that is NOT a method/field receiver
+// (`name.x`) or an index base (`name[i]`) — e.g. a bare value use, an assignment source, or a call
+// argument, all of which can copy the buffer pointer out.
+func objectMayEscape(body []ast.Stmt, name string) bool {
+	okBase := map[*ast.Ident]bool{}
+	allRefs := []*ast.Ident{}
+	addrTaken := false
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if addrTaken || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			switch e := v.Interface().(type) {
+			case *ast.Ident:
+				if e.Name == name {
+					allRefs = append(allRefs, e)
+				}
+			case *ast.FieldExpr:
+				if id, ok := stripParenExpr(e.Object).(*ast.Ident); ok && id.Name == name {
+					okBase[id] = true
+				}
+			case *ast.IndexExpr:
+				if id, ok := stripParenExpr(e.Object).(*ast.Ident); ok && id.Name == name {
+					okBase[id] = true
+				}
+			case *ast.AddrOfExpr:
+				if identReducesTo(e.Operand, name) {
+					addrTaken = true
+				}
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(body))
+	if addrTaken {
+		return true
+	}
+	for _, id := range allRefs {
+		if !okBase[id] {
+			return true // a bare / aliasing use
+		}
+	}
+	return false
+}
+
+// identReducesTo reports whether expr is `name` or `name[...]` (the targets of an address-of that
+// would alias into the object's buffer).
+func identReducesTo(expr ast.Expr, name string) bool {
+	switch e := stripParenExpr(expr).(type) {
+	case *ast.Ident:
+		return e.Name == name
+	case *ast.IndexExpr:
+		id, ok := stripParenExpr(e.Object).(*ast.Ident)
+		return ok && id.Name == name
+	}
+	return false
+}
+
+// subtreeReferencesIdent reports whether any *ast.Ident named `name` appears anywhere in node.
+func subtreeReferencesIdent(node ast.Node, name string) bool {
+	found := false
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			if id, ok := v.Interface().(*ast.Ident); ok && id.Name == name {
+				found = true
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(node))
+	return found
 }
 
 // collectInteriorRefNames returns the tracked container names that have an interior reference
@@ -307,6 +449,10 @@ func (a *Analyzer) dumpRegionStackAssignment(region *ast.RegionStmt, asn RegionS
 	sort.Ints(stacks)
 	for _, s := range stacks {
 		sort.Strings(byStack[s])
-		fmt.Fprintf(os.Stderr, "  stack %d (%s, %s): %v\n", s, asn.StackKind[s], asn.stackStrategy(s), byStack[s])
+		ef := ""
+		if off, ok := asn.StackEarlyFreeAfter[s]; ok {
+			ef = fmt.Sprintf(" early-free@%d", off)
+		}
+		fmt.Fprintf(os.Stderr, "  stack %d (%s, %s)%s: %v\n", s, asn.StackKind[s], asn.stackStrategy(s), ef, byStack[s])
 	}
 }

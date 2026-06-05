@@ -124,3 +124,45 @@ func TestReserveCommitInferenceUnboundedStillErrors(t *testing.T) {
 		t.Fatalf("unbounded interior-ref-across-growth must still error, got:\n%s", all)
 	}
 }
+
+// Phase B2: an own-stack growable that dies before region exit and is never aliased gets an early
+// arena free scheduled (its stack reclaims at its last use, not region exit).
+func TestRegionStacksEarlyFreesDeadUnaliasedObject(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "b2_dead.elisa", `def f() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            big: mutable darray[i64] = []
+            big.push(1)
+            big.push(2)
+            total: mutable i64 = big.count.i64()
+            rest: mutable darray[i64] = []
+            rest.push(3)
+            return total + rest.count.i64()
+`, AnalyzeOptions{})
+	asn := onlyRegionStack(t, result)
+	if _, ok := asn.StackEarlyFreeAfter[asn.StackOf["big"]]; !ok {
+		t.Fatalf("a dead unaliased own-stack object must be scheduled for early free, got %v", asn.StackEarlyFreeAfter)
+	}
+	if _, ok := asn.StackEarlyFreeAfter[asn.StackOf["rest"]]; ok {
+		t.Fatalf("an object live to region exit must NOT be early-freed, got %v", asn.StackEarlyFreeAfter)
+	}
+}
+
+// Phase D (conservative merge): an object whose address is taken (an interior pointer escapes) must
+// NOT be early-freed — freeing it would dangle the pointer. It stays to region exit.
+func TestRegionStacksDoesNotEarlyFreeAliasedObject(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "b2_aliased.elisa", `def f() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            big: mutable darray[i64] = []
+            big.push(1)
+            p: i64& = &big[0]
+            rest: mutable darray[i64] = []
+            rest.push(2)
+            return p[0] + rest.count.i64()
+`, AnalyzeOptions{})
+	asn := onlyRegionStack(t, result)
+	if _, ok := asn.StackEarlyFreeAfter[asn.StackOf["big"]]; ok {
+		t.Fatalf("an aliased object must not be early-freed (dangling-pointer risk), got %v", asn.StackEarlyFreeAfter)
+	}
+}

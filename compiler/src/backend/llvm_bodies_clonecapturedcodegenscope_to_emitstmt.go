@@ -341,6 +341,7 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 	if arenaType == nil {
 		return noop, fmt.Errorf("missing builtin Arena type for region %s", n.Name)
 	}
+	allocaByStack := map[int]C.LLVMValueRef{}
 	for k := 1; k < asn.StackCount; k++ {
 		name := fmt.Sprintf("%s#%d", n.Name, k)
 		var alloca C.LLVMValueRef
@@ -363,6 +364,7 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 		}
 		// Lazy arena: first block allocated on demand, free is a no-op if unused -> an unused
 		// parallel stack costs only the stack slot.
+		allocaByStack[k] = alloca
 		s.regions = append(s.regions, regionBinding{name: name, ptr: alloca, typ: arenaType})
 		kind := scopedCleanupRegion
 		if loopReset {
@@ -396,12 +398,36 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 		saved[allocName] = prevTag{value: v, had: had}
 		s.darrayStackTag[allocName] = fmt.Sprintf("%s#%d", n.Name, stackID)
 	}
+	// Phase B2: schedule each early-freeable own stack's arena to be freed right after the
+	// statement at its recorded offset.
+	if s.earlyFreeByOffset == nil {
+		s.earlyFreeByOffset = map[int]C.LLVMValueRef{}
+	}
+	type prevFree struct {
+		value C.LLVMValueRef
+		had   bool
+	}
+	savedFree := map[int]prevFree{}
+	for k, off := range asn.StackEarlyFreeAfter {
+		if alloca, ok := allocaByStack[k]; ok {
+			v, had := s.earlyFreeByOffset[off]
+			savedFree[off] = prevFree{value: v, had: had}
+			s.earlyFreeByOffset[off] = alloca
+		}
+	}
 	return func() {
 		for name, p := range saved {
 			if p.had {
 				s.darrayStackTag[name] = p.value
 			} else {
 				delete(s.darrayStackTag, name)
+			}
+		}
+		for off, p := range savedFree {
+			if p.had {
+				s.earlyFreeByOffset[off] = p.value
+			} else {
+				delete(s.earlyFreeByOffset, off)
 			}
 		}
 	}, nil
@@ -450,6 +476,28 @@ func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
 	return nil
 }
 func (s *functionState) emitStmt(stmt ast.Stmt) error {
+	if err := s.emitStmtInner(stmt); err != nil {
+		return err
+	}
+	return s.maybeEarlyFreeAfter(stmt)
+}
+
+// maybeEarlyFreeAfter frees an own-stack arena right after the top-level statement that ends its
+// object's life (Phase B2). Idempotent with the region-exit cleanup (arena_free nulls begin/end);
+// fired once per statement and skipped if the block already terminated.
+func (s *functionState) maybeEarlyFreeAfter(stmt ast.Stmt) error {
+	if s.earlyFreeByOffset == nil || stmt == nil || s.currentBlockTerminated() {
+		return nil
+	}
+	arenaPtr, ok := s.earlyFreeByOffset[stmt.Pos().Offset]
+	if !ok {
+		return nil
+	}
+	delete(s.earlyFreeByOffset, stmt.Pos().Offset)
+	return s.emitArenaFree(arenaPtr, s.g.result.NamedTypes["Arena"])
+}
+
+func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	if s.g.di != nil {
 		s.g.di.setLoc(s, stmt)
 	}
