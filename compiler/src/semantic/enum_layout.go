@@ -38,6 +38,29 @@ func (e *EnumType) MaxNodeCount() uint64 {
 	return e.NullSentinelValue()
 }
 
+// enumDeclHasDirectSelfReference reports whether a plain enum is recursive: a variant payload whose
+// type is the enum itself, by value (a bare `Expr`, not `Expr&` and not `darray[Expr]`). That is
+// exactly the by-value self-reference the old "cannot contain Expr by value" error rejected — a
+// reference is wrapped in a reference type-expr and a container puts the name behind type args, so a
+// *bare* `BuiltinTypeExpr{Name: <enum>}` with no type args is the recursive-AST-node case (docs/76).
+func enumDeclHasDirectSelfReference(n *ast.EnumDecl) bool {
+	if n == nil {
+		return false
+	}
+	for i := range n.Variants {
+		for _, pd := range n.Variants[i].Payload {
+			// A bare user-type reference `Expr` parses to *ast.NamedType (builtins are
+			// BuiltinTypeExpr; a reference `Expr&` is wrapped in *ast.RefType; a container puts the
+			// name behind type args). So a direct *ast.NamedType whose name is the enum is exactly the
+			// by-value self-reference.
+			if nt, ok := pd.Type.(*ast.NamedType); ok && nt != nil && nt.Name == n.Name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // validateEnumLayout enforces the docs/76 constraints on the `layout` suffix of an enum: only `aos`
 // and `soa` are enum layouts (`c`/`packed` are struct-FFI layouts), `(sparse)` is SoA-only, and
 // `(index: uN)` is meaningful only for the columnar/array layouts that carry handles.

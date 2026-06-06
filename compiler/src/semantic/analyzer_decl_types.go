@@ -206,7 +206,16 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
-				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n, Layout: n.Layout, LayoutSet: n.LayoutSet, LayoutSparse: n.LayoutSparse, IndexWidth: n.IndexWidth}
+				// docs/76 Phase 3: a plain `enum` whose variant references the enum by value is a
+				// recursive AST node — promote it to the region-backed machinery (set the AST's Packed
+				// flag here, before any consumer runs, so the whole pipeline sees it consistently and
+				// the order-dependent type-graph below is built once). The default storage is AoS.
+				recursivePlain := false
+				if !n.Packed && enumDeclHasDirectSelfReference(n) {
+					n.Packed = true
+					recursivePlain = true
+				}
+				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n, Layout: n.Layout, LayoutSet: n.LayoutSet, LayoutSparse: n.LayoutSparse, IndexWidth: n.IndexWidth, RecursivePlain: recursivePlain}
 				a.namedTypes[qualifiedName] = enumType
 				markPrivate(qualifiedName)
 				if n.Packed {

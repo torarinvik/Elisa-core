@@ -422,6 +422,11 @@ type EnumType struct {
 	LayoutSet    bool
 	LayoutSparse bool
 	IndexWidth   string // "u8"|"u16"|"u32"|"u64"; "" = default u32 (docs/76 opaque index handle)
+	// RecursivePlain (docs/76 Phase 3) is set when a plain `enum` (no `packed` keyword) was promoted
+	// to the region-backed machinery because a variant references the enum by value (a recursive AST
+	// node). It selects the AoS storage mode by default and lets the migration diagnostics (Phase 4)
+	// distinguish "the user wrote `packed enum`" from "the compiler promoted a recursive plain enum".
+	RecursivePlain bool
 }
 
 type PackedFieldStorageMode string
