@@ -81,9 +81,10 @@ def bt() -> void:
 	}
 }
 
-// docs/76 Phase 3 Slice 0: a PLAIN recursive `enum` (no `packed` keyword, no `store`, no `in
-// store:`) is promoted to the region-backed machinery and runs end-to-end with `new[auto]`
-// construction, `common(...)` shared fields, and storeless `match`. eval(make(10)) sums 1024 leaves.
+// docs/76 Phase 3 Slice 0+0b: the full zero-ceremony beginner surface — a PLAIN recursive `enum`
+// (no `packed`, no `store`, no `in store:`), `common(...)` shared fields, BARE constructors (no
+// `new[auto]`), and storeless `match` — is promoted to the region-backed machinery and runs.
+// eval(make(10)) sums 1024 leaves.
 func TestPlainRecursiveEnumPromotedRuns(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
@@ -101,8 +102,8 @@ enum Expr:
 def make(depth: i64) -> Expr:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         if depth <= 0:
-            return new[auto] Expr.Int(span: 0, value: 1)
-        return new[auto] Expr.Add(span: 0, left: make(depth - 1), right: make(depth - 1))
+            return Expr.Int(span: 0, value: 1)
+        return Expr.Add(span: 0, left: make(depth - 1), right: make(depth - 1))
 
 def eval(node: Expr) -> i64:
     match node:

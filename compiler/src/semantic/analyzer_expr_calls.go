@@ -131,13 +131,19 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 			return invalidType
 		}
 		if enumType.Packed {
-			// docs/76 TODO (Slice 0b): a bare constructor `Expr.Add(...)` with no active store should
-			// be an implicit `new[auto]` into the inferred region. That requires the region-poly
-			// pre-pass detection (classifyRegionPolymorphicFunctions / collectRegionBackedPackedEnums)
-			// to first recognize bare packed-enum constructors as region allocations, so the building
-			// function is region-poly and a region is threaded — otherwise the no-region path recurses.
-			// Until then, the working surface is `new[auto] Expr.Add(...)` / an explicit `in store:`.
-			return a.analyzeScopedPackedAllocExpr(&ast.AllocExpr{Position: expr.Pos(), Value: expr})
+			alloc := &ast.AllocExpr{Position: expr.Pos(), Value: expr}
+			// docs/76 Slice 0b: a bare constructor `Expr.Add(...)` of a region-backed (recursive-plain)
+			// enum with no active explicit store is an implicit `new[auto]` into the inferred region.
+			// The region-poly pre-pass now recognizes such constructors, so the building function is
+			// region-polymorphic and a region is threaded (no no-region recursion). An explicit
+			// `packed enum` (not RecursivePlain) keeps the explicit-store path.
+			if enumType.RecursivePlain {
+				if _, hasStore := a.lookupPackedStore(enumType); !hasStore {
+					alloc.AutoRegion = true
+					return a.analyzeAutoAllocExpr(alloc, expected)
+				}
+			}
+			return a.analyzeScopedPackedAllocExpr(alloc)
 		}
 		orderedArgs, ok := a.resolveEnumConstructorArgs(expr, enumType, variant)
 		if !ok {

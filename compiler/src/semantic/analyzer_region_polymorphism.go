@@ -165,8 +165,32 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 		if ft := a.regionPolyCalleeFuncType(e); ft != nil && ft.RegionPolymorphic {
 			return true
 		}
+		// A bare constructor of a region-backed (recursive-plain) enum is an implicit new[auto]
+		// allocation (docs/76 Slice 0b), so a function returning one is region-polymorphic.
+		if et, ok := a.regionBackedEnumConstructor(e); ok && et != nil {
+			return true
+		}
 	}
 	return false
+}
+
+// regionBackedEnumConstructor reports the enum if a call is a bare constructor of a region-backed
+// (recursive-plain) enum — `Expr.Add(...)` where Expr is a promoted plain enum. Explicit `packed
+// enum`s (e.g. an explicit-store JSON DOM) are NOT region-backed-by-default and are excluded, so
+// their bare constructors keep the explicit-store path.
+func (a *Analyzer) regionBackedEnumConstructor(call *ast.CallExpr) (*EnumType, bool) {
+	if call == nil {
+		return nil, false
+	}
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, false
+	}
+	enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
+	if !ok || enumType == nil || variant == nil || !enumType.Packed || !enumType.RecursivePlain {
+		return nil, false
+	}
+	return enumType, true
 }
 
 func unwrapParenForRegionPoly(value ast.Expr) ast.Expr {

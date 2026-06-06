@@ -150,6 +150,11 @@ func (a *Analyzer) analyzeAutoAllocExpr(expr *ast.AllocExpr, expected Type) Type
 	region := a.activeContainerRegionName()
 	if region == "" {
 		a.errorf(expr.Pos(), "new[auto] needs an enclosing inferred region (the native stack arena); wrap it in `in auto:` (or a scope that already opens one)")
+		// A bare packed-enum constructor routes back into this function (docs/76 Slice 0b); re-analyzing
+		// it as a value here would recurse infinitely, so stop after the diagnostic.
+		if enumType, _, ok := a.packedAllocConstructorInfo(expr.Value); ok && enumType != nil && enumType.Packed {
+			return invalidType
+		}
 		a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
 		return invalidType
 	}

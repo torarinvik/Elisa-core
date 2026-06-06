@@ -15,6 +15,13 @@ import (
 // (e.g. the JSON parser's JsonNode). This is the precise gate on implicit packed-store injection.
 func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[string]bool {
 	out := map[string]bool{}
+	// docs/76: a recursive plain enum is region-backed by design (the default), independent of whether
+	// any call site uses `new[auto]` syntax — its bare constructors allocate into the region too.
+	for _, t := range a.namedTypes {
+		if et, ok := t.(*EnumType); ok && et != nil && et.RecursivePlain {
+			out[et.Name] = true
+		}
+	}
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
