@@ -315,6 +315,19 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	)
 
 	switch n := expr.(type) {
+	case *ast.EnumColumnExpr:
+		// A column scan `Expr of .field` is only ever consumed as an iterable-for
+		// source; its count/elements are produced directly from the packed store
+		// (see emitIterLoopCount / emitIterLoopElementValue). This placeholder is
+		// never read — it just satisfies the source-materialization step.
+		if actualType == nil {
+			return nil, nil, fmt.Errorf("missing type for column scan %s of .%s", n.Enum, n.Field)
+		}
+		llvmType, lerr := s.g.lowerType(actualType)
+		if lerr != nil {
+			return nil, nil, lerr
+		}
+		return C.LLVMGetUndef(llvmType), actualType, nil
 	case *ast.Ident:
 		if s.isUnboundImplicitPackedStoreIdent(n) {
 			value, actualType, err = s.emitImplicitPackedStoreIdent(n, actualType)

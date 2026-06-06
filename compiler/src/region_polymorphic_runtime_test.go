@@ -147,6 +147,65 @@ def bt() -> void:
 	}
 }
 
+// docs/76 §5 (Phase 5): first-class column scan. A `layout soa` (columnar) recursive enum is
+// region-backed with per-field column arrays; `for s in Expr of .span` streams the dense `span`
+// common-field column across every node in the implicit store. Builds 3 nodes (spans 10, 20, 30)
+// and sums the column → 60. A broken column scan would read the wrong column, miscount rows, or
+// fail to recover the store.
+func TestEnumColumnScanSumsCommonField(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := "include \"" + std + "\"\n" + `
+enum Expr layout soa:
+    common(span: int)
+    Int(value: int)
+    Add(left: Expr, right: Expr)
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Expr = new[auto] Expr.Int(span: 10, value: 5)
+            b: Expr = new[auto] Expr.Int(span: 20, value: 7)
+            root: Expr = new[auto] Expr.Add(span: 30, left: a, right: b)
+            total: mutable i64 = 0
+            for s in Expr of .span:
+                total <- total + s
+            if total != 60:
+                panic("column scan over .span produced wrong sum")
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "colscan.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+	if out, err := exec.Command(exePath, "bt").CombinedOutput(); err != nil {
+		t.Fatalf("column scan run failed: %v\noutput:\n%s", err, string(out))
+	}
+}
+
 // docs/74 + docs/75 milestone: the recursive region-backed packed-enum binary tree with ZERO
 // ceremony — no explicit Store, no `in store:`, no hand-threaded params. `make` (region-polymorphic,
 // returns Expr) builds a depth-10 Add-tree of 1024 Int leaves via `new[auto] Expr.V`; the implicit

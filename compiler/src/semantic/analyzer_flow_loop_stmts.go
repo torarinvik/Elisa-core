@@ -218,6 +218,14 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 	if sourceType == nil {
 		return iterLoopSourceInfo{}, false
 	}
+	// Column scan `Expr of .field` yields computed scalars, not addressable
+	// elements — value binding only, no ref/mutable-ref.
+	if _, ok := sourceExpr.(*ast.EnumColumnExpr); ok {
+		if view, ok := StripAggregateStateType(sourceType).(*DArrayViewType); ok {
+			return iterLoopSourceInfo{ItemType: view.Elem}, true
+		}
+		return iterLoopSourceInfo{ItemType: invalidType}, false
+	}
 	facts, hasFacts := a.exprFacts[sourceExpr]
 	readOnly := hasFacts && facts.ReadOnly
 	switch tt := sourceType.(type) {

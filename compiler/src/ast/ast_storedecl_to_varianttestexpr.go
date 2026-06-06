@@ -539,6 +539,16 @@ type FieldExpr struct {
 	Field    string
 	Safe     bool
 }
+
+// EnumColumnExpr is a first-class column scan over a `layout soa` enum store:
+// `Expr of .field` yields the dense column of `field` across every node in the
+// implicit store (docs/76 §5). Enum names the enum type; Field is the selected
+// common/tag column.
+type EnumColumnExpr struct {
+	Position lexer.Pos
+	Enum     string
+	Field    string
+}
 type CallArgItem struct {
 	Position lexer.Pos
 	ArgIndex int

@@ -139,6 +139,8 @@ func formatExpr(expr ast.Expr) string {
 			return formatExpr(n.Object) + "?." + n.Field
 		}
 		return formatExpr(n.Object) + "." + n.Field
+	case *ast.EnumColumnExpr:
+		return n.Enum + " of ." + n.Field
 	case *ast.ShorthandMemberExpr:
 		return "." + strings.Join(n.Parts, ".")
 	case *ast.IndexExpr:

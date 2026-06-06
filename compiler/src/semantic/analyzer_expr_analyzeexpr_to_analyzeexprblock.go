@@ -222,6 +222,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.CallExpr:
 		result = a.analyzeCallExpr(n)
 		return
+	case *ast.EnumColumnExpr:
+		result = a.analyzeEnumColumnExpr(n)
+		return
 	case *ast.FieldExpr:
 		if interfaceMethodType, ok := a.resolveInterfaceMethodExprType(n); ok {
 			result = interfaceMethodType

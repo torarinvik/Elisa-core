@@ -91,6 +91,63 @@ func (a *Analyzer) packedEnumTagExprType(expr *ast.FieldExpr) (Type, bool) {
 	}
 	return enumType.TagType, true
 }
+// analyzeEnumColumnExpr types a first-class column scan `Expr of .field`
+// (docs/76 §5). The enum must be declared `layout soa` (columnar), and the
+// selected field must be a *dense* column — the tag, or a common(...) field.
+// Per-variant payload fields are sparse and deferred to `layout soa(sparse)`.
+// The result is a `dview[fieldType]` so the existing iterable-for machinery
+// derives the loop element type; the backend special-cases the scan.
+func (a *Analyzer) analyzeEnumColumnExpr(expr *ast.EnumColumnExpr) Type {
+	base, _, ok := a.lookupVisibleType(expr.Enum)
+	if !ok {
+		a.errorf(expr.Pos(), "column scan source %q is not a type", expr.Enum)
+		return invalidType
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok || enumType == nil {
+		a.errorf(expr.Pos(), "column scan requires an enum type, got %s", base)
+		return invalidType
+	}
+	if !enumType.Packed || !enumType.LayoutSet || enumType.Layout != ast.StructLayoutSOA {
+		a.errorf(expr.Pos(), "column scan `%s of .%s` requires `enum %s layout soa`; the default layout stores nodes row-major (AoS), which has no dense columns", expr.Enum, expr.Field, expr.Enum)
+		return invalidType
+	}
+	var elem Type
+	switch {
+	case expr.Field == "tag":
+		if enumType.TagType == nil {
+			a.errorf(expr.Pos(), "enum %q has no tag column", enumType.Name)
+			return invalidType
+		}
+		elem = enumType.TagType
+	default:
+		field, ok := enumType.Common[expr.Field]
+		if !ok {
+			if _, isPayload := a.enumColumnVariantPayloadField(enumType, expr.Field); isPayload {
+				a.errorf(expr.Pos(), "column scan `%s of .%s` selects a per-variant payload field, which is a sparse column; only `tag` and common(...) fields are dense. (per-variant column scans require `layout soa(sparse)`)", expr.Enum, expr.Field)
+				return invalidType
+			}
+			a.errorf(expr.Pos(), "enum %q has no common field or tag named %q to scan", enumType.Name, expr.Field)
+			return invalidType
+		}
+		elem = field.Type
+	}
+	return &DArrayViewType{Elem: elem, SurfaceName: "dview"}
+}
+
+// enumColumnVariantPayloadField reports whether name is a named payload field
+// of any variant (used only to produce a precise diagnostic).
+func (a *Analyzer) enumColumnVariantPayloadField(enumType *EnumType, name string) (Type, bool) {
+	for _, variant := range enumType.Variants {
+		for i, pname := range variant.PayloadNames {
+			if pname == name && i < len(variant.Payload) {
+				return variant.Payload[i], true
+			}
+		}
+	}
+	return nil, false
+}
+
 func shorthandMemberName(parts []string) string {
 	return strings.Join(parts, ".")
 }

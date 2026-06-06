@@ -75,6 +75,7 @@ func (n *UnaryExpr) Pos() lexer.Pos        { return n.Position }
 func (n *MoveExpr) Pos() lexer.Pos         { return n.Position }
 func (n *CallExpr) Pos() lexer.Pos         { return n.Position }
 func (n *FieldExpr) Pos() lexer.Pos        { return n.Position }
+func (n *EnumColumnExpr) Pos() lexer.Pos   { return n.Position }
 func (n *ShorthandMemberExpr) Pos() lexer.Pos {
 	return n.Position
 }
@@ -299,6 +300,7 @@ func (*UnaryExpr) nodeTag()                            {}
 func (*MoveExpr) nodeTag()                             {}
 func (*CallExpr) nodeTag()                             {}
 func (*FieldExpr) nodeTag()                            {}
+func (*EnumColumnExpr) nodeTag()                       {}
 func (*ShorthandMemberExpr) nodeTag()                  {}
 func (*IndexExpr) nodeTag()                            {}
 func (*SliceExpr) nodeTag()                            {}
@@ -506,6 +508,7 @@ func (*UnaryExpr) exprTag()                            {}
 func (*MoveExpr) exprTag()                             {}
 func (*CallExpr) exprTag()                             {}
 func (*FieldExpr) exprTag()                            {}
+func (*EnumColumnExpr) exprTag()                       {}
 func (*ShorthandMemberExpr) exprTag()                  {}
 func (*IndexExpr) exprTag()                            {}
 func (*SliceExpr) exprTag()                            {}

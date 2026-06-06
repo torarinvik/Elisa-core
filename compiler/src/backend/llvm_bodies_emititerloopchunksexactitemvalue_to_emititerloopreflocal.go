@@ -32,6 +32,9 @@ func (s *functionState) emitIterLoopChunksExactItemValue(carrierValue C.LLVMValu
 	return value, chunkType, nil
 }
 func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
+	if colExpr, ok := sourceExpr.(*ast.EnumColumnExpr); ok {
+		return s.emitEnumColumnScanCount(colExpr, sourceName)
+	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -320,6 +323,9 @@ func (s *functionState) emitIterLoopStringIndexValue(stringValue C.LLVMValueRef,
 	return call, resultType, nil
 }
 func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
+	if colExpr, ok := sourceExpr.(*ast.EnumColumnExpr); ok {
+		return s.emitEnumColumnScanElement(colExpr, indexValue, sourceName)
+	}
 	switch tt := sourceType.(type) {
 	case *semantic.ArrayType:
 		ptr, elemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)

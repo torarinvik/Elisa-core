@@ -8,6 +8,20 @@ import (
 func (p *Parser) parsePostfix() ast.Expr {
 	expr := p.parsePrimary()
 	for {
+		// Column scan: `<EnumName> of .field` (docs/76 §5). Tightly guarded —
+		// only when the left side is a bare type name, the soft keyword `of`
+		// follows, and a `.field` selector comes next. This sequence is not
+		// otherwise valid, so it cannot shadow ordinary expressions.
+		if ident, ok := expr.(*ast.Ident); ok &&
+			p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "of" &&
+			p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_DOT {
+			pos := p.cur().Pos
+			p.advance() // consume `of`
+			p.expect(lexer.TOKEN_DOT)
+			field := p.expect(lexer.TOKEN_IDENT).Text
+			expr = &ast.EnumColumnExpr{Position: pos, Enum: ident.Name, Field: field}
+			continue
+		}
 		switch p.peek() {
 		case lexer.TOKEN_QUESTION:
 			if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_DOT {
