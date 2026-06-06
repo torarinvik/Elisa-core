@@ -124,7 +124,8 @@ func (s *functionState) storeValue(ptr C.LLVMValueRef, value C.LLVMValueRef, typ
 			}
 		}
 	}
-	C.LLVMBuildStore(s.builder, value, ptr)
+	store := C.LLVMBuildStore(s.builder, value, ptr)
+	s.tagDarrayElementAccess(store, ptr)
 	return nil
 }
 

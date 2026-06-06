@@ -210,7 +210,54 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 	}
 	indices := []C.LLVMValueRef{indexValue}
 	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+	if isNumericType(elemType) {
+		// Scalar element buffer can never contain a darray header, so the data-pointer load (header
+		// memory) provably never aliases the element stores (buffer memory). Tag both so LLVM hoists
+		// the base-pointer load out of hot loops. See aliasSafeElementPtrs.
+		s.tagDarrayHeaderLoad(dataPtr)
+		s.markAliasSafeElementPtr(ptr)
+	}
 	return ptr, elemType, nil
+}
+
+const (
+	darrayAliasDomain     = "elisa.darray.aa"
+	darrayAliasScopeHdr   = "hdr"
+	darrayAliasScopeElt   = "elt"
+)
+
+// tagDarrayHeaderLoad marks a darray header (data-pointer) load as not aliasing scalar element memory.
+func (s *functionState) tagDarrayHeaderLoad(load C.LLVMValueRef) {
+	if s == nil || load == nil {
+		return
+	}
+	if C.LLVMIsALoadInst(load) == nil {
+		return
+	}
+	s.attachAliasScopeMetadataWithNames(load, darrayAliasDomain, darrayAliasScopeHdr, []string{darrayAliasScopeElt})
+}
+
+// markAliasSafeElementPtr records a scalar-darray element address so subsequent loads/stores through
+// it get tagged with the "elt" scope (noalias "hdr") in loadValue/storeValue.
+func (s *functionState) markAliasSafeElementPtr(ptr C.LLVMValueRef) {
+	if s == nil || ptr == nil {
+		return
+	}
+	if s.aliasSafeElementPtrs == nil {
+		s.aliasSafeElementPtrs = map[C.LLVMValueRef]bool{}
+	}
+	s.aliasSafeElementPtrs[ptr] = true
+}
+
+// tagDarrayElementAccess marks a scalar-darray element load/store as not aliasing header memory.
+func (s *functionState) tagDarrayElementAccess(inst C.LLVMValueRef, ptr C.LLVMValueRef) {
+	if s == nil || inst == nil || ptr == nil || s.aliasSafeElementPtrs == nil {
+		return
+	}
+	if !s.aliasSafeElementPtrs[ptr] {
+		return
+	}
+	s.attachAliasScopeMetadataWithNames(inst, darrayAliasDomain, darrayAliasScopeElt, []string{darrayAliasScopeHdr})
 }
 func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
 	if enumType == nil {
@@ -256,7 +303,9 @@ func (s *functionState) loadValue(ptr C.LLVMValueRef, t semantic.Type, name stri
 	if err := s.emitDebugPointerDerefGuard(ptr); err != nil {
 		return nil, err
 	}
-	return C.LLVMBuildLoad2(s.builder, llvmType, ptr, cStringFree(name)), nil
+	load := C.LLVMBuildLoad2(s.builder, llvmType, ptr, cStringFree(name))
+	s.tagDarrayElementAccess(load, ptr)
+	return load, nil
 }
 
 // derefGuardNearNullLimit mirrors DEBUG_REFEREE_NEAR_NULL_LIMIT in debug_referee.elisa:

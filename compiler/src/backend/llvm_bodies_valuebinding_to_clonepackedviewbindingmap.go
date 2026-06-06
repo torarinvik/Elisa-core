@@ -56,6 +56,14 @@ type functionState struct {
 	specializedFuncTypes         map[*semantic.FuncType]*semantic.FuncType
 	resultSlot                   C.LLVMValueRef
 	sretReturn                   bool
+	// aliasSafeElementPtrs holds GEP'd element addresses of scalar-element darrays (e.g. darray[f64]).
+	// Loads/stores through these are tagged with the "elt" alias scope (noalias the "hdr" scope), and
+	// the darray's data-pointer header load is tagged "hdr" (noalias "elt"). This lets LLVM prove the
+	// f64 element stores don't clobber the header's data pointer, so LICM hoists the base-pointer load
+	// out of hot loops. Gated to scalar element types: a scalar buffer can never contain a darray
+	// header, so hdr != elt is always true (nested darray[darray[...]] is left untagged). All element
+	// accesses share ONE "elt" scope, so they remain may-alias to each other (no spurious vectorization).
+	aliasSafeElementPtrs         map[C.LLVMValueRef]bool
 	regions                      []regionBinding
 	// darrayStackTag routes a fresh inferred-region darray (by name) to its assigned parallel
 	// arena (multi-stack regions, Phase B1b): name -> region arena tag "__auto_N#k". Populated at
