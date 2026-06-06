@@ -33,8 +33,16 @@ Rust `rustc -O`. Single-threaded.
    bump per node. Peak RSS is dominated by the one biggest tree's columnar metadata, not by churn.
    Columnar SoA pays off for **large, persistent ASTs traversed many times** (cache locality across
    passes — the JSON DOM / ML-AST use case), *not* for build-once-check-once tiny trees. For this
-   workload the **struct form is the right tool, and it wins** — no store micro-optimization changes
-   that tradeoff; it is the layout choice itself.
+   workload the **struct form is the right tool, and it wins**.
+
+   **Honesty note on the 4× number.** This 2.07 s vs 0.40 s gap is *not* a pure-layout verdict — it
+   mixes the columnar overhead with an allocation-path difference (the packed store builds rows via
+   its own `PackedStoreState`/region machinery, not the plain inferred bump the struct form uses). The
+   *allocator-independent* layout verdicts are cleaner and still favor the struct form: **memory** is
+   ~2× (88 MB vs 22 MB, intrinsic per-node metadata) and **pure traversal** — the `ast_traversal`
+   benchmark, where the build is amortized over 100 passes — is ~1.4× (0.68 s vs 0.49 s). So SoA loses
+   on memory and on traversal *by layout*, and loses additionally on build/alloc by path; lead with
+   the 2× / 1.4× when attributing the loss to the layout itself.
 
 ## Files
 - `binary_trees_struct.elisa` — Elisa struct/region version (fastest)
