@@ -216,6 +216,81 @@ def bt() -> void:
 	}
 }
 
+// docs/76 regression: a region-OWNING function (one with `in auto:` blocks, here several — a fresh
+// tree per loop iteration, the binary-trees shape) must CREATE its region-backed store on demand per
+// region, NOT receive a single threaded store. `run` calls `make`/`check` but owns its regions, so the
+// transitive store-need injection must skip it (funcOwnsRegion); otherwise all per-iteration trees
+// collapse into one store and the build fails ("no active inferred region arena"). Sums to the
+// binary-trees(10) checksum.
+func TestRegionOwningFunctionCreatesPerRegionStores(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := "include \"" + std + "\"\n" + `
+enum Tree:
+    Leaf(unused: i64)
+    Node(left: Tree, right: Tree)
+
+def make(depth: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Tree.Leaf(unused: 0)
+        return Tree.Node(left: make(depth - 1), right: make(depth - 1))
+
+def check(node: Tree) -> i64:
+    match node:
+        Tree.Leaf(unused: u):
+            return 1
+        Tree.Node(left: l, right: r):
+            return 1 + check(l) + check(r)
+
+def run(reps: i64) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        total: mutable i64 = 0
+        i: mutable i64 = 0
+        while i < reps:
+            in auto:
+                total <- total + check(make(8))
+            i <- i + 1
+        return total
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if run(50) != 50 * 511:
+            panic("region-owning per-region store build produced wrong sum")
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "perregion.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+	if out, err := exec.Command(exePath, "bt").CombinedOutput(); err != nil {
+		t.Fatalf("region-owning per-region store run failed: %v\noutput:\n%s", err, string(out))
+	}
+}
+
 // docs/76: MUTUALLY-recursive plain enums (Tree↔Forest). Tree is recursive only THROUGH Forest, so
 // the transitive recursion detection promotes the whole cycle; and the transitive store-need fixpoint
 // threads BOTH per-enum stores across the call graph (forest() builds via leaf(), sumT()<->sumF()

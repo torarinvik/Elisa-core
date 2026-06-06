@@ -227,6 +227,50 @@ func (a *Analyzer) injectStoreNeeds(fnType *FuncType, needs map[string]*EnumType
 	}
 }
 
+// funcOwnsRegion reports whether a function establishes its own region with an `in auto:`/`in <arena>:`
+// block (an ast.RegionStmt). Such a function CREATES region-backed stores on demand inside that region
+// — possibly several, one per region in a loop (binary-trees builds a fresh tree per iteration) — so
+// it must NOT receive a single threaded store for enums beyond its signature; that would force every
+// per-region tree into one store and defeat region-local allocation.
+func funcOwnsRegion(fn *ast.FuncDecl) bool {
+	if fn == nil {
+		return false
+	}
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if _, ok := v.Interface().(*ast.RegionStmt); ok {
+				found = true
+				return
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(fn.Body))
+	return found
+}
+
 // funcIsRegionStoreEntryPoint reports whether a function is a region-store entry point: a `@test`,
 // `@bench`, or `main`. These own a region (an `in auto:` scope) and CREATE region-backed stores on
 // demand, threading them into callees — so they must NOT receive store params themselves (the runtime
