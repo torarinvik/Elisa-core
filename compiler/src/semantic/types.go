@@ -444,6 +444,15 @@ type EnumType struct {
 	LeafTagCount uint32
 }
 
+// Root returns the topmost ancestor of a sealed hierarchy (docs/77) — the enum that owns the unified
+// representation and tag space. For a plain enum it returns the enum itself.
+func (e *EnumType) Root() *EnumType {
+	for e != nil && e.Parent != nil {
+		e = e.Parent
+	}
+	return e
+}
+
 type PackedFieldStorageMode string
 
 const (

@@ -35,8 +35,40 @@ import (
 	"fmt"
 )
 
+// enumLayoutLeaves returns the variants that determine an enum's physical layout: for a sealed
+// hierarchy node (docs/77) that is the union of all descendant leaves (so every member shares the
+// root's representation); for a plain enum it is the enum's own variants.
+func enumLayoutLeaves(enum *semantic.EnumType) []*semantic.EnumVariant {
+	if enum == nil {
+		return nil
+	}
+	if enum.Parent == nil && len(enum.Children) == 0 {
+		return enum.Variants // plain enum
+	}
+	var out []*semantic.EnumVariant
+	var visit func(e *semantic.EnumType)
+	visit = func(e *semantic.EnumType) {
+		out = append(out, e.Variants...)
+		for _, child := range e.Children {
+			visit(child)
+		}
+	}
+	visit(enum.Root()) // any hierarchy member shares the root's leaf set
+	return out
+}
+
+func enumLeavesAreTagOnly(leaves []*semantic.EnumVariant) bool {
+	for _, variant := range leaves {
+		if variant != nil && len(variant.Payload) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {
-	if enumIsTagOnly(enum) {
+	leaves := enumLayoutLeaves(enum)
+	if enumLeavesAreTagOnly(leaves) {
 		return g.lowerBuiltin("u32")
 	}
 	ty, err := g.ensureNamedStructType(name)
@@ -55,7 +87,7 @@ func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.
 		return nil, err
 	}
 	maxSlots := uint64(0)
-	for _, variant := range enum.Variants {
+	for _, variant := range leaves {
 		slots, err := g.enumVariantPayloadSlots(variant)
 		if err != nil {
 			return nil, err
@@ -445,12 +477,9 @@ func enumIsTagOnly(enum *semantic.EnumType) bool {
 	if enum == nil {
 		return false
 	}
-	for _, variant := range enum.Variants {
-		if variant != nil && len(variant.Payload) > 0 {
-			return false
-		}
-	}
-	return true
+	// Hierarchy-aware (docs/77): a member is tag-only iff the whole hierarchy is, so all members
+	// agree on representation (bare u32 vs {tag, union}).
+	return enumLeavesAreTagOnly(enumLayoutLeaves(enum))
 }
 func (g *llvmGenerator) enumVariantPayloadSlots(variant *semantic.EnumVariant) (uint64, error) {
 	if variant == nil || len(variant.Payload) == 0 {

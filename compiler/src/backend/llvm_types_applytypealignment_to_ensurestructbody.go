@@ -283,6 +283,12 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		if tt.Packed {
 			return g.lowerPackedEnumType(tt)
 		}
+		// docs/77: every enum in a sealed hierarchy lowers to the ROOT's representation (unified tag +
+		// payload union over all leaves), so all members share one LLVM type and upcast is a no-op.
+		if tt.Parent != nil || len(tt.Children) > 0 {
+			root := tt.Root()
+			return g.ensureEnumBody(root.Name, root)
+		}
 		return g.ensureEnumBody(tt.Name, tt)
 	case *semantic.StructType:
 		if len(structGenericParams(tt)) == 0 {

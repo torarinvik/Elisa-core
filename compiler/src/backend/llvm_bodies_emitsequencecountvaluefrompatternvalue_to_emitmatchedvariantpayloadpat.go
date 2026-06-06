@@ -426,7 +426,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			C.LLVMPositionBuilderAtEnd(s.builder, matchedBB)
 			return s.emitMatchedTreeVariantPayloadPatternTest(p, actualValue, patternTreeType, variant, successBB, failureBB)
 		}
-		variant, ok := enumType.Variant(p.Variant)
+		variant, ok := s.resolveEnumArmVariant(enumType, p)
 		if !ok {
 			return nil, packedPayloadValueCache{}, fmt.Errorf("enum %s has no variant %s", enumType.Name, p.Variant)
 		}

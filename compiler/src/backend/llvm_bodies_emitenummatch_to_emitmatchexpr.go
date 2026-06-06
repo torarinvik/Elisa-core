@@ -67,7 +67,7 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 			if !ok {
 				continue
 			}
-			variant, _ := enumType.Variant(pattern.Variant)
+			variant, _ := s.resolveEnumArmVariant(enumType, pattern)
 			tagConst, err := s.enumTagConstant(variant.Tag)
 			if err != nil {
 				return err

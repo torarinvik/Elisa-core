@@ -17,6 +17,19 @@ import (
 	"strings"
 )
 
+// resolveEnumArmVariant resolves a match arm's variant against the scrutinee enum or, for a sealed
+// hierarchy (docs/77), against the refinement the arm names (`Mono.Black` while matching a `Color`).
+// Semantic analysis has already validated the arm, so this trusts the qualified name.
+func (s *functionState) resolveEnumArmVariant(enumType *semantic.EnumType, pattern *ast.MatchVariantPattern) (*semantic.EnumVariant, bool) {
+	owner := enumType
+	if pattern.EnumName != "" && pattern.EnumName != enumType.Name {
+		if resolved, ok := s.g.result.NamedTypes[pattern.EnumName].(*semantic.EnumType); ok && resolved != nil {
+			owner = resolved
+		}
+	}
+	return owner.Variant(pattern.Variant)
+}
+
 func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, expr.Value, expr.Store)
 	if err != nil {
@@ -71,7 +84,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 			if !ok {
 				continue
 			}
-			variant, _ := enumType.Variant(pattern.Variant)
+			variant, _ := s.resolveEnumArmVariant(enumType, pattern)
 			tagConst, err := s.enumTagConstant(variant.Tag)
 			if err != nil {
 				return nil, nil, err
