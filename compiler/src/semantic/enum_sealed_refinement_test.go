@@ -190,6 +190,48 @@ enum Literal is Expression:
 	}
 }
 
+// docs/77: inside a match arm naming a refinement, the scrutinee is narrowed to that sub-category,
+// so it can be passed where the narrower type is required.
+func TestEnumHierarchyMatchNarrowsScrutinee(t *testing.T) {
+	analyzeTreeTestSource(t, "enum_match_narrow.elisa", enumHierarchyMatchPrelude+`
+def fold_binop(b: BinaryExpression) -> i64:
+    return 0
+
+def visit(e: Expression) -> i64:
+    out: mutable i64 = 0
+    match e:
+        BinaryExpression.Add(left: l, right: r):
+            out <- fold_binop(e)
+        BinaryExpression.Mul(left: l, right: r):
+            out <- fold_binop(e)
+        Literal.Int(value: v):
+            out <- v
+    return out
+`)
+}
+
+// The narrowing must NOT leak: a Literal arm cannot pass the scrutinee as a BinaryExpression.
+func TestEnumHierarchyMatchNarrowingIsArmScoped(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_match_narrow_bad.elisa", enumHierarchyMatchPrelude+`
+def fold_binop(b: BinaryExpression) -> i64:
+    return 0
+
+def visit(e: Expression) -> i64:
+    out: mutable i64 = 0
+    match e:
+        Literal.Int(value: v):
+            out <- fold_binop(e)
+        BinaryExpression.Add(left: l, right: r):
+            out <- 0
+        BinaryExpression.Mul(left: l, right: r):
+            out <- 0
+    return out
+`)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("expected error: in a Literal arm, the scrutinee is not a BinaryExpression")
+	}
+}
+
 // Refining a non-enum (or unknown) type is a clear error, not a crash.
 func TestEnumRefinesNonEnumErrors(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_is_bad.elisa", `struct Plain:

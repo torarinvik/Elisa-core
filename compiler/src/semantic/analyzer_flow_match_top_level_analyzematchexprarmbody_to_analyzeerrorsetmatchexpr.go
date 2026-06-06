@@ -88,6 +88,11 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 		if owner.Packed {
 			a.bindMatchedPackedVariantView(valueExpr, &PackedVariantViewType{Enum: owner, Variant: variant})
 		}
+		// docs/77: in an arm matching a refinement, narrow the scrutinee to that sub-category for the
+		// arm body, so it can be passed where the narrower type is required (mirrors tree narrowing).
+		if owner != enumType {
+			a.bindRefinedExprType(scope, valueExpr, owner)
+		}
 		orderedArgs := a.resolveMatchPatternArgs(p, variant, qualified, false)
 		for i, arg := range orderedArgs {
 			if arg == nil {
