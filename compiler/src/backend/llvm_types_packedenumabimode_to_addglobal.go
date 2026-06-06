@@ -697,6 +697,8 @@ func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 		return true
 	case "ctx_packed_store_alloc_fixed_tagged_variant_sparse_result", "ctx_packed_store_alloc_tagged_variant_sparse_result":
 		return true
+	case "ctx_aos_store_new", "ctx_aos_store_alloc", "ctx_aos_store_record":
+		return true
 	default:
 		return false
 	}

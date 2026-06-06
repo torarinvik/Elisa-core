@@ -1,0 +1,62 @@
+# ============================================================
+# Packed enum AoS store (docs/76 Slice 2)
+#
+# Array-of-Structs storage for a region-backed recursive enum: ONE contiguous, growable array of
+# fixed-size node records {tag, common fields, payload-union}, addressed by a dense index handle.
+# No columns and no per-node metadata pushes — exactly one record write per node (matching a plain
+# struct bump). Growth reallocates from the arena and copies; INDEX handles stay valid across growth
+# (that is the whole reason handles are indices, not pointers).
+# ============================================================
+
+struct PackedAoSStore:
+    base: mutable heap u8&?
+    count: mutable usize
+    capacity: mutable usize
+    record_bytes: mutable usize
+
+const PACKED_AOS_INITIAL_CAPACITY: usize = 16
+
+# Create an AoS store backed by arena `a`, with fixed `record_bytes` per node. The state struct is
+# itself arena_alloc'd; the record buffer is created lazily on the first allocation.
+def ctx_aos_store_new(a: mutable Arena&, record_bytes: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        state: heap PackedAoSStore& = arena_alloc(a, size_of(PackedAoSStore)).cast[heap PackedAoSStore&]
+        state.base <- null
+        state.count <- 0
+        state.capacity <- 0
+        state.record_bytes <- record_bytes
+        return state.cast[heap void&]
+
+# Allocate one node record. Returns its address (to write tag/common/payload into) and its index
+# handle. Grows the record array (doubling) from arena `a` when full, copying existing records.
+def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
+    can Memory.Allocate, Abort.Panic:
+        state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
+        if state.count == state.capacity:
+            new_cap: mutable usize = state.capacity * 2
+            if new_cap == 0:
+                new_cap <- PACKED_AOS_INITIAL_CAPACITY
+            new_base: heap u8& = arena_alloc(a, new_cap * state.record_bytes).cast[heap u8&]
+            if state.base != null and state.count > 0:
+                old: heap u8& = state.base
+                _ = memcpy(new_base.cast[mutable void&], old.cast[void&], state.count * state.record_bytes)
+            state.base <- new_base
+            state.capacity <- new_cap
+        index: usize = state.count
+        b: mutable heap u8&? = state.base
+        if b == null:
+            panic("aos store: record buffer null after growth")
+        base: mutable heap u8& = b
+        row: mutable heap u8& = base + index * state.record_bytes
+        state.count <- index + 1
+        return PackedStoreIndexAllocResult(row: row.cast[mutable heap void&], index: index.u32())
+
+# Resolve a node index handle to its record address: base + index * record_bytes.
+def ctx_aos_store_record(state_bits: mutable void&, index: usize) -> mutable heap void&:
+    can Abort.Panic:
+        state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
+        b: mutable heap u8&? = state.base
+        if b == null:
+            panic("aos store: record buffer null")
+        base: mutable heap u8& = b
+        return (base + index * state.record_bytes).cast[mutable heap void&]
