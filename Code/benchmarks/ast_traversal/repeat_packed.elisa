@@ -1,0 +1,31 @@
+include "/Users/torarinvikbjarko/Documents/Coding Projects/Go projects/Elisa-core/compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+extern printf(fmt: u8&, ...) -> int effects[Console.Write]
+
+packed enum Expr:
+    common:
+        span: int
+    Int(value: int)
+    Add(left: Expr, right: Expr)
+
+def make(depth: i64) -> Expr:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return new[auto] Expr.Int(span: 1, value: 1)
+        return new[auto] Expr.Add(span: 1, left: make(depth - 1), right: make(depth - 1))
+
+def sum_spans(node: Expr, bias: i64) -> i64:
+    match node:
+        Expr.Int(value: v):
+            return node.span + bias
+        Expr.Add(left: l, right: r):
+            return node.span + bias + sum_spans(l, bias) + sum_spans(r, bias)
+
+@test
+def bench() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            root: Expr = make(20)
+            acc: mutable i64 = 0
+            for k in 0..<100:
+                acc <- acc + sum_spans(root, k)
+            printf("packed repeat sum: %lld\n".cast[u8&], acc)

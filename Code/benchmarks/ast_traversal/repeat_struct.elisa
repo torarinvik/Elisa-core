@@ -1,0 +1,32 @@
+include "/Users/torarinvikbjarko/Documents/Coding Projects/Go projects/Elisa-core/compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+extern printf(fmt: u8&, ...) -> int effects[Console.Write]
+
+struct Expr:
+    span: i64
+    value: i64
+    left: Expr&?
+    right: Expr&?
+
+def make(depth: i64) -> Expr&:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return new[auto] Expr(span: 1, value: 1, left: null, right: null)
+        return new[auto] Expr(span: 1, value: 0, left: make(depth - 1), right: make(depth - 1))
+
+def sum_spans(node: Expr&, bias: i64) -> i64:
+    can Abort.Panic:
+        lo: Expr&? = node.left
+        ro: Expr&? = node.right
+        if lo != null and ro != null:
+            return node.span + bias + sum_spans(lo, bias) + sum_spans(ro, bias)
+        return node.span + bias
+
+@test
+def bench() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            root: Expr& = make(20)
+            acc: mutable i64 = 0
+            for k in 0..<100:
+                acc <- acc + sum_spans(root, k)
+            printf("struct repeat sum: %lld\n".cast[u8&], acc)
