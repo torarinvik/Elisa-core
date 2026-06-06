@@ -453,7 +453,11 @@ func (s *functionState) emitPackedStoreValueFromArenaPtr(arenaPtr C.LLVMValueRef
 	stateHelperName := "ctx_packed_store_state_new"
 	stateHelperParams := []semantic.Type{arenaRefType, usizeType}
 	stateArgs := []C.LLVMValueRef{arenaPtr, rowSizeValue}
-	if s.g.packedLoweringForStore(storeType) == packedEnumABIVariantSparse {
+	if s.g.packedLoweringForStore(storeType) == packedEnumABIAoS {
+		// docs/76 Slice 2: AoS store creation — same (arena, record_bytes) signature, lean record-array
+		// backing instead of columns. record_bytes is the node-record (rowType) size already computed.
+		stateHelperName = "ctx_aos_store_new"
+	} else if s.g.packedLoweringForStore(storeType) == packedEnumABIVariantSparse {
 		if sideWords > 0 {
 			stateHelperName = "ctx_packed_store_state_new_variant_sparse_with_side_words"
 			stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
