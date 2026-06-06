@@ -130,6 +130,7 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			a.analyzeEnumAnnotations(enumDecl, enumType)
+			a.validateEnumLayout(enumDecl)
 			if len(enumDecl.Common) > 0 && !enumDecl.Packed {
 				a.errorf(enumDecl.Pos(), "enum %q only supports common: fields for packed enums", enumDecl.Name)
 			}
