@@ -261,33 +261,79 @@ the positional dense range. Decouple the two.
 
 ## §6 — Implementation roadmap (phases)
 
-Current shipped state: recursive-enum AoS default + opaque index handle (docs/76 Phase 3); first-class
-column scan `X of .field` (docs/76 §5); cross-enum/mutual-recursion store threading; `tree`/`node`
-parsing with per-family `TreeStoreType`, per-category exhaustiveness, and `treeCategoryDescendsFrom`
-subtyping.
+> **Order note:** rather than collapse `tree` onto `enum` first (the original Phase 0), `enum … is`
+> was built as a *parallel* path so it could be developed and tested independently. `tree` is then
+> **retired last** (Phase 6) once `enum … is` fully subsumes it. End state: `enum … is` is the only
+> construct; the `tree`/`node` keywords are **removed** (not kept as sugar).
+
+### Shipped (type-system front half, all green on `work`)
+
+- **Phase 1 — surface + subtype** (commit `eddb008a`): parse `enum Child is Parent:` + `enum Root:
+  pass`; `EnumType.Parent`; `Child <: Parent` in assignability (`enumDescendsFrom`); formatter.
+- **Phase 1b — hierarchy match** (commit `93762815`): `EnumType.Children`; `enumDescendantLeaves`
+  (leaves flow up); arms may name any refinement (`BinaryExpression.Add` matching an `Expression`);
+  exhaustiveness over the descendant-leaf union (`matchCoversAllVariants` + `reportNonExhaustiveMatch`).
+- **Phase 2a — tag-range metadata** (commit `e4f03f76`): `assignHierarchyEnumTags` — dense,
+  hierarchy-grouped, nested leaf numbering per root; `EnumType.LeafTagLo/LeafTagCount`; unified
+  `EnumVariant.Tag`.
+
+### Remaining
 
 | Phase | Delivers | Risk |
 |---|---|---|
-| 0 | **Type-node unification.** Collapse the tree type-nodes (`TreeType`, `TreeCategoryType`, `TreeNodeType`, `TreeVariantViewType`, `TreeBlockType`, `TreeStructType`) onto `EnumType{Parent, Root}`; point `SameType`/assignability at the one `Parent`-walk relation. **Caveat:** `block`/`struct` tree members have no enum analogue — define their lowering or scope them out of v1 (don't claim "all tree tests green" until `visit`/`fold`/`rewrite`/`block` have a path). | medium |
-| 1 | **Surface `enum X is Y`.** Parse it to the Phase-0 nodes; resolve `Node.Statement` to the `Statement` `EnumType`; bare-pattern category arms in `match`; keep `is` for the expression test. No new lowering yet (reuse current path). | low |
-| 2 | **Tag-range discrimination.** Hierarchy-grouped dense leaf numbering; lower `is`/upcast/downcast to range checks; upcast = typed no-op. Deep chains via nested ranges. | medium |
-| 3 | **Unified store (the big item).** Build the single-AoS-arena store on the **packed-enum AoS** path; port the tree family onto it; thread one store per root; `common` fields as shared columns, payloads AoS. | high |
-| 4 | **Hierarchy-aware exhaustiveness + column scan.** Generalize `visitDomainKeys`/exhaustiveness over the `Parent` chain; extend `X of .f` well-formedness to "present on every leaf in T's range." | medium |
-| 5 | **Default + sugar.** Unified arena is the default lowering (no annotation); `layout soa` opt-in per root; keep `tree`/`node` as documented sugar (or soft-deprecate — no technical need to remove). | low |
+| 2b | **Surface sugar (parser).** Unqualified leaf arms `Add(...)` (route the existing `MatchStructPattern` at top level of an enum match to variant resolution) + category-only arm `Child b:` + scrutinee refinement-narrowing in the arm body (reuse `bindRefinedExprType`). Still analysis-only. | low |
+| 3 | **Unified store + codegen — the runtime gate (sub-sliced below).** Until this lands, hierarchy values do not run. | high |
+| 4 | **Hierarchy column scan.** Extend `X of .f` well-formedness to "present on every leaf in T's range" (auto-true for `common`); `common`-field scans dense, payload scans strided / `layout soa`. | medium |
+| 5 | **Defaults + value hierarchies.** Recursive hierarchy → unified root store by default; **non-recursive** hierarchy (e.g. colors) → inline `{tag, payload-union}` value, no store; `layout soa` opt-in per root. | medium |
+| 6 | **Retire `tree`.** Desugar `tree`/`node` → `enum … is`; migrate `block`/`struct` members + all tree-using code; **delete** the tree parser/AST/`Tree*` type-nodes/`TreeStoreType` and the `tree`/`node` keywords. | medium |
 
-## §7 — Open questions (decide before/while building)
+### Phase 3 sub-slices (the unified store + codegen)
 
-1. **`block`/`struct` tree members** — port to the enum model (as non-`case` leaf records?) or drop
-   them for v1? This sizes Phase 0.
-2. **Serialization** — does the self-hosting toolchain serialize ASTs (incremental/caches)? If yes,
-   stable explicit tags are mandatory from Phase 2, decoupled from the dense `is`-range (§5).
-3. **`tree`/`node` long-term** — permanent sugar, or migrate to `enum … is` and deprecate? (Lean:
-   keep as sugar; it reads better for ASTs and costs nothing once it lowers to the same nodes.)
+3a. **Per-root store identity.** Key the region-backed AoS store by the hierarchy **root**, not per
+enum. A leaf constructor (`BinaryExpression.Add(...)`) allocates into the root's store;
+`getOrCreateRegionPackedStore`/`lookupPackedStore` resolve via `EnumType.Root` (the topmost `Parent`).
+Reuse `packedEnumABIAoS`.
+
+3b. **Record shape = root union.** `ensurePackedEnumRowType` for the root sizes the payload to the
+**widest leaf across the whole hierarchy** and places `common` fields at fixed offsets. Every leaf
+writes its **unified tag** (Phase 2a) + its payload into that shared shape, so a `Parent` handle can
+hold any leaf.
+
+3c. **Construction codegen.** Route leaf construction (qualified, and the Phase-2b unqualified form)
+through the root store with the unified tag. Static result type = the leaf's owner enum; the runtime
+value = a bare `u32` index into the root store.
+
+3d. **Match dispatch codegen.** `match e` reads the unified tag from the record and switches: leaf
+arms = exact tag; category arms = unsigned range check (`tag - lo < count`). Exhaustiveness frontier
+already computed (Phase 1b).
+
+3e. **Upcast / `is` / downcast codegen.** Upcast `Child → Parent` = a typed no-op (identical bits).
+`if e is X b:` and downcast = read tag + range check, then bind `b` at the narrowed type.
+
+3f. **Store threading per root.** `computeTransitiveStoreNeeds` keyed by **root** — one implicit
+store param per root (collapses N-enum mutual recursion to 1); `funcOwnsRegion` per-region-instance
+logic unchanged (commit `cef50ce7`).
+
+3g. **`common` reads from any handle.** Reuse the shared-column prefix mechanism; verify it reads
+from a bare `Parent` handle across the hierarchy.
+
+## §7 — Open questions (decide before/while building Phase 3)
+
+1. **Non-recursive (value) hierarchies** (colors): inline `{tag, payload-union}` value with **no
+   store** vs. always a store. Lean: non-recursive → inline value (no arena); recursive → root store.
+   (Phase 5.)
+2. **Payload-union sizing** pads to the widest leaf across the whole hierarchy (AoS memory cost);
+   `layout soa(sparse)` is the later per-variant-dense answer.
+3. **`block`/`struct` tree members** (Phase 6 migration) — give them an enum analogue (a struct-shaped
+   leaf / a plain `struct` referenced by a variant payload) or migrate the handful of usages by hand?
+4. **Serialization** — does the self-hosting toolchain serialize ASTs (incremental/caches)? If yes,
+   stable explicit tags are mandatory before any on-disk use, decoupled from the dense `is`-range (§5).
 
 ## Decisions locked in this design
 
-- One construct: `enum` + `is`; `tree`/`node` = sugar. `is` (not `extends`) because sum-type
-  refinement is the *opposite* variance from OO `extends`.
+- One construct: `enum` + `is`. `tree`/`node` is **retired** once `enum … is` subsumes it (Phase 6) —
+  not kept as permanent sugar. `is` (not `extends`) because sum-type refinement is the *opposite*
+  variance from OO `extends`.
 - `is` for declaration & expression-test; bare patterns in `match` arms.
 - Sealed at the library boundary; multi-file; `non-sealed`-style escape hatch = data, not type.
 - One region-backed AoS arena per root; bare index handle; category = compile-time tag-range; upcast
