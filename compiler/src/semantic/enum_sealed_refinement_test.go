@@ -258,6 +258,32 @@ def bad(e: Expression) -> bool:
 	}
 }
 
+// docs/77: a bare-category `is` test `e is BinaryExpression` (no `.Variant`) type-checks on a
+// hierarchy scrutinee, and rejects an unrelated enum.
+func TestEnumHierarchyBareCategoryIsTest(t *testing.T) {
+	analyzeTreeTestSource(t, "enum_is_cat.elisa", enumHierarchyMatchPrelude+`
+def is_binop(e: Expression) -> bool:
+    return e is BinaryExpression
+
+def is_literal(e: Expression) -> bool:
+    return e is Literal
+`)
+}
+
+func TestEnumHierarchyBareCategoryIsRejectsUnrelated(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_is_cat_bad.elisa", enumHierarchyMatchPrelude+`
+enum Other: pass
+enum Outsider is Other:
+    Nope(x: i64)
+
+def bad(e: Expression) -> bool:
+    return e is Outsider
+`)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("expected error: Outsider is not in Expression's hierarchy")
+	}
+}
+
 // Refining a non-enum (or unknown) type is a clear error, not a crash.
 func TestEnumRefinesNonEnumErrors(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_is_bad.elisa", `struct Plain:

@@ -562,6 +562,16 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 			a.validateStructIsTargetPattern(pattern, left)
 			continue
 		}
+		// docs/77: a bare-category test `e is BinaryExpression` (no `.Variant`) on a hierarchy
+		// scrutinee. Gated to hierarchical enums so flat-enum `is` behavior is unchanged.
+		if matchableEnum, _, mok := resolveMatchableEnumType(left); mok && enumIsHierarchical(matchableEnum) {
+			if category, ok := a.resolveEnumCategoryIsTarget(target); ok {
+				if !enumDescendsFrom(category, matchableEnum) && !enumDescendsFrom(matchableEnum, category) {
+					a.errorf(expr.Pos(), "is expects %q or a refinement of it, got unrelated enum %q", matchableEnum.Name, category.Name)
+				}
+				continue
+			}
+		}
 		if targetBase, _, ok := a.resolveNamedStateIsTarget(target); ok {
 			leftBase, ok := namedStateStructBase(left)
 			if !ok || leftBase == nil {
@@ -577,6 +587,48 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	}
 	return a.namedTypes["bool"]
 }
+// resolveEnumCategoryIsTarget recognizes a bare enum-category target in an `is` test (docs/77): the
+// target is a plain type name (no `.Variant`) that resolves to an enum. Returns that enum.
+func (a *Analyzer) resolveEnumCategoryIsTarget(expr ast.Expr) (*EnumType, bool) {
+	switch e := expr.(type) {
+	case *ast.ParenExpr:
+		if e == nil {
+			return nil, false
+		}
+		return a.resolveEnumCategoryIsTarget(e.Inner)
+	case *ast.IsAliasExpr:
+		if e == nil {
+			return nil, false
+		}
+		return a.resolveEnumCategoryIsTarget(e.Target)
+	case *ast.TypeExprExpr:
+		if e == nil {
+			return nil, false
+		}
+		named, ok := e.Type.(*ast.NamedType)
+		if !ok || named == nil || strings.Contains(named.Name, ".") {
+			return nil, false // dotted ⇒ a variant target, handled elsewhere
+		}
+		base, _, ok := a.lookupVisibleType(named.Name)
+		if !ok {
+			return nil, false
+		}
+		enumType, ok := base.(*EnumType)
+		return enumType, ok && enumType != nil
+	case *ast.Ident:
+		if e == nil || e.Name == "" {
+			return nil, false
+		}
+		base, _, ok := a.lookupVisibleType(e.Name)
+		if !ok {
+			return nil, false
+		}
+		enumType, ok := base.(*EnumType)
+		return enumType, ok && enumType != nil
+	}
+	return nil, false
+}
+
 func (a *Analyzer) structIsTargetPattern(expr ast.Expr) (*ast.MatchStructPattern, bool) {
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return a.structIsTargetPattern(paren.Inner)
