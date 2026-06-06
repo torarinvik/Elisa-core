@@ -54,6 +54,10 @@ type packedEnumABIMode int
 const (
 	packedEnumABIIndexSOA packedEnumABIMode = iota
 	packedEnumABIVariantSparse
+	// packedEnumABIAoS (docs/76 Slice 2): Array-of-Structs — one contiguous {tag, common, payload}
+	// record per node in a growable region-backed array, addressed by a dense index handle. No
+	// columns; one record write per node. The default for a recursive plain enum.
+	packedEnumABIAoS
 )
 
 type PackedEnumABI string
@@ -93,10 +97,15 @@ func (abi PackedEnumABI) mode() (packedEnumABIMode, error) {
 	}
 }
 func packedModeUsesDenseIndexHandle(mode packedEnumABIMode) bool {
-	return mode == packedEnumABIIndexSOA || mode == packedEnumABIVariantSparse
+	return mode == packedEnumABIIndexSOA || mode == packedEnumABIVariantSparse || mode == packedEnumABIAoS
+}
+func packedModeIsAoS(mode packedEnumABIMode) bool {
+	return mode == packedEnumABIAoS
 }
 func packedModeUsesDirectWordReads(mode packedEnumABIMode) bool {
-	return packedModeUsesDenseIndexHandle(mode)
+	// AoS reads fields from the per-node record (base+index*stride+offset), not from store columns,
+	// so it is NOT a column-word-read mode — it has its own read path.
+	return mode == packedEnumABIIndexSOA || mode == packedEnumABIVariantSparse
 }
 func packedModeName(mode packedEnumABIMode) string {
 	switch mode {
@@ -104,6 +113,8 @@ func packedModeName(mode packedEnumABIMode) string {
 		return string(PackedEnumABIIndexSOA)
 	case packedEnumABIVariantSparse:
 		return string(PackedEnumABIVariantSparse)
+	case packedEnumABIAoS:
+		return "aos"
 	default:
 		return fmt.Sprintf("mode-%d", mode)
 	}
