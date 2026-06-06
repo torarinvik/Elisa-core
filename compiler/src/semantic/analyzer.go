@@ -562,6 +562,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
+	a.assignHierarchyEnumTags(activeDecls)
 	a.populateTreeMembers(activeDecls)
 	generatedDecls := make(map[ast.Decl]bool)
 	expandedDecls := a.expandActiveAndGeneratedDecls(activeFile.Decls, generatedDecls)
@@ -589,6 +590,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.populateConstEnumMembers(generatedScopedDecls)
 		a.populateStructFields(generatedScopedDecls)
 		a.populateEnumVariants(generatedScopedDecls)
+		a.assignHierarchyEnumTags(generatedScopedDecls)
 		a.populateTreeMembers(generatedScopedDecls)
 	}
 	a.validatePermissionSubsumption()

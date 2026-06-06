@@ -434,6 +434,14 @@ type EnumType struct {
 	// Children are the direct refinements declared with `is this` — the downward edges of the sealed
 	// hierarchy (the inverse of Parent), in declaration order. Populated as parents are resolved.
 	Children []*EnumType
+	// LeafTagLo/LeafTagCount (docs/77 Phase 2 groundwork) describe this node's contiguous, dense
+	// leaf-tag range within its hierarchy root's tag space: the leaves of this category (and all its
+	// refinements) occupy tags [LeafTagLo, LeafTagLo+LeafTagCount). Ranges nest, so a category test
+	// `is X` is a single unsigned range check and an upcast is a no-op. Assigned per root after all
+	// variants are populated; only meaningful for hierarchical enums. NOTE: this dense range is
+	// recomputed each compile and must NOT be used as a stable on-disk/serialization tag (docs/77 §5).
+	LeafTagLo    uint32
+	LeafTagCount uint32
 }
 
 type PackedFieldStorageMode string

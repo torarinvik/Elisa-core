@@ -152,6 +152,44 @@ def describe(e: Expression) -> i64:
 	}
 }
 
+// docs/77 Phase 2 groundwork: a hierarchy root gets a dense, hierarchy-grouped leaf-tag space, so
+// each category occupies a contiguous NESTED range — the basis for `is X` as a range check and a
+// zero-cost upcast.
+func TestEnumHierarchyTagRangesAreNestedAndContiguous(t *testing.T) {
+	result := analyzeTreeTestSource(t, "enum_tags.elisa", `enum Expression: pass
+enum BinaryExpression is Expression:
+    Add(left: i64, right: i64)
+    Mul(left: i64, right: i64)
+enum Literal is Expression:
+    Int(value: i64)
+`)
+	expr := result.NamedTypes["Expression"].(*EnumType)
+	bin := result.NamedTypes["BinaryExpression"].(*EnumType)
+	lit := result.NamedTypes["Literal"].(*EnumType)
+
+	// Root spans all three leaves; children partition it contiguously, in declaration order.
+	if expr.LeafTagLo != 0 || expr.LeafTagCount != 3 {
+		t.Fatalf("Expression range = [%d,+%d), want [0,+3)", expr.LeafTagLo, expr.LeafTagCount)
+	}
+	if bin.LeafTagLo != 0 || bin.LeafTagCount != 2 {
+		t.Fatalf("BinaryExpression range = [%d,+%d), want [0,+2)", bin.LeafTagLo, bin.LeafTagCount)
+	}
+	if lit.LeafTagLo != 2 || lit.LeafTagCount != 1 {
+		t.Fatalf("Literal range = [%d,+%d), want [2,+1)", lit.LeafTagLo, lit.LeafTagCount)
+	}
+	// Child range nests inside the parent's.
+	if !(bin.LeafTagLo >= expr.LeafTagLo && bin.LeafTagLo+bin.LeafTagCount <= expr.LeafTagLo+expr.LeafTagCount) {
+		t.Fatalf("BinaryExpression range must nest within Expression's")
+	}
+	// Leaf variant tags are unified across the hierarchy (0,1 for binops; 2 for the literal).
+	add, _ := bin.Variant("Add")
+	mul, _ := bin.Variant("Mul")
+	intLit, _ := lit.Variant("Int")
+	if add.Tag != 0 || mul.Tag != 1 || intLit.Tag != 2 {
+		t.Fatalf("unified tags wrong: Add=%d Mul=%d Int=%d, want 0,1,2", add.Tag, mul.Tag, intLit.Tag)
+	}
+}
+
 // Refining a non-enum (or unknown) type is a clear error, not a crash.
 func TestEnumRefinesNonEnumErrors(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_is_bad.elisa", `struct Plain:

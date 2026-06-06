@@ -49,6 +49,40 @@ func enumDescendsFrom(src *EnumType, dst *EnumType) bool {
 	return false
 }
 
+// assignHierarchyEnumTags assigns each hierarchy root a dense, hierarchy-grouped leaf-tag space
+// (docs/77 Phase 2 groundwork). Leaves are numbered in pre-order (a node's own leaves before its
+// refinements'), so every category occupies a contiguous, NESTED range [LeafTagLo, +LeafTagCount):
+// `is X` becomes one unsigned range check and an upcast is a no-op. Each root gets its own space
+// starting at 0 (one store per root). Plain enums (no hierarchy) are left untouched. Roots are
+// processed in declaration order for determinism; per-root numbering is order-independent.
+func (a *Analyzer) assignHierarchyEnumTags(decls []scopedDecl) {
+	for _, scoped := range decls {
+		enumDecl, ok := scoped.Decl.(*ast.EnumDecl)
+		if !ok {
+			continue
+		}
+		root, _ := a.namedTypes[joinQualifiedName(scoped.Namespace, enumDecl.Name)].(*EnumType)
+		if root == nil || root.Parent != nil || len(root.Children) == 0 {
+			continue // only roots of a hierarchy
+		}
+		next := uint32(0)
+		var visit func(n *EnumType)
+		visit = func(n *EnumType) {
+			lo := next
+			for _, variant := range n.Variants {
+				variant.Tag = next
+				next++
+			}
+			for _, child := range n.Children {
+				visit(child)
+			}
+			n.LeafTagLo = lo
+			n.LeafTagCount = next - lo
+		}
+		visit(root)
+	}
+}
+
 // enumIsHierarchical reports whether the enum participates in a sealed hierarchy (docs/77) — it is a
 // refinement of another enum, or has its own refinements. Plain standalone enums are not hierarchical
 // and keep the original flat match/exhaustiveness behavior.
