@@ -20,6 +20,16 @@ static void elisacoreSetFPContract(LLVMValueRef v) {
 	}
 }
 
+// Allow contraction AND reciprocal (a/b -> a * (1/b)) on a floating-point instruction, matching
+// clang's -ffp-contract=fast -freciprocal-math. For a loop-invariant divisor this lets LICM hoist
+// the single reciprocal out of the loop, turning a per-iteration fdiv (slow, poorly pipelined) into
+// a multiply. This relaxes division rounding by up to ~1 ulp, the same relaxed-FP tier as contract.
+static void elisacoreSetFPContractReciprocal(LLVMValueRef v) {
+	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
+		LLVMSetFastMathFlags(v, LLVMFastMathAllowContract | LLVMFastMathAllowReciprocal);
+	}
+}
+
 static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
 	if (value == NULL) {
 		return LLVMMDStringInContext2(ctx, "", 0);
@@ -554,7 +564,7 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 		return C.LLVMBuildMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
 	case lexer.TOKEN_SLASH:
 		if isFloatType(operandType) {
-			return fpAllowContract(C.LLVMBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
+			return fpAllowContractReciprocal(C.LLVMBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
 		}
 		if isSignedIntegerType(operandType) {
 			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
@@ -778,5 +788,13 @@ func (s *functionState) emitMembershipRangeCompareValueAndExpr(leftValue C.LLVMV
 // multiply-add into fma (clang's default). Returns the same value for convenient inline use.
 func fpAllowContract(v C.LLVMValueRef) C.LLVMValueRef {
 	C.elisacoreSetFPContract(v)
+	return v
+}
+
+// fpAllowContractReciprocal marks an FP instruction as contraction- and reciprocal-allowed, so the
+// backend may hoist a loop-invariant divisor's reciprocal and replace per-iteration division with a
+// multiply. Used for fdiv. Returns the same value for convenient inline use.
+func fpAllowContractReciprocal(v C.LLVMValueRef) C.LLVMValueRef {
+	C.elisacoreSetFPContractReciprocal(v)
 	return v
 }
