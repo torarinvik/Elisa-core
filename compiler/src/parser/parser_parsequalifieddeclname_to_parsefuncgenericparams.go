@@ -123,8 +123,25 @@ func (p *Parser) parseEnumDeclWithAnnotations(annotations []ast.Annotation) *ast
 }
 func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast.Annotation) *ast.EnumDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	// Optional sealed-refinement suffix (docs/77): `enum Child is Parent:`. `is` reads as the
+	// Liskov "is-a" relation — Child's cases are a subset of Parent's, so Child <: Parent.
+	parent := ""
+	if p.peek() == lexer.TOKEN_IS {
+		p.advance()
+		parent = p.expect(lexer.TOKEN_IDENT).Text
+		for p.matchQualifiedNameSeparator() {
+			parent += "." + p.expect(lexer.TOKEN_IDENT).Text
+		}
+	}
 	layout, layoutSet, sparse, indexWidth := p.parseEnumLayoutSuffix()
 	p.expect(lexer.TOKEN_COLON)
+	// An abstract root that only gathers sub-categories may use the inline empty body `enum Node: pass`
+	// (docs/77) instead of an indented block.
+	if p.peek() == lexer.TOKEN_PASS {
+		p.advance()
+		p.expectNewline()
+		return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, Parent: parent}
+	}
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
@@ -135,6 +152,11 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
+		}
+		// An abstract root that only gathers sub-categories has no variants: `enum Node: pass`.
+		if p.peek() == lexer.TOKEN_PASS {
+			p.advance()
+			continue
 		}
 		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "common" && p.pos+1 < len(p.tokens) {
 			switch p.tokens[p.pos+1].Kind {
@@ -152,7 +174,7 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth}
+	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, Parent: parent}
 }
 
 // parseEnumLayoutSuffix parses an optional `layout soa|aos|c|packed` suffix on an enum declaration

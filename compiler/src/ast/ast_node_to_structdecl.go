@@ -137,6 +137,10 @@ type EnumDecl struct {
 	LayoutSet    bool
 	LayoutSparse bool   // the `soa(sparse)` sub-option: variant-sparse payload columns
 	IndexWidth   string // the `(index: uN)` sub-option: "u8"|"u16"|"u32"|"u64"; "" = default (u32)
+	// Parent is the qualified name of the enum this one refines (docs/77): the `enum Child is Parent:`
+	// sealed-refinement suffix. "" means a root (no parent). Child's cases are a subset of Parent's, so
+	// Child <: Parent.
+	Parent string
 }
 type TreeDecl struct {
 	Position    lexer.Pos

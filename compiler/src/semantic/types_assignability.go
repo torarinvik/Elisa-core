@@ -154,6 +154,15 @@ func AssignableTo(dst, src Type) bool {
 			return true
 		}
 	}
+	// Sealed enum refinement (docs/77): a Child enum (a subset of cases) is assignable to its Parent
+	// (the wider union) — `enum Child is Parent:` ⟹ Child <: Parent. Widening only; the reverse
+	// requires an explicit narrowing match/`is` test. Unrelated enums never relate (enumDescendsFrom
+	// returns false), so existing behavior is unchanged.
+	if dstEnum, ok := dst.(*EnumType); ok && dstEnum != nil {
+		if srcEnum, ok := StripAggregateStateType(src).(*EnumType); ok && srcEnum != dstEnum && enumDescendsFrom(srcEnum, dstEnum) {
+			return true
+		}
+	}
 	return false
 }
 

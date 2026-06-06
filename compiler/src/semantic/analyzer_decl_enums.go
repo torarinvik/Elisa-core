@@ -6,6 +6,48 @@ import (
 	"elisacore/src/ast"
 )
 
+// resolveEnumParent wires the `enum Child is Parent:` sealed-refinement relation (docs/77). The
+// parent must be an enum; cycles are rejected. Child <: Parent is then established in assignability
+// (enumDescendsFrom). Runs in populateEnumVariants, after all enum skeletons exist, so a parent may be
+// declared in any order or another file.
+func (a *Analyzer) resolveEnumParent(enumDecl *ast.EnumDecl, enumType *EnumType) {
+	if enumDecl.Parent == "" {
+		return
+	}
+	base, _, ok := a.lookupVisibleType(enumDecl.Parent)
+	if !ok {
+		a.errorf(enumDecl.Pos(), "enum %q refines unknown type %q", enumDecl.Name, enumDecl.Parent)
+		return
+	}
+	parentEnum, ok := base.(*EnumType)
+	if !ok || parentEnum == nil {
+		a.errorf(enumDecl.Pos(), "enum %q can only refine another enum with `is`, but %q is %s", enumDecl.Name, enumDecl.Parent, base)
+		return
+	}
+	if parentEnum == enumType {
+		a.errorf(enumDecl.Pos(), "enum %q cannot refine itself", enumDecl.Name)
+		return
+	}
+	for ancestor := parentEnum; ancestor != nil; ancestor = ancestor.Parent {
+		if ancestor == enumType {
+			a.errorf(enumDecl.Pos(), "enum %q refinement cycle through %q", enumDecl.Name, enumDecl.Parent)
+			return
+		}
+	}
+	enumType.Parent = parentEnum
+}
+
+// enumDescendsFrom reports whether src is dst or a (transitive) refinement of dst — the sealed
+// subtype walk for `enum Child is Parent:` (docs/77), mirroring treeCategoryDescendsFrom.
+func enumDescendsFrom(src *EnumType, dst *EnumType) bool {
+	for current := src; current != nil; current = current.Parent {
+		if SameType(current, dst) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Analyzer) populateConstEnumMembers(decls []scopedDecl) {
 	for _, scoped := range decls {
 		constEnumDecl, ok := scoped.Decl.(*ast.ConstEnumDecl)
@@ -130,6 +172,7 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			a.analyzeEnumAnnotations(enumDecl, enumType)
+			a.resolveEnumParent(enumDecl, enumType)
 			a.validateEnumLayout(enumDecl)
 			if len(enumDecl.Common) > 0 && !enumDecl.Packed {
 				a.errorf(enumDecl.Pos(), "enum %q only supports common: fields for packed enums", enumDecl.Name)

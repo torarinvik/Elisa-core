@@ -141,7 +141,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.Packed {
 			header += "packed "
 		}
-		header += "enum " + n.Name + ":"
+		header += "enum " + n.Name
+		if n.Parent != "" {
+			header += " is " + n.Parent // sealed refinement (docs/77)
+		}
+		header += ":"
 		f.writeLine(level, header)
 		if len(n.Common) > 0 {
 			f.writeLine(level+1, "common:")
@@ -151,6 +155,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		for _, variant := range n.Variants {
 			f.writeLine(level+1, formatEnumVariantDecl(variant))
+		}
+		if len(n.Common) == 0 && len(n.Variants) == 0 {
+			f.writeLine(level+1, "pass") // abstract root that only gathers sub-categories
 		}
 	case *ast.TreeDecl:
 		f.writeAnnotations(level, n.Annotations)

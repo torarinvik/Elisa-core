@@ -427,6 +427,10 @@ type EnumType struct {
 	// node). It selects the AoS storage mode by default and lets the migration diagnostics (Phase 4)
 	// distinguish "the user wrote `packed enum`" from "the compiler promoted a recursive plain enum".
 	RecursivePlain bool
+	// Parent (docs/77) is the enum this one refines via `enum Child is Parent:`. nil means a root.
+	// Child's cases are a subset of Parent's, so Child <: Parent (sealed nominal subtyping). Resolved
+	// after all enum skeletons are collected (parents may be declared in any order / another file).
+	Parent *EnumType
 }
 
 type PackedFieldStorageMode string
