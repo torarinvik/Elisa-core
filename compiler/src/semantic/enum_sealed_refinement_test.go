@@ -232,6 +232,32 @@ def visit(e: Expression) -> i64:
 	}
 }
 
+// docs/77: an `is` variant test in expression position accepts a refinement's variant
+// (`e is BinaryExpression.Add`) when matching a value of the parent type.
+func TestEnumHierarchyIsExprAcceptsRefinementVariant(t *testing.T) {
+	analyzeTreeTestSource(t, "enum_is_expr.elisa", enumHierarchyMatchPrelude+`
+def is_add(e: Expression) -> bool:
+    return e is BinaryExpression.Add
+
+def reject_alien(e: Expression) -> bool:
+    return e is Literal.Int
+`)
+}
+
+func TestEnumHierarchyIsExprRejectsUnrelatedEnum(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_is_expr_bad.elisa", enumHierarchyMatchPrelude+`
+enum Other: pass
+enum Outsider is Other:
+    Nope(x: i64)
+
+def bad(e: Expression) -> bool:
+    return e is Outsider.Nope
+`)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("expected error: Outsider.Nope is not a variant reachable from Expression")
+	}
+}
+
 // Refining a non-enum (or unknown) type is a clear error, not a crash.
 func TestEnumRefinesNonEnumErrors(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_is_bad.elisa", `struct Plain:

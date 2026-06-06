@@ -516,7 +516,10 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 				continue
 			}
 			matchableEnum, _, _ := resolveMatchableEnumType(left)
-			if matchableEnum == nil || enumType == nil || matchableEnum.Name != enumType.Name {
+			// docs/77: `e is BinaryExpression.Add` is valid when the tested enum is the scrutinee's
+			// enum OR any refinement of it (BinaryExpression <: Expression). enumDescendsFrom collapses
+			// to name-equality for a plain enum, so this is a strict generalization.
+			if matchableEnum == nil || enumType == nil || !enumDescendsFrom(enumType, matchableEnum) {
 				expected := "<invalid>"
 				if matchableEnum != nil {
 					expected = matchableEnum.Name
