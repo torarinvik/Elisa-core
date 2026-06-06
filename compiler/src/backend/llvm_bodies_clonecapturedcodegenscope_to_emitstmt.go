@@ -274,8 +274,15 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	scope := s.scope
 	defer s.popScope()
 	savedTreeOwner := s.treeAllocOwner
+	// docs/74: the implicit region-backed packed stores are region-scoped — a store built in this
+	// region must not leak out to (or into) an enclosing region. Clone on entry, restore on exit, so
+	// each `in auto:` owns its own stores and a long-lived outer tree keeps its store across inner
+	// per-iteration regions.
+	savedPackedStores := s.packedStores
+	s.packedStores = s.clonePackedStores()
 	defer func() {
 		s.treeAllocOwner = savedTreeOwner
+		s.packedStores = savedPackedStores
 	}()
 	if s.regionPolyAutoAdopts(n) {
 		// Adopt the threaded caller region: bind the region name to it, route new[auto] to it, emit

@@ -290,10 +290,15 @@ func (s *functionState) emitAutoRegionPackedAllocExpr(expr *ast.AllocExpr) (C.LL
 // region, creating it (backed by the active inferred region's arena) on first use and registering it
 // as the active store so subsequent new[auto] allocations and storeless `match` resolve to it.
 func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType) (packedStoreBinding, error) {
-	if binding, ok := s.lookupPackedStore(enumType); ok {
-		return binding, nil
-	}
 	arenaPtr := s.treeAllocOwner.arenaRef
+	if binding, ok := s.lookupPackedStore(enumType); ok {
+		// Reuse an explicit/threaded store (regionArena nil) unconditionally, or an implicit store
+		// built on the CURRENT region arena. An implicit store from an outer region (different arena)
+		// falls through to build a fresh one so nested-region trees stay region-local.
+		if binding.regionArena == nil || binding.regionArena == arenaPtr {
+			return binding, nil
+		}
+	}
 	if arenaPtr == nil {
 		return packedStoreBinding{}, fmt.Errorf("new[auto] packed allocation has no active inferred region arena")
 	}
@@ -308,7 +313,7 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 	if s.packedStores == nil {
 		s.packedStores = map[string]packedStoreBinding{}
 	}
-	binding := packedStoreBinding{value: storeValue, typ: storeType}
+	binding := packedStoreBinding{value: storeValue, typ: storeType, regionArena: arenaPtr}
 	s.packedStores[enumType.Name] = binding
 	return binding, nil
 }

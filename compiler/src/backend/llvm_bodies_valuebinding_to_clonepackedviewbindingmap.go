@@ -235,6 +235,11 @@ type checkpointBinding struct {
 type packedStoreBinding struct {
 	value C.LLVMValueRef
 	typ   *semantic.PackedEnumStoreType
+	// regionArena marks an IMPLICIT region-backed store (docs/74) with the arena it was built on.
+	// nil for an explicit or threaded store (those are reused unconditionally). An implicit store is
+	// reused only within its own region; entering a nested region (a different arena) builds a fresh
+	// one, so per-region trees are reclaimed with their region instead of leaking into an outer one.
+	regionArena C.LLVMValueRef
 }
 type treeAllocOwnerBinding struct {
 	isPerm      bool
