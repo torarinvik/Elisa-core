@@ -481,6 +481,44 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 			return nil, nil, nil, err
 		}
 		return allocPtr, enumValue, rowSizeValue, nil
+	case packedEnumABIAoS:
+		// docs/76 Slice 2: bump one node record onto the contiguous record array; the caller then
+		// stores the full rowType (tag + common) at the returned record ptr and the payload after it,
+		// exactly as for the other modes — so AoS needs no tag column and no tag write here.
+		if hasTail {
+			return nil, nil, nil, fmt.Errorf("packed enum AoS layout does not support tail payloads")
+		}
+		arenaValue, err := ops.arenaValue("packed.arena")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		stateValue, err := ops.stateValue("packed.state")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		allocResultType := ops.s.g.result.NamedTypes["PackedStoreIndexAllocResult"]
+		if allocResultType == nil {
+			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreIndexAllocResult type for AoS packed enum allocation")
+		}
+		allocHelperType := ops.cachedRuntimeHelperType("ctx_aos_store_alloc", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_aos_store_alloc", Params: []semantic.Type{ops.arenaRefType(), ops.voidRefType()}, Return: allocResultType}
+		})
+		allocCallee, err := ops.s.g.ensureFunctionDeclared("ctx_aos_store_alloc", allocHelperType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		allocLLVMFnType, err := ops.s.g.lowerFunctionType(allocHelperType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, stateValue}, "packed.aos.alloc")
+		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.aos.alloc.ptr"))
+		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.aos.alloc.index"))
+		enumValue, err := ops.s.coerceValue(indexValue, ops.s.g.result.NamedTypes["u32"], enumType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return allocPtr, enumValue, rowSizeValue, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
