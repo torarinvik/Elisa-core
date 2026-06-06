@@ -107,13 +107,18 @@ efficient reading of the decision and supersedes the "pointer lane" language abo
 
 ## Staging
 
-| Step | Delivers | Risk |
-|------|----------|------|
-| 1 | Semantic: `new[auto]/new[r] Expr.V(...)` recognized as a packed allocation into the inferred/named region (route packed constructors out of the struct `new[auto]` path); result is a bare `Expr` handle with region provenance. | medium |
-| 2 | Backend: lower it to push a row onto the region's per-enum column-stacks (implicit per-region store backed by the region arena to start, reusing the column machinery). | high |
-| 3 | `match node:` recovers the store from the handle's provenance (`resolvePackedNodeStoreRoot`), dropping `in store:` and the threaded store param. | medium |
-| 4 | Reclaim via `destroy r`/`reset r`/loop-reset; keep the legacy `Expr.Store(arena)` + `in store:` path alive during migration. | medium |
-| 5 | Cross-region `@field` edges; `freeze`/publish over region-backed columns. | low |
+| Step | Delivers | Risk | Status |
+|------|----------|------|--------|
+| 1 | Semantic: `new[auto] Expr.V(...)` recognized as a packed allocation; result is a bare `Expr` handle with region provenance. | medium | **DONE** |
+| 2 | Backend: lower it into an implicit per-region store (PackedStoreState backed by the region arena, created on first `new[auto]`, reusing the column machinery — `getOrCreateRegionPackedStore`). | high | **DONE** |
+| 3 | Storeless `match node:` resolves the implicit region store via the active-store binding (semantic gate + backend Path-4), dropping `in store:`. Cross-function: an implicit `__packed_store_E` is threaded by inference (gated to enums actually built with `new[auto]`), so a recursive `make`/`eval` share one store. | medium | **DONE** |
+| 4 | Reclaim via the region (the store's columns are arena-backed → freed with the region); legacy `Expr.Store(arena)` + `in store:` path unaffected. | medium | **DONE** (region-reclaim inherited; explicit path untouched) |
+| 5 | Cross-region `@field` edges; `freeze`/publish over region-backed columns. | low | TODO |
+
+Steps 1–4 are verified end-to-end: a recursive `make(depth) -> Expr` builds a region-backed tree
+with `new[auto]`, a separate `eval(node: Expr)` matches it storelessly, the store is auto-created at
+the root and threaded by inference, and the legacy explicit-store packed code (JSON parser, packed ML
+AST) is unaffected. Step 5 (multi-region/forest + freeze) is the tail.
 
 Land 1→2→3→4 as the milestone (a packed node becomes "just another allocation in a region", store
 deleted from every recursive signature). Step 5 is the multi-arena/forest tail.

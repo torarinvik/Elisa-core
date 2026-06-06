@@ -127,7 +127,7 @@ becomes sugar expressible in this lower layer rather than a bespoke mechanism.
 |------|----------|------|--------|
 | 1 | Detect: a value-returning path whose result carries a synthesized `__auto_*` region marks `f` `RegionPolymorphic` on its `FuncType`. | medium | **DONE** |
 | 2+3 | Pre-pass `classifyRegionPolymorphicFunctions` (fixpoint, before any body is analyzed) injects a hidden `__region_auto` Arena& param; call sites thread the caller's region (recursive → own `__region_auto`, root → active `in auto:`); the body's synthesized `__auto_*` region ADOPTS the threaded arena (no per-call arena, no premature free); escape error suppressed for region-poly fns. | high | **DONE** — verified end-to-end on a depth-100 recursive struct builder |
-| 4 | Packed-enum payoff: the docs/74 recursive `make` compiles and runs. **Blocked on docs/74 steps 2-3** (region-backed packed allocation + storeless `match node:`); the *threading* already works, but `new[auto] Expr.V(...)` has no region-backed store to lower into yet. | medium | blocked on docs/74 |
+| 4 | Packed-enum payoff: the docs/74 recursive `make` compiles and runs — region-backed `new[auto] Expr.V` + storeless `match`, store auto-threaded across `make`/`eval`. | medium | **DONE** — verified: make(10) builds a 1024-leaf tree, eval sums to 1024, zero ceremony |
 | 5 | Explicit `-> T @r` pin form for multi-region returns; ambiguous-multi-region detection; `tree` reframed as sugar over this layer. | low | TODO |
 
 Steps 1-3 are the milestone for *any* region-polymorphic value (structs work today). Step 4 — the
