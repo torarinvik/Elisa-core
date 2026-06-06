@@ -120,6 +120,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionNoRecurseAnnotation(annotation, fn, signature)
 			case "hot", "cold":
 				a.applyFunctionTemperatureAnnotation(annotation, fn, signature)
+			case "fast_math":
+				signature.FastMath = true
 			case "callconv", "c_abi", "stdcall":
 				a.applyFunctionCallConvAnnotation(annotation, fn, signature)
 			case "guard_nonnull", "guard_variant":
@@ -448,6 +450,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
+	if annotation.Name == "fast_math" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@fast_math on function %q does not take arguments", fn.Name)
+			return false
+		}
+		return true
+	}
 	if annotation.Name == "callconv" || annotation.Name == "c_abi" {
 		if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
 			a.errorf(annotation.Position, "@%s on function %q expects exactly one calling convention name", annotation.Name, fn.Name)
@@ -714,7 +723,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "method", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "method", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe":
 		return true
 	case "boundary_pointer_args":
 		return true

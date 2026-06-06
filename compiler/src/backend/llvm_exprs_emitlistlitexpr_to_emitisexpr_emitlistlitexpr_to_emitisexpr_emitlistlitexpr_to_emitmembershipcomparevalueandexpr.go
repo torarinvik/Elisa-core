@@ -30,6 +30,15 @@ static void elisacoreSetFPContractReciprocal(LLVMValueRef v) {
 	}
 }
 
+// Set ALL fast-math flags (reassoc, nnan, ninf, nsz, arcp, contract) on an FP instruction, matching
+// clang -ffast-math. Enables FP reassociation -> auto-vectorization of reduction/elementwise loops.
+// Used only inside functions annotated @fast_math (opt-in; reorders FP, results may differ).
+static void elisacoreSetFPFast(LLVMValueRef v) {
+	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
+		LLVMSetFastMathFlags(v, LLVMFastMathAll);
+	}
+}
+
 static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
 	if (value == NULL) {
 		return LLVMMDStringInContext2(ctx, "", 0);
@@ -549,22 +558,22 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	switch expr.Op {
 	case lexer.TOKEN_PLUS:
 		if isFloatType(operandType) {
-			return fpAllowContract(C.LLVMBuildFAdd(s.builder, left, right, cStringFree("addtmp"))), resultType, nil
+			return s.fpContract(C.LLVMBuildFAdd(s.builder, left, right, cStringFree("addtmp"))), resultType, nil
 		}
 		return C.LLVMBuildAdd(s.builder, left, right, cStringFree("addtmp")), resultType, nil
 	case lexer.TOKEN_MINUS:
 		if isFloatType(operandType) {
-			return fpAllowContract(C.LLVMBuildFSub(s.builder, left, right, cStringFree("subtmp"))), resultType, nil
+			return s.fpContract(C.LLVMBuildFSub(s.builder, left, right, cStringFree("subtmp"))), resultType, nil
 		}
 		return C.LLVMBuildSub(s.builder, left, right, cStringFree("subtmp")), resultType, nil
 	case lexer.TOKEN_STAR:
 		if isFloatType(operandType) {
-			return fpAllowContract(C.LLVMBuildFMul(s.builder, left, right, cStringFree("multmp"))), resultType, nil
+			return s.fpContract(C.LLVMBuildFMul(s.builder, left, right, cStringFree("multmp"))), resultType, nil
 		}
 		return C.LLVMBuildMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
 	case lexer.TOKEN_SLASH:
 		if isFloatType(operandType) {
-			return fpAllowContractReciprocal(C.LLVMBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
+			return s.fpContractReciprocal(C.LLVMBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
 		}
 		if isSignedIntegerType(operandType) {
 			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
@@ -797,4 +806,28 @@ func fpAllowContract(v C.LLVMValueRef) C.LLVMValueRef {
 func fpAllowContractReciprocal(v C.LLVMValueRef) C.LLVMValueRef {
 	C.elisacoreSetFPContractReciprocal(v)
 	return v
+}
+
+// fnFastMath reports whether the enclosing function opted into full fast-math FP (@fast_math).
+func (s *functionState) fnFastMath() bool {
+	return s != nil && s.fnType != nil && s.fnType.FastMath
+}
+
+// fpContract applies contraction (FMA) by default, or full fast-math when the function is @fast_math.
+func (s *functionState) fpContract(v C.LLVMValueRef) C.LLVMValueRef {
+	if s.fnFastMath() {
+		C.elisacoreSetFPFast(v)
+		return v
+	}
+	return fpAllowContract(v)
+}
+
+// fpContractReciprocal applies contraction+reciprocal by default (for fdiv), or full fast-math when
+// the function is @fast_math.
+func (s *functionState) fpContractReciprocal(v C.LLVMValueRef) C.LLVMValueRef {
+	if s.fnFastMath() {
+		C.elisacoreSetFPFast(v)
+		return v
+	}
+	return fpAllowContractReciprocal(v)
 }

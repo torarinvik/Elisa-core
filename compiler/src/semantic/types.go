@@ -628,6 +628,11 @@ type FuncType struct {
 	CapturesThreadUnsafe         bool
 	InlineMode                   FuncInlineMode
 	HasInlineMode                bool
+	// FastMath opts the function body into full fast-math FP semantics (reassoc + nnan + ninf + nsz +
+	// arcp + contract), matching clang -ffast-math. Set by @fast_math. Enables FP reassociation and
+	// thus auto-vectorization of reduction/elementwise loops. Off by default; opt-in only because it
+	// reorders FP operations (results may differ by more than the contract/reciprocal tier).
+	FastMath                     bool
 	HasNoRecurse                 bool
 	HasAsyncEntry                bool
 	HasSegmentAgnostic           bool
