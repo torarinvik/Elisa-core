@@ -1,5 +1,15 @@
 # 74 — Region-backed packed enums (drop the bespoke store)
 
+> **SUPERSEDED AS THE DEFAULT BY [docs/76](76-enum-layout-and-handles.md).** Benchmarks
+> (`Code/benchmarks/binary_trees`, `Code/benchmarks/ast_traversal`) showed the columnar SoA store is
+> *not* the right default for tree-shaped data: it loses ~2× on memory and ~1.4× on traversal to the
+> contiguous AoS-in-arena form, intrinsically. docs/76 makes plain `enum` lower to **AoS-in-arena with
+> opaque index handles** by default, and demotes the columnar store to an opt-in `enum … layout soa`
+> for whole-store column scans. This doc's *region-backed store mechanics* (the implicit, threaded,
+> region-backed `PackedStoreState`; storeless `match`; the implicit-store threading) remain the
+> backing for the `layout soa` path and the cross-region forest escape hatch — read it for the
+> store/columns machinery, but read docs/76 for the user-facing model and the index-handle ABI.
+>
 > Status: design + staged implementation. Builds on the orthogonality law (docs/10), store/handle
 > unification (docs/69), the region memory model (docs/68), multi-stack regions (docs/71), default
 > stack backing (docs/73), and `new[auto]` (inferred-region struct allocation).

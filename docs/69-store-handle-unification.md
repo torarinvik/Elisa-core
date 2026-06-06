@@ -1,5 +1,11 @@
 # 69 — Store / Handle unification (shared surface, distinct backings)
 
+> **The user-facing enum model is now [docs/76](76-enum-layout-and-handles.md).** A recursive `enum`
+> defaults to AoS-in-arena with an opaque **index** handle (`u8…u64`, default `u32`, free null
+> sentinel); the columnar store is the opt-in `enum … layout soa`. This doc's store/handle unification
+> remains accurate for the *backing* layer; docs/76 governs which backing is the default and the
+> index-handle ABI.
+
 ## Implementation status
 
 - ✅ Total `Store` (`Elem`/`Handle` + `store_get -> Elem&` + `store_count`) with backings

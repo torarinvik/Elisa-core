@@ -1,5 +1,11 @@
 # Orthogonality Rules For Packed Enums, Regions, And Affine Concurrency
 
+> **Layout-axis update: see [docs/76](76-enum-layout-and-handles.md).** The three axes here
+> (layout / storage-provenance / usage) are unchanged, but the *default* point on the layout axis for
+> a recursive `enum` is now **AoS-in-arena with an opaque index handle**, not columnar SoA. Columnar
+> is the opt-in `enum … layout soa` (suffix `layout` grammar, docs/01). `layout` still carries no
+> region and no usage meaning — the orthogonality law below governs it.
+
 This document defines the sound unified model for low-level parallel features in
 `elisacore`.
 
