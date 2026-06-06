@@ -24,12 +24,17 @@ Rust `rustc -O`. Single-threaded.
    (docs/75); the programmer writes no arena, no free, no lifetime annotation.
 2. The idiomatic *safe* C++/Rust (`unique_ptr`/`Box`) are ~3.4× slower than the arena/region versions
    — the per-node alloc/free cost that regions eliminate.
-3. **The region-backed *packed enum* path is currently slow** (2.07 s, 88 MB). Each per-iteration
-   tree creates its own `PackedStoreState` whose columnar `darray`s are heap-backed and not reclaimed
-   by the region reset — pathological for the many-tiny-trees pattern (the columnar store was
-   designed for a few large forests). Making the store's columns arena-backed (true region
-   column-stacks, docs/74's original intent) is the clear next optimization; until then, prefer the
-   struct form for many small short-lived trees.
+3. **The region-backed *packed enum* path is slower here (2.07 s, 88 MB) — by design, not by bug.**
+   Investigated thoroughly: the store's columns are *already* arena-backed (metadata `darray`s grow
+   via the region arena, column data via `arena_alloc`), and there is **no leak** — a tight loop of
+   2,000,000 tiny region-backed packed trees holds steady at **1.4 MB** RSS. The cost is the
+   *inherent* columnar (struct-of-arrays) overhead: every node carries a separate tag column, index
+   column, and handle column, plus variant-row indirection — versus the struct form's single 16-byte
+   bump per node. Peak RSS is dominated by the one biggest tree's columnar metadata, not by churn.
+   Columnar SoA pays off for **large, persistent ASTs traversed many times** (cache locality across
+   passes — the JSON DOM / ML-AST use case), *not* for build-once-check-once tiny trees. For this
+   workload the **struct form is the right tool, and it wins** — no store micro-optimization changes
+   that tradeoff; it is the layout choice itself.
 
 ## Files
 - `binary_trees_struct.elisa` — Elisa struct/region version (fastest)
