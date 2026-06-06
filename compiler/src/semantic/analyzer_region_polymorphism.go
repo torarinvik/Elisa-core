@@ -37,10 +37,20 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			}
 		}
 	}
+	// docs/74: only enums actually built with `new[auto]` somewhere in the program are region-backed
+	// and eligible for implicit store threading; explicit-store enums must be left untouched.
+	regionBackedPacked := a.collectRegionBackedPackedEnums(funcs)
 	for _, fn := range funcs {
-		if fnType := a.funcTypeForRegionPoly(fn); fnType != nil && fnType.RegionPolymorphic {
+		fnType := a.funcTypeForRegionPoly(fn)
+		if fnType == nil {
+			continue
+		}
+		if fnType.RegionPolymorphic {
 			a.injectRegionPolymorphicParam(fnType)
 		}
+		// Thread an implicit store into any function exposing a region-backed packed enum in its
+		// signature, so it can build/match a bare handle without an explicit Store.
+		a.injectInferredPackedStoreParams(fnType, regionBackedPacked)
 	}
 }
 

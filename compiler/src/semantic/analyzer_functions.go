@@ -120,6 +120,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					if fnType != nil && fnType.RegionPolymorphic {
 						a.defineRegionPolymorphicParamSymbol(fn, fnType)
 					}
+					if fnType != nil {
+						a.defineImplicitPackedStoreParamSymbols(fn, fnType)
+					}
 					savedBodyTreeOwner := a.currentTreeAllocOwner
 					if owner, ok := a.inferFunctionTreeAllocOwnerFromParams(allParamDecls, fnType); ok {
 						a.currentTreeAllocOwner = owner

@@ -197,6 +197,14 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 				}
 				a.errorf(expr.Pos(), "call to region-polymorphic %q must occur inside an inferred region (open one with `in auto:`) or another region-polymorphic function", ft.Name)
 				continue
+			} else if packedStoreType, isPackedStore := expectedType.(*PackedEnumStoreType); isPackedStore && packedStoreType != nil {
+				// docs/74: thread the region-backed packed store. A caller that already has the store
+				// (its own implicit param) resolves it via the same-name lookup above; otherwise the
+				// backend creates it on demand at this call site (the root call) and reuses it after.
+				argExpr = packedStoreImplicitArgExpr(packedStoreType)
+				a.exprTypes[argExpr] = expectedType
+				resolved = append(resolved, argExpr)
+				continue
 			} else if storeType, isTreeStore := expectedType.(*TreeStoreType); isTreeStore && storeType != nil {
 				if ownerArg, found := a.recoverImplicitTreeStoreOwnerArg(expr, ft, explicitCount); found {
 					resolved = append(resolved, ownerArg)

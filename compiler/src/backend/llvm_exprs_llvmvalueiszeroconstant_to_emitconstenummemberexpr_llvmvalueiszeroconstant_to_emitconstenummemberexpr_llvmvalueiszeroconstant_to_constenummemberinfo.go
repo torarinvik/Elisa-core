@@ -316,7 +316,9 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 
 	switch n := expr.(type) {
 	case *ast.Ident:
-		if s.g != nil && s.g.result != nil && s.g.result.RewriteDefaults[n] {
+		if s.isUnboundImplicitPackedStoreIdent(n) {
+			value, actualType, err = s.emitImplicitPackedStoreIdent(n, actualType)
+		} else if s.g != nil && s.g.result != nil && s.g.result.RewriteDefaults[n] {
 			value, actualType, err = s.emitTreeRewriteDefaultExpr(n)
 		} else {
 			value, actualType, err = s.emitIdent(n)

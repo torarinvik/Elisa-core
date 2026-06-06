@@ -78,7 +78,49 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"strings"
 )
+
+// isUnboundImplicitPackedStoreIdent reports whether an identifier is a threaded `__packed_store_E`
+// argument with NO local binding — i.e. a caller (the root, e.g. `build`) that does not itself carry
+// the store and must create the region-backed store on demand. In make/eval the name IS bound (their
+// own implicit param), so the normal ident path handles it.
+func (s *functionState) isUnboundImplicitPackedStoreIdent(n *ast.Ident) bool {
+	if n == nil || !strings.HasPrefix(n.Name, "__packed_store_") {
+		return false
+	}
+	_, bound := s.lookupBinding(n.Name)
+	return !bound
+}
+
+// emitImplicitPackedStoreIdent resolves an unbound `__packed_store_E` argument by getting-or-creating
+// the region-backed store for E (docs/74), so the root call threads a real store value into the
+// callee and reuses it for subsequent calls in the same region.
+func (s *functionState) emitImplicitPackedStoreIdent(n *ast.Ident, actualType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	enumType := s.resolveImplicitPackedStoreEnum(n, actualType)
+	if enumType == nil {
+		return nil, nil, fmt.Errorf("cannot resolve enum for implicit packed store %q", n.Name)
+	}
+	store, err := s.getOrCreateRegionPackedStore(enumType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return store.value, store.typ, nil
+}
+
+func (s *functionState) resolveImplicitPackedStoreEnum(n *ast.Ident, actualType semantic.Type) *semantic.EnumType {
+	if storeType, ok := semantic.StripAggregateStateType(actualType).(*semantic.PackedEnumStoreType); ok && storeType != nil && storeType.Enum != nil {
+		return storeType.Enum
+	}
+	enumName := strings.TrimPrefix(n.Name, "__packed_store_")
+	if enumName == "" || s.g == nil || s.g.result == nil {
+		return nil
+	}
+	if named, ok := s.g.result.NamedTypes[enumName].(*semantic.EnumType); ok && named != nil && named.Packed {
+		return named
+	}
+	return nil
+}
 
 func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if expr.AutoRegion {
