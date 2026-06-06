@@ -131,6 +131,12 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 			return invalidType
 		}
 		if enumType.Packed {
+			// docs/76 TODO (Slice 0b): a bare constructor `Expr.Add(...)` with no active store should
+			// be an implicit `new[auto]` into the inferred region. That requires the region-poly
+			// pre-pass detection (classifyRegionPolymorphicFunctions / collectRegionBackedPackedEnums)
+			// to first recognize bare packed-enum constructors as region allocations, so the building
+			// function is region-poly and a region is threaded — otherwise the no-region path recurses.
+			// Until then, the working surface is `new[auto] Expr.Add(...)` / an explicit `in store:`.
 			return a.analyzeScopedPackedAllocExpr(&ast.AllocExpr{Position: expr.Pos(), Value: expr})
 		}
 		orderedArgs, ok := a.resolveEnumConstructorArgs(expr, enumType, variant)
