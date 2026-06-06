@@ -210,8 +210,8 @@ deliverable** — everything else is downstream.
 
 | Phase | Delivers | Depends on |
 |------|----------|-----------|
-| 0 | **Close region-poly threading gaps** so storeless builders never hit "requires an active in <arena>" — container ops (`darray.push`) and constructors in helper functions thread the caller's region like `new[auto]` already does (docs/75). | docs/75 |
-| 1 | **`layout` on enum declarations**: parse `enum … layout soa|aos(...)`, carry a layout mode + `index:` width on the enum type; default (no `layout`) = AoS-in-arena. Reject `layout …[region r]`. | struct `layout` grammar |
+| 0 | **Close region-poly threading gaps** so storeless builders never hit "requires an active in <arena>" — container ops (`darray.push`) and constructors in helper functions thread the caller's region like `new[auto]` already does (docs/75). Note: enum *construction* + *match* threading is already done (docs/74/75); this phase is the remaining explicit-container gap. | docs/75 |
+| 1 | **DONE** — `layout` on enum declarations: parses `enum … layout soa\|aos(sparse, index: uN)`, carries Layout/LayoutSet/LayoutSparse/IndexWidth onto EnumDecl + EnumType, reuses the struct `layout` grammar; bad index widths rejected at parse. No lowering change yet. | struct `layout` grammar |
 | 2 | **Opaque index handle ABI**: index width `u8…u64` (default `u32`, node-index), free null sentinel at each width, loud overflow panic; opaque-handle check (no raw `&` leak). | 1 |
 | 3 | **Plain recursive `enum` ⇒ AoS-in-arena default** with storeless `new`/`match`; non-recursive ⇒ inline value. Retire `common:` → fields. | 0, 2 |
 | 4 | **`packed enum` → deprecation error**; keep explicit-store path; map Cohort A to `layout soa`. | 3 |
