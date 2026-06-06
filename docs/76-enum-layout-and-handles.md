@@ -347,20 +347,20 @@ cleanly). 5 keeps SoA a first-class expert path. 6 is the tail.
 - No pointer-vs-index dial in ordinary code; no `store`/`columns`/`packed` in the beginner
   surface.
 
-## Known limitation: mutual recursion (cross-enum store threading)
+## Mutual recursion
 
-Directly-recursive enums (a tree, a list, a single-enum AST — the overwhelmingly common case) are the
-fast AoS default and work end to end. **Mutually-recursive** enum *groups* (e.g. `Tree`↔`Forest`,
-`Expr`↔`Stmt`) are *detected* as recursive and promoted together (`computeRecursiveEnumSet` walks the
-by-value enum-reference graph), but automatic store threading across them is not yet wired: each enum
-gets its own per-region store, and a builder for one enum that calls a builder for the other must
-thread *both* stores — today `injectInferredPackedStoreParams` only threads stores named in a
-function's own signature, so the second enum's store is missing (`new[auto] packed allocation has no
-active inferred region arena`). Fixing it needs transitive store-requirement propagation over the call
-graph (a fixpoint that, for each function, unions the region-backed enums it constructs or reaches
-through its callees, then threads all of them). Tracked as a follow-up; single-enum recursion is
-unaffected.
+Both directly-recursive enums (tree, list, single-enum AST) and **mutually-recursive** enum *groups*
+(`Tree`↔`Forest`, `Expr`↔`Stmt`) work end to end on the AoS default. Two pieces make the latter work:
 
-Note also: a *bare* constructor (no `new[auto]`) must appear inside a region-polymorphic builder
-function or an `in auto:`/store-threaded context — a bare constructor written directly in a plain
-entry function still needs explicit `new[auto] E.V(...)`.
+- **Transitive recursion detection** — `computeRecursiveEnumSet` walks the by-value enum-reference
+  graph, so an enum recursive only *through* another (Tree→Forest→Tree) is promoted along with the
+  whole cycle.
+- **Transitive store threading** — each enum has its own per-region store, and a function that builds
+  or consumes across the cycle needs *every* store it touches, not just the one in its signature. A
+  call-graph fixpoint (`computeTransitiveStoreNeeds`) unions, per function, the region-backed stores
+  it reaches through its callees and threads them all in. Entry points and export targets (which own a
+  region) create the stores on demand and thread them down; everyone else receives them.
+
+Note: a *bare* constructor (no `new[auto]`) must appear inside a region-polymorphic builder function
+or an `in auto:`/store-threaded context — a bare constructor written directly in a plain entry
+function still needs explicit `new[auto] E.V(...)`.

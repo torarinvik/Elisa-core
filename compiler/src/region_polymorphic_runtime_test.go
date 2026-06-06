@@ -216,6 +216,91 @@ def bt() -> void:
 	}
 }
 
+// docs/76: MUTUALLY-recursive plain enums (Tree↔Forest). Tree is recursive only THROUGH Forest, so
+// the transitive recursion detection promotes the whole cycle; and the transitive store-need fixpoint
+// threads BOTH per-enum stores across the call graph (forest() builds via leaf(), sumT()<->sumF()
+// consume across the cycle) — neither enum is in every function's signature. branch(4) builds a
+// Tree.Branch over a 4-element Forest of leaves; sumT recursively sums across both enums → 10. A
+// broken cross-enum thread would fail to compile ("no active inferred region arena") or read garbage.
+func TestMutuallyRecursivePlainEnumsRun(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := "include \"" + std + "\"\n" + `
+enum Tree:
+    Leaf(v: i64)
+    Branch(f: Forest)
+
+enum Forest:
+    Empty(u: i64)
+    More(hd: Tree, tl: Forest)
+
+def leaf(n: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        return Tree.Leaf(v: n)
+
+def forest(n: i64) -> Forest:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if n <= 0:
+            return Forest.Empty(u: 0)
+        return Forest.More(hd: leaf(n), tl: forest(n - 1))
+
+def branch(n: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        return Tree.Branch(f: forest(n))
+
+def sumT(t: Tree) -> i64:
+    match t:
+        Tree.Leaf(v: v):
+            return v
+        Tree.Branch(f: f):
+            return sumF(f)
+
+def sumF(f: Forest) -> i64:
+    match f:
+        Forest.Empty(u: u):
+            return 0
+        Forest.More(hd: h, tl: rest):
+            return sumT(h) + sumF(rest)
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            if sumT(branch(4)) != 10:
+                panic("mutually-recursive plain enums produced wrong sum")
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mutual.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+	if out, err := exec.Command(exePath, "bt").CombinedOutput(); err != nil {
+		t.Fatalf("mutually-recursive plain enum run failed: %v\noutput:\n%s", err, string(out))
+	}
+}
+
 // docs/75: a recursive `new[auto]` builder. `make` is region-polymorphic — it threads the caller's
 // region (the `in auto:` in `bt`) through every recursive call, so all 101 nodes land in ONE region
 // and each survives to be read by the next level. depth-100 adds 1 per level → value 101. If

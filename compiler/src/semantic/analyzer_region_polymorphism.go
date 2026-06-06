@@ -40,17 +40,39 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 	// docs/74: only enums actually built with `new[auto]` somewhere in the program are region-backed
 	// and eligible for implicit store threading; explicit-store enums must be left untouched.
 	regionBackedPacked := a.collectRegionBackedPackedEnums(funcs)
+	// docs/76: compute each function's TRANSITIVE region-backed store needs (signature ∪ what its
+	// callees need) so mutually-recursive enum groups thread every required store across the call
+	// graph, not just the one in each function's own signature.
+	storeNeeds := a.computeTransitiveStoreNeeds(funcs, regionBackedPacked)
+	// An export target must have NO implicit parameters (exports.go), so it can never receive a
+	// threaded store — it owns a region and creates stores on demand. The generated test runner turns
+	// each @test body into an export target (e.g. ctx_test_case_impl_0), so detect them structurally.
+	exportTargets := map[string]bool{}
+	for _, scoped := range decls {
+		if ed, ok := scoped.Decl.(*ast.ExportFuncDecl); ok && ed != nil && ed.TargetName != "" {
+			exportTargets[ed.TargetName] = true
+		}
+	}
 	for _, fn := range funcs {
 		fnType := a.funcTypeForRegionPoly(fn)
 		if fnType == nil {
 			continue
 		}
+		// Entry points (@test/@bench/main) and export targets own a region and create stores on demand
+		// — they must NOT receive threaded store params (the runtime/export ABI calls them with none).
+		// Every other function receives its full transitive store set threaded in, so a bare handle can
+		// be built/matched without an explicit Store, even across a mutually-recursive enum group.
+		if fn.Name != "" && exportTargets[fn.Name] {
+			continue
+		}
 		if fnType.RegionPolymorphic {
 			a.injectRegionPolymorphicParam(fnType)
 		}
-		// Thread an implicit store into any function exposing a region-backed packed enum in its
-		// signature, so it can build/match a bare handle without an explicit Store.
-		a.injectInferredPackedStoreParams(fnType, regionBackedPacked)
+		if funcIsRegionStoreEntryPoint(fn) {
+			a.injectInferredPackedStoreParams(fnType, regionBackedPacked)
+		} else {
+			a.injectStoreNeeds(fnType, storeNeeds[fnType])
+		}
 	}
 }
 

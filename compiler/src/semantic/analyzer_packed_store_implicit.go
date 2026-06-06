@@ -113,6 +113,131 @@ func (a *Analyzer) injectInferredPackedStoreParams(fnType *FuncType, regionBacke
 	}
 }
 
+// computeTransitiveStoreNeeds computes, for each region-poly candidate function, the full set of
+// region-backed packed enums whose implicit store it must carry: its own signature enums PLUS, via a
+// call-graph fixpoint, every store needed by a function it calls. This is what makes MUTUAL recursion
+// work — a consumer `sumT(Tree)->i64` (no region of its own) calls `sumF(Forest)`, so it must receive
+// Forest's store threaded in; a builder `forest()->Forest` calls `leaf()->Tree`, so it must thread
+// Tree's store down. Entry points (which own a region) create the stores on demand and are excluded
+// from injection by the caller; every other function in the chain receives them threaded.
+func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBacked map[string]bool) map[*FuncType]map[string]*EnumType {
+	needs := map[*FuncType]map[string]*EnumType{}
+	callees := map[*FuncType]map[*FuncType]bool{}
+	var order []*FuncType
+	for _, fn := range funcs {
+		ft := a.funcTypeForRegionPoly(fn)
+		if ft == nil {
+			continue
+		}
+		if _, seen := needs[ft]; !seen {
+			needs[ft] = map[string]*EnumType{}
+			callees[ft] = map[*FuncType]bool{}
+			order = append(order, ft)
+		}
+		sig := map[string]*EnumType{}
+		explicitCount := funcTypeExplicitParamCount(ft)
+		for i := 0; i < explicitCount && i < len(ft.Params); i++ {
+			collectPackedEnumsInType(ft.Params[i], sig)
+		}
+		collectPackedEnumsInType(ft.Return, sig)
+		for name, et := range sig {
+			if regionBacked[name] {
+				needs[ft][name] = et
+			}
+		}
+		a.collectCalleeFuncTypes(fn.Body, callees[ft])
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, ft := range order {
+			for g := range callees[ft] {
+				for name, et := range needs[g] {
+					if needs[ft][name] == nil {
+						needs[ft][name] = et
+						changed = true
+					}
+				}
+			}
+		}
+	}
+	return needs
+}
+
+// collectCalleeFuncTypes records the FuncTypes of every directly-called function in a body (resolving
+// plain-identifier calls to their visible global). Used to build the call-graph edges for the
+// transitive store-need fixpoint.
+func (a *Analyzer) collectCalleeFuncTypes(body []ast.Stmt, out map[*FuncType]bool) {
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
+				if ft := a.regionPolyCalleeFuncType(call); ft != nil {
+					out[ft] = true
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(body))
+}
+
+// injectStoreNeeds threads an implicit packed-store parameter for each region-backed enum in `needs`
+// (signature ∪ transitive callee needs). Idempotent; skips enums already carried explicitly.
+func (a *Analyzer) injectStoreNeeds(fnType *FuncType, needs map[string]*EnumType) {
+	if fnType == nil || len(needs) == 0 {
+		return
+	}
+	names := make([]string, 0, len(needs))
+	for name := range needs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, enumName := range names {
+		enumType := needs[enumName]
+		if enumType == nil || enumType.StoreType == nil {
+			continue
+		}
+		paramName := packedStoreImplicitParamName(enumName)
+		if funcTypeHasImplicitParam(fnType, paramName) || funcTypeHasExplicitPackedStoreParam(fnType, enumName) {
+			continue
+		}
+		storeType := PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"])
+		fnType.Params = append(fnType.Params, storeType)
+		fnType.ImplicitParamNames = append(fnType.ImplicitParamNames, paramName)
+	}
+}
+
+// funcIsRegionStoreEntryPoint reports whether a function is a region-store entry point: a `@test`,
+// `@bench`, or `main`. These own a region (an `in auto:` scope) and CREATE region-backed stores on
+// demand, threading them into callees — so they must NOT receive store params themselves (the runtime
+// calls them with no such argument). Every other function receives its needed stores threaded in.
+func funcIsRegionStoreEntryPoint(fn *ast.FuncDecl) bool {
+	if fn == nil {
+		return false
+	}
+	return fn.Name == "main" || funcHasAnnotation(fn, "test") || funcHasAnnotation(fn, "bench")
+}
+
 // funcTypeHasExplicitPackedStoreParam reports whether an explicit parameter is already an `E.Store`
 // (any state). When true the function threads its store by hand — the legacy explicit style — and
 // must not also receive an implicit store.
