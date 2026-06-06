@@ -372,9 +372,12 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum storage type")
 	}
+	// docs/77: a sealed hierarchy shares ONE record type (the root's union), keyed by the root name,
+	// so all members allocate identically-shaped nodes into the single per-root store.
+	root := enumType.Root()
 	switch g.packedModeForEnum(enumType) {
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
-		return g.ensurePackedEnumRowType(enumType.Name, enumType)
+		return g.ensurePackedEnumRowType(root.Name, root)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
 	}

@@ -34,14 +34,14 @@ func (a *Analyzer) bindActivePackedStoreType(t Type) {
 	if a.currentPackedStores == nil {
 		a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	}
-	a.currentPackedStores[storeType.Enum.Name] = storeType
+	a.currentPackedStores[storeType.Enum.Root().Name] = storeType // docs/77: one store per hierarchy root
 }
 
 func (a *Analyzer) lookupPackedStore(enumType *EnumType) (*PackedEnumStoreType, bool) {
 	if a.currentPackedStores == nil || enumType == nil {
 		return nil, false
 	}
-	store, ok := a.currentPackedStores[enumType.Name]
+	store, ok := a.currentPackedStores[enumType.Root().Name]
 	if !ok || store == nil {
 		return nil, false
 	}

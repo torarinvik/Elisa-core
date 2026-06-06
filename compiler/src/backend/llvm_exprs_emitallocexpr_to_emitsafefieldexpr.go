@@ -302,10 +302,13 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 	if arenaPtr == nil {
 		return packedStoreBinding{}, fmt.Errorf("new[auto] packed allocation has no active inferred region arena")
 	}
-	if enumType.StoreType == nil {
-		return packedStoreBinding{}, fmt.Errorf("packed enum %s is missing store layout metadata", enumType.Name)
+	// docs/77: a sealed hierarchy shares ONE store per root, whose record is the union over all
+	// refinements' leaves. Build (and key) the store on the root.
+	root := enumType.Root()
+	if root.StoreType == nil {
+		return packedStoreBinding{}, fmt.Errorf("packed enum %s is missing store layout metadata", root.Name)
 	}
-	storeType := semantic.PackedEnumStoreWithState(enumType.StoreType, s.g.result.NamedTypes["Local"])
+	storeType := semantic.PackedEnumStoreWithState(root.StoreType, s.g.result.NamedTypes["Local"])
 	storeValue, err := s.emitPackedStoreValueFromArenaPtr(arenaPtr, storeType)
 	if err != nil {
 		return packedStoreBinding{}, err
@@ -314,7 +317,7 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 		s.packedStores = map[string]packedStoreBinding{}
 	}
 	binding := packedStoreBinding{value: storeValue, typ: storeType, regionArena: arenaPtr}
-	s.packedStores[enumType.Name] = binding
+	s.packedStores[packedStoreKey(enumType)] = binding
 	return binding, nil
 }
 

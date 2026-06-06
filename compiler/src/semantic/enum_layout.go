@@ -54,6 +54,27 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 			byName[ed.Name] = ed
 		}
 	}
+	// docs/77: a sealed hierarchy is recursive *through the subtype relation* — a field typed as the
+	// root `Node` can hold any of its refinements, so `Expr.Add(left: Node)` makes `Expr` recursive.
+	// Build the descendant closure (over syntactic `is Parent` links) so a reference to enum X expands
+	// to X and every refinement of X.
+	descendants := map[string][]string{} // X -> all transitive refinements of X (excluding X)
+	for name, ed := range byName {
+		_ = name
+		for p := ed.Parent; p != ""; {
+			descendants[p] = append(descendants[p], ed.Name)
+			parentDecl, ok := byName[p]
+			if !ok {
+				break
+			}
+			p = parentDecl.Parent
+		}
+	}
+	hierarchyOf := func(name string) []string { // name + its descendants (a value of type name can be any of these)
+		out := []string{name}
+		out = append(out, descendants[name]...)
+		return out
+	}
 	byValueEnumRefs := func(ed *ast.EnumDecl) []string {
 		var out []string
 		if ed == nil {
@@ -63,7 +84,7 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 			for _, pd := range ed.Variants[i].Payload {
 				if nt, ok := pd.Type.(*ast.NamedType); ok && nt != nil {
 					if _, isEnum := byName[nt.Name]; isEnum {
-						out = append(out, nt.Name)
+						out = append(out, hierarchyOf(nt.Name)...)
 					}
 				}
 			}
@@ -90,6 +111,27 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 		}
 		if reachesStart(start) {
 			result[start] = true
+		}
+	}
+	// If any member of a hierarchy is recursive, the whole hierarchy is region-backed (it shares one
+	// store), so promote the root and every refinement — including non-recursive leaves and the root.
+	rootOf := func(name string) string {
+		for {
+			ed, ok := byName[name]
+			if !ok || ed.Parent == "" {
+				return name
+			}
+			name = ed.Parent
+		}
+	}
+	for name := range byName {
+		if !result[name] {
+			continue
+		}
+		root := rootOf(name)
+		result[root] = true
+		for _, d := range descendants[root] {
+			result[d] = true
 		}
 	}
 	return result

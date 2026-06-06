@@ -379,7 +379,7 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 		}
 	}
 	maxSlots := uint64(0)
-	for _, variant := range enum.Variants {
+	for _, variant := range enumLayoutLeaves(enum) { // docs/77: union over the whole hierarchy's leaves
 		slots, err := g.enumVariantPayloadSlots(variant)
 		if err != nil {
 			return nil, err
@@ -409,7 +409,7 @@ func (g *llvmGenerator) packedEnumCommonPrefixWordCount(enum *semantic.EnumType)
 		return 0, err
 	}
 	hasPayload := false
-	for _, variant := range enum.Variants {
+	for _, variant := range enumLayoutLeaves(enum) {
 		slots, err := g.enumVariantPayloadSlots(variant)
 		if err != nil {
 			return 0, err

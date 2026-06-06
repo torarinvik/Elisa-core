@@ -284,6 +284,43 @@ def bad(e: Expression) -> bool:
 	}
 }
 
+// docs/77 Phase 3: a hierarchy that is recursive through the subtype relation (a field typed as the
+// root, which can hold any refinement) promotes the WHOLE hierarchy to the region-backed packed path.
+func TestRecursiveHierarchyPromotesWholeFamily(t *testing.T) {
+	result := analyzeTreeTestSource(t, "rec_hier.elisa", `enum Node: pass
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+enum Stmt is Node:
+    Return(value: Node)
+`)
+	for _, name := range []string{"Node", "Expr", "Stmt"} {
+		e, ok := result.NamedTypes[name].(*EnumType)
+		if !ok {
+			t.Fatalf("%s is %T, want *EnumType", name, result.NamedTypes[name])
+		}
+		if !e.Packed {
+			t.Errorf("%s should be promoted to packed (recursive hierarchy through Node)", name)
+		}
+	}
+}
+
+func TestNonRecursiveHierarchyStaysValue(t *testing.T) {
+	result := analyzeTreeTestSource(t, "value_hier.elisa", `enum Color: pass
+enum Mono is Color:
+    Black
+    White
+enum RGB is Color:
+    Red(r: i64)
+`)
+	for _, name := range []string{"Color", "Mono", "RGB"} {
+		e := result.NamedTypes[name].(*EnumType)
+		if e.Packed {
+			t.Errorf("%s should NOT be packed (non-recursive value hierarchy)", name)
+		}
+	}
+}
+
 // Refining a non-enum (or unknown) type is a clear error, not a crash.
 func TestEnumRefinesNonEnumErrors(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_is_bad.elisa", `struct Plain:

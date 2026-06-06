@@ -407,11 +407,19 @@ func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type,
 		}
 	}
 }
+// packedStoreKey returns the cache key for an enum's region-backed store. A sealed hierarchy (docs/77)
+// shares ONE store per root, so all members key by the root's name.
+func packedStoreKey(enumType *semantic.EnumType) string {
+	if enumType == nil {
+		return ""
+	}
+	return enumType.Root().Name
+}
 func (s *functionState) lookupPackedStore(enumType *semantic.EnumType) (packedStoreBinding, bool) {
 	if s.packedStores == nil || enumType == nil {
 		return packedStoreBinding{}, false
 	}
-	binding, ok := s.packedStores[enumType.Name]
+	binding, ok := s.packedStores[packedStoreKey(enumType)]
 	if !ok || binding.typ == nil {
 		return packedStoreBinding{}, false
 	}
@@ -425,7 +433,7 @@ func (s *functionState) bindPackedStoreValue(t semantic.Type, value C.LLVMValueR
 	if s.packedStores == nil {
 		s.packedStores = map[string]packedStoreBinding{}
 	}
-	s.packedStores[storeType.Enum.Name] = packedStoreBinding{value: value, typ: storeType}
+	s.packedStores[packedStoreKey(storeType.Enum)] = packedStoreBinding{value: value, typ: storeType}
 }
 func (s *functionState) invalidatePackedReadCaches() {
 	if s == nil {

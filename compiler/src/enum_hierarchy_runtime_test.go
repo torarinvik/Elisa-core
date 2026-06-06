@@ -81,6 +81,43 @@ def bt() -> void:
 `)
 }
 
+// docs/77 Phase 3: a RECURSIVE hierarchy (Expr.Add references the root Node) is region-backed with one
+// store per root, shared by all refinements. Single-function (no cross-function threading yet): build a
+// depth-1 tree in `in auto:` and fold it with nested storeless matches. 5 + 7 = 12.
+func TestRecursiveEnumHierarchySingleFunction(t *testing.T) {
+	runEnumHierarchyProgram(t, "rec_hier.elisa", `
+enum Node: pass
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Node = new[auto] Expr.Lit(value: 5)
+            b: Node = new[auto] Expr.Lit(value: 7)
+            root: Node = new[auto] Expr.Add(left: a, right: b)
+            sum: mutable i64 = 0
+            match root:
+                Expr.Add(left: l, right: r):
+                    match l:
+                        Expr.Lit(value: lv):
+                            sum <- sum + lv
+                        Expr.Add(left: l2, right: r2):
+                            sum <- sum + 0
+                    match r:
+                        Expr.Lit(value: rv):
+                            sum <- sum + rv
+                        Expr.Add(left: l3, right: r3):
+                            sum <- sum + 0
+                Expr.Lit(value: v):
+                    sum <- v
+            if sum != 12:
+                panic("recursive hierarchy fold produced wrong sum")
+`)
+}
+
 // Payload hierarchy: leaves carry data; the root's record is the union of all leaves' payloads.
 func TestValueEnumHierarchyWithPayload(t *testing.T) {
 	runEnumHierarchyProgram(t, "shape.elisa", `
