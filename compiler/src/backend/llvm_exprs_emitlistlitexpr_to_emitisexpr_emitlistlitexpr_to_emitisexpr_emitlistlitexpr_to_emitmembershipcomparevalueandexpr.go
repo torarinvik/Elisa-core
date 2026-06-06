@@ -11,6 +11,15 @@ static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
 	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
 }
 
+// Allow FP contraction (a*b+c -> fma) on a floating-point instruction, matching clang's default
+// -ffp-contract=on. Only the AllowContract flag is set; no reassociation / no-nan / no-inf, so this
+// does not change value semantics beyond the single-rounding fused multiply-add the C ABI permits.
+static void elisacoreSetFPContract(LLVMValueRef v) {
+	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
+		LLVMSetFastMathFlags(v, LLVMFastMathAllowContract);
+	}
+}
+
 static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
 	if (value == NULL) {
 		return LLVMMDStringInContext2(ctx, "", 0);
@@ -530,22 +539,22 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	switch expr.Op {
 	case lexer.TOKEN_PLUS:
 		if isFloatType(operandType) {
-			return C.LLVMBuildFAdd(s.builder, left, right, cStringFree("addtmp")), resultType, nil
+			return fpAllowContract(C.LLVMBuildFAdd(s.builder, left, right, cStringFree("addtmp"))), resultType, nil
 		}
 		return C.LLVMBuildAdd(s.builder, left, right, cStringFree("addtmp")), resultType, nil
 	case lexer.TOKEN_MINUS:
 		if isFloatType(operandType) {
-			return C.LLVMBuildFSub(s.builder, left, right, cStringFree("subtmp")), resultType, nil
+			return fpAllowContract(C.LLVMBuildFSub(s.builder, left, right, cStringFree("subtmp"))), resultType, nil
 		}
 		return C.LLVMBuildSub(s.builder, left, right, cStringFree("subtmp")), resultType, nil
 	case lexer.TOKEN_STAR:
 		if isFloatType(operandType) {
-			return C.LLVMBuildFMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
+			return fpAllowContract(C.LLVMBuildFMul(s.builder, left, right, cStringFree("multmp"))), resultType, nil
 		}
 		return C.LLVMBuildMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
 	case lexer.TOKEN_SLASH:
 		if isFloatType(operandType) {
-			return C.LLVMBuildFDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
+			return fpAllowContract(C.LLVMBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
 		}
 		if isSignedIntegerType(operandType) {
 			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
@@ -763,4 +772,11 @@ func (s *functionState) emitMembershipRangeCompareValueAndExpr(leftValue C.LLVMV
 	lower := C.LLVMBuildICmp(s.builder, lowerPred, coercedLeft, startValue, cStringFree("membership.range.lower"))
 	upper := C.LLVMBuildICmp(s.builder, upperPred, coercedLeft, endValue, cStringFree("membership.range.upper"))
 	return C.LLVMBuildAnd(s.builder, lower, upper, cStringFree("membership.range")), nil
+}
+
+// fpAllowContract marks a floating-point instruction as contraction-allowed so the backend may fuse
+// multiply-add into fma (clang's default). Returns the same value for convenient inline use.
+func fpAllowContract(v C.LLVMValueRef) C.LLVMValueRef {
+	C.elisacoreSetFPContract(v)
+	return v
 }

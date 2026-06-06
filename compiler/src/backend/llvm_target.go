@@ -233,11 +233,28 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 		return fmt.Errorf("failed to resolve LLVM target %q: %s", tripleText, errText)
 	}
 
-	cpu := cString("")
-	features := cString("")
+	// For a NATIVE build (no explicit cross-target), tune for the host CPU and enable its features —
+	// exactly what clang does by default (e.g. `-target-cpu apple-m1` on Apple Silicon). A generic
+	// target leaves the scheduler model and post-baseline ISA features on the table. Cross builds keep
+	// the generic target so the output stays portable.
+	hostTuned := false
+	var cpu, features *C.char
+	if strings.TrimSpace(g.requestedTargetTriple) == "" {
+		cpu = C.LLVMGetHostCPUName()
+		features = C.LLVMGetHostCPUFeatures()
+		hostTuned = true
+	} else {
+		cpu = cString("")
+		features = cString("")
+	}
 	tm := C.elisacoreCreateTargetMachineDefault(target, triple, cpu, features)
-	C.free(unsafe.Pointer(cpu))
-	C.free(unsafe.Pointer(features))
+	if hostTuned {
+		C.LLVMDisposeMessage(cpu)
+		C.LLVMDisposeMessage(features)
+	} else {
+		C.free(unsafe.Pointer(cpu))
+		C.free(unsafe.Pointer(features))
+	}
 	if tm == nil {
 		tripleText := C.GoString(triple)
 		if tripleOwnedByLLVM {
