@@ -35,6 +35,7 @@ func (a *Analyzer) resolveEnumParent(enumDecl *ast.EnumDecl, enumType *EnumType)
 		}
 	}
 	enumType.Parent = parentEnum
+	parentEnum.Children = append(parentEnum.Children, enumType)
 }
 
 // enumDescendsFrom reports whether src is dst or a (transitive) refinement of dst — the sealed
@@ -46,6 +47,66 @@ func enumDescendsFrom(src *EnumType, dst *EnumType) bool {
 		}
 	}
 	return false
+}
+
+// enumIsHierarchical reports whether the enum participates in a sealed hierarchy (docs/77) — it is a
+// refinement of another enum, or has its own refinements. Plain standalone enums are not hierarchical
+// and keep the original flat match/exhaustiveness behavior.
+func enumIsHierarchical(e *EnumType) bool {
+	return e != nil && (e.Parent != nil || len(e.Children) > 0)
+}
+
+// enumLeafItem is a leaf variant reachable from a hierarchy node, with the concrete enum that owns it.
+type enumLeafItem struct {
+	Owner     *EnumType
+	Variant   *EnumVariant
+	Qualified string // "Owner.Variant"
+}
+
+// enumDescendantLeaves returns every leaf variant of root and all its (transitive) refinements, in
+// declaration order — the full matchable case-set of a hierarchy node (leaves flow up, docs/77).
+func enumDescendantLeaves(root *EnumType) []enumLeafItem {
+	if root == nil {
+		return nil
+	}
+	var items []enumLeafItem
+	var visit func(e *EnumType)
+	visit = func(e *EnumType) {
+		for _, variant := range e.Variants {
+			items = append(items, enumLeafItem{Owner: e, Variant: variant, Qualified: e.Name + "." + variant.Name})
+		}
+		for _, child := range e.Children {
+			visit(child)
+		}
+	}
+	visit(root)
+	return items
+}
+
+// resolveEnumMatchPatternCategory resolves a match arm's `Owner.Variant` against a hierarchy scrutinee
+// of type expected: the arm may name expected itself or any descendant enum (docs/77), mirroring
+// resolveTreeMatchPatternCategory. Returns the owning enum and the variant.
+func (a *Analyzer) resolveEnumMatchPatternCategory(expected *EnumType, pattern *ast.MatchVariantPattern) (*EnumType, *EnumVariant, bool) {
+	owner := expected
+	if pattern.EnumName != expected.Name {
+		base, _, ok := a.lookupVisibleType(pattern.EnumName)
+		if !ok {
+			a.errorf(pattern.Pos(), "match arm expects enum %q or a refinement of it, got %q", expected.Name, pattern.EnumName)
+			return nil, nil, false
+		}
+		resolved, ok := StripAggregateStateType(base).(*EnumType)
+		if !ok || resolved == nil || !enumDescendsFrom(resolved, expected) {
+			a.errorf(pattern.Pos(), "match arm expects enum %q or a refinement of it, got %q", expected.Name, pattern.EnumName)
+			return nil, nil, false
+		}
+		owner = resolved
+	}
+	variant, ok := owner.Variant(pattern.Variant)
+	if !ok {
+		a.errorf(pattern.Pos(), "enum %q has no variant %q", owner.Name, pattern.Variant)
+		return nil, nil, false
+	}
+	return owner, variant, true
 }
 
 func (a *Analyzer) populateConstEnumMembers(decls []scopedDecl) {

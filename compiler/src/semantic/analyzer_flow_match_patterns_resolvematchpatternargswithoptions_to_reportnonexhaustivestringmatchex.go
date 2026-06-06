@@ -84,6 +84,16 @@ func (a *Analyzer) matchCoversAllVariants(variantBase Type, covered map[string]b
 		if tt == nil {
 			return false
 		}
+		if enumIsHierarchical(tt) {
+			// docs/77: a hierarchy node's case-set is the union of its refinements' leaves; check
+			// coverage by qualified Owner.Variant key (distinct refinements never collide).
+			for _, leaf := range enumDescendantLeaves(tt) {
+				if !covered[leaf.Qualified] {
+					return false
+				}
+			}
+			return true
+		}
 		for _, variant := range tt.Variants {
 			if !covered[variant.Name] {
 				return false
@@ -172,9 +182,18 @@ func (a *Analyzer) reportNonExhaustiveMatch(pos lexer.Pos, variantBase Type, cov
 			return
 		}
 		missing := make([]string, 0)
-		for _, variant := range tt.Variants {
-			if !covered[variant.Name] {
-				missing = append(missing, tt.Name+"."+variant.Name)
+		if enumIsHierarchical(tt) {
+			// docs/77: report missing leaves across the whole refinement subtree, by qualified name.
+			for _, leaf := range enumDescendantLeaves(tt) {
+				if !covered[leaf.Qualified] {
+					missing = append(missing, leaf.Qualified)
+				}
+			}
+		} else {
+			for _, variant := range tt.Variants {
+				if !covered[variant.Name] {
+					missing = append(missing, tt.Name+"."+variant.Name)
+				}
 			}
 		}
 		if len(missing) == 0 {

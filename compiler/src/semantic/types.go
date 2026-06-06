@@ -431,6 +431,9 @@ type EnumType struct {
 	// Child's cases are a subset of Parent's, so Child <: Parent (sealed nominal subtyping). Resolved
 	// after all enum skeletons are collected (parents may be declared in any order / another file).
 	Parent *EnumType
+	// Children are the direct refinements declared with `is this` — the downward edges of the sealed
+	// hierarchy (the inverse of Parent), in declaration order. Populated as parents are resolved.
+	Children []*EnumType
 }
 
 type PackedFieldStorageMode string

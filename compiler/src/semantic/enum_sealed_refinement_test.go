@@ -78,6 +78,80 @@ enum Assignment is Statement:
 	}
 }
 
+// docs/77: a `match` over a hierarchy scrutinee accepts arms naming any refinement's leaf
+// (`BinaryExpression.Add` when matching an `Expression`), and is exhaustive over the union of all
+// descendant leaves. Analysis-only (no lowering yet).
+const enumHierarchyMatchPrelude = `enum Expression: pass
+enum BinaryExpression is Expression:
+    Add(left: i64, right: i64)
+    Mul(left: i64, right: i64)
+enum Literal is Expression:
+    Int(value: i64)
+`
+
+func TestEnumHierarchyMatchExhaustive(t *testing.T) {
+	analyzeTreeTestSource(t, "enum_match_ok.elisa", enumHierarchyMatchPrelude+`
+def describe(e: Expression) -> i64:
+    out: mutable i64 = 0
+    match e:
+        BinaryExpression.Add(left: l, right: r):
+            out <- l + r
+        BinaryExpression.Mul(left: l, right: r):
+            out <- l * r
+        Literal.Int(value: v):
+            out <- v
+    return out
+`)
+}
+
+func TestEnumHierarchyMatchExpressionExhaustive(t *testing.T) {
+	// A match EXPRESSION requires exhaustiveness — full coverage of the descendant-leaf union is
+	// accepted with no wildcard.
+	analyzeTreeTestSource(t, "enum_match_expr_ok.elisa", enumHierarchyMatchPrelude+`
+def describe(e: Expression) -> i64:
+    return match e:
+        BinaryExpression.Add(left: l, right: r):
+            l + r
+        BinaryExpression.Mul(left: l, right: r):
+            l * r
+        Literal.Int(value: v):
+            v
+`)
+}
+
+func TestEnumHierarchyMatchNonExhaustiveErrors(t *testing.T) {
+	// Match EXPRESSION missing BinaryExpression.Mul must be flagged non-exhaustive.
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_match_partial.elisa", enumHierarchyMatchPrelude+`
+def describe(e: Expression) -> i64:
+    return match e:
+        BinaryExpression.Add(left: l, right: r):
+            l + r
+        Literal.Int(value: v):
+            v
+`)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("expected a non-exhaustive match error (missing BinaryExpression.Mul)")
+	}
+}
+
+func TestEnumHierarchyMatchRejectsNonDescendant(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_match_alien.elisa", enumHierarchyMatchPrelude+`
+enum Other: pass
+enum Outsider is Other:
+    Nope(x: i64)
+
+def describe(e: Expression) -> i64:
+    out: mutable i64 = 0
+    match e:
+        Outsider.Nope(x: n):
+            out <- n
+    return out
+`)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("expected an error: Outsider is not a refinement of Expression")
+	}
+}
+
 // Refining a non-enum (or unknown) type is a clear error, not a crash.
 func TestEnumRefinesNonEnumErrors(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "enum_is_bad.elisa", `struct Plain:

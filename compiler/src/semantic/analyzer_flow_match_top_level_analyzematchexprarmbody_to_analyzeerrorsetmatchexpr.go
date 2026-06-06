@@ -55,21 +55,38 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 		}
 		return true
 	case *ast.MatchVariantPattern:
-		if p.EnumName != enumType.Name {
-			a.errorf(p.Pos(), "match arm expects enum %q, got %q", enumType.Name, p.EnumName)
-			return false
+		// Hierarchy scrutinee (docs/77): an arm may name the scrutinee enum itself or any refinement
+		// of it (`BinaryExpression.Add` when matching an `Expression`). For a plain enum this collapses
+		// to the original same-name check.
+		var owner *EnumType
+		var variant *EnumVariant
+		if enumIsHierarchical(enumType) {
+			var ok bool
+			owner, variant, ok = a.resolveEnumMatchPatternCategory(enumType, p)
+			if !ok {
+				return false
+			}
+		} else {
+			if p.EnumName != enumType.Name {
+				a.errorf(p.Pos(), "match arm expects enum %q, got %q", enumType.Name, p.EnumName)
+				return false
+			}
+			v, ok := enumType.Variant(p.Variant)
+			if !ok {
+				a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
+				return false
+			}
+			owner, variant = enumType, v
 		}
-		variant, ok := enumType.Variant(p.Variant)
-		if !ok {
-			a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
-			return false
-		}
-		qualified := enumType.Name + "." + variant.Name
+		qualified := owner.Name + "." + variant.Name
 		if covered != nil {
+			// Bare key preserves the flat-enum convention; qualified key drives hierarchy
+			// exhaustiveness (leaves from different refinements never collide).
 			covered[variant.Name] = true
+			covered[qualified] = true
 		}
-		if enumType.Packed {
-			a.bindMatchedPackedVariantView(valueExpr, &PackedVariantViewType{Enum: enumType, Variant: variant})
+		if owner.Packed {
+			a.bindMatchedPackedVariantView(valueExpr, &PackedVariantViewType{Enum: owner, Variant: variant})
 		}
 		orderedArgs := a.resolveMatchPatternArgs(p, variant, qualified, false)
 		for i, arg := range orderedArgs {
