@@ -1,0 +1,59 @@
+include "/Users/torarinvikbjarko/Documents/Coding Projects/Go projects/Elisa-core/compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+extern printf(fmt: u8&, ...) -> int effects[Console.Write]
+
+struct Node:
+    tag: i32
+    span: i64
+    value: i64
+    left: i32
+    right: i32
+
+def make(a: mutable Arena&, nodes: mutable darray[Node]&, depth: i64) -> i32:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            in a:
+                nodes.push(Node(tag: 0, span: 1, value: 1, left: 0.i32() - 1, right: 0.i32() - 1))
+            return (nodes.count - 1).i32()
+        l: i32 = make(a, nodes, depth - 1)
+        r: i32 = make(a, nodes, depth - 1)
+        in a:
+            nodes.push(Node(tag: 1, span: 1, value: 0, left: l, right: r))
+        return (nodes.count - 1).i32()
+
+def check(nodes: darray[Node]&, i: i32) -> i64:
+    can Abort.Panic:
+        n: Node = nodes[i.usize()]
+        if n.tag == 0:
+            return n.span
+        return n.span + check(nodes, n.left) + check(nodes, n.right)
+
+def run(max_depth: i64) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Console.Write:
+        min_depth: i64 = 4
+        total: mutable i64 = 0
+        stretch_a: mutable Arena = zeroed
+        stretch: mutable darray[Node] @stretch_a = []
+        total <- total + check(stretch, make(&stretch_a, stretch, max_depth + 1))
+        arena_free(&stretch_a)
+        ll_a: mutable Arena = zeroed
+        long_lived: mutable darray[Node] @ll_a = []
+        ll_root: i32 = make(&ll_a, long_lived, max_depth)
+        depth: mutable i64 = min_depth
+        while depth <= max_depth:
+            iterations: i64 = 1 << (max_depth - depth + min_depth)
+            d_sum: mutable i64 = 0
+            for i in 0..<iterations:
+                a: mutable Arena = zeroed
+                nodes: mutable darray[Node] @a = []
+                d_sum <- d_sum + check(nodes, make(&a, nodes, depth))
+                arena_free(&a)
+            total <- total + d_sum
+            depth <- depth + 2
+        total <- total + check(long_lived, ll_root)
+        arena_free(&ll_a)
+        return total
+
+@test
+def bench() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Console.Write:
+        printf("binary-trees(18) check total: %lld\n".cast[u8&], run(18))
