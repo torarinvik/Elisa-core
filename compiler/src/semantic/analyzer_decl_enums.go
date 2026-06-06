@@ -83,6 +83,32 @@ func (a *Analyzer) assignHierarchyEnumTags(decls []scopedDecl) {
 	}
 }
 
+// inheritHierarchyCommonFields merges each ancestor's common(...) fields into every refinement's
+// Common map (docs/77), so common fields declared on a hierarchy root (the canonical AST `span`) are
+// shared by every node — constructors accept them and `node.field` reads resolve. The physical record
+// (built once per root) already carries them; this aligns the type-level view. A refinement's own
+// common field shadows nothing (duplicate names across the chain are rejected here).
+func (a *Analyzer) inheritHierarchyCommonFields(decls []scopedDecl) {
+	for _, scoped := range decls {
+		enumDecl, ok := scoped.Decl.(*ast.EnumDecl)
+		if !ok {
+			continue
+		}
+		enumType, _ := a.namedTypes[joinQualifiedName(scoped.Namespace, enumDecl.Name)].(*EnumType)
+		if enumType == nil || enumType.Parent == nil {
+			continue
+		}
+		for ancestor := enumType.Parent; ancestor != nil; ancestor = ancestor.Parent {
+			for name, field := range ancestor.Common {
+				if _, exists := enumType.Common[name]; exists {
+					continue
+				}
+				enumType.Common[name] = field
+			}
+		}
+	}
+}
+
 // enumIsHierarchical reports whether the enum participates in a sealed hierarchy (docs/77) — it is a
 // refinement of another enum, or has its own refinements. Plain standalone enums are not hierarchical
 // and keep the original flat match/exhaustiveness behavior.

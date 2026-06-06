@@ -416,7 +416,8 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 	}
 	switch g.packedModeForEnum(enumType) {
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
-		inlineCommonCount, err := g.packedEnumInlineCommonFieldCount(enumType)
+		// docs/77: payload sits after tag + the ROOT's inline common fields (the shared record layout).
+		inlineCommonCount, err := g.packedEnumInlineCommonFieldCount(enumType.Root())
 		if err != nil {
 			return 0, err
 		}
@@ -505,7 +506,13 @@ func (g *llvmGenerator) packedEnumCommonSideTableWordCount(enumType *semantic.En
 	return total, nil
 }
 func (g *llvmGenerator) packedEnumCommonFieldLayout(enumType *semantic.EnumType, fieldName string) (*packedEnumCommonFieldLayout, error) {
-	if enumType == nil || !enumType.Packed || enumType.Decl == nil {
+	if enumType == nil {
+		return nil, fmt.Errorf("missing packed enum common field layout metadata")
+	}
+	// docs/77: common(...) fields live on the hierarchy root and are laid out in the single root record;
+	// resolve a refinement's common field against the root so offsets match the shared record.
+	enumType = enumType.Root()
+	if !enumType.Packed || enumType.Decl == nil {
 		return nil, fmt.Errorf("missing packed enum common field layout metadata")
 	}
 	cacheKey := packedEnumCommonFieldLayoutCacheKey{enum: enumType, field: fieldName}

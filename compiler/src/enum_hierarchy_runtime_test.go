@@ -150,6 +150,38 @@ def bt() -> void:
 `)
 }
 
+// docs/77: common(...) fields on the hierarchy root are shared by every node, readable from any
+// refinement (the canonical AST `span` pattern). Build two nodes with spans, sum via match.
+func TestRecursiveEnumHierarchyCommonField(t *testing.T) {
+	runEnumHierarchyProgram(t, "rec_hier_common.elisa", `
+enum Node:
+    common(span: int)
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Node = new[auto] Expr.Lit(span: 10, value: 5)
+            b: Node = new[auto] Expr.Lit(span: 20, value: 7)
+            root: Node = new[auto] Expr.Add(span: 30, left: a, right: b)
+            if a.span != 10:
+                panic("common field read wrong: a.span should be 10")
+            if root.span != 30:
+                panic("common field read wrong: root.span should be 30")
+            total: mutable i64 = 0
+            match root:
+                Expr.Add(left: l, right: r):
+                    total <- total + root.span
+                Expr.Lit(value: v):
+                    total <- total + root.span + v
+            if total != 30:
+                panic("common field read in match arm wrong")
+`)
+}
+
 // Payload hierarchy: leaves carry data; the root's record is the union of all leaves' payloads.
 func TestValueEnumHierarchyWithPayload(t *testing.T) {
 	runEnumHierarchyProgram(t, "shape.elisa", `

@@ -129,8 +129,8 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 	}
 	rowValue := C.LLVMConstNull(rowType)
 	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, tagValue, 0, cStringFree("packed.enum.tag.ins"))
-	commonValues := make(map[string]C.LLVMValueRef, len(enumType.Decl.Common))
-	for _, commonDecl := range enumType.Decl.Common {
+	commonValues := make(map[string]C.LLVMValueRef, len(enumType.Root().Decl.Common))
+	for _, commonDecl := range enumType.Root().Decl.Common { // docs/77: common(...) lives on the root
 		arg, ok := commonArgs[commonDecl.Name]
 		if !ok {
 			continue
@@ -208,7 +208,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 			return nil, nil, err
 		}
 		C.LLVMBuildStore(s.builder, C.LLVMConstNull(sideBufferLLVMType), sideBufferPtr)
-		for _, commonDecl := range enumType.Decl.Common {
+		for _, commonDecl := range enumType.Root().Decl.Common { // docs/77: common(...) lives on the root
 			layout, err := s.g.packedEnumCommonFieldLayout(enumType, commonDecl.Name)
 			if err != nil {
 				return nil, nil, err

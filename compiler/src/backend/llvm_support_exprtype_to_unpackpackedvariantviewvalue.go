@@ -133,10 +133,12 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 	}
 	objType = semantic.StripAggregateStateType(objType)
 	if enumType, ok := objType.(*semantic.EnumType); ok && enumType.Packed {
-		if enumType.Decl == nil {
+		// docs/77: common(...) fields live on the hierarchy root; look them up there.
+		commonOwner := enumType.Root()
+		if commonOwner.Decl == nil {
 			return nil, 0, nil, false, fmt.Errorf("packed enum %s is missing declaration metadata", enumType.Name)
 		}
-		for _, fieldDecl := range enumType.Decl.Common {
+		for _, fieldDecl := range commonOwner.Decl.Common {
 			if fieldDecl.Name != fieldName {
 				continue
 			}
