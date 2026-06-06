@@ -5,6 +5,10 @@
 > enums) and the packed-store framing in docs/69, and builds on docs/75 (region-polymorphic
 > functions), docs/73 (default stack backing), docs/71 (multi-stack regions), docs/68 (region memory
 > model), docs/10 (orthogonality), and the shipped `layout` struct grammar (docs/01).
+>
+> **Forward:** splitting an `enum` into type-safe sealed sub-categories that share this same
+> unified-arena/index-handle model (`enum X is Y`, unifying the `tree`/`node` feature) is specified in
+> **docs/77 (enum hierarchies & sealed refinement)**.
 
 ## The decision, in one sentence
 
