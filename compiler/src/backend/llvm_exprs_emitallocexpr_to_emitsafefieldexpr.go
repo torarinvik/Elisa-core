@@ -455,7 +455,7 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	}
 	var indexValue C.LLVMValueRef
 	switch s.g.packedModeForEnum(sourceEnum) {
-	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
 		indexValue, err = s.coerceValue(handleValue, sourceEnum, s.g.result.NamedTypes["u32"])
 		if err != nil {
 			return nil, nil, true, err

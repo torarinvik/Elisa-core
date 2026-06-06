@@ -490,6 +490,9 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 			return nil, err
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue}, name), nil
+	case packedEnumABIAoS:
+		// docs/76 Slice 2: decode a handle to its record address = ctx_aos_store_record(state, index).
+		return ops.aosRecordPtr(handleValue, enumType, name)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}

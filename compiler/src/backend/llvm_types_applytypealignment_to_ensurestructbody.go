@@ -316,7 +316,7 @@ func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVM
 		return nil, fmt.Errorf("missing packed enum type")
 	}
 	switch g.packedModeForEnum(enumType) {
-	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
 		return g.lowerBuiltin("u32")
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
@@ -327,7 +327,7 @@ func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumS
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
 	switch g.packedLoweringForStore(storeType) {
-	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
 		return g.ensurePackedEnumStoreCarrierType(storeType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedLoweringForStore(storeType))
@@ -367,7 +367,7 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 		return nil, fmt.Errorf("missing packed enum storage type")
 	}
 	switch g.packedModeForEnum(enumType) {
-	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
 		return g.ensurePackedEnumRowType(enumType.Name, enumType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
@@ -406,7 +406,7 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 		return 0, fmt.Errorf("missing packed enum payload metadata")
 	}
 	switch g.packedModeForEnum(enumType) {
-	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
 		inlineCommonCount, err := g.packedEnumInlineCommonFieldCount(enumType)
 		if err != nil {
 			return 0, err

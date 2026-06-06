@@ -1,6 +1,9 @@
 package backend
 
-import "elisacore/src/semantic"
+import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
+)
 
 type PackedLoweringContract string
 
@@ -70,6 +73,14 @@ func (p PackedLoweringProfile) packedModeForPackedEnum(enumType *semantic.EnumTy
 				return mode
 			}
 		}
+	}
+	// docs/76: a recursive plain enum will default to AoS (one record per node) — unless the author
+	// opted into the columnar layout with `enum X layout soa`. NOT YET ENABLED: the AoS runtime store
+	// has a growth/scale bug (correct for small trees within one chunk, wrong/segfault as the store
+	// grows). Until that's fixed, recursive plain enums stay on the correct SoA path. Flip the guard
+	// below (currently `false &&`) once the AoS store is verified at scale.
+	if false && enumType.RecursivePlain && !(enumType.LayoutSet && enumType.Layout == ast.StructLayoutSOA) {
+		return packedEnumABIAoS
 	}
 	return p.canonicalPackedMode()
 }

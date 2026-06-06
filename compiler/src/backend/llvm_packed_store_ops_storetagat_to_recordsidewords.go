@@ -20,6 +20,38 @@ import (
 	"fmt"
 )
 
+// aosRecordPtr resolves a node index handle to its record address via ctx_aos_store_record(state,
+// index). The record holds the full rowType {tag, common, payload}; all field byte offsets are
+// rowType-relative (packedEnumVariantPayloadFieldByteOffset uses abiOffsetOfLLVMElement(rowType,...)),
+// so reads are direct loads at record+offset, consistent with the constructor's record-based writes.
+func (ops *packedStoreOps) aosRecordPtr(handleValue C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
+	stateValue, err := ops.stateValue(name + ".state")
+	if err != nil {
+		return nil, err
+	}
+	usizeType := ops.s.g.result.NamedTypes["usize"]
+	u32Type := ops.s.g.result.NamedTypes["u32"]
+	h32, err := ops.s.coerceValue(handleValue, enumType, u32Type)
+	if err != nil {
+		return nil, err
+	}
+	idx, err := ops.s.coerceValue(h32, u32Type, usizeType)
+	if err != nil {
+		return nil, err
+	}
+	helperType := ops.cachedRuntimeHelperType("ctx_aos_store_record", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "ctx_aos_store_record", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: ops.voidRefType()}
+	})
+	callee, err := ops.s.g.ensureFunctionDeclared("ctx_aos_store_record", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := ops.s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, idx}, name+".record"), nil
+}
 func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum tag metadata")
@@ -103,6 +135,17 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 			return tagValue, nil
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name), nil
+	case packedEnumABIAoS:
+		// docs/76 Slice 2: the tag is rowType field 0 → byte offset 0 in the record.
+		recordPtr, err := ops.aosRecordPtr(handleValue, enumType, name+".tag")
+		if err != nil {
+			return nil, err
+		}
+		tagLLVM, err := ops.s.g.lowerType(tagType)
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMBuildLoad2(ops.s.builder, tagLLVM, recordPtr, cStringFree(name)), nil
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
@@ -211,6 +254,33 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 			return wordValue, nil
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, ""), nil
+	case packedEnumABIAoS:
+		// docs/76 Slice 2: read the uintptr word at record + wordOffset*wordBytes. wordOffset is
+		// rowType-relative (the field byte offset / word), so this covers both common and payload words.
+		recordPtr, err := ops.aosRecordPtr(handleValue, enumType, "packed.aos")
+		if err != nil {
+			return nil, err
+		}
+		usizeLLVM, err := ops.s.g.lowerType(ops.s.g.result.NamedTypes["usize"])
+		if err != nil {
+			return nil, err
+		}
+		wordBytes := uint64(ops.s.g.wordBits / 8)
+		if wordBytes == 0 {
+			wordBytes = 8
+		}
+		byteOffset := C.LLVMBuildMul(ops.s.builder, wordOffset, C.LLVMConstInt(usizeLLVM, C.ulonglong(wordBytes), 0), cStringFree("packed.aos.byteoff"))
+		i8LLVM, err := ops.s.g.lowerBuiltin("u8")
+		if err != nil {
+			return nil, err
+		}
+		indices := []C.LLVMValueRef{byteOffset}
+		wordPtr := C.LLVMBuildGEP2(ops.s.builder, i8LLVM, recordPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.aos.word.ptr"))
+		uintptrLLVM, err := ops.s.g.lowerType(uintptrType)
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMBuildLoad2(ops.s.builder, uintptrLLVM, wordPtr, cStringFree("packed.aos.word")), nil
 	default:
 		arenaValue, err := ops.arenaValue("packed.arena")
 		if err != nil {

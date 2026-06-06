@@ -461,7 +461,7 @@ func (s *functionState) emitPackedStoreValueAtDenseKey(ops *packedStoreOps, keyI
 		return nil, nil, fmt.Errorf("dense-key packed store read requires store metadata")
 	}
 	switch s.g.packedModeForEnum(ops.storeType.Enum) {
-	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
 		coerced, err := s.coerceValue(keyIndex, s.g.result.NamedTypes["u32"], ops.storeType.Enum)
 		if err != nil {
 			return nil, nil, err

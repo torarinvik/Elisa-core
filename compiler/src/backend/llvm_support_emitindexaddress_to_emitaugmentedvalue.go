@@ -226,7 +226,7 @@ func (s *functionState) coercePackedEnumHandleValue(value C.LLVMValueRef, actual
 		return nil, false, nil
 	}
 	switch s.g.packedModeForEnum(expected) {
-	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
 		if !isNumericCastType(actual) {
 			return nil, false, nil
 		}
