@@ -415,6 +415,13 @@ type EnumType struct {
 	Variants                []*EnumVariant
 	VariantMap              map[string]*EnumVariant
 	Decl                    *ast.EnumDecl
+	// Layout (docs/76) records the `enum X layout soa|aos(...)` suffix. LayoutSet says whether one was
+	// written; when unset the compiler's default applies (AoS-in-arena for a recursive enum). The
+	// layout axis is independent of region (provenance) and freeze (usage) — docs/10.
+	Layout       ast.StructLayoutMode
+	LayoutSet    bool
+	LayoutSparse bool
+	IndexWidth   string // "u8"|"u16"|"u32"|"u64"; "" = default u32 (docs/76 opaque index handle)
 }
 
 type PackedFieldStorageMode string

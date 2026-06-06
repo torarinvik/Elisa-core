@@ -130,6 +130,13 @@ type EnumDecl struct {
 	Packed      bool
 	Common      []FieldDecl
 	Variants    []EnumVariantDecl
+	// Layout selects the physical layout of a recursive enum (docs/76): the `enum X layout soa|aos:`
+	// suffix. StructLayoutDefault means the compiler's default (AoS-in-arena for a recursive enum).
+	// LayoutSet records whether a `layout` suffix was written at all.
+	Layout       StructLayoutMode
+	LayoutSet    bool
+	LayoutSparse bool   // the `soa(sparse)` sub-option: variant-sparse payload columns
+	IndexWidth   string // the `(index: uN)` sub-option: "u8"|"u16"|"u32"|"u64"; "" = default (u32)
 }
 type TreeDecl struct {
 	Position    lexer.Pos

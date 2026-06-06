@@ -206,7 +206,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
-				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n}
+				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n, Layout: n.Layout, LayoutSet: n.LayoutSet, LayoutSparse: n.LayoutSparse, IndexWidth: n.IndexWidth}
 				a.namedTypes[qualifiedName] = enumType
 				markPrivate(qualifiedName)
 				if n.Packed {

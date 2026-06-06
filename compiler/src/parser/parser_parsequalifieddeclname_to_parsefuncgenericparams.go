@@ -123,6 +123,7 @@ func (p *Parser) parseEnumDeclWithAnnotations(annotations []ast.Annotation) *ast
 }
 func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast.Annotation) *ast.EnumDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	layout, layoutSet, sparse, indexWidth := p.parseEnumLayoutSuffix()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -143,7 +144,70 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants}
+	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth}
+}
+
+// parseEnumLayoutSuffix parses an optional `layout soa|aos|c|packed` suffix on an enum declaration
+// (docs/76), with optional `(sparse)` and/or `(index: uN)` sub-options, e.g.
+//
+//	enum Expr layout soa:
+//	enum Expr layout soa(sparse):
+//	enum Small layout aos(index: u16):
+//
+// `layout` reuses the struct layout grammar (docs/01) — one vocabulary across structs and enums. It
+// is layout-only: it carries no region and no usage meaning (orthogonality, docs/10).
+func (p *Parser) parseEnumLayoutSuffix() (ast.StructLayoutMode, bool, bool, string) {
+	if !p.matchIdentText("layout") {
+		return ast.StructLayoutDefault, false, false, ""
+	}
+	layout := ast.StructLayoutDefault
+	mode := p.cur()
+	if mode.Kind != lexer.TOKEN_IDENT && mode.Kind != lexer.TOKEN_PACKED {
+		p.errorf("expected enum layout mode `aos`, `soa`, `c`, or `packed`, got %s", mode)
+	} else {
+		p.advance()
+	}
+	switch mode.Text {
+	case "aos":
+		layout = ast.StructLayoutAOS
+	case "soa":
+		layout = ast.StructLayoutSOA
+	case "c":
+		layout = ast.StructLayoutC
+	case "packed":
+		layout = ast.StructLayoutPacked
+	default:
+		p.errorf("unsupported enum layout %q; expected `aos`, `soa`, `c`, or `packed`", mode.Text)
+	}
+	sparse := false
+	indexWidth := ""
+	if p.match(lexer.TOKEN_LPAREN) {
+		for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+			opt := p.cur()
+			if opt.Kind == lexer.TOKEN_IDENT && opt.Text == "sparse" {
+				p.advance()
+				sparse = true
+			} else if opt.Kind == lexer.TOKEN_IDENT && opt.Text == "index" {
+				p.advance()
+				p.expect(lexer.TOKEN_COLON)
+				width := p.expect(lexer.TOKEN_IDENT).Text
+				switch width {
+				case "u8", "u16", "u32", "u64":
+					indexWidth = width
+				default:
+					p.errorf("enum index width must be u8, u16, u32, or u64, got %q", width)
+				}
+			} else {
+				p.errorf("unexpected enum layout option %s; expected `sparse` or `index: uN`", opt)
+				p.advance()
+			}
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+	return layout, true, sparse, indexWidth
 }
 func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {
 	p.expect(lexer.TOKEN_IDENT)
