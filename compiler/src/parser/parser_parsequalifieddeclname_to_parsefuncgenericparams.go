@@ -136,9 +136,17 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "common" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
-			commonFields = append(commonFields, p.parseEnumCommonFields()...)
-			continue
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "common" && p.pos+1 < len(p.tokens) {
+			switch p.tokens[p.pos+1].Kind {
+			case lexer.TOKEN_COLON:
+				// Legacy indented block form: `common:` then fields below.
+				commonFields = append(commonFields, p.parseEnumCommonFields()...)
+				continue
+			case lexer.TOKEN_LPAREN:
+				// Canonical inline form (docs/76): `common(span: int, metadata: cstr)`.
+				commonFields = append(commonFields, p.parseEnumCommonFieldsInline()...)
+				continue
+			}
 		}
 		variants = append(variants, p.parseEnumVariantDecl())
 	}
@@ -226,6 +234,42 @@ func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 	return fields
 }
+// parseEnumCommonFieldsInline parses the canonical inline shared-field form (docs/76):
+//
+//	common(span: int, metadata: cstr)
+//
+// and its multi-line variant (newlines and a trailing comma are allowed inside the parens, like a
+// long function signature). It produces the same []ast.FieldDecl as the legacy `common:` block.
+func (p *Parser) parseEnumCommonFieldsInline() []ast.FieldDecl {
+	p.expect(lexer.TOKEN_IDENT) // "common"
+	p.expect(lexer.TOKEN_LPAREN)
+	fields := make([]ast.FieldDecl, 0, 4)
+	for {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_RPAREN || p.peek() == lexer.TOKEN_EOF {
+			break
+		}
+		annotations := p.parseAnnotations()
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_COLON)
+		mutable := false
+		if p.match(lexer.TOKEN_MUTABLE) {
+			mutable = true
+		}
+		typ := p.parseTypeExpr()
+		fields = append(fields, ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Mutable: mutable, Type: typ})
+		p.skipNewlines()
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.skipNewlines()
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expectNewline()
+	return fields
+}
+
 func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
