@@ -120,6 +120,12 @@ func (a *Analyzer) activeStmtBranch(n *ast.StaticIfStmt) []ast.Stmt {
 }
 
 func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
+	// docs/76 Phase 3: an enum is a recursive AST node not only when it references ITSELF by value,
+	// but when it can reach itself through a chain of by-value enum payload references (mutual
+	// recursion, e.g. Tree↔Forest, Expr↔Stmt). Promote every enum in such a cycle. Computed once over
+	// all enum decls before the type-creation loop so each enum's Packed/RecursivePlain flags are set
+	// consistently when its EnumType is built below.
+	recursiveEnums := computeRecursiveEnumSet(decls)
 	for _, scoped := range decls {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			markPrivate := func(name string) {
@@ -211,7 +217,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				// flag here, before any consumer runs, so the whole pipeline sees it consistently and
 				// the order-dependent type-graph below is built once). The default storage is AoS.
 				recursivePlain := false
-				if !n.Packed && enumDeclHasDirectSelfReference(n) {
+				if !n.Packed && recursiveEnums[n.Name] {
 					n.Packed = true
 					recursivePlain = true
 				}

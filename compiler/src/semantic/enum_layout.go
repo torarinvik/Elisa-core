@@ -41,6 +41,60 @@ func (e *EnumType) MaxNodeCount() uint64 {
 // enumDeclHasDirectSelfReference reports whether a plain enum is recursive: a variant payload whose
 // type is the enum itself, by value (a bare `Expr`, not `Expr&` and not `darray[Expr]`). That is
 // exactly the by-value self-reference the old "cannot contain Expr by value" error rejected — a
+// computeRecursiveEnumSet returns the set of enum names (by declared name) that are recursive AST
+// nodes: an enum reaches itself by following by-value enum-typed payload fields, directly
+// (List→List) or transitively through other enums (Tree→Forest→Tree, Expr↔Stmt). Only bare
+// `*ast.NamedType` payloads count — a reference (`Expr&`) or container (`darray[Expr]`) is already
+// indirect and does not force the node into a store. Every enum in a recursive cycle is promoted to
+// the region-backed AoS machinery.
+func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
+	byName := map[string]*ast.EnumDecl{}
+	for _, scoped := range decls {
+		if ed, ok := scoped.Decl.(*ast.EnumDecl); ok && ed != nil {
+			byName[ed.Name] = ed
+		}
+	}
+	byValueEnumRefs := func(ed *ast.EnumDecl) []string {
+		var out []string
+		if ed == nil {
+			return out
+		}
+		for i := range ed.Variants {
+			for _, pd := range ed.Variants[i].Payload {
+				if nt, ok := pd.Type.(*ast.NamedType); ok && nt != nil {
+					if _, isEnum := byName[nt.Name]; isEnum {
+						out = append(out, nt.Name)
+					}
+				}
+			}
+		}
+		return out
+	}
+	result := map[string]bool{}
+	for start := range byName {
+		visited := map[string]bool{}
+		var reachesStart func(cur string) bool
+		reachesStart = func(cur string) bool {
+			for _, next := range byValueEnumRefs(byName[cur]) {
+				if next == start {
+					return true
+				}
+				if !visited[next] {
+					visited[next] = true
+					if reachesStart(next) {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		if reachesStart(start) {
+			result[start] = true
+		}
+	}
+	return result
+}
+
 // reference is wrapped in a reference type-expr and a container puts the name behind type args, so a
 // *bare* `BuiltinTypeExpr{Name: <enum>}` with no type args is the recursive-AST-node case (docs/76).
 func enumDeclHasDirectSelfReference(n *ast.EnumDecl) bool {
