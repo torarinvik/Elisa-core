@@ -342,14 +342,36 @@ func matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 	if enumType == nil {
 		return false
 	}
-	covered := map[string]bool{}
+	covered := map[string]bool{}        // bare variant names (flat enum)
+	coveredQualified := map[string]bool{} // Owner.Variant (hierarchy)
 	for _, arm := range arms {
 		switch pattern := arm.Pattern.(type) {
 		case *ast.MatchWildcardPattern:
 			return true
 		case *ast.MatchVariantPattern:
 			covered[pattern.Variant] = true
+			coveredQualified[pattern.EnumName+"."+pattern.Variant] = true
 		}
+	}
+	// docs/77: a hierarchy match is exhaustive when every leaf across the whole refinement subtree is
+	// covered (by qualified Owner.Variant key).
+	if enumType.Parent != nil || len(enumType.Children) > 0 {
+		total := 0
+		allCovered := true
+		var visit func(e *semantic.EnumType)
+		visit = func(e *semantic.EnumType) {
+			for _, variant := range e.Variants {
+				total++
+				if !coveredQualified[e.Name+"."+variant.Name] {
+					allCovered = false
+				}
+			}
+			for _, child := range e.Children {
+				visit(child)
+			}
+		}
+		visit(enumType.Root())
+		return allCovered && total > 0
 	}
 	return len(covered) == len(enumType.Variants)
 }

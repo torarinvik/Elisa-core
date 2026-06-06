@@ -19,7 +19,7 @@ func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[str
 	// any call site uses `new[auto]` syntax — its bare constructors allocate into the region too.
 	for _, t := range a.namedTypes {
 		if et, ok := t.(*EnumType); ok && et != nil && et.RecursivePlain {
-			out[et.Name] = true
+			out[et.Root().Name] = true // docs/77: region-backed by hierarchy root
 		}
 	}
 	var rec func(v reflect.Value)
@@ -34,7 +34,7 @@ func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[str
 			}
 			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && alloc.AutoRegion {
 				if enumType, _, ok := a.packedAllocConstructorInfo(alloc.Value); ok && enumType != nil && enumType.Packed {
-					out[enumType.Name] = true
+					out[enumType.Root().Name] = true
 				}
 			}
 			rec(v.Elem())
@@ -291,7 +291,7 @@ func funcTypeHasExplicitPackedStoreParam(fnType *FuncType, enumName string) bool
 	}
 	explicitCount := funcTypeExplicitParamCount(fnType)
 	for i := 0; i < explicitCount && i < len(fnType.Params); i++ {
-		if storeType, ok := StripAggregateStateType(fnType.Params[i]).(*PackedEnumStoreType); ok && storeType != nil && storeType.Enum != nil && storeType.Enum.Name == enumName {
+		if storeType, ok := StripAggregateStateType(fnType.Params[i]).(*PackedEnumStoreType); ok && storeType != nil && storeType.Enum != nil && storeType.Enum.Root().Name == enumName {
 			return true
 		}
 	}
@@ -333,9 +333,12 @@ func packedStoreImplicitArgExpr(storeType *PackedEnumStoreType) ast.Expr {
 	if storeType == nil || storeType.Enum == nil {
 		return &ast.Ident{Name: "__packed_store_"}
 	}
-	return &ast.Ident{Name: packedStoreImplicitParamName(storeType.Enum.Name)}
+	return &ast.Ident{Name: packedStoreImplicitParamName(storeType.Enum.Root().Name)}
 }
 
+// collectPackedEnumsInType records the packed enums appearing in a type, canonicalized to their
+// hierarchy ROOT (docs/77) — a sealed hierarchy shares ONE store per root, so threading keys, param
+// names, and store types are all the root's. For a plain enum the root is itself.
 func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
 	switch tt := StripAggregateStateType(t).(type) {
 	case *RefType:
@@ -346,11 +349,13 @@ func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
 		collectPackedEnumsInType(tt.Value, out)
 	case *EnumType:
 		if tt != nil && tt.Packed {
-			out[tt.Name] = tt
+			root := tt.Root()
+			out[root.Name] = root
 		}
 	case *PackedVariantViewType:
 		if tt != nil && tt.Enum != nil && tt.Enum.Packed {
-			out[tt.Enum.Name] = tt.Enum
+			root := tt.Enum.Root()
+			out[root.Name] = root
 		}
 	}
 }

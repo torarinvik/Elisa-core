@@ -41,7 +41,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 				if ok {
 					variant, ok := enumType.Variant(fieldExpr.Field)
 					if ok && enumType.Packed && len(variant.Payload) == 0 {
-						if storeType.Enum != enumType {
+						if storeType.Enum.Root().Name != enumType.Root().Name { // docs/77: members share the root store
 							a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType)
 						}
 						return enumType
@@ -62,7 +62,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		a.errorf(expr.Value.Pos(), "new[%s] expects a packed enum constructor call, got %s", storeType, valueType)
 		return invalidType
 	}
-	if storeType.Enum != enumType {
+	if storeType.Enum.Root().Name != enumType.Root().Name { // docs/77: members share the root store
 		a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType)
 	}
 	orderedArgs, commonArgs, ok := a.resolvePackedEnumConstructorArgs(callExpr, enumType, variant)

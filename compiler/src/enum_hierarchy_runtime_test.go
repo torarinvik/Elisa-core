@@ -118,6 +118,38 @@ def bt() -> void:
 `)
 }
 
+// docs/77 Phase 3: CROSS-FUNCTION recursive hierarchy — a builder (make, returns Node) and a consumer
+// (eval, takes Node) are separate functions, so the per-root store must be THREADED between them.
+func TestRecursiveEnumHierarchyCrossFunction(t *testing.T) {
+	runEnumHierarchyProgram(t, "rec_hier_xfn.elisa", `
+enum Node: pass
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+
+def make(depth: i64) -> Node:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Expr.Lit(value: 1)
+        return Expr.Add(left: make(depth - 1), right: make(depth - 1))
+
+def eval(n: Node) -> i64:
+    match n:
+        Expr.Add(left: l, right: r):
+            return eval(l) + eval(r)
+        Expr.Lit(value: v):
+            return v
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            root: Node = make(10)
+            if eval(root) != 1024:
+                panic("cross-function recursive hierarchy produced wrong sum")
+`)
+}
+
 // Payload hierarchy: leaves carry data; the root's record is the union of all leaves' payloads.
 func TestValueEnumHierarchyWithPayload(t *testing.T) {
 	runEnumHierarchyProgram(t, "shape.elisa", `
