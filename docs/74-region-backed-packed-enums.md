@@ -80,6 +80,13 @@ Orthogonality stays physical, not just nominal:
 
 ## Cross-region edges (the rare case)
 
+> **SUPERSEDED by [docs/76](76-enum-layout-and-handles.md) §"Nested side-tables & cross-region
+> edges".** The `@types` field annotation below only binds because `types` is a *globally-known store*
+> (the ML-AST forest has a distinct program-level `TypeExpr` store). For an *ad-hoc local* region a
+> declared `@region` has nowhere to bind — so the general mechanism is **construction-time provenance
+> inference** (the edge is inferred from the argument's region; the enum type stays region-free;
+> functions thread the second region, not the type). Read docs/76 for the model.
+
 Same-region is the default and needs no notation (the four-enum ML AST forest lives in one region,
 unified by inference). A genuine cross-region edge annotates the **one field** that crosses, reusing
 the struct field-provenance suffix: `Name(symbol: int, ty: TypeExpr @types)`. The checker treats it

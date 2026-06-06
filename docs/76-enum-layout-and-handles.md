@@ -60,12 +60,12 @@ an existing node) and the freeze cliff in a single move.
 
 ## The beginner surface
 
-The entire vocabulary is `enum`, the variant constructors, and `match`. No `store`, no `columns`, no
-`packed`, no `common:`, no `&?`/`null`, no `new[...]` bracket, no arena:
+The vocabulary is `enum`, the variant constructors, `match`, and (only when variants share fields)
+`common(...)`. No `store`, no `columns`, no `packed`, no `&?`/`null`, no `new[...]` bracket, no arena:
 
 ```elisa
 enum Expr:
-    span: int                          # shared fields are just fields (was `common:`)
+    common(span: int)                  # fields every variant carries (one line)
     Int(value: int)
     Add(left: Expr, right: Expr)       # a recursive child is the bare type
 
@@ -90,6 +90,42 @@ pointer). This single rule is what makes "graduate to serialization without a re
 be a *checked* rule in the existing borrowed-owner-ref / interior-borrow machinery — if a raw pointer
 can leak, the no-cliff property is false.
 
+### Shared fields: `common(...)`
+
+Fields carried by *every* variant are written with `common(...)` — a colon-less, parenthesized form,
+canonical:
+
+```elisa
+enum Expr:
+    common(span: int, metadata: cstr)   # one line; uniform with a variant line
+    Int(value: int)
+    Add(left: Expr, right: Expr)
+```
+
+`common(...)` is chosen over the alternatives on a consistency rule already in the language: **`:`
+introduces an indented block; `(...)` is an inline, colon-less group** (`Int(value: int)`, `f(a, b)`).
+So `common: (...)` — colon *and* parens — is the one spelling that fights the grammar; `common(...)`
+reads exactly like a variant line (it *is* the "always-present variant"), parses trivially (the reader
+and the parser never have to disambiguate a bare field from a variant), and scales to many fields with
+multi-line parens, no new syntax:
+
+```elisa
+enum Expr:
+    common(
+        span: int,
+        line: int,
+        col: int,
+    )
+    Int(value: int)
+```
+
+This supersedes the earlier "shared fields are just bare fields (no keyword)" idea: the explicit
+grouping and the trivial parse are worth one reserved word inside an enum body. The legacy `common:`
+indented block keeps working (back-compat / a verbose multi-line option), with `common(...)` the
+documented canonical form. (Considered and rejected: the header form `enum Expr(span: int):` — it
+collides with the `[T]` generic and `layout …` suffixes and shoves a long shared list far from the
+`:`.)
+
 ## The opaque index handle
 
 A handle is an unsigned integer index relative to its store. Because it is **opaque** (no arithmetic,
@@ -109,6 +145,88 @@ the integer is never visible), the compiler owns its representation:
 - **Overflow is a loud panic** at the allocation site (same discipline as `reserve_commit`
   exhaustion), never a silent wrap — so sizing down to `u16`/`u8` is *safe*: the compiler enforces the
   ceiling for you.
+
+## Nested side-tables & cross-region edges
+
+A variant payload may itself hold a heap-shaped value — a `darray`, a `dict`, a string buffer (a
+"side-table"). The question is *which region that side-table lives in*, and how (if ever) you name a
+different one.
+
+```elisa
+enum FooEnum:
+    Foo(value: int)
+    Baz(rofl: u64, mao: darray[u16])     # a side-table inside a variant
+```
+
+### Same region — the default, fully inferred
+
+`mao`'s backing is inferred to live in **the node's own region**: co-located with the `FooEnum` node,
+freed in bulk when that region goes. No annotation, no region parameter. There is no separate "heap" —
+the side-table is a region-allocated buffer sitting next to the node (this is the AoS generalization
+of what the columnar store calls a "side table"). The node is a fixed record (`rofl` + a region-stable
+handle to the buffer) plus that buffer, both in one arena. This is just the §"opaque index handle"
+co-location guarantee applied one level down: a node's *contents* — child handles **and** containers —
+default to the node's region.
+
+### The binding rule (why a declared `@region` can't work)
+
+A region name written in a **field declaration** has nowhere to be bound — *unless* it is a parameter
+of the type (`enum FooEnum[region shared]`) or the variant (`Baz[region shared](...)`). There is no
+third option: a bare `mao: darray[u16] @shared` on the declaration references an unbound name and is
+**rejected**. So "annotate the field" collapses into "add a region parameter," and the real decision
+is parameter-vs-inference.
+
+### Cross-region — inferred from the argument, type stays region-free
+
+When a side-table must live in a *different, longer-lived* region than the node, **do not name it in
+the type.** The cross-region edge is inferred from the **argument's provenance at construction**:
+
+```elisa
+region shared(reserve_commit):
+    side: darray[u16] = [1, 2, 3]            # `side` lives in `shared`
+    in nodes:
+        node = FooEnum.Baz(rofl: 5, mao: side)
+        # compiler records: node.mao points into `shared`; checks `shared` outlives `nodes`
+```
+
+`node`'s type is just `FooEnum` — no `@shared`, no `[region shared]`. The compiler records a
+provenance fact ("`mao` is in `shared`") on the value and the existing outlives/escape checker enforces
+`shared` outlives `nodes`. Same machinery as same-region; it just remembers a second region for that one
+field. Where the edge must cross a **function** boundary, the second region is threaded on the
+*function* (docs/75 region-polymorphism, its multi-region tail), never on the enum type:
+
+```elisa
+def build(side: darray[u16]) -> FooEnum:     # `side`'s region threaded by inference, like docs/75
+    return FooEnum.Baz(rofl: 5, mao: side)    # node in the inferred region; mao in side's region
+```
+
+`build` is polymorphic over *two* regions (the node's and the side-table's); both inferred, both
+threaded; `FooEnum` stays clean.
+
+### Why not a region parameter on the type
+
+`enum FooEnum[region shared]` is **rejected** for two reasons — distinct from why docs/74 rejected
+`packed enum Expr[region r]`. (That earlier rejection was about an *erased, redundant* region — the
+handle already carried it, so `Expr[r]` and `Expr[other]` were the identical ABI word. A cross-region
+*field* names a **genuine second provenance**, so the redundancy argument does not apply here.) The
+reasons it is still rejected:
+
+1. **It re-creates the threading wall.** The moment `FooEnum[shared]` exists, every function building or
+   consuming one needs `[region shared]` threaded through it — the exact `undefined identifier shared`
+   wall region-polymorphic functions (docs/75) exist to remove.
+2. **It splits the type by provenance.** `FooEnum[a]` and `FooEnum[b]` would be different types with
+   byte-identical layout, differing only in where one field points — provenance leaking into type
+   identity, which docs/10 forbids.
+
+**Fallback (only if value-level inference proves too costly):** a region parameter on the **variant**
+(`Baz[region shared](...)`), scoped to the one variant that actually crosses — never smeared across the
+whole type. This is the explicit escape hatch, not the model.
+
+> Correction to docs/74: that doc's `ty: TypeExpr @types` field annotation only works because `types`
+> names a **globally-known store** (the ML-AST forest has a distinct program-level `TypeExpr` store).
+> For an *ad-hoc local* region there is no such global name, so a declared `@region` cannot bind — the
+> construction-time inference above is the mechanism. docs/74's "cross-region edges" section is
+> superseded by this one.
 
 ## Expert tweaks (the `layout` suffix, reused from structs)
 
@@ -190,7 +308,8 @@ Instead:
 > For whole-store column scans, write `enum … layout soa`. For the default fast tree, write plain
 > `enum`."*
 
-- `common:` blocks lower to plain top-level fields.
+- `common(...)` is the canonical shared-field form; the legacy `common:` indented block keeps working
+  and lowers to the same shared-field node prefix.
 - The explicit-store path (`Expr.Store(arena)`, `in store:`, `match node in store:`) is **kept
   verbatim** as the escape hatch for the cross-region forest (docs/74 already preserves it) — never
   the default.
@@ -213,10 +332,10 @@ deliverable** — everything else is downstream.
 | 0 | **Close region-poly threading gaps** so storeless builders never hit "requires an active in <arena>" — container ops (`darray.push`) and constructors in helper functions thread the caller's region like `new[auto]` already does (docs/75). Note: enum *construction* + *match* threading is already done (docs/74/75); this phase is the remaining explicit-container gap. | docs/75 |
 | 1 | **DONE** — `layout` on enum declarations: parses `enum … layout soa\|aos(sparse, index: uN)`, carries Layout/LayoutSet/LayoutSparse/IndexWidth onto EnumDecl + EnumType, reuses the struct `layout` grammar; bad index widths rejected at parse. No lowering change yet. | struct `layout` grammar |
 | 2 | **Opaque index handle ABI**: index width `u8…u64` (default `u32`, node-index), free null sentinel at each width, loud overflow panic; opaque-handle check (no raw `&` leak). | 1 |
-| 3 | **Plain recursive `enum` ⇒ AoS-in-arena default** with storeless `new`/`match`; non-recursive ⇒ inline value. Retire `common:` → fields. | 0, 2 |
+| 3 | **Plain recursive `enum` ⇒ AoS-in-arena default** with storeless `new`/`match`; non-recursive ⇒ inline value. Add canonical `common(...)` shared-field form (keep `common:` block). | 0, 2 |
 | 4 | **`packed enum` → deprecation error**; keep explicit-store path; map Cohort A to `layout soa`. | 3 |
 | 5 | **First-class column scan** (`Expr.column(.field)`) + `soa(sparse)` + the static memory lint + the `-Wperf` SoA hint. SoA becomes a real, discoverable expert path. | 1, 3 |
-| 6 | Auto-narrow index width from a local `reserve_commit(N)`; cross-region forest `aos(handle: pointer)` / `@field` edges. | 2, 5 |
+| 6 | **Cross-region side-table edges** via construction-time provenance inference (the edge is inferred from the argument's region; type stays region-free; functions thread the second region — docs/75 multi-region tail). Auto-narrow index width from a local `reserve_commit(N)`. | 2, 5, docs/75 |
 
 Land 0→4 as the milestone (the beginner default is fast, safe, ceremony-free; `packed enum` retired
 cleanly). 5 keeps SoA a first-class expert path. 6 is the tail.
@@ -225,5 +344,5 @@ cleanly). 5 keeps SoA a first-class expert path. 6 is the tail.
 
 - No layout selection from non-local usage (only declaration-site `layout`, or a `-Wperf` hint).
 - No region or freeze/usage meaning on `layout` (axes stay orthogonal, docs/10).
-- No pointer-vs-index dial in ordinary code; no `store`/`columns`/`packed`/`common:` in the beginner
+- No pointer-vs-index dial in ordinary code; no `store`/`columns`/`packed` in the beginner
   surface.
