@@ -1,0 +1,47 @@
+include "/Users/torarinvikbjarko/Documents/Coding Projects/Go projects/Elisa-core/compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+extern printf(fmt: u8&, ...) -> int effects[Console.Write]
+
+struct Tree:
+    left: Tree&?
+    right: Tree&?
+
+def make(depth: i64) -> Tree&:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return new[auto] Tree(left: null, right: null)
+        return new[auto] Tree(left: make(depth - 1), right: make(depth - 1))
+
+def check(node: Tree&) -> i64:
+    can Abort.Panic:
+        lo: Tree&? = node.left
+        ro: Tree&? = node.right
+        if lo != null and ro != null:
+            return 1 + check(lo) + check(ro)
+        return 1
+
+def run(max_depth: i64) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        min_depth: i64 = 4
+        total: mutable i64 = 0
+        in auto:
+            total <- total + check(make(max_depth + 1))
+        in auto:
+            long_lived: Tree& = make(max_depth)
+            depth: mutable i64 = min_depth
+            while depth <= max_depth:
+                iterations: i64 = 1 << (max_depth - depth + min_depth)
+                d_sum: mutable i64 = 0
+                for i in 0..<iterations:
+                    in auto:
+                        d_sum <- d_sum + check(make(depth))
+                total <- total + d_sum
+                depth <- depth + 2
+            total <- total + check(long_lived)
+        return total
+
+@test
+def bench() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        result: i64 = run(18)
+        printf("binary-trees(18) check total: %lld\n".cast[u8&], result)
