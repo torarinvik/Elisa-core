@@ -48,10 +48,9 @@ def reduce[T](s: Slice[T], w: usize, identity: T, op: func(T, T) -> T) -> T:
 		for i in 0..<w:
 			partials[i] <- identity
 		ps: Slice[T] = slice(&partials)
-		worker: func(ReduceArg[T]) -> i64 = reduce_worker.specialize[T]()
 		nursery workers(w):
 			for t in 0..<w:
-				submit worker(ReduceArg[T] { band: s.split(w, t), partials: ps, id: t, identity: identity, op: op })
+				submit reduce_worker[T](ReduceArg[T] { band: s.split(w, t), partials: ps, id: t, identity: identity, op: op })
 		acc: mutable T = identity
 		for i in 0..<w:
 			acc <- op(acc, partials[i])
