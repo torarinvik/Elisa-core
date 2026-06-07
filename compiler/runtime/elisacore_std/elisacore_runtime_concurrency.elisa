@@ -813,3 +813,41 @@ def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
 def fence(order: MemoryOrder):
 	can Atomics.Fence:
 		_ = order
+
+# ------------------------------------------------------------
+# Barrier: a sense-free generation barrier for persistent-worker parallelism.
+# `state` points at two i64 cells [count, generation] in caller-owned backing
+# (use `barrier_make` over a darray[i64] of length >= 2 that outlives the
+# workers). The struct is all scalars, so it is structurally thread-shareable and
+# may be passed by value to each worker; copies share the same backing cells.
+# The only unsafe step -- viewing the backing as atomics -- is encapsulated here.
+# ------------------------------------------------------------
+struct Barrier:
+	state: uintptr
+	total: i64
+
+# Initialize `backing[0..2)` to zero and return a Barrier over it for `total`
+# participating workers. `backing` must have length >= 2 and outlive every worker.
+def barrier_make(backing: mutable darray[i64]&, total: i64) -> Barrier:
+	backing[0.usize()] <- 0
+	backing[1.usize()] <- 0
+	return Barrier { state: (&backing[0.usize()]).cast[uintptr], total: total }
+
+# Block until all `total` workers have arrived, then release them together. No
+# per-thread state: the current generation is read before arrival and waited on.
+def barrier_wait(b: Barrier) -> void:
+	can Atomics.Load, Atomics.Store, Atomics.Rmw, Thread.Yield:
+		cnt: mutable atomic[i64]& = b.state.cast[mutable atomic[i64]&]
+		gen: mutable atomic[i64]& = (b.state + 8).cast[mutable atomic[i64]&]
+		g: i64 = load(gen, MemoryOrder.Acquire)
+		arrived: i64 = fetch_add(cnt, 1, MemoryOrder.AcqRel) + 1
+		if arrived == b.total:
+			store(cnt, 0, MemoryOrder.Relaxed)
+			_ = fetch_add(gen, 1, MemoryOrder.Release)
+		else:
+			spins: mutable i64 = 0
+			while load(gen, MemoryOrder.Acquire) == g:
+				spins <- spins + 1
+				if spins > 4000:
+					_ = yield_thread()
+					spins <- 0

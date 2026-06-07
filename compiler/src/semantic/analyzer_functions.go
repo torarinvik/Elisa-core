@@ -147,6 +147,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	}
 	a.checkSentinelIndex(fn)
 	a.checkAllocationChurn(fn)
+	a.checkThreadSpawnChurn(fn)
 	a.checkRegionLifetimes(fn)
 	if fnType != nil {
 		if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {

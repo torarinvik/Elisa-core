@@ -17,3 +17,37 @@ def std_mutex_condvar_native_smoke():
 		mutex_dispose((&mu).cast[mutable Mutex&])
 		assert mu.handle == null
 		assert cv.handle == null
+
+struct BarrierProbe:
+	gate: Barrier
+	out: uintptr
+	id: i64
+	rounds: i64
+
+def barrier_probe_worker(p: BarrierProbe) -> i64:
+	can Atomic, Thread.Yield:
+		po: mutable i64& = p.out.cast[mutable i64&]
+		for r in 0..<p.rounds:
+			barrier_wait(p.gate)
+		po[p.id.usize()] <- p.id * 1000 + p.rounds
+		return 0
+
+@test
+def std_barrier_native_smoke():
+	can Parallel:
+		backing: mutable darray[i64] = []
+		_ = backing.resize(2.usize())
+		out: mutable darray[i64] = []
+		_ = out.resize(3.usize())
+		out[0.usize()] <- -1
+		out[1.usize()] <- -1
+		out[2.usize()] <- -1
+		gate: Barrier = barrier_make(&backing, 3)
+		ob: uintptr = (&out[0.usize()]).cast[uintptr]
+		t0: Thread[i64, Joinable] = spawn1(barrier_probe_worker, BarrierProbe { gate: gate, out: ob, id: 0, rounds: 64 })
+		t1: Thread[i64, Joinable] = spawn1(barrier_probe_worker, BarrierProbe { gate: gate, out: ob, id: 1, rounds: 64 })
+		t2: Thread[i64, Joinable] = spawn1(barrier_probe_worker, BarrierProbe { gate: gate, out: ob, id: 2, rounds: 64 })
+		_ = join(move t0) + join(move t1) + join(move t2)
+		assert out[0.usize()] == 64
+		assert out[1.usize()] == 1064
+		assert out[2.usize()] == 2064

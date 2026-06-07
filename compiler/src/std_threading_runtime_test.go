@@ -20,4 +20,7 @@ func TestRunCLIStdThreadingRuntimeSmoke(t *testing.T) {
 	if !strings.Contains(stdout.String(), "[       OK ] std_mutex_condvar_native_smoke") {
 		t.Fatalf("expected std threading smoke test to pass, got stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
+	if !strings.Contains(stdout.String(), "[       OK ] std_barrier_native_smoke") {
+		t.Fatalf("expected std barrier smoke test to pass, got stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
 }
