@@ -132,7 +132,10 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 			rowIndexValue = currentCount
 			rowIndexType = usizeType
 		}
-		neededValue := C.LLVMBuildAdd(s.builder, currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("store."+name+".push.needed"))
+		neededValue, err := s.emitCheckedUSizeAdd(currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), "store."+name+".push.needed")
+		if err != nil {
+			return nil, nil, true, err
+		}
 		if err := s.emitBuiltinDArrayEnsureCapacity(fieldPtr, darrayType, owner.arenaRef, neededValue, "store."+name+".push"); err != nil {
 			return nil, nil, true, err
 		}

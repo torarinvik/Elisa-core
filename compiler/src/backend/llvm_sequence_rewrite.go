@@ -176,7 +176,10 @@ func (s *functionState) emitSequenceRewriteAppend(outPtr C.LLVMValueRef, outType
 		return err
 	}
 	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree(name+".count"))
-	neededValue := C.LLVMBuildAdd(s.builder, currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree(name+".needed"))
+	neededValue, err := s.emitCheckedUSizeAdd(currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), name+".needed")
+	if err != nil {
+		return err
+	}
 	if err := s.emitBuiltinDArrayEnsureCapacity(outPtr, outType, owner.arenaRef, neededValue, name); err != nil {
 		return err
 	}

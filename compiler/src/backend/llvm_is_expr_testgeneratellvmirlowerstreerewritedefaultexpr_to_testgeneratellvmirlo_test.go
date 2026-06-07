@@ -146,7 +146,7 @@ func TestGenerateLLVMIRLowersSequenceRewriteExpr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define %DynArray__u32 @keep_non_zero", "sequence.rewrite.loop", "sequence.emit.slot"} {
+	for _, check := range []string{"define %DynArray__u32 @keep_non_zero", "sequence.rewrite.loop", "sequence.emit.needed.overflow", "sequence.emit.slot"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected sequence rewrite lowering to include %q, got:\n%s", check, output)
 		}

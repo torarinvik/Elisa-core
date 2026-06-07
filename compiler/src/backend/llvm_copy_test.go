@@ -91,6 +91,29 @@ func TestGenerateLLVMIRDArrayPushAndExtendCountArithmeticIsChecked(t *testing.T)
 	}
 }
 
+func TestGenerateLLVMIRDArrayCstrCountArithmeticIsChecked(t *testing.T) {
+	src := `def finish(owner: mutable Arena&) -> cstr:
+    can Abort.Panic, Memory.Allocate:
+        in owner:
+            xs: mutable darray[u8] = []
+            xs.push([72, 105])
+            return xs.as_cstr()
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_cstr_count_overflow.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"llvm.uadd.with.overflow",
+		"darray.cstr.needed.overflow",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected darray cstr count arithmetic to emit %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRDArrayEnsureCapacityArithmeticAvoidsWrappedCapacity(t *testing.T) {
 	src := `def build(owner: mutable Arena&, n: usize) -> usize:
     xs: mutable darray[u16] = []

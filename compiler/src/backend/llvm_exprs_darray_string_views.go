@@ -117,7 +117,10 @@ func (s *functionState) emitBuiltinDArrayCstrCall(expr *ast.CallExpr) (C.LLVMVal
 		return nil, nil, true, err
 	}
 	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.cstr.count"))
-	neededValue := C.LLVMBuildAdd(s.builder, currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("darray.cstr.needed"))
+	neededValue, err := s.emitCheckedUSizeAdd(currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), "darray.cstr.needed")
+	if err != nil {
+		return nil, nil, true, err
+	}
 	if err := s.emitBuiltinDArrayEnsureCapacity(darrayPtr, darrayType, owner.arenaRef, neededValue, "darray.cstr"); err != nil {
 		return nil, nil, true, err
 	}

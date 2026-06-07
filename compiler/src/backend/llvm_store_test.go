@@ -55,8 +55,14 @@ def build(owner: Arena) -> usize:
 	if !strings.Contains(output, "store.name_key.push.slot") {
 		t.Fatalf("expected store push lowering for first column, got:\n%s", output)
 	}
+	if !strings.Contains(output, "store.name_key.push.needed.overflow") {
+		t.Fatalf("expected store push count arithmetic to be checked for first column, got:\n%s", output)
+	}
 	if !strings.Contains(output, "store.depth.push.slot") {
 		t.Fatalf("expected store push lowering for second column, got:\n%s", output)
+	}
+	if !strings.Contains(output, "store.depth.push.needed.overflow") {
+		t.Fatalf("expected store push count arithmetic to be checked for second column, got:\n%s", output)
 	}
 	if !strings.Contains(output, "store.name_key.truncate.count") {
 		t.Fatalf("expected store truncate lowering for first column, got:\n%s", output)
