@@ -29,17 +29,18 @@ def promote_runtime_test() -> void:
     can Abort.Panic, Memory.Allocate:
         region keep(4096)
         region scratch(4096)
-        value: i32& = new[scratch] 7
-        promote value into keep
-        xs: mutable darray[i64] @scratch = []
-        xs.push(11i64)
-        xs.push(22i64)
-        promote xs into keep
-        destroy scratch
-        if value[0] != 7:
-            panic("promote ref: value corrupted after source region destroyed")
-        if xs[0] != 11i64 or xs[1] != 22i64:
-            panic("promote darray: buffer corrupted after source region destroyed")
+        in scratch:
+            value: i32& = new[scratch] 7
+            promote value into keep
+            xs: mutable darray[i64] = []
+            xs.push(11)
+            xs.push(22)
+            promote xs into keep
+            destroy scratch
+            if value[0] != 7:
+                panic("promote ref: value corrupted after source region destroyed")
+            if xs[0] != 11 or xs[1] != 22:
+                panic("promote darray: buffer corrupted after source region destroyed")
         destroy keep
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

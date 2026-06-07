@@ -32,9 +32,20 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 }
 
 func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt) {
+	known := map[string]Type{}
 	for i, stmt := range stmts {
 		decl, ok := stmt.(*ast.VarDeclStmt)
-		if !ok || decl == nil || decl.Type != nil || !semanticListLiteralExpr(decl.Value) {
+		if !ok || decl == nil {
+			continue
+		}
+		if decl.Type != nil {
+			known[decl.Name] = a.resolveType(decl.Type)
+			continue
+		}
+		if !semanticListLiteralExpr(decl.Value) {
+			if typ := inferKnownDArrayBuilderExprType(decl.Value, known); typ != nil {
+				known[decl.Name] = typ
+			}
 			continue
 		}
 		elem := inferDArrayBuilderElemTypeExpr(decl.Value)
@@ -42,7 +53,7 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt) {
 			if shadow, ok := stmts[j].(*ast.VarDeclStmt); ok && shadow.Name == decl.Name {
 				break
 			}
-			elem = inferDArrayElemTypeFromUse(stmts[j], decl.Name)
+			elem = inferDArrayElemTypeFromUse(stmts[j], decl.Name, known)
 		}
 		if elem == nil {
 			continue
@@ -56,6 +67,7 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt) {
 				TypeArgs: []ast.TypeExpr{elem},
 			},
 		}
+		known[decl.Name] = a.resolveType(decl.Type)
 	}
 }
 
@@ -91,7 +103,7 @@ func inferDArrayBuilderElemTypeExpr(value ast.Expr) ast.TypeExpr {
 	return nil
 }
 
-func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string) ast.TypeExpr {
+func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string, known map[string]Type) ast.TypeExpr {
 	var found ast.TypeExpr
 	var visitExpr func(ast.Expr)
 	visitExpr = func(expr ast.Expr) {
@@ -109,6 +121,9 @@ func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string) ast.TypeExpr {
 								found = inferDArrayBuilderElemTypeExpr(list)
 							} else {
 								found = inferSimpleLiteralTypeExpr(e.Args[0])
+								if found == nil {
+									found = inferDArrayBuilderElemTypeFromKnownExpr(e.Args[0], known)
+								}
 							}
 						}
 						return
@@ -116,6 +131,8 @@ func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string) ast.TypeExpr {
 						if len(e.Args) == 1 {
 							if list, ok := stripParenExpr(e.Args[0]).(*ast.ListLitExpr); ok && list != nil {
 								found = inferDArrayBuilderElemTypeExpr(list)
+							} else {
+								found = inferDArrayExtendElemTypeFromKnownExpr(e.Args[0], known)
 							}
 						}
 						return
@@ -146,6 +163,54 @@ func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string) ast.TypeExpr {
 		visitExpr(s.Value)
 	}
 	return found
+}
+
+func inferDArrayBuilderElemTypeFromKnownExpr(expr ast.Expr, known map[string]Type) ast.TypeExpr {
+	typ := inferKnownDArrayBuilderExprType(expr, known)
+	if typ == nil || IsInvalidType(typ) {
+		return nil
+	}
+	return astTypeExprForBuiltinMethodRewrite(expr.Pos(), typ)
+}
+
+func inferKnownDArrayBuilderExprType(expr ast.Expr, known map[string]Type) Type {
+	expr = stripParenExpr(expr)
+	ident, ok := expr.(*ast.Ident)
+	if !ok || ident == nil {
+		return nil
+	}
+	typ := known[ident.Name]
+	if ref, ok := typ.(*RefType); ok && ref != nil {
+		typ = ref.Elem
+	}
+	return typ
+}
+
+func inferDArrayExtendElemTypeFromKnownExpr(expr ast.Expr, known map[string]Type) ast.TypeExpr {
+	expr = stripParenExpr(expr)
+	ident, ok := expr.(*ast.Ident)
+	if !ok || ident == nil {
+		return nil
+	}
+	typ := known[ident.Name]
+	if ref, ok := typ.(*RefType); ok && ref != nil {
+		typ = ref.Elem
+	}
+	switch t := StripAggregateStateType(typ).(type) {
+	case *DArrayType:
+		if t != nil {
+			return astTypeExprForBuiltinMethodRewrite(expr.Pos(), t.Elem)
+		}
+	case *DArrayViewType:
+		if t != nil {
+			return astTypeExprForBuiltinMethodRewrite(expr.Pos(), t.Elem)
+		}
+	case *ArrayType:
+		if t != nil {
+			return astTypeExprForBuiltinMethodRewrite(expr.Pos(), t.Elem)
+		}
+	}
+	return nil
 }
 
 func inferSimpleLiteralTypeExpr(expr ast.Expr) ast.TypeExpr {

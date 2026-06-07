@@ -288,6 +288,77 @@ func TestAnalyzeInfersUntypedEmptyDArrayFromPush(t *testing.T) {
 	}
 }
 
+func TestAnalyzeInfersUntypedDArrayFromVariablePush(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_empty_infers_from_variable_push.elisa", `def build() -> void:
+    item: u8 = 7
+    xs = []
+    xs.push(item)
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, `requires an active in <arena>: scope`) || strings.Contains(all, `requires a type or initializer`) {
+		t.Fatalf("expected typed push argument to infer an untyped darray, got:\n%s", all)
+	}
+	var regionStmt *ast.RegionStmt
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name == "build" && len(fn.Body) != 0 {
+			regionStmt, _ = fn.Body[0].(*ast.RegionStmt)
+			break
+		}
+	}
+	if regionStmt == nil || len(regionStmt.Body) < 2 {
+		t.Fatalf("expected function body to be wrapped in inferred auto region, got %#v", result.File.Decls[0])
+	}
+	varDecl, ok := regionStmt.Body[1].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected inferred darray declaration after typed item, got %T", regionStmt.Body[1])
+	}
+	darrayType, ok := result.ExprTypes[varDecl.Value].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected empty literal to resolve to inferred darray type, got %T", result.ExprTypes[varDecl.Value])
+	}
+	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "u8" {
+		t.Fatalf("expected inferred darray element u8, got %#v", darrayType.Elem)
+	}
+}
+
+func TestAnalyzeInfersUntypedDArrayFromExtendSource(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_empty_infers_from_extend_source.elisa", `def build() -> void:
+    src: mutable darray[u8] = []
+    src.push([1, 2])
+    xs = []
+    xs.extend(src)
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, `requires an active in <arena>: scope`) || strings.Contains(all, `requires a type or initializer`) {
+		t.Fatalf("expected typed extend source to infer an untyped darray, got:\n%s", all)
+	}
+	var regionStmt *ast.RegionStmt
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name == "build" && len(fn.Body) != 0 {
+			regionStmt, _ = fn.Body[0].(*ast.RegionStmt)
+			break
+		}
+	}
+	if regionStmt == nil || len(regionStmt.Body) < 3 {
+		t.Fatalf("expected function body to be wrapped in inferred auto region, got %#v", result.File.Decls[0])
+	}
+	varDecl, ok := regionStmt.Body[2].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected inferred darray declaration after source setup, got %T", regionStmt.Body[2])
+	}
+	darrayType, ok := result.ExprTypes[varDecl.Value].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected empty literal to resolve to inferred darray type, got %T", result.ExprTypes[varDecl.Value])
+	}
+	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "u8" {
+		t.Fatalf("expected inferred darray element u8, got %#v", darrayType.Elem)
+	}
+}
+
 func TestAnalyzeInfersUntypedNonEmptyDArrayFromUse(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_nonempty_infers_from_use.elisa", `def build() -> void:
     xs = [1, 2]
