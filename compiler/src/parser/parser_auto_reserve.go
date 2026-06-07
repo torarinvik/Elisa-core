@@ -3,6 +3,7 @@ package parser
 import (
 	"os"
 	"reflect"
+	"strconv"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -21,7 +22,7 @@ import (
 //
 // `extend` is treated as a fill too. The bound is a conservative reservation: it may not cover
 // every element appended by each extension, but it still removes avoidable early growth without
-// changing values.
+// changing values. `push([a, b, c])` contributes its literal element count to the reserve bound.
 //
 // This is a pure optimization: reserve only pre-allocates capacity (it never changes observable
 // length or values), and over-reserving is safe. v1 fires only for the side-effect-free counting
@@ -88,8 +89,17 @@ func countingFillBound(loop *ast.ForStmt, name string) (ast.Expr, bool) {
 	if clone == nil {
 		return nil, false // not a pure ident/int bound
 	}
-	if !bodyGrowsTo(loop.Body, name) {
+	perIteration, ok := bodyGrowthPerIteration(loop.Body, name)
+	if !ok {
 		return nil, false
+	}
+	if perIteration > 1 {
+		clone = &ast.BinaryExpr{
+			Position: clone.Pos(),
+			Op:       lexer.TOKEN_STAR,
+			Left:     clone,
+			Right:    &ast.IntLit{Position: loop.Position, Value: strconv.Itoa(perIteration)},
+		}
 	}
 	return clone, true
 }
@@ -106,12 +116,14 @@ func cloneBoundExpr(e ast.Expr) ast.Expr {
 	return nil
 }
 
-// bodyGrowsTo reports whether any `name.push(...)` or `name.extend(...)` call appears anywhere in body.
-func bodyGrowsTo(body []ast.Stmt, name string) bool {
-	found := false
+// bodyGrowthPerIteration returns the syntactically known minimum number of elements appended to
+// name per loop iteration by `push(...)` / `extend(...)` calls. Scalar push and extend each count
+// as 1; `push([a, b, c])` counts as 3.
+func bodyGrowthPerIteration(body []ast.Stmt, name string) (int, bool) {
+	growth := 0
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
+		if !v.IsValid() || !v.CanInterface() {
 			return
 		}
 		switch v.Kind() {
@@ -122,7 +134,7 @@ func bodyGrowsTo(body []ast.Stmt, name string) bool {
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if field, ok := call.Func.(*ast.FieldExpr); ok && (field.Field == "push" || field.Field == "extend") {
 					if recv, ok := field.Object.(*ast.Ident); ok && recv.Name == name {
-						found = true
+						growth += growthCallElementCount(field.Field, call)
 						return
 					}
 				}
@@ -139,7 +151,18 @@ func bodyGrowsTo(body []ast.Stmt, name string) bool {
 		}
 	}
 	walk(reflect.ValueOf(body))
-	return found
+	return growth, growth > 0
+}
+
+func growthCallElementCount(method string, call *ast.CallExpr) int {
+	if method != "push" || call == nil || len(call.Args) != 1 {
+		return 1
+	}
+	list, ok := call.Args[0].(*ast.ListLitExpr)
+	if !ok || list == nil || list.Brace || len(list.Elems) == 0 {
+		return 1
+	}
+	return len(list.Elems)
 }
 
 // makeReserveStmt builds `name.reserve(bound)` as a bare expression statement.

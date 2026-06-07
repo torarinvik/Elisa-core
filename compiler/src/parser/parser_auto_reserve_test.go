@@ -38,6 +38,20 @@ func TestAutoReserveInsertsBeforeCountingExtendFill(t *testing.T) {
 	}
 }
 
+func TestAutoReserveCountsListPushElements(t *testing.T) {
+	file, errs := parseSourceFile(t, "def foo(n: usize) -> i64:\n    xs: mutable darray[i64] = []\n    for i in 0..<n:\n        xs.push([1, 2, 3])\n    return xs[0]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	formatted := unparse.FormatDecl(file.Decls[0])
+	if !strings.Contains(formatted, "xs.reserve((n * 3))") {
+		t.Fatalf("expected auto-reserve to account for list-push element count, got:\n%s", formatted)
+	}
+	if strings.Index(formatted, "xs.reserve((n * 3))") > strings.Index(formatted, "for i in") {
+		t.Fatalf("reserve must come before the list-push fill loop, got:\n%s", formatted)
+	}
+}
+
 // v1 fires only for the side-effect-free counting shape. A `for x in coll:` fill (no statically
 // derivable pure bound at parse time) and a non-empty / explicitly-regioned darray are skipped.
 func TestAutoReserveSkipsNonCountingAndIneligible(t *testing.T) {
