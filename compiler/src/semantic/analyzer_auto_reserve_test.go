@@ -90,6 +90,37 @@ func TestAutoReserveForInExtendSetsPreReserve(t *testing.T) {
 	}
 }
 
+func TestAutoReserveForInCountsListPushElements(t *testing.T) {
+	file := analyzeAndGetFile(t, `def g(src: darray[i64]&) -> i64:
+    ys: mutable darray[i64] = []
+    for x in src:
+        ys.push([x, x])
+    return ys[0]
+`)
+	loop := firstIterForStmt(file)
+	if loop == nil {
+		t.Fatal("no IterForStmt found")
+	}
+	if loop.PreReserve == nil {
+		t.Fatal("expected an auto-reserve PreReserve on the for-in list-push fill loop")
+	}
+	exprStmt, ok := loop.PreReserve.(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected reserve prelude to be an expr stmt, got %T", loop.PreReserve)
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		t.Fatalf("expected reserve call with one bound argument, got %T %#v", exprStmt.Expr, exprStmt.Expr)
+	}
+	bound, ok := call.Args[0].(*ast.BinaryExpr)
+	if !ok || bound.Op != lexer.TOKEN_STAR {
+		t.Fatalf("expected reserve bound to multiply source count by list length, got %T %#v", call.Args[0], call.Args[0])
+	}
+	if lit, ok := bound.Right.(*ast.IntLit); !ok || lit.Value != "2" {
+		t.Fatalf("expected reserve multiplier 2, got %T %#v", bound.Right, bound.Right)
+	}
+}
+
 // Two darrays filled in one loop is ambiguous (which to presize?) — skipped.
 func TestAutoReserveForInSkipsAmbiguousFill(t *testing.T) {
 	file := analyzeAndGetFile(t, `def g(src: darray[i64]&) -> i64:

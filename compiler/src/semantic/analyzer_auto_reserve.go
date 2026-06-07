@@ -3,8 +3,10 @@ package semantic
 import (
 	"os"
 	"reflect"
+	"strconv"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // autoReserveDisabledSem opts out of analysis-time auto-reservation (the `for x in coll` case).
@@ -13,8 +15,9 @@ var autoReserveDisabledSem = os.Getenv("ELISA_NO_AUTO_RESERVE") != ""
 
 // maybeAutoReserveIterFill infers a presize for a `for x in src:` loop that fills a darray, by
 // synthesizing `ys.reserve(src.count)` and emitting it before the loop (region inference, Phase A;
-// the for-in counterpart of the parser's counting-loop auto-reserve). The darray then never
-// reallocates during the fill, and becomes a fixed-footprint citizen that packs densely.
+// the for-in counterpart of the parser's counting-loop auto-reserve). Fixed-size list pushes scale
+// the bound (`ys.push([a, b])` reserves `src.count * 2`). The darray then never reallocates during
+// the fill, and becomes a fixed-footprint citizen that packs densely.
 //
 // Pure optimization, so the eligibility bar is conservative for safety:
 //   - source is a bare identifier of darray type — `.count` is O(1) and re-reading it cannot
@@ -33,7 +36,8 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		return
 	}
 	ysName := ""
-	for name := range collectGrowthTargetNames(stmt.Body) {
+	perIteration := 0
+	for name, growth := range collectGrowthTargetCounts(stmt.Body) {
 		if name == srcIdent.Name {
 			continue
 		}
@@ -48,15 +52,25 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 			return // more than one fill target — ambiguous, skip
 		}
 		ysName = name
+		perIteration = growth
 	}
 	if ysName == "" {
 		return
 	}
 	pos := stmt.Position
+	bound := ast.Expr(&ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: srcIdent.Name}, Field: "count"})
+	if perIteration > 1 {
+		bound = &ast.BinaryExpr{
+			Position: pos,
+			Op:       lexer.TOKEN_STAR,
+			Left:     bound,
+			Right:    &ast.IntLit{Position: pos, Value: strconv.Itoa(perIteration)},
+		}
+	}
 	preReserve := &ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{
 		Position: pos,
 		Func:     &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ysName}, Field: "reserve"},
-		Args:     []ast.Expr{&ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: srcIdent.Name}, Field: "count"}},
+		Args:     []ast.Expr{bound},
 	}}
 	a.analyzeStmt(preReserve)
 	stmt.PreReserve = preReserve
@@ -72,10 +86,10 @@ func isDArrayTypeMaybeRef(t Type) bool {
 	return ok
 }
 
-// collectGrowthTargetNames returns the set of receiver names of `name.push(...)` or
-// `name.extend(...)` calls in body.
-func collectGrowthTargetNames(body []ast.Stmt) map[string]bool {
-	names := map[string]bool{}
+// collectGrowthTargetCounts returns syntactically known per-iteration growth for each receiver
+// named by `name.push(...)` or `name.extend(...)` calls in body.
+func collectGrowthTargetCounts(body []ast.Stmt) map[string]int {
+	counts := map[string]int{}
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -89,7 +103,8 @@ func collectGrowthTargetNames(body []ast.Stmt) map[string]bool {
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if field, ok := call.Func.(*ast.FieldExpr); ok && (field.Field == "push" || field.Field == "extend") {
 					if recv, ok := field.Object.(*ast.Ident); ok {
-						names[recv.Name] = true
+						counts[recv.Name] += semanticGrowthCallElementCount(field.Field, call)
+						return
 					}
 				}
 			}
@@ -105,5 +120,16 @@ func collectGrowthTargetNames(body []ast.Stmt) map[string]bool {
 		}
 	}
 	walk(reflect.ValueOf(body))
-	return names
+	return counts
+}
+
+func semanticGrowthCallElementCount(method string, call *ast.CallExpr) int {
+	if method != "push" || call == nil || len(call.Args) != 1 {
+		return 1
+	}
+	list, ok := call.Args[0].(*ast.ListLitExpr)
+	if !ok || list == nil || list.Brace || len(list.Elems) == 0 {
+		return 1
+	}
+	return len(list.Elems)
 }
