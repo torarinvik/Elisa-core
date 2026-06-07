@@ -269,14 +269,14 @@ func diagnosticRuntimeCarrierTypeString(t Type) (string, bool) {
 		if tt.Name == "DynDict" {
 			return "dict[K, V] (runtime carrier)", true
 		}
-		return runtimeCarrierSurfaceReplacement(tt.Name)
+		return runtimeCarrierTypeDisplayReplacement(tt.Name)
 	case *GenericInstanceType:
 		switch tt.Name {
 		case "DynArray":
 			if len(tt.Args) == 1 {
 				return fmt.Sprintf("darray[%s, shape]", diagnosticTypeString(tt.Args[0])), true
 			}
-			return runtimeCarrierSurfaceReplacement(tt.Name)
+			return runtimeCarrierTypeDisplayReplacement(tt.Name)
 		case "DynDict":
 			if len(tt.Args) == 2 {
 				dictText := fmt.Sprintf("dict[%s, %s]", diagnosticTypeString(tt.Args[0]), diagnosticTypeString(tt.Args[1]))

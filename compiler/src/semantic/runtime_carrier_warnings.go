@@ -8,7 +8,28 @@ import (
 	"elisacore/src/lexer"
 )
 
+// runtimeCarrierSurfaceReplacement returns the prose "use X instead" hint for the carrier
+// WARNING/ERROR message. Arena/ArenaMark map to a prose phrase (not a type name) because the
+// migration target is a language construct (a region scope), not a drop-in type.
 func runtimeCarrierSurfaceReplacement(typeName string) (string, bool) {
+	if display, ok := runtimeCarrierTypeDisplayReplacement(typeName); ok {
+		return display, true
+	}
+	switch typeName {
+	case "Arena":
+		return "region scopes and inferred container regions", true
+	case "ArenaMark":
+		return "region scopes/checkpoints", true
+	default:
+		return "", false
+	}
+}
+
+// runtimeCarrierTypeDisplayReplacement returns the clean *type name* a raw carrier type should
+// render as inside type-mismatch diagnostics. Only carriers whose replacement is itself a valid
+// type spelling belong here — notably NOT Arena/ArenaMark, whose prose hint ("region scopes …")
+// would read as nonsense in "expects mutable <X>&, got <X>". Those render under their plain name.
+func runtimeCarrierTypeDisplayReplacement(typeName string) (string, bool) {
 	switch typeName {
 	case "StringView":
 		return "sview[...]", true
@@ -18,10 +39,6 @@ func runtimeCarrierSurfaceReplacement(typeName string) (string, bool) {
 		return "darray[T, shape]", true
 	case "DynDict":
 		return "dict[K, V]", true
-	case "Arena":
-		return "region scopes and inferred container regions", true
-	case "ArenaMark":
-		return "region scopes/checkpoints", true
 	default:
 		return "", false
 	}

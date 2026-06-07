@@ -10,6 +10,39 @@ import (
 	"elisacore/src/parser"
 )
 
+// Regression: the Arena/ArenaMark carrier WARNING uses a prose migration hint ("region
+// scopes …"), but that prose must NOT leak into type-DISPLAY diagnostics, where it would
+// render as "expects mutable region scopes and inferred container regions&". The two paths
+// are split: runtimeCarrierTypeDisplayReplacement (type names only) excludes Arena/ArenaMark
+// so they render under their plain name, while runtimeCarrierSurfaceReplacement (the warning)
+// keeps the prose hint.
+func TestArenaCarrierReplacementSplitDisplayVsWarning(t *testing.T) {
+	// Type-display path: Arena/ArenaMark are NOT remapped (render as plain "Arena"/"ArenaMark").
+	for _, name := range []string{"Arena", "ArenaMark"} {
+		if got, ok := runtimeCarrierTypeDisplayReplacement(name); ok {
+			t.Fatalf("type-display replacement for %q must be empty (render plain name), got %q", name, got)
+		}
+	}
+	// Warning path: Arena/ArenaMark DO carry the prose migration hint.
+	if got, ok := runtimeCarrierSurfaceReplacement("Arena"); !ok || got != "region scopes and inferred container regions" {
+		t.Fatalf("warning replacement for Arena = (%q, %v); want the prose hint", got, ok)
+	}
+	if got, ok := runtimeCarrierSurfaceReplacement("ArenaMark"); !ok || got != "region scopes/checkpoints" {
+		t.Fatalf("warning replacement for ArenaMark = (%q, %v); want the prose hint", got, ok)
+	}
+	// Hard carriers whose replacement IS a real type name remain shared across both paths.
+	for _, tc := range []struct{ name, want string }{
+		{"DynArray", "darray[T, shape]"},
+		{"DynDict", "dict[K, V]"},
+		{"StringView", "sview[...]"},
+		{"DynArrayView", "dview[T]"},
+	} {
+		if got, ok := runtimeCarrierTypeDisplayReplacement(tc.name); !ok || got != tc.want {
+			t.Fatalf("type-display replacement for %q = (%q, %v); want %q", tc.name, got, ok, tc.want)
+		}
+	}
+}
+
 func TestUserSourceRejectsDirectArenaSurfaceType(t *testing.T) {
 	filename := filepath.Join(".", "arena_surface_user_fixture.elisa")
 	src := `def build(owner: Arena) -> void:
