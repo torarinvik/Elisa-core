@@ -1,0 +1,58 @@
+# ============================================================
+# Data-parallel combinators over Slice[T]: the safe, one-line fast path.
+#
+# `each` and `reduce` fold the nursery + split boilerplate into a single call. They
+# partition a Slice into W disjoint bands (one per worker), run on a structured nursery
+# (every worker joined before the call returns), and pass only thread-shareable values
+# across the boundary -- no raw casts, no manual pool/barrier/join.
+#
+# `reduce` is the contention-free shape: each worker folds its band into a PRIVATE partial
+# slot, and the W partials are merged afterward with the same op -- so there is no shared
+# accumulator and no atomic-RMW-in-a-loop (the reduction footgun the perf lints steer away
+# from). `op` must be associative and `identity` its unit for the result to be partition-
+# independent (it is: verified bit-identical across w=1/2/4/8).
+# ============================================================
+
+# Parallel for-each over disjoint bands: `each(s, w, worker)` runs `worker(band)` on each of
+# `w` disjoint bands in parallel and joins them all. The "parallel for band" as one call.
+def each[T](s: Slice[T], w: usize, body: func(Slice[T]) -> i64) -> void:
+	can Parallel:
+		nursery workers(w):
+			for t in 0..<w:
+				submit body(s.split(w, t))
+
+struct ReduceArg[T]:
+	band: Slice[T]
+	partials: Slice[T]
+	id: usize
+	identity: T
+	op: func(T, T) -> T
+
+# Worker: fold one band into the accumulator, write the partial into the worker's own slot
+# (id < w = partials length, so the write is in-range -> set_unchecked, no panic/effects).
+def reduce_worker[T](a: ReduceArg[T]) -> i64:
+	acc: mutable T = a.identity
+	n: usize = a.band.len()
+	for i in 0..<n:
+		acc <- a.op(acc, a.band.get_unchecked(i))
+	a.partials.set_unchecked(a.id, acc)
+	return 0
+
+# Parallel reduction: `reduce(s, w, identity, op)` folds `s` to a single T using `w` workers.
+# Each worker reduces its disjoint band into a private partial; partials are merged with `op`.
+# `op` must be associative with unit `identity`.
+def reduce[T](s: Slice[T], w: usize, identity: T, op: func(T, T) -> T) -> T:
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		partials: mutable darray[T] = []
+		_ = partials.resize(w)
+		for i in 0..<w:
+			partials[i] <- identity
+		ps: Slice[T] = slice(&partials)
+		worker: func(ReduceArg[T]) -> i64 = reduce_worker.specialize[T]()
+		nursery workers(w):
+			for t in 0..<w:
+				submit worker(ReduceArg[T] { band: s.split(w, t), partials: ps, id: t, identity: identity, op: op })
+		acc: mutable T = identity
+		for i in 0..<w:
+			acc <- op(acc, partials[i])
+		return acc

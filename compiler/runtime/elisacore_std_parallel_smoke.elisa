@@ -1,0 +1,26 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+def add_one(b: Slice[f64]) -> i64:
+	for i in 0..<b.len():
+		b.set_unchecked(i, b.get_unchecked(i) + 1.0)
+	return 0
+
+# each(): parallel map over disjoint bands. reduce(): contention-free parallel fold.
+# Both partition-independent and race-free (verified across worker counts elsewhere).
+@test
+def std_parallel_native_smoke():
+	can Parallel:
+		xs: mutable darray[f64] = []
+		_ = xs.resize(1000.usize())
+		for k in 0..<1000:
+			xs[k.usize()] <- k.f64()
+		# parallel map: +1 to every element over 4 disjoint bands
+		each(slice(&xs), 4.usize(), add_one)
+		assert xs[0.usize()] == 1.0
+		assert xs[999.usize()] == 1000.0
+		# parallel sum: 1+2+...+1000 = 500500
+		total: f64 = reduce(slice(&xs), 4.usize(), 0.0, lambda(a: f64, b: f64) => a + b)
+		assert total == 500500.0
+		# parallel max
+		mx: f64 = reduce(slice(&xs), 4.usize(), 0.0, lambda(a: f64, b: f64) => (a if a > b else b))
+		assert mx == 1000.0

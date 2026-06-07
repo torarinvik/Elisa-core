@@ -7,6 +7,7 @@
 include "./elisacore_runtime_prelude.elisa"
 include "./elisacore_runtime_concurrency.elisa"
 include "./elisacore_runtime_slice.elisa"
+include "./elisacore_runtime_parallel.elisa"
 include "./elisacore_runtime_strings.elisa"
 include "./debug_referee.elisa"
 include "./runtime.elisa"
