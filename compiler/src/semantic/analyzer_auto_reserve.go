@@ -19,8 +19,8 @@ var autoReserveDisabledSem = os.Getenv("ELISA_NO_AUTO_RESERVE") != ""
 // Pure optimization, so the eligibility bar is conservative for safety:
 //   - source is a bare identifier of darray type — `.count` is O(1) and re-reading it cannot
 //     double-evaluate a side effect (the loop reads the same identifier).
-//   - the body pushes exactly ONE distinct darray ys (in scope, not the source); ambiguous or
-//     zero push targets are skipped. Over-reserving (e.g. under a `where` filter) is safe.
+//   - the body grows exactly ONE distinct darray ys via push/extend (in scope, not the source);
+//     ambiguous or zero targets are skipped. Over-reserving (e.g. under a `where` filter) is safe.
 func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Type) {
 	if autoReserveDisabledSem || stmt == nil || stmt.PreReserve != nil {
 		return
@@ -33,7 +33,7 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		return
 	}
 	ysName := ""
-	for name := range collectPushTargetNames(stmt.Body) {
+	for name := range collectGrowthTargetNames(stmt.Body) {
 		if name == srcIdent.Name {
 			continue
 		}
@@ -72,8 +72,9 @@ func isDArrayTypeMaybeRef(t Type) bool {
 	return ok
 }
 
-// collectPushTargetNames returns the set of receiver names of `name.push(...)` calls in body.
-func collectPushTargetNames(body []ast.Stmt) map[string]bool {
+// collectGrowthTargetNames returns the set of receiver names of `name.push(...)` or
+// `name.extend(...)` calls in body.
+func collectGrowthTargetNames(body []ast.Stmt) map[string]bool {
 	names := map[string]bool{}
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
@@ -86,7 +87,7 @@ func collectPushTargetNames(body []ast.Stmt) map[string]bool {
 				return
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
-				if field, ok := call.Func.(*ast.FieldExpr); ok && field.Field == "push" {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && (field.Field == "push" || field.Field == "extend") {
 					if recv, ok := field.Object.(*ast.Ident); ok {
 						names[recv.Name] = true
 					}

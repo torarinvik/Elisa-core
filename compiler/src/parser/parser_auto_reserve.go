@@ -19,6 +19,10 @@ import (
 //	    xs.push(f(i))                   for i in 0..<n:
 //	                                        xs.push(f(i))
 //
+// `extend` is treated as a fill too. The bound is a conservative reservation: it may not cover
+// every element appended by each extension, but it still removes avoidable early growth without
+// changing values.
+//
 // This is a pure optimization: reserve only pre-allocates capacity (it never changes observable
 // length or values), and over-reserving is safe. v1 fires only for the side-effect-free counting
 // shape `for i in 0..<END` with a literal-0 start and END an identifier/integer — so the inserted
@@ -84,7 +88,7 @@ func countingFillBound(loop *ast.ForStmt, name string) (ast.Expr, bool) {
 	if clone == nil {
 		return nil, false // not a pure ident/int bound
 	}
-	if !bodyPushesTo(loop.Body, name) {
+	if !bodyGrowsTo(loop.Body, name) {
 		return nil, false
 	}
 	return clone, true
@@ -102,8 +106,8 @@ func cloneBoundExpr(e ast.Expr) ast.Expr {
 	return nil
 }
 
-// bodyPushesTo reports whether any `name.push(...)` call appears anywhere in body.
-func bodyPushesTo(body []ast.Stmt, name string) bool {
+// bodyGrowsTo reports whether any `name.push(...)` or `name.extend(...)` call appears anywhere in body.
+func bodyGrowsTo(body []ast.Stmt, name string) bool {
 	found := false
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
@@ -116,7 +120,7 @@ func bodyPushesTo(body []ast.Stmt, name string) bool {
 				return
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
-				if field, ok := call.Func.(*ast.FieldExpr); ok && field.Field == "push" {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && (field.Field == "push" || field.Field == "extend") {
 					if recv, ok := field.Object.(*ast.Ident); ok && recv.Name == name {
 						found = true
 						return
