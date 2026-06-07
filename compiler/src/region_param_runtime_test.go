@@ -385,3 +385,53 @@ def darray_views_test() -> void:
 		}
 	}
 }
+
+// Region-param version of `.as_cstr()`: the helper has no ambient `in <arena>:`
+// scope, so NUL-termination must grow through the hidden caller-threaded region
+// arena for r. This guards the region-aware cstr path specifically.
+func TestRunCLIRegionParamDarrayCstrThreadsArenaViaHiddenParam(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_param_darray_cstr.elisa")
+	src := `def cstrlen[region r](d: mutable darray[u8] @r) -> i64:
+    cs: cstr = d.as_cstr()
+    n: mutable i64 = 0
+    for ch in cs:
+        n <- n + 1
+    return n
+
+@test
+def region_param_darray_cstr_test() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            d: mutable darray[u8] @a = []
+            d.push([72, 105])
+            n: i64 = cstrlen(d)
+            if n != 2:
+                panic("expected cstr len 2")
+            if d.count != 2.usize():
+                panic("as_cstr must not change darray count")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write region-param darray-cstr fixture: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-param darray-cstr test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] region_param_darray_cstr_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected region-param darray-cstr output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
