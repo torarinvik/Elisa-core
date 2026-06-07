@@ -69,13 +69,14 @@ func TestRegionStacksReserveCommitForHardBoundedInteriorRef(t *testing.T) {
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
             xs: mutable darray[i64] = []
+            gap: i64 = 0
             for i in 0..<n:
                 xs.push(i.i64())
             e0: i64& = &xs[0]
             plain: mutable darray[i64] = []
             for i in 0..<n:
                 plain.push(i.i64())
-            sink: i64 = e0[0] + plain[0]
+            sink: i64 = e0[0] + plain[0] + gap
             if sink < 0:
                 panic("x")
 `, AnalyzeOptions{})
@@ -111,6 +112,46 @@ func TestRegionStacksReserveCommitCountsListPushElements(t *testing.T) {
 	}
 	if lit, ok := bound.Right.(*ast.IntLit); !ok || lit.Value != "2" {
 		t.Fatalf("expected reserve_commit list-push multiplier 2, got %T %#v", bound.Right, bound.Right)
+	}
+}
+
+func TestRegionStacksResizeDisqualifiesHardBound(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_resize_disqualifies.elisa", `def f(n: usize) -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            xs: mutable darray[i64] = []
+            gap: i64 = 0
+            for i in 0..<n:
+                xs.push(i.i64())
+            xs.resize(n * 2)
+            e0: i64& = &xs[0]
+            if e0[0] + gap < 0:
+                panic("x")
+`, AnalyzeOptions{})
+	asn := onlyRegionStack(t, result)
+	stack := asn.StackOf["xs"]
+	if _, ok := asn.StackCapacity[stack]; ok {
+		t.Fatalf("resize can grow beyond the push-loop bound, so it must not get a finite hard-bound capacity: %#v", asn.StackCapacity[stack])
+	}
+}
+
+func TestRegionStacksReserveDisqualifiesHardBound(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_reserve_disqualifies.elisa", `def f(n: usize) -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            xs: mutable darray[i64] = []
+            gap: i64 = 0
+            for i in 0..<n:
+                xs.push(i.i64())
+            xs.reserve(n * 2)
+            e0: i64& = &xs[0]
+            if e0[0] + gap < 0:
+                panic("x")
+`, AnalyzeOptions{})
+	asn := onlyRegionStack(t, result)
+	stack := asn.StackOf["xs"]
+	if _, ok := asn.StackCapacity[stack]; ok {
+		t.Fatalf("reserve can request capacity beyond the push-loop bound, so it must not get a finite hard-bound capacity: %#v", asn.StackCapacity[stack])
 	}
 }
 

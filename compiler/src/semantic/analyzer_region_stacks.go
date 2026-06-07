@@ -417,8 +417,8 @@ func (s *hardBoundScan) checkCall(call *ast.CallExpr) {
 			}
 		}
 		s.bound = b
-	case "push_back", "push_front", "extend", "append", "append_many", "insert":
-		s.disqualified = true // adds an unbounded / non-counting amount
+	case "push_back", "push_front", "extend", "append", "append_many", "insert", "resize", "reserve", "as_cstr", "cstr":
+		s.disqualified = true // adds or reserves an unbounded / non-counting amount
 	}
 }
 
