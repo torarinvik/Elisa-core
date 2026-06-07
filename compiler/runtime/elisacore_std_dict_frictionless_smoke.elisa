@@ -1,0 +1,24 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+# A plain `dict = zeroed` inside a region scope grows with ZERO ceremony — the same
+# frictionless surface as darray push: no `can Memory.Allocate, Abort.Panic`, no error
+# union to handle, no explicit Arena threading. Allocation failure panics (parity with
+# darray push) rather than returning an error union or null. This exercises the synthetic
+# region-mutation path end to end (semantic dispatch -> backend arena_dict_*_or_panic).
+@test
+def std_dict_frictionless_smoke():
+	region scratch(8192):
+		d: mutable dict[cstr, i64] = zeroed
+		d.reserve(16)
+		d.put("alpha", 10)
+		d.put("beta", 20)
+		d.put("alpha", 11)
+		assert d.get("alpha") != null
+		assert d.contains("beta")
+		assert not d.contains("zeta")
+		slot: mutable i64&? = d.get_or_insert("gamma", 30)
+		assert slot != null
+		assert d.contains("gamma")
+		# get_or_insert on an existing key keeps the original value
+		again: mutable i64&? = d.get_or_insert("alpha", 999)
+		assert again != null

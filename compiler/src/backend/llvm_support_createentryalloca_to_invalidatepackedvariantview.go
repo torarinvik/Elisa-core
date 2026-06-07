@@ -194,16 +194,20 @@ func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
 	return treeAllocOwnerBinding{}, false
 }
 
-// dictMutationHelperName picks the runtime helper the dict-entry codegen calls
-// for an insert/get_or_insert. The real std `arena_dict_put` /
+// dictMutationHelperName picks the runtime helper the dict growth/entry codegen calls
+// for an insert/get_or_insert/reserve. The real std `arena_dict_put` /
 // `arena_dict_get_or_insert` / `arena_dict_reserve` return `error[RuntimeError]`
 // (an sret/error-tag ABI the hand-rolled call site cannot consume), so the std
-// also ships thin non-error `_checked` wrappers. Prefer the wrapper when
-// present; fall back to the base name for minimal runtimes/test stubs that
-// already define a non-error helper of that name.
+// also ships thin non-error wrappers. Prefer `_or_panic` (frictionless dict surface:
+// allocation failure aborts, exactly like darray push — no error union, no null to
+// check), then the older `_checked` (returns null on OOM) for runtimes that predate
+// the panic wrappers, then the base name for minimal/test stubs.
 func (s *functionState) dictMutationHelperName(base string) string {
 	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
 		return base
+	}
+	if _, ok := s.g.result.GlobalScope.Lookup(base + "_or_panic"); ok {
+		return base + "_or_panic"
 	}
 	if _, ok := s.g.result.GlobalScope.Lookup(base + "_checked"); ok {
 		return base + "_checked"

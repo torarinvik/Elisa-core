@@ -200,13 +200,18 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictM
 		return builtinDictMethodRewriteInvalid
 	}
 	if needsAlloc {
-		if a.currentAllocExpr == nil {
-			if (method == "put" || method == "get_or_insert" || method == "reserve") && a.regionAvailableForContainer(dictType) {
-				return builtinDictMethodRewriteNone
-			}
-			a.errorf(expr.Pos(), "dict %s requires an active in <arena>: scope", method)
-			return builtinDictMethodRewriteInvalid
+		// put/get_or_insert/reserve allocate, so they need a region. Whenever one is in scope
+		// — the dict's own typed region (`@r`) OR an ambient `in <arena>:` / region scope —
+		// defer to the synthetic region-mutation path (analyzeBuiltinDictRegionMutationCall).
+		// That path lowers exactly like darray push: no error union to thread, no Arena argument
+		// to coerce, and no Memory.Allocate/Abort.Panic surfaced into the caller (the backend
+		// sources the arena from the active scope and calls the panic-on-OOM runtime wrapper).
+		// Only a complete absence of any region is an error.
+		if a.regionAvailableForContainer(dictType) || a.currentAllocExpr != nil {
+			return builtinDictMethodRewriteNone
 		}
+		a.errorf(expr.Pos(), "dict %s requires an active in <arena>: scope", method)
+		return builtinDictMethodRewriteInvalid
 	}
 	rewrittenArgs := make([]ast.Expr, 0, len(expr.Args)+2)
 	if needsAlloc {
@@ -315,7 +320,11 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 		a.exprTypes[expr] = invalidType
 		return invalidType, true
 	}
-	if !a.regionAvailableForContainer(dictType) {
+	// Frictionless growth is allowed when the dict's region is available (`@r` typed region)
+	// OR there is an ambient `in <arena>:` / region scope to allocate from. The latter is the
+	// plain `dict = zeroed` inside a region scope — the direct parallel to darray push, which
+	// the backend lowers by sourcing the arena from the active tree-alloc owner.
+	if !a.regionAvailableForContainer(dictType) && a.currentAllocExpr == nil {
 		return nil, false
 	}
 	if receiverRefType == nil && !a.exprCanYieldWritableRef(fieldExpr.Object) {

@@ -1050,6 +1050,38 @@ def arena_dict_reserve_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, 
             error e:
                 return
 
+# Panic-on-failure wrappers: the frictionless default surface for `d.put`/`.get_or_insert`/
+# `.reserve` (dict parity with darray push). darray push panics on allocation failure and
+# surfaces no error union; these give dict the same shape. A growth OOM is unrecoverable in
+# the common in-region case, so it aborts rather than forcing every call site to thread an
+# error union. These are invoked only from the backend's synthetic `dict.put`/`.get_or_insert`/
+# `.reserve` lowering (dictMutationHelperName), which carries no effect of its own — exactly
+# like darray push — so `d.put(k, v)` needs no `can` grant. Callers who want to RECOVER from
+# OOM use the error-returning arena_dict_put directly.
+def arena_dict_put_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
+    can Memory.Allocate, Abort.Panic:
+        catch arena_dict_put(a, m, key, value):
+            slot:
+                return slot
+            error e:
+                panic("dict put: allocation failed")
+
+def arena_dict_get_or_insert_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
+    can Memory.Allocate, Abort.Panic:
+        catch arena_dict_get_or_insert(a, m, key, value):
+            slot:
+                return slot
+            error e:
+                panic("dict get_or_insert: allocation failed")
+
+def arena_dict_reserve_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        catch arena_dict_reserve(a, m, min_capacity):
+            ok:
+                return
+            error e:
+                panic("dict reserve: allocation failed")
+
 def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
     return arena_dict_get(m, key) != null
 

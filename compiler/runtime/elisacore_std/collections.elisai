@@ -500,6 +500,12 @@ extern arena_dict_get_or_insert_checked[K, T](a: mutable Arena&, m: mutable dict
 
 extern arena_dict_reserve_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void
 
+extern arena_dict_put_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?
+
+extern arena_dict_get_or_insert_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?
+
+extern arena_dict_reserve_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void
+
 extern arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool
 
 extern arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool
