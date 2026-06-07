@@ -93,13 +93,8 @@ func countingFillBound(loop *ast.ForStmt, name string) (ast.Expr, bool) {
 	if !ok {
 		return nil, false
 	}
-	if perIteration > 1 {
-		clone = &ast.BinaryExpr{
-			Position: clone.Pos(),
-			Op:       lexer.TOKEN_STAR,
-			Left:     clone,
-			Right:    &ast.IntLit{Position: loop.Position, Value: strconv.Itoa(perIteration)},
-		}
+	if !isIntOne(perIteration) {
+		clone = multiplyReserveExpr(clone, perIteration, loop.Position)
 	}
 	return clone, true
 }
@@ -116,11 +111,12 @@ func cloneBoundExpr(e ast.Expr) ast.Expr {
 	return nil
 }
 
-// bodyGrowthPerIteration returns the syntactically known minimum number of elements appended to
-// name per loop iteration by `push(...)` / `extend(...)` calls. Scalar push and extend each count
-// as 1; `push([a, b, c])` counts as 3.
-func bodyGrowthPerIteration(body []ast.Stmt, name string) (int, bool) {
-	growth := 0
+// bodyGrowthPerIteration returns the syntactically known element count appended to name per loop
+// iteration by `push(...)` / `extend(...)` calls. Scalar push and extend each count as 1;
+// `push([a, b, c])` counts as 3; nested pure counting loops multiply their inner growth by their
+// bound. Any unprovable nested loop growth opts out.
+func bodyGrowthPerIteration(body []ast.Stmt, name string) (ast.Expr, bool) {
+	var growth ast.Expr
 	disqualified := false
 	var walk func(v reflect.Value, loopDepth int)
 	walk = func(v reflect.Value, loopDepth int) {
@@ -142,12 +138,21 @@ func bodyGrowthPerIteration(body []ast.Stmt, name string) (int, bool) {
 							disqualified = true
 							return
 						}
-						growth += growthCallElementCount(field.Field, call)
+						growth = addReserveExpr(growth, intReserveExpr(growthCallElementCount(field.Field, call), call.Pos()), call.Pos())
 						return
 					}
 				}
 			}
 			if node, ok := v.Interface().(ast.Node); ok && autoReserveLoopNode(node) {
+				if loop, ok := node.(*ast.ForStmt); ok && loopDepth == 0 {
+					if bound, ok := countingLoopBoundExpr(loop); ok {
+						inner, ok := bodyGrowthPerIteration(loop.Body, name)
+						if ok {
+							growth = addReserveExpr(growth, multiplyReserveExpr(bound, inner, loop.Position), loop.Position)
+							return
+						}
+					}
+				}
 				walk(v.Elem(), loopDepth+1)
 				return
 			}
@@ -163,7 +168,7 @@ func bodyGrowthPerIteration(body []ast.Stmt, name string) (int, bool) {
 		}
 	}
 	walk(reflect.ValueOf(body), 0)
-	return growth, growth > 0 && !disqualified
+	return growth, growth != nil && !disqualified
 }
 
 func growthCallElementCount(method string, call *ast.CallExpr) int {
@@ -183,6 +188,46 @@ func autoReserveLoopNode(n ast.Node) bool {
 		return true
 	}
 	return false
+}
+
+func countingLoopBoundExpr(loop *ast.ForStmt) (ast.Expr, bool) {
+	if loop == nil || loop.Reverse || loop.Op != lexer.TOKEN_RANGE_LT || loop.Step != nil {
+		return nil, false
+	}
+	if start, ok := loop.Start.(*ast.IntLit); !ok || start.Value != "0" {
+		return nil, false
+	}
+	bound := cloneBoundExpr(loop.End)
+	return bound, bound != nil
+}
+
+func intReserveExpr(value int, pos lexer.Pos) ast.Expr {
+	return &ast.IntLit{Position: pos, Value: strconv.Itoa(value)}
+}
+
+func isIntOne(e ast.Expr) bool {
+	lit, ok := e.(*ast.IntLit)
+	return ok && lit.Value == "1"
+}
+
+func addReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: left, Right: right}
+}
+
+func multiplyReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
+	if isIntOne(left) {
+		return right
+	}
+	if isIntOne(right) {
+		return left
+	}
+	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_STAR, Left: left, Right: right}
 }
 
 // makeReserveStmt builds `name.reserve(bound)` as a bare expression statement.

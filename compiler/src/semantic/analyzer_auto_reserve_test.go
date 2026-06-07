@@ -138,6 +138,41 @@ func TestAutoReserveForInSkipsNestedGrowth(t *testing.T) {
 	}
 }
 
+func TestAutoReserveForInInfersNestedCountingGrowthProduct(t *testing.T) {
+	file := analyzeAndGetFile(t, `def g(src: darray[i64]&, m: usize) -> i64:
+    ys: mutable darray[i64] = []
+    for x in src:
+        for j in 0..<m:
+            ys.push(j.i64())
+    return ys[0]
+`)
+	loop := firstIterForStmt(file)
+	if loop == nil {
+		t.Fatal("no IterForStmt found")
+	}
+	if loop.PreReserve == nil {
+		t.Fatal("expected an auto-reserve PreReserve on the nested counting fill loop")
+	}
+	exprStmt, ok := loop.PreReserve.(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected reserve prelude to be an expr stmt, got %T", loop.PreReserve)
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		t.Fatalf("expected reserve call with one bound argument, got %T %#v", exprStmt.Expr, exprStmt.Expr)
+	}
+	outer, ok := call.Args[0].(*ast.BinaryExpr)
+	if !ok || outer.Op != lexer.TOKEN_STAR {
+		t.Fatalf("expected reserve bound to multiply source count by nested loop bound, got %T %#v", call.Args[0], call.Args[0])
+	}
+	if _, ok := outer.Left.(*ast.FieldExpr); !ok {
+		t.Fatalf("expected left side to be src.count, got %T %#v", outer.Left, outer.Left)
+	}
+	if ident, ok := outer.Right.(*ast.Ident); !ok || ident.Name != "m" {
+		t.Fatalf("expected right side to be m, got %T %#v", outer.Right, outer.Right)
+	}
+}
+
 // Two darrays filled in one loop is ambiguous (which to presize?) — skipped.
 func TestAutoReserveForInSkipsAmbiguousFill(t *testing.T) {
 	file := analyzeAndGetFile(t, `def g(src: darray[i64]&) -> i64:

@@ -36,7 +36,7 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		return
 	}
 	ysName := ""
-	perIteration := 0
+	var perIteration ast.Expr
 	for name, growth := range collectGrowthTargetCounts(stmt.Body) {
 		if name == srcIdent.Name {
 			continue
@@ -59,13 +59,8 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 	}
 	pos := stmt.Position
 	bound := ast.Expr(&ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: srcIdent.Name}, Field: "count"})
-	if perIteration > 1 {
-		bound = &ast.BinaryExpr{
-			Position: pos,
-			Op:       lexer.TOKEN_STAR,
-			Left:     bound,
-			Right:    &ast.IntLit{Position: pos, Value: strconv.Itoa(perIteration)},
-		}
+	if !semanticReserveExprIsIntOne(perIteration) {
+		bound = semanticMultiplyReserveExpr(bound, perIteration, pos)
 	}
 	preReserve := &ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{
 		Position: pos,
@@ -88,8 +83,8 @@ func isDArrayTypeMaybeRef(t Type) bool {
 
 // collectGrowthTargetCounts returns syntactically known per-iteration growth for each receiver
 // named by `name.push(...)` or `name.extend(...)` calls in body.
-func collectGrowthTargetCounts(body []ast.Stmt) map[string]int {
-	counts := map[string]int{}
+func collectGrowthTargetCounts(body []ast.Stmt) map[string]ast.Expr {
+	counts := map[string]ast.Expr{}
 	disqualified := map[string]bool{}
 	var walk func(v reflect.Value, loopDepth int)
 	walk = func(v reflect.Value, loopDepth int) {
@@ -112,12 +107,24 @@ func collectGrowthTargetCounts(body []ast.Stmt) map[string]int {
 						if disqualified[recv.Name] {
 							return
 						}
-						counts[recv.Name] += semanticGrowthCallElementCount(field.Field, call)
+						counts[recv.Name] = semanticAddReserveExpr(counts[recv.Name], semanticIntReserveExpr(semanticGrowthCallElementCount(field.Field, call), call.Pos()), call.Pos())
 						return
 					}
 				}
 			}
 			if node, ok := v.Interface().(ast.Node); ok && isLoopStmtNode(node) {
+				if loop, ok := node.(*ast.ForStmt); ok && loopDepth == 0 {
+					if bound, ok := semanticCountingLoopBoundExpr(loop); ok {
+						inner := collectGrowthTargetCounts(loop.Body)
+						for name, innerGrowth := range inner {
+							if disqualified[name] {
+								continue
+							}
+							counts[name] = semanticAddReserveExpr(counts[name], semanticMultiplyReserveExpr(bound, innerGrowth, loop.Position), loop.Position)
+						}
+						return
+					}
+				}
 				walk(v.Elem(), loopDepth+1)
 				return
 			}
@@ -145,4 +152,54 @@ func semanticGrowthCallElementCount(method string, call *ast.CallExpr) int {
 		return 1
 	}
 	return len(list.Elems)
+}
+
+func semanticCountingLoopBoundExpr(loop *ast.ForStmt) (ast.Expr, bool) {
+	if loop == nil || loop.Reverse || loop.Op != lexer.TOKEN_RANGE_LT || loop.Step != nil {
+		return nil, false
+	}
+	if start, ok := loop.Start.(*ast.IntLit); !ok || start.Value != "0" {
+		return nil, false
+	}
+	bound := semanticCloneReserveBoundExpr(loop.End)
+	return bound, bound != nil
+}
+
+func semanticCloneReserveBoundExpr(e ast.Expr) ast.Expr {
+	switch n := e.(type) {
+	case *ast.Ident:
+		return &ast.Ident{Position: n.Position, Name: n.Name}
+	case *ast.IntLit:
+		return &ast.IntLit{Position: n.Position, Value: n.Value, Suffix: n.Suffix, IsHex: n.IsHex}
+	}
+	return nil
+}
+
+func semanticIntReserveExpr(value int, pos lexer.Pos) ast.Expr {
+	return &ast.IntLit{Position: pos, Value: strconv.Itoa(value)}
+}
+
+func semanticReserveExprIsIntOne(e ast.Expr) bool {
+	lit, ok := e.(*ast.IntLit)
+	return ok && lit.Value == "1"
+}
+
+func semanticAddReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: left, Right: right}
+}
+
+func semanticMultiplyReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
+	if semanticReserveExprIsIntOne(left) {
+		return right
+	}
+	if semanticReserveExprIsIntOne(right) {
+		return left
+	}
+	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_STAR, Left: left, Right: right}
 }

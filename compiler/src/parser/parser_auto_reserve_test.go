@@ -52,7 +52,7 @@ func TestAutoReserveCountsListPushElements(t *testing.T) {
 	}
 }
 
-func TestAutoReserveSkipsNestedCountingGrowth(t *testing.T) {
+func TestAutoReserveInfersNestedCountingGrowthProduct(t *testing.T) {
 	file, errs := parseSourceFile(t, `def foo(n: usize, m: usize) -> i64:
     xs: mutable darray[i64] = []
     for i in 0..<n:
@@ -64,8 +64,8 @@ func TestAutoReserveSkipsNestedCountingGrowth(t *testing.T) {
 		t.Fatalf("unexpected parse errors: %v", errs)
 	}
 	formatted := unparse.FormatDecl(file.Decls[0])
-	if strings.Contains(formatted, "xs.reserve(n)") {
-		t.Fatalf("nested fill grows by more than the outer count, so it must not reserve only n, got:\n%s", formatted)
+	if !strings.Contains(formatted, "xs.reserve((n * m))") {
+		t.Fatalf("expected nested counting fill to reserve the product n * m, got:\n%s", formatted)
 	}
 }
 
