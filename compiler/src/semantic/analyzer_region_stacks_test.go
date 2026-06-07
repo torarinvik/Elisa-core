@@ -3,6 +3,9 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // onlyRegionStack returns the single region's stack assignment from an analysis result (test
@@ -82,6 +85,32 @@ func TestRegionStacksReserveCommitForHardBoundedInteriorRef(t *testing.T) {
 	}
 	if asn.StackOf["plain"] != 0 {
 		t.Fatalf("bounded darray without an interior ref must stay on the shared stack, got %v", asn.StackOf)
+	}
+}
+
+func TestRegionStacksReserveCommitCountsListPushElements(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_list_push.elisa", `def f(n: usize) -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            xs: mutable darray[i64] = []
+            gap: i64 = 0
+            for i in 0..<n:
+                xs.push([i.i64(), i.i64()])
+            e0: i64& = &xs[0]
+            if e0[0] + gap < 0:
+                panic("x")
+`, AnalyzeOptions{})
+	asn := onlyRegionStack(t, result)
+	stack := asn.StackOf["xs"]
+	if asn.stackStrategy(stack) != "reserve_commit" {
+		t.Fatalf("hard-bounded list-push darray with an interior ref must get reserve_commit, got %v / %v", asn.StackOf, asn.StackStrategy)
+	}
+	bound, ok := asn.StackCapacity[stack].(*ast.BinaryExpr)
+	if !ok || bound.Op != lexer.TOKEN_STAR {
+		t.Fatalf("expected reserve_commit capacity to multiply loop bound by list length, got %T %#v", asn.StackCapacity[stack], asn.StackCapacity[stack])
+	}
+	if lit, ok := bound.Right.(*ast.IntLit); !ok || lit.Value != "2" {
+		t.Fatalf("expected reserve_commit list-push multiplier 2, got %T %#v", bound.Right, bound.Right)
 	}
 }
 

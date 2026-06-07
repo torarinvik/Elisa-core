@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -366,8 +367,9 @@ func collectInteriorRefNames(body []ast.Stmt, tracked map[string]bool) map[strin
 // hardBoundForName returns the provable maximum element count N for a fresh darray `name` when its
 // ONLY element growth is a single `name.push(...)` located inside exactly one counting loop
 // `for _ in 0..<N` (N a pure ident/int) — with no other push/extend/append/insert anywhere, and not
-// nested in a deeper loop. Such a darray can never hold more than N elements, so a reserve_commit
-// reservation sized to N can never overflow. Returns the N expression and ok; otherwise ok=false.
+// nested in a deeper loop. `push([a, b])` scales the bound by the literal element count. Such a
+// darray can never hold more than the bound's elements, so a reserve_commit reservation sized to it
+// can never overflow. Returns the bound expression and ok; otherwise ok=false.
 func hardBoundForName(body []ast.Stmt, name string) (ast.Expr, bool) {
 	s := &hardBoundScan{name: name}
 	s.walk(reflect.ValueOf(body))
@@ -406,10 +408,29 @@ func (s *hardBoundScan) checkCall(call *ast.CallExpr) {
 			s.disqualified = true
 			return
 		}
+		if count := hardBoundPushElementCount(call); count > 1 {
+			b = &ast.BinaryExpr{
+				Position: b.Pos(),
+				Op:       lexer.TOKEN_STAR,
+				Left:     b,
+				Right:    &ast.IntLit{Position: call.Pos(), Value: strconv.Itoa(count)},
+			}
+		}
 		s.bound = b
 	case "push_back", "push_front", "extend", "append", "append_many", "insert":
 		s.disqualified = true // adds an unbounded / non-counting amount
 	}
+}
+
+func hardBoundPushElementCount(call *ast.CallExpr) int {
+	if call == nil || len(call.Args) != 1 {
+		return 1
+	}
+	list, ok := call.Args[0].(*ast.ListLitExpr)
+	if !ok || list == nil || list.Brace || len(list.Elems) == 0 {
+		return 1
+	}
+	return len(list.Elems)
 }
 
 func (s *hardBoundScan) walk(v reflect.Value) {
@@ -451,16 +472,22 @@ func (s *hardBoundScan) walk(v reflect.Value) {
 }
 
 // boundInScopeAtRegionEntry reports whether a reservation bound can be evaluated at the region's
-// entry (where the reserve_commit arena is created): an integer literal always, or an identifier
-// that is a function parameter. A local declared inside the region body is not yet in scope there,
-// so it does not qualify for reserve_commit (the darray stays chained — a sound, graceful fallback;
-// deferring the reservation to the darray's first use to support local bounds is a follow-up).
+// entry (where the reserve_commit arena is created): an integer literal always, an identifier
+// that is a function parameter, or arithmetic over entry-available terms. A local declared inside
+// the region body is not yet in scope there, so it does not qualify for reserve_commit (the darray
+// stays chained — a sound, graceful fallback; deferring the reservation to the darray's first use
+// to support local bounds is a follow-up).
 func boundInScopeAtRegionEntry(bound ast.Expr, paramNames map[string]bool) bool {
 	switch b := bound.(type) {
 	case *ast.IntLit:
 		return true
 	case *ast.Ident:
 		return paramNames[b.Name]
+	case *ast.BinaryExpr:
+		switch b.Op {
+		case lexer.TOKEN_STAR, lexer.TOKEN_PLUS:
+			return boundInScopeAtRegionEntry(b.Left, paramNames) && boundInScopeAtRegionEntry(b.Right, paramNames)
+		}
 	}
 	return false
 }
