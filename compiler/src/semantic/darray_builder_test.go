@@ -251,6 +251,17 @@ func TestAnalyzeInfersRegionForBareDArrayPush(t *testing.T) {
 	if strings.Contains(all, `requires an active in <arena>: scope`) {
 		t.Fatalf("expected inference to supply a region for the bare push, got:\n%s", all)
 	}
+	sym, ok := result.GlobalScope.Lookup("build")
+	if !ok {
+		t.Fatal("expected build symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected build function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != "" {
+		t.Fatalf("expected safe darray growth to infer no public allocation/panic permission, got %q", got)
+	}
 }
 
 func TestAnalyzeInfersUntypedEmptyDArrayFromPush(t *testing.T) {

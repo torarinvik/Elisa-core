@@ -1308,8 +1308,7 @@ def rewrite_spans(node: Lua.Expr) -> Lua.Expr:
 def per_variant_tree_fold_rewrite_test() -> void:
 	can Abort.Panic, Memory.Allocate:
 		region scratch(8192)
-		owner: mutable Arena& = scratch.ref[mutable Arena&]
-		in owner:
+		in scratch:
 			left: Lua.Expr = Lua.Expr.Int(span: 1, value: 10)
 			right: Lua.Expr = Lua.Expr.Int(span: 2, value: -5)
 			root: Lua.Expr = Lua.Expr.Binary(span: 3, left: left, right: right)
@@ -1388,8 +1387,7 @@ attribute Dense.Expr.checksum -> i64:
 def tree_attribute_native_test() -> void:
 	can Abort.Panic, Memory.Allocate:
 		region scratch(8192)
-		owner: mutable Arena& = scratch.ref[mutable Arena&]
-		in owner:
+		in scratch:
 			sleft: Sparse.Expr = Sparse.Expr.Int(value: 10)
 			sright: Sparse.Expr = Sparse.Expr.Int(value: 20)
 			sroot: Sparse.Expr = Sparse.Expr.Binary(left: sleft, right: sright)

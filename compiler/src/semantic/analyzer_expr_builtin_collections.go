@@ -19,12 +19,9 @@ func (a *Analyzer) checkDarrayGrowthRegionEscape(receiver ast.Expr, op string) {
 	if a == nil || receiver == nil || a.staticContextDepth != 0 {
 		return
 	}
-	// Growing a darray allocates from the active region. Memory.Allocate is ambient
-	// (no grant needed — region allocation is the frictionless default), but we still
-	// record it as a used effect so the inferred signature is honest and @hot(noalloc)
-	// kernels reject silent region growth. permissionRefGranted short-circuits ambient
-	// refs, so this records without imposing any `can` ceremony.
-	a.recordFunctionPermissionRefs([]ast.PermissionRef{{Name: "Memory", Member: "Allocate", Position: receiver.Pos()}})
+	// Growing a safe stdlib darray may touch region storage, but that allocation is a
+	// trusted implementation detail of the container. Explicit Memory.Allocate is
+	// reserved for low-level allocation APIs such as malloc/custom allocators.
 	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
 		return
 	}

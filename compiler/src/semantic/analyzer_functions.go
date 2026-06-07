@@ -170,13 +170,13 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
 		fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
 		// Trusted-runtime ENCAPSULATION: the stdlib implements safe abstractions with
-		// raw-memory internals, so its Unsafe.* effects are not propagated into the function's
-		// public signature (like Rust's `std` not being `unsafe` to call). This keeps the
-		// runtime's effect types stable when EnforceUnsafePermissions is on for every build
-		// path, while ordinary user code is still required to declare its Unsafe grants.
+		// raw-memory/panic internals, so those implementation details are not propagated
+		// into the function's public signature (like Rust's `std` not being `unsafe` to
+		// call). Ordinary user code is still required to declare explicit low-level
+		// allocation, panic, and Unsafe grants.
 		if a.enforceUnsafePermissions && fn != nil && isRuntimeStdPermissionInternal(fn.Pos().File) {
-			fnType.PermissionRefs = filterOutUnsafePermissionRefs(fnType.PermissionRefs)
-			fnType.Permissions = filterOutPermissionFamily(fnType.Permissions, "Unsafe")
+			fnType.PermissionRefs = filterOutTrustedStdlibPermissionRefs(fnType.PermissionRefs)
+			fnType.Permissions = permissionFamiliesFromRefs(fnType.PermissionRefs)
 		}
 		a.checkHotContract(fn, fnType)
 		a.finalizeFunctionAnalysis(fn, fnType)

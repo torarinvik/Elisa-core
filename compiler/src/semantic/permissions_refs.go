@@ -124,12 +124,11 @@ func (a *Analyzer) markSubsumedFamilies(family string, granted map[string]bool) 
 const permissionAnyName = "any"
 
 // isAmbientPermission reports whether a permission is implicitly granted everywhere, so it
-// never needs a `can` declaration. Region allocation/freeing (Memory.Allocate / Memory.Release)
-// is the frictionless default — it is the universal allocation primitive, not an explicit
-// opt-in like raw malloc — so it is ambient. The effect is still INFERRED into a function's
-// signature (so @hot(noalloc) can forbid it), it just carries no declaration burden.
+// never needs a `can` declaration. Safe stdlib containers are trusted not to surface their
+// allocator internals; explicit Memory.* permissions now belong to low-level allocation APIs
+// such as malloc/custom allocators.
 func isAmbientPermission(ref ast.PermissionRef) bool {
-	return ref.Name == "Memory" && (ref.Member == "Allocate" || ref.Member == "Release")
+	return false
 }
 
 func permissionRefGranted(ref ast.PermissionRef, granted map[string]bool) bool {
@@ -309,6 +308,23 @@ func (a *Analyzer) recordFunctionPermissionRefs(refs []ast.PermissionRef) {
 	a.recordFunctionPermissionFamilies(permissionFamiliesFromRefs(refs))
 }
 
+func filterOutTrustedStdlibPermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
+	out := refs[:0:0]
+	for _, ref := range refs {
+		if ref.Name == "Unsafe" {
+			continue
+		}
+		if ref.Name == "Memory" && (ref.Member == "Allocate" || ref.Member == "Release") {
+			continue
+		}
+		if ref.Name == "Abort" && ref.Member == "Panic" {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
+}
+
 func sortedPermissionFamilies(families map[string]bool) []string {
 	if len(families) == 0 {
 		return nil
@@ -407,7 +423,7 @@ func sameStringSlice(left []string, right []string) bool {
 }
 
 // filterOutUnsafePermissionRefs drops the Unsafe.* refs from a permission ref list, used to
-// encapsulate the trusted runtime's raw-memory internals out of its public effect signature.
+// encapsulate trusted implementation internals out of public effect signatures.
 func filterOutUnsafePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 	out := refs[:0:0]
 	for _, ref := range refs {

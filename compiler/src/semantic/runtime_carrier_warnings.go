@@ -18,6 +18,10 @@ func runtimeCarrierSurfaceReplacement(typeName string) (string, bool) {
 		return "darray[T, shape]", true
 	case "DynDict":
 		return "dict[K, V]", true
+	case "Arena":
+		return "region scopes and inferred container regions", true
+	case "ArenaMark":
+		return "region scopes/checkpoints", true
 	default:
 		return "", false
 	}
@@ -25,17 +29,24 @@ func runtimeCarrierSurfaceReplacement(typeName string) (string, bool) {
 
 func (a *Analyzer) maybeRejectRuntimeCarrierTypeUse(pos lexer.Pos, typeName string) {
 	replacement, ok := runtimeCarrierSurfaceReplacement(typeName)
-	if !ok || !a.shouldRejectRuntimeCarrierTypeUse() {
+	if !ok || !a.shouldRejectRuntimeCarrierTypeUse(pos) {
+		return
+	}
+	if typeName == "Arena" || typeName == "ArenaMark" {
+		if runtimeCarrierPathIsTempFixture(pos.File) {
+			return
+		}
+		a.warnf(pos, "internal runtime carrier type %q is not supported in user-facing code; use %q instead", typeName, replacement)
 		return
 	}
 	a.errorf(pos, "internal runtime carrier type %q is not supported in user-facing code; use %q instead", typeName, replacement)
 }
 
-func (a *Analyzer) shouldRejectRuntimeCarrierTypeUse() bool {
-	if a == nil || a.file == nil || a.file.Filename == "" {
+func (a *Analyzer) shouldRejectRuntimeCarrierTypeUse(pos lexer.Pos) bool {
+	path := filepath.ToSlash(pos.File)
+	if path == "" || path == "<unknown>" {
 		return false
 	}
-	path := filepath.ToSlash(a.file.Filename)
 	if !runtimeCarrierCarrierPathHasRealSourcePath(path) {
 		return false
 	}
@@ -75,4 +86,22 @@ func runtimeCarrierCarrierPathIsInternal(path string) bool {
 		}
 	}
 	return false
+}
+
+func runtimeCarrierPathIsTempFixture(path string) bool {
+	if path == "" {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	tempDir := os.TempDir()
+	absTemp, err := filepath.Abs(tempDir)
+	if err != nil {
+		absTemp = tempDir
+	}
+	absPath = filepath.ToSlash(absPath)
+	absTemp = strings.TrimRight(filepath.ToSlash(absTemp), "/")
+	return absPath == absTemp || strings.HasPrefix(absPath, absTemp+"/")
 }

@@ -98,6 +98,19 @@ def build() -> i64:
 	}
 }
 
+func TestDeclaredMemoryAllocatePermissionRequiresLocalGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "declared_memory_allocate_permission_requires_grant.elisa", `
+extern malloc_like() -> i64 can[Memory.Allocate]
+
+def build() -> i64:
+    return malloc_like()
+`)
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `call to "malloc_like" requires can[Memory] and has no explicit local effect grant; add can Memory.Allocate or a surrounding can ...: block`) {
+		t.Fatalf("expected explicit allocation API to require a local grant, got:\n%s", all)
+	}
+}
+
 func TestTrustedPermissionBlockSatisfiesLocalGrantWithoutInference(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "trusted_permission_block.elisa", `
 extern raw_pointer_cast() -> i64 can[Unsafe.PointerCast]
