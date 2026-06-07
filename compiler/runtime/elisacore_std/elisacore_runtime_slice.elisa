@@ -1,0 +1,67 @@
+# ============================================================
+# Slice[T]: a borrowed, disjoint-partitionable view over a contiguous T buffer.
+#
+# Slice is all-scalar ({base: uintptr, len: usize}) so it is structurally
+# thread-shareable and may be passed BY VALUE across a spawn/nursery boundary --
+# the safe, bounds-checked alternative to casting a raw `uintptr` to `T&` in every
+# worker. `split` carves a Slice into provably DISJOINT sub-bands (one per worker),
+# so writing each band in parallel is data-race free by construction. The single
+# unsafe step (viewing a darray's backing as a raw pointer) is encapsulated in
+# `slice_of`, audited once, instead of scattered through user code.
+#
+# CONTRACT (caller's obligation, not yet compiler-enforced): the source darray must
+# OUTLIVE every Slice over it and must NOT be resized while any Slice is live (a
+# resize may reallocate the backing and dangle the slice). Compile-time borrow
+# enforcement is the planned next step; until then this is encapsulated-unsafe with
+# a checked, shareable surface.
+# ============================================================
+
+struct Slice[T]:
+	base: uintptr
+	len: usize
+
+# Borrow a darray's full backing as a Slice. The one unsafe view, encapsulated here.
+def slice_of[T](da: mutable darray[T]&) -> Slice[T]:
+	return Slice[T] { base: (&da[0.usize()]).cast[uintptr], len: da.count }
+
+# Number of elements in the slice.
+def slice_len[T](s: Slice[T]) -> usize:
+	return s.len
+
+# The idx-th of `nbands` disjoint, contiguous sub-bands (ceil split). Bands tile the
+# slice with no overlap, so handing band k to worker k is race-free for writes.
+def split[T](s: Slice[T], nbands: usize, idx: usize) -> Slice[T]:
+	band: usize = (s.len + nbands - 1.usize()) / nbands
+	lo: usize = idx * band
+	if lo >= s.len:
+		return Slice[T] { base: s.base, len: 0.usize() }
+	hi: usize = (lo + band if lo + band < s.len else s.len)
+	p: mutable T& = s.base.cast[mutable T&]
+	return Slice[T] { base: (&p[lo]).cast[uintptr], len: hi - lo }
+
+# Bounds-checked read (panics on out-of-range): the safe default.
+def slice_get[T](s: Slice[T], i: usize) -> T:
+	can Abort.Panic:
+		if i >= s.len:
+			panic("Slice index out of bounds")
+		p: T& = s.base.cast[T&]
+		return p[i]
+
+# Bounds-checked write (panics on out-of-range): the safe default. `s` is by value;
+# the write goes through the shared backing the slice points at.
+def slice_set[T](s: Slice[T], i: usize, v: T) -> void:
+	can Abort.Panic:
+		if i >= s.len:
+			panic("Slice index out of bounds")
+		p: mutable T& = s.base.cast[mutable T&]
+		p[i] <- v
+
+# Unchecked variants for hot loops where the index is provably in range (e.g. a
+# `for i in 0..<slice_len(s)`): no per-access bounds branch.
+def slice_get_unchecked[T](s: Slice[T], i: usize) -> T:
+	p: T& = s.base.cast[T&]
+	return p[i]
+
+def slice_set_unchecked[T](s: Slice[T], i: usize, v: T) -> void:
+	p: mutable T& = s.base.cast[mutable T&]
+	p[i] <- v

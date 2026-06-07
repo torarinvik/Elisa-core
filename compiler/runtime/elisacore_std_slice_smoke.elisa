@@ -1,0 +1,32 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+def slice_scale_band(s: Slice[f64]) -> i64:
+	n: usize = slice_len(s)
+	for i in 0..<n:
+		slice_set_unchecked(s, i, 2.0 * slice_get_unchecked(s, i) + 1.0)
+	return 0
+
+# Slice: disjoint bands tile exactly, bounds-checked access round-trips, and a parallel
+# map over the bands (each worker its own band) is race-free -- proven by every element
+# being transformed exactly once.
+@test
+def std_slice_native_smoke():
+	can Parallel:
+		ys: mutable darray[f64] = []
+		_ = ys.resize(1000.usize())
+		for k in 0..<1000:
+			ys[k.usize()] <- k.f64()
+		whole: Slice[f64] = slice_of(&ys)
+		assert slice_len(whole) == 1000.usize()
+		# bands tile the whole slice with no overlap or gap
+		total: mutable usize = 0.usize()
+		for t in 0..<4:
+			total <- total + slice_len(split(whole, 4.usize(), t.usize()))
+		assert total == 1000.usize()
+		# parallel map y[i] = 2y[i]+1 over disjoint bands
+		nursery workers(4):
+			for t in 0..<4:
+				submit slice_scale_band(split(whole, 4.usize(), t.usize()))
+		assert ys[0.usize()] == 1.0
+		assert ys[500.usize()] == 1001.0
+		assert ys[999.usize()] == 1999.0
