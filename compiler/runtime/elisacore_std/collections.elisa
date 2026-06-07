@@ -967,6 +967,8 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
             return
 
         owner: mutable Arena& = m.arena if m.arena != null else a
+        if m.arena == null:
+            m.arena as & <- owner
         new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(owner, target_capacity * size_of(DictBucket[K, T])))
         arena_dict_zero_buckets(new_items, target_capacity)
 
@@ -979,7 +981,6 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         m.items as & <- new_items
         m.used <- m.count
         m.capacity <- target_capacity
-        m.arena as & <- owner
         return
 
 def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
@@ -1040,6 +1041,14 @@ def arena_dict_put_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key:
 def arena_dict_get_or_insert_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
     can Memory.Allocate, Abort.Panic:
         return try arena_dict_get_or_insert(a, m, key, value) else null
+
+def arena_dict_reserve_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        catch arena_dict_reserve(a, m, min_capacity):
+            ok:
+                return
+            error e:
+                return
 
 def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
     return arena_dict_get(m, key) != null

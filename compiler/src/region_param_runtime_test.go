@@ -280,6 +280,7 @@ func TestRunCLIRegionParamDictPutThreadsArenaViaHiddenParam(t *testing.T) {
 include "` + filepath.Join(stdDir, "heap.elisa") + `"
 
 def fill[region r](d: mutable dict[cstr, i64] @r) -> i64:
+    d.reserve(8)
     _ = d.put("alpha", 10)
     _ = d.put("beta", 20)
     _ = d.get_or_insert("gamma", 30)

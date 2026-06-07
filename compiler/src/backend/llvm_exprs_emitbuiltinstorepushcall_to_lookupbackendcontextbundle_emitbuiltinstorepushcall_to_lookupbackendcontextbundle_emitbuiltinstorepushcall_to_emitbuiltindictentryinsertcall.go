@@ -652,15 +652,19 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 		return nil, nil, false, nil
 	}
 	method := fieldExpr.Field
-	if method != "put" && method != "get_or_insert" {
+	if method != "put" && method != "get_or_insert" && method != "reserve" {
 		return nil, nil, false, nil
 	}
 	dictType, _, ok := builtinDictReceiverType(s.exprType(fieldExpr.Object))
 	if !ok || dictType == nil {
 		return nil, nil, false, nil
 	}
-	if len(expr.Args) != 2 {
-		return nil, nil, true, fmt.Errorf("dict %s expects 2 arguments, got %d", method, len(expr.Args))
+	expectedArgs := 2
+	if method == "reserve" {
+		expectedArgs = 1
+	}
+	if len(expr.Args) != expectedArgs {
+		return nil, nil, true, fmt.Errorf("dict %s expects %d arguments, got %d", method, expectedArgs, len(expr.Args))
 	}
 	owner, ok := s.regionArenaOwner(dictType.Region)
 	if !ok {
@@ -679,6 +683,24 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 	dictValue, dictType, err := s.emitBuiltinDictReceiverValue(fieldExpr.Object, s.exprType(fieldExpr.Object))
 	if err != nil {
 		return nil, nil, true, err
+	}
+	if method == "reserve" {
+		helperBase := "arena_dict_reserve"
+		callee, helperType, err := s.ensureRuntimeFunction(s.dictMutationHelperName(helperBase), map[string]semantic.Type{"K": dictType.Key, "T": dictType.Value})
+		if err != nil {
+			return nil, nil, true, err
+		}
+		llvmType, err := s.g.lowerFunctionType(helperType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		usizeType := s.g.result.NamedTypes["usize"]
+		minCapacity, _, err := s.emitExpr(expr.Args[0], usizeType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, dictValue, minCapacity}, "")
+		return value, s.g.result.NamedTypes["void"], true, nil
 	}
 	keyValue, _, err := s.emitExpr(expr.Args[0], dictType.Key)
 	if err != nil {

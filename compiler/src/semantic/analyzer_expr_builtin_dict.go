@@ -201,7 +201,7 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictM
 	}
 	if needsAlloc {
 		if a.currentAllocExpr == nil {
-			if (method == "put" || method == "get_or_insert") && a.regionAvailableForContainer(dictType) {
+			if (method == "put" || method == "get_or_insert" || method == "reserve") && a.regionAvailableForContainer(dictType) {
 				return builtinDictMethodRewriteNone
 			}
 			a.errorf(expr.Pos(), "dict %s requires an active in <arena>: scope", method)
@@ -303,7 +303,7 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 		return nil, false
 	}
 	method := fieldExpr.Field
-	if method != "put" && method != "get_or_insert" {
+	if method != "put" && method != "get_or_insert" && method != "reserve" {
 		return nil, false
 	}
 	receiverType := a.analyzeExpr(fieldExpr.Object)
@@ -320,6 +320,24 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 	}
 	if receiverRefType == nil && !a.exprCanYieldWritableRef(fieldExpr.Object) {
 		a.errorf(fieldExpr.Object.Pos(), "dict %s requires a mutable dict receiver", method)
+	}
+	if method == "reserve" {
+		if len(expr.Args) != 1 {
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			a.errorf(expr.Pos(), "dict reserve expects 1 argument, got %d", len(expr.Args))
+		} else {
+			usizeType := a.namedTypes["usize"]
+			argType := a.analyzeValueExpr(expr.Args[0], usizeType)
+			if !AssignableTo(usizeType, argType) {
+				a.errorf(expr.Args[0].Pos(), "dict reserve expects usize, got %s", argType)
+			}
+		}
+		voidType := a.namedTypes["void"]
+		a.exprTypes[expr.Func] = &FuncType{Name: "dict.reserve", Params: []Type{receiverType, a.namedTypes["usize"]}, Return: voidType}
+		a.exprTypes[expr] = voidType
+		return voidType, true
 	}
 	if len(expr.Args) != 2 {
 		for _, arg := range expr.Args {

@@ -196,9 +196,9 @@ func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
 
 // dictMutationHelperName picks the runtime helper the dict-entry codegen calls
 // for an insert/get_or_insert. The real std `arena_dict_put` /
-// `arena_dict_get_or_insert` return `error[RuntimeError]` (an sret/error-tag
-// ABI the hand-rolled call site cannot consume), so the std also ships thin
-// non-error `_checked` wrappers (try->panic-via-else). Prefer the wrapper when
+// `arena_dict_get_or_insert` / `arena_dict_reserve` return `error[RuntimeError]`
+// (an sret/error-tag ABI the hand-rolled call site cannot consume), so the std
+// also ships thin non-error `_checked` wrappers. Prefer the wrapper when
 // present; fall back to the base name for minimal runtimes/test stubs that
 // already define a non-error helper of that name.
 func (s *functionState) dictMutationHelperName(base string) string {
@@ -407,6 +407,7 @@ func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type,
 		}
 	}
 }
+
 // packedStoreKey returns the cache key for an enum's region-backed store. A sealed hierarchy (docs/77)
 // shares ONE store per root, so all members key by the root's name.
 func packedStoreKey(enumType *semantic.EnumType) string {
