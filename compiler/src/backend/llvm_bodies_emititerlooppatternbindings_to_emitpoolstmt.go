@@ -549,12 +549,7 @@ func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, source
 
 func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	// Auto-reservation (region inference, Phase A): presize the fill target before the loop.
-	if stmt.PreReserve != nil {
-		if err := s.emitStmt(stmt.PreReserve); err != nil {
-			return err
-		}
-	}
-	for _, preReserve := range stmt.PreReserves {
+	for _, preReserve := range ast.SynthesizedPreReserveStmts(stmt) {
 		if err := s.emitStmt(preReserve); err != nil {
 			return err
 		}

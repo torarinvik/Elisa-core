@@ -335,7 +335,7 @@ type ForStmt struct {
 	Op       lexer.TokenKind
 	Body     []Stmt
 	// PreReserve is a compiler-synthesized `ys.reserve(bound)` emitted before the loop when
-	// analysis proves a bounded darray fill that parser-side adjacency rewriting could not cover.
+	// analysis proves a bounded darray fill.
 	PreReserve  Stmt
 	PreReserves []Stmt
 }

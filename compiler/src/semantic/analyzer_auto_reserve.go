@@ -8,13 +8,12 @@ import (
 	"elisacore/src/lexer"
 )
 
-// autoReserveDisabledSem opts out of analysis-time auto-reservation (the `for x in coll` case).
-// Mirrors the parser-side opt-out so ELISA_NO_AUTO_RESERVE disables both halves.
+// autoReserveDisabledSem opts out of analysis-time auto-reservation.
 var autoReserveDisabledSem = os.Getenv("ELISA_NO_AUTO_RESERVE") != ""
 
 // maybeAutoReserveIterFill infers a presize for a `for x in src:` loop that fills a darray, by
-// synthesizing `ys.reserve(src.count)` and emitting it before the loop (region inference, Phase A;
-// the for-in counterpart of the parser's counting-loop auto-reserve). Fixed-size list pushes scale
+// synthesizing `ys.reserve(src.count)` and emitting it before the loop (region inference, Phase A).
+// Fixed-size list pushes scale
 // the bound (`ys.push([a, b])` reserves `src.count * 2`). The darray then never reallocates during
 // the fill, and becomes a fixed-footprint citizen that packs densely.
 //
@@ -24,7 +23,7 @@ var autoReserveDisabledSem = os.Getenv("ELISA_NO_AUTO_RESERVE") != ""
 //   - the body grows exactly ONE distinct darray ys via push/extend (in scope, not the source);
 //     ambiguous or zero targets are skipped. Over-reserving (e.g. under a `where` filter) is safe.
 func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Type) {
-	if autoReserveDisabledSem || stmt == nil || stmt.PreReserve != nil || len(stmt.PreReserves) != 0 {
+	if autoReserveDisabledSem || stmt == nil || ast.HasSynthesizedPreReserveStmts(stmt) {
 		return
 	}
 	if semanticCloneReserveBoundExpr(stmt.Source) == nil {
@@ -85,7 +84,7 @@ func semanticIterSourceCountBound(stmt *ast.IterForStmt) ast.Expr {
 }
 
 func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
-	if autoReserveDisabledSem || stmt == nil || stmt.PreReserve != nil || len(stmt.PreReserves) != 0 {
+	if autoReserveDisabledSem || stmt == nil || ast.HasSynthesizedPreReserveStmts(stmt) {
 		return
 	}
 	loopBound, ok := semanticCountingLoopBoundExpr(stmt)

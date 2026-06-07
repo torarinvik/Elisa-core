@@ -216,11 +216,8 @@ func (s *regionGrowthScan) recordSynthesizedReserve(stmt ast.Stmt) {
 	}
 }
 
-func (s *regionGrowthScan) recordSynthesizedReserves(single ast.Stmt, many []ast.Stmt) {
-	if single != nil {
-		s.recordSynthesizedReserve(single)
-	}
-	for _, stmt := range many {
+func (s *regionGrowthScan) recordSynthesizedReserves(loop ast.Node) {
+	for _, stmt := range ast.SynthesizedPreReserveStmts(loop) {
 		s.recordSynthesizedReserve(stmt)
 	}
 }
@@ -235,12 +232,12 @@ func (s *regionGrowthScan) walkGrowth(v reflect.Value) {
 			return
 		}
 		if loop, ok := v.Interface().(*ast.ForStmt); ok {
-			s.recordSynthesizedReserves(loop.PreReserve, loop.PreReserves)
+			s.recordSynthesizedReserves(loop)
 			s.walkGrowth(reflect.ValueOf(loop.Body))
 			return
 		}
 		if loop, ok := v.Interface().(*ast.IterForStmt); ok {
-			s.recordSynthesizedReserves(loop.PreReserve, loop.PreReserves)
+			s.recordSynthesizedReserves(loop)
 			s.walkGrowth(reflect.ValueOf(loop.Body))
 			return
 		}

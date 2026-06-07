@@ -2,7 +2,7 @@ package semantic
 
 import "elisacore/src/ast"
 
-// The unreserved counting-fill lint catches the shape parser auto-reserve cannot rewrite:
+// The unreserved counting-fill lint catches loops semantic auto-reserve cannot prove:
 // a provably bounded counting loop grows one darray, but the immediately preceding statement is
 // not `xs.reserve(bound)`. The fix is cheap and explicit, and under -Wperf this closes the
 // "silent repeated reallocations" path when a harmless statement sits between declaration and fill.
@@ -47,7 +47,7 @@ func (a *Analyzer) findUnreservedCountingFills(stmts []ast.Stmt) {
 }
 
 func (a *Analyzer) flagUnreservedCountingFill(prev ast.Stmt, loop *ast.ForStmt) {
-	if loop.PreReserve != nil || len(loop.PreReserves) != 0 {
+	if ast.HasSynthesizedPreReserveStmts(loop) {
 		return
 	}
 	loopBound, ok := semanticCountingLoopBoundExpr(loop)

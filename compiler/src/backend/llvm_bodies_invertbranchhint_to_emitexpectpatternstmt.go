@@ -252,12 +252,7 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 	return nil
 }
 func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
-	if stmt.PreReserve != nil {
-		if err := s.emitStmt(stmt.PreReserve); err != nil {
-			return err
-		}
-	}
-	for _, preReserve := range stmt.PreReserves {
+	for _, preReserve := range ast.SynthesizedPreReserveStmts(stmt) {
 		if err := s.emitStmt(preReserve); err != nil {
 			return err
 		}
