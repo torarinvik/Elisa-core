@@ -17,6 +17,7 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	saved := a.currentScope
 	savedAliasAccesses := a.currentAliasAccesses
 	savedAliasBindings := a.currentAliasBindings
+	a.inferUntypedDArrayBuilderLocals(stmts)
 	a.currentScope = scope
 	a.currentAliasAccesses = a.cloneAliasAccesses()
 	a.currentAliasBindings = a.cloneAliasBindings()
@@ -28,6 +29,151 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	a.currentAliasAccesses = savedAliasAccesses
 	a.currentAliasBindings = savedAliasBindings
 	a.currentScope = saved
+}
+
+func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt) {
+	for i, stmt := range stmts {
+		decl, ok := stmt.(*ast.VarDeclStmt)
+		if !ok || decl == nil || decl.Type != nil || !semanticListLiteralExpr(decl.Value) {
+			continue
+		}
+		elem := inferDArrayBuilderElemTypeExpr(decl.Value)
+		for j := i + 1; elem == nil && j < len(stmts); j++ {
+			if shadow, ok := stmts[j].(*ast.VarDeclStmt); ok && shadow.Name == decl.Name {
+				break
+			}
+			elem = inferDArrayElemTypeFromUse(stmts[j], decl.Name)
+		}
+		if elem == nil {
+			continue
+		}
+		decl.Mutable = true
+		decl.Type = &ast.MutableType{
+			Position: decl.Position,
+			Elem: &ast.BuiltinTypeExpr{
+				Position: decl.Position,
+				Name:     "darray",
+				TypeArgs: []ast.TypeExpr{elem},
+			},
+		}
+	}
+}
+
+func semanticListLiteralExpr(value ast.Expr) bool {
+	for {
+		paren, ok := value.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		value = paren.Inner
+	}
+	_, ok := value.(*ast.ListLitExpr)
+	return ok
+}
+
+func inferDArrayBuilderElemTypeExpr(value ast.Expr) ast.TypeExpr {
+	for {
+		paren, ok := value.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		value = paren.Inner
+	}
+	list, ok := value.(*ast.ListLitExpr)
+	if !ok || list == nil {
+		return nil
+	}
+	for _, elem := range list.Elems {
+		if inferred := inferSimpleLiteralTypeExpr(elem); inferred != nil {
+			return inferred
+		}
+	}
+	return nil
+}
+
+func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string) ast.TypeExpr {
+	var found ast.TypeExpr
+	var visitExpr func(ast.Expr)
+	visitExpr = func(expr ast.Expr) {
+		if found != nil || expr == nil {
+			return
+		}
+		switch e := expr.(type) {
+		case *ast.CallExpr:
+			if field, ok := e.Func.(*ast.FieldExpr); ok && field != nil {
+				if ident, ok := field.Object.(*ast.Ident); ok && ident.Name == name {
+					switch field.Field {
+					case "push":
+						if len(e.Args) == 1 {
+							if list, ok := stripParenExpr(e.Args[0]).(*ast.ListLitExpr); ok && list != nil {
+								found = inferDArrayBuilderElemTypeExpr(list)
+							} else {
+								found = inferSimpleLiteralTypeExpr(e.Args[0])
+							}
+						}
+						return
+					case "extend":
+						if len(e.Args) == 1 {
+							if list, ok := stripParenExpr(e.Args[0]).(*ast.ListLitExpr); ok && list != nil {
+								found = inferDArrayBuilderElemTypeExpr(list)
+							}
+						}
+						return
+					}
+				}
+			}
+			visitExpr(e.Func)
+			for _, arg := range e.Args {
+				visitExpr(arg)
+			}
+		case *ast.BinaryExpr:
+			visitExpr(e.Left)
+			visitExpr(e.Right)
+		case *ast.UnaryExpr:
+			visitExpr(e.Operand)
+		case *ast.ParenExpr:
+			visitExpr(e.Inner)
+		}
+	}
+	switch s := stmt.(type) {
+	case *ast.ExprStmt:
+		visitExpr(s.Expr)
+	case *ast.VarDeclStmt:
+		visitExpr(s.Value)
+	case *ast.AssignStmt:
+		visitExpr(s.Value)
+	case *ast.ReturnStmt:
+		visitExpr(s.Value)
+	}
+	return found
+}
+
+func inferSimpleLiteralTypeExpr(expr ast.Expr) ast.TypeExpr {
+	expr = stripParenExpr(expr)
+	pos := expr.Pos()
+	switch lit := expr.(type) {
+	case *ast.IntLit:
+		switch lit.Suffix {
+		case "":
+			return &ast.NamedType{Position: pos, Name: "int"}
+		case "u":
+			return &ast.NamedType{Position: pos, Name: "usize"}
+		case "i":
+			return &ast.NamedType{Position: pos, Name: "int"}
+		default:
+			return &ast.NamedType{Position: pos, Name: lit.Suffix}
+		}
+	case *ast.FloatLit:
+		if lit.Suffix != "" {
+			return &ast.NamedType{Position: pos, Name: lit.Suffix}
+		}
+		return &ast.NamedType{Position: pos, Name: "f64"}
+	case *ast.BoolLit:
+		return &ast.NamedType{Position: pos, Name: "bool"}
+	case *ast.CharLit:
+		return &ast.NamedType{Position: pos, Name: "char"}
+	}
+	return nil
 }
 
 func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {

@@ -496,7 +496,7 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			// false positives on inspection/forwarding code. Some builders (`[x for ...]`,
 			// `each`) infer their darray result type from the expression itself, so they
 			// should synthesize an auto region even when the local has no type annotation.
-			if (s.Type == nil && isInferredDArrayBuilder(s.Value)) || (isRegionlessContainerType(s.Type) && isAllocatingLiteral(s.Value)) {
+			if (s.Type == nil && (isInferredDArrayBuilder(s.Value) || blockLaterUsesUntypedListLiteralAsDArray(stmts, s.Name))) || (isRegionlessContainerType(s.Type) && isAllocatingLiteral(s.Value)) {
 				return true
 			}
 		}
@@ -586,6 +586,117 @@ func isInferredDArrayBuilder(value ast.Expr) bool {
 		return v.Kind == ast.QueryExprEach
 	}
 	return false
+}
+
+func blockLaterUsesUntypedListLiteralAsDArray(stmts []ast.Stmt, name string) bool {
+	if name == "" {
+		return false
+	}
+	seenDecl := false
+	for _, stmt := range stmts {
+		if !seenDecl {
+			decl, ok := stmt.(*ast.VarDeclStmt)
+			if !ok || decl.Name != name {
+				continue
+			}
+			seenDecl = decl.Type == nil && isListLiteralExpr(decl.Value)
+			continue
+		}
+		if stmtUsesDArrayBuilderLocal(stmt, name) {
+			return true
+		}
+		if decl, ok := stmt.(*ast.VarDeclStmt); ok && decl.Name == name {
+			return false
+		}
+	}
+	return false
+}
+
+func isListLiteralExpr(value ast.Expr) bool {
+	for {
+		paren, ok := value.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		value = paren.Inner
+	}
+	_, ok := value.(*ast.ListLitExpr)
+	return ok
+}
+
+func stmtUsesDArrayBuilderLocal(stmt ast.Stmt, name string) bool {
+	found := false
+	var visitExpr func(ast.Expr)
+	visitExpr = func(expr ast.Expr) {
+		if found || expr == nil {
+			return
+		}
+		switch e := expr.(type) {
+		case *ast.CallExpr:
+			if field, ok := e.Func.(*ast.FieldExpr); ok && field != nil {
+				if ident, ok := field.Object.(*ast.Ident); ok && ident.Name == name {
+					switch field.Field {
+					case "push", "extend", "reserve", "resize", "clear", "truncate", "as_sview", "as_cstr":
+						found = true
+						return
+					}
+				}
+			}
+			visitExpr(e.Func)
+			for _, arg := range e.Args {
+				visitExpr(arg)
+			}
+		case *ast.FieldExpr:
+			if ident, ok := e.Object.(*ast.Ident); ok && ident.Name == name {
+				switch e.Field {
+				case "count", "capacity", "items":
+					found = true
+					return
+				}
+			}
+			visitExpr(e.Object)
+		case *ast.IndexExpr:
+			if ident, ok := e.Object.(*ast.Ident); ok && ident.Name == name {
+				found = true
+				return
+			}
+			visitExpr(e.Object)
+			visitExpr(e.Index)
+		case *ast.BinaryExpr:
+			visitExpr(e.Left)
+			visitExpr(e.Right)
+		case *ast.UnaryExpr:
+			visitExpr(e.Operand)
+		case *ast.ParenExpr:
+			visitExpr(e.Inner)
+		}
+	}
+	switch s := stmt.(type) {
+	case *ast.ExprStmt:
+		visitExpr(s.Expr)
+	case *ast.ReturnStmt:
+		visitExpr(s.Value)
+	case *ast.VarDeclStmt:
+		visitExpr(s.Value)
+	case *ast.AssignStmt:
+		visitExpr(s.Target)
+		visitExpr(s.Value)
+	case *ast.AugAssignStmt:
+		visitExpr(s.Target)
+		visitExpr(s.Value)
+	case *ast.IfStmt:
+		visitExpr(s.Cond)
+	case *ast.ForStmt:
+		visitExpr(s.Start)
+		visitExpr(s.End)
+		visitExpr(s.Step)
+	case *ast.IterForStmt:
+		visitExpr(s.Source)
+		visitExpr(s.Filter)
+	case *ast.WhileStmt:
+		visitExpr(s.Cond)
+	}
+	return found
 }
 
 // isRegionlessContainerType reports whether a declared type is a growable container
