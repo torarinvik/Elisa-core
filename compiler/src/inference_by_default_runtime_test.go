@@ -25,7 +25,7 @@ def inference_by_default_test() -> void:
         xs: mutable darray[i64] = []
         for i in 0..<5000:
             xs.push(i.i64())
-        if xs[0] != 0i64 or xs[4999] != 4999i64:
+        if xs[0] != 0 or xs[4999] != 4999:
             panic("inferred region: data wrong after growth")
         if xs.count != 5000:
             panic("inferred region: count wrong")
@@ -57,11 +57,11 @@ func TestRunCLIInfersUntypedEmptyDArrayFromPush(t *testing.T) {
 def inference_untyped_empty_darray_test() -> void:
     can Abort.Panic, Memory.Allocate:
         xs = []
-        xs.push([10u8, 20u8, 30u8])
-        xs.push(40u8)
+        xs.push([10, 20, 30])
+        xs.push(40)
         if xs.count != 4:
             panic("expected four inferred darray items")
-        if xs[0] != 10u8 or xs[3] != 40u8:
+        if xs[0] != 10 or xs[3] != 40:
             panic("inferred darray contents wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -93,11 +93,11 @@ func TestRunCLIInfersUntypedNonEmptyDArrayFromUse(t *testing.T) {
 	src := `@test
 def inference_untyped_nonempty_darray_test() -> void:
     can Abort.Panic, Memory.Allocate:
-        xs = [10u8, 20u8, 30u8]
-        xs.push(40u8)
+        xs = [10, 20, 30]
+        xs.push(40)
         if xs.count != 4:
             panic("expected four inferred non-empty darray items")
-        if xs[0] != 10u8 or xs[3] != 40u8:
+        if xs[0] != 10 or xs[3] != 40:
             panic("inferred non-empty darray contents wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -130,12 +130,12 @@ func TestRunCLIInfersRegionForUntypedBuilders(t *testing.T) {
 def inference_by_default_builders_test() -> void:
     can Abort.Panic, Memory.Allocate:
         src: mutable darray[u8] = []
-        src.push([0u8, 1u8, 2u8, 3u8])
-        comp = [item + 1 for item in src if item > 0u8]
-        query = item + 2 for each item in src where item > 1u8
-        if comp.count != 3 or comp[0] != 2u8 or comp[2] != 4u8:
+        src.push([0, 1, 2, 3])
+        comp = [item + 1 for item in src if item > 0]
+        query = item + 2 for each item in src where item > 1
+        if comp.count != 3 or comp[0] != 2 or comp[2] != 4:
             panic("inferred list comprehension result wrong")
-        if query.count != 2 or query[0] != 4u8 or query[1] != 5u8:
+        if query.count != 2 or query[0] != 4 or query[1] != 5:
             panic("inferred each query result wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

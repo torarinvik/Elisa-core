@@ -256,8 +256,8 @@ func TestAnalyzeInfersRegionForBareDArrayPush(t *testing.T) {
 func TestAnalyzeInfersUntypedEmptyDArrayFromPush(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_empty_infers_from_push.elisa", `def build() -> void:
     xs = []
-    xs.push([1u8, 2u8])
-    xs.push(3u8)
+    xs.push([1, 2])
+    xs.push(3)
 `)
 
 	all := strings.Join(result.Errors(), "\n")
@@ -283,15 +283,15 @@ func TestAnalyzeInfersUntypedEmptyDArrayFromPush(t *testing.T) {
 	if !ok || darrayType == nil {
 		t.Fatalf("expected empty literal to resolve to inferred darray type, got %T", result.ExprTypes[varDecl.Value])
 	}
-	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "u8" {
-		t.Fatalf("expected inferred darray element u8, got %#v", darrayType.Elem)
+	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "int" {
+		t.Fatalf("expected inferred darray element int, got %#v", darrayType.Elem)
 	}
 }
 
 func TestAnalyzeInfersUntypedNonEmptyDArrayFromUse(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_nonempty_infers_from_use.elisa", `def build() -> void:
-    xs = [1u8, 2u8]
-    xs.push(3u8)
+    xs = [1, 2]
+    xs.push(3)
 `)
 
 	all := strings.Join(result.Errors(), "\n")
@@ -317,8 +317,8 @@ func TestAnalyzeInfersUntypedNonEmptyDArrayFromUse(t *testing.T) {
 	if !ok || darrayType == nil {
 		t.Fatalf("expected non-empty literal to resolve to inferred darray type, got %T", result.ExprTypes[varDecl.Value])
 	}
-	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "u8" {
-		t.Fatalf("expected inferred darray element u8, got %#v", darrayType.Elem)
+	if builtin, ok := darrayType.Elem.(*BuiltinType); !ok || builtin.Name != "int" {
+		t.Fatalf("expected inferred darray element int, got %#v", darrayType.Elem)
 	}
 }
 
