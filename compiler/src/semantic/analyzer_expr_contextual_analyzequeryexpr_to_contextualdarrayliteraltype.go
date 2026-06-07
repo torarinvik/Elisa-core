@@ -2,10 +2,11 @@ package semantic
 
 import "elisacore/src/ast"
 
-func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
+func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 	if expr == nil {
 		return invalidType
 	}
+	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
 	sourceType := a.analyzeExpr(expr.Source)
 	info, ok := a.resolveIterLoopSourceInfo(expr.Source, sourceType)
 	if !ok {
@@ -78,23 +79,43 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr) Type {
 			result = &OptionalType{Value: info.ItemType}
 		}
 	case ast.QueryExprEach:
-		if expr.Owner == nil && a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		if expr.Owner == nil && a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
 			a.errorf(expr.Pos(), "each query expression requires an active in <arena>: scope")
 		}
 		projectionType := info.ItemType
+		var expectedElem Type
+		if useExpectedDArray {
+			expectedElem = expectedDArray.Elem
+		}
 		if expr.Projection != nil {
 			savedScope := a.currentScope
 			a.currentScope = loopScope
-			projectionType = a.analyzeExpr(expr.Projection)
+			projectionType = a.analyzeValueExpr(expr.Projection, expectedElem)
 			a.currentScope = savedScope
 		}
 		if projectionType == nil || IsInvalidType(projectionType) {
 			result = invalidType
 		} else {
-			if expr.Projection != nil {
-				a.consumeAffineValueExpr(expr.Projection, projectionType, "move into each query element")
+			if useExpectedDArray && !AssignableTo(expectedDArray.Elem, projectionType) {
+				valuePos := expr.Pos()
+				if expr.Projection != nil {
+					valuePos = expr.Projection.Pos()
+				}
+				a.errorf(valuePos, "each query element expects %s, got %s", expectedDArray.Elem, projectionType)
+				a.reportShapeMismatchNotes(valuePos, expectedDArray.Elem, projectionType)
 			}
-			result = &DArrayType{Elem: projectionType, Shape: &WildcardShape{}, SurfaceName: "darray"}
+			if expr.Projection != nil {
+				moveType := projectionType
+				if useExpectedDArray {
+					moveType = expectedDArray.Elem
+				}
+				a.consumeAffineValueExpr(expr.Projection, moveType, "move into each query element")
+			}
+			if useExpectedDArray {
+				result = expectedDArray
+			} else {
+				result = &DArrayType{Elem: projectionType, Shape: &WildcardShape{}, SurfaceName: "darray"}
+			}
 		}
 	case ast.QueryExprCount:
 		result = a.namedTypes["usize"]

@@ -208,7 +208,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeListComprehensionExprWithExpected(n, nil)
 		return
 	case *ast.QueryExpr:
-		result = a.analyzeQueryExpr(n)
+		result = a.analyzeQueryExpr(n, nil)
 		return
 	case *ast.BinaryExpr:
 		result = a.analyzeBinaryExpr(n)

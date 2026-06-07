@@ -96,6 +96,9 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if comp, ok := expr.(*ast.ListComprehensionExpr); ok {
 		return a.analyzeListComprehensionExprWithExpected(comp, expected)
 	}
+	if query, ok := expr.(*ast.QueryExpr); ok {
+		return a.analyzeQueryExpr(query, expected)
+	}
 	if tuple, ok := expr.(*ast.TupleExpr); ok {
 		return a.analyzeTupleExprWithExpected(tuple, expected)
 	}

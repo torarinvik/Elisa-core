@@ -861,6 +861,39 @@ def names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
 	}
 }
 
+func TestAnalyzeEachQueryUsesExpectedRegionParam(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "each_query_region_param.elisa", `def build[region r](items: darray[i64] @r) -> usize:
+    out: darray[i64] @r = item + 1 for each item in items
+    return out.count
+`)
+	var query *ast.QueryExpr
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name != "build" || len(fn.Body) == 0 {
+			continue
+		}
+		varDecl, ok := fn.Body[0].(*ast.VarDeclStmt)
+		if !ok {
+			t.Fatalf("expected first statement to bind query result, got %T", fn.Body[0])
+		}
+		query, ok = varDecl.Value.(*ast.QueryExpr)
+		if !ok {
+			t.Fatalf("expected each query initializer, got %T", varDecl.Value)
+		}
+		break
+	}
+	if query == nil {
+		t.Fatal("expected build function each query")
+	}
+	darrayType, ok := result.ExprTypes[query].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected each query to resolve to darray type, got %T", result.ExprTypes[query])
+	}
+	if darrayType.Region != "r" {
+		t.Fatalf("expected each query result region r, got %q", darrayType.Region)
+	}
+}
+
 func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.elisa", `def build(items: darray[i64]) -> darray[i64]:
     return [item + 1 for item in items]
