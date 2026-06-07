@@ -435,3 +435,47 @@ def region_param_darray_cstr_test() -> void:
 		}
 	}
 }
+
+func TestRunCLIRegionParamDarrayLiteralThreadsArenaViaHiddenParam(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_param_darray_literal.elisa")
+	src := `def build[region r](anchor: mutable darray[u8] @r) -> u64:
+    xs: darray[u8] @r = [10, 20, 30]
+    sum: mutable u64 = 0u64
+    for i in 0..<xs.count.i64():
+        sum <- sum + xs[i].u64()
+    return sum
+
+@test
+def region_param_darray_literal_test() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            anchor: mutable darray[u8] @a = []
+            sum: u64 = build(anchor)
+            if sum != 60u64:
+                panic("expected sum 60")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write region-param darray-literal fixture: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-param darray-literal test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] region_param_darray_literal_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected region-param darray-literal output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}

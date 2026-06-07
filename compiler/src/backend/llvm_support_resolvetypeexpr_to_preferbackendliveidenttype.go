@@ -517,9 +517,9 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, err
 		}
 		if len(expr.ValueArgs) == 0 {
-			return &semantic.DArrayType{Elem: elem, Shape: &semantic.WildcardShape{}, SurfaceName: "darray"}, nil
+			return &semantic.DArrayType{Elem: elem, Shape: &semantic.WildcardShape{}, SurfaceName: "darray", Region: expr.Region}, nil
 		}
-		return &semantic.DArrayType{Elem: elem, Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "darray"}, nil
+		return &semantic.DArrayType{Elem: elem, Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "darray", Region: expr.Region}, nil
 	case "dict":
 		if len(expr.TypeArgs) != 2 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("dict expects 2 type arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

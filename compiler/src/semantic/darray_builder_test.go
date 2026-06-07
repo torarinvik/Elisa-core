@@ -168,6 +168,38 @@ func TestAnalyzeDArrayLiteralWithExplicitOwner(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDArrayLiteralUsesExpectedRegionParam(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_region_param.elisa", `def build[region r](anchor: darray[i64] @r) -> usize:
+    _ = anchor
+    xs: darray[i64] @r = [1, 2, 3]
+    return xs.count
+`)
+
+	var lit *ast.ListLitExpr
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "build" {
+			if len(fn.Body) < 2 {
+				t.Fatalf("expected binding and darray declaration, got %d statements", len(fn.Body))
+			}
+			varDecl, ok := fn.Body[1].(*ast.VarDeclStmt)
+			if !ok {
+				t.Fatalf("expected darray var decl, got %T", fn.Body[1])
+			}
+			lit, _ = varDecl.Value.(*ast.ListLitExpr)
+		}
+	}
+	if lit == nil {
+		t.Fatal("expected darray list literal")
+	}
+	literalType, ok := result.ExprTypes[lit].(*DArrayType)
+	if !ok || literalType == nil {
+		t.Fatalf("expected darray literal to resolve to darray type, got %T %#v", result.ExprTypes[lit], result.ExprTypes[lit])
+	}
+	if literalType.Region != "r" {
+		t.Fatalf("expected darray literal region r, got %q", literalType.Region)
+	}
+}
+
 func TestAnalyzeDArrayLiteralWithSpreadElements(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_spread.elisa", `def build(owner: Arena, first: i64, rest: darray[i64]) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

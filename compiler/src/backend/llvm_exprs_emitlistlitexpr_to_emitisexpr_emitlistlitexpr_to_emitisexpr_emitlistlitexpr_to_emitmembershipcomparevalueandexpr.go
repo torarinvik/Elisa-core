@@ -162,7 +162,10 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 			return nil, nil, err
 		}
 	} else {
-		owner, ok = s.lookupTreeAllocOwner()
+		owner, ok = s.regionArenaOwner(darrayType.Region)
+		if !ok {
+			owner, ok = s.lookupTreeAllocOwner()
+		}
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, fmt.Errorf("darray literal requires an active in <arena>: scope")
