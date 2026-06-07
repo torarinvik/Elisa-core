@@ -201,6 +201,9 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictM
 	}
 	if needsAlloc {
 		if a.currentAllocExpr == nil {
+			if (method == "put" || method == "get_or_insert") && a.regionAvailableForContainer(dictType) {
+				return builtinDictMethodRewriteNone
+			}
 			a.errorf(expr.Pos(), "dict %s requires an active in <arena>: scope", method)
 			return builtinDictMethodRewriteInvalid
 		}
@@ -290,6 +293,52 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 	}
 	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
 	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry.insert", Params: []Type{receiverType, entryType.Dict.Value}, Return: valueRefType}
+	a.exprTypes[expr] = valueRefType
+	return valueRefType, true
+}
+
+func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
+		return nil, false
+	}
+	method := fieldExpr.Field
+	if method != "put" && method != "get_or_insert" {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	dictType, receiverRefType, ok := builtinDictReceiverType(receiverType)
+	if !ok || dictType == nil {
+		return nil, false
+	}
+	if !a.ensureRuntimeBackedDictSupported(fieldExpr.Object.Pos(), dictType) {
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if !a.regionAvailableForContainer(dictType) {
+		return nil, false
+	}
+	if receiverRefType == nil && !a.exprCanYieldWritableRef(fieldExpr.Object) {
+		a.errorf(fieldExpr.Object.Pos(), "dict %s requires a mutable dict receiver", method)
+	}
+	if len(expr.Args) != 2 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "dict %s expects 2 arguments, got %d", method, len(expr.Args))
+	} else {
+		keyType := a.analyzeValueExpr(expr.Args[0], dictType.Key)
+		if !AssignableTo(dictType.Key, keyType) {
+			a.errorf(expr.Args[0].Pos(), "dict %s expects key of type %s, got %s", method, dictType.Key, keyType)
+		}
+		valueType := a.analyzeValueExpr(expr.Args[1], dictType.Value)
+		if !AssignableTo(dictType.Value, valueType) {
+			a.errorf(expr.Args[1].Pos(), "dict %s expects value of type %s, got %s", method, dictType.Value, valueType)
+		}
+		a.consumeAffineValueExpr(expr.Args[1], dictType.Value, "move into dict "+method)
+	}
+	valueRefType := builtinDictEntryValueRefType(dictType)
+	a.exprTypes[expr.Func] = &FuncType{Name: "dict." + method, Params: []Type{receiverType, dictType.Key, dictType.Value}, Return: valueRefType}
 	a.exprTypes[expr] = valueRefType
 	return valueRefType, true
 }

@@ -216,6 +216,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinDictEntryGetOrInsertCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinDictRegionMutationCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {
 		return value, actualType, err
 	}

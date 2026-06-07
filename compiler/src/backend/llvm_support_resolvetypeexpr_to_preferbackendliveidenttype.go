@@ -532,7 +532,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if err != nil {
 			return nil, err
 		}
-		return resolveBackendDictType(keyType, valueType, "dict")
+		return resolveBackendDictType(keyType, valueType, "dict", expr.Region)
 	case "str":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -602,8 +602,12 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		return nil, fmt.Errorf("unknown built-in type %q", expr.Name)
 	}
 }
-func resolveBackendDictType(keyType semantic.Type, valueType semantic.Type, surfaceName string) (semantic.Type, error) {
-	return &semantic.DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}, nil
+func resolveBackendDictType(keyType semantic.Type, valueType semantic.Type, surfaceName string, region ...string) (semantic.Type, error) {
+	dictRegion := ""
+	if len(region) != 0 {
+		dictRegion = region[0]
+	}
+	return &semantic.DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName, Region: dictRegion}, nil
 }
 
 // preferBackendLiveIdentType reconciles two valid-but-different views of an

@@ -268,6 +268,65 @@ def region_param_dict_test() -> void:
 	}
 }
 
+func TestRunCLIRegionParamDictPutThreadsArenaViaHiddenParam(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	repoRoot := repoRootFromMainTest(t)
+	stdDir := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_param_dict_put_fixture.elisa")
+	src := `include "` + filepath.Join(stdDir, "elisacore_runtime.elisa") + `"
+include "` + filepath.Join(stdDir, "heap.elisa") + `"
+
+def fill[region r](d: mutable dict[cstr, i64] @r) -> i64:
+    _ = d.put("alpha", 10)
+    _ = d.put("beta", 20)
+    _ = d.get_or_insert("gamma", 30)
+    _ = d.get_or_insert("delta", 40)
+    sum: mutable i64 = 0
+    sa: i64& = get d.get("alpha") else return -1
+    sum <- sum + sa[0]
+    sb: i64& = get d.get("beta") else return -2
+    sum <- sum + sb[0]
+    sc: i64& = get d.get("gamma") else return -3
+    sum <- sum + sc[0]
+    sd: i64& = get d.get("delta") else return -4
+    sum <- sum + sd[0]
+    return sum
+
+@test
+def region_param_dict_put_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region a(4096):
+            d: mutable dict[cstr, i64] @a = zeroed
+            s: i64 = fill(d)
+            if s != 100:
+                panic("expected sum 100 (10+20+30+40)")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write region-param dict put fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-param dict put test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] region_param_dict_put_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected region-param dict put output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 // End-to-end: the "any allocator" interface. A single generic function written
 // against the `Allocator` protocol allocates + fills a buffer through BOTH a
 // bump (Arena) backend and a malloc-backed backend, proving static-dispatch

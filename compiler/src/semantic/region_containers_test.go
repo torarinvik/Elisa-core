@@ -78,6 +78,16 @@ func TestRegionScopeDirectPushAllowed(t *testing.T) {
 	}
 }
 
+func TestRegionParamDictDirectPutAllowed(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_param_dict_direct_put.elisa", `def fill[region r](d: mutable dict[cstr, i64] @r) -> void:
+    _ = d.put("alpha", 10)
+    _ = d.get_or_insert("beta", 20)
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "requires an active in <arena>: scope") {
+		t.Fatalf("direct put/get_or_insert into a live-region dict must be allowed; got: %s", all)
+	}
+}
+
 // A safe `darray[u8] @r -> sview/cstr @r` conversion carries the region, so the
 // escape checker rejects returning it out of a scope-owned region (the bytes are
 // freed at scope exit) — the safety the unsafe `out[0].ref[static u8&]` idiom

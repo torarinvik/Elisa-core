@@ -645,3 +645,63 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	_ = currentBB
 	return phi, valueRefType, true, nil
 }
+
+func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	method := fieldExpr.Field
+	if method != "put" && method != "get_or_insert" {
+		return nil, nil, false, nil
+	}
+	dictType, _, ok := builtinDictReceiverType(s.exprType(fieldExpr.Object))
+	if !ok || dictType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 {
+		return nil, nil, true, fmt.Errorf("dict %s expects 2 arguments, got %d", method, len(expr.Args))
+	}
+	owner, ok := s.regionArenaOwner(dictType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
+		return nil, nil, true, fmt.Errorf("dict %s requires an active in <arena>: scope", method)
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "dict."+method+".owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
+	}
+	dictValue, dictType, err := s.emitBuiltinDictReceiverValue(fieldExpr.Object, s.exprType(fieldExpr.Object))
+	if err != nil {
+		return nil, nil, true, err
+	}
+	keyValue, _, err := s.emitExpr(expr.Args[0], dictType.Key)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	insertedArg, _, err := s.emitExpr(expr.Args[1], dictType.Value)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	helperBase := "arena_dict_put"
+	resultName := "dict.put.result"
+	if method == "get_or_insert" {
+		helperBase = "arena_dict_get_or_insert"
+		resultName = "dict.get_or_insert.result"
+	}
+	callee, helperType, err := s.ensureRuntimeFunction(s.dictMutationHelperName(helperBase), map[string]semantic.Type{"K": dictType.Key, "T": dictType.Value})
+	if err != nil {
+		return nil, nil, true, err
+	}
+	llvmType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, resultName)
+	return value, builtinDictEntryValueRefType(dictType), true, nil
+}
