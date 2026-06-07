@@ -4,6 +4,17 @@
 # ============================================================
 
 # ------------------------------------------------------------
+# Effect-family aliases: bundle the common concurrency permissions so callers
+# write `can Parallel:` instead of a nine-effect list. Fine-grained effects stay
+# available; these are convenience supersets that expand at each use site.
+# ------------------------------------------------------------
+
+grant Atomic = Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence
+grant Threads = Thread.Spawn, Thread.Join, Thread.Detach, Thread.Yield, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
+grant Pooled = Pool.Create, Pool.Submit, Pool.Await, Pool.WaitAll, Pool.Shutdown, Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
+grant Parallel = Thread.Spawn, Thread.Join, Thread.Detach, Thread.Yield, Pool.Create, Pool.Submit, Pool.Await, Pool.WaitAll, Pool.Shutdown, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence
+
+# ------------------------------------------------------------
 # Core runtime carriers
 # ------------------------------------------------------------
 

@@ -482,6 +482,8 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		return nil
 	case *ast.TypeAliasDecl:
 		return nil
+	case *ast.GrantAliasDecl:
+		return nil
 	case *ast.UsingDecl, *ast.ImportDecl:
 		return nil
 	case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
@@ -668,6 +670,8 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 	case *ast.GrammarEnvDecl:
 		return nil
 	case *ast.TypeAliasDecl:
+		return nil
+	case *ast.GrantAliasDecl:
 		return nil
 	case *ast.UsingDecl, *ast.ImportDecl:
 		return nil
