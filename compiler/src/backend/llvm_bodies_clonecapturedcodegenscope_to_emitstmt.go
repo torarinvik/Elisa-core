@@ -245,7 +245,7 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 		C.LLVMBuildStore(s.builder, zero, alloca)
 	}
 	s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
-	s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
+	s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType, owned: true})
 	s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: alloca}
 	// A lazy region (e.g. `in auto:`) is left zero-initialized: arena_alloc creates its
 	// first block on demand, and arena_free over a never-allocated arena is a no-op. So a
@@ -255,6 +255,7 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 	}
 	return s.emitRegionInit(alloca, arenaType, n.Capacity, n.Allocator)
 }
+
 // regionPolyAutoAdopts reports whether this synthesized `__auto_*` region, inside a
 // region-polymorphic function (docs/75), should ADOPT the threaded caller region (`__region_auto`)
 // instead of creating its own arena. When true the region allocates nothing, frees nothing, and is
@@ -418,7 +419,7 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 		// Lazy arena: first block allocated on demand, free is a no-op if unused -> an unused
 		// parallel stack costs only the stack slot.
 		allocaByStack[k] = alloca
-		s.regions = append(s.regions, regionBinding{name: name, ptr: alloca, typ: arenaType})
+		s.regions = append(s.regions, regionBinding{name: name, ptr: alloca, typ: arenaType, owned: true})
 		kind := scopedCleanupRegion
 		if loopReset {
 			kind = scopedCleanupRegionReset

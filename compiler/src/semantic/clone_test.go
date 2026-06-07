@@ -26,6 +26,16 @@ def clone_pair(owner: mutable Arena&, source_items: dview[u32], block: Lua.Block
 `)
 }
 
+func TestAnalyzeCloneBuiltinUsesRegionParamTarget(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_region_param.elisa", `def copy[region r](items: darray[u8] @r) -> darray[u8] @r:
+    return clone[darray[u8] @r](items)
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, "requires an active in <owner>: scope") {
+		t.Fatalf("clone into a live region-param darray target must be allowed; got:\n%s", all)
+	}
+}
+
 func TestAnalyzeCloneBuiltinRejectsAllocatingCloneWithoutOwner(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_owner_required.elisa", `def clone_items(items: dview[u32]) -> darray[u32]:
 	return clone[darray[u32]](items)

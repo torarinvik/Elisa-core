@@ -374,6 +374,50 @@ def region_scope_store_growth_test() -> void:
 	}
 }
 
+func TestRunCLIRegionParamCloneDArrayUsesHiddenArena(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_param_clone_darray.elisa")
+	src := `def copy[region r](items: darray[u8] @r) -> darray[u8] @r:
+    return clone[darray[u8] @r](items)
+
+@test
+def region_param_clone_darray_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region a(4096):
+            src: mutable darray[u8] @a = []
+            src.push([10, 20, 30])
+            cloned: darray[u8] @a = copy(src)
+            if cloned.count != 3:
+                panic("expected clone count 3")
+            if cloned[0] != 10 or cloned[1] != 20 or cloned[2] != 30:
+                panic("unexpected clone contents")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write region-param clone fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-param clone test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] region_param_clone_darray_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected region-param clone output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 // End-to-end: the "any allocator" interface. A single generic function written
 // against the `Allocator` protocol allocates + fills a buffer through BOTH a
 // bump (Arena) backend and a malloc-backed backend, proving static-dispatch

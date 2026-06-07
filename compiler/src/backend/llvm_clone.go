@@ -139,7 +139,10 @@ func (s *functionState) emitCloneArrayValue(sourceValue C.LLVMValueRef, sourceTy
 }
 
 func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceType semantic.Type, targetType *semantic.DArrayType, name string) (C.LLVMValueRef, error) {
-	owner, ok := s.lookupTreeAllocOwner()
+	owner, ok := s.regionArenaOwner(targetType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
 	if !ok {
 		return nil, fmt.Errorf("clone of %s requires an active in <owner>: scope", targetType.String())
 	}

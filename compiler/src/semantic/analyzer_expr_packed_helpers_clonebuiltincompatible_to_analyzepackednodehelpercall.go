@@ -118,7 +118,7 @@ func (a *Analyzer) analyzeCloneBuiltinCall(expr *ast.CallExpr) (Type, bool) {
 		a.errorf(expr.Pos(), "clone cannot clone %s into %s in v1", sourceType, targetType)
 		return invalidType, true
 	}
-	if needsOwner && a.currentTreeAllocOwner.Kind == treeAllocOwnerNone {
+	if needsOwner && a.currentTreeAllocOwner.Kind == treeAllocOwnerNone && !a.regionAvailableForContainer(targetType) {
 		a.errorf(expr.Pos(), "clone of %q requires an active in <owner>: scope", targetType.String())
 		return invalidType, true
 	}

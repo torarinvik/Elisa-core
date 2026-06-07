@@ -44,18 +44,18 @@ type codegenScope struct {
 	packedViewPtrs           map[string]packedVariantViewBinding
 }
 type functionState struct {
-	g                            *llvmGenerator
-	decl                         *ast.FuncDecl
-	fnValue                      C.LLVMValueRef
-	fnType                       *semantic.FuncType
-	builder                      C.LLVMBuilderRef
-	scope                        *codegenScope
-	diScope                      C.LLVMMetadataRef
-	traceNameGlobal              C.LLVMValueRef
-	typeMap                      map[string]semantic.Type
-	specializedFuncTypes         map[*semantic.FuncType]*semantic.FuncType
-	resultSlot                   C.LLVMValueRef
-	sretReturn                   bool
+	g                    *llvmGenerator
+	decl                 *ast.FuncDecl
+	fnValue              C.LLVMValueRef
+	fnType               *semantic.FuncType
+	builder              C.LLVMBuilderRef
+	scope                *codegenScope
+	diScope              C.LLVMMetadataRef
+	traceNameGlobal      C.LLVMValueRef
+	typeMap              map[string]semantic.Type
+	specializedFuncTypes map[*semantic.FuncType]*semantic.FuncType
+	resultSlot           C.LLVMValueRef
+	sretReturn           bool
 	// aliasSafeElementPtrs holds GEP'd element addresses of scalar-element darrays (e.g. darray[f64]).
 	// Loads/stores through these are tagged with the "elt" alias scope (noalias the "hdr" scope), and
 	// the darray's data-pointer header load is tagged "hdr" (noalias "elt"). This lets LLVM prove the
@@ -63,8 +63,8 @@ type functionState struct {
 	// out of hot loops. Gated to scalar element types: a scalar buffer can never contain a darray
 	// header, so hdr != elt is always true (nested darray[darray[...]] is left untagged). All element
 	// accesses share ONE "elt" scope, so they remain may-alias to each other (no spurious vectorization).
-	aliasSafeElementPtrs         map[C.LLVMValueRef]bool
-	regions                      []regionBinding
+	aliasSafeElementPtrs map[C.LLVMValueRef]bool
+	regions              []regionBinding
 	// darrayStackTag routes a fresh inferred-region darray (by name) to its assigned parallel
 	// arena (multi-stack regions, Phase B1b): name -> region arena tag "__auto_N#k". Populated at
 	// region entry from Result.RegionStacks, cleared at region exit. Empty for ordinary code.
@@ -73,8 +73,8 @@ type functionState struct {
 	// statement -> the stack arena to free right after it (the object died and is not aliased).
 	// Populated at region entry, fired once and removed when the statement is emitted.
 	earlyFreeByOffset map[int]C.LLVMValueRef
-	packedStores                 map[string]packedStoreBinding
-	treeAllocOwner               treeAllocOwnerBinding
+	packedStores      map[string]packedStoreBinding
+	treeAllocOwner    treeAllocOwnerBinding
 	// regionPolyOwner is the region threaded into a region-polymorphic function via the hidden
 	// `__region_auto` Arena& param (docs/75). The function's synthesized `__auto_*` region adopts it
 	// rather than creating a fresh, locally-freed arena, so `new[auto]` allocates into the caller's
@@ -221,9 +221,10 @@ type deferredBodyBinding struct {
 	captureScope *codegenScope
 }
 type regionBinding struct {
-	name string
-	ptr  C.LLVMValueRef
-	typ  semantic.Type
+	name  string
+	ptr   C.LLVMValueRef
+	typ   semantic.Type
+	owned bool
 }
 type checkpointBindingKind int
 
@@ -511,7 +512,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		base := paramOffset + len(fnType.Params)
 		for j, regionName := range fnType.RegionParams {
 			arenaParam := C.LLVMGetParam(fnValue, C.unsigned(base+j))
-			state.regions = append(state.regions, regionBinding{name: regionName, ptr: arenaParam, typ: arenaType})
+			state.regions = append(state.regions, regionBinding{name: regionName, ptr: arenaParam, typ: arenaType, owned: false})
 		}
 	}
 
@@ -603,12 +604,16 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 }
 func (s *functionState) emitRegionCleanup() error {
 	for i := len(s.regions) - 1; i >= 0; i-- {
+		if !s.regions[i].owned {
+			continue
+		}
 		if err := s.emitArenaFree(s.regions[i].ptr, s.regions[i].typ); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
 // pushLoopTargets records the break/continue targets for a loop along with the current scoped
 // cleanup floor — the number of cleanups registered by ENCLOSING scopes. A break/continue must
 // only run cleanups registered INSIDE the loop body (indices >= floor); firing an enclosing
