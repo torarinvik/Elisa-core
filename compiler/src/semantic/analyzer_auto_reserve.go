@@ -37,7 +37,8 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 	}
 	ysName := ""
 	var perIteration ast.Expr
-	for name, growth := range collectGrowthTargetCounts(stmt.Body) {
+	provenGrowth := collectGrowthTargetCounts(stmt.Body)
+	for name, growth := range provenGrowth {
 		if name == srcIdent.Name {
 			continue
 		}
@@ -55,6 +56,7 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		perIteration = growth
 	}
 	if ysName == "" {
+		a.lintUninferredAutoReserveIterFill(stmt, srcIdent.Name)
 		return
 	}
 	pos := stmt.Position
@@ -69,6 +71,27 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 	}}
 	a.analyzeStmt(preReserve)
 	stmt.PreReserve = preReserve
+}
+
+func (a *Analyzer) lintUninferredAutoReserveIterFill(stmt *ast.IterForStmt, srcName string) {
+	target := ""
+	for name := range collectGrowthTargetNames(stmt.Body) {
+		if name == srcName {
+			continue
+		}
+		sym, ok := a.currentScope.Lookup(name)
+		if !ok || !isDArrayTypeMaybeRef(sym.Type) {
+			continue
+		}
+		if target != "" {
+			return
+		}
+		target = name
+	}
+	if target == "" {
+		return
+	}
+	a.perfLint(stmt.Pos(), "cannot infer a safe reserve bound for %q in this loop; growth may reallocate repeatedly. Make the bound provable or add an explicit `%s.reserve(total)` before the loop", target, target)
 }
 
 // isDArrayTypeMaybeRef reports whether t is a darray, looking through a single reference wrapper
@@ -141,6 +164,41 @@ func collectGrowthTargetCounts(body []ast.Stmt) map[string]ast.Expr {
 	}
 	walk(reflect.ValueOf(body), 0)
 	return counts
+}
+
+func collectGrowthTargetNames(body []ast.Stmt) map[string]bool {
+	names := map[string]bool{}
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && (field.Field == "push" || field.Field == "extend") {
+					if recv, ok := field.Object.(*ast.Ident); ok {
+						names[recv.Name] = true
+						return
+					}
+				}
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(body))
+	return names
 }
 
 func semanticGrowthCallElementCount(method string, call *ast.CallExpr) int {

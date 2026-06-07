@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"elisacore/src/ast"
@@ -135,6 +136,40 @@ func TestAutoReserveForInSkipsNestedGrowth(t *testing.T) {
 	}
 	if loop.PreReserve != nil {
 		t.Fatal("nested for-in growth must not auto-reserve only the outer source count")
+	}
+}
+
+func TestAutoReserveForInWarnsWhenBoundCannotBeInferred(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "auto_reserve_uninferred_warn.elisa", `def g(src: darray[darray[i64]]&) -> i64:
+    ys: mutable darray[i64] = []
+    for chunk in src:
+        for x in chunk:
+            ys.push(x)
+    return ys[0]
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "cannot infer a safe reserve bound") {
+		t.Fatalf("expected uninferred auto-reserve warning, got:\n%s", all)
+	}
+	if len(result.Errors()) != 0 {
+		t.Fatalf("default performance lint must be a warning, got errors:\n%v", result.Errors())
+	}
+}
+
+func TestAutoReserveForInPerfStrictErrorsWhenBoundCannotBeInferred(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "auto_reserve_uninferred_error.elisa", `def g(src: darray[darray[i64]]&) -> i64:
+    ys: mutable darray[i64] = []
+    for chunk in src:
+        for x in chunk:
+            ys.push(x)
+    return ys[0]
+`, AnalyzeOptions{EnforcePerfLints: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "cannot infer a safe reserve bound") {
+		t.Fatalf("expected uninferred auto-reserve error, got:\n%s", all)
+	}
+	if len(result.Errors()) == 0 {
+		t.Fatal("performance-strict uninferred auto-reserve lint must be an error")
 	}
 }
 

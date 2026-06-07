@@ -44,6 +44,18 @@ def main() -> i64:
 `,
 			marker: "boxes a value on every iteration",
 		},
+		{
+			name: "uninferred_auto_reserve.elisa",
+			src: `def main(src: darray[darray[i64]]&) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        ys: mutable darray[i64] = []
+        for chunk in src:
+            for x in chunk:
+                ys.push(x)
+        return ys[0]
+`,
+			marker: "cannot infer a safe reserve bound",
+		},
 	}
 
 	for _, tc := range cases {
