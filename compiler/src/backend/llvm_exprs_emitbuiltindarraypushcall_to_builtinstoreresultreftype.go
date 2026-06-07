@@ -145,7 +145,10 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 		return nil, nil, true, err
 	}
 	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.push.count"))
-	neededValue := C.LLVMBuildAdd(s.builder, currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("darray.push.needed"))
+	neededValue, err := s.emitCheckedUSizeAdd(currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), "darray.push.needed")
+	if err != nil {
+		return nil, nil, true, err
+	}
 	if err := s.emitBuiltinDArrayEnsureCapacity(darrayPtr, darrayType, owner.arenaRef, neededValue, "darray.push"); err != nil {
 		return nil, nil, true, err
 	}
@@ -241,7 +244,10 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 		return nil, nil, true, err
 	}
 	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.extend.count"))
-	neededValue := C.LLVMBuildAdd(s.builder, currentCount, sourceCount, cStringFree("darray.extend.needed"))
+	neededValue, err := s.emitCheckedUSizeAdd(currentCount, sourceCount, "darray.extend.needed")
+	if err != nil {
+		return nil, nil, true, err
+	}
 	if err := s.emitBuiltinDArrayEnsureCapacity(darrayPtr, darrayType, owner.arenaRef, neededValue, "darray.extend"); err != nil {
 		return nil, nil, true, err
 	}
@@ -625,12 +631,15 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 	C.LLVMPositionBuilderAtEnd(s.builder, growBB)
 	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	initCap := C.LLVMConstInt(usizeLLVMType, 256, 0)
-	doubled := C.LLVMBuildMul(s.builder, currentCapacity, C.LLVMConstInt(usizeLLVMType, 2, 0), cStringFree(name+".capacity.double"))
+	doubledOrNeeded, err := s.emitSafeDoubledCapacity(currentCapacity, neededValue, usizeLLVMType, name)
+	if err != nil {
+		return err
+	}
 	baseCapacity := C.LLVMBuildSelect(
 		s.builder,
 		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentCapacity, zero, cStringFree(name+".capacity.zero")),
 		initCap,
-		doubled,
+		doubledOrNeeded,
 		cStringFree(name+".capacity.base"),
 	)
 	newCapacity := C.LLVMBuildSelect(
@@ -644,8 +653,10 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 	if err != nil {
 		return err
 	}
-	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSizeBytes), 0)
-	oldSize := C.LLVMBuildMul(s.builder, currentCapacity, elemSizeValue, cStringFree(name+".old.bytes"))
+	oldSize, err := s.emitCheckedElemByteCount(currentCapacity, elemSizeBytes, name+".old")
+	if err != nil {
+		return err
+	}
 	newSize, err := s.emitCheckedElemByteCount(newCapacity, elemSizeBytes, name+".new")
 	if err != nil {
 		return err

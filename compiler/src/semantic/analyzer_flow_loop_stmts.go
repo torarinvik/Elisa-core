@@ -187,6 +187,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	a.currentStorageViewDeps = mergedStorageViewDeps
+	a.maybeAutoReserveCountingFill(stmt)
 }
 
 type iterLoopSourceInfo struct {

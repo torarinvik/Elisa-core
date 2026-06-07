@@ -47,6 +47,9 @@ func (a *Analyzer) findUnreservedCountingFills(stmts []ast.Stmt) {
 }
 
 func (a *Analyzer) flagUnreservedCountingFill(prev ast.Stmt, loop *ast.ForStmt) {
+	if loop.PreReserve != nil || len(loop.PreReserves) != 0 {
+		return
+	}
 	loopBound, ok := semanticCountingLoopBoundExpr(loop)
 	if !ok {
 		return
@@ -118,5 +121,5 @@ func stmtIsReserveForBound(stmt ast.Stmt, name string, expected ast.Expr) bool {
 	if !ok || recv.Name != name || len(call.Args) != 1 {
 		return false
 	}
-	return optimizationExprString(call.Args[0]) == optimizationExprString(expected)
+	return semanticReserveBoundAtLeast(call.Args[0], expected)
 }

@@ -437,6 +437,9 @@ func TestAnalyzeAmbiguousUntypedDArrayBuilderDiagnostic(t *testing.T) {
 	if !strings.Contains(all, `cannot infer element type for empty darray builder "xs"`) {
 		t.Fatalf("expected ambiguous darray builder diagnostic, got:\n%s", all)
 	}
+	if !strings.Contains(all, `xs: T[] = []`) {
+		t.Fatalf("expected typed declaration suggestion without numeric suffixes, got:\n%s", all)
+	}
 	if strings.Contains(all, `empty list literal requires an expected array or darray type`) {
 		t.Fatalf("expected tailored darray builder diagnostic without generic empty-list noise, got:\n%s", all)
 	}

@@ -56,18 +56,6 @@ def main() -> i64:
 `,
 			marker: "cannot infer a safe reserve bound",
 		},
-		{
-			name: "unreserved_counting_fill.elisa",
-			src: `def main(n: usize) -> usize:
-    can Memory.Allocate, Abort.Panic:
-        xs: mutable darray[i64] = []
-        gap: i64 = 0
-        for i in 0..<n:
-            xs.push(i.i64() + gap)
-        return xs.count
-`,
-			marker: "without a matching immediately preceding reserve",
-		},
 	}
 
 	for _, tc := range cases {

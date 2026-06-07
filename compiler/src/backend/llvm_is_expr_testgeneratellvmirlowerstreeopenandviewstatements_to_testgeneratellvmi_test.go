@@ -72,9 +72,12 @@ def make_int(value: i64) -> Lua.Expr:
 	}
 	for _, check := range []string{
 		"%Lua_Expr__TreeUnionTable = type { i64, i64, ptr, ptr }",
+		"tree.category.needed.overflow",
 		"tree.category.kind.ptr",
 		"tree.category.payload.memcpy",
 		"tree.category.count.ptr",
+		"tree.category.capacity.double.safe",
+		"tree.category.kinds.new.size.overflow",
 		"define i32 @make_int",
 	} {
 		if !strings.Contains(output, check) {

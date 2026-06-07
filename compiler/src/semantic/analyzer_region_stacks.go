@@ -445,6 +445,18 @@ func (s *hardBoundScan) walk(v reflect.Value) {
 			return
 		}
 		iface := v.Interface()
+		if loop, ok := iface.(*ast.ForStmt); ok {
+			s.loopStack = append(s.loopStack, loop)
+			s.walk(reflect.ValueOf(loop.Body))
+			s.loopStack = s.loopStack[:len(s.loopStack)-1]
+			return
+		}
+		if loop, ok := iface.(*ast.IterForStmt); ok {
+			s.loopStack = append(s.loopStack, loop)
+			s.walk(reflect.ValueOf(loop.Body))
+			s.loopStack = s.loopStack[:len(s.loopStack)-1]
+			return
+		}
 		if call, ok := iface.(*ast.CallExpr); ok {
 			s.checkCall(call)
 		}

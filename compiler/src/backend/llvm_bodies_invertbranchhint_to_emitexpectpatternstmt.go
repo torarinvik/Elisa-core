@@ -252,6 +252,16 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 	return nil
 }
 func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
+	if stmt.PreReserve != nil {
+		if err := s.emitStmt(stmt.PreReserve); err != nil {
+			return err
+		}
+	}
+	for _, preReserve := range stmt.PreReserves {
+		if err := s.emitStmt(preReserve); err != nil {
+			return err
+		}
+	}
 	loopType := s.forLoopValueType(stmt)
 	if loopType == nil {
 		return fmt.Errorf("missing semantic type for for-loop")

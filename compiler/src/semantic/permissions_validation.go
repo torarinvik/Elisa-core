@@ -277,6 +277,12 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionExpr(n.Cond, granted)
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.ForStmt:
+		if n.PreReserve != nil {
+			a.validatePermissionStmt(n.PreReserve, granted)
+		}
+		for _, preReserve := range n.PreReserves {
+			a.validatePermissionStmt(preReserve, granted)
+		}
 		a.validatePermissionExpr(n.Start, granted)
 		a.validatePermissionExpr(n.End, granted)
 		if n.Step != nil {
@@ -284,6 +290,12 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		}
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.IterForStmt:
+		if n.PreReserve != nil {
+			a.validatePermissionStmt(n.PreReserve, granted)
+		}
+		for _, preReserve := range n.PreReserves {
+			a.validatePermissionStmt(preReserve, granted)
+		}
 		a.validatePermissionExpr(n.Source, granted)
 		a.validatePermissionExpr(n.WhereFilter, granted)
 		a.validatePermissionExpr(n.Filter, granted)

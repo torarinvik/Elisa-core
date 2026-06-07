@@ -554,6 +554,11 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			return err
 		}
 	}
+	for _, preReserve := range stmt.PreReserves {
+		if err := s.emitStmt(preReserve); err != nil {
+			return err
+		}
+	}
 	sourceType := s.exprType(stmt.Source)
 	if sourceType == nil {
 		return fmt.Errorf("missing semantic type for iterable loop source")

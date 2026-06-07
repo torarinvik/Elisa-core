@@ -67,6 +67,54 @@ func TestGenerateLLVMIRDArrayReserveBoundArithmeticIsChecked(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRDArrayPushAndExtendCountArithmeticIsChecked(t *testing.T) {
+	src := `def build(owner: mutable Arena&, src: darray[u8]&) -> usize:
+    xs: mutable darray[u8] = []
+    in owner:
+        xs.push(1)
+        xs.extend(src)
+    return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_growth_count_overflow.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"llvm.uadd.with.overflow",
+		"darray.push.needed.overflow",
+		"darray.extend.needed.overflow",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected darray growth count arithmetic to emit %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRDArrayEnsureCapacityArithmeticAvoidsWrappedCapacity(t *testing.T) {
+	src := `def build(owner: mutable Arena&, n: usize) -> usize:
+    xs: mutable darray[u16] = []
+    in owner:
+        xs.reserve(n)
+    return xs.capacity
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_capacity_growth_overflow.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"llvm.umul.with.overflow",
+		"darray.reserve.capacity.double.overflow",
+		"darray.reserve.capacity.double.safe",
+		"darray.reserve.old.size.overflow",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected darray capacity growth arithmetic to emit %q, got:\n%s", check, output)
+		}
+	}
+}
+
 // clone[darray[u8]](sview) lowers to a region allocation plus a byte-copy loop
 // from the view's (ptr, len), producing an owned darray[u8] / dstr.
 func TestGenerateLLVMIRLowersCloneSViewIntoOwnedBytes(t *testing.T) {

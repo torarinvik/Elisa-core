@@ -211,6 +211,14 @@ func (s *regionGrowthScan) walkGrowth(v reflect.Value) {
 		if v.IsNil() {
 			return
 		}
+		if loop, ok := v.Interface().(*ast.ForStmt); ok {
+			s.walkGrowth(reflect.ValueOf(loop.Body))
+			return
+		}
+		if loop, ok := v.Interface().(*ast.IterForStmt); ok {
+			s.walkGrowth(reflect.ValueOf(loop.Body))
+			return
+		}
 		if call, ok := v.Interface().(*ast.CallExpr); ok {
 			if name, isReserve, isGrowth := s.growthCallTarget(call); name != "" {
 				if isReserve {

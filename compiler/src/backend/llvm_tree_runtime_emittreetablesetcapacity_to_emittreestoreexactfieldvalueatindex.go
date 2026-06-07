@@ -67,7 +67,10 @@ func (s *functionState) emitTreeExactAppendSlot(arenaValue C.LLVMValueRef, state
 	if err != nil {
 		return treeExactAppendSlot{}, err
 	}
-	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree(name+".needed"))
+	neededCount, err := s.emitCheckedUSizeAdd(rowIndex, C.LLVMConstInt(usizeType, 1, 0), name+".needed")
+	if err != nil {
+		return treeExactAppendSlot{}, err
+	}
 	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, name); err != nil {
 		return treeExactAppendSlot{}, err
 	}
@@ -87,7 +90,10 @@ func (s *functionState) emitTreeCategoryUnionAppendSlot(arenaValue C.LLVMValueRe
 	if err != nil {
 		return treeCategoryUnionAppendSlot{}, err
 	}
-	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree(name+".needed"))
+	neededCount, err := s.emitCheckedUSizeAdd(rowIndex, C.LLVMConstInt(usizeType, 1, 0), name+".needed")
+	if err != nil {
+		return treeCategoryUnionAppendSlot{}, err
+	}
 	if err := s.emitTreeEnsureCategoryUnionTableCapacity(arenaValue, tablePtr, category, neededCount, name); err != nil {
 		return treeCategoryUnionAppendSlot{}, err
 	}
@@ -107,7 +113,10 @@ func (s *functionState) emitTreeRootUnionAppendSlot(arenaValue C.LLVMValueRef, s
 	if err != nil {
 		return treeRootUnionAppendSlot{}, err
 	}
-	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree(name+".needed"))
+	neededCount, err := s.emitCheckedUSizeAdd(rowIndex, C.LLVMConstInt(usizeType, 1, 0), name+".needed")
+	if err != nil {
+		return treeRootUnionAppendSlot{}, err
+	}
 	if err := s.emitTreeEnsureRootUnionTableCapacity(arenaValue, tablePtr, family, neededCount, name); err != nil {
 		return treeRootUnionAppendSlot{}, err
 	}
@@ -308,7 +317,10 @@ func (s *functionState) emitTreeEnsureTableCapacity(arenaRef C.LLVMValueRef, tab
 	C.LLVMPositionBuilderAtEnd(s.builder, growBB)
 	zero := C.LLVMConstInt(usizeType, 0, 0)
 	initCap := C.LLVMConstInt(usizeType, C.ulonglong(treeInitialRowCapacity(rowSizeBytes)), 0)
-	doubled := C.LLVMBuildMul(s.builder, currentCapacity, C.LLVMConstInt(usizeType, 2, 0), cStringFree(name+".capacity.double"))
+	doubled, err := s.emitSafeDoubledCapacity(currentCapacity, neededCount, usizeType, name)
+	if err != nil {
+		return err
+	}
 	nonZeroCap := C.LLVMBuildSelect(s.builder,
 		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentCapacity, zero, cStringFree(name+".capacity.zero")),
 		initCap,
@@ -354,9 +366,14 @@ func (s *functionState) emitTreeEnsureTableCapacity(arenaRef C.LLVMValueRef, tab
 		C.LLVMPositionBuilderAtEnd(s.builder, contBB)
 		return nil
 	}
-	rowSizeValue := C.LLVMConstInt(usizeType, C.ulonglong(rowSizeBytes), 0)
-	oldBytes := C.LLVMBuildMul(s.builder, currentCapacity, rowSizeValue, cStringFree(name+".old.bytes"))
-	newBytes := C.LLVMBuildMul(s.builder, newCapacity, rowSizeValue, cStringFree(name+".new.bytes"))
+	oldBytes, err := s.emitCheckedElemByteCount(currentCapacity, rowSizeBytes, name+".old")
+	if err != nil {
+		return err
+	}
+	newBytes, err := s.emitCheckedElemByteCount(newCapacity, rowSizeBytes, name+".new")
+	if err != nil {
+		return err
+	}
 	rowsPtr, err := s.emitTreeTableRowsPointerValue(tablePtr, memberType, name)
 	if err != nil {
 		return err
@@ -425,7 +442,10 @@ func (s *functionState) emitTreeEnsureCategoryUnionTableCapacity(arenaRef C.LLVM
 	C.LLVMPositionBuilderAtEnd(s.builder, growBB)
 	zero := C.LLVMConstInt(usizeType, 0, 0)
 	initCap := C.LLVMConstInt(usizeType, C.ulonglong(treeInitialRowCapacity(kindSizeBytes+payloadSizeBytes)), 0)
-	doubled := C.LLVMBuildMul(s.builder, currentCapacity, C.LLVMConstInt(usizeType, 2, 0), cStringFree(name+".capacity.double"))
+	doubled, err := s.emitSafeDoubledCapacity(currentCapacity, neededCount, usizeType, name)
+	if err != nil {
+		return err
+	}
 	nonZeroCap := C.LLVMBuildSelect(s.builder,
 		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentCapacity, zero, cStringFree(name+".capacity.zero")),
 		initCap,
@@ -487,7 +507,10 @@ func (s *functionState) emitTreeEnsureRootUnionTableCapacity(arenaRef C.LLVMValu
 	C.LLVMPositionBuilderAtEnd(s.builder, growBB)
 	zero := C.LLVMConstInt(usizeType, 0, 0)
 	initCap := C.LLVMConstInt(usizeType, C.ulonglong(treeInitialRowCapacity(kindSizeBytes+payloadSizeBytes)), 0)
-	doubled := C.LLVMBuildMul(s.builder, currentCapacity, C.LLVMConstInt(usizeType, 2, 0), cStringFree(name+".capacity.double"))
+	doubled, err := s.emitSafeDoubledCapacity(currentCapacity, neededCount, usizeType, name)
+	if err != nil {
+		return err
+	}
 	nonZeroCap := C.LLVMBuildSelect(s.builder,
 		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentCapacity, zero, cStringFree(name+".capacity.zero")),
 		initCap,
@@ -560,10 +583,6 @@ func (s *functionState) emitTreeGrowDenseUnionPointer(arenaRef C.LLVMValueRef, c
 	if rowSizeBytes == 0 {
 		return nil
 	}
-	usizeType, err := s.g.lowerBuiltin("usize")
-	if err != nil {
-		return err
-	}
 	arenaType := s.g.result.NamedTypes["Arena"]
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -589,9 +608,14 @@ func (s *functionState) emitTreeGrowDenseUnionPointer(arenaRef C.LLVMValueRef, c
 	if err != nil {
 		return err
 	}
-	rowSizeValue := C.LLVMConstInt(usizeType, C.ulonglong(rowSizeBytes), 0)
-	oldBytes := C.LLVMBuildMul(s.builder, currentCapacity, rowSizeValue, cStringFree(name+".old.bytes"))
-	newBytes := C.LLVMBuildMul(s.builder, newCapacity, rowSizeValue, cStringFree(name+".new.bytes"))
+	oldBytes, err := s.emitCheckedElemByteCount(currentCapacity, rowSizeBytes, name+".old")
+	if err != nil {
+		return err
+	}
+	newBytes, err := s.emitCheckedElemByteCount(newCapacity, rowSizeBytes, name+".new")
+	if err != nil {
+		return err
+	}
 	oldPtr, err := loadPointer()
 	if err != nil {
 		return err

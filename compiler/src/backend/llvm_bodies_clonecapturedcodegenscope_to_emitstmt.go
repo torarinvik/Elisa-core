@@ -357,11 +357,23 @@ func (s *functionState) emitReserveCommitStackInit(arenaPtr C.LLVMValueRef, aren
 	if elemBytes == 0 {
 		elemBytes = 1
 	}
-	twoN := C.LLVMBuildMul(s.builder, nValue, C.LLVMConstInt(usizeLLVM, 2, 0), cStringFree("rc.2n"))
-	bytes := C.LLVMBuildMul(s.builder, twoN, C.LLVMConstInt(usizeLLVM, C.ulonglong(elemBytes), 0), cStringFree("rc.bytes"))
-	bytes = C.LLVMBuildAdd(s.builder, bytes, C.LLVMConstInt(usizeLLVM, 4096, 0), cStringFree("rc.bytes.headroom"))
+	twoN, err := s.emitCheckedUSizeMul(nValue, C.LLVMConstInt(usizeLLVM, 2, 0), "rc.2n")
+	if err != nil {
+		return err
+	}
+	bytes, err := s.emitCheckedUSizeMul(twoN, C.LLVMConstInt(usizeLLVM, C.ulonglong(elemBytes), 0), "rc.bytes")
+	if err != nil {
+		return err
+	}
+	bytes, err = s.emitCheckedUSizeAdd(bytes, C.LLVMConstInt(usizeLLVM, 4096, 0), "rc.bytes.headroom")
+	if err != nil {
+		return err
+	}
 	slots := C.LLVMBuildUDiv(s.builder, bytes, C.LLVMConstInt(usizeLLVM, 8, 0), cStringFree("rc.slots"))
-	slots = C.LLVMBuildAdd(s.builder, slots, C.LLVMConstInt(usizeLLVM, 8, 0), cStringFree("rc.slots.pad"))
+	slots, err = s.emitCheckedUSizeAdd(slots, C.LLVMConstInt(usizeLLVM, 8, 0), "rc.slots.pad")
+	if err != nil {
+		return err
+	}
 	return s.emitRegionInitValue(arenaPtr, arenaType, slots, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */)
 }
 

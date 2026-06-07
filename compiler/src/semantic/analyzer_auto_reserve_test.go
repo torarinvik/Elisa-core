@@ -57,6 +57,50 @@ func firstIterForStmt(root any) *ast.IterForStmt {
 	return found
 }
 
+func firstForStmt(root any) *ast.ForStmt {
+	var found *ast.ForStmt
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if found != nil || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			if loop, ok := v.Interface().(*ast.ForStmt); ok {
+				found = loop
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(root))
+	return found
+}
+
+func reserveBoundArg(t *testing.T, stmt ast.Stmt) ast.Expr {
+	t.Helper()
+	exprStmt, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected reserve prelude to be an expr stmt, got %T", stmt)
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		t.Fatalf("expected reserve call with one bound argument, got %T %#v", exprStmt.Expr, exprStmt.Expr)
+	}
+	return call.Args[0]
+}
+
 // A `for x in src:` loop over a darray that fills exactly one darray gets an auto-inserted
 // `ys.reserve(src.count)` (recorded on the loop's PreReserve slot).
 func TestAutoReserveForInSetsPreReserve(t *testing.T) {
@@ -72,6 +116,90 @@ func TestAutoReserveForInSetsPreReserve(t *testing.T) {
 	}
 	if loop.PreReserve == nil {
 		t.Fatal("expected an auto-reserve PreReserve on the for-in fill loop")
+	}
+}
+
+func TestAutoReserveCountingLoopSetsPreReserveAfterGap(t *testing.T) {
+	file := analyzeAndGetFile(t, `def g(n: usize) -> usize:
+    ys: mutable darray[i64] = []
+    gap: i64 = 0
+    for i in 0..<n:
+        ys.push(i.i64() + gap)
+    return ys.count
+`)
+	loop := firstForStmt(file)
+	if loop == nil {
+		t.Fatal("no ForStmt found")
+	}
+	if loop.PreReserve == nil {
+		t.Fatal("expected semantic auto-reserve PreReserve on counting fill loop")
+	}
+	if ident, ok := reserveBoundArg(t, loop.PreReserve).(*ast.Ident); !ok || ident.Name != "n" {
+		t.Fatalf("expected reserve bound n, got %T %#v", reserveBoundArg(t, loop.PreReserve), reserveBoundArg(t, loop.PreReserve))
+	}
+}
+
+func TestAutoReserveCountingLoopClonesArithmeticAndCountBounds(t *testing.T) {
+	file := analyzeAndGetFile(t, `def g(src: darray[i64]&) -> usize:
+    ys: mutable darray[i64] = []
+    gap: i64 = 0
+    for i in 0..<src.count + 1:
+        ys.push(i.i64() + gap)
+    return ys.count
+`)
+	loop := firstForStmt(file)
+	if loop == nil {
+		t.Fatal("no ForStmt found")
+	}
+	if loop.PreReserve == nil {
+		t.Fatal("expected semantic auto-reserve for arithmetic count bound")
+	}
+	if bound, ok := reserveBoundArg(t, loop.PreReserve).(*ast.BinaryExpr); !ok || bound.Op != lexer.TOKEN_PLUS {
+		t.Fatalf("expected reserve bound to keep src.count + 1, got %T %#v", reserveBoundArg(t, loop.PreReserve), reserveBoundArg(t, loop.PreReserve))
+	}
+}
+
+func TestAutoReserveCountingLoopReservesAllProvableTargets(t *testing.T) {
+	file := analyzeAndGetFile(t, `def g(n: usize) -> usize:
+    xs: mutable darray[i64] = []
+    ys: mutable darray[i64] = []
+    for i in 0..<n:
+        xs.push(i.i64())
+        ys.push([i.i64(), i.i64()])
+    return xs.count + ys.count
+`)
+	loop := firstForStmt(file)
+	if loop == nil {
+		t.Fatal("no ForStmt found")
+	}
+	if loop.PreReserve != nil {
+		t.Fatalf("multi-target auto-reserve should use PreReserves, got single prelude %T", loop.PreReserve)
+	}
+	if len(loop.PreReserves) != 2 {
+		t.Fatalf("expected two synthesized reserves, got %d", len(loop.PreReserves))
+	}
+	found := map[string]bool{}
+	for _, preReserve := range loop.PreReserves {
+		exprStmt, ok := preReserve.(*ast.ExprStmt)
+		if !ok {
+			t.Fatalf("expected reserve prelude expr stmt, got %T", preReserve)
+		}
+		call, ok := exprStmt.Expr.(*ast.CallExpr)
+		if !ok {
+			t.Fatalf("expected reserve call, got %T", exprStmt.Expr)
+		}
+		field, ok := call.Func.(*ast.FieldExpr)
+		if !ok || field.Field != "reserve" {
+			t.Fatalf("expected reserve field call, got %T %#v", call.Func, call.Func)
+		}
+		recv, ok := field.Object.(*ast.Ident)
+		if !ok {
+			t.Fatalf("expected identifier reserve target, got %T %#v", field.Object, field.Object)
+		}
+		found[recv.Name] = true
+	}
+	if !found["xs"] || !found["ys"] {
+		t.Fatalf("expected reserves for xs and ys, got %v", found)
 	}
 }
 
@@ -151,6 +279,33 @@ func TestAutoReserveForInFoldsMultiplePushesPerIteration(t *testing.T) {
 	}
 	if lit, ok := bound.Right.(*ast.IntLit); !ok || lit.Value != "2" {
 		t.Fatalf("expected reserve multiplier 2, got %T %#v", bound.Right, bound.Right)
+	}
+}
+
+func TestAutoReserveForInPureFieldSourceSetsPreReserve(t *testing.T) {
+	file := analyzeAndGetFile(t, `struct Bag:
+    items: darray[i64]
+
+def g(bag: Bag&) -> i64:
+    ys: mutable darray[i64] = []
+    for x in bag.items:
+        ys.push(x)
+    return ys[0]
+`)
+	loop := firstIterForStmt(file)
+	if loop == nil {
+		t.Fatal("no IterForStmt found")
+	}
+	if loop.PreReserve == nil {
+		t.Fatal("expected an auto-reserve PreReserve on pure field-source for-in fill loop")
+	}
+	bound := reserveBoundArg(t, loop.PreReserve)
+	field, ok := bound.(*ast.FieldExpr)
+	if !ok || field.Field != "count" {
+		t.Fatalf("expected reserve bound to use source.count, got %T %#v", bound, bound)
+	}
+	if source, ok := field.Object.(*ast.FieldExpr); !ok || source.Field != "items" {
+		t.Fatalf("expected reserve source to clone bag.items, got %T %#v", field.Object, field.Object)
 	}
 }
 
@@ -240,8 +395,7 @@ func TestAutoReserveForInInfersNestedCountingGrowthProduct(t *testing.T) {
 	}
 }
 
-// Two darrays filled in one loop is ambiguous (which to presize?) — skipped.
-func TestAutoReserveForInSkipsAmbiguousFill(t *testing.T) {
+func TestAutoReserveForInReservesAllProvableTargets(t *testing.T) {
 	file := analyzeAndGetFile(t, `def g(src: darray[i64]&) -> i64:
     ys: mutable darray[i64] = []
     zs: mutable darray[i64] = []
@@ -255,6 +409,32 @@ func TestAutoReserveForInSkipsAmbiguousFill(t *testing.T) {
 		t.Fatal("no IterForStmt found")
 	}
 	if loop.PreReserve != nil {
-		t.Fatal("ambiguous multi-target fill must not auto-reserve")
+		t.Fatalf("multi-target for-in auto-reserve should use PreReserves, got single prelude %T", loop.PreReserve)
+	}
+	if len(loop.PreReserves) != 2 {
+		t.Fatalf("expected two synthesized reserves, got %d", len(loop.PreReserves))
+	}
+	found := map[string]bool{}
+	for _, preReserve := range loop.PreReserves {
+		exprStmt, ok := preReserve.(*ast.ExprStmt)
+		if !ok {
+			t.Fatalf("expected reserve prelude expr stmt, got %T", preReserve)
+		}
+		call, ok := exprStmt.Expr.(*ast.CallExpr)
+		if !ok {
+			t.Fatalf("expected reserve call, got %T", exprStmt.Expr)
+		}
+		field, ok := call.Func.(*ast.FieldExpr)
+		if !ok || field.Field != "reserve" {
+			t.Fatalf("expected reserve field call, got %T %#v", call.Func, call.Func)
+		}
+		recv, ok := field.Object.(*ast.Ident)
+		if !ok {
+			t.Fatalf("expected identifier reserve target, got %T %#v", field.Object, field.Object)
+		}
+		found[recv.Name] = true
+	}
+	if !found["ys"] || !found["zs"] {
+		t.Fatalf("expected reserves for ys and zs, got %v", found)
 	}
 }

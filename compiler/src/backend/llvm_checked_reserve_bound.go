@@ -69,18 +69,10 @@ func (s *functionState) emitCheckedUSizeReserveBoundExpr(expr ast.Expr, name str
 }
 
 func (s *functionState) emitCheckedUSizeBinaryIntrinsic(intrinsicName string, left, right C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
-	usizeLLVMType, err := s.g.lowerType(usizeType)
+	value, overflow, err := s.emitUSizeBinaryOverflowIntrinsic(intrinsicName, left, right, name)
 	if err != nil {
 		return nil, err
 	}
-	fn, err := s.overflowIntrinsic(intrinsicName, usizeLLVMType)
-	if err != nil {
-		return nil, err
-	}
-	call := C.LLVMBuildCall2(s.builder, C.LLVMGlobalGetValueType(fn), fn, llvmValueSlicePtr([]C.LLVMValueRef{left, right}), 2, cStringFree(name+".checked"))
-	value := C.LLVMBuildExtractValue(s.builder, call, 0, cStringFree(name+".value"))
-	overflow := C.LLVMBuildExtractValue(s.builder, call, 1, cStringFree(name+".overflow"))
 	trapBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".overflow.trap"))
 	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".ok"))
 	C.LLVMBuildCondBr(s.builder, overflow, trapBB, contBB)
@@ -92,6 +84,38 @@ func (s *functionState) emitCheckedUSizeBinaryIntrinsic(intrinsicName string, le
 
 	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
 	return value, nil
+}
+
+func (s *functionState) emitUSizeBinaryOverflowIntrinsic(intrinsicName string, left, right C.LLVMValueRef, name string) (C.LLVMValueRef, C.LLVMValueRef, error) {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	fn, err := s.overflowIntrinsic(intrinsicName, usizeLLVMType)
+	if err != nil {
+		return nil, nil, err
+	}
+	call := C.LLVMBuildCall2(s.builder, C.LLVMGlobalGetValueType(fn), fn, llvmValueSlicePtr([]C.LLVMValueRef{left, right}), 2, cStringFree(name+".checked"))
+	value := C.LLVMBuildExtractValue(s.builder, call, 0, cStringFree(name+".value"))
+	overflow := C.LLVMBuildExtractValue(s.builder, call, 1, cStringFree(name+".overflow"))
+	return value, overflow, nil
+}
+
+func (s *functionState) emitCheckedUSizeAdd(left, right C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	return s.emitCheckedUSizeBinaryIntrinsic("llvm.uadd.with.overflow", left, right, name)
+}
+
+func (s *functionState) emitCheckedUSizeMul(left, right C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	return s.emitCheckedUSizeBinaryIntrinsic("llvm.umul.with.overflow", left, right, name)
+}
+
+func (s *functionState) emitSafeDoubledCapacity(currentCapacity, neededCapacity C.LLVMValueRef, usizeLLVMType C.LLVMTypeRef, name string) (C.LLVMValueRef, error) {
+	doubled, overflow, err := s.emitUSizeBinaryOverflowIntrinsic("llvm.umul.with.overflow", currentCapacity, C.LLVMConstInt(usizeLLVMType, 2, 0), name+".capacity.double")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildSelect(s.builder, overflow, neededCapacity, doubled, cStringFree(name+".capacity.double.safe")), nil
 }
 
 func (s *functionState) overflowIntrinsic(name string, llvmType C.LLVMTypeRef) (C.LLVMValueRef, error) {

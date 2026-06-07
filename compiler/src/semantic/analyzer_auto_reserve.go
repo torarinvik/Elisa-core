@@ -3,7 +3,6 @@ package semantic
 import (
 	"os"
 	"reflect"
-	"strconv"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -25,21 +24,23 @@ var autoReserveDisabledSem = os.Getenv("ELISA_NO_AUTO_RESERVE") != ""
 //   - the body grows exactly ONE distinct darray ys via push/extend (in scope, not the source);
 //     ambiguous or zero targets are skipped. Over-reserving (e.g. under a `where` filter) is safe.
 func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Type) {
-	if autoReserveDisabledSem || stmt == nil || stmt.PreReserve != nil {
+	if autoReserveDisabledSem || stmt == nil || stmt.PreReserve != nil || len(stmt.PreReserves) != 0 {
 		return
 	}
-	srcIdent, ok := stmt.Source.(*ast.Ident)
-	if !ok {
+	if semanticCloneReserveBoundExpr(stmt.Source) == nil {
 		return
 	}
 	if !isDArrayTypeMaybeRef(sourceType) {
 		return
 	}
-	ysName := ""
-	var perIteration ast.Expr
+	sourceName := ""
+	if srcIdent, ok := stmt.Source.(*ast.Ident); ok {
+		sourceName = srcIdent.Name
+	}
+	preReserves := []ast.Stmt{}
 	provenGrowth := collectGrowthTargetCounts(stmt.Body)
 	for name, growth := range provenGrowth {
-		if name == srcIdent.Name {
+		if sourceName != "" && name == sourceName {
 			continue
 		}
 		sym, ok := a.currentScope.Lookup(name)
@@ -49,28 +50,82 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		if !isDArrayTypeMaybeRef(sym.Type) {
 			continue
 		}
-		if ysName != "" {
-			return // more than one fill target — ambiguous, skip
+		bound := semanticIterSourceCountBound(stmt)
+		if bound == nil {
+			continue
 		}
-		ysName = name
-		perIteration = growth
+		if !semanticReserveExprIsIntOne(growth) {
+			bound = semanticMultiplyReserveExpr(bound, growth, stmt.Position)
+		}
+		preReserves = append(preReserves, semanticMakeReserveStmt(stmt.Position, name, bound))
 	}
-	if ysName == "" {
-		a.lintUninferredAutoReserveIterFill(stmt, srcIdent.Name)
+	if len(preReserves) == 0 {
+		a.lintUninferredAutoReserveIterFill(stmt, sourceName)
 		return
 	}
-	pos := stmt.Position
-	bound := ast.Expr(&ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: srcIdent.Name}, Field: "count"})
-	if !semanticReserveExprIsIntOne(perIteration) {
-		bound = semanticMultiplyReserveExpr(bound, perIteration, pos)
+	for _, preReserve := range preReserves {
+		a.analyzeStmt(preReserve)
 	}
-	preReserve := &ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{
+	if len(preReserves) == 1 {
+		stmt.PreReserve = preReserves[0]
+		return
+	}
+	stmt.PreReserves = preReserves
+}
+
+func semanticIterSourceCountBound(stmt *ast.IterForStmt) ast.Expr {
+	if stmt == nil {
+		return nil
+	}
+	sourceClone := semanticCloneReserveBoundExpr(stmt.Source)
+	if sourceClone == nil {
+		return nil
+	}
+	return &ast.FieldExpr{Position: stmt.Position, Object: sourceClone, Field: "count"}
+}
+
+func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
+	if autoReserveDisabledSem || stmt == nil || stmt.PreReserve != nil || len(stmt.PreReserves) != 0 {
+		return
+	}
+	loopBound, ok := semanticCountingLoopBoundExpr(stmt)
+	if !ok {
+		return
+	}
+	preReserves := []ast.Stmt{}
+	for name, growth := range collectGrowthTargetCounts(stmt.Body) {
+		sym, ok := a.currentScope.Lookup(name)
+		if !ok || !isDArrayTypeMaybeRef(sym.Type) {
+			continue
+		}
+		bound := semanticCloneReserveBoundExpr(loopBound)
+		if bound == nil {
+			continue
+		}
+		if !semanticReserveExprIsIntOne(growth) {
+			bound = semanticMultiplyReserveExpr(bound, growth, stmt.Pos())
+		}
+		preReserves = append(preReserves, semanticMakeReserveStmt(stmt.Position, name, bound))
+	}
+	if len(preReserves) == 0 {
+		return
+	}
+	for _, preReserve := range preReserves {
+		a.analyzeStmt(preReserve)
+	}
+	if len(preReserves) == 1 {
+		stmt.PreReserve = preReserves[0]
+		return
+	}
+	stmt.PreReserves = preReserves
+}
+
+func semanticMakeReserveStmt(pos lexer.Pos, target string, bound ast.Expr) ast.Stmt {
+	return &ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{
 		Position: pos,
-		Func:     &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ysName}, Field: "reserve"},
+		Func:     &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: target}, Field: "reserve"},
 		Args:     []ast.Expr{bound},
 	}}
-	a.analyzeStmt(preReserve)
-	stmt.PreReserve = preReserve
 }
 
 func (a *Analyzer) lintUninferredAutoReserveIterFill(stmt *ast.IterForStmt, srcName string) {
@@ -210,79 +265,4 @@ func semanticGrowthCallElementCount(method string, call *ast.CallExpr) int {
 		return 1
 	}
 	return len(list.Elems)
-}
-
-func semanticCountingLoopBoundExpr(loop *ast.ForStmt) (ast.Expr, bool) {
-	if loop == nil || loop.Reverse || loop.Op != lexer.TOKEN_RANGE_LT || loop.Step != nil {
-		return nil, false
-	}
-	if start, ok := loop.Start.(*ast.IntLit); !ok || start.Value != "0" {
-		return nil, false
-	}
-	bound := semanticCloneReserveBoundExpr(loop.End)
-	return bound, bound != nil
-}
-
-func semanticCloneReserveBoundExpr(e ast.Expr) ast.Expr {
-	switch n := e.(type) {
-	case *ast.Ident:
-		return &ast.Ident{Position: n.Position, Name: n.Name}
-	case *ast.IntLit:
-		return &ast.IntLit{Position: n.Position, Value: n.Value, Suffix: n.Suffix, IsHex: n.IsHex}
-	}
-	return nil
-}
-
-func semanticIntReserveExpr(value int, pos lexer.Pos) ast.Expr {
-	return &ast.IntLit{Position: pos, Value: strconv.Itoa(value)}
-}
-
-func semanticReserveExprIsIntOne(e ast.Expr) bool {
-	lit, ok := e.(*ast.IntLit)
-	return ok && lit.Value == "1"
-}
-
-func semanticIntReserveExprValue(e ast.Expr) (int, bool) {
-	lit, ok := e.(*ast.IntLit)
-	if !ok || lit == nil {
-		return 0, false
-	}
-	value, err := strconv.Atoi(lit.Value)
-	if err != nil {
-		return 0, false
-	}
-	return value, true
-}
-
-func semanticAddReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
-	if left == nil {
-		return right
-	}
-	if right == nil {
-		return left
-	}
-	if leftValue, ok := semanticIntReserveExprValue(left); ok {
-		if rightValue, ok := semanticIntReserveExprValue(right); ok {
-			return semanticIntReserveExpr(leftValue+rightValue, pos)
-		}
-	}
-	if optimizationExprString(left) == optimizationExprString(right) {
-		return semanticMultiplyReserveExpr(left, semanticIntReserveExpr(2, pos), pos)
-	}
-	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: left, Right: right}
-}
-
-func semanticMultiplyReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
-	if semanticReserveExprIsIntOne(left) {
-		return right
-	}
-	if semanticReserveExprIsIntOne(right) {
-		return left
-	}
-	if leftValue, ok := semanticIntReserveExprValue(left); ok {
-		if rightValue, ok := semanticIntReserveExprValue(right); ok {
-			return semanticIntReserveExpr(leftValue*rightValue, pos)
-		}
-	}
-	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_STAR, Left: left, Right: right}
 }

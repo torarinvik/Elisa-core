@@ -334,6 +334,10 @@ type ForStmt struct {
 	Step     Expr
 	Op       lexer.TokenKind
 	Body     []Stmt
+	// PreReserve is a compiler-synthesized `ys.reserve(bound)` emitted before the loop when
+	// analysis proves a bounded darray fill that parser-side adjacency rewriting could not cover.
+	PreReserve  Stmt
+	PreReserves []Stmt
 }
 type IterBindMode int
 
@@ -357,7 +361,8 @@ type IterForStmt struct {
 	// PreReserve is a compiler-synthesized `ys.reserve(src.count)` emitted before the loop when
 	// auto-reservation infers a bounded fill over this iterable (region inference, Phase A). Set
 	// by the analyzer, emitted by codegen; nil when the loop is not an eligible fill.
-	PreReserve Stmt
+	PreReserve  Stmt
+	PreReserves []Stmt
 }
 type ParallelForStmt struct {
 	Position  lexer.Pos
