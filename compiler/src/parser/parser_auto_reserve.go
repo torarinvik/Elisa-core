@@ -121,8 +121,12 @@ func cloneBoundExpr(e ast.Expr) ast.Expr {
 // as 1; `push([a, b, c])` counts as 3.
 func bodyGrowthPerIteration(body []ast.Stmt, name string) (int, bool) {
 	growth := 0
-	var walk func(v reflect.Value)
-	walk = func(v reflect.Value) {
+	disqualified := false
+	var walk func(v reflect.Value, loopDepth int)
+	walk = func(v reflect.Value, loopDepth int) {
+		if disqualified {
+			return
+		}
 		if !v.IsValid() || !v.CanInterface() {
 			return
 		}
@@ -134,24 +138,32 @@ func bodyGrowthPerIteration(body []ast.Stmt, name string) (int, bool) {
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if field, ok := call.Func.(*ast.FieldExpr); ok && (field.Field == "push" || field.Field == "extend") {
 					if recv, ok := field.Object.(*ast.Ident); ok && recv.Name == name {
+						if loopDepth > 0 {
+							disqualified = true
+							return
+						}
 						growth += growthCallElementCount(field.Field, call)
 						return
 					}
 				}
 			}
-			walk(v.Elem())
+			if node, ok := v.Interface().(ast.Node); ok && autoReserveLoopNode(node) {
+				walk(v.Elem(), loopDepth+1)
+				return
+			}
+			walk(v.Elem(), loopDepth)
 		case reflect.Struct:
 			for i := 0; i < v.NumField(); i++ {
-				walk(v.Field(i))
+				walk(v.Field(i), loopDepth)
 			}
 		case reflect.Slice, reflect.Array:
 			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i))
+				walk(v.Index(i), loopDepth)
 			}
 		}
 	}
-	walk(reflect.ValueOf(body))
-	return growth, growth > 0
+	walk(reflect.ValueOf(body), 0)
+	return growth, growth > 0 && !disqualified
 }
 
 func growthCallElementCount(method string, call *ast.CallExpr) int {
@@ -163,6 +175,14 @@ func growthCallElementCount(method string, call *ast.CallExpr) int {
 		return 1
 	}
 	return len(list.Elems)
+}
+
+func autoReserveLoopNode(n ast.Node) bool {
+	switch n.(type) {
+	case *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt, *ast.ParallelForStmt:
+		return true
+	}
+	return false
 }
 
 // makeReserveStmt builds `name.reserve(bound)` as a bare expression statement.

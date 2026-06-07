@@ -90,8 +90,9 @@ func isDArrayTypeMaybeRef(t Type) bool {
 // named by `name.push(...)` or `name.extend(...)` calls in body.
 func collectGrowthTargetCounts(body []ast.Stmt) map[string]int {
 	counts := map[string]int{}
-	var walk func(v reflect.Value)
-	walk = func(v reflect.Value) {
+	disqualified := map[string]bool{}
+	var walk func(v reflect.Value, loopDepth int)
+	walk = func(v reflect.Value, loopDepth int) {
 		if !v.IsValid() || !v.CanInterface() {
 			return
 		}
@@ -103,23 +104,35 @@ func collectGrowthTargetCounts(body []ast.Stmt) map[string]int {
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if field, ok := call.Func.(*ast.FieldExpr); ok && (field.Field == "push" || field.Field == "extend") {
 					if recv, ok := field.Object.(*ast.Ident); ok {
+						if loopDepth > 0 {
+							disqualified[recv.Name] = true
+							delete(counts, recv.Name)
+							return
+						}
+						if disqualified[recv.Name] {
+							return
+						}
 						counts[recv.Name] += semanticGrowthCallElementCount(field.Field, call)
 						return
 					}
 				}
 			}
-			walk(v.Elem())
+			if node, ok := v.Interface().(ast.Node); ok && isLoopStmtNode(node) {
+				walk(v.Elem(), loopDepth+1)
+				return
+			}
+			walk(v.Elem(), loopDepth)
 		case reflect.Struct:
 			for i := 0; i < v.NumField(); i++ {
-				walk(v.Field(i))
+				walk(v.Field(i), loopDepth)
 			}
 		case reflect.Slice, reflect.Array:
 			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i))
+				walk(v.Index(i), loopDepth)
 			}
 		}
 	}
-	walk(reflect.ValueOf(body))
+	walk(reflect.ValueOf(body), 0)
 	return counts
 }
 

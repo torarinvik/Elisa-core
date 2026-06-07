@@ -52,6 +52,23 @@ func TestAutoReserveCountsListPushElements(t *testing.T) {
 	}
 }
 
+func TestAutoReserveSkipsNestedCountingGrowth(t *testing.T) {
+	file, errs := parseSourceFile(t, `def foo(n: usize, m: usize) -> i64:
+    xs: mutable darray[i64] = []
+    for i in 0..<n:
+        for j in 0..<m:
+            xs.push(j.i64())
+    return xs[0]
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	formatted := unparse.FormatDecl(file.Decls[0])
+	if strings.Contains(formatted, "xs.reserve(n)") {
+		t.Fatalf("nested fill grows by more than the outer count, so it must not reserve only n, got:\n%s", formatted)
+	}
+}
+
 // v1 fires only for the side-effect-free counting shape. A `for x in coll:` fill (no statically
 // derivable pure bound at parse time) and a non-empty / explicitly-regioned darray are skipped.
 func TestAutoReserveSkipsNonCountingAndIneligible(t *testing.T) {

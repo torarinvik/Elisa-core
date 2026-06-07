@@ -121,6 +121,23 @@ func TestAutoReserveForInCountsListPushElements(t *testing.T) {
 	}
 }
 
+func TestAutoReserveForInSkipsNestedGrowth(t *testing.T) {
+	file := analyzeAndGetFile(t, `def g(src: darray[darray[i64]]&) -> i64:
+    ys: mutable darray[i64] = []
+    for chunk in src:
+        for x in chunk:
+            ys.push(x)
+    return ys[0]
+`)
+	loop := firstIterForStmt(file)
+	if loop == nil {
+		t.Fatal("no IterForStmt found")
+	}
+	if loop.PreReserve != nil {
+		t.Fatal("nested for-in growth must not auto-reserve only the outer source count")
+	}
+}
+
 // Two darrays filled in one loop is ambiguous (which to presize?) — skipped.
 func TestAutoReserveForInSkipsAmbiguousFill(t *testing.T) {
 	file := analyzeAndGetFile(t, `def g(src: darray[i64]&) -> i64:
