@@ -22,3 +22,20 @@ def std_dict_frictionless_smoke():
 		# get_or_insert on an existing key keeps the original value
 		again: mutable i64&? = d.get_or_insert("alpha", 999)
 		assert again != null
+
+# Full darray parity: a `dict[cstr, V] = {}` literal with NO explicit region scope. The empty
+# `{}` is an allocating dict literal (the dict analogue of `[]`), so it triggers auto-region
+# inference exactly like darray — the function body is wrapped in a synthesized lazy region and
+# the inserts just work, no `region`/`in` ceremony at all.
+@test
+def std_dict_brace_auto_region_smoke():
+	d: mutable dict[cstr, i64] = {}
+	d.put("one", 1)
+	d.put("two", 2)
+	d.put("one", 11)
+	assert d.contains("one")
+	assert d.contains("two")
+	assert not d.contains("three")
+	slot: mutable i64&? = d.get_or_insert("three", 3)
+	assert slot != null
+	assert d.contains("three")

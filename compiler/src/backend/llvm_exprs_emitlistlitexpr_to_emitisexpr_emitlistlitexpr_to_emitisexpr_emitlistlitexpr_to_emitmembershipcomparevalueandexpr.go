@@ -110,6 +110,18 @@ import (
 )
 
 func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	// An empty `{}` against a dict type is an empty (zero-initialized) dict — the dict analogue
+	// of an empty `[]` darray literal. Lower it to the dict's zero value (a zeroed header); the
+	// backing allocates lazily on the first insert.
+	if expr.Brace && len(expr.Elems) == 0 {
+		if dictType, ok := s.dictLiteralTargetType(expr, expected); ok {
+			zero, err := s.zeroValue(dictType)
+			if err != nil {
+				return nil, nil, err
+			}
+			return zero, dictType, nil
+		}
+	}
 	hasSpread := false
 	for _, spread := range expr.Spreads {
 		if spread {
@@ -466,6 +478,18 @@ func (s *functionState) listLiteralTargetArrayType(expr *ast.ListLitExpr, expect
 		return nil, false, nil
 	}
 	return actualArray, true, nil
+}
+// dictLiteralTargetType resolves the dict type an empty `{}` literal should lower to, preferring
+// the expected (target) type and falling back to the literal's own resolved type. Mirrors
+// listLiteralTargetDArrayType for the dict analogue of `[]`.
+func (s *functionState) dictLiteralTargetType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.DictType, bool) {
+	if dictType, ok := semantic.StripAggregateStateType(expected).(*semantic.DictType); ok && dictType != nil {
+		return dictType, true
+	}
+	if dictType, ok := semantic.StripAggregateStateType(s.exprType(expr)).(*semantic.DictType); ok && dictType != nil {
+		return dictType, true
+	}
+	return nil, false
 }
 func (s *functionState) listLiteralTargetDArrayType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.DArrayType, error) {
 	if expectedDArray, ok := expected.(*semantic.DArrayType); ok {

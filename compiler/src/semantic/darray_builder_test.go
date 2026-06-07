@@ -264,6 +264,37 @@ func TestAnalyzeInfersRegionForBareDArrayPush(t *testing.T) {
 	}
 }
 
+// Dict parity with darray (the user named "stdlib types like darray and dict"): an empty `{}`
+// dict literal is an allocating literal — like `[]` — so a bare `dict[cstr, V] = {}; d.put(...)`
+// triggers auto-region inference with NO explicit region scope, and the safe growth infers no
+// public allocation/panic permission (the alloc + OOM-panic are trusted stdlib details).
+func TestAnalyzeInfersRegionForBareDictBraceLiteralPut(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "dict_brace_infers_region.elisa", `def build() -> void:
+    d: mutable dict[cstr, i64] = {}
+    d.put("a", 1)
+    d.put("b", 2)
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, `requires an active in <arena>: scope`) {
+		t.Fatalf("expected inference to supply a region for the bare dict put, got:\n%s", all)
+	}
+	if strings.Contains(all, `brace membership set literals`) {
+		t.Fatalf("expected `{}` to be accepted as an empty dict literal, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("build")
+	if !ok {
+		t.Fatal("expected build symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected build function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != "" {
+		t.Fatalf("expected safe dict growth to infer no public allocation/panic permission, got %q", got)
+	}
+}
+
 func TestAnalyzeInfersUntypedEmptyDArrayFromPush(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_empty_infers_from_push.elisa", `def build() -> void:
     xs = []

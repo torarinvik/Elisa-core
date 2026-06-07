@@ -470,6 +470,17 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		return invalidType
 	}
 	if expr.Brace {
+		// An empty `{}` against an expected dict type is an empty (zero-initialized) dict —
+		// the dict analogue of `[]` for darray. It allocates its backing lazily on first
+		// insert, and being a literal it triggers auto-region inference (functionBodyNeedsAutoRegion)
+		// exactly like `[]`, so `d: dict[cstr, V] = {}; d.put(...)` needs no explicit region scope.
+		// A non-empty `{a, b}` remains a set-membership literal (valid only on the RHS of `in`).
+		if len(expr.Elems) == 0 {
+			if dictType, ok := contextualDictLiteralType(expected); ok {
+				a.recordAnalyzedExprType(expr, dictType)
+				return dictType
+			}
+		}
 		a.errorf(expr.Pos(), "brace membership set literals are only valid on the right-hand side of `in`")
 		a.exprTypes[expr] = invalidType
 		return invalidType

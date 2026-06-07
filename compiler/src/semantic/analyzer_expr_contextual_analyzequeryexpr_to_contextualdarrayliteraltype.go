@@ -139,3 +139,13 @@ func contextualDArrayLiteralType(expected Type) (*DArrayType, bool) {
 	}
 	return darrayType, true
 }
+
+// contextualDictLiteralType peels an expected type to a *DictType, so an empty `{}` literal
+// assigned to a dict-typed target can be recognized as an empty-dict initializer (the dict
+// analogue of `[]` for darray). Mutability/aggregate-state wrappers are stripped.
+func contextualDictLiteralType(expected Type) (*DictType, bool) {
+	if dictType, ok := StripAggregateStateType(expected).(*DictType); ok && dictType != nil {
+		return dictType, true
+	}
+	return nil, false
+}
