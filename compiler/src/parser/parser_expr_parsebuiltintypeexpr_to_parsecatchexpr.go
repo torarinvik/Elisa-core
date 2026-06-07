@@ -845,7 +845,7 @@ func (p *Parser) parseUnary() ast.Expr {
 				},
 			}
 		}
-		return &ast.CallExpr{
+		submitCall := &ast.CallExpr{
 			Position: pos,
 			Func:     &ast.Ident{Position: pos, Name: "pool_submit1"},
 			Args: []ast.Expr{
@@ -854,6 +854,19 @@ func (p *Parser) parseUnary() ast.Expr {
 				call.Args[0],
 			},
 		}
+		// Inside a nursery (implicit pool), auto-collect the task into the nursery's group so
+		// it is joined at scope exit. The submit then yields void (fire-into-nursery): for an
+		// individually awaitable handle, use a `pool workers(...)` scope instead.
+		if !hasExplicitPool {
+			if grpName, ok := p.nurseryGroupForActivePool(); ok {
+				return &ast.CallExpr{
+					Position: pos,
+					Func:     &ast.Ident{Position: pos, Name: "task_group_add"},
+					Args:     []ast.Expr{nurseryGroupRef(pos, grpName), submitCall},
+				}
+			}
+		}
+		return submitCall
 	}
 	if p.matchIdentText("await") {
 		pos := p.tokens[p.pos-1].Pos

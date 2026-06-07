@@ -1,0 +1,21 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+def nursery_bump(slot: uintptr) -> i64:
+	can Atomic:
+		c: mutable atomic[i64]& = slot.cast[mutable atomic[i64]&]
+		_ = fetch_add(c, 1, MemoryOrder.AcqRel)
+		return 0
+
+# A nursery guarantees every submitted task is joined before the scope exits, so the
+# shared counter reads exactly N right after the `nursery:` block (no manual wait-all).
+@test
+def std_nursery_native_smoke():
+	can Parallel:
+		counter: mutable darray[i64] = []
+		_ = counter.resize(1.usize())
+		counter[0.usize()] <- 0
+		cb: uintptr = (&counter[0.usize()]).cast[uintptr]
+		nursery workers(4):
+			for k in 0..<32:
+				submit nursery_bump(cb)
+		assert counter[0.usize()] == 32

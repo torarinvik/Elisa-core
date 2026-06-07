@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"fmt"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -77,6 +79,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 		case "pool":
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()
+			}
+		case "nursery":
+			if p.looksLikeNurseryStmt() {
+				return p.parseNurseryStmt()
 			}
 		case "emit":
 			if p.looksLikeSequenceEmitStmt() {
@@ -518,6 +524,88 @@ func (p *Parser) looksLikeLockStmt() bool {
 	}
 	return false
 }
+// looksLikeNurseryStmt matches `nursery:` or `nursery workers(N):` at statement position.
+func (p *Parser) looksLikeNurseryStmt() bool {
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos+1]
+	if next.Kind == lexer.TOKEN_COLON {
+		return true
+	}
+	return next.Kind == lexer.TOKEN_IDENT && next.Text == "workers"
+}
+
+// parseNurseryStmt desugars a structured nursery to the existing pool machinery:
+//
+//	nursery:                       pool workers(N):
+//	    submit a()           ==>       __grp = task_group_new()
+//	    submit b()                     task_group_add(&__grp, submit a())
+//	                                   task_group_add(&__grp, submit b())
+//	                                   wait all __grp
+//
+// Every `submit` inside the nursery (without an explicit pool) is auto-collected into the
+// implicit group, which is waited at scope exit — so all tasks are guaranteed joined before
+// the nursery returns (structured concurrency: no leaked/detached work), with no manual
+// `wait all` and no pool to name. N defaults to 4 (will track perf-core count once that
+// query lands); `nursery workers(N):` sets it explicitly.
+func (p *Parser) parseNurseryStmt() *ast.PoolStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("nursery")
+	var workers ast.Expr
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "workers" {
+		p.advance()
+		p.expect(lexer.TOKEN_LPAREN)
+		workers = p.parseExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+	} else {
+		workers = &ast.IntLit{Position: pos, Value: "4"}
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.nurseryCounter++
+	poolName := fmt.Sprintf("__nursery_pool_%d", p.nurseryCounter)
+	grpName := fmt.Sprintf("__nursery_grp_%d", p.nurseryCounter)
+	p.poolScopes = append(p.poolScopes, poolName)
+	p.nurseryGroupByPool[poolName] = grpName
+	body := p.parseBlock()
+	delete(p.nurseryGroupByPool, poolName)
+	p.poolScopes = p.poolScopes[:len(p.poolScopes)-1]
+
+	grpDecl := &ast.VarDeclStmt{
+		Position: pos,
+		Name:     grpName,
+		Mutable:  true,
+		Type:     &ast.NamedType{Position: pos, Name: "TaskGroup"},
+		Value:    &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "task_group_new"}},
+	}
+	waitAll := &ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.Ident{Position: pos, Name: "task_group_wait_all"},
+		Args:     []ast.Expr{nurseryGroupRef(pos, grpName)},
+	}}
+	fullBody := make([]ast.Stmt, 0, len(body)+2)
+	fullBody = append(fullBody, grpDecl)
+	fullBody = append(fullBody, body...)
+	fullBody = append(fullBody, waitAll)
+	return &ast.PoolStmt{Position: pos, Name: poolName, Workers: workers, Body: fullBody}
+}
+
+// nurseryGroupRef builds `(&grpName).cast[mutable TaskGroup&]` for task_group_* calls.
+func nurseryGroupRef(pos lexer.Pos, grpName string) ast.Expr {
+	return &ast.CastExpr{
+		Position: pos,
+		Operand:  &ast.AddrOfExpr{Position: pos, Operand: &ast.Ident{Position: pos, Name: grpName}},
+		Target: &ast.RefType{
+			Position: pos,
+			Elem:     &ast.NamedType{Position: pos, Name: "TaskGroup"},
+			State:    ast.RefStateNonNull,
+			Storage:  ast.RefStorageAny,
+			Explicit: true,
+		},
+	}
+}
+
 func (p *Parser) parsePoolStmt() *ast.PoolStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("pool")

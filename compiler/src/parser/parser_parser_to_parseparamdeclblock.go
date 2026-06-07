@@ -12,6 +12,8 @@ type Parser struct {
 	pos                 int
 	errors              []string
 	poolScopes          []string
+	nurseryGroupByPool  map[string]string
+	nurseryCounter      int
 	declVisibility      map[ast.Decl]string
 	currentVisibility   string
 	allowInMembership   bool
@@ -21,7 +23,19 @@ type Parser struct {
 }
 
 func New(tokens []lexer.Token) *Parser {
-	return &Parser{tokens: tokens, declVisibility: map[ast.Decl]string{}, currentVisibility: "public", allowInMembership: true, allowTernary: true, allowWhereExpr: true}
+	return &Parser{tokens: tokens, declVisibility: map[ast.Decl]string{}, nurseryGroupByPool: map[string]string{}, currentVisibility: "public", allowInMembership: true, allowTernary: true, allowWhereExpr: true}
+}
+
+// nurseryGroupForActivePool returns the implicit task-group variable name for the innermost
+// active nursery (if the innermost active pool is a nursery), so `submit` inside a nursery can
+// auto-collect the task into that group for the auto-join at scope exit.
+func (p *Parser) nurseryGroupForActivePool() (string, bool) {
+	name := p.activePoolName()
+	if name == "" {
+		return "", false
+	}
+	grp, ok := p.nurseryGroupByPool[name]
+	return grp, ok
 }
 func (p *Parser) Errors() []string { return p.errors }
 func (p *Parser) activePoolName() string {
