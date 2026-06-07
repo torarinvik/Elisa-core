@@ -594,7 +594,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		if !ok || owner.Kind != treeAllocOwnerArena {
 			a.errorf(expr.Owner.Pos(), "list comprehension owner must be an Arena or mutable Arena&, got %s", ownerType)
 		}
-	} else if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
+	} else if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.activeContainerRegionName() == "" && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
 		a.errorf(expr.Pos(), "list comprehension requires an active in <arena>: scope")
 	}
 	var itemType Type
@@ -664,7 +664,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		return invalidType
 	}
 	a.consumeAffineValueExpr(expr.Value, valueType, "move into list comprehension element")
-	result := &DArrayType{Elem: valueType, Shape: &WildcardShape{}, SurfaceName: "darray"}
+	result, _ := a.stampContainerRegion(&DArrayType{Elem: valueType, Shape: &WildcardShape{}, SurfaceName: "darray"}).(*DArrayType)
 	a.exprTypes[expr] = result
 	return result
 }

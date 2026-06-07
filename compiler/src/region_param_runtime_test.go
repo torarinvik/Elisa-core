@@ -464,6 +464,48 @@ def region_param_sequence_rewrite_test() -> void:
 	}
 }
 
+func TestRunCLIInferredRegionBuildersUseActiveRegion(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "inferred_region_builders.elisa")
+	src := `@test
+def inferred_region_builders_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region a(4096):
+            src: mutable darray[u8] @a = []
+            src.push([0u8, 1u8, 2u8, 3u8])
+            comp = [item + 1 for item in src if item > 0u8]
+            query = item + 2 for each item in src where item > 1u8
+            if comp.count != 3 or comp[0] != 2u8 or comp[2] != 4u8:
+                panic("unexpected list comprehension result")
+            if query.count != 2 or query[0] != 4u8 or query[1] != 5u8:
+                panic("unexpected each query result")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write inferred-region builders fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected inferred-region builders test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] inferred_region_builders_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected inferred-region builders output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 // End-to-end: the "any allocator" interface. A single generic function written
 // against the `Allocator` protocol allocates + fills a buffer through BOTH a
 // bump (Arena) backend and a malloc-backed backend, proving static-dispatch

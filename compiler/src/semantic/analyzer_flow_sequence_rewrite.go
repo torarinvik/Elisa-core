@@ -146,7 +146,7 @@ func (a *Analyzer) analyzeSequenceRewriteExprWithExpected(expr *ast.FoldExpr, ex
 		}
 		return invalidType
 	}
-	resultType := &DArrayType{Elem: outputElemType, Shape: &WildcardShape{}, SurfaceName: "darray"}
+	resultType, _ := a.stampContainerRegion(&DArrayType{Elem: outputElemType, Shape: &WildcardShape{}, SurfaceName: "darray"}).(*DArrayType)
 	if expectedDArray, ok := contextualDArrayLiteralType(expected); ok && AssignableTo(expectedDArray.Elem, outputElemType) {
 		resultType = expectedDArray
 	}

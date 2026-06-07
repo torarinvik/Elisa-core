@@ -970,6 +970,92 @@ func TestAnalyzeListComprehensionUsesExpectedRegionParam(t *testing.T) {
 	}
 }
 
+func TestAnalyzeListComprehensionInfersActiveRegion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "list_comprehension_infers_active_region.elisa", `def build(items: darray[i64]) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            out = [item + 1 for item in items]
+            return out.count
+`)
+	var comp *ast.ListComprehensionExpr
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name != "build" || len(fn.Body) == 0 {
+			continue
+		}
+		canStmt, ok := fn.Body[0].(*ast.CanStmt)
+		if !ok || len(canStmt.Body) == 0 {
+			t.Fatalf("expected can block, got %T", fn.Body[0])
+		}
+		regionStmt, ok := canStmt.Body[0].(*ast.RegionStmt)
+		if !ok || len(regionStmt.Body) == 0 {
+			t.Fatalf("expected scoped region block, got %T", canStmt.Body[0])
+		}
+		varDecl, ok := regionStmt.Body[0].(*ast.VarDeclStmt)
+		if !ok {
+			t.Fatalf("expected first region statement to bind comprehension result, got %T", regionStmt.Body[0])
+		}
+		comp, ok = varDecl.Value.(*ast.ListComprehensionExpr)
+		if !ok {
+			t.Fatalf("expected list comprehension initializer, got %T", varDecl.Value)
+		}
+		break
+	}
+	if comp == nil {
+		t.Fatal("expected build function list comprehension")
+	}
+	darrayType, ok := result.ExprTypes[comp].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected list comprehension to resolve to darray type, got %T", result.ExprTypes[comp])
+	}
+	if darrayType.Region != "a" {
+		t.Fatalf("expected list comprehension result region a, got %q", darrayType.Region)
+	}
+}
+
+func TestAnalyzeEachQueryInfersActiveRegion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "each_query_infers_active_region.elisa", `def build(items: darray[i64]) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            out = item + 1 for each item in items
+            return out.count
+`)
+	var query *ast.QueryExpr
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name != "build" || len(fn.Body) == 0 {
+			continue
+		}
+		canStmt, ok := fn.Body[0].(*ast.CanStmt)
+		if !ok || len(canStmt.Body) == 0 {
+			t.Fatalf("expected can block, got %T", fn.Body[0])
+		}
+		regionStmt, ok := canStmt.Body[0].(*ast.RegionStmt)
+		if !ok || len(regionStmt.Body) == 0 {
+			t.Fatalf("expected scoped region block, got %T", canStmt.Body[0])
+		}
+		varDecl, ok := regionStmt.Body[0].(*ast.VarDeclStmt)
+		if !ok {
+			t.Fatalf("expected first region statement to bind query result, got %T", regionStmt.Body[0])
+		}
+		query, ok = varDecl.Value.(*ast.QueryExpr)
+		if !ok {
+			t.Fatalf("expected each query initializer, got %T", varDecl.Value)
+		}
+		break
+	}
+	if query == nil {
+		t.Fatal("expected build function each query")
+	}
+	darrayType, ok := result.ExprTypes[query].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected each query to resolve to darray type, got %T", result.ExprTypes[query])
+	}
+	if darrayType.Region != "a" {
+		t.Fatalf("expected each query result region a, got %q", darrayType.Region)
+	}
+}
+
 func TestAnalyzeDArrayPushSupportsMutableRefReceivers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_push_ref_receiver.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

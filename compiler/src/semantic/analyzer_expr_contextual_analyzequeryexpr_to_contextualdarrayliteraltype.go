@@ -79,7 +79,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 			result = &OptionalType{Value: info.ItemType}
 		}
 	case ast.QueryExprEach:
-		if expr.Owner == nil && a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
+		if expr.Owner == nil && a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.activeContainerRegionName() == "" && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
 			a.errorf(expr.Pos(), "each query expression requires an active in <arena>: scope")
 		}
 		projectionType := info.ItemType
@@ -114,7 +114,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 			if useExpectedDArray {
 				result = expectedDArray
 			} else {
-				result = &DArrayType{Elem: projectionType, Shape: &WildcardShape{}, SurfaceName: "darray"}
+				result = a.stampContainerRegion(&DArrayType{Elem: projectionType, Shape: &WildcardShape{}, SurfaceName: "darray"})
 			}
 		}
 	case ast.QueryExprCount:
