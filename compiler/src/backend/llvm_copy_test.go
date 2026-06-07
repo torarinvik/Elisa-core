@@ -48,6 +48,25 @@ func TestGenerateLLVMIRDarrayGrowthHasOverflowGuard(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRDArrayReserveBoundArithmeticIsChecked(t *testing.T) {
+	src := `def build(owner: mutable Arena&, n: usize, m: usize) -> usize:
+    xs: mutable darray[u8] = []
+    in owner:
+        xs.reserve(n * m)
+    return xs.capacity
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_reserve_bound_overflow.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"llvm.umul.with.overflow", "darray.reserve.bound.mul.overflow"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected reserve bound arithmetic to emit %q, got:\n%s", check, output)
+		}
+	}
+}
+
 // clone[darray[u8]](sview) lowers to a region allocation plus a byte-copy loop
 // from the view's (ptr, len), producing an owned darray[u8] / dstr.
 func TestGenerateLLVMIRLowersCloneSViewIntoOwnedBytes(t *testing.T) {

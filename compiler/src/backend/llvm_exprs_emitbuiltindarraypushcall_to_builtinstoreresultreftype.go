@@ -397,7 +397,7 @@ func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVM
 	if err != nil {
 		return nil, nil, true, err
 	}
-	neededValue, _, err := s.emitExpr(expr.Args[0], s.g.result.NamedTypes["usize"])
+	neededValue, err := s.emitReserveBoundExpr(expr.Args[0], "darray.reserve.bound")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -441,7 +441,7 @@ func (s *functionState) emitBuiltinDArrayResizeCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	neededValue, _, err := s.emitExpr(expr.Args[0], s.g.result.NamedTypes["usize"])
+	neededValue, err := s.emitReserveBoundExpr(expr.Args[0], "darray.resize.bound")
 	if err != nil {
 		return nil, nil, true, err
 	}
