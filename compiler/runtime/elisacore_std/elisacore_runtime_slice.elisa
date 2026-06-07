@@ -70,3 +70,55 @@ def get_unchecked[T](s: Slice[T], i: usize) -> T:
 def set_unchecked[T](s: Slice[T], i: usize, v: T) -> void:
 	p: mutable T& = s.base.cast[mutable T&]
 	p[i] <- v
+
+# ============================================================
+# ReadView[T]: a borrowed, read-only view over a contiguous T buffer.
+#
+# Unlike Slice[T] which carves disjoint write bands, ReadView covers the
+# WHOLE source array and exposes only reads. It is the natural complement
+# for double-buffer / stencil parallel patterns:
+#
+#   src_view: ReadView[f64] = read_view(&src)   # full array, read-only
+#   dst_slice: Slice[f64]   = slice(&dst)        # full array, write-only bands
+#   nursery:
+#       for band in 0..<w:
+#           submit stencil_worker(src_view, dst_slice.split(w, band), ...)
+#
+# Each worker writes to its disjoint dst band while reading ANY neighbour
+# from src_view — including cells that fall in another worker's write band.
+# This is race-free by construction: src is only read, dst bands are disjoint.
+#
+# ReadView is all-scalar ({base: uintptr, count: usize}) and structurally
+# thread-shareable; pass it BY VALUE across spawn/nursery boundaries.
+#
+# BORROW SAFETY: `read_view(&da)` is recorded as a storage-view borrow of
+# `da` (see storageViewDependencyForCall), so a relocating mutation of `da`
+# while the view is live is a stale-reference compile error — the same
+# guarantee Slice[T] and interior references get.
+# ============================================================
+
+struct ReadView[T]:
+	base: uintptr
+	count: usize
+
+# Borrow a darray's full backing as a read-only view. The one unsafe pointer
+# view, encapsulated here; no writes are possible through the returned value.
+def read_view[T](da: mutable darray[T]&) -> ReadView[T]:
+	return ReadView[T] { base: (&da[0.usize()]).cast[uintptr], count: da.count }
+
+# Number of elements. `v.len()`.
+def len[T](v: ReadView[T]) -> usize:
+	return v.count
+
+# Bounds-checked read (panics on out-of-range): the safe default. `v.get(i)`.
+def get[T](v: ReadView[T], i: usize) -> T:
+	can Abort.Panic:
+		if i >= v.count:
+			panic("ReadView index out of bounds")
+		p: T& = v.base.cast[T&]
+		return p[i]
+
+# Unchecked read for hot inner loops where the index is provably in range.
+def get_unchecked[T](v: ReadView[T], i: usize) -> T:
+	p: T& = v.base.cast[T&]
+	return p[i]

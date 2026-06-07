@@ -1,5 +1,76 @@
 include "./elisacore_std/elisacore_runtime.elisa"
 
+# ------------------------------------------------------------
+# Stencil smoke: ReadView[T] + Slice[T] double-buffer 1D averaging kernel.
+#
+# Each worker owns a disjoint write band in `dst` (Slice) but reads from
+# the FULL `src` array (ReadView), including neighbour cells that fall in
+# another worker's write band.  This cross-band read is the key property
+# ReadView enables over Slice: no bounds-check panic, no data race.
+#
+# src[k] = k*3   =>   interior dst[i] = (3(i-1)+3i+3(i+1))/3 = 3i = src[i]
+# Boundary: dst[0]=(0+0+3)/3=1, dst[7]=(18+21+21)/3=20
+# ------------------------------------------------------------
+
+struct StencilAvgArg:
+	src: ReadView[f64]
+	dst: Slice[f64]
+	offset: usize
+	n: usize
+
+def stencil_avg_worker(a: StencilAvgArg) -> i64:
+	for j in 0.usize()..<a.dst.len():
+		i: usize = a.offset + j
+		lo: mutable usize = 0.usize()
+		if i > 0.usize():
+			lo <- i - 1.usize()
+		hi: mutable usize = a.n - 1.usize()
+		if i + 1.usize() < a.n:
+			hi <- i + 1.usize()
+		val: f64 = (a.src.get_unchecked(lo) + a.src.get_unchecked(i) + a.src.get_unchecked(hi)) / 3.0
+		a.dst.set_unchecked(j, val)
+	return 0
+
+@test
+def std_read_view_stencil_smoke():
+	can Parallel:
+		n: usize = 8.usize()
+		workers: usize = 2.usize()
+		band_size: usize = (n + workers - 1.usize()) / workers   # = 4
+
+		src: mutable darray[f64] = []
+		_ = src.resize(n)
+		for k in 0.usize()..<n:
+			src[k] <- (k * 3.usize()).f64()   # src = [0,3,6,9,12,15,18,21]
+
+		dst: mutable darray[f64] = []
+		_ = dst.resize(n)
+
+		src_view: ReadView[f64] = read_view(&src)
+		dst_slice: Slice[f64] = slice(&dst)
+
+		assert src_view.len() == n
+		# key property: can read index 7 from a view without splitting
+		assert src_view.get(7.usize()) == 21.0
+
+		nursery workers(2):
+			for t in 0.usize()..<workers:
+				submit stencil_avg_worker(StencilAvgArg {
+					src: src_view,
+					dst: dst_slice.split(workers, t),
+					offset: t * band_size,
+					n: n
+				})
+
+		# boundaries
+		assert dst[0.usize()] == 1.0      # (0+0+3)/3
+		assert dst[7.usize()] == 20.0     # (18+21+21)/3
+		# interior: dst[i] == src[i] for 1..=6
+		assert dst[1.usize()] == 3.0
+		assert dst[3.usize()] == 9.0      # worker 0's last cell: reads src[4] (band 1!)
+		assert dst[4.usize()] == 12.0     # worker 1's first cell: reads src[3] (band 0!)
+		assert dst[6.usize()] == 18.0
+
 def slice_scale_band(s: Slice[f64]) -> i64:
 	n: usize = s.len()
 	for i in 0..<n:

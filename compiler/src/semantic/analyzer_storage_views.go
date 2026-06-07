@@ -213,6 +213,17 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 			}
 		}
 		return storageViewDependencyState{}, false
+	case "read_view":
+		// read_view(&da) borrows the darray's backing as a read-only ReadView[T].
+		// Same relocation hazard as slice(&da): a relocating mutation of `da` moves the
+		// backing and dangles the view. Record a dependency so any such mutation while
+		// the view is live is a stale-reference compile error.
+		if len(call.Args) == 1 {
+			if addr, ok := stripOptimizationParens(call.Args[0]).(*ast.AddrOfExpr); ok && addr.Operand != nil {
+				return storageViewDependencyFromSource(addr.Operand)
+			}
+		}
+		return storageViewDependencyState{}, false
 	case "split":
 		// A band borrows whatever its source slice borrows: propagate the dependency so
 		// `split(whole, ...)` over a sliced darray inherits the darray dependency.
