@@ -29,6 +29,34 @@ func TestParseOneLineFunctionBodies(t *testing.T) {
 	}
 }
 
+func TestParseInfersAutoRegionForUntypedDArrayBuilders(t *testing.T) {
+	file, errs := parseSourceFile(t, `def build(items: darray[i64]) -> usize:
+    out = [item + 1 for item in items]
+    more = item + 2 for each item in items
+    return out.count + more.count
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	if len(decl.Body) != 1 {
+		t.Fatalf("expected function body to be wrapped in one auto region, got %d statements", len(decl.Body))
+	}
+	region, ok := decl.Body[0].(*ast.RegionStmt)
+	if !ok {
+		t.Fatalf("expected synthesized auto region, got %T", decl.Body[0])
+	}
+	if !region.Lazy || !strings.HasPrefix(region.Name, "__auto_") {
+		t.Fatalf("expected lazy synthesized auto region, got name=%q lazy=%v", region.Name, region.Lazy)
+	}
+	if len(region.Body) != 3 {
+		t.Fatalf("expected original body inside auto region, got %d statements", len(region.Body))
+	}
+}
+
 func TestParseOneLineFunctionBodiesWithSemicolonSeparatedStatements(t *testing.T) {
 	file, errs := parseSourceFile(t, "def answer(x: int) -> int: _ = x; return 42\n")
 	if len(errs) != 0 {

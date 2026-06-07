@@ -47,6 +47,44 @@ def inference_by_default_test() -> void:
 	}
 }
 
+func TestRunCLIInfersRegionForUntypedBuilders(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "inference_by_default_builders.elisa")
+	src := `@test
+def inference_by_default_builders_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        src: mutable darray[u8] = []
+        src.push([0u8, 1u8, 2u8, 3u8])
+        comp = [item + 1 for item in src if item > 0u8]
+        query = item + 2 for each item in src where item > 1u8
+        if comp.count != 3 or comp[0] != 2u8 or comp[2] != 4u8:
+            panic("inferred list comprehension result wrong")
+        if query.count != 2 or query[0] != 4u8 or query[1] != 5u8:
+            panic("inferred each query result wrong")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write inference builders fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected inference-by-default builders test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{"[       OK ] inference_by_default_builders_test", "passed=1"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected inference builders output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 // Inference's slack stays a diagnostic, not a leak: a function that builds a value in its
 // inferred region and then returns it is rejected, because that region is freed at the
 // function's exit. The fix is an explicit lifetime (a `[region r]` param and `-> ... @r`).

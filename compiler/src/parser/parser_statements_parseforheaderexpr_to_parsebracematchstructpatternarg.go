@@ -493,8 +493,10 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			// Only an allocating literal initializer (`= []`, `= [a, b]`, `= {}`, a
 			// comprehension) actually allocates and needs a region. A container local
 			// assigned from a view/copy/call (`= other`) does not — excluding those avoids
-			// false positives on inspection/forwarding code.
-			if isRegionlessContainerType(s.Type) && isAllocatingLiteral(s.Value) {
+			// false positives on inspection/forwarding code. Some builders (`[x for ...]`,
+			// `each`) infer their darray result type from the expression itself, so they
+			// should synthesize an auto region even when the local has no type annotation.
+			if (s.Type == nil && isInferredDArrayBuilder(s.Value)) || (isRegionlessContainerType(s.Type) && isAllocatingLiteral(s.Value)) {
 				return true
 			}
 		}
@@ -558,11 +560,30 @@ func bodyContainsAutoAlloc(stmts []ast.Stmt) bool {
 }
 
 // isAllocatingLiteral reports whether an initializer is a container literal or
-// comprehension — the forms that actually allocate a backing buffer.
+// builder — the forms that actually allocate a backing buffer.
 func isAllocatingLiteral(value ast.Expr) bool {
 	switch value.(type) {
 	case *ast.ListLitExpr, *ast.ListComprehensionExpr:
 		return true
+	}
+	return isInferredDArrayBuilder(value)
+}
+
+// isInferredDArrayBuilder reports whether value is an expression that constructs
+// a darray without needing a declared container type as context.
+func isInferredDArrayBuilder(value ast.Expr) bool {
+	for {
+		paren, ok := value.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		value = paren.Inner
+	}
+	switch v := value.(type) {
+	case *ast.ListComprehensionExpr:
+		return true
+	case *ast.QueryExpr:
+		return v.Kind == ast.QueryExprEach
 	}
 	return false
 }

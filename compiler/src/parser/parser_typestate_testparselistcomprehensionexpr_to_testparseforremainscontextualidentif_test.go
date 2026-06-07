@@ -17,9 +17,13 @@ func TestParseListComprehensionExpr(t *testing.T) {
 	if !ok || len(fn.Body) != 1 {
 		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
 	}
-	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	region, ok := fn.Body[0].(*ast.RegionStmt)
 	if !ok {
-		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+		t.Fatalf("expected inferred auto region, got %T", fn.Body[0])
+	}
+	decl, ok := region.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", region.Body[0])
 	}
 	comp, ok := decl.Value.(*ast.ListComprehensionExpr)
 	if !ok {
@@ -31,7 +35,7 @@ func TestParseListComprehensionExpr(t *testing.T) {
 	if comp.Filter == nil {
 		t.Fatal("expected list comprehension filter")
 	}
-	formatted := unparse.FormatStmt(fn.Body[0])
+	formatted := unparse.FormatStmt(decl)
 	if !strings.Contains(formatted, "["+"(item + 1) for item in items if (item > 0)]") {
 		t.Fatalf("expected formatter to preserve list comprehension syntax, got:\n%s", formatted)
 	}
@@ -58,9 +62,13 @@ func TestParseListComprehensionExprOverRange(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	fn := file.Decls[0].(*ast.FuncDecl)
-	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	region, ok := fn.Body[0].(*ast.RegionStmt)
 	if !ok {
-		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+		t.Fatalf("expected inferred auto region, got %T", fn.Body[0])
+	}
+	decl, ok := region.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", region.Body[0])
 	}
 	comp, ok := decl.Value.(*ast.ListComprehensionExpr)
 	if !ok {
@@ -69,7 +77,7 @@ func TestParseListComprehensionExprOverRange(t *testing.T) {
 	if comp.RangeEnd == nil || comp.RangeOp != lexer.TOKEN_RANGE_LT {
 		t.Fatalf("expected exclusive range comprehension, got op=%s end=%T", lexer.TokenName(comp.RangeOp), comp.RangeEnd)
 	}
-	formatted := unparse.FormatStmt(fn.Body[0])
+	formatted := unparse.FormatStmt(decl)
 	if !strings.Contains(formatted, "[index for index in 1 ..< count]") {
 		t.Fatalf("expected formatter to preserve range comprehension syntax, got:\n%s", formatted)
 	}
