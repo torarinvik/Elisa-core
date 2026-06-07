@@ -815,6 +815,63 @@ def fence(order: MemoryOrder):
 		_ = order
 
 # ------------------------------------------------------------
+# perf_cores: the default nursery worker count — number of performance cores.
+# On Apple Silicon it queries hw.perflevel0.physicalcpu (P-cores only) so the
+# default pool size matches the fast-core count. Intel Macs and the Linux/FreeBSD
+# paths report all logical CPUs (the closest portable equivalent). Windows uses
+# GetActiveProcessorCount(ALL_PROCESSOR_GROUPS). If the OS query fails the
+# fallback is 1 (conservative: run sequentially rather than guess a core count).
+# ------------------------------------------------------------
+
+static if ELISA_TARGET_OS_MACOS:
+	extern sysctlbyname(name: u8&, oldp: void&?, oldlenp: mutable usize&, newp: void&?, newlen: usize) -> int
+
+	def perf_cores() -> i64:
+		val: mutable int = 0
+		sz: mutable usize = 4
+		key_p: u8& = "hw.perflevel0.physicalcpu"
+		if sysctlbyname(key_p, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0:
+			return val.i64()
+		sz <- 4
+		val <- 0
+		key_l: u8& = "hw.logicalcpu"
+		if sysctlbyname(key_l, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0:
+			return val.i64()
+		return 1
+
+static elif ELISA_TARGET_OS_LINUX:
+	extern sysconf(name: int) -> isize
+
+	def perf_cores() -> i64:
+		n: isize = sysconf(84)  # _SC_NPROCESSORS_ONLN
+		if n > 0:
+			return n.i64()
+		return 1
+
+static elif ELISA_TARGET_OS_FREEBSD:
+	extern sysconf(name: int) -> isize
+
+	def perf_cores() -> i64:
+		n: isize = sysconf(58)  # _SC_NPROCESSORS_ONLN on FreeBSD
+		if n > 0:
+			return n.i64()
+		return 1
+
+static elif ELISA_TARGET_OS_WINDOWS:
+	@callconv(winapi)
+	extern GetActiveProcessorCount(group: u16) -> u32
+
+	def perf_cores() -> i64:
+		n: u32 = GetActiveProcessorCount(0xffffu16)  # ALL_PROCESSOR_GROUPS = 0xffff
+		if n > 0u32:
+			return n.i64()
+		return 1
+
+static else:
+	def perf_cores() -> i64:
+		return 1
+
+# ------------------------------------------------------------
 # Barrier: a sense-free generation barrier for persistent-worker parallelism.
 # `state` points at two i64 cells [count, generation] in caller-owned backing
 # (use `barrier_make` over a darray[i64] of length >= 2 that outlives the

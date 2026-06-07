@@ -19,3 +19,19 @@ def std_nursery_native_smoke():
 			for k in 0..<32:
 				submit nursery_bump(cb)
 		assert counter[0.usize()] == 32
+
+# Verify that bare `nursery:` (no explicit worker count) compiles and runs correctly;
+# the default worker count is perf_cores() queried at runtime.
+@test
+def std_nursery_default_workers_smoke():
+	can Parallel:
+		n: i64 = perf_cores()
+		assert n > 0
+		counter: mutable darray[i64] = []
+		_ = counter.resize(1.usize())
+		counter[0.usize()] <- 0
+		cb: uintptr = (&counter[0.usize()]).cast[uintptr]
+		nursery:
+			for k in 0..<16:
+				submit nursery_bump(cb)
+		assert counter[0.usize()] == 16

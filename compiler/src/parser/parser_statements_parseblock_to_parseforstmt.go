@@ -547,8 +547,8 @@ func (p *Parser) looksLikeNurseryStmt() bool {
 // Every `submit` inside the nursery (without an explicit pool) is auto-collected into the
 // implicit group, which is waited at scope exit — so all tasks are guaranteed joined before
 // the nursery returns (structured concurrency: no leaked/detached work), with no manual
-// `wait all` and no pool to name. N defaults to 4 (will track perf-core count once that
-// query lands); `nursery workers(N):` sets it explicitly.
+// `wait all` and no pool to name. N defaults to perf_cores() (P-core count on Apple
+// Silicon, logical CPUs on Linux/FreeBSD/Windows); `nursery workers(N):` overrides it.
 func (p *Parser) parseNurseryStmt() *ast.PoolStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("nursery")
@@ -559,7 +559,9 @@ func (p *Parser) parseNurseryStmt() *ast.PoolStmt {
 		workers = p.parseExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 	} else {
-		workers = &ast.IntLit{Position: pos, Value: "4"}
+		// Default: query at runtime so Apple-Silicon P-cores, Linux logical CPUs, etc.
+		// are automatically picked up rather than a hardcoded fallback.
+		workers = &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "perf_cores"}}
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
