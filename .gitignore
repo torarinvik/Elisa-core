@@ -41,3 +41,4 @@ compiler/elisacore-compiler
 /elisa-wolf3d
 /elisa-shad-ps4-from-scratch
 /bin
+Code/test_programs/fluid_dynamics_sim.cpp

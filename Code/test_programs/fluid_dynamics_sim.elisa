@@ -1,0 +1,285 @@
+# Real-time fluid dynamics: a Navier-Stokes "Stable Fluids" solver (Jos Stam, SIGGRAPH 99) with
+# vorticity confinement, rendered in true colour with raylib. Each frame advances velocity and density
+# fields through diffuse -> project (mass conservation, Gauss-Seidel) -> advect (semi-Lagrangian
+# back-trace). A buoyant source feeds a rising plume; vorticity confinement re-injects the small curls
+# the grid would otherwise smear out, giving crisp turbulent rolls. Fully physical — no scripted motion.
+#
+# Interactive:
+#   drag the mouse to stir dye + momentum into the fluid
+#   P  toggle palette (fire  <->  blue ink)
+#   V  toggle vorticity confinement
+#   C  clear the field
+#
+# Build & run (opens a window; close it to finish):
+#   elisacore -emit test -O2 -L /opt/homebrew/lib -l raylib \
+#     -link -framework -link Cocoa -link -framework -link IOKit -link -framework -link CoreVideo \
+#     -link -framework -link CoreAudio -link -framework -link OpenGL  fluid_dynamics_sim.elisa
+
+extern InitWindow(width: i32, height: i32, title: u8&)
+extern WindowShouldClose() -> bool
+extern BeginDrawing()
+extern EndDrawing()
+extern ClearBackground(color: u32)
+extern DrawRectangle(x: i32, y: i32, width: i32, height: i32, color: u32)
+extern DrawText(text: u8&, posX: i32, posY: i32, fontSize: i32, color: u32)
+extern DrawFPS(posX: i32, posY: i32)
+extern CloseWindow()
+extern IsKeyPressed(key: i32) -> bool
+extern IsMouseButtonDown(button: i32) -> bool
+extern GetMouseX() -> i32
+extern GetMouseY() -> i32
+extern sqrt(x: f64) -> f64
+
+# ---- helpers -------------------------------------------------------------------------------------
+
+# Flat index into an (n+2) x (n+2) grid (a 1-cell boundary ring around the n x n interior).
+def ix(i: i64, j: i64, n: i64) -> usize:
+    return (i + (n + 2) * j).usize()
+
+def clampf(x: f64, lo: f64, hi: f64) -> f64:
+    if x < lo:
+        return lo
+    if x > hi:
+        return hi
+    return x
+
+def absf(x: f64) -> f64:
+    return (-x if x < 0.0 else x)
+
+# Pack r,g,b (0..255) into raylib's little-endian RGBA u32 (alpha = 255).
+def rgba(r: i64, g: i64, b: i64) -> u32:
+    return (r | (g << 8) | (b << 16) | (255 << 24)).u32()
+
+# Fire palette: density 0..1 mapped black -> red -> orange -> yellow -> white.
+def fire_color(d: f64) -> u32:
+    t: f64 = clampf(d, 0.0, 1.0)
+    r: i64 = (clampf(t * 3.0, 0.0, 1.0) * 255.0).i64()
+    g: i64 = (clampf(t * 3.0 - 1.0, 0.0, 1.0) * 255.0).i64()
+    b: i64 = (clampf(t * 3.0 - 2.0, 0.0, 1.0) * 255.0).i64()
+    return rgba(r, g, b)
+
+# Blue-ink palette: density 0..1 mapped near-black -> deep blue -> cyan -> white.
+def ink_color(d: f64) -> u32:
+    t: f64 = clampf(d, 0.0, 1.0)
+    b: i64 = (clampf(t * 2.4, 0.0, 1.0) * 255.0).i64()
+    g: i64 = (clampf(t * 2.0 - 0.4, 0.0, 1.0) * 255.0).i64()
+    r: i64 = (clampf(t * 2.2 - 1.1, 0.0, 1.0) * 255.0).i64()
+    return rgba(r, g, b)
+
+# ---- Stam solver ---------------------------------------------------------------------------------
+
+# Reflective/continuous boundary on the 1-cell ring. b=1 mirrors the x-velocity, b=2 the y-velocity,
+# b=0 leaves scalars (density, pressure) continuous.
+def set_bnd(n: i64, b: i64, x: mutable darray[f64]&) -> void:
+    for i in 1..<(n + 1):
+        x[ix(0, i, n)] <- (-x[ix(1, i, n)] if b == 1 else x[ix(1, i, n)])
+        x[ix(n + 1, i, n)] <- (-x[ix(n, i, n)] if b == 1 else x[ix(n, i, n)])
+        x[ix(i, 0, n)] <- (-x[ix(i, 1, n)] if b == 2 else x[ix(i, 1, n)])
+        x[ix(i, n + 1, n)] <- (-x[ix(i, n, n)] if b == 2 else x[ix(i, n, n)])
+    x[ix(0, 0, n)] <- 0.5 * (x[ix(1, 0, n)] + x[ix(0, 1, n)])
+    x[ix(0, n + 1, n)] <- 0.5 * (x[ix(1, n + 1, n)] + x[ix(0, n, n)])
+    x[ix(n + 1, 0, n)] <- 0.5 * (x[ix(n, 0, n)] + x[ix(n + 1, 1, n)])
+    x[ix(n + 1, n + 1, n)] <- 0.5 * (x[ix(n, n + 1, n)] + x[ix(n + 1, n, n)])
+
+# Gauss-Seidel relaxation for the implicit diffuse / pressure-Poisson systems.
+def lin_solve(n: i64, b: i64, x: mutable darray[f64]&, x0: mutable darray[f64]&, a: f64, c: f64) -> void:
+    for k in 0..<20:
+        for j in 1..<(n + 1):
+            for i in 1..<(n + 1):
+                x[ix(i, j, n)] <- (x0[ix(i, j, n)] + a * (x[ix(i - 1, j, n)] + x[ix(i + 1, j, n)] + x[ix(i, j - 1, n)] + x[ix(i, j + 1, n)])) / c
+        set_bnd(n, b, x)
+
+def diffuse(n: i64, b: i64, x: mutable darray[f64]&, x0: mutable darray[f64]&, diff: f64, dt: f64) -> void:
+    a: f64 = dt * diff * n.f64() * n.f64()
+    lin_solve(n, b, x, x0, a, 1.0 + 4.0 * a)
+
+# Semi-Lagrangian advection: trace each cell's quantity back along the velocity field.
+def advect(n: i64, b: i64, d: mutable darray[f64]&, d0: mutable darray[f64]&, u: mutable darray[f64]&, v: mutable darray[f64]&, dt: f64) -> void:
+    dt0: f64 = dt * n.f64()
+    edge: f64 = n.f64() + 0.5
+    for j in 1..<(n + 1):
+        for i in 1..<(n + 1):
+            x: f64 = clampf(i.f64() - dt0 * u[ix(i, j, n)], 0.5, edge)
+            y: f64 = clampf(j.f64() - dt0 * v[ix(i, j, n)], 0.5, edge)
+            i0: i64 = x.i64()
+            j0: i64 = y.i64()
+            i1: i64 = i0 + 1
+            j1: i64 = j0 + 1
+            s1: f64 = x - i0.f64()
+            s0: f64 = 1.0 - s1
+            t1: f64 = y - j0.f64()
+            t0: f64 = 1.0 - t1
+            d[ix(i, j, n)] <- s0 * (t0 * d0[ix(i0, j0, n)] + t1 * d0[ix(i0, j1, n)]) + s1 * (t0 * d0[ix(i1, j0, n)] + t1 * d0[ix(i1, j1, n)])
+    set_bnd(n, b, d)
+
+# Hodge projection: subtract the gradient of the pressure so the velocity stays mass-conserving.
+def project(n: i64, u: mutable darray[f64]&, v: mutable darray[f64]&, p: mutable darray[f64]&, div: mutable darray[f64]&) -> void:
+    h: f64 = 1.0 / n.f64()
+    for j in 1..<(n + 1):
+        for i in 1..<(n + 1):
+            div[ix(i, j, n)] <- -0.5 * h * (u[ix(i + 1, j, n)] - u[ix(i - 1, j, n)] + v[ix(i, j + 1, n)] - v[ix(i, j - 1, n)])
+            p[ix(i, j, n)] <- 0.0
+    set_bnd(n, 0, div)
+    set_bnd(n, 0, p)
+    lin_solve(n, 0, p, div, 1.0, 4.0)
+    for j in 1..<(n + 1):
+        for i in 1..<(n + 1):
+            u[ix(i, j, n)] <- u[ix(i, j, n)] - 0.5 * (p[ix(i + 1, j, n)] - p[ix(i - 1, j, n)]) / h
+            v[ix(i, j, n)] <- v[ix(i, j, n)] - 0.5 * (p[ix(i, j + 1, n)] - p[ix(i, j - 1, n)]) / h
+    set_bnd(n, 1, u)
+    set_bnd(n, 2, v)
+
+# Vorticity confinement (Fedkiw et al. 2001): measure the local curl, then add a force that pushes
+# velocity back toward each vortex centre, restoring the fine swirls numerical diffusion erases.
+def vorticity(n: i64, u: mutable darray[f64]&, v: mutable darray[f64]&, curl: mutable darray[f64]&, eps: f64, dt: f64) -> void:
+    for j in 1..<(n + 1):
+        for i in 1..<(n + 1):
+            w: f64 = (v[ix(i + 1, j, n)] - v[ix(i - 1, j, n)] - u[ix(i, j + 1, n)] + u[ix(i, j - 1, n)]) * 0.5
+            curl[ix(i, j, n)] <- absf(w)
+    for j in 2..<n:
+        for i in 2..<n:
+            dwdx: f64 = (curl[ix(i + 1, j, n)] - curl[ix(i - 1, j, n)]) * 0.5
+            dwdy: f64 = (curl[ix(i, j + 1, n)] - curl[ix(i, j - 1, n)]) * 0.5
+            length: f64 = sqrt(dwdx * dwdx + dwdy * dwdy) + 0.00001
+            nx: f64 = dwdx / length
+            ny: f64 = dwdy / length
+            w: f64 = (v[ix(i + 1, j, n)] - v[ix(i - 1, j, n)] - u[ix(i, j + 1, n)] + u[ix(i, j - 1, n)]) * 0.5
+            u[ix(i, j, n)] <- u[ix(i, j, n)] + eps * dt * (ny * w)
+            v[ix(i, j, n)] <- v[ix(i, j, n)] - eps * dt * (nx * w)
+
+# One velocity update (diffuse -> project -> advect -> project), routing the prev-buffers as scratch
+# instead of pointer swaps.
+def vel_step(n: i64, u: mutable darray[f64]&, v: mutable darray[f64]&, u0: mutable darray[f64]&, v0: mutable darray[f64]&, visc: f64, dt: f64) -> void:
+    diffuse(n, 1, u0, u, visc, dt)
+    diffuse(n, 2, v0, v, visc, dt)
+    project(n, u0, v0, u, v)
+    advect(n, 1, u, u0, u0, v0, dt)
+    advect(n, 2, v, v0, u0, v0, dt)
+    project(n, u, v, u0, v0)
+
+def dens_step(n: i64, dens: mutable darray[f64]&, dens0: mutable darray[f64]&, u: mutable darray[f64]&, v: mutable darray[f64]&, diff: f64, dt: f64) -> void:
+    diffuse(n, 0, dens0, dens, diff, dt)
+    advect(n, 0, dens, dens0, u, v, dt)
+
+# ---- simulation driver ---------------------------------------------------------------------------
+
+@test
+def fluid_dynamics_sim() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        n: i64 = 200            # interior grid resolution (200 x 200 = 40k cells)
+        cell: i64 = 4           # pixels per cell
+        margin: i64 = 16
+        win: i64 = n * cell + 2 * margin
+        size: i64 = (n + 2) * (n + 2)
+        dt: f64 = 0.10
+        diff: f64 = 0.00001     # density diffusion
+        visc: f64 = 0.00001     # viscosity
+        buoy: f64 = 2.0         # buoyancy: dense fluid rises
+        vort: f64 = 14.0        # vorticity-confinement strength
+
+        InitWindow(win.i32(), (win + 40).i32(), "Elisa - Navier-Stokes Stable Fluids (vorticity confinement)")
+        # no SetTargetFPS: run uncapped (the on-screen FPS counter shows the real rate)
+
+        # Velocity (u,v), density (dens), scratch buffers, and the curl field.
+        u: mutable darray[f64] = []
+        v: mutable darray[f64] = []
+        u0: mutable darray[f64] = []
+        v0: mutable darray[f64] = []
+        dens: mutable darray[f64] = []
+        dens0: mutable darray[f64] = []
+        curl: mutable darray[f64] = []
+        _ = u.resize(size.usize())
+        _ = v.resize(size.usize())
+        _ = u0.resize(size.usize())
+        _ = v0.resize(size.usize())
+        _ = dens.resize(size.usize())
+        _ = dens0.resize(size.usize())
+        _ = curl.resize(size.usize())
+        for k in 0..<size:
+            u[k.usize()] <- 0.0
+            v[k.usize()] <- 0.0
+            u0[k.usize()] <- 0.0
+            v0[k.usize()] <- 0.0
+            dens[k.usize()] <- 0.0
+            dens0[k.usize()] <- 0.0
+            curl[k.usize()] <- 0.0
+
+        frame: mutable i64 = 0
+        palette: mutable i64 = 0      # 0 = fire, 1 = blue ink
+        vort_on: mutable bool = true
+        pmx: mutable i64 = 0          # previous mouse position (for drag momentum)
+        pmy: mutable i64 = 0
+
+        trusted Unsafe.AssumeProgress:
+            while not WindowShouldClose():
+                frame <- frame + 1
+
+                # ---- controls ----
+                if IsKeyPressed(80):                  # P: palette
+                    palette <- (1 if palette == 0 else 0)
+                if IsKeyPressed(86):                  # V: vorticity
+                    vort_on <- not vort_on
+                if IsKeyPressed(67):                  # C: clear
+                    for k in 0..<size:
+                        u[k.usize()] <- 0.0
+                        v[k.usize()] <- 0.0
+                        dens[k.usize()] <- 0.0
+
+                # ---- forces & sources ----
+                # Buoyancy + gentle dissipation across the whole field.
+                for k in 0..<size:
+                    v[k.usize()] <- v[k.usize()] - buoy * dens[k.usize()] * dt
+                    dens[k.usize()] <- dens[k.usize()] * 0.992
+
+                # Wavering plume at the base: bright dense source pushed upward with a side wobble.
+                wob: f64 = ((frame % 130).f64() - 65.0) / 65.0
+                cx: i64 = n / 2 + (wob * (n.f64() * 0.10)).i64()
+                js: i64 = n - 6
+                for dx in -8..<9:
+                    cxi: i64 = cx + dx
+                    if cxi >= 1 and cxi <= n:
+                        for dj in 0..<5:
+                            dens[ix(cxi, js + dj, n)] <- 1.7
+                            v[ix(cxi, js + dj, n)] <- -7.5
+                            u[ix(cxi, js + dj, n)] <- wob * 7.0
+
+                # Mouse: drag injects dye and momentum (the classic interactive stir).
+                mx: i64 = GetMouseX().i64()
+                my: i64 = GetMouseY().i64()
+                if IsMouseButtonDown(0):
+                    gi: i64 = (mx - margin) / cell + 1
+                    gj: i64 = (my - margin) / cell + 1
+                    fx: f64 = (mx - pmx).f64() * 0.10
+                    fy: f64 = (my - pmy).f64() * 0.10
+                    for bj in -3..<4:
+                        for bi in -3..<4:
+                            ci: i64 = gi + bi
+                            cj: i64 = gj + bj
+                            if ci >= 1 and ci <= n and cj >= 1 and cj <= n:
+                                dens[ix(ci, cj, n)] <- clampf(dens[ix(ci, cj, n)] + 0.5, 0.0, 2.0)
+                                u[ix(ci, cj, n)] <- u[ix(ci, cj, n)] + fx
+                                v[ix(ci, cj, n)] <- v[ix(ci, cj, n)] + fy
+                pmx <- mx
+                pmy <- my
+
+                # ---- physics ----
+                if vort_on:
+                    vorticity(n, &u, &v, &curl, vort, dt)
+                vel_step(n, &u, &v, &u0, &v0, visc, dt)
+                dens_step(n, &dens, &dens0, &u, &v, diff, dt)
+
+                # ---- render ----
+                BeginDrawing()
+                ClearBackground(0xFF0A0A12.u32())
+                for j in 1..<(n + 1):
+                    py: i64 = margin + (j - 1) * cell
+                    for i in 1..<(n + 1):
+                        d: f64 = dens[ix(i, j, n)]
+                        if d > 0.012:
+                            px: i64 = margin + (i - 1) * cell
+                            col: u32 = (fire_color(d) if palette == 0 else ink_color(d))
+                            DrawRectangle(px.i32(), py.i32(), cell.i32(), cell.i32(), col)
+                DrawText("Navier-Stokes stable fluids + vorticity confinement   |   drag: stir   P: palette   V: vorticity   C: clear", margin.i32(), (win + 12).i32(), 18, 0xFFCCCCCC.u32())
+                DrawFPS((win - 90).i32(), 12)
+                EndDrawing()
+        CloseWindow()
