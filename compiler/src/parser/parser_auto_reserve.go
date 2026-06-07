@@ -210,12 +210,29 @@ func isIntOne(e ast.Expr) bool {
 	return ok && lit.Value == "1"
 }
 
+func intReserveExprValue(e ast.Expr) (int, bool) {
+	lit, ok := e.(*ast.IntLit)
+	if !ok || lit == nil {
+		return 0, false
+	}
+	value, err := strconv.Atoi(lit.Value)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
 func addReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
 	if left == nil {
 		return right
 	}
 	if right == nil {
 		return left
+	}
+	if leftValue, ok := intReserveExprValue(left); ok {
+		if rightValue, ok := intReserveExprValue(right); ok {
+			return intReserveExpr(leftValue+rightValue, pos)
+		}
 	}
 	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: left, Right: right}
 }
@@ -226,6 +243,11 @@ func multiplyReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
 	}
 	if isIntOne(right) {
 		return left
+	}
+	if leftValue, ok := intReserveExprValue(left); ok {
+		if rightValue, ok := intReserveExprValue(right); ok {
+			return intReserveExpr(leftValue*rightValue, pos)
+		}
 	}
 	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_STAR, Left: left, Right: right}
 }

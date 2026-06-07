@@ -52,6 +52,23 @@ func TestAutoReserveCountsListPushElements(t *testing.T) {
 	}
 }
 
+func TestAutoReserveFoldsMultiplePushesPerIteration(t *testing.T) {
+	file, errs := parseSourceFile(t, `def foo(n: usize) -> i64:
+    xs: mutable darray[i64] = []
+    for i in 0..<n:
+        xs.push(i.i64())
+        xs.push((i + 1).i64())
+    return xs[0]
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	formatted := unparse.FormatDecl(file.Decls[0])
+	if !strings.Contains(formatted, "xs.reserve((n * 2))") {
+		t.Fatalf("expected auto-reserve to fold two pushes per iteration, got:\n%s", formatted)
+	}
+}
+
 func TestAutoReserveInfersNestedCountingGrowthProduct(t *testing.T) {
 	file, errs := parseSourceFile(t, `def foo(n: usize, m: usize) -> i64:
     xs: mutable darray[i64] = []

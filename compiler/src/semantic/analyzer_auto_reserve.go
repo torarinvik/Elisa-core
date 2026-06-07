@@ -242,12 +242,29 @@ func semanticReserveExprIsIntOne(e ast.Expr) bool {
 	return ok && lit.Value == "1"
 }
 
+func semanticIntReserveExprValue(e ast.Expr) (int, bool) {
+	lit, ok := e.(*ast.IntLit)
+	if !ok || lit == nil {
+		return 0, false
+	}
+	value, err := strconv.Atoi(lit.Value)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
 func semanticAddReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
 	if left == nil {
 		return right
 	}
 	if right == nil {
 		return left
+	}
+	if leftValue, ok := semanticIntReserveExprValue(left); ok {
+		if rightValue, ok := semanticIntReserveExprValue(right); ok {
+			return semanticIntReserveExpr(leftValue+rightValue, pos)
+		}
 	}
 	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: left, Right: right}
 }
@@ -258,6 +275,11 @@ func semanticMultiplyReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
 	}
 	if semanticReserveExprIsIntOne(right) {
 		return left
+	}
+	if leftValue, ok := semanticIntReserveExprValue(left); ok {
+		if rightValue, ok := semanticIntReserveExprValue(right); ok {
+			return semanticIntReserveExpr(leftValue*rightValue, pos)
+		}
 	}
 	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_STAR, Left: left, Right: right}
 }
