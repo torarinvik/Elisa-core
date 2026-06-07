@@ -6,6 +6,13 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 	if expr == nil || expr.Operand == nil {
 		return invalidType
 	}
+	if expr.Legacy {
+		name := "fn"
+		if ident, ok := expr.Operand.(*ast.Ident); ok && ident != nil {
+			name = ident.Name
+		}
+		a.deprecatedf(expr.Pos(), "`%s.specialize[...]()` is deprecated; use the bracket form `%s[...]` (e.g. `%s[T]` or `%s[A, B]`) instead", name, name, name, name)
+	}
 	ident, ok := expr.Operand.(*ast.Ident)
 	if !ok {
 		a.errorf(expr.Pos(), "specialize expects a named generic function")

@@ -4,8 +4,34 @@ import (
 	"elisacore/src/ast"
 )
 
+// exprAsSpecializeTypeArg converts an index subexpression into a type argument for the `fn[T]`
+// value-specialization reinterpretation. Only a bare identifier (a type name) is accepted -- that
+// covers the value form; multi-arg and generic-type-arg forms are parsed as SpecializeExpr directly.
+func exprAsSpecializeTypeArg(e ast.Expr) (ast.TypeExpr, bool) {
+	if ident, ok := e.(*ast.Ident); ok && ident != nil {
+		return &ast.NamedType{Position: ident.Position, Name: ident.Name}, true
+	}
+	return nil, false
+}
+
 func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	objType := a.analyzeExpr(expr.Object)
+	// `fn[T]` over a generic function is not an index (functions are not indexable) -- it is a
+	// single-type-arg value specialization, the counterpart of the multi-arg `fn[A, B]` the parser
+	// produces directly. Reinterpret it as a SpecializeExpr so it materializes the generic function
+	// as a value (the modern replacement for `fn.specialize[T]()`).
+	if expr.Fallback == nil {
+		if fnType, isFunc := objType.(*FuncType); isFunc && len(genericParamsForFuncType(fnType)) > 0 {
+			if typeArg, ok := exprAsSpecializeTypeArg(expr.Index); ok {
+				spec := &ast.SpecializeExpr{Position: expr.Position, Operand: expr.Object, TypeArgs: []ast.TypeExpr{typeArg}}
+				result := a.analyzeSpecializeExpr(spec)
+				expr.AsSpecialize = spec
+				a.reportInvalidRegionUse(expr, result)
+				a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
+				return result
+			}
+		}
+	}
 	if flagType, ok := FlagsInstanceType(objType); ok {
 		indexType := a.analyzeValueExpr(expr.Index, flagType)
 		if expr.Fallback != nil {

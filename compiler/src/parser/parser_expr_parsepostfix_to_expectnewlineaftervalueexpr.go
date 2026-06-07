@@ -101,7 +101,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.expect(lexer.TOKEN_RBRACKET)
 				p.expect(lexer.TOKEN_LPAREN)
 				p.expect(lexer.TOKEN_RPAREN)
-				expr = &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}
+				expr = &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs, Legacy: true}
 				continue
 			}
 
@@ -163,6 +163,24 @@ func (p *Parser) parsePostfix() ast.Expr {
 
 		case lexer.TOKEN_LBRACKET:
 			pos := p.cur().Pos
+			// Generic-function VALUE specialization with 2+ type args and no trailing call:
+			// `fn[A, B]` materializes the generic function as a value (the modern replacement
+			// for `fn.specialize[A, B]()`). A multi-element bracket cannot be an index, so this
+			// is unambiguous. The single-arg value form `fn[T]` stays an IndexExpr here and is
+			// reinterpreted as a specialization in the analyzer when the operand is a function.
+			if p.peekPostfixGenericValueApplication() {
+				p.advance()
+				typeArgs := make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+				for {
+					typeArgs = append(typeArgs, p.parseGenericTypeArgExpr())
+					if !p.match(lexer.TOKEN_COMMA) {
+						break
+					}
+				}
+				p.expect(lexer.TOKEN_RBRACKET)
+				expr = &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}
+				continue
+			}
 			if p.peekPostfixGenericApplication() {
 				p.advance()
 				typeArgs := make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))

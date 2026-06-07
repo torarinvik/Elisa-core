@@ -476,6 +476,38 @@ func (p *Parser) attachOptionalCallWithClause(expr ast.Expr) ast.Expr {
 	call.WithArgs, call.WithBundles, call.WithItemOrder = p.parseWithValueClause()
 	return call
 }
+
+// peekPostfixGenericValueApplication matches a generic-function value specialization with two or
+// more type args and NO trailing call: `fn[A, B]`. A multi-element bracket can never be an index
+// (indexing is single-subscript), so this is unambiguous and net-new (it was a parse error before).
+// Single-arg `fn[T]` is intentionally NOT matched here -- it is ambiguous with `arr[i]` and is
+// resolved in the analyzer instead.
+func (p *Parser) peekPostfixGenericValueApplication() bool {
+	if p.peek() != lexer.TOKEN_LBRACKET {
+		return false
+	}
+	probe := *p
+	probe.errors = nil
+	probe.advance()
+	if probe.peek() == lexer.TOKEN_RBRACKET {
+		return false
+	}
+	count := 0
+	for {
+		_ = probe.parseGenericTypeArgExpr()
+		count++
+		if !probe.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	if probe.peek() != lexer.TOKEN_RBRACKET || count < 2 {
+		return false
+	}
+	probe.advance()
+	// A trailing `(` is the call form handled by peekPostfixGenericApplication; not a value.
+	return probe.peek() != lexer.TOKEN_LPAREN
+}
+
 func (p *Parser) peekPostfixGenericApplication() bool {
 	if p.peek() != lexer.TOKEN_LBRACKET {
 		return false

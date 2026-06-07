@@ -564,6 +564,11 @@ type IndexExpr struct {
 	Object   Expr
 	Index    Expr
 	Fallback Expr
+	// AsSpecialize is set by the analyzer when `fn[T]` over a generic function is reinterpreted
+	// as a single-type-arg value specialization (the single-arg counterpart of the multi-arg
+	// `fn[A, B]` SpecializeExpr the parser produces). When non-nil, codegen emits this instead
+	// of an index. nil for ordinary indexing.
+	AsSpecialize *SpecializeExpr
 }
 type SliceExpr struct {
 	Position lexer.Pos
@@ -691,6 +696,9 @@ type SpecializeExpr struct {
 	Position lexer.Pos
 	Operand  Expr
 	TypeArgs []TypeExpr
+	// Legacy marks the deprecated `fn.specialize[T]()` spelling (vs the preferred bracket form
+	// `fn[T]` / `fn[T, U]`). The analyzer emits a deprecation warning for it.
+	Legacy bool
 }
 type StructLitExpr struct {
 	Position lexer.Pos

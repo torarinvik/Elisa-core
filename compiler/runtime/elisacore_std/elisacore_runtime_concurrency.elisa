@@ -687,10 +687,10 @@ def ctx_task_group_release_all(group: mutable TaskGroup&):
 
 def spawn1[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> Thread[R, Joinable]:
 	can Thread.Spawn, Memory.Allocate, Abort.Panic:
-		from_raw: func(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw.specialize[R, Joinable]()
+		from_raw: func(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw[R, Joinable]
 		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
 		raw: Thread[void&?, Joinable] = spawn_raw(
-			ctx_concurrency_work1_entry.specialize[A, R]().cast[void&],
+			ctx_concurrency_work1_entry[A, R].cast[void&],
 			state.cast[void&]
 		)
 		raw.state <- state.cast[void&]
@@ -698,7 +698,7 @@ def spawn1[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> Thread[R,
 
 def join[R](thread: Thread[R, Joinable]) -> R:
 	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		take_result: func(void&?) -> R effects[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result.specialize[R]()
+		take_result: func(void&?) -> R effects[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
 		state_bits: void&? = thread.state
 		raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
 		_ = join_raw(move raw)
@@ -714,11 +714,11 @@ def detach[R](thread: Thread[R, Joinable]):
 
 def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R effects[P], arg: A) -> Task[R, Pending]:
 	can Pool.Submit, Thread.Spawn, Memory.Allocate, Abort.Panic:
-		from_raw: func(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw.specialize[R, Pending]()
+		from_raw: func(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw[R, Pending]
 		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
 		raw: Task[void&?, Pending] = pool_submit_raw(
 			pool,
-			ctx_concurrency_work1_entry.specialize[A, R]().cast[void&],
+			ctx_concurrency_work1_entry[A, R].cast[void&],
 			state.cast[void&]
 		)
 		raw.state <- state.cast[void&]
@@ -726,7 +726,7 @@ def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R
 
 def pool_await[R](task: Task[R, Pending]) -> R:
 	can Pool.Await, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		take_result: func(void&?) -> R effects[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result.specialize[R]()
+		take_result: func(void&?) -> R effects[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
 		state_bits: void&? = task.state
 		raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
 		_ = pool_await_raw(move raw)
