@@ -559,6 +559,7 @@ func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.consumeHandledErrorUnionExpr(expr.Value, unionType, "catch")
 	if resultType == nil {
 		return neverType
 	}

@@ -81,6 +81,9 @@ func affineHandleKind(t Type) string {
 }
 
 func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason string) {
+	if unionType, ok := expected.(*ErrorUnionType); ok && unionType != nil {
+		expected = unionType.Value
+	}
 	if expr == nil || !a.containsAffineHandleValues(expected, map[string]bool{}) {
 		return
 	}
@@ -133,6 +136,17 @@ func (a *Analyzer) recordAffineConsumption(key affineValueKey, reason string) {
 		}
 		a.currentAffineValues[existingKey] = existingState
 	}
+}
+
+func (a *Analyzer) consumeHandledErrorUnionExpr(expr ast.Expr, unionType *ErrorUnionType, reason string) {
+	if expr == nil || unionType == nil || !a.containsAffineHandleValues(unionType, map[string]bool{}) {
+		return
+	}
+	key, ok := a.lookupAffineValueKey(expr)
+	if !ok {
+		return
+	}
+	a.recordAffineConsumption(key, reason)
 }
 
 func (a *Analyzer) lookupProtocolTargetKey(expr ast.Expr) (affineValueKey, bool) {

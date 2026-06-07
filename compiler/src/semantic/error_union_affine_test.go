@@ -73,3 +73,95 @@ def propagated_direct() -> i64 error[E]:
 	return f()
 `)
 }
+
+func TestErrorUnionReturnRequiresExplicitMoveForAffineOkPayload(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "error_union_affine_ok_payload.elisa", `error E:
+    Bad
+
+linear struct Guard:
+    open: bool
+
+def make() -> Guard:
+    return Guard(true)
+
+def wrap() -> Guard error[E]:
+    g: mutable Guard = make()
+    return g
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "must be moved explicitly") {
+		t.Fatalf("expected affine ok payload to require explicit move into error union return; got:\n%s", all)
+	}
+}
+
+func TestErrorUnionReturnConsumesExplicitMoveForAffineOkPayload(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "error_union_affine_ok_payload_move.elisa", `error E:
+    Bad
+
+linear struct Guard:
+    open: bool
+
+def make() -> Guard:
+    return Guard(true)
+
+def wrap() -> Guard error[E]:
+    g: mutable Guard = make()
+    return move g
+`)
+	if all := strings.Join(result.Errors(), "\n"); all != "" {
+		t.Fatalf("explicit move into error union return should analyze cleanly; got:\n%s", all)
+	}
+}
+
+func TestCatchConsumesStoredErrorUnionWithAffineOkPayload(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "error_union_affine_catch_consumes.elisa", `error E:
+    Bad
+
+affine struct Tok:
+    n: i64
+
+def wrap() -> Tok error[E]:
+    t: mutable Tok = Tok(1)
+    return move t
+
+def f() -> void:
+    u: mutable Tok error[E] = wrap()
+    catch u:
+        ok:
+            ok.n
+        E.Bad:
+            0
+    catch u:
+        ok:
+            ok.n
+        E.Bad:
+            0
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "cannot be used") {
+		t.Fatalf("expected stored error union to be consumed by catch; got:\n%s", all)
+	}
+}
+
+func TestTryConsumesStoredErrorUnionWithAffineOkPayload(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "error_union_affine_try_consumes.elisa", `error E:
+    Bad
+
+affine struct Tok:
+    n: i64
+
+def wrap() -> Tok error[E]:
+    t: mutable Tok = Tok(1)
+    return move t
+
+def f() -> i64:
+    u: mutable Tok error[E] = wrap()
+    a: Tok = try u else Tok(2)
+    b: Tok = try u else Tok(3)
+    return a.n + b.n
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "cannot be used") {
+		t.Fatalf("expected stored error union to be consumed by try; got:\n%s", all)
+	}
+}

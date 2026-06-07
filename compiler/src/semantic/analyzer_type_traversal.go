@@ -68,6 +68,20 @@ func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool
 		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *OptionalType:
 		return a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1)
+	case *ErrorUnionType:
+		if a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1) {
+			return true
+		}
+		if tt.Errors != nil {
+			for _, payloads := range tt.Errors.Payloads {
+				for _, payloadType := range payloads {
+					if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
+						return true
+					}
+				}
+			}
+		}
+		return false
 	case *DictType:
 		return a.containsAffineHandleValuesWithSeen(tt.Key, seen, depth+1) || a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1)
 	case *DictEntryType:

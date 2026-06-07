@@ -335,6 +335,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		valueType := a.analyzeExpr(n.Value)
 		if unionType, ok := valueType.(*ErrorUnionType); ok {
+			a.consumeHandledErrorUnionExpr(n.Value, unionType, "try")
 			if recovery == nil {
 				currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 				if !ok {
