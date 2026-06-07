@@ -531,6 +531,11 @@ func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType sema
 	return call, fieldType, nil
 }
 func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr != nil && expr.AsSpecialize != nil {
+		// `fn[T]` over a generic function: the analyzer reinterpreted this as a single-type-arg
+		// value specialization. Emit the materialized generic-function value, not an index.
+		return s.emitSpecializeExpr(expr.AsSpecialize)
+	}
 	if expr != nil && expr.Fallback != nil {
 		return s.emitIndexFallbackExpr(expr)
 	}

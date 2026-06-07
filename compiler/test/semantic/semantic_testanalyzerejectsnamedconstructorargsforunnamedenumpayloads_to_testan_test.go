@@ -369,19 +369,16 @@ def score(tok: Token) -> i64:
 		t.Fatalf("expected specialized diagnostic instead of generic undefined identifier, got:\n%s", all)
 	}
 }
-func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
+// docs/76 Phase 3 / docs/77: a plain `enum` whose variant contains the enum by value is now
+// automatically promoted to the region-backed (packed) machinery (RecursivePlain flag). The old
+// "cannot contain Expr by value" rejection no longer fires — the declaration is accepted.
+func TestAnalyzeAcceptsRecursiveEnumPayloadByValueAsRegionBacked(t *testing.T) {
 	src := `enum Expr:
 	Int(int)
 	Add(Expr, Expr)
 `
-	_, errs := parseAndAnalyze(t, "enum_recursive_by_value_reject.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "enum \"Expr\" variant \"Add\" cannot contain \"Expr\" by value; use a reference type instead") {
-		t.Fatalf("expected recursive-enum by-value diagnostic, got:\n%s", all)
-	}
+	_, errs := parseAndAnalyze(t, "enum_recursive_by_value_promoted.elisa", src)
+	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsRecursiveEnumPayloadByReference(t *testing.T) {
 	src := `enum Expr:
