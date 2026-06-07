@@ -47,11 +47,14 @@ func (a *Analyzer) findUnreservedCountingFills(stmts []ast.Stmt) {
 }
 
 func (a *Analyzer) flagUnreservedCountingFill(prev ast.Stmt, loop *ast.ForStmt) {
-	if _, ok := semanticCountingLoopBoundExpr(loop); !ok {
+	loopBound, ok := semanticCountingLoopBoundExpr(loop)
+	if !ok {
 		return
 	}
 	target := ""
-	for name := range collectGrowthTargetCounts(loop.Body) {
+	var perIteration ast.Expr
+	growthCounts := collectGrowthTargetCounts(loop.Body)
+	for name, growth := range growthCounts {
 		if !a.growthTargetIsDArray(loop.Body, name) {
 			continue
 		}
@@ -59,11 +62,19 @@ func (a *Analyzer) flagUnreservedCountingFill(prev ast.Stmt, loop *ast.ForStmt) 
 			return
 		}
 		target = name
+		perIteration = growth
 	}
-	if target == "" || stmtIsReserveFor(prev, target) {
+	if target == "" {
 		return
 	}
-	a.perfLint(loop.Pos(), "counting loop grows %q without an immediately preceding reserve; add `%s.reserve(<count>)` before the loop or keep the fresh darray declaration adjacent so auto-reserve can synthesize it", target, target)
+	expected := loopBound
+	if !semanticReserveExprIsIntOne(perIteration) {
+		expected = semanticMultiplyReserveExpr(loopBound, perIteration, loop.Pos())
+	}
+	if stmtIsReserveForBound(prev, target, expected) {
+		return
+	}
+	a.perfLint(loop.Pos(), "counting loop grows %q without a matching immediately preceding reserve; add `%s.reserve(%s)` before the loop or keep the fresh darray declaration adjacent so auto-reserve can synthesize it", target, target, optimizationExprString(expected))
 }
 
 func (a *Analyzer) growthTargetIsDArray(body []ast.Stmt, name string) bool {
@@ -90,7 +101,7 @@ func (a *Analyzer) growthTargetIsDArray(body []ast.Stmt, name string) bool {
 	return found
 }
 
-func stmtIsReserveFor(stmt ast.Stmt, name string) bool {
+func stmtIsReserveForBound(stmt ast.Stmt, name string, expected ast.Expr) bool {
 	exprStmt, ok := stmt.(*ast.ExprStmt)
 	if !ok || exprStmt == nil {
 		return false
@@ -104,5 +115,8 @@ func stmtIsReserveFor(stmt ast.Stmt, name string) bool {
 		return false
 	}
 	recv, ok := field.Object.(*ast.Ident)
-	return ok && recv.Name == name
+	if !ok || recv.Name != name || len(call.Args) != 1 {
+		return false
+	}
+	return optimizationExprString(call.Args[0]) == optimizationExprString(expected)
 }

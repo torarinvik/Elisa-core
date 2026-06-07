@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const unreservedFillWarning = "without an immediately preceding reserve"
+const unreservedFillWarning = "without a matching immediately preceding reserve"
 
 func TestRunCLIUnreservedCountingFillLintFlagsSeparatedFill(t *testing.T) {
 	out := compileAndCaptureStderr(t, "unreserved_counting_fill.elisa", `def builds(n: usize) -> usize:
@@ -34,6 +34,35 @@ func TestRunCLIUnreservedCountingFillLintAllowsAutoReserve(t *testing.T) {
 `)
 	if strings.Contains(out, unreservedFillWarning) {
 		t.Fatalf("auto-reserved adjacent fill must not warn, got:\n%s", out)
+	}
+}
+
+func TestRunCLIUnreservedCountingFillLintAllowsMatchingExplicitReserve(t *testing.T) {
+	out := compileAndCaptureStderr(t, "explicit_reserved_counting_fill.elisa", `def builds(n: usize) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        xs: mutable darray[i64] = []
+        gap: i64 = 0
+        xs.reserve(n)
+        for i in 0..<n:
+            xs.push(i.i64() + gap)
+        return xs.count
+`)
+	if strings.Contains(out, unreservedFillWarning) {
+		t.Fatalf("matching explicit reserve must not warn, got:\n%s", out)
+	}
+}
+
+func TestRunCLIUnreservedCountingFillLintFlagsMismatchedExplicitReserve(t *testing.T) {
+	out := compileAndCaptureStderr(t, "mismatched_reserved_counting_fill.elisa", `def builds(n: usize) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        xs: mutable darray[i64] = []
+        xs.reserve(1)
+        for i in 0..<n:
+            xs.push(i.i64())
+        return xs.count
+`)
+	if !strings.Contains(out, unreservedFillWarning) {
+		t.Fatalf("mismatched explicit reserve must warn, got:\n%s", out)
 	}
 }
 

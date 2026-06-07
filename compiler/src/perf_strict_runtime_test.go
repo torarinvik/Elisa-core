@@ -66,7 +66,7 @@ def main() -> i64:
             xs.push(i.i64() + gap)
         return xs.count
 `,
-			marker: "without an immediately preceding reserve",
+			marker: "without a matching immediately preceding reserve",
 		},
 	}
 
