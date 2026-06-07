@@ -8,17 +8,17 @@ import (
 // A Slice[T] borrows a darray's backing. Growing the darray afterward can relocate the
 // buffer, dangling the slice -- so using the slice after a push must be flagged as a stale
 // reference, exactly like an interior darray ref used after push. Slice routes through the
-// same storage-view invalidation chokepoint (slice_of recorded as a dependency on the source
+// same storage-view invalidation chokepoint (slice() recorded as a dependency on the source
 // darray), so this is the borrow guarantee, not a bespoke checker.
 func TestSliceInvalidatedByPush(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "slice_push.elisa", `struct Slice[T]:
     base: uintptr
-    len: usize
+    count: usize
 
-def slice_of[T](da: mutable darray[T]&) -> Slice[T]:
-    return Slice[T] { base: (&da[0.usize()]).cast[uintptr], len: da.count }
+def slice[T](da: mutable darray[T]&) -> Slice[T]:
+    return Slice[T] { base: (&da[0.usize()]).cast[uintptr], count: da.count }
 
-def slice_get[T](s: Slice[T], i: usize) -> T:
+def get[T](s: Slice[T], i: usize) -> T:
     p: T& = s.base.cast[T&]
     return p[i]
 
@@ -26,9 +26,9 @@ def f(owner: mutable Arena&) -> u8:
     xs: mutable darray[u8] = []
     in owner:
         xs.push(1)
-        s: Slice[u8] = slice_of(&xs)
+        s: Slice[u8] = slice(&xs)
         xs.push(2)
-        return slice_get(s, 0.usize())
+        return s.get(0.usize())
     return 0
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	if !strings.Contains(allDiagnostics(result), "stale reference") {
@@ -41,12 +41,12 @@ def f(owner: mutable Arena&) -> u8:
 func TestSliceNotInvalidatedWithoutGrowth(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "slice_nogrow.elisa", `struct Slice[T]:
     base: uintptr
-    len: usize
+    count: usize
 
-def slice_of[T](da: mutable darray[T]&) -> Slice[T]:
-    return Slice[T] { base: (&da[0.usize()]).cast[uintptr], len: da.count }
+def slice[T](da: mutable darray[T]&) -> Slice[T]:
+    return Slice[T] { base: (&da[0.usize()]).cast[uintptr], count: da.count }
 
-def slice_get[T](s: Slice[T], i: usize) -> T:
+def get[T](s: Slice[T], i: usize) -> T:
     p: T& = s.base.cast[T&]
     return p[i]
 
@@ -55,8 +55,8 @@ def f(owner: mutable Arena&) -> u8:
     in owner:
         xs.push(1)
         xs.push(2)
-        s: Slice[u8] = slice_of(&xs)
-        return slice_get(s, 0.usize())
+        s: Slice[u8] = slice(&xs)
+        return s.get(0.usize())
     return 0
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	if strings.Contains(allDiagnostics(result), "stale reference") {
