@@ -266,7 +266,7 @@ func TestRegionGrowthReserveSuppresses(t *testing.T) {
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
             a: mutable darray[i64] = []
-            a.reserve(8u)
+            a.reserve(8)
             a.push(1)
             b: mutable darray[i64] = []
             b.push(2)
@@ -292,6 +292,25 @@ func TestRegionGrowthTailOrderNoWarning(t *testing.T) {
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(result), "no longer the arena tail") {
 		t.Fatalf("tail-ordered growth must not warn, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestRegionGrowthResizeWarns(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_resize.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: mutable darray[i64] = []
+            b: mutable darray[i64] = []
+            c: mutable darray[i64] = []
+            d: mutable darray[i64] = []
+            e: mutable darray[i64] = []
+            e.push(1)
+            g: mutable darray[i64] = []
+            g.push(2)
+            e.resize(4)
+`, AnalyzeOptions{})
+	if !strings.Contains(allDiagnostics(result), "no longer the arena tail") {
+		t.Fatalf("resize can grow and must participate in tail-growth diagnostics, got:\n%s", allDiagnostics(result))
 	}
 }
 

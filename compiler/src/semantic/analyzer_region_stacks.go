@@ -496,6 +496,7 @@ func stripParenExpr(e ast.Expr) ast.Expr {
 // its allocations to. A class is a distinct death-point at which live objects are reclaimed:
 //   - one per distinct B2 early-free offset (objects that die before region exit), plus
 //   - one for the region exit itself, iff some allocated stack survives to it.
+//
 // Stacks within a region are layout (all freed together at region exit, docs/71) and do NOT count
 // as separate lifetimes — only distinct *death-points* do. A region with no fresh allocations
 // contributes 0.

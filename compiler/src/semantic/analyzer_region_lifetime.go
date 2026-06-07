@@ -103,7 +103,7 @@ func (a *Analyzer) resolvePendingStorageViewErrors(reserveCommitDeclOffsets map[
 // panics (under the interior-pointer-stable RESERVE_COMMIT/FIXED strategies — arena.elisa:460).
 var regionGrowthMethods = map[string]bool{
 	"push": true, "push_back": true, "push_front": true,
-	"insert": true, "append": true, "extend": true,
+	"insert": true, "append": true, "extend": true, "resize": true,
 }
 
 // analyzeRegionGrowthDiscipline (Phase 1 — diagnostics) enforces tail-growth discipline: once a
