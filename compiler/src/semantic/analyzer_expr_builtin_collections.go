@@ -625,7 +625,7 @@ func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) 
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "store push requires a mutable store receiver")
 	}
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.currentTreeAllocOwner.Kind != treeAllocOwnerRegion {
 		a.errorf(expr.Pos(), "store push requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != len(storeType.StoreFieldOrder) {
@@ -668,7 +668,7 @@ func (a *Analyzer) analyzeBuiltinStoreReserveCall(expr *ast.CallExpr) (Type, boo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "store reserve requires a mutable store receiver")
 	}
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.currentTreeAllocOwner.Kind != treeAllocOwnerRegion {
 		a.errorf(expr.Pos(), "store reserve requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {

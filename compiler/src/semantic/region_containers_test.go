@@ -89,6 +89,23 @@ func TestRegionParamDictDirectPutAllowed(t *testing.T) {
 	}
 }
 
+func TestRegionScopeStoreGrowthAllowed(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_scope_store_growth.elisa", `store Pending:
+    name_key: u32
+    depth: u32
+
+def build() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            pending: mutable Pending = zeroed
+            pending.reserve(4)
+            pending.push(1, 2)
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "requires an active in <arena>: scope") {
+		t.Fatalf("store reserve/push in an active region scope must be allowed; got: %s", all)
+	}
+}
+
 // A safe `darray[u8] @r -> sview/cstr @r` conversion carries the region, so the
 // escape checker rejects returning it out of a scope-owned region (the bytes are
 // freed at scope exit) — the safety the unsafe `out[0].ref[static u8&]` idiom

@@ -328,6 +328,52 @@ def region_param_dict_put_test() -> void:
 	}
 }
 
+func TestRunCLIRegionScopeStoreGrowthUsesRegionArena(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_scope_store_growth.elisa")
+	src := `store RegionStoreGrowthRows:
+    name_key: u32
+    depth: u32
+
+@test
+def region_scope_store_growth_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region a(4096):
+            pending: mutable RegionStoreGrowthRows = zeroed
+            pending.reserve(4)
+            pending.push(1, 2)
+            pending.push(3, 4)
+            if pending.name_key.count != 2:
+                panic("expected name_key count 2")
+            if pending.depth.count != 2:
+                panic("expected depth count 2")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write region-scope store-growth fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-scope store-growth test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] region_scope_store_growth_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected region-scope store-growth output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 // End-to-end: the "any allocator" interface. A single generic function written
 // against the `Allocator` protocol allocates + fills a buffer through BOTH a
 // bump (Arena) backend and a malloc-backed backend, proving static-dispatch
