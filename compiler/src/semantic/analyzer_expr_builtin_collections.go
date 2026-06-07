@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"strconv"
 )
 
 // checkDarrayGrowthRegionEscape rejects growing a darray whose storage outlives
@@ -264,15 +265,36 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "push")
-	argType := a.analyzeValueExpr(expr.Args[0], darrayType.Elem)
-	if !AssignableTo(darrayType.Elem, argType) {
-		a.errorf(expr.Args[0].Pos(), "darray push expects %s, got %s", darrayType.Elem, argType)
+	pushArgType := darrayType.Elem
+	bulkPush := false
+	if list, ok := expr.Args[0].(*ast.ListLitExpr); ok && list != nil && !darrayElemPrefersListLiteralAsSingleValue(darrayType.Elem) {
+		pushArgType = &ArrayType{Elem: darrayType.Elem, Size: strconv.FormatInt(int64(len(list.Elems)), 10), HasConstSize: true, ConstSize: int64(len(list.Elems))}
+		bulkPush = true
 	}
-	// Nested-region escape: pushing an inner-@r value into a darray whose element
-	// region outlives it would leave the longer-lived buffer holding a dangling
-	// reference once the inner region is freed.
-	a.checkNestedRegionStoreEscape(expr.Args[0], darrayType.Elem, argType)
-	a.consumeAffineValueExpr(expr.Args[0], darrayType.Elem, "move into darray push")
+	argType := a.analyzeValueExpr(expr.Args[0], pushArgType)
+	if !bulkPush {
+		if !AssignableTo(darrayType.Elem, argType) {
+			if builtinDArrayExtendSourceCompatible(darrayType.Elem, argType) {
+				bulkPush = true
+			} else {
+				a.errorf(expr.Args[0].Pos(), "darray push expects %s, got %s", darrayType.Elem, argType)
+			}
+		}
+	}
+	if bulkPush {
+		if !builtinDArrayExtendSourceCompatible(darrayType.Elem, argType) {
+			a.errorf(expr.Args[0].Pos(), "darray push expects %s or a compatible darray, dview, or array source of %s, got %s", darrayType.Elem, darrayType.Elem, argType)
+		}
+		if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
+			a.errorf(expr.Args[0].Pos(), "bulk darray push does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
+		}
+	} else {
+		// Nested-region escape: pushing an inner-@r value into a darray whose element
+		// region outlives it would leave the longer-lived buffer holding a dangling
+		// reference once the inner region is freed.
+		a.checkNestedRegionStoreEscape(expr.Args[0], darrayType.Elem, argType)
+		a.consumeAffineValueExpr(expr.Args[0], darrayType.Elem, "move into darray push")
+	}
 	resultType := receiverRefType
 	if resultType == nil {
 		resultType = &RefType{
@@ -285,7 +307,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	}
 	a.exprTypes[expr.Func] = &FuncType{
 		Name:   "darray.push",
-		Params: []Type{resultType, darrayType.Elem},
+		Params: []Type{resultType, argType},
 		Return: resultType,
 	}
 	a.exprTypes[expr] = resultType
@@ -328,9 +350,16 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 		a.errorf(expr.Pos(), "darray extend requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "extend")
-	sourceType := a.analyzeValueExpr(expr.Args[0], nil)
+	var expectedSource Type
+	if list, ok := expr.Args[0].(*ast.ListLitExpr); ok && list != nil {
+		expectedSource = &ArrayType{Elem: darrayType.Elem, Size: strconv.FormatInt(int64(len(list.Elems)), 10), HasConstSize: true, ConstSize: int64(len(list.Elems))}
+	}
+	sourceType := a.analyzeValueExpr(expr.Args[0], expectedSource)
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
 		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, dview, or array source of %s, got %s", darrayType.Elem, sourceType)
+	}
+	if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
+		a.errorf(expr.Args[0].Pos(), "darray extend does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
 	}
 	resultType := receiverRefType
 	if resultType == nil {
@@ -827,6 +856,15 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 		}
 	}
 	return false
+}
+
+func darrayElemPrefersListLiteralAsSingleValue(elemType Type) bool {
+	switch StripAggregateStateType(elemType).(type) {
+	case *ArrayType, *DArrayType:
+		return true
+	default:
+		return false
+	}
 }
 
 func builtinStoreReceiverType(t Type) (*StructType, *RefType, bool) {

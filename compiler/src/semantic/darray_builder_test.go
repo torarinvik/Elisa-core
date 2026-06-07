@@ -946,6 +946,60 @@ func TestAnalyzeDArrayPushSupportsMutableRefReceivers(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDArrayPushAcceptsArrayLiteralAsBulkAppend(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_push_array_literal.elisa", `def build(owner: Arena) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        xs: mutable darray[u8] = []
+        xs.push([10, 20, 30])
+        return xs.count
+`)
+	var call *ast.CallExpr
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name != "build" {
+			continue
+		}
+		inStmt := fn.Body[1].(*ast.InStoreStmt)
+		exprStmt := inStmt.Body[1].(*ast.ExprStmt)
+		call = exprStmt.Expr.(*ast.CallExpr)
+		break
+	}
+	if call == nil {
+		t.Fatal("expected darray push call")
+	}
+	fnType, ok := result.ExprTypes[call.Func].(*FuncType)
+	if !ok || fnType == nil || len(fnType.Params) != 2 {
+		t.Fatalf("expected darray push func type with source param, got %T %#v", result.ExprTypes[call.Func], result.ExprTypes[call.Func])
+	}
+	arrayType, ok := fnType.Params[1].(*ArrayType)
+	if !ok || arrayType == nil {
+		t.Fatalf("expected push array-literal overload to use array param, got %T %#v", fnType.Params[1], fnType.Params[1])
+	}
+	if arrayType.ConstSize != 3 {
+		t.Fatalf("expected fixed array size 3, got %d", arrayType.ConstSize)
+	}
+	if builtin, ok := arrayType.Elem.(*BuiltinType); !ok || builtin.Name != "u8" {
+		t.Fatalf("expected fixed array elem u8, got %#v", arrayType.Elem)
+	}
+}
+
+func TestAnalyzeDArrayBulkAppendRejectsAffineElements(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_bulk_affine_reject.elisa", `affine struct Tok:
+    n: i64
+
+def build(owner: Arena) -> void:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        xs: mutable darray[Tok] = []
+        xs.push([Tok(1), Tok(2)])
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "bulk darray push does not support affine element type") {
+		t.Fatalf("expected affine bulk push rejection, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeDArrayExtendSupportsRefReceiversAndArraySources(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_extend_ref_receiver.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

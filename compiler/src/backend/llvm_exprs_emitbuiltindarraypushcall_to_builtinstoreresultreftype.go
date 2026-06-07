@@ -96,6 +96,22 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("darray push expects 1 argument, got %d", len(expr.Args))
 	}
+	if s.darrayPushUsesBulkAppend(darrayType, expr.Args[0]) {
+		extendExpr := &ast.CallExpr{
+			Position: expr.Position,
+			Func: &ast.FieldExpr{
+				Position: fieldExpr.Position,
+				Object:   fieldExpr.Object,
+				Field:    "extend",
+			},
+			Args: expr.Args,
+		}
+		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[extendExpr.Func] = s.exprType(expr.Func)
+			s.g.result.ExprTypes[extendExpr] = s.exprType(expr)
+		}
+		return s.emitBuiltinDArrayExtendCall(extendExpr)
+	}
 	// Region-parameterized containers: prefer the arena of the darray's own
 	// region (if that region is live in s.regions) over the ambient scope. In
 	// today's code a container's region == its ambient scope, so this resolves
@@ -148,6 +164,31 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 	C.LLVMBuildStore(s.builder, neededValue, countPtr)
 	return darrayPtr, resultType, true, nil
 }
+
+func (s *functionState) darrayPushUsesBulkAppend(darrayType *semantic.DArrayType, arg ast.Expr) bool {
+	if s == nil || darrayType == nil || arg == nil {
+		return false
+	}
+	sourceType := s.exprType(arg)
+	if sourceType == nil || semantic.SameType(darrayType.Elem, sourceType) {
+		return false
+	}
+	baseType, ok := builtinDArrayExtendSourceType(sourceType)
+	if !ok || baseType == nil {
+		return false
+	}
+	switch tt := baseType.(type) {
+	case *semantic.DArrayType:
+		return semantic.SameType(darrayType.Elem, tt.Elem)
+	case *semantic.DArrayViewType:
+		return semantic.SameType(darrayType.Elem, tt.Elem)
+	case *semantic.ArrayType:
+		return semantic.SameType(darrayType.Elem, tt.Elem)
+	default:
+		return false
+	}
+}
+
 func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil

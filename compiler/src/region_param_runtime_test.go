@@ -60,6 +60,47 @@ def region_param_push_test() -> void:
 	}
 }
 
+func TestRunCLIDArrayPushArrayLiteralBulkAppend(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "darray_push_array_literal_fixture.elisa")
+	src := `def fill[region r](out: mutable darray[u8] @r) -> u64:
+    out.push([10, 20, 30])
+    out.extend([40, 50])
+    sum: mutable u64 = 0u64
+    for i in 0..<out.count.i64():
+        sum <- sum + out[i].u64()
+    return sum
+
+@test
+def darray_push_array_literal_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region a(4096):
+            v: mutable darray[u8] @a = []
+            s: u64 = fill(v)
+            if s != 150u64:
+                panic("expected sum 150")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write darray push array literal fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected darray push array literal test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[       OK ] darray_push_array_literal_test") {
+		t.Fatalf("expected darray push array literal output to pass, got:\n%s", stdout.String())
+	}
+}
+
 // End-to-end: a list comprehension whose result is explicitly `@r` can allocate
 // through the region-param hidden arena, with no ambient `in <arena>:` scope in
 // the helper. This is the comprehension analogue of darray.push threading: the
