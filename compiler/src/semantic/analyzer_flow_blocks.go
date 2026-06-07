@@ -275,11 +275,40 @@ func inferDArrayBuilderElemTypeFromKnownExpr(expr ast.Expr, known map[string]Typ
 
 func inferKnownDArrayBuilderExprType(expr ast.Expr, known map[string]Type) Type {
 	expr = stripParenExpr(expr)
-	ident, ok := expr.(*ast.Ident)
-	if !ok || ident == nil {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return inferKnownIdentType(e.Name, known)
+	case *ast.IndexExpr:
+		source := inferKnownDArrayBuilderExprType(e.Object, known)
+		if ref, ok := source.(*RefType); ok && ref != nil {
+			source = ref.Elem
+		}
+		switch t := StripAggregateStateType(source).(type) {
+		case *DArrayType:
+			if t != nil {
+				return t.Elem
+			}
+		case *DArrayViewType:
+			if t != nil {
+				return t.Elem
+			}
+		case *ArrayType:
+			if t != nil {
+				return t.Elem
+			}
+		case *ViewType:
+			if t != nil {
+				return t.Elem
+			}
+		}
+		return nil
+	default:
 		return nil
 	}
-	typ := known[ident.Name]
+}
+
+func inferKnownIdentType(name string, known map[string]Type) Type {
+	typ := known[name]
 	if ref, ok := typ.(*RefType); ok && ref != nil {
 		typ = ref.Elem
 	}

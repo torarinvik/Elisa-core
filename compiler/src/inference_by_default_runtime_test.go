@@ -123,6 +123,45 @@ def inference_untyped_darray_variable_push_test() -> void:
 	}
 }
 
+func TestRunCLIInfersUntypedDArrayFromIndexedPush(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "inference_untyped_darray_indexed_push.elisa")
+	src := `@test
+def inference_untyped_darray_indexed_push_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        src: mutable darray[u8] = []
+        src.push([4, 5, 6])
+        xs = []
+        xs.push(src[0])
+        xs.push(src[2])
+        if xs.count != 2:
+            panic("expected two inferred indexed-push items")
+        if xs[0] != 4 or xs[1] != 6:
+            panic("inferred indexed-push darray contents wrong")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write indexed-push darray inference fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected indexed-push darray inference test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{"[       OK ] inference_untyped_darray_indexed_push_test", "passed=1"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected indexed-push darray inference output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 func TestRunCLIInfersUntypedDArrayFromExtendSource(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
