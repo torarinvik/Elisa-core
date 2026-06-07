@@ -17,7 +17,7 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	saved := a.currentScope
 	savedAliasAccesses := a.currentAliasAccesses
 	savedAliasBindings := a.currentAliasBindings
-	a.inferUntypedDArrayBuilderLocals(stmts)
+	a.inferUntypedDArrayBuilderLocals(stmts, scope)
 	a.currentScope = scope
 	a.currentAliasAccesses = a.cloneAliasAccesses()
 	a.currentAliasBindings = a.cloneAliasBindings()
@@ -31,8 +31,8 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	a.currentScope = saved
 }
 
-func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt) {
-	known := map[string]Type{}
+func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scope) {
+	known := inferDArrayBuilderKnownTypes(scope)
 	for i, stmt := range stmts {
 		decl, ok := stmt.(*ast.VarDeclStmt)
 		if !ok || decl == nil {
@@ -69,6 +69,28 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt) {
 		}
 		known[decl.Name] = a.resolveType(decl.Type)
 	}
+}
+
+func inferDArrayBuilderKnownTypes(scope *Scope) map[string]Type {
+	known := map[string]Type{}
+	var seed func(*Scope)
+	seed = func(cur *Scope) {
+		if cur == nil {
+			return
+		}
+		seed(cur.Parent)
+		for name, sym := range cur.Symbols {
+			if sym == nil || sym.Type == nil || IsInvalidType(sym.Type) {
+				continue
+			}
+			switch sym.Kind {
+			case SymbolLocal, SymbolParam:
+				known[name] = sym.Type
+			}
+		}
+	}
+	seed(scope)
+	return known
 }
 
 func semanticListLiteralExpr(value ast.Expr) bool {

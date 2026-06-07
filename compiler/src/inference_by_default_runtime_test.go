@@ -161,6 +161,45 @@ def inference_untyped_darray_extend_source_test() -> void:
 	}
 }
 
+func TestRunCLIInfersUntypedDArrayFromExtendParam(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "inference_untyped_darray_extend_param.elisa")
+	src := `def copied_count(src: darray[u8]) -> usize:
+    xs = []
+    xs.extend(src)
+    return xs.count
+
+@test
+def inference_untyped_darray_extend_param_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        src: mutable darray[u8] = []
+        src.push([1, 2, 3])
+        if copied_count(src) != 3:
+            panic("expected extend-param inference to copy three items")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write extend-param darray inference fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected extend-param darray inference test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{"[       OK ] inference_untyped_darray_extend_param_test", "passed=1"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected extend-param darray inference output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 func TestRunCLIInfersUntypedNonEmptyDArrayFromUse(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
