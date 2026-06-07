@@ -202,6 +202,29 @@ func (s *regionGrowthScan) growthCallTarget(call *ast.CallExpr) (name string, is
 	return "", false, false
 }
 
+func (s *regionGrowthScan) recordSynthesizedReserve(stmt ast.Stmt) {
+	exprStmt, ok := stmt.(*ast.ExprStmt)
+	if !ok || exprStmt == nil {
+		return
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok || call == nil {
+		return
+	}
+	if name, isReserve, _ := s.growthCallTarget(call); name != "" && isReserve {
+		s.reserved[name] = true
+	}
+}
+
+func (s *regionGrowthScan) recordSynthesizedReserves(single ast.Stmt, many []ast.Stmt) {
+	if single != nil {
+		s.recordSynthesizedReserve(single)
+	}
+	for _, stmt := range many {
+		s.recordSynthesizedReserve(stmt)
+	}
+}
+
 func (s *regionGrowthScan) walkGrowth(v reflect.Value) {
 	if !v.IsValid() || !v.CanInterface() {
 		return
@@ -212,10 +235,12 @@ func (s *regionGrowthScan) walkGrowth(v reflect.Value) {
 			return
 		}
 		if loop, ok := v.Interface().(*ast.ForStmt); ok {
+			s.recordSynthesizedReserves(loop.PreReserve, loop.PreReserves)
 			s.walkGrowth(reflect.ValueOf(loop.Body))
 			return
 		}
 		if loop, ok := v.Interface().(*ast.IterForStmt); ok {
+			s.recordSynthesizedReserves(loop.PreReserve, loop.PreReserves)
 			s.walkGrowth(reflect.ValueOf(loop.Body))
 			return
 		}

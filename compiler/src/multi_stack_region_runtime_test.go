@@ -24,16 +24,18 @@ def multi_stack_runtime_test() -> void:
     can Memory.Allocate, Abort.Panic:
         foo: mutable darray[i64] = []
         bar: mutable darray[i64] = []
-        for i in 0..<1000:
-            foo.push(i.i64() * 2i64)
-            bar.push(i.i64() * 3i64)
-        if foo.count != 1000u:
+        i: mutable usize = 0
+        while i < 1000:
+            foo.push(i.i64() * 2)
+            bar.push(i.i64() * 3)
+            i <- i + 1
+        if foo.count != 1000:
             panic("multi-stack: foo length wrong")
-        if bar.count != 1000u:
+        if bar.count != 1000:
             panic("multi-stack: bar length wrong")
-        if foo[0] != 0i64 or foo[999] != 1998i64:
+        if foo[0] != 0 or foo[999] != 1998:
             panic("multi-stack: foo values wrong")
-        if bar[0] != 0i64 or bar[999] != 2997i64:
+        if bar[0] != 0 or bar[999] != 2997:
             panic("multi-stack: bar values wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

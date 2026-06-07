@@ -21,7 +21,7 @@ func (p *Parser) parseBlock() []ast.Stmt {
 		}
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return autoReserveBoundedFills(stmts)
+	return stmts
 }
 func (p *Parser) parseContextualStmt() ast.Stmt {
 	if p.staticFunctionDepth > 0 {
@@ -524,6 +524,7 @@ func (p *Parser) looksLikeLockStmt() bool {
 	}
 	return false
 }
+
 // looksLikeNurseryStmt matches `nursery:` or `nursery workers(N):` at statement position.
 func (p *Parser) looksLikeNurseryStmt() bool {
 	if p.pos+1 >= len(p.tokens) {
