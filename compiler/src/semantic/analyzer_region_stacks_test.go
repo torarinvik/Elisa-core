@@ -115,6 +115,63 @@ func TestRegionStacksReserveCommitCountsListPushElements(t *testing.T) {
 	}
 }
 
+func TestRegionStacksReserveCommitFoldsMultiplePushesPerIteration(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_multi_push.elisa", `def f(n: usize) -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            xs: mutable darray[i64] = []
+            gap: i64 = 0
+            for i in 0..<n:
+                xs.push(i.i64())
+                xs.push((i + 1).i64())
+            e0: i64& = &xs[0]
+            if e0[0] + gap < 0:
+                panic("x")
+`, AnalyzeOptions{})
+	asn := onlyRegionStack(t, result)
+	stack := asn.StackOf["xs"]
+	if asn.stackStrategy(stack) != "reserve_commit" {
+		t.Fatalf("multi-push hard-bounded darray with an interior ref must get reserve_commit, got %v / %v", asn.StackOf, asn.StackStrategy)
+	}
+	bound, ok := asn.StackCapacity[stack].(*ast.BinaryExpr)
+	if !ok || bound.Op != lexer.TOKEN_STAR {
+		t.Fatalf("expected reserve_commit capacity to multiply loop bound by folded push count, got %T %#v", asn.StackCapacity[stack], asn.StackCapacity[stack])
+	}
+	if lit, ok := bound.Right.(*ast.IntLit); !ok || lit.Value != "2" {
+		t.Fatalf("expected reserve_commit multiplier 2, got %T %#v", bound.Right, bound.Right)
+	}
+}
+
+func TestRegionStacksReserveCommitInfersNestedCountingProduct(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_nested_product.elisa", `def f(n: usize, m: usize) -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            xs: mutable darray[i64] = []
+            gap: i64 = 0
+            for i in 0..<n:
+                for j in 0..<m:
+                    xs.push(j.i64())
+            e0: i64& = &xs[0]
+            if e0[0] + gap < 0:
+                panic("x")
+`, AnalyzeOptions{})
+	asn := onlyRegionStack(t, result)
+	stack := asn.StackOf["xs"]
+	if asn.stackStrategy(stack) != "reserve_commit" {
+		t.Fatalf("nested hard-bounded darray with an interior ref must get reserve_commit, got %v / %v", asn.StackOf, asn.StackStrategy)
+	}
+	outer, ok := asn.StackCapacity[stack].(*ast.BinaryExpr)
+	if !ok || outer.Op != lexer.TOKEN_STAR {
+		t.Fatalf("expected reserve_commit capacity to multiply nested loop bounds, got %T %#v", asn.StackCapacity[stack], asn.StackCapacity[stack])
+	}
+	if ident, ok := outer.Left.(*ast.Ident); !ok || ident.Name != "n" {
+		t.Fatalf("expected outer reserve_commit bound to start with n, got %T %#v", outer.Left, outer.Left)
+	}
+	if ident, ok := outer.Right.(*ast.Ident); !ok || ident.Name != "m" {
+		t.Fatalf("expected outer reserve_commit bound to multiply by m, got %T %#v", outer.Right, outer.Right)
+	}
+}
+
 func TestRegionStacksResizeDisqualifiesHardBound(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_resize_disqualifies.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:

@@ -5,7 +5,6 @@ import (
 	"os"
 	"reflect"
 	"sort"
-	"strconv"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -365,15 +364,15 @@ func collectInteriorRefNames(body []ast.Stmt, tracked map[string]bool) map[strin
 }
 
 // hardBoundForName returns the provable maximum element count N for a fresh darray `name` when its
-// ONLY element growth is a single `name.push(...)` located inside exactly one counting loop
-// `for _ in 0..<N` (N a pure ident/int) — with no other push/extend/append/insert anywhere, and not
-// nested in a deeper loop. `push([a, b])` scales the bound by the literal element count. Such a
-// darray can never hold more than the bound's elements, so a reserve_commit reservation sized to it
-// can never overflow. Returns the bound expression and ok; otherwise ok=false.
+// ONLY element growth is `name.push(...)` inside pure counting loops `for _ in 0..<N` (N a pure
+// ident/int), with no unbounded growth operations. Multiple push sites are summed, nested counting
+// loops multiply their bounds, and `push([a, b])` scales by the literal element count. Such a darray
+// can never hold more than the bound's elements, so a reserve_commit reservation sized to it can
+// never overflow. Returns the bound expression and ok; otherwise ok=false.
 func hardBoundForName(body []ast.Stmt, name string) (ast.Expr, bool) {
 	s := &hardBoundScan{name: name}
 	s.walk(reflect.ValueOf(body))
-	if s.disqualified || s.pushSites != 1 || s.bound == nil {
+	if s.disqualified || s.pushSites == 0 || s.bound == nil {
 		return nil, false
 	}
 	return s.bound, true
@@ -399,24 +398,20 @@ func (s *hardBoundScan) checkCall(call *ast.CallExpr) {
 	switch field.Field {
 	case "push":
 		s.pushSites++
-		if len(s.loopStack) != 1 { // outside a loop, or nested in a deeper loop -> not provably <= N
+		if len(s.loopStack) == 0 {
 			s.disqualified = true
 			return
 		}
-		b, ok := countingLoopBound(s.loopStack[0])
-		if !ok {
-			s.disqualified = true
-			return
-		}
-		if count := hardBoundPushElementCount(call); count > 1 {
-			b = &ast.BinaryExpr{
-				Position: b.Pos(),
-				Op:       lexer.TOKEN_STAR,
-				Left:     b,
-				Right:    &ast.IntLit{Position: call.Pos(), Value: strconv.Itoa(count)},
+		var siteBound ast.Expr = semanticIntReserveExpr(hardBoundPushElementCount(call), call.Pos())
+		for i := len(s.loopStack) - 1; i >= 0; i-- {
+			b, ok := countingLoopBound(s.loopStack[i])
+			if !ok {
+				s.disqualified = true
+				return
 			}
+			siteBound = semanticMultiplyReserveExpr(b, siteBound, call.Pos())
 		}
-		s.bound = b
+		s.bound = semanticAddReserveExpr(s.bound, siteBound, call.Pos())
 	case "push_back", "push_front", "extend", "append", "append_many", "insert", "resize", "reserve", "as_cstr", "cstr":
 		s.disqualified = true // adds or reserves an unbounded / non-counting amount
 	}

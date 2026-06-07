@@ -266,6 +266,9 @@ func semanticAddReserveExpr(left, right ast.Expr, pos lexer.Pos) ast.Expr {
 			return semanticIntReserveExpr(leftValue+rightValue, pos)
 		}
 	}
+	if optimizationExprString(left) == optimizationExprString(right) {
+		return semanticMultiplyReserveExpr(left, semanticIntReserveExpr(2, pos), pos)
+	}
 	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: left, Right: right}
 }
 
