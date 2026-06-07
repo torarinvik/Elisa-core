@@ -872,6 +872,39 @@ func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 	}
 }
 
+func TestAnalyzeListComprehensionUsesExpectedRegionParam(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "list_comprehension_region_param.elisa", `def build[region r](items: darray[i64] @r) -> usize:
+    out: darray[i64] @r = [item + 1 for item in items]
+    return out.count
+`)
+	var comp *ast.ListComprehensionExpr
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name != "build" || len(fn.Body) == 0 {
+			continue
+		}
+		varDecl, ok := fn.Body[0].(*ast.VarDeclStmt)
+		if !ok {
+			t.Fatalf("expected first statement to bind comprehension result, got %T", fn.Body[0])
+		}
+		comp, ok = varDecl.Value.(*ast.ListComprehensionExpr)
+		if !ok {
+			t.Fatalf("expected list comprehension initializer, got %T", varDecl.Value)
+		}
+		break
+	}
+	if comp == nil {
+		t.Fatal("expected build function list comprehension")
+	}
+	darrayType, ok := result.ExprTypes[comp].(*DArrayType)
+	if !ok || darrayType == nil {
+		t.Fatalf("expected list comprehension to resolve to darray type, got %T", result.ExprTypes[comp])
+	}
+	if darrayType.Region != "r" {
+		t.Fatalf("expected list comprehension result region r, got %q", darrayType.Region)
+	}
+}
+
 func TestAnalyzeDArrayPushSupportsMutableRefReceivers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_push_ref_receiver.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

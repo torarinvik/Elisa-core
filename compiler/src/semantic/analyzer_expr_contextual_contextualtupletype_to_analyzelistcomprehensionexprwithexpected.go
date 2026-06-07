@@ -584,15 +584,15 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	if expr == nil {
 		return invalidType
 	}
+	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
 	if expr.Owner != nil {
 		owner, ownerType, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
 		if !ok || owner.Kind != treeAllocOwnerArena {
 			a.errorf(expr.Owner.Pos(), "list comprehension owner must be an Arena or mutable Arena&, got %s", ownerType)
 		}
-	} else if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+	} else if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
 		a.errorf(expr.Pos(), "list comprehension requires an active in <arena>: scope")
 	}
-	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
 	var itemType Type
 	loopScope := NewScope(a.currentScope)
 	if expr.RangeEnd != nil {
