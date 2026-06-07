@@ -200,6 +200,26 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 			return storageViewDependencyFromSource(dictContainerArgBase(call.Args[1]))
 		}
 		return storageViewDependencyState{}, false
+	case "slice_of":
+		// slice_of(&da) borrows the darray's backing as a Slice[T]. A later relocating
+		// mutation of `da` (push/resize/reserve/clear/truncate) moves that backing and
+		// dangles the slice, so record a dependency on the source darray. Using the slice
+		// after such a mutation is then flagged, the same as an interior-ref-after-push.
+		if len(call.Args) >= 1 {
+			src := call.Args[0]
+			if addr, ok := stripOptimizationParens(src).(*ast.AddrOfExpr); ok && addr.Operand != nil {
+				src = addr.Operand
+			}
+			return storageViewDependencyFromSource(src)
+		}
+		return storageViewDependencyState{}, false
+	case "split":
+		// A band borrows whatever its source slice borrows: propagate the dependency so
+		// `split(whole, ...)` over a sliced darray inherits the darray dependency.
+		if len(call.Args) >= 1 {
+			return a.storageViewDependencyForExpr(call.Args[0])
+		}
+		return storageViewDependencyState{}, false
 	case "darray_view", "arena_da_view":
 		if len(call.Args) == 0 {
 			return storageViewDependencyState{}, false
