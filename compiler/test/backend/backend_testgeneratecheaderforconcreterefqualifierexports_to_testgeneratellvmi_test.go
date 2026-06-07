@@ -35,8 +35,8 @@ def narrow(value: f64) -> f32:
 		"@tau = global double",
 		"define double @mix(float",
 		"fpext float",
-		"fadd double",
-		"fmul double",
+		"fadd contract double",
+		"fmul contract double",
 		"define double @negate(double",
 		"fneg double",
 		"define i1 @same(double",
@@ -245,7 +245,7 @@ def local_and_call() -> f32:
 		"define float @choose(i1",
 		"define float @local_and_call()",
 		"call float @passthrough(float",
-		"fadd float",
+		"fadd contract float",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -289,7 +289,7 @@ def local_and_call() -> f32:
 		"declare float @passthrough(float)",
 		"define float @choose(i1",
 		"define float @local_and_call()",
-		"fadd float",
+		"fadd contract float",
 		"call float @passthrough(float",
 	}
 	for _, check := range checks {
@@ -340,7 +340,7 @@ def total() -> f64:
 		"@g_pair = global %FloatPair { float 1.950000e+01, float 2.350000e+01 }",
 		"@g_values = global [2 x float] [float 2.750000e+01, float 3.150000e+01]",
 		"define double @total()",
-		"fadd double",
+		"fadd contract double",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
