@@ -18,6 +18,21 @@ def std_mutex_condvar_native_smoke():
 		assert mu.handle == null
 		assert cv.handle == null
 
+# task / future_get smoke: two values computed in parallel, combined after both finish.
+def double_for_future(n: i64) -> i64:
+	return n * 2
+
+@test
+def std_future_smoke():
+	can Threads:
+		t1: Thread[i64, Joinable] = task(double_for_future, 21)
+		t2: Thread[i64, Joinable] = task(double_for_future, 10)
+		r1: i64 = future_get(move t1)
+		r2: i64 = future_get(move t2)
+		assert r1 == 42
+		assert r2 == 20
+		assert r1 + r2 == 62
+
 struct BarrierProbe:
 	gate: Barrier
 	out: uintptr

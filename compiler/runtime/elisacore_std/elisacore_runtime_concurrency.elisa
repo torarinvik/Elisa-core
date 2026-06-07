@@ -712,6 +712,30 @@ def detach[R](thread: Thread[R, Joinable]):
 		detach_raw(move raw)
 		ctx_concurrency_work1_release(state_bits)
 
+# ------------------------------------------------------------
+# task / future_get: ergonomic aliases for fork-join parallel results.
+#
+# `task(fn, arg)` spawns fn(arg) on a new OS thread and returns a joinable
+# handle. `future_get` blocks until that thread is done and returns its
+# result. Together they express structured fork-join without a pool:
+#
+#   t1 = task(compute_a, arg_a)           # both start immediately
+#   t2 = task(compute_b, arg_b)
+#   result = future_get(move t1) + future_get(move t2)
+#
+# The handle is linear (must be consumed by future_get or detach); the
+# type system enforces this so a forgotten task cannot silently leak.
+# For pool-based fan-out see `nursery:` / `each()` / `reduce()`.
+# ------------------------------------------------------------
+
+def task[A, R, permission P](fn: func(A) -> R effects[P], arg: A) -> Thread[R, Joinable]:
+	can Thread.Spawn, Memory.Allocate, Abort.Panic:
+		return spawn1(fn, arg)
+
+def future_get[R](handle: Thread[R, Joinable]) -> R:
+	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		return join(move handle)
+
 def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R effects[P], arg: A) -> Task[R, Pending]:
 	can Pool.Submit, Thread.Spawn, Memory.Allocate, Abort.Panic:
 		from_raw: func(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw[R, Pending]
