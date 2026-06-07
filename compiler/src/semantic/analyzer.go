@@ -133,6 +133,7 @@ type Analyzer struct {
 	unsafeAliasStmts             map[ast.Stmt]bool
 	progressSummaries            map[*ast.FuncDecl]*FunctionProgressSummary
 	numericLiteralSuffixWarnings map[ast.Expr]bool
+	ambiguousDArrayBuilders      map[*ast.VarDeclStmt]bool
 	treeConstructorCallees       map[ast.Expr]bool
 	resolvedCastHooks            map[ast.Expr]*Symbol
 	unsafeLifetimeWidenCasts     map[*ast.CastExpr]bool
@@ -188,17 +189,17 @@ type Analyzer struct {
 	// caller-owned and outlive every local (ordinal 0), and 'heap/borrowed arenas
 	// are treated as outermost. Used to reject storing an inner-@r value into an
 	// outer-region slot (a dangling pointer once the inner region is freed).
-	regionLifetimeOrdinals        map[string]int
-	regionLifetimeCounter         int
-	currentRegionMarks            map[*Symbol]regionMarkState
-	currentCheckpoints            map[*Symbol]checkpointState
-	currentRegionRefs             map[*Symbol]regionRefState
-	currentAffineValues           map[affineValueKey]affineValueState
-	currentBorrowedOwnerRefs      map[*Symbol]borrowedOwnerRefState
-	currentFunctionValues         map[*Symbol]*FuncType
-	currentSpecializedValueTypes  map[*Symbol]Type
-	currentValueBindings          map[*Symbol]ast.Expr
-	currentStorageViewDeps        map[*Symbol]storageViewDependencyState
+	regionLifetimeOrdinals       map[string]int
+	regionLifetimeCounter        int
+	currentRegionMarks           map[*Symbol]regionMarkState
+	currentCheckpoints           map[*Symbol]checkpointState
+	currentRegionRefs            map[*Symbol]regionRefState
+	currentAffineValues          map[affineValueKey]affineValueState
+	currentBorrowedOwnerRefs     map[*Symbol]borrowedOwnerRefState
+	currentFunctionValues        map[*Symbol]*FuncType
+	currentSpecializedValueTypes map[*Symbol]Type
+	currentValueBindings         map[*Symbol]ast.Expr
+	currentStorageViewDeps       map[*Symbol]storageViewDependencyState
 	// pendingStorageViewErrors holds invalidated-view uses deferred until the per-function region
 	// stack assignment is known (Phase C1b): a use whose source darray got a reserve_commit stack
 	// is stable and the error is dropped; otherwise it is emitted. Scoped per function.
@@ -208,8 +209,8 @@ type Analyzer struct {
 	// relocating mutation (push/extend/reserve/clear/truncate) of such a container would
 	// move its buffer out from under the live iteration — the iterator-invalidation gap —
 	// so it is rejected at invalidateStorageViewsForSource, the universal mutation chokepoint.
-	currentIteratedSources map[string]lexer.Pos
-	currentAliasAccesses   map[string]aliasAccessState
+	currentIteratedSources        map[string]lexer.Pos
+	currentAliasAccesses          map[string]aliasAccessState
 	currentAliasBindings          map[*Symbol]aliasAccessBinding
 	currentPackedVariantViews     map[*Symbol]*PackedVariantViewType
 	currentPackedStores           map[string]*PackedEnumStoreType
@@ -514,6 +515,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		unsafeAliasStmts:                  make(map[ast.Stmt]bool, exprCapacity/64+8),
 		progressSummaries:                 make(map[*ast.FuncDecl]*FunctionProgressSummary, funcDeclCapacity),
 		numericLiteralSuffixWarnings:      make(map[ast.Expr]bool, exprCapacity/64+8),
+		ambiguousDArrayBuilders:           make(map[*ast.VarDeclStmt]bool),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
 		unsafeLifetimeWidenCasts:          make(map[*ast.CastExpr]bool),

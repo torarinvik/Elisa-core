@@ -14,7 +14,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			declType = a.resolveType(n.Type)
 		}
 		if n.Value != nil {
-			valueType = a.analyzeValueExpr(n.Value, declType)
+			if n.Type == nil && a.ambiguousDArrayBuilders != nil && a.ambiguousDArrayBuilders[n] {
+				a.errorf(n.Pos(), "cannot infer element type for empty darray builder %q; add a type declaration (for example `%s: mutable darray[T] = []`) or push/extend typed values before type-dependent darray operations", n.Name, n.Name)
+				declType = invalidType
+				valueType = invalidType
+				a.exprTypes[n.Value] = invalidType
+			} else {
+				valueType = a.analyzeValueExpr(n.Value, declType)
+			}
 			if declType == nil {
 				declType = valueType
 			} else if !AssignableTo(declType, valueType) {

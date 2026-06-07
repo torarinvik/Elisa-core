@@ -393,6 +393,21 @@ func TestAnalyzeInfersUntypedDArrayFromExtendParam(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAmbiguousUntypedDArrayBuilderDiagnostic(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_untyped_empty_ambiguous_reserve.elisa", `def build() -> void:
+    xs = []
+    xs.reserve(10)
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `cannot infer element type for empty darray builder "xs"`) {
+		t.Fatalf("expected ambiguous darray builder diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, `empty list literal requires an expected array or darray type`) {
+		t.Fatalf("expected tailored darray builder diagnostic without generic empty-list noise, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeInfersUntypedNonEmptyDArrayFromUse(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_nonempty_infers_from_use.elisa", `def build() -> void:
     xs = [1, 2]

@@ -49,13 +49,23 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scop
 			continue
 		}
 		elem := inferDArrayBuilderElemTypeExpr(decl.Value)
+		sawDArrayBuilderUse := false
 		for j := i + 1; elem == nil && j < len(stmts); j++ {
 			if shadow, ok := stmts[j].(*ast.VarDeclStmt); ok && shadow.Name == decl.Name {
 				break
 			}
+			if stmtUsesUntypedDArrayBuilderLocal(stmts[j], decl.Name) {
+				sawDArrayBuilderUse = true
+			}
 			elem = inferDArrayElemTypeFromUse(stmts[j], decl.Name, known)
 		}
 		if elem == nil {
+			if sawDArrayBuilderUse {
+				if a.ambiguousDArrayBuilders == nil {
+					a.ambiguousDArrayBuilders = map[*ast.VarDeclStmt]bool{}
+				}
+				a.ambiguousDArrayBuilders[decl] = true
+			}
 			continue
 		}
 		decl.Mutable = true
@@ -91,6 +101,74 @@ func inferDArrayBuilderKnownTypes(scope *Scope) map[string]Type {
 	}
 	seed(scope)
 	return known
+}
+
+func stmtUsesUntypedDArrayBuilderLocal(stmt ast.Stmt, name string) bool {
+	found := false
+	var visitExpr func(ast.Expr)
+	visitExpr = func(expr ast.Expr) {
+		if found || expr == nil {
+			return
+		}
+		switch e := expr.(type) {
+		case *ast.CallExpr:
+			if field, ok := stripParenExpr(e.Func).(*ast.FieldExpr); ok && field != nil {
+				if ident, ok := stripParenExpr(field.Object).(*ast.Ident); ok && ident != nil && ident.Name == name {
+					switch field.Field {
+					case "push", "extend", "reserve", "resize", "clear", "truncate", "as_sview", "as_cstr":
+						found = true
+						return
+					}
+				}
+			}
+			visitExpr(e.Func)
+			for _, arg := range e.Args {
+				visitExpr(arg)
+			}
+		case *ast.FieldExpr:
+			if ident, ok := stripParenExpr(e.Object).(*ast.Ident); ok && ident != nil && ident.Name == name {
+				switch e.Field {
+				case "count", "capacity", "items":
+					found = true
+					return
+				}
+			}
+			visitExpr(e.Object)
+		case *ast.IndexExpr:
+			if ident, ok := stripParenExpr(e.Object).(*ast.Ident); ok && ident != nil && ident.Name == name {
+				found = true
+				return
+			}
+			visitExpr(e.Object)
+			visitExpr(e.Index)
+		case *ast.SliceExpr:
+			if ident, ok := stripParenExpr(e.Object).(*ast.Ident); ok && ident != nil && ident.Name == name {
+				found = true
+				return
+			}
+			visitExpr(e.Object)
+			visitExpr(e.Start)
+			visitExpr(e.End)
+		case *ast.BinaryExpr:
+			visitExpr(e.Left)
+			visitExpr(e.Right)
+		case *ast.UnaryExpr:
+			visitExpr(e.Operand)
+		case *ast.ParenExpr:
+			visitExpr(e.Inner)
+		}
+	}
+	switch s := stmt.(type) {
+	case *ast.ExprStmt:
+		visitExpr(s.Expr)
+	case *ast.VarDeclStmt:
+		visitExpr(s.Value)
+	case *ast.AssignStmt:
+		visitExpr(s.Value)
+	case *ast.ReturnStmt:
+		visitExpr(s.Value)
+	}
+	return found
 }
 
 func semanticListLiteralExpr(value ast.Expr) bool {
