@@ -153,7 +153,10 @@ func (s *functionState) emitSequenceRewriteAppend(outPtr C.LLVMValueRef, outType
 	if outPtr == nil || outType == nil {
 		return fmt.Errorf("missing sequence rewrite output")
 	}
-	owner, ok := s.lookupTreeAllocOwner()
+	owner, ok := s.regionArenaOwner(outType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return fmt.Errorf("sequence rewrite requires an active in <arena>: scope")
 	}

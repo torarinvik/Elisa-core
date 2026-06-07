@@ -418,6 +418,52 @@ def region_param_clone_darray_test() -> void:
 	}
 }
 
+func TestRunCLIRegionParamSequenceRewriteUsesHiddenArena(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "region_param_sequence_rewrite.elisa")
+	src := `def keep_non_zero[region r](items: darray[u32] @r) -> darray[u32] @r:
+    return rewrite items as sequence[u32]:
+        item when item != 0u32:
+            emit item
+
+@test
+def region_param_sequence_rewrite_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region a(4096):
+            src: mutable darray[u32] @a = []
+            src.push([0u32, 7u32, 0u32, 9u32])
+            kept: darray[u32] @a = keep_non_zero(src)
+            if kept.count != 2:
+                panic("expected two kept items")
+            if kept[0] != 7u32 or kept[1] != 9u32:
+                panic("unexpected kept contents")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write region-param sequence rewrite fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected region-param sequence rewrite test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] region_param_sequence_rewrite_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected region-param sequence rewrite output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 // End-to-end: the "any allocator" interface. A single generic function written
 // against the `Allocator` protocol allocates + fills a buffer through BOTH a
 // bump (Arena) backend and a malloc-backed backend, proving static-dispatch

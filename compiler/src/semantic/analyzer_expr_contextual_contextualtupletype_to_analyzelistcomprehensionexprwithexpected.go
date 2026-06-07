@@ -99,6 +99,11 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if query, ok := expr.(*ast.QueryExpr); ok {
 		return a.analyzeQueryExpr(query, expected)
 	}
+	if fold, ok := expr.(*ast.FoldExpr); ok && fold.Keyword == "rewrite" {
+		if _, ok := sequenceRewriteTargetTypeExpr(fold.Root); ok {
+			return a.analyzeFoldExprWithExpected(fold, expected)
+		}
+	}
 	if tuple, ok := expr.(*ast.TupleExpr); ok {
 		return a.analyzeTupleExprWithExpected(tuple, expected)
 	}

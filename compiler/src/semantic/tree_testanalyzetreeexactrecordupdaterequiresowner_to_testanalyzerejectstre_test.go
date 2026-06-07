@@ -65,6 +65,17 @@ func TestAnalyzeSequenceRewriteExpr(t *testing.T) {
 					emit item
 `)
 }
+func TestAnalyzeSequenceRewriteUsesExpectedRegionParam(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "sequence_rewrite_region_param.elisa", `def keep_non_zero[region r](items: darray[u32] @r) -> darray[u32] @r:
+	return rewrite items as sequence[u32]:
+		item when item != 0u32:
+			emit item
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, "requires an active in <owner>: scope") {
+		t.Fatalf("sequence rewrite into a live region-param darray must be allowed; got:\n%s", all)
+	}
+}
 func TestAnalyzeTreeTargetSequenceRewriteExpr(t *testing.T) {
 	analyzeTreeTestSource(t, "sequence_rewrite_tree_target_surface.elisa", `tree Lua:
 	common:

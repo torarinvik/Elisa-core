@@ -5,9 +5,13 @@ import (
 )
 
 func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
+	return a.analyzeFoldExprWithExpected(expr, nil)
+}
+
+func (a *Analyzer) analyzeFoldExprWithExpected(expr *ast.FoldExpr, expected Type) Type {
 	if expr != nil && expr.Keyword == "rewrite" {
 		if _, ok := sequenceRewriteTargetTypeExpr(expr.Root); ok {
-			return a.analyzeSequenceRewriteExpr(expr)
+			return a.analyzeSequenceRewriteExprWithExpected(expr, expected)
 		}
 	}
 	valueType := a.analyzeExpr(expr.Value)

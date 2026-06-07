@@ -118,6 +118,10 @@ func (a *Analyzer) analyzeSequenceRewriteArmBodyWithAffineSnapshot(body []ast.St
 }
 
 func (a *Analyzer) analyzeSequenceRewriteExpr(expr *ast.FoldExpr) Type {
+	return a.analyzeSequenceRewriteExprWithExpected(expr, nil)
+}
+
+func (a *Analyzer) analyzeSequenceRewriteExprWithExpected(expr *ast.FoldExpr, expected Type) Type {
 	valueType := a.analyzeExpr(expr.Value)
 	elemType, ok := sequenceRewriteCarrierElemType(valueType)
 	if !ok || elemType == nil {
@@ -143,7 +147,10 @@ func (a *Analyzer) analyzeSequenceRewriteExpr(expr *ast.FoldExpr) Type {
 		return invalidType
 	}
 	resultType := &DArrayType{Elem: outputElemType, Shape: &WildcardShape{}, SurfaceName: "darray"}
-	if a.currentTreeAllocOwner.Kind == treeAllocOwnerNone {
+	if expectedDArray, ok := contextualDArrayLiteralType(expected); ok && AssignableTo(expectedDArray.Elem, outputElemType) {
+		resultType = expectedDArray
+	}
+	if a.currentTreeAllocOwner.Kind == treeAllocOwnerNone && !a.regionAvailableForContainer(resultType) {
 		a.errorf(expr.Pos(), "sequence rewrite requires an active in <owner>: scope")
 	}
 	baselineAffine := a.cloneAffineValueStates()
@@ -201,5 +208,6 @@ func (a *Analyzer) analyzeSequenceRewriteExpr(expr *ast.FoldExpr) Type {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.exprTypes[expr] = resultType
 	return resultType
 }
