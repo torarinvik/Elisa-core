@@ -275,7 +275,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry insert requires an entry created from a mutable dict receiver")
 	}
-	if a.currentAllocExpr == nil && !a.containerRegionParamInScope(receiverType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(receiverType) {
 		a.errorf(expr.Pos(), "dict entry insert requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {
@@ -378,7 +378,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry get_or_insert requires an entry created from a mutable dict receiver")
 	}
-	if a.currentAllocExpr == nil && !a.containerRegionParamInScope(receiverType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(receiverType) {
 		a.errorf(expr.Pos(), "dict entry get_or_insert requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {

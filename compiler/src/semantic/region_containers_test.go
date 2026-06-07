@@ -89,6 +89,24 @@ func TestRegionParamDictDirectPutAllowed(t *testing.T) {
 	}
 }
 
+func TestLiveRegionDictEntryMutationAllowedInOtherOwnerScope(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "live_region_dict_entry_other_owner.elisa", `store Pending:
+    id: u32
+
+def fill() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            d: mutable dict[cstr, i64] @a = zeroed
+            pending: mutable Pending = zeroed
+            in pending:
+                _ = d.entry("alpha").insert(10)
+                _ = d.entry("beta").get_or_insert(20)
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "requires an active in <arena>: scope") {
+		t.Fatalf("dict entry insert/get_or_insert into a live-region dict must be allowed in another owner scope; got: %s", all)
+	}
+}
+
 func TestRegionScopeStoreGrowthAllowed(t *testing.T) {
 	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_scope_store_growth.elisa", `store Pending:
     name_key: u32
