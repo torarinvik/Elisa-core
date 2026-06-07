@@ -111,6 +111,21 @@ def build() -> i64:
 	}
 }
 
+// Dual to the darray/dict no-ceremony rule: an *explicit* `panic(...)` in user code is
+// the case the user reserves Abort.Panic for, so it still requires a local grant. (Safe
+// container growth, which may panic on overflow internally, does not surface this.)
+func TestExplicitPanicRequiresLocalAbortGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "explicit_panic_requires_grant.elisa", `def risky(x: i64) -> i64:
+    if x < 0:
+        panic("negative")
+    return x
+`)
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `panic requires can[Abort] and has no explicit local effect grant; add can Abort.Panic or a surrounding can ...: block`) {
+		t.Fatalf("expected explicit panic to require a local Abort.Panic grant, got:\n%s", all)
+	}
+}
+
 func TestTrustedPermissionBlockSatisfiesLocalGrantWithoutInference(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "trusted_permission_block.elisa", `
 extern raw_pointer_cast() -> i64 can[Unsafe.PointerCast]
