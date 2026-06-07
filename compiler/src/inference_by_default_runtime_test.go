@@ -84,6 +84,42 @@ def inference_untyped_empty_darray_test() -> void:
 	}
 }
 
+func TestRunCLIInfersUntypedNonEmptyDArrayFromUse(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "inference_untyped_nonempty_darray.elisa")
+	src := `@test
+def inference_untyped_nonempty_darray_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        xs = [10u8, 20u8, 30u8]
+        xs.push(40u8)
+        if xs.count != 4:
+            panic("expected four inferred non-empty darray items")
+        if xs[0] != 10u8 or xs[3] != 40u8:
+            panic("inferred non-empty darray contents wrong")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write non-empty darray inference fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected non-empty darray inference test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error") {
+		t.Fatalf("unexpected error on stderr:\n%s", stderr.String())
+	}
+	for _, check := range []string{"[       OK ] inference_untyped_nonempty_darray_test", "passed=1"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected non-empty darray inference output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 func TestRunCLIInfersRegionForUntypedBuilders(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

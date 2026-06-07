@@ -194,7 +194,12 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 	if err != nil {
 		return nil, nil, err
 	}
-	byteCount := C.LLVMConstInt(usizeLLVMType, C.ulonglong(uint64(len(expr.Elems))*elemSize), 0)
+	literalCount := len(expr.Elems)
+	literalCapacity := literalCount
+	if literalCapacity < 256 {
+		literalCapacity = 256
+	}
+	byteCount := C.LLVMConstInt(usizeLLVMType, C.ulonglong(uint64(literalCapacity)*elemSize), 0)
 	arenaType := s.g.result.NamedTypes["Arena"]
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -225,11 +230,12 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 		elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("darray.literal.elem.ptr"))
 		C.LLVMBuildStore(s.builder, elemValue, elemPtr)
 	}
-	countValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(len(expr.Elems)), 0)
+	countValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(literalCount), 0)
+	capacityValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(literalCapacity), 0)
 	current := C.LLVMGetUndef(llvmType)
 	current = C.LLVMBuildInsertValue(s.builder, current, allocPtr, 0, cStringFree("darray.literal.items"))
 	current = C.LLVMBuildInsertValue(s.builder, current, countValue, 1, cStringFree("darray.literal.count"))
-	current = C.LLVMBuildInsertValue(s.builder, current, countValue, 2, cStringFree("darray.literal.capacity"))
+	current = C.LLVMBuildInsertValue(s.builder, current, capacityValue, 2, cStringFree("darray.literal.capacity"))
 	return current, darrayType, nil
 }
 func (s *functionState) emitSpreadListLitExpr(expr *ast.ListLitExpr, darrayType *semantic.DArrayType) (C.LLVMValueRef, semantic.Type, error) {
