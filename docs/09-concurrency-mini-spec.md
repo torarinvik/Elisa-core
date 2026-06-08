@@ -1,8 +1,383 @@
 # Concurrency Mini-Spec
 
 This document proposes a concurrency design for Elisa core / `elisacore` where
-protocol safety is tracked in the **type system**, not by ad hoc lifetime-flow
-analysis.
+strict-mode concurrency is accepted only when the program carries explicit
+proof objects for ownership, protected state, protocol state, progress, and
+unsafe escape hatches.
+
+The current runtime already has low-level threads, pools, locks, condition
+variables, atomics, and progress diagnostics. The strict-mode direction is to
+keep those raw pieces available for the runtime and trusted low-level code, but
+make ordinary user concurrency go through proof-carrying APIs.
+
+In short:
+
+> concurrency is allowed only as a composition of ownership transfer,
+> protected domains, linear protocol states, predicate waits, and progress
+> proofs.
+
+## Strict-Mode Contract
+
+Strict mode should guarantee that the safe surface cannot express the common
+concurrency bug classes below. When a guarantee depends on the host scheduler,
+operating system, or foreign code, strict mode requires a trusted runtime policy
+or an explicit unsafe capability rather than silently pretending the guarantee
+is local.
+
+### Bug classes strict mode must account for
+
+Correctness and memory safety:
+
+- data races
+- aliasing races, where two handles look independent but share the same buffer
+- publication races, where a worker observes partially initialized state
+- use-after-free or use-after-reset across threads
+- stale views, slices, cursors, iterators, or refs after concurrent mutation
+- atomicity violations across multi-step transactions
+- ordering violations such as consume-before-produce or close-before-flush
+- memory-ordering bugs from incorrect acquire/release/fence choices
+- torn reads and writes
+- ABA bugs in lock-free protocols
+
+Waiting and liveness:
+
+- lost wakeups
+- spurious wakeup bugs
+- cancellation wakeups missed by sleeping tasks
+- deadlocks
+- self-deadlocks
+- lock-order inversions
+- hold-and-wait bugs, where a task blocks while holding a resource needed by
+  the unblocker
+- priority inversion
+- starvation
+- livelock
+- busy-spin retry loops with no yield, blocking wait, or bounded progress
+
+Task, channel, and lifecycle bugs:
+
+- orphaned tasks
+- detached tasks that outlive borrowed state
+- join leaks
+- cancellation resource leaks
+- cancellation interrupting a broken invariant
+- cancellation masking in code that must stay responsive
+- backpressure and resource blowup from unbounded queues, retries, tasks, or
+  buffers
+- channel protocol bugs such as send-after-close, receive-after-close, close
+  while senders are live, and forgotten receivers
+- message ordering bugs where FIFO, priority, or fairness is needed but not
+  declared
+- barrier and latch bugs such as wrong participant counts or generation races
+- unhandled task errors
+- error/cancellation state crossing a thread boundary incorrectly
+
+Boundary and performance hazards:
+
+- reentrancy bugs
+- callbacks under a protected domain or lock while invariants are broken
+- thread-affinity violations for main-thread, UI, GPU, event-loop, or realtime
+  state
+- blocking in nonblocking, main-thread, executor, realtime, or hot contexts
+- sync-over-async deadlocks
+- foreign functions that block, spawn, call back, store pointers, or share
+  memory without declaring that behavior
+- false sharing, lock convoys, excessive contention, and atomic hot-loop
+  performance cliffs in strict performance mode
+
+This list is intentionally broad. The point is not that every item needs a
+separate feature. The point is that the same few proof axes should cover the
+whole list.
+
+## Unified Proof Axes
+
+Strict-mode concurrency uses five orthogonal proof axes.
+
+### 1. Share rights
+
+Every value has a concurrency sharing judgement.
+
+```text
+local         cannot cross a task/thread boundary
+send          may be moved to another task
+share_read    may be shared read-only
+share_atomic  may be shared through an atomic protocol
+share_locked  may be shared only behind a domain/lock
+unsafe_share  requires an explicit unsafe/trusted escape
+```
+
+The judgement is derived from type, storage, provenance, aliasing, and
+publication facts. It is not a layout attribute. Packedness, region ownership,
+and thread-sharing remain separate facts.
+
+### 2. Domains
+
+A domain is the unit of protected state and broken/restored invariants. It is
+where strict mode records:
+
+- protected state
+- lock rank or ordering policy
+- reentrancy policy
+- callback policy
+- priority policy
+- wait predicates
+- allowed blocking and cancellation behavior
+
+Example design syntax:
+
+```elisa
+domain AccountDomain:
+    protects Account.balance, Account.audit_log
+    lock_rank 20
+    reentrant false
+    callbacks closed
+    wait_policy FIFO
+```
+
+Inside a domain, an invariant may be temporarily broken. On exit, the domain
+must be restored. Unknown callbacks, cancellation points, and blocking waits are
+therefore rejected while a non-reentrant domain is open unless the domain
+declares a policy that makes them safe.
+
+### 3. Linear protocol states
+
+Typestate is the local protocol carrier. It is ideal for finite state machines
+where values must be consumed exactly once or only used in a particular phase.
+
+Examples:
+
+```text
+Thread[T, Joinable] -> join -> T
+Task[T, Pending] -> await/cancel -> consumed
+MutexGuard[Held] -> unlock -> consumed
+Promise[T, Pending] -> complete -> Promise[T, Ready]
+Sender[T, Open] -> close -> Sender[T, Closed]
+QueueSlot[q, Reserved] -> send -> consumed
+Txn[Open] -> commit/rollback -> consumed
+```
+
+Typestate should not try to encode every global property as type parameters.
+Instead, typestate proves the local protocol phase, while domains, permissions,
+and progress summaries prove why a transition is globally legal.
+
+### 4. Predicate waits
+
+Raw wait/notify is a legacy low-level surface. Strict safe code should wait on a
+predicate over protected domain state.
+
+Design syntax:
+
+```elisa
+condition NotEmpty(q: Queue) in q.domain:
+    q.items.count > 0 or q.closed
+
+def pop(q: mutable Queue[Job]&) -> Job?:
+    await q.NotEmpty:
+        if q.items.count > 0:
+            return q.items.pop_front()
+        return null
+```
+
+The language/runtime operation is:
+
+```text
+check predicate
+if false: atomically register waiter and release domain
+sleep or yield according to policy
+reacquire domain
+recheck predicate
+```
+
+That single rule removes lost wakeups and spurious wakeup bugs from safe code.
+Cancellation-aware waits additionally register cancellation with the same
+predicate wait, so cancellation cannot be missed while the task sleeps.
+
+### 5. Progress obligations
+
+Concurrent loops, retry loops, waits, blocking calls, and recursive cycles carry
+progress obligations. Accepted evidence includes:
+
+- a bounded counter that decreases
+- a finite iterator
+- a fair blocking wait
+- a yield point
+- a cancellation check
+- a deadline or progress budget
+- a trusted local escape hatch
+
+Current progress checking is documented in `25-progress-safety.md`. Strict
+concurrency should reuse that machinery rather than inventing a second liveness
+system.
+
+## Strict Safe Surface Versus Legacy Raw Surface
+
+The raw primitives remain useful for the runtime, tests, and hand-written
+low-level wrappers, but strict-mode user code should prefer the proof-carrying
+surface.
+
+Legacy raw calls include:
+
+- `spawn_raw`
+- `join_raw`
+- `detach_raw`
+- direct `spawn1` / `pool_submit1` when a structured scope would work
+- `cond_wait`
+- `notify_one`
+- `notify_all`
+- manual atomics outside a protocol wrapper
+- unbounded queues or detached workers without a declared lifetime owner
+
+Migration direction:
+
+- use `nursery:` / pool scopes / task groups for ordinary fan-out
+- keep escaped tasks as linear `Thread[T, Joinable]` or `Task[T, Pending]`
+- use predicate waits instead of raw condition variables
+- use bounded channels/queues with capacity tokens
+- wrap raw atomics in a named protocol type
+- keep low-level implementations in narrow `trusted` blocks or explicit
+  unsafe-permission code
+
+The compiler should initially report these raw calls as deprecations/warnings,
+then allow projects to promote them to errors. In full strict mode, the raw
+surface should require explicit unsafe or trusted authority unless the call is
+inside the trusted runtime standard library.
+
+## Examples Of The Intended Strict Shape
+
+### Structured task scope
+
+```elisa
+def compile_both(left: Module, right: Module) -> Pair[IR, IR]:
+    nursery:
+        left_task = spawn lower(left)
+        right_task = spawn lower(right)
+        return Pair(await left_task, await right_task)
+```
+
+The nursery owns both tasks. A task cannot be forgotten, and borrowed state
+cannot outlive the nursery.
+
+Escaping the scope is still possible, but the handle stays linear:
+
+```elisa
+def start_worker(arg: WorkerArg) -> Thread[Result, Joinable]:
+    return spawn1(worker, move arg)
+
+def finish_worker(t: Thread[Result, Joinable]) -> Result:
+    return join(move t)
+```
+
+### Predicate wait queue
+
+```elisa
+domain QueueDomain:
+    protects Queue.items, Queue.closed
+    lock_rank 30
+    reentrant false
+    wait_policy FIFO
+
+condition NotEmpty(q: Queue) in q.domain:
+    q.items.count > 0 or q.closed
+
+condition NotFull(q: Queue) in q.domain:
+    q.items.count < q.capacity or q.closed
+
+linear struct QueueSlot[Q]
+
+def reserve_slot[T](q: mutable Queue[T]&) -> QueueSlot[q]:
+    await q.NotFull:
+        if q.closed:
+            raise QueueClosed
+        return QueueSlot[q]()
+
+def send[T](q: mutable Queue[T]&, slot: QueueSlot[q], item: T):
+    do q.domain:
+        _ = move slot
+        q.items.push(item)
+
+def recv[T](q: mutable Queue[T]&) -> T?:
+    await q.NotEmpty:
+        if q.items.count > 0:
+            return q.items.pop_front()
+        return null
+```
+
+This one abstraction carries proofs for race freedom, lost-wakeup freedom,
+spurious-wakeup handling, bounded buffering, close protocol, and FIFO wait
+policy.
+
+### Atomic protocol wrapper
+
+Raw atomics are too easy to misuse in strict code. A protocol wrapper should
+carry the memory-ordering proof.
+
+```elisa
+struct OnceCell[T, S]:
+    storage: mutable T
+    ready: mutable atomic[bool]
+
+def publish[T](cell: mutable OnceCell[T, Empty]&, value: T) -> OnceCell[T, Ready]:
+    cell.storage <- value
+    store(&cell.ready, true, MemoryOrder.Release)
+    return move cell as OnceCell[T, Ready]
+
+def get[T](cell: OnceCell[T, Ready]&) -> T:
+    assert load(&cell.ready, MemoryOrder.Acquire)
+    return cell.storage
+```
+
+Callers use `OnceCell[T, Ready]`; they do not casually choose relaxed memory
+orders at every call site.
+
+### Non-reentrant domain and callback control
+
+```elisa
+domain AccountDomain:
+    protects Account.balance, Account.audit_log
+    reentrant false
+    callbacks closed
+
+def withdraw(account: mutable Account&, amount: i64, callback: func() -> void):
+    do account.domain:
+        account.balance <- account.balance - amount
+        account.audit_log.push(Withdraw(amount))
+
+    callback()
+```
+
+The callback runs after the domain invariant is restored. Calling it inside the
+domain would be rejected in strict mode because it could re-enter account state.
+
+### Cancellation and linear cleanup
+
+```elisa
+def write_file(path: cstr):
+    cancel_scope:
+        file: File[Open] = open(path)
+
+        on_cancel:
+            close(move file)
+
+        data = await network_read() cancel_point
+        write(file, data)
+        close(move file)
+```
+
+The cancellation point is accepted because every cancellation path consumes the
+linear file handle.
+
+## Relationship To The Older Affine Slice
+
+The older affine-thread model below remains valid as the local protocol-state
+slice. The update in this section broadens the strict-mode story around it:
+
+- typestate and affine values carry local protocol facts
+- domains carry protected-state and ordering facts
+- predicate waits carry wait/wakeup facts
+- progress summaries carry liveness facts
+- permissions and trusted blocks carry authority and escape hatches
+
+That is the intended unified model.
 
 The core move is:
 

@@ -38,6 +38,16 @@ In fact-core terms:
 - calls may `ensure` poststate facts, or `widen` when no checked poststate is available
 - region/store operations may `invalidate` or `rebase` facts that typestate alone cannot explain
 
+Concurrency uses the same rule: typestate is the local protocol proof carrier,
+not the whole concurrency proof system. It is excellent for one-shot and
+phase-sensitive values such as `Thread[T, Joinable]`, `Task[T, Pending]`,
+`MutexGuard[Held]`, `Sender[T, Open]`, `Promise[T, Ready]`, and capacity tokens.
+Global concurrency guarantees still need the other fact classes: domain
+protection, alias/share rights, lock ordering, predicate waits, cancellation
+cleanup, and progress evidence. In strict concurrency, typestate should be the
+thing users see most often, while domains and progress checks explain why each
+transition is safe.
+
 ---
 
 ## 1. Why typestate exists here

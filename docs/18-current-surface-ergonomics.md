@@ -3117,6 +3117,20 @@ Current rules:
 - captured outer values must still satisfy the compiler's existing thread-transfer checks
 - this is the current implemented parallel loop feature, not just a proposal placeholder
 
+Strict-concurrency migration notes:
+
+- `pool` / `parallel for` is the preferred current structured surface for
+  ordinary data-parallel work
+- direct `spawn1`, `pool_submit1`, `detach`, raw thread helpers, and raw
+  condition-variable helpers are low-level compatibility/runtime surfaces
+- strict-mode direction is to keep those raw calls available for trusted
+  wrappers while nudging user code toward structured task scopes, linear
+  escaped handles, typed predicate waits, bounded queues, and domain-protected
+  state
+- current semantic analysis reports the legacy raw concurrency calls as
+  deprecations so projects can start auditing them before promotion to hard
+  strict-mode errors
+
 ## Tuple-bind statements
 
 Tuple values can be unpacked directly into local names with a statement-form tuple binder. Use `=` when the binder introduces new locals, and `<-` when it rebinds existing locals from another tuple-shaped value.
