@@ -6,7 +6,46 @@ import (
 )
 
 func TestLegacyRawConcurrencyCallsAreDeprecated(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "legacy_raw_concurrency.elisa", `
+	result := analyzeLegacyRawConcurrencySource(t, AnalyzeOptions{})
+	deprecations := strings.Join(result.Deprecations(), "\n")
+	for _, check := range []string{
+		"`cond_wait` is legacy raw condition-variable surface",
+		"`notify_one` is legacy raw notification surface",
+		"`spawn1` is low-level escaped-task surface",
+		"`detach` is a detached-task escape hatch",
+		"`pool_submit1` is low-level pool submission surface",
+	} {
+		if !strings.Contains(deprecations, check) {
+			t.Fatalf("expected deprecation %q, got:\n%s", check, deprecations)
+		}
+	}
+	if errors := strings.Join(result.Errors(), "\n"); errors != "" {
+		t.Fatalf("legacy raw concurrency migration diagnostics should be soft deprecations for now, got errors:\n%s", errors)
+	}
+}
+
+func TestStrictConcurrencyPromotesLegacyRawConcurrencyCallsToErrors(t *testing.T) {
+	result := analyzeLegacyRawConcurrencySource(t, AnalyzeOptions{EnforceStrictConcurrency: true})
+	errors := strings.Join(result.Errors(), "\n")
+	for _, check := range []string{
+		"strict concurrency error: `cond_wait` is legacy raw condition-variable surface",
+		"strict concurrency error: `notify_one` is legacy raw notification surface",
+		"strict concurrency error: `spawn1` is low-level escaped-task surface",
+		"strict concurrency error: `detach` is a detached-task escape hatch",
+		"strict concurrency error: `pool_submit1` is low-level pool submission surface",
+	} {
+		if !strings.Contains(errors, check) {
+			t.Fatalf("expected strict concurrency error %q, got:\n%s", check, errors)
+		}
+	}
+	if deprecations := strings.Join(result.Deprecations(), "\n"); deprecations != "" {
+		t.Fatalf("strict concurrency should promote these diagnostics to errors, got deprecations:\n%s", deprecations)
+	}
+}
+
+func analyzeLegacyRawConcurrencySource(t *testing.T, options AnalyzeOptions) *Result {
+	t.Helper()
+	return analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "legacy_raw_concurrency.elisa", `
 def cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]:
     return move g
 
@@ -32,20 +71,5 @@ def use_raw(cv: mutable CondVar&, guard: MutexGuard[Held], pool: mutable ThreadP
     detach(move thread)
     _ = pool_submit1(pool, worker, 2)
     _ = move next
-`, AnalyzeOptions{})
-	deprecations := strings.Join(result.Deprecations(), "\n")
-	for _, check := range []string{
-		"`cond_wait` is legacy raw condition-variable surface",
-		"`notify_one` is legacy raw notification surface",
-		"`spawn1` is low-level escaped-task surface",
-		"`detach` is a detached-task escape hatch",
-		"`pool_submit1` is low-level pool submission surface",
-	} {
-		if !strings.Contains(deprecations, check) {
-			t.Fatalf("expected deprecation %q, got:\n%s", check, deprecations)
-		}
-	}
-	if errors := strings.Join(result.Errors(), "\n"); errors != "" {
-		t.Fatalf("legacy raw concurrency migration diagnostics should be soft deprecations for now, got errors:\n%s", errors)
-	}
+`, options)
 }

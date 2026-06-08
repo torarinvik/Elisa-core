@@ -553,19 +553,26 @@ func (a *Analyzer) warnOnLegacyRawConcurrencyCall(pos lexer.Pos, fnType *FuncTyp
 	if fnType == nil || fnType.Name == "" || isRuntimeStdPermissionInternal(pos.File) {
 		return
 	}
+	emit := func(format string, args ...interface{}) {
+		if a.enforceStrictConcurrency {
+			a.errorf(pos, "strict concurrency error: "+format, args...)
+			return
+		}
+		a.deprecatedf(pos, format, args...)
+	}
 	switch fnType.Name {
 	case "cond_wait":
-		a.deprecatedf(pos, "`cond_wait` is legacy raw condition-variable surface; strict concurrency should use a typed predicate wait over protected domain state")
+		emit("`cond_wait` is legacy raw condition-variable surface; strict concurrency should use a typed predicate wait over protected domain state")
 	case "notify_one", "notify_all":
-		a.deprecatedf(pos, "`%s` is legacy raw notification surface; strict concurrency should derive wakeups from protected state predicates", fnType.Name)
+		emit("`%s` is legacy raw notification surface; strict concurrency should derive wakeups from protected state predicates", fnType.Name)
 	case "spawn_raw", "join_raw", "detach_raw":
-		a.deprecatedf(pos, "`%s` is legacy raw thread surface; strict concurrency should use structured task scopes or linear typed thread handles", fnType.Name)
+		emit("`%s` is legacy raw thread surface; strict concurrency should use structured task scopes or linear typed thread handles", fnType.Name)
 	case "spawn1":
-		a.deprecatedf(pos, "`spawn1` is low-level escaped-task surface; prefer structured task scopes unless the linear Thread handle intentionally escapes")
+		emit("`spawn1` is low-level escaped-task surface; prefer structured task scopes unless the linear Thread handle intentionally escapes")
 	case "pool_submit1":
-		a.deprecatedf(pos, "`pool_submit1` is low-level pool submission surface; prefer `pool` / `parallel for` / task-group structure unless the Pending task handle is intentional")
+		emit("`pool_submit1` is low-level pool submission surface; prefer `pool` / `parallel for` / task-group structure unless the Pending task handle is intentional")
 	case "detach":
-		a.deprecatedf(pos, "`detach` is a detached-task escape hatch; strict concurrency should keep work in a structured scope or prove captured state is static/share-safe")
+		emit("`detach` is a detached-task escape hatch; strict concurrency should keep work in a structured scope or prove captured state is static/share-safe")
 	}
 }
 

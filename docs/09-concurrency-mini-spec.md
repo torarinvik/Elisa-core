@@ -237,10 +237,12 @@ Migration direction:
 - keep low-level implementations in narrow `trusted` blocks or explicit
   unsafe-permission code
 
-The compiler should initially report these raw calls as deprecations/warnings,
-then allow projects to promote them to errors. In full strict mode, the raw
-surface should require explicit unsafe or trusted authority unless the call is
-inside the trusted runtime standard library.
+The compiler reports these raw calls as deprecations/warnings by default. The
+semantic analyzer's `EnforceStrictConcurrency` option promotes that same
+diagnostic set to hard errors, letting projects audit gradually and then turn on
+the proof-carrying policy for shipped strict-mode code. In full strict mode, the
+raw surface should require explicit unsafe or trusted authority unless the call
+is inside the trusted runtime standard library.
 
 ## Examples Of The Intended Strict Shape
 

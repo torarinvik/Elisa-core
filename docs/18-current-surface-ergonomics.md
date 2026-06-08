@@ -3130,6 +3130,9 @@ Strict-concurrency migration notes:
 - current semantic analysis reports the legacy raw concurrency calls as
   deprecations so projects can start auditing them before promotion to hard
   strict-mode errors
+- `AnalyzeOptions.EnforceStrictConcurrency` currently performs that promotion
+  for the legacy raw concurrency calls while leaving unrelated deprecations as
+  migration warnings
 
 ## Tuple-bind statements
 
