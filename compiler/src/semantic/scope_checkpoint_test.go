@@ -356,8 +356,10 @@ def build(owner: Arena, key: Key, id: u32) -> usize:
         return counts.count + keyed.count
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[cstr, V]") {
-		t.Fatalf("expected runtime-backed dict restriction diagnostic, got:\n%s", all)
+	// `dict[u32, i64]` (counts) is now a supported key type; the `dict[Key, i64]` (keyed,
+	// a struct key) is still rejected — aggregates have no value equality for the linear-scan find.
+	if !strings.Contains(all, "runtime-backed dict keys must be cstr, an integer type, bool, or a const enum") {
+		t.Fatalf("expected runtime-backed dict key restriction diagnostic for the struct key, got:\n%s", all)
 	}
 }
 

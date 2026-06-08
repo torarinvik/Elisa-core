@@ -108,10 +108,11 @@ func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
 }
 
 func runtimeBackedDictSupportDiagnostic(dictType *DictType) string {
+	const supported = "runtime-backed dict keys must be cstr, an integer type, bool, or a const enum (any type with value equality); floats and aggregates are unsupported"
 	if dictType == nil {
-		return "runtime-backed dict operations currently support only dict[cstr, V]"
+		return supported
 	}
-	return fmt.Sprintf("runtime-backed dict operations currently support only dict[cstr, V], got %s", diagnosticTypeString(dictType))
+	return fmt.Sprintf("%s; got key type in %s", supported, diagnosticTypeString(dictType))
 }
 
 func (a *Analyzer) ensureRuntimeBackedDictSupported(pos lexer.Pos, dictType *DictType) bool {

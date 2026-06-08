@@ -39,3 +39,29 @@ def std_dict_brace_auto_region_smoke():
 	slot: mutable i64&? = d.get_or_insert("three", 3)
 	assert slot != null
 	assert d.contains("three")
+
+# Non-cstr keys: the runtime dict find is a generic linear scan over `==`, so any key with
+# value equality works — integers, bool, const enums. Here i64 keys, with value readback.
+const enum Suit:
+	Hearts
+	Spades
+
+@test
+def std_dict_int_keys_smoke():
+	d: mutable dict[i64, i64] = {}
+	d.put(10, 100)
+	d.put(20, 200)
+	d.put(10, 111)
+	assert d.contains(10)
+	assert d.contains(20)
+	assert not d.contains(30)
+	got: i64& = get d.get(10) else return
+	assert got[0] == 111
+
+@test
+def std_dict_enum_keys_smoke():
+	d: mutable dict[Suit, i64] = {}
+	d.put(Suit.Hearts, 1)
+	d.put(Suit.Spades, 2)
+	assert d.contains(Suit.Hearts)
+	assert d.contains(Suit.Spades)

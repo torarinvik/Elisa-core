@@ -356,28 +356,22 @@ def ok(values: dict[i32, i32], keyed: dict[Pair, i32]) -> void:
 	_, errs := parseAndAnalyze(t, "dict_generic_keys_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
-func TestAnalyzeRejectsGenericDictRuntimeBridgeAndSugar(t *testing.T) {
-	src := `extern take_runtime(values: DynDict[u32, i32]) -> void
-extern make_runtime() -> DynDict[u32, i32]
-
-def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
+// Integral/bool/enum/cstr keys are runtime-backed, but a float key is not (== is unsafe on
+// floats), so the `.get` runtime sugar is rejected on a `dict[f64, V]`.
+func TestAnalyzeRejectsFloatKeyRuntimeBackedDictSugar(t *testing.T) {
+	src := `def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
 	return null
 
-def use(values: dict[u32, i32], key: u32) -> dict[u32, i32]:
-	_ = values.get(key)
-	take_runtime(values)
-	return make_runtime()
+def use(values: dict[f64, i32], key: f64) -> mutable i32&?:
+	return values.get(key)
 `
-	_, errs := parseAndAnalyze(t, "dict_generic_runtime_bridge_reject.elisa", src)
+	_, errs := parseAndAnalyze(t, "dict_float_key_runtime_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[cstr, V]") {
-		t.Fatalf("expected runtime-backed dict restriction diagnostic, got:\n%s", all)
-	}
-	if !strings.Contains(all, "expects dict[u32, i32] (runtime carrier), got dict[u32, i32]") {
-		t.Fatalf("expected generic-key runtime bridge mismatch diagnostic, got:\n%s", all)
+	if !strings.Contains(all, "runtime-backed dict keys must be cstr, an integer type, bool, or a const enum") {
+		t.Fatalf("expected float-key runtime-backed dict diagnostic, got:\n%s", all)
 	}
 }
 func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {

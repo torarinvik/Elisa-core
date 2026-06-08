@@ -412,7 +412,8 @@ func TestRunCLIRejectsInvalidCharLiteral(t *testing.T) {
 func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "generic_key_dict_runtime_reject.elisa")
-	src := "def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:\n    return null\n\ndef bad(values: dict[u32, i64], key: u32) -> mutable i64&?:\n    return values.get(key)\n"
+	// Integral keys are now supported; a float key (no safe value equality) is still rejected.
+	src := "def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:\n    return null\n\ndef bad(values: dict[f64, i64], key: f64) -> mutable i64&?:\n    return values.get(key)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write generic-key dict runtime rejection fixture: %v", err)
 	}
@@ -423,8 +424,8 @@ func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	if exitCode == 0 {
 		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "runtime-backed dict operations currently support only dict[cstr, V]") {
-		t.Fatalf("expected generic-key runtime-backed dict diagnostic, got:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "runtime-backed dict keys must be cstr, an integer type, bool, or a const enum") {
+		t.Fatalf("expected float-key runtime-backed dict diagnostic, got:\n%s", stderr.String())
 	}
 }
 func TestRunCLIExecutesCharLiteralSmokeProgram(t *testing.T) {

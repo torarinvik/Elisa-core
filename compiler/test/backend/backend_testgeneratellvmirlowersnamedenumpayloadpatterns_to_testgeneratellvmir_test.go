@@ -287,10 +287,13 @@ def from_runtime() -> dict[cstr, i32]:
 	}
 }
 func TestGenerateLLVMIRRejectsGenericDictRuntimeBridge(t *testing.T) {
-	src := `extern take_runtime(values: DynDict[u32, i32]) -> void
-extern make_runtime() -> DynDict[u32, i32]
+	// Integral keys (u32, ...) are now runtime-backed, so their surface `dict` IS the `DynDict`
+	// carrier and bridges cleanly. A float key is NOT runtime-backed, so the surface-vs-carrier
+	// mismatch still stands — that is the case this test pins.
+	src := `extern take_runtime(values: DynDict[f64, i32]) -> void
+extern make_runtime() -> DynDict[f64, i32]
 
-def use(values: dict[u32, i32]) -> dict[u32, i32]:
+def use(values: dict[f64, i32]) -> dict[f64, i32]:
 	take_runtime(values)
 	return make_runtime()
 `
@@ -306,8 +309,8 @@ def use(values: dict[u32, i32]) -> dict[u32, i32]:
 	}
 	result := semantic.Analyze(file)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "expects dict[u32, i32] (runtime carrier), got dict[u32, i32]") {
-		t.Fatalf("expected generic-key runtime bridge mismatch diagnostic, got:\n%s", all)
+	if !strings.Contains(all, "expects dict[f64, i32] (runtime carrier), got dict[f64, i32]") {
+		t.Fatalf("expected non-backed-key runtime bridge mismatch diagnostic, got:\n%s", all)
 	}
 }
 func TestGenerateLLVMIRSpecializesDictHelperStyleFunctions(t *testing.T) {

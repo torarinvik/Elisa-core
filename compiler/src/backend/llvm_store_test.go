@@ -294,10 +294,10 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
 def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&?:
     return null
 
-def build(owner: Arena, key: u32) -> usize:
+def build(owner: Arena, key: f64) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
-        values: mutable dict[u32, i64] = zeroed
+        values: mutable dict[f64, i64] = zeroed
         _ = values.get(key)
         slot = values.get_or_insert(key):
             5
@@ -318,8 +318,9 @@ def build(owner: Arena, key: u32) -> usize:
 	}
 	result := semantic.Analyze(file)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[cstr, V]") {
-		t.Fatalf("expected runtime-backed dict restriction diagnostic, got:\n%s", all)
+	// Integral keys are now supported; a float key remains unsupported (== is unsafe on floats).
+	if !strings.Contains(all, "runtime-backed dict keys must be cstr, an integer type, bool, or a const enum") {
+		t.Fatalf("expected runtime-backed dict key restriction diagnostic for the float key, got:\n%s", all)
 	}
 }
 

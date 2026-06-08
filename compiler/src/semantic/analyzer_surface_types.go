@@ -293,13 +293,19 @@ func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr,
 	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName, Region: region}
 }
 
+// dictRuntimeBackedKeyType reports whether a dict key type is supported by the runtime-backed
+// dict. The runtime find is a linear scan comparing keys with `==` (arena_dict_find_index is
+// generic over K), so any type with well-defined value equality works: cstr (content equality),
+// every integral type (value equality — int/iN/uN/usize/uintptr/char/BitInt), bool, and const
+// enums (integer-backed). Floats are excluded (== is unsafe: NaN, precision). A generic K
+// (TypeParamType) is deferred — its concrete binding is re-checked at instantiation.
 func dictRuntimeBackedKeyType(keyType Type) bool {
-	switch StripAggregateStateType(keyType).(type) {
-	case *DStrType, *TypeParamType:
+	stripped := StripAggregateStateType(keyType)
+	switch stripped.(type) {
+	case *DStrType, *TypeParamType, *ConstEnumType:
 		return true
-	default:
-		return false
 	}
+	return IsIntegralType(stripped) || IsBoolType(stripped)
 }
 
 func dictSupportsRuntimeBackedOps(dictType *DictType) bool {
