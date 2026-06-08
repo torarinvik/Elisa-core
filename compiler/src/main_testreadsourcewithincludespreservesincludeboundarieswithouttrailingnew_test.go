@@ -528,6 +528,55 @@ func TestParseArgsAcceptsConcurrencyStrictFlag(t *testing.T) {
 	}
 }
 
+func TestRunCLIConcurrencyStrictPromotesRawAtomicDeprecation(t *testing.T) {
+	prevSuppress, hadSuppress := os.LookupEnv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
+	_ = os.Unsetenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
+	t.Cleanup(func() {
+		if hadSuppress {
+			_ = os.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", prevSuppress)
+		} else {
+			_ = os.Unsetenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
+		}
+	})
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "raw_atomic.elisa")
+	src := `enum MemoryOrder:
+    Relaxed
+    Acquire
+    Release
+    AcqRel
+    SeqCst
+
+def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
+    return slot.value
+
+def use_raw(slot: mutable atomic[i64]&) -> i64:
+    return load(slot, MemoryOrder.Acquire)
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write raw atomic fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected ordinary semantic emit to succeed, exit=%d\nstdout:\n%s\nstderr:\n%s", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "`load` is legacy raw atomic surface") {
+		t.Fatalf("expected ordinary semantic emit to report raw atomic deprecation, got:\n%s", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if exitCode := runCLI([]string{"-Wconcurrency", "-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode == 0 {
+		t.Fatalf("expected -Wconcurrency semantic emit to fail\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "strict concurrency error: `load` is legacy raw atomic surface") {
+		t.Fatalf("expected -Wconcurrency to promote raw atomic diagnostic, got:\n%s", stderr.String())
+	}
+}
+
 func TestParseArgsRejectsRemovedPackedABI(t *testing.T) {
 	tests := []struct {
 		name string
