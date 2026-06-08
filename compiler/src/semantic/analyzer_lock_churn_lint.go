@@ -43,6 +43,9 @@ func (a *Analyzer) findLockChurnLoops(stmts []ast.Stmt) {
 }
 
 func (a *Analyzer) flagLockChurn(loopBody []ast.Stmt) {
+	for _, stmt := range loopBody {
+		a.flagLockChurnStmt(stmt)
+	}
 	a.walkStaticStmts(loopBody, func(e ast.Expr) bool {
 		call, ok := e.(*ast.CallExpr)
 		if !ok || call == nil {
@@ -58,4 +61,44 @@ func (a *Analyzer) flagLockChurn(loopBody []ast.Stmt) {
 		a.perfLint(call.Pos(), "`mutex_lock` acquires a lock on every iteration of this loop. Prefer batching the locked work, sharding the state, using a reduction/local accumulator, or moving synchronization to a coarser protocol boundary. If each iteration is intentionally long-lived or externally synchronized, this is fine")
 		return false
 	})
+}
+
+func (a *Analyzer) flagLockChurnStmt(stmt ast.Stmt) {
+	switch s := stmt.(type) {
+	case *ast.LockStmt:
+		a.perfLint(s.Pos(), "`lock ... as %s` acquires a lock on every iteration of this loop. Prefer batching the locked work, sharding the state, using a reduction/local accumulator, or moving synchronization to a coarser protocol boundary", s.GuardName)
+	case *ast.IfStmt:
+		for _, child := range s.Then {
+			a.flagLockChurnStmt(child)
+		}
+		for _, child := range s.Else {
+			a.flagLockChurnStmt(child)
+		}
+	case *ast.ScopeStmt:
+		for _, child := range s.Body {
+			a.flagLockChurnStmt(child)
+		}
+	case *ast.CanStmt:
+		for _, child := range s.Body {
+			a.flagLockChurnStmt(child)
+		}
+	case *ast.WithStmt:
+		for _, child := range s.Body {
+			a.flagLockChurnStmt(child)
+		}
+	case *ast.RegionStmt:
+		for _, child := range s.Body {
+			a.flagLockChurnStmt(child)
+		}
+	case *ast.InStoreStmt:
+		for _, child := range s.Body {
+			a.flagLockChurnStmt(child)
+		}
+	case *ast.MatchStmt:
+		for _, arm := range s.Arms {
+			for _, child := range arm.Body {
+				a.flagLockChurnStmt(child)
+			}
+		}
+	}
 }

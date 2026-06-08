@@ -27,6 +27,26 @@ def churns() -> i64:
 	}
 }
 
+func TestRunCLILockChurnLintFlagsLockStmtInLoop(t *testing.T) {
+	out := compileAndCaptureStderr(t, "lock_stmt_churn.elisa", `struct Mutex:
+    value: i64
+
+def mutex_lock(mu: Mutex&) -> i64:
+    return mu.value
+
+def churns() -> i64:
+    mu: Mutex = Mutex(1)
+    acc: mutable i64 = 0
+    for i in 0..<4:
+        lock mu as guard:
+            acc <- acc + guard + i.i64()
+    return acc
+`)
+	if !strings.Contains(out, lockChurnWarning) {
+		t.Fatalf("expected a lock-churn warning for `lock ... as` inside a loop, got:\n%s", out)
+	}
+}
+
 func TestRunCLILockChurnLintAllowsSingleMutexLock(t *testing.T) {
 	out := compileAndCaptureStderr(t, "lock_once.elisa", `def mutex_lock(mu: i64) -> i64:
     return mu
