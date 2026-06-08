@@ -193,8 +193,9 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		hasOptLevel:           hasOptLevel,
 		targetTriple:          targetTriple,
 		packedProfile:         packedProfile,
-		perfStrict:            definition.Warnings.Perf || options.perfStrict,
-		concurrencyStrict:     definition.Warnings.Concurrency || options.concurrencyStrict,
+		strictPolicy:          definition.Warnings.Strict || options.strictPolicy,
+		perfStrict:            definition.Warnings.Strict || definition.Warnings.Perf || options.perfStrict,
+		concurrencyStrict:     definition.Warnings.Strict || definition.Warnings.Concurrency || options.concurrencyStrict,
 	}, nil
 }
 func resolveProjectOptLevel(targetValue string, options projectCLIOptions) (backend.OptimizationLevel, bool, error) {
@@ -569,7 +570,7 @@ func runProjectView(project *resolvedProject, options projectCLIOptions, stdout 
 	if selected.hasOptLevel {
 		fmt.Fprintf(stdout, "Optimization: O%d\n", int(selected.optLevel))
 	}
-	fmt.Fprintf(stdout, "Warning policy: perf=%s concurrency=%s\n", enabledString(selected.perfStrict), enabledString(selected.concurrencyStrict))
+	fmt.Fprintf(stdout, "Warning policy: strict=%s perf=%s concurrency=%s\n", onOffString(selected.strictPolicy), enabledString(selected.perfStrict), enabledString(selected.concurrencyStrict))
 	fmt.Fprintf(stdout, "Include dirs:\n")
 	for _, dir := range selected.includeDirs {
 		fmt.Fprintf(stdout, "  - %s\n", dir)
@@ -693,4 +694,10 @@ func enabledString(enabled bool) string {
 		return "error"
 	}
 	return "warn"
+}
+func onOffString(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
 }

@@ -59,6 +59,7 @@ type projectCLIOptions struct {
 	strictContracts   bool
 	debugInfo         bool
 	recordTrace       bool
+	strictPolicy      bool
 	perfStrict        bool
 	concurrencyStrict bool
 }
@@ -91,6 +92,7 @@ type projectTargetDefinition struct {
 	Warnings             projectTargetWarnings `json:"warnings,omitempty"`
 }
 type projectTargetWarnings struct {
+	Strict      bool `json:"strict,omitempty"`
 	Perf        bool `json:"perf,omitempty"`
 	Concurrency bool `json:"concurrency,omitempty"`
 }
@@ -142,6 +144,7 @@ type resolvedProjectTarget struct {
 	hasOptLevel           bool
 	targetTriple          string
 	packedProfile         backend.PackedLoweringProfile
+	strictPolicy          bool
 	perfStrict            bool
 	concurrencyStrict     bool
 }
@@ -231,6 +234,7 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		optLevel:          target.optLevel,
 		debugInfo:         options.debugInfo,
 		recordTrace:       options.recordTrace,
+		strictPolicy:      target.strictPolicy,
 		perfStrict:        target.perfStrict,
 		concurrencyStrict: target.concurrencyStrict,
 	}
@@ -394,6 +398,10 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 		case arg == "-Wperf":
 			options.perfStrict = true
 		case arg == "-Wconcurrency":
+			options.concurrencyStrict = true
+		case arg == "-Wstrict":
+			options.strictPolicy = true
+			options.perfStrict = true
 			options.concurrencyStrict = true
 		case arg == "-o":
 			i++

@@ -42,13 +42,16 @@ Per-target fields:
 
 Per-target `warnings` fields:
 
+- `strict`: when `true`, enables unsafe permission enforcement,
+  progress-safety analysis, `perf`, and `concurrency` for that target
 - `perf`: when `true`, promotes performance-friction diagnostics to errors
   like `-Wperf`
 - `concurrency`: when `true`, promotes legacy raw-concurrency migration
   diagnostics to strict errors like `-Wconcurrency`
 
-These fields are escalation-only policy. CLI `-Wperf` and `-Wconcurrency`
-also enable the corresponding strictness for the current project command.
+These fields are escalation-only policy. CLI `-Wstrict`, `-Wperf`, and
+`-Wconcurrency` also enable the corresponding strictness for the current
+project command.
 
 ## Dependency manifest schema (current)
 
@@ -140,6 +143,7 @@ Each source is include-expanded with configured include directories and concaten
       "emit": "llvm",
       "run-emit": "interpret",
       "warnings": {
+        "strict": true,
         "perf": true,
         "concurrency": true
       }

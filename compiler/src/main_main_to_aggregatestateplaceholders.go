@@ -216,6 +216,7 @@ type cliOptions struct {
 	packedProfile     backend.PackedLoweringProfile
 	optLevel          backend.OptimizationLevel
 	hasOptLevel       bool
+	strictPolicy      bool
 	perfStrict        bool
 	concurrencyStrict bool
 }
@@ -289,6 +290,11 @@ func parseArgs(args []string) (cliOptions, error) {
 		case arg == "-Wconcurrency":
 			// Graduated strictness (docs/09): promote legacy raw-concurrency migration
 			// diagnostics to hard errors for strict-mode code.
+			options.concurrencyStrict = true
+		case arg == "-Wstrict":
+			// Unified strictness: turn on the shipped safety/performance proof levers together.
+			options.strictPolicy = true
+			options.perfStrict = true
 			options.concurrencyStrict = true
 		case arg == "-debug":
 			options.debug = true

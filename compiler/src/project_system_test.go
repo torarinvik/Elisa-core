@@ -940,6 +940,13 @@ func TestRunCLIProjectTargetWarningPolicyPromotesPerfAndConcurrency(t *testing.T
       "warnings": {
         "concurrency": true
       }
+    },
+    "strict": {
+      "entry": "strict.elisa",
+      "emit": "llvm",
+      "warnings": {
+        "strict": true
+      }
     }
   }
 }
@@ -966,6 +973,11 @@ def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
 def main(slot: atomic[i64]&) -> i64:
     return load(slot, MemoryOrder.SeqCst)
 `)
+	writeFixtureFile(t, filepath.Join(projectRoot, "strict.elisa"), `def read_at(xs: darray[u8], i: int) -> u8:
+    if i < xs.count:
+        return xs[i]
+    return 0
+`)
 
 	for _, tc := range []struct {
 		target string
@@ -973,6 +985,7 @@ def main(slot: atomic[i64]&) -> i64:
 	}{
 		{target: "perf", check: "`fetch_add` performs an atomic read-modify-write/compare-exchange on every iteration"},
 		{target: "concurrency", check: "strict concurrency error: `load` is legacy raw atomic surface"},
+		{target: "strict", check: "unchecked index requires"},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer

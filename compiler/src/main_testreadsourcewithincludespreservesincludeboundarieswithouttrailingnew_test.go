@@ -528,6 +528,29 @@ func TestParseArgsAcceptsConcurrencyStrictFlag(t *testing.T) {
 	}
 }
 
+func TestParseArgsAcceptsUnifiedStrictFlag(t *testing.T) {
+	options, err := parseArgs([]string{"-Wstrict", "fixture.elisa"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if !options.strictPolicy || !options.perfStrict || !options.concurrencyStrict {
+		t.Fatalf("expected -Wstrict to enable strict/perf/concurrency policy, got strict=%v perf=%v concurrency=%v", options.strictPolicy, options.perfStrict, options.concurrencyStrict)
+	}
+	semanticOptions := semanticOptionsForCLI(options)
+	if !semanticOptions.EnforceUnsafePermissions {
+		t.Fatal("expected -Wstrict to enforce unsafe permissions")
+	}
+	if !semanticOptions.EnforceProgressSafety {
+		t.Fatal("expected -Wstrict to enable progress safety analysis")
+	}
+	if !semanticOptions.EnforcePerfLints {
+		t.Fatal("expected -Wstrict to enforce performance lints")
+	}
+	if !semanticOptions.EnforceStrictConcurrency {
+		t.Fatal("expected -Wstrict to enforce strict concurrency")
+	}
+}
+
 func TestRunCLIConcurrencyStrictPromotesRawAtomicDeprecation(t *testing.T) {
 	prevSuppress, hadSuppress := os.LookupEnv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
 	_ = os.Unsetenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
@@ -574,6 +597,29 @@ def use_raw(slot: mutable atomic[i64]&) -> i64:
 	}
 	if !strings.Contains(stderr.String(), "strict concurrency error: `load` is legacy raw atomic surface") {
 		t.Fatalf("expected -Wconcurrency to promote raw atomic diagnostic, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIUnifiedStrictEnforcesUnsafePermissions(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "strict_unsafe_index.elisa")
+	src := `def read_at(xs: darray[u8], i: int) -> u8:
+    if i < xs.count:
+        return xs[i]
+    return 0
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write strict unsafe fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-Wstrict", "-emit", "semantic", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected -Wstrict semantic emit to fail for unchecked signed index\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unchecked index requires") {
+		t.Fatalf("expected -Wstrict to enforce unsafe index proof, got:\n%s", stderr.String())
 	}
 }
 

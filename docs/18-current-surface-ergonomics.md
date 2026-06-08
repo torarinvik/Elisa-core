@@ -3151,6 +3151,10 @@ Strict-concurrency migration notes:
   shape, or acquiring a mutex once per loop iteration instead of batching,
   sharding, or reducing locally; atomic RMW/CAS hot loops get the same treatment
   because they often serialize on one cache line
+- `-Wstrict` is the umbrella preset for shipped strict code: it enables unsafe
+  permission enforcement, progress-safety analysis, `-Wconcurrency`, and
+  `-Wperf` together; project targets can request the same policy with
+  `warnings.strict: true`
 
 ## Tuple-bind statements
 

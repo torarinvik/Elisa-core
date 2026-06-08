@@ -44,6 +44,7 @@ Project target resolution supports:
 - `output`
 - `target-triple`
 - `opt`
+- `warnings.strict`
 - `warnings.perf`
 - `warnings.concurrency`
 - `foreign`
@@ -72,6 +73,7 @@ Example project file shape:
       "output": "build/app.ll",
       "opt": "O0",
       "warnings": {
+        "strict": true,
         "perf": true,
         "concurrency": true
       }
@@ -119,12 +121,16 @@ documented in
 - `-link`, `-L`, and `-l` flags are appended to resolved target link flags
 - `-target-triple` overrides target triple for the current command
 - `-O0`, `-O2`, and `-O3` override target optimization for the current command
+- `-Wstrict` enables the shipped strict analysis levers together: unsafe
+  permission enforcement, progress-safety analysis, `-Wperf`, and
+  `-Wconcurrency`
 - `-Wperf` and `-Wconcurrency` promote the same warning classes as target
   `warnings.perf` and `warnings.concurrency`
 - Target warning policy can only make a build stricter: `warnings.perf: true`
   promotes performance-friction diagnostics to errors and
   `warnings.concurrency: true` promotes legacy raw-concurrency diagnostics to
   strict errors
+- `warnings.strict: true` applies the same preset as `-Wstrict` for that target
 
 ## Trust gates for hooks
 
