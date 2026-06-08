@@ -1,0 +1,79 @@
+# include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+extern dict_bench_escape(value: i64) -> i64
+
+const enum DictBenchKind:
+	Alpha
+	Beta
+	Gamma
+	Delta
+
+def dict_i64_growth_churn_impl(repeats: i64) -> i64:
+	region scratch(33554432):
+		d: mutable dict[i64, i64] = {}
+		total: mutable i64 = 0
+		n: mutable i64 = repeats * 8
+		if n < 128:
+			n <- 128
+		for i in 0..<n:
+			d.put(i, i * 3)
+		for i in 0..<n:
+			slot: i64& = get d.get(i) else return -1
+			total <- total + slot[0]
+		for i in 0..<n:
+			if i % 3 == 0:
+				if not d.remove(i):
+					return -2
+		for i in 0..<n:
+			if i % 3 == 0:
+				d.put(i, i * 5)
+		for i in 0..<n:
+			slot: i64& = get d.get(i) else return -3
+			total <- total + slot[0]
+		total <- total + d.count.i64() + d.used.i64() + d.capacity.i64()
+		return dict_bench_escape(total)
+
+def dict_cstr_lookup_impl(repeats: i64) -> i64:
+	region scratch(1048576):
+		d: mutable dict[cstr, i64] = {
+			"alpha": 11,
+			"beta": 13,
+			"gamma": 17,
+			"delta": 19,
+			"epsilon": 23,
+			"zeta": 29,
+			"eta": 31,
+			"theta": 37
+		}
+		total: mutable i64 = 0
+		for _ in 0..<repeats:
+			a: i64& = get d.get("alpha") else return -11
+			g: i64& = get d.get("gamma") else return -12
+			t: i64& = get d.get("theta") else return -13
+			total <- total + a[0] + g[0] + t[0]
+			if d.contains("missing"):
+				return -14
+		return dict_bench_escape(total)
+
+def dict_enum_bool_impl(repeats: i64) -> i64:
+	region scratch(1048576):
+		kinds: mutable dict[DictBenchKind, i64] = {
+			DictBenchKind.Alpha: 3,
+			DictBenchKind.Beta: 5,
+			DictBenchKind.Gamma: 7,
+			DictBenchKind.Delta: 11
+		}
+		flags: mutable dict[bool, i64] = {true: 13, false: 17}
+		total: mutable i64 = 0
+		for _ in 0..<repeats:
+			a: i64& = get kinds.get(DictBenchKind.Alpha) else return -21
+			d: i64& = get kinds.get(DictBenchKind.Delta) else return -22
+			t: i64& = get flags.get(true) else return -23
+			f: i64& = get flags.get(false) else return -24
+			total <- total + a[0] + d[0] + t[0] + f[0]
+			kinds.put(DictBenchKind.Beta, total)
+		return dict_bench_escape(total)
+
+export func dict_i64_growth_churn(repeats: i64) -> i64 = dict_i64_growth_churn_impl
+export func dict_cstr_lookup(repeats: i64) -> i64 = dict_cstr_lookup_impl
+export func dict_enum_bool(repeats: i64) -> i64 = dict_enum_bool_impl

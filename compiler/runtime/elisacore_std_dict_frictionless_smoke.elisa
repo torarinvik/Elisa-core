@@ -40,8 +40,9 @@ def std_dict_brace_auto_region_smoke():
 	assert slot != null
 	assert d.contains("three")
 
-# Non-cstr keys: the runtime dict find is a generic linear scan over `==`, so any key with
-# value equality works — integers, bool, const enums. Here i64 keys, with value readback.
+# Non-cstr keys: the runtime dict hashes supported key types and confirms matches with `==`, so
+# keys with deterministic hashing and value equality work — integers, bool, const enums. Here i64
+# keys, with value readback.
 const enum Suit:
 	Hearts
 	Spades
@@ -91,9 +92,15 @@ def std_dict_literal_smoke():
 def std_dict_hashtable_stress():
 	region scratch(1048576):
 		d: mutable dict[i64, i64] = {}
+		assert d.count == 0.usize()
+		assert d.used == 0.usize()
+		assert d.capacity == 0.usize()
 		n: i64 = 1500
 		for i in 0..<n:
 			d.put(i, i * 3)
+		assert d.count.i64() == n
+		assert d.used >= d.count
+		assert d.used * 4.usize() <= d.capacity * 3.usize()
 		for i in 0..<n:
 			probe: i64& = get d.get(i) else return
 			assert probe[0] == i * 3
@@ -101,6 +108,8 @@ def std_dict_hashtable_stress():
 		for i in 0..<n:
 			if i % 3 == 0:
 				assert d.remove(i)
+		assert d.count.i64() == n - (n / 3)
+		assert d.used.i64() == n
 		for i in 0..<n:
 			if i % 3 == 0:
 				assert not d.contains(i)
@@ -117,3 +126,9 @@ def std_dict_hashtable_stress():
 			else:
 				assert probe[0] == i * 3
 		assert d.count.i64() == n
+		assert d.used >= d.count
+		assert d.used * 4.usize() <= d.capacity * 3.usize()
+		d.clear()
+		assert d.count == 0.usize()
+		assert d.used == 0.usize()
+		assert d.capacity > 0.usize()

@@ -130,6 +130,38 @@ def rt_puts(value: u8&?) -> int:
     return puts(value if value != null else "") can Console.Write
 
 # ------------------------------------------------------------
+# Console printing
+# ------------------------------------------------------------
+
+const enum FileDescriptor of int:
+    Input = 0
+    Output = 1
+    Error = 2
+
+@link_name(write)
+extern runtime_write(fd: FileDescriptor, buf: void&, count: usize) -> isize effects[Console.Write]
+
+def printr(value: cstr) -> void can[Console.Write]:
+    length: usize = runtime_strlen(value)
+    if length == 0:
+        return
+    _ = runtime_write(FileDescriptor.Output, value.cast[void&], length) can Console.Write
+
+def print(value: cstr) -> void can[Console.Write]:
+    printr(value) can Console.Write
+    _ = runtime_write(FileDescriptor.Output, "\n".cast[void&], 1.usize()) can Console.Write
+
+def printr(value: dstr) -> void can[Console.Write]:
+    if value.count == 0 or value.items == null:
+        return
+    items: u8& = value.items
+    _ = runtime_write(FileDescriptor.Output, items.cast[void&], value.count) can Console.Write
+
+def print(value: dstr) -> void can[Console.Write]:
+    printr(value) can Console.Write
+    _ = runtime_write(FileDescriptor.Output, "\n".cast[void&], 1.usize()) can Console.Write
+
+# ------------------------------------------------------------
 # Fatal error handler (weak linkage)
 # ------------------------------------------------------------
 

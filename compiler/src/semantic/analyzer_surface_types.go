@@ -294,11 +294,11 @@ func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr,
 }
 
 // dictRuntimeBackedKeyType reports whether a dict key type is supported by the runtime-backed
-// dict. The runtime find is a linear scan comparing keys with `==` (arena_dict_find_index is
-// generic over K), so any type with well-defined value equality works: cstr (content equality),
-// every integral type (value equality — int/iN/uN/usize/uintptr/char/BitInt), bool, and const
-// enums (integer-backed). Floats are excluded (== is unsafe: NaN, precision). A generic K
-// (TypeParamType) is deferred — its concrete binding is re-checked at instantiation.
+// hash table. Runtime lookup hashes the key with ctx_hash_value and confirms matches with `==`,
+// so any type with deterministic hashing and well-defined value equality works: cstr (content
+// hash/equality), every integral type (value hash/equality: int/iN/uN/usize/uintptr/char/BitInt),
+// bool, and const enums (integer-backed). Floats are excluded (== is unsafe: NaN, precision).
+// A generic K (TypeParamType) is deferred — its concrete binding is re-checked at instantiation.
 func dictRuntimeBackedKeyType(keyType Type) bool {
 	stripped := StripAggregateStateType(keyType)
 	switch stripped.(type) {
