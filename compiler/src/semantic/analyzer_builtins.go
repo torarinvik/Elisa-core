@@ -159,6 +159,8 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	a.registerBuiltinStructType("DictBucket", []string{"K", "T"}, false, []builtinFieldSpec{
 		{name: "key", typ: namedTypeExpr("K", false), mutable: true},
 		{name: "value", typ: namedTypeExpr("T", false), mutable: true},
+		// Open-addressing slot state: 0=empty, 1=occupied, 2=tombstone (see collections.elisa).
+		{name: "state", typ: namedTypeExpr("u8", false), mutable: true},
 	})
 	a.registerBuiltinStructType("DynDict", []string{"K", "T"}, false, []builtinFieldSpec{
 		{name: "items", typ: refToTypeExpr(genericTypeExpr("DictBucket", namedTypeExpr("K", false), namedTypeExpr("T", false)), true), mutable: true},

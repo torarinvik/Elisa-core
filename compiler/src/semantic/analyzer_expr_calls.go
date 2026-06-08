@@ -53,6 +53,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if resultType, ok := a.analyzeBuiltinDictRegionMutationCall(expr); ok {
 		return resultType
 	}
+	if resultType, ok := a.analyzeHashBuiltinCall(expr); ok {
+		return resultType
+	}
 	if resultType, ok := a.analyzeCloneBuiltinCall(expr); ok {
 		return resultType
 	}

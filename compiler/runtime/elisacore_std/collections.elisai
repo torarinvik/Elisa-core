@@ -205,6 +205,7 @@ struct DynArrayView:
 struct DictBucket[K, T]:
     key: mutable K
     value: mutable T
+    state: mutable u8
 
 struct DynDict[K, T]:
     items: mutable DictBucket[K, T]&?
@@ -480,7 +481,13 @@ extern arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&
 
 extern arena_dict_next_capacity(min_capacity: usize) -> usize
 
+extern ctx_hash_cstr(s: cstr) -> u64
+
+extern ctx_hash_u64(value: u64) -> u64
+
 extern arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult
+
+extern arena_dict_place_fresh[K, T](m: mutable dict[K, T]&, key: K, value: T) -> void
 
 extern arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize)
 

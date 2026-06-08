@@ -19,9 +19,12 @@ struct DynArrayView:
     len: mutable usize
     elem_size: mutable usize
 
+# Open-addressing slot: `state` is 0=empty, 1=occupied, 2=tombstone (deleted, but probing
+# must continue past it). A zeroed bucket is therefore an empty slot.
 struct DictBucket[K, T]:
     key: mutable K
     value: mutable T
+    state: mutable u8
 
 struct DynDict[K, T]:
     items: mutable DictBucket[K, T]&?
@@ -928,15 +931,65 @@ def arena_dict_next_capacity(min_capacity: usize) -> usize:
             cap <- cap * 2
     return cap
 
+# Key hashing for the open-addressing dict. The `ctx_hash_value` builtin (compiler-emitted)
+# dispatches on the concrete key type after monomorphization: a cstr hashes its CONTENT via
+# ctx_hash_cstr (FNV-1a), every fixed-size scalar key (integer/bool/char/const enum) is
+# zero-extended to u64 and finalized by ctx_hash_u64 (splitmix64). Both are deterministic and
+# defined here as plain functions the builtin lowers to.
+def ctx_hash_cstr(s: cstr) -> u64:
+    # FNV-1a over the string content (self-contained so collections.elisa needs no string
+    # module). Matches hash_sview; deterministic and content-based (not pointer-based).
+    h: mutable u64 = 0xcbf29ce484222325
+    for ch in s[0:s.len]:
+        h <- h ^ ch.u64()
+        h <- h * 0x100000001b3
+    return h
+
+def ctx_hash_u64(value: u64) -> u64:
+    h: mutable u64 = value
+    h <- (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9
+    h <- (h ^ (h >> 27)) * 0x94d049bb133111eb
+    h <- h ^ (h >> 31)
+    return h
+
+# Open-addressing probe (linear probing over a power-of-2 table). Returns found=true with the
+# slot of the matching occupied entry, or found=false with the slot to insert at: the first
+# tombstone seen (slot reuse), else the terminating empty slot. O(1) expected with load < 3/4.
 def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
-    DictProbeResult(0, false) return if m.count == 0 or m.items == null
+    DictProbeResult(0, false) return if m.capacity == 0 or m.items == null
 
     assert m.items != null
     items: DictBucket[K, T]& = m.items
-    for index in 0..<m.count:
-        DictProbeResult(index, true) return if items[index].key == key
+    mask: usize = m.capacity - 1
+    slot: mutable usize = ctx_hash_value(key).usize() & mask
+    insert_slot: mutable usize = m.capacity   # sentinel: no reusable slot seen yet
+    probed: mutable usize = 0
+    trusted Unsafe.AssumeProgress:
+        while probed < m.capacity:
+            st: u8 = items[slot].state
+            if st == 0:
+                final_slot: usize = slot if insert_slot == m.capacity else insert_slot
+                return DictProbeResult(final_slot, false)
+            if st == 1 and items[slot].key == key:
+                return DictProbeResult(slot, true)
+            if st == 2 and insert_slot == m.capacity:
+                insert_slot <- slot
+            slot <- (slot + 1.usize()) & mask
+            probed <- probed + 1.usize()
+    DictProbeResult(insert_slot, false) return if insert_slot != m.capacity
+    return DictProbeResult(0, false)
 
-    return DictProbeResult(m.count, false)
+# Place (key, value) into a table that is known to have room and to not already contain `key`
+# (used by rehash). The probe terminates at an empty slot since the fresh table has no tombstones.
+def arena_dict_place_fresh[K, T](m: mutable dict[K, T]&, key: K, value: T) -> void:
+    assert m.items != null
+    items: mutable DictBucket[K, T]& = m.items
+    probe: DictProbeResult = arena_dict_find_index(m, key)
+    items[probe.index].key <- key
+    items[probe.index].value <- value
+    items[probe.index].state <- 1
+    m.count <- m.count + 1.usize()
+    m.used <- m.used + 1.usize()
 
 def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
     view: dview[DictBucket[K, T]] = DynArrayView(collections_void_from_items[DictBucket[K, T]](items), capacity, size_of(DictBucket[K, T]))
@@ -969,18 +1022,25 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         owner: mutable Arena& = m.arena if m.arena != null else a
         if m.arena == null:
             m.arena as & <- owner
+
+        old_items_opt: mutable DictBucket[K, T]&? = m.items
+        old_capacity: usize = m.capacity
+
         new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(owner, target_capacity * size_of(DictBucket[K, T])))
         arena_dict_zero_buckets(new_items, target_capacity)
 
-        if m.items != null and m.count > 0:
-            assert m.items != null
-            old_items: mutable DictBucket[K, T]& = m.items
-            for i in 0..<m.count:
-                new_items[i] <- old_items[i]
-
+        # Switch to the fresh table, then re-probe every live entry into it. Rehashing drops
+        # tombstones, so `used` is reset to the live count as entries are placed.
         m.items as & <- new_items
-        m.used <- m.count
         m.capacity <- target_capacity
+        m.count <- 0.usize()
+        m.used <- 0.usize()
+
+        if old_items_opt != null and old_capacity > 0:
+            old_items: mutable DictBucket[K, T]& = old_items_opt
+            for i in 0..<old_capacity:
+                if old_items[i].state == 1:
+                    arena_dict_place_fresh(m, old_items[i].key, old_items[i].value)
         return
 
 def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
@@ -999,29 +1059,29 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
         if m.arena == null:
             m.arena as & <- owner
 
-        probe: DictProbeResult = arena_dict_find_index(m, key)
-        if probe.found:
-            assert m.items != null
-            items: mutable DictBucket[K, T]& = m.items
-            items[probe.index].value <- value
-            return &items[probe.index].value
-
-        if m.capacity == 0 or m.count == m.capacity:
-            target_capacity: mutable usize = DICT_INIT_CAP if m.capacity == 0 else m.capacity * 2
-            if target_capacity < m.count + 1:
-                target_capacity <- m.count + 1
+        # Grow before probing when the load (occupied + tombstones) would exceed 3/4, so a probe
+        # always terminates at an empty slot. Growing rehashes and clears tombstones.
+        if m.capacity == 0 or (m.used + 1.usize()) * 4.usize() > m.capacity * 3.usize():
+            target_capacity: usize = DICT_INIT_CAP if m.capacity == 0 else m.capacity * 2
             try arena_dict_reserve(owner, m, target_capacity)
 
         assert m.items != null
         assert m.capacity > 0
 
         items: mutable DictBucket[K, T]& = m.items
-        insert_index: usize = m.count
-        items[insert_index].key <- key
-        items[insert_index].value <- value
-        m.count <- insert_index + 1
-        m.used <- m.count
-        return &items[insert_index].value
+        probe: DictProbeResult = arena_dict_find_index(m, key)
+        if probe.found:
+            items[probe.index].value <- value
+            return &items[probe.index].value
+
+        reused_tombstone: bool = items[probe.index].state == 2
+        items[probe.index].key <- key
+        items[probe.index].value <- value
+        items[probe.index].state <- 1
+        m.count <- m.count + 1.usize()
+        if not reused_tombstone:
+            m.used <- m.used + 1.usize()
+        return &items[probe.index].value
 
 def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
     can Memory.Allocate, Abort.Panic:
@@ -1093,12 +1153,11 @@ def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
 
     assert m.items != null
     items: mutable DictBucket[K, T]& = m.items
-    last_index: usize = m.count - 1
-    if probe.index != last_index:
-        items[probe.index] <- items[last_index]
-    items[last_index] <- zeroed
-    m.count <- last_index
-    m.used <- m.count
+    # Tombstone the slot (state 2): it stays non-empty so probes for entries that collided past
+    # it still reach them. `used` is unchanged; the slot is reclaimed on the next rehash.
+    items[probe.index] <- zeroed
+    items[probe.index].state <- 2
+    m.count <- m.count - 1.usize()
     return true
 
 def arena_dict_clear[K, T](m: mutable dict[K, T]&):

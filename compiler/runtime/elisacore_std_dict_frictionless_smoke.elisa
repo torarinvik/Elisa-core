@@ -65,3 +65,37 @@ def std_dict_enum_keys_smoke():
 	d.put(Suit.Spades, 2)
 	assert d.contains(Suit.Hearts)
 	assert d.contains(Suit.Spades)
+
+# Open-addressing hash table stress: many entries force repeated resize+rehash; removal
+# leaves tombstones that probing must skip; tombstones are reused on re-insert and cleared on
+# the next rehash. Validates the O(1) table end to end (collisions, growth, delete, reinsert).
+@test
+def std_dict_hashtable_stress():
+	region scratch(1048576):
+		d: mutable dict[i64, i64] = {}
+		n: i64 = 1500
+		for i in 0..<n:
+			d.put(i, i * 3)
+		for i in 0..<n:
+			probe: i64& = get d.get(i) else return
+			assert probe[0] == i * 3
+		# remove multiples of 3 (tombstones), verify membership split
+		for i in 0..<n:
+			if i % 3 == 0:
+				assert d.remove(i)
+		for i in 0..<n:
+			if i % 3 == 0:
+				assert not d.contains(i)
+			else:
+				assert d.contains(i)
+		# re-insert removed keys with new values (reuses tombstones / triggers rehash)
+		for i in 0..<n:
+			if i % 3 == 0:
+				d.put(i, i * 5)
+		for i in 0..<n:
+			probe: i64& = get d.get(i) else return
+			if i % 3 == 0:
+				assert probe[0] == i * 5
+			else:
+				assert probe[0] == i * 3
+		assert d.count.i64() == n
