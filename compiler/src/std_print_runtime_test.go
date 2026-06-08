@@ -22,9 +22,20 @@ func TestRunCLIStdPrintRuntimeSmoke(t *testing.T) {
 	}
 	src := fmt.Sprintf(`# include %q
 
+struct Label:
+	text: cstr
+
+impl Str for Label:
+	def __cast__(self: Label) -> cstr:
+		return self.text
+
 def main() -> int can[Console.Write]:
 	printr("raw") can Console.Write
 	print(" line") can Console.Write
+	print(true) can Console.Write
+	printr(false) can Console.Write
+	print(" bool") can Console.Write
+	print(Label("tagged")) can Console.Write
 	region scratch:
 		in scratch:
 			d: mutable dstr = ['d'.u8(), 'y'.u8(), 'n'.u8()]
@@ -59,6 +70,9 @@ def main() -> int can[Console.Write]:
 	stdout := string(output)
 	for _, want := range []string{
 		"raw line\n",
+		"true\n",
+		"false bool\n",
+		"tagged\n",
 		"dyn tail\n",
 		"dyn\n",
 	} {

@@ -249,3 +249,23 @@ impl Builder for BuilderTag:
 		t.Fatalf("expected static-interface spelling deprecation, got:\n%s", deprecations)
 	}
 }
+
+func TestAnalyzeProtocolCanRequireCastMethod(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "protocol_cast_requirement.elisa", `
+protocol Str:
+    def __cast__(self: Self) -> cstr
+
+struct Label:
+    text: cstr
+
+impl Str for Label:
+    def __cast__(self: Label) -> cstr:
+        return self.text
+
+def read[T: Str](value: T) -> cstr:
+    return T.__cast__(value)
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", result.Errors())
+	}
+}

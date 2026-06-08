@@ -141,6 +141,17 @@ const enum FileDescriptor of int:
 @link_name(write)
 extern runtime_write(fd: FileDescriptor, buf: void&, count: usize) -> isize effects[Console.Write]
 
+protocol Str:
+    def __cast__(self: Self) -> cstr
+
+impl Str for cstr:
+    def __cast__(self: cstr) -> cstr:
+        return self
+
+impl Str for bool:
+    def __cast__(self: bool) -> cstr:
+        return "true" if self else "false"
+
 def printr(value: cstr) -> void can[Console.Write]:
     length: usize = runtime_strlen(value)
     if length == 0:
@@ -150,6 +161,12 @@ def printr(value: cstr) -> void can[Console.Write]:
 def print(value: cstr) -> void can[Console.Write]:
     printr(value) can Console.Write
     _ = runtime_write(FileDescriptor.Output, "\n".cast[void&], 1.usize()) can Console.Write
+
+def printr[T: Str](value: T) -> void can[Console.Write]:
+    printr(T.__cast__(value)) can Console.Write
+
+def print[T: Str](value: T) -> void can[Console.Write]:
+    print(T.__cast__(value)) can Console.Write
 
 def printr(value: dstr) -> void can[Console.Write]:
     if value.count == 0 or value.items == null:
