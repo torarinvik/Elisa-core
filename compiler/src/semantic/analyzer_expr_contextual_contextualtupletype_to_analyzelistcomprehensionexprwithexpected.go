@@ -476,6 +476,10 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		if len(expr.Keys) > 0 {
 			return a.analyzeDictLiteralExpr(expr, expected)
 		}
+		if setType, ok := contextualSetLiteralType(expected); ok {
+			_ = setType
+			return a.analyzeSetLiteralExpr(expr, expected)
+		}
 		// An empty `{}` against an expected dict type is an empty (zero-initialized) dict —
 		// the dict analogue of `[]` for darray. It allocates its backing lazily on first
 		// insert, and being a literal it triggers auto-region inference (functionBodyNeedsAutoRegion)

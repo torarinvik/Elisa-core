@@ -535,6 +535,36 @@ extern arena_dict_remove__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[
 
 extern arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&)
 
+extern arena_set_find_index[T](s: set[T]&, key: T) -> DictProbeResult
+
+extern arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void
+
+extern arena_set_zero_buckets[T](items: mutable SetBucket[T]&, capacity: usize)
+
+extern arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]
+
+extern arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void error[RuntimeError]
+
+extern arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool error[RuntimeError]
+
+extern arena_set_add_or_panic[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool
+
+extern arena_set_reserve_or_panic[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void
+
+extern arena_set_contains[T](s: set[T]&, key: T) -> bool
+
+extern contains[T](s: set[T]&, key: T) -> bool
+
+extern has[T](s: set[T]&, key: T) -> bool
+
+extern arena_set_remove[T](s: mutable set[T]&, key: T) -> bool
+
+extern remove[T](s: mutable set[T]&, key: T) -> bool
+
+extern arena_set_clear[T](s: mutable set[T]&)
+
+extern clear[T](s: mutable set[T]&)
+
 extern index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]
 
 extern index_map_new[K, T](owner: mutable Arena&) -> IndexMap[K, T]

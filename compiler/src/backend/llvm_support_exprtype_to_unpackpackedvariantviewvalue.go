@@ -247,6 +247,13 @@ func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
 		}
 		return &semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{dict.Key, dict.Value}}
 	}
+	if set, ok := t.(*semantic.SetType); ok {
+		base, ok := g.result.NamedTypes["DynSet"]
+		if !ok {
+			return nil
+		}
+		return &semantic.GenericInstanceType{Name: "DynSet", Base: base, Args: []semantic.Type{set.Elem}}
+	}
 	if darray, ok := t.(*semantic.DArrayType); ok {
 		base, ok := g.result.NamedTypes["DynArray"]
 		if !ok {

@@ -258,6 +258,12 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 			return nil, fmt.Errorf("missing runtime struct DynDict")
 		}
 		return g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Key, tt.Value}})
+	case *semantic.SetType:
+		base, ok := g.result.NamedTypes["DynSet"]
+		if !ok {
+			return nil, fmt.Errorf("missing runtime struct DynSet")
+		}
+		return g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynSet", Base: base, Args: []semantic.Type{tt.Elem}})
 	case *semantic.DictEntryType:
 		dictRefType, err := g.lowerType(&semantic.RefType{Elem: tt.Dict, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true})
 		if err != nil {

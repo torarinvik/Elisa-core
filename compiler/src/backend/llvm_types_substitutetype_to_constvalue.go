@@ -121,6 +121,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		return tt
 	case *semantic.DictType:
 		return &semantic.DictType{Key: substituteType(tt.Key, subst, impls), Value: substituteType(tt.Value, subst, impls), SurfaceName: tt.SurfaceName, Region: tt.Region}
+	case *semantic.SetType:
+		return &semantic.SetType{Elem: substituteType(tt.Elem, subst, impls), SurfaceName: tt.SurfaceName, Region: tt.Region}
 	case *semantic.SViewType:
 		return &semantic.SViewType{Begin: tt.Begin, End: tt.End}
 	case *semantic.GenericInstanceType:

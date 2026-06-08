@@ -1201,6 +1201,177 @@ def arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&):
 
 
 # ------------------------------------------------------------
+# Set helpers
+# ------------------------------------------------------------
+
+def arena_set_find_index[T](s: set[T]&, key: T) -> DictProbeResult:
+    DictProbeResult(0, false) return if s.capacity == 0 or s.items == null
+
+    assert s.items != null
+    items: SetBucket[T]& = s.items
+    mask: usize = s.capacity - 1
+    slot: mutable usize = ctx_hash_value(key).usize() & mask
+    insert_slot: mutable usize = s.capacity
+    probed: mutable usize = 0
+    trusted Unsafe.AssumeProgress:
+        while probed < s.capacity:
+            st: u8 = items[slot].state
+            if st == 0:
+                final_slot: usize = slot if insert_slot == s.capacity else insert_slot
+                return DictProbeResult(final_slot, false)
+            if st == 1 and items[slot].key == key:
+                return DictProbeResult(slot, true)
+            if st == 2 and insert_slot == s.capacity:
+                insert_slot <- slot
+            slot <- (slot + 1.usize()) & mask
+            probed <- probed + 1.usize()
+    DictProbeResult(insert_slot, false) return if insert_slot != s.capacity
+    return DictProbeResult(0, false)
+
+def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
+    assert s.items != null
+    items: mutable SetBucket[T]& = s.items
+    probe: DictProbeResult = arena_set_find_index(s, key)
+    items[probe.index].key <- key
+    items[probe.index].state <- 1
+    s.count <- s.count + 1.usize()
+    s.used <- s.used + 1.usize()
+
+def arena_set_zero_buckets[T](items: mutable SetBucket[T]&, capacity: usize):
+    view: dview[SetBucket[T]] = DynArrayView(collections_void_from_items[SetBucket[T]](items), capacity, size_of(SetBucket[T]))
+    arena_da_fill(view, zeroed)
+
+def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable set[T] = zeroed
+        out.arena as & <- a
+
+        capacity: usize = arena_dict_next_capacity(initial_capacity)
+        out return if capacity == 0
+
+        items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](arena_alloc(a, capacity * size_of(SetBucket[T])))
+        arena_set_zero_buckets(items, capacity)
+
+        out.items as & <- items
+        out.capacity <- capacity
+        return out
+
+def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        target_capacity: usize = arena_dict_next_capacity(min_capacity)
+        if target_capacity == 0:
+            return
+
+        if target_capacity <= s.capacity:
+            return
+
+        owner: mutable Arena& = s.arena if s.arena != null else a
+        if s.arena == null:
+            s.arena as & <- owner
+
+        old_items_opt: mutable SetBucket[T]&? = s.items
+        old_capacity: usize = s.capacity
+
+        new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](arena_alloc(owner, target_capacity * size_of(SetBucket[T])))
+        arena_set_zero_buckets(new_items, target_capacity)
+
+        s.items as & <- new_items
+        s.capacity <- target_capacity
+        s.count <- 0.usize()
+        s.used <- 0.usize()
+
+        if old_items_opt != null and old_capacity > 0:
+            old_items: mutable SetBucket[T]& = old_items_opt
+            for i in 0..<old_capacity:
+                if old_items[i].state == 1:
+                    arena_set_place_fresh(s, old_items[i].key)
+        return
+
+def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool error[RuntimeError]:
+    can Memory.Allocate, Abort.Panic:
+        owner: mutable Arena& = s.arena if s.arena != null else a
+        if s.arena == null:
+            s.arena as & <- owner
+
+        if s.capacity == 0 or (s.used + 1.usize()) * 4.usize() > s.capacity * 3.usize():
+            target_capacity: usize = DICT_INIT_CAP if s.capacity == 0 else s.capacity * 2
+            try arena_set_reserve(owner, s, target_capacity)
+
+        assert s.items != null
+        assert s.capacity > 0
+
+        items: mutable SetBucket[T]& = s.items
+        probe: DictProbeResult = arena_set_find_index(s, key)
+        false return if probe.found
+
+        reused_tombstone: bool = items[probe.index].state == 2
+        items[probe.index].key <- key
+        items[probe.index].state <- 1
+        s.count <- s.count + 1.usize()
+        if not reused_tombstone:
+            s.used <- s.used + 1.usize()
+        return true
+
+def arena_set_add_or_panic[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool:
+    can Memory.Allocate, Abort.Panic:
+        catch arena_set_add(a, s, key):
+            inserted:
+                return inserted
+            error e:
+                panic("set add: allocation failed")
+
+def arena_set_reserve_or_panic[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        catch arena_set_reserve(a, s, min_capacity):
+            ok:
+                return
+            error e:
+                panic("set reserve: allocation failed")
+
+def arena_set_contains[T](s: set[T]&, key: T) -> bool:
+    false return if s.count == 0 or s.items == null
+    probe: DictProbeResult = arena_set_find_index(s, key)
+    return probe.found
+
+def contains[T](s: set[T]&, key: T) -> bool:
+    return arena_set_contains[T](s, key)
+
+def has[T](s: set[T]&, key: T) -> bool:
+    return arena_set_contains[T](s, key)
+
+def arena_set_remove[T](s: mutable set[T]&, key: T) -> bool:
+    false return if s.count == 0 or s.items == null
+
+    probe: DictProbeResult = arena_set_find_index(s, key)
+    false return if not probe.found
+
+    assert s.items != null
+    items: mutable SetBucket[T]& = s.items
+    items[probe.index] <- zeroed
+    items[probe.index].state <- 2
+    s.count <- s.count - 1.usize()
+    return true
+
+def remove[T](s: mutable set[T]&, key: T) -> bool:
+    return arena_set_remove[T](s, key)
+
+def arena_set_clear[T](s: mutable set[T]&):
+    if s.items == null or s.capacity == 0:
+        s.count <- 0
+        s.used <- 0
+        return
+
+    assert s.items != null
+    items: mutable SetBucket[T]& = s.items
+    arena_set_zero_buckets(items, s.capacity)
+    s.count <- 0
+    s.used <- 0
+
+def clear[T](s: mutable set[T]&):
+    arena_set_clear[T](s)
+
+
+# ------------------------------------------------------------
 # Ordered index maps
 # ------------------------------------------------------------
 

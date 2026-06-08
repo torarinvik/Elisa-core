@@ -210,6 +210,12 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			return invalidType
 		}
 		return a.resolveDictType(expr.TypeArgs[0], expr.TypeArgs[1], "dict", expr.Region)
+	case "set":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "set expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return a.resolveSetType(expr.TypeArgs[0], "set", expr.Region)
 	case "str":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			a.errorf(expr.Pos(), "str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -293,6 +299,18 @@ func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr,
 	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName, Region: region}
 }
 
+func (a *Analyzer) resolveSetType(elemExpr ast.TypeExpr, surfaceName string, region string) Type {
+	elemType := a.resolveType(elemExpr)
+	if IsInvalidType(elemType) {
+		return invalidType
+	}
+	if a.containsAffineHandleValues(elemType, map[string]bool{}) {
+		a.errorf(elemExpr.Pos(), "set elements cannot contain linear handles, got %s", elemType)
+		return invalidType
+	}
+	return &SetType{Elem: elemType, SurfaceName: surfaceName, Region: region}
+}
+
 // dictRuntimeBackedKeyType reports whether a dict key type is supported by the runtime-backed
 // hash table. Runtime lookup hashes the key with ctx_hash_value and confirms matches with `==`,
 // so any type with deterministic hashing and well-defined value equality works: cstr (content
@@ -310,4 +328,8 @@ func dictRuntimeBackedKeyType(keyType Type) bool {
 
 func dictSupportsRuntimeBackedOps(dictType *DictType) bool {
 	return dictType != nil && dictRuntimeBackedKeyType(dictType.Key)
+}
+
+func setSupportsRuntimeBackedOps(setType *SetType) bool {
+	return setType != nil && dictRuntimeBackedKeyType(setType.Elem)
 }

@@ -715,7 +715,7 @@ func isRegionlessContainerType(typ ast.TypeExpr) bool {
 		return false
 	}
 	switch bt.Name {
-	case "darray", "dict", "dstr":
+	case "darray", "dict", "set", "dstr":
 		return bt.Region == ""
 	}
 	return false

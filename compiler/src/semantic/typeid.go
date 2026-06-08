@@ -210,6 +210,11 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.Key, active, nextCycleID) || !appendTypeIDKey(b, tt.Value, active, nextCycleID) {
 			return false
 		}
+	case *SetType:
+		appendKeyTag(b, "set")
+		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
+			return false
+		}
 	case *DictEntryType:
 		appendKeyTag(b, "dictentry")
 		appendKeyBool(b, tt.Mutable)

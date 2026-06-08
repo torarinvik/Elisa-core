@@ -1,0 +1,64 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+@test
+def std_set_literal_and_methods_smoke():
+	s: mutable set[i64] = {1, 2, 3, 2}
+	assert s.count.i64() == 3
+	assert s.contains(1)
+	assert s.has(2)
+	assert 2 in s
+	assert not s.contains(4)
+	assert not s.add(2)
+	assert s.add(4)
+	assert s.count.i64() == 4
+	assert s.remove(3)
+	assert not s.remove(3)
+	assert not s.contains(3)
+	assert 3 not in s
+	s.reserve(64)
+	assert s.capacity >= 64.usize()
+	s.clear()
+	assert s.count == 0.usize()
+	assert s.used == 0.usize()
+	assert not s.contains(1)
+
+const enum Suit:
+	Hearts
+	Spades
+	Clubs
+
+@test
+def std_set_enum_keys_smoke():
+	s: mutable set[Suit] = {Suit.Hearts, Suit.Spades}
+	assert s.contains(Suit.Hearts)
+	assert s.contains(Suit.Spades)
+	assert not s.contains(Suit.Clubs)
+
+@test
+def std_set_hashtable_stress():
+	region scratch(1048576):
+		s: mutable set[i64] = {}
+		n: i64 = 1500
+		for i in 0..<n:
+			assert s.add(i)
+		assert s.count.i64() == n
+		assert s.used >= s.count
+		assert s.used * 4.usize() <= s.capacity * 3.usize()
+		for i in 0..<n:
+			assert s.contains(i)
+		for i in 0..<n:
+			if i % 3 == 0:
+				assert s.remove(i)
+		assert s.count.i64() == n - (n / 3)
+		assert s.used.i64() == n
+		for i in 0..<n:
+			if i % 3 == 0:
+				assert not s.contains(i)
+			else:
+				assert s.contains(i)
+		for i in 0..<n:
+			if i % 3 == 0:
+				assert s.add(i)
+		assert s.count.i64() == n
+		assert s.used >= s.count
+		assert s.used * 4.usize() <= s.capacity * 3.usize()

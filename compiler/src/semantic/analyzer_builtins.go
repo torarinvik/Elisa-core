@@ -169,6 +169,17 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "arena", typ: refTypeExpr("Arena", true), mutable: true},
 	})
+	a.registerBuiltinStructType("SetBucket", []string{"T"}, false, []builtinFieldSpec{
+		{name: "key", typ: namedTypeExpr("T", false), mutable: true},
+		{name: "state", typ: namedTypeExpr("u8", false), mutable: true},
+	})
+	a.registerBuiltinStructType("DynSet", []string{"T"}, false, []builtinFieldSpec{
+		{name: "items", typ: refToTypeExpr(genericTypeExpr("SetBucket", namedTypeExpr("T", false)), true), mutable: true},
+		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "used", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "arena", typ: refTypeExpr("Arena", true), mutable: true},
+	})
 }
 
 type builtinFieldSpec struct {

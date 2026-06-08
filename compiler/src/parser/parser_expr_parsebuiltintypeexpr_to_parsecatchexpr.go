@@ -53,6 +53,11 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 		value := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
 		return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{key, value}}
+	case "set":
+		p.advance()
+		elem := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}}
 	case "cstr":
 		p.advance()
 		size := p.parseExpr()

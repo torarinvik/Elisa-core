@@ -150,6 +150,11 @@ func diagnosticTypeString(t Type) string {
 			return "<invalid-dict>"
 		}
 		return fmt.Sprintf("dict[%s, %s]", diagnosticTypeString(tt.Key), diagnosticTypeString(tt.Value))
+	case *SetType:
+		if tt == nil || tt.Elem == nil {
+			return "<invalid-set>"
+		}
+		return fmt.Sprintf("set[%s]", diagnosticTypeString(tt.Elem))
 	case *DictEntryType:
 		if tt == nil || tt.Dict == nil {
 			return "<invalid-dict-entry>"
@@ -269,6 +274,9 @@ func diagnosticRuntimeCarrierTypeString(t Type) (string, bool) {
 		if tt.Name == "DynDict" {
 			return "dict[K, V] (runtime carrier)", true
 		}
+		if tt.Name == "DynSet" {
+			return "set[T] (runtime carrier)", true
+		}
 		return runtimeCarrierTypeDisplayReplacement(tt.Name)
 	case *GenericInstanceType:
 		switch tt.Name {
@@ -287,6 +295,16 @@ func diagnosticRuntimeCarrierTypeString(t Type) (string, bool) {
 				return dictText + " (runtime carrier)", true
 			}
 			return "dict[K, V] (runtime carrier)", true
+		case "DynSet":
+			if len(tt.Args) == 1 {
+				setText := fmt.Sprintf("set[%s]", diagnosticTypeString(tt.Args[0]))
+				setType := &SetType{Elem: tt.Args[0]}
+				if setSupportsRuntimeBackedOps(setType) {
+					return setText, true
+				}
+				return setText + " (runtime carrier)", true
+			}
+			return "set[T] (runtime carrier)", true
 		default:
 			return "", false
 		}

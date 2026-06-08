@@ -276,6 +276,12 @@ type DictType struct {
 	Region string
 }
 
+type SetType struct {
+	Elem        Type
+	SurfaceName string
+	Region      string
+}
+
 type DictEntryType struct {
 	Dict    *DictType
 	Mutable bool
@@ -607,27 +613,27 @@ const (
 )
 
 type FuncType struct {
-	Name                         string
-	TypeParams                   []string
-	RegionParams                 []string
-	PermissionParams             []string
-	GenericParams                []ast.GenericParam
-	UsedPermissionParams         []string
-	DeclaredPermissionRefs       []ast.PermissionRef
-	DeclaredPermissions          []string
-	PermissionRefs               []ast.PermissionRef
-	Permissions                  []string
-	ShapeParams                  []string
-	FreshReturnShapeParams       []string
-	Static                       bool
+	Name                   string
+	TypeParams             []string
+	RegionParams           []string
+	PermissionParams       []string
+	GenericParams          []ast.GenericParam
+	UsedPermissionParams   []string
+	DeclaredPermissionRefs []ast.PermissionRef
+	DeclaredPermissions    []string
+	PermissionRefs         []ast.PermissionRef
+	Permissions            []string
+	ShapeParams            []string
+	FreshReturnShapeParams []string
+	Static                 bool
 	// CapturesThreadUnsafe marks a closure that captures a value which is not safe to
 	// share across threads (a non-static mutable ref, a darray/dict, etc.). Closures
 	// capture by value, so capturing such a *reference* copies the pointer and shares its
 	// referent — passing the closure to a thread is therefore a data race unless gated by
 	// Unsafe.ThreadShare. The flag flows into threadTransferRequiresUnsafeThreadShare.
-	CapturesThreadUnsafe         bool
-	InlineMode                   FuncInlineMode
-	HasInlineMode                bool
+	CapturesThreadUnsafe bool
+	InlineMode           FuncInlineMode
+	HasInlineMode        bool
 	// FastMath opts the function body into full fast-math FP semantics (reassoc + nnan + ninf + nsz +
 	// arcp + contract), matching clang -ffast-math. Set by @fast_math. Enables FP reassociation and
 	// thus auto-vectorization of reduction/elementwise loops. Off by default; opt-in only because it

@@ -117,6 +117,18 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 			return s.emitDictLiteralExpr(expr, dictType)
 		}
 	}
+	if expr.Brace && len(expr.Keys) == 0 {
+		if setType, ok := s.setLiteralTargetType(expr, expected); ok {
+			if len(expr.Elems) == 0 {
+				zero, err := s.zeroValue(setType)
+				if err != nil {
+					return nil, nil, err
+				}
+				return zero, setType, nil
+			}
+			return s.emitSetLiteralExpr(expr, setType)
+		}
+	}
 	// An empty `{}` against a dict type is an empty (zero-initialized) dict — the dict analogue
 	// of an empty `[]` darray literal. Lower it to the dict's zero value (a zeroed header); the
 	// backing allocates lazily on the first insert.
@@ -486,6 +498,7 @@ func (s *functionState) listLiteralTargetArrayType(expr *ast.ListLitExpr, expect
 	}
 	return actualArray, true, nil
 }
+
 // dictLiteralTargetType resolves the dict type an empty `{}` literal should lower to, preferring
 // the expected (target) type and falling back to the literal's own resolved type. Mirrors
 // listLiteralTargetDArrayType for the dict analogue of `[]`.
@@ -498,6 +511,17 @@ func (s *functionState) dictLiteralTargetType(expr *ast.ListLitExpr, expected se
 	}
 	return nil, false
 }
+
+func (s *functionState) setLiteralTargetType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.SetType, bool) {
+	if setType, ok := semantic.StripAggregateStateType(expected).(*semantic.SetType); ok && setType != nil {
+		return setType, true
+	}
+	if setType, ok := semantic.StripAggregateStateType(s.exprType(expr)).(*semantic.SetType); ok && setType != nil {
+		return setType, true
+	}
+	return nil, false
+}
+
 func (s *functionState) listLiteralTargetDArrayType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.DArrayType, error) {
 	if expectedDArray, ok := expected.(*semantic.DArrayType); ok {
 		return expectedDArray, nil
@@ -655,6 +679,26 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	}
 }
 func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if setType, _, ok := builtinSetReceiverType(s.exprType(expr.Right)); ok && setType != nil {
+		setValue, setType, err := s.emitBuiltinSetReceiverValue(expr.Right, s.exprType(expr.Right))
+		if err != nil {
+			return nil, nil, err
+		}
+		leftValue, _, err := s.emitExpr(expr.Left, setType.Elem)
+		if err != nil {
+			return nil, nil, err
+		}
+		callee, helperType, err := s.ensureRuntimeFunction("arena_set_contains", map[string]semantic.Type{"T": setType.Elem})
+		if err != nil {
+			return nil, nil, err
+		}
+		llvmType, err := s.g.lowerFunctionType(helperType)
+		if err != nil {
+			return nil, nil, err
+		}
+		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{setValue, leftValue}, "set.in")
+		return value, s.g.result.NamedTypes["bool"], nil
+	}
 	list, ok := s.membershipCandidateList(expr.Right)
 	if !ok || list == nil {
 		return nil, nil, fmt.Errorf("membership operator requires a list literal or tokenset on the right-hand side")

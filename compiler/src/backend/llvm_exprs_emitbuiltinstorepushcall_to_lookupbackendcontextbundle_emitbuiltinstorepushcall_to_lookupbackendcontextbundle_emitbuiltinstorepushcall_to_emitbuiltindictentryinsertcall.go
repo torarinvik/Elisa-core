@@ -730,3 +730,84 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 	value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, resultName)
 	return value, builtinDictEntryValueRefType(dictType), true, nil
 }
+
+func (s *functionState) emitBuiltinSetReceiverValue(receiver ast.Expr, receiverType semantic.Type) (C.LLVMValueRef, *semantic.SetType, error) {
+	setType, receiverRefType, ok := builtinSetReceiverType(receiverType)
+	if !ok || setType == nil {
+		return nil, nil, fmt.Errorf("set receiver is not a set")
+	}
+	if receiverRefType != nil {
+		value, _, err := s.emitExpr(receiver, receiverRefType)
+		return value, setType, err
+	}
+	ptr, _, err := s.emitAddress(receiver)
+	return ptr, setType, err
+}
+
+func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	method := fieldExpr.Field
+	if method != "add" && method != "insert" && method != "reserve" {
+		return nil, nil, false, nil
+	}
+	setType, _, ok := builtinSetReceiverType(s.exprType(fieldExpr.Object))
+	if !ok || setType == nil {
+		return nil, nil, false, nil
+	}
+	expectedArgs := 1
+	if len(expr.Args) != expectedArgs {
+		return nil, nil, true, fmt.Errorf("set %s expects %d arguments, got %d", method, expectedArgs, len(expr.Args))
+	}
+	owner, ok := s.regionArenaOwner(setType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
+		return nil, nil, true, fmt.Errorf("set %s requires an active in <arena>: scope", method)
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "set."+method+".owner.arena")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		owner.arenaRef = arenaRef
+	}
+	setValue, setType, err := s.emitBuiltinSetReceiverValue(fieldExpr.Object, s.exprType(fieldExpr.Object))
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if method == "reserve" {
+		callee, helperType, err := s.ensureRuntimeFunction(s.dictMutationHelperName("arena_set_reserve"), map[string]semantic.Type{"T": setType.Elem})
+		if err != nil {
+			return nil, nil, true, err
+		}
+		llvmType, err := s.g.lowerFunctionType(helperType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		usizeType := s.g.result.NamedTypes["usize"]
+		minCapacity, _, err := s.emitExpr(expr.Args[0], usizeType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, setValue, minCapacity}, "")
+		return value, s.g.result.NamedTypes["void"], true, nil
+	}
+	elemValue, _, err := s.emitExpr(expr.Args[0], setType.Elem)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	callee, helperType, err := s.ensureRuntimeFunction(s.dictMutationHelperName("arena_set_add"), map[string]semantic.Type{"T": setType.Elem})
+	if err != nil {
+		return nil, nil, true, err
+	}
+	llvmType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, setValue, elemValue}, "set.add.result")
+	return value, s.g.result.NamedTypes["bool"], true, nil
+}

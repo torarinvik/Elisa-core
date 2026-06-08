@@ -268,6 +268,16 @@ func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
 	list, ok := a.membershipCandidateList(expr.Right)
 	if !ok || list == nil {
 		right := a.analyzeExpr(expr.Right)
+		if setType, ok := StripAggregateStateType(right).(*SetType); ok && setType != nil {
+			if !a.ensureRuntimeBackedSetSupported(expr.Right.Pos(), setType) {
+				return resultType
+			}
+			if !AssignableTo(setType.Elem, left) {
+				a.errorf(expr.Left.Pos(), "set membership expects %s, got %s", setType.Elem, left)
+			}
+			a.exprTypes[expr.Right] = right
+			return resultType
+		}
 		if _, isPackedStore := right.(*PackedEnumStoreType); isPackedStore {
 			a.errorf(expr.Right.Pos(), "if pattern binder requires `as Enum.Variant(...)` after store expression")
 			return resultType
@@ -587,6 +597,7 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	}
 	return a.namedTypes["bool"]
 }
+
 // resolveEnumCategoryIsTarget recognizes a bare enum-category target in an `is` test (docs/77): the
 // target is a plain type name (no `.Variant`) that resolves to an enum. Returns that enum.
 func (a *Analyzer) resolveEnumCategoryIsTarget(expr ast.Expr) (*EnumType, bool) {

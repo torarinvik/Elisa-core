@@ -90,6 +90,9 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *DictType:
 		a, ok := actual.(*DictType)
 		return ok && matchTypePattern(p.Key, a.Key) && matchTypePattern(p.Value, a.Value)
+	case *SetType:
+		a, ok := actual.(*SetType)
+		return ok && matchTypePattern(p.Elem, a.Elem)
 	case *DictEntryType:
 		a, ok := actual.(*DictEntryType)
 		return ok && p.Mutable == a.Mutable && matchTypePattern(p.Dict, a.Dict)

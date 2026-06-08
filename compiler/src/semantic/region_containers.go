@@ -41,6 +41,12 @@ func (a *Analyzer) stampContainerRegion(t Type) Type {
 			cp.Region = region
 			return &cp
 		}
+	case *SetType:
+		if c != nil && c.Region == "" {
+			cp := *c
+			cp.Region = region
+			return &cp
+		}
 	}
 	return t
 }
@@ -59,6 +65,11 @@ func containerRegion(t Type) string {
 			}
 			return tt.Region
 		case *DictType:
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
+		case *SetType:
 			if tt == nil {
 				return ""
 			}
@@ -242,6 +253,11 @@ func containerOrEntryRegion(t Type) string {
 			}
 			return tt.Region
 		case *DictType:
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
+		case *SetType:
 			if tt == nil {
 				return ""
 			}

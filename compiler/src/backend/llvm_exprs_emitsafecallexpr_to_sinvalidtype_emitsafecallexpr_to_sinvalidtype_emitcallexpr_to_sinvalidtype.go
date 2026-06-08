@@ -222,6 +222,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinDictRegionMutationCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinSetRegionMutationCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {
 		return value, actualType, err
 	}
@@ -693,6 +696,25 @@ func builtinDictReceiverType(t semantic.Type) (*semantic.DictType, *semantic.Ref
 	}
 	return dictType, refType, true
 }
+
+func builtinSetReceiverType(t semantic.Type) (*semantic.SetType, *semantic.RefType, bool) {
+	if t == nil {
+		return nil, nil, false
+	}
+	if setType, ok := t.(*semantic.SetType); ok && setType != nil {
+		return setType, nil, true
+	}
+	refType, ok := t.(*semantic.RefType)
+	if !ok || refType == nil || refType.Elem == nil {
+		return nil, nil, false
+	}
+	setType, ok := refType.Elem.(*semantic.SetType)
+	if !ok || setType == nil {
+		return nil, nil, false
+	}
+	return setType, refType, true
+}
+
 func builtinDictEntryValueRefType(dictType *semantic.DictType) *semantic.RefType {
 	if dictType == nil {
 		return &semantic.RefType{Elem: sInvalidType(), Mutable: true, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true}

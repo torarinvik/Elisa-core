@@ -192,6 +192,9 @@ func SameType(a, b Type) bool {
 	case *DictType:
 		tb, ok := b.(*DictType)
 		return ok && SameType(ta.Key, tb.Key) && SameType(ta.Value, tb.Value)
+	case *SetType:
+		tb, ok := b.(*SetType)
+		return ok && SameType(ta.Elem, tb.Elem)
 	case *DictEntryType:
 		tb, ok := b.(*DictEntryType)
 		return ok && ta.Mutable == tb.Mutable && SameType(ta.Dict, tb.Dict)

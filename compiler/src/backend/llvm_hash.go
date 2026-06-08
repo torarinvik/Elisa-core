@@ -127,3 +127,44 @@ func (s *functionState) emitDictLiteralExpr(expr *ast.ListLitExpr, dictType *sem
 	}
 	return C.LLVMBuildLoad2(s.builder, dictLLVM, dictPtr, cStringFree("dictlit.value")), dictType, nil
 }
+
+func (s *functionState) emitSetLiteralExpr(expr *ast.ListLitExpr, setType *semantic.SetType) (C.LLVMValueRef, semantic.Type, error) {
+	setPtr, err := s.createEntryAllocaZeroed("setlit", setType)
+	if err != nil {
+		return nil, nil, err
+	}
+	owner, ok := s.regionArenaOwner(setType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
+		return nil, nil, fmt.Errorf("set literal requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "setlit.owner.arena")
+		if err != nil {
+			return nil, nil, err
+		}
+		owner.arenaRef = arenaRef
+	}
+	addCallee, addType, err := s.ensureRuntimeFunction(s.dictMutationHelperName("arena_set_add"), map[string]semantic.Type{"T": setType.Elem})
+	if err != nil {
+		return nil, nil, err
+	}
+	addLLVM, err := s.g.lowerFunctionType(addType)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, elem := range expr.Elems {
+		elemValue, _, err := s.emitExpr(elem, setType.Elem)
+		if err != nil {
+			return nil, nil, err
+		}
+		s.buildCall(addLLVM, addCallee, []C.LLVMValueRef{owner.arenaRef, setPtr, elemValue}, "setlit.add")
+	}
+	setLLVM, err := s.g.lowerType(setType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return C.LLVMBuildLoad2(s.builder, setLLVM, setPtr, cStringFree("setlit.value")), setType, nil
+}

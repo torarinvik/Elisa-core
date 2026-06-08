@@ -102,6 +102,12 @@ func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
 				astTypeExprForBuiltinMethodRewrite(pos, t.Value),
 			},
 		}
+	case *SetType:
+		return &ast.BuiltinTypeExpr{
+			Position: pos,
+			Name:     "set",
+			TypeArgs: []ast.TypeExpr{astTypeExprForBuiltinMethodRewrite(pos, t.Elem)},
+		}
 	default:
 		return &ast.NamedType{Position: pos, Name: typ.String()}
 	}

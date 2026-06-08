@@ -86,6 +86,12 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		}
 		return Field{}, false
 	}
+	if setType, ok := objType.(*SetType); ok && !setSupportsRuntimeBackedOps(setType) {
+		if emitDiagnostics {
+			a.errorf(pos, "%s", runtimeBackedSetSupportDiagnostic(setType))
+		}
+		return Field{}, false
+	}
 	if field, ok := packedStoreSyntheticField(objType, fieldName); ok {
 		return field, true
 	}
@@ -243,6 +249,16 @@ func (a *Analyzer) runtimeBackedStructType(t Type) Type {
 			return nil
 		}
 		return &GenericInstanceType{Name: "DynDict", Base: base, Args: []Type{dict.Key, dict.Value}}
+	}
+	if set, ok := t.(*SetType); ok {
+		if !setSupportsRuntimeBackedOps(set) {
+			return nil
+		}
+		base, ok := a.namedTypes["DynSet"]
+		if !ok {
+			return nil
+		}
+		return &GenericInstanceType{Name: "DynSet", Base: base, Args: []Type{set.Elem}}
 	}
 	darray, ok := t.(*DArrayType)
 	if !ok {

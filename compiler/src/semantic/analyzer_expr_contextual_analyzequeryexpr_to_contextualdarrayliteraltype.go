@@ -150,6 +150,13 @@ func contextualDictLiteralType(expected Type) (*DictType, bool) {
 	return nil, false
 }
 
+func contextualSetLiteralType(expected Type) (*SetType, bool) {
+	if setType, ok := StripAggregateStateType(expected).(*SetType); ok && setType != nil {
+		return setType, true
+	}
+	return nil, false
+}
+
 // analyzeDictLiteralExpr type-checks a `{k1: v1, k2: v2, ...}` dict literal. The dict type is
 // taken from the expected type when present, else inferred from the first pair; every key is
 // checked assignable to the key type and every value to the value type. The key type must be
@@ -198,4 +205,37 @@ func (a *Analyzer) analyzeDictLiteralExpr(expr *ast.ListLitExpr, expected Type) 
 	}
 	a.recordAnalyzedExprType(expr, dictType)
 	return dictType
+}
+
+func (a *Analyzer) analyzeSetLiteralExpr(expr *ast.ListLitExpr, expected Type) Type {
+	setType, _ := contextualSetLiteralType(expected)
+	var elemType Type
+	if setType != nil {
+		elemType = setType.Elem
+	}
+	for i, elem := range expr.Elems {
+		et := a.analyzeValueExpr(elem, elemType)
+		if elemType == nil {
+			elemType = et
+		} else if !IsInvalidType(et) && !AssignableTo(elemType, et) {
+			a.errorf(elem.Pos(), "set literal element %d has type %s, expected %s", i, diagnosticTypeString(et), diagnosticTypeString(elemType))
+		}
+	}
+	if elemType == nil || IsInvalidType(elemType) {
+		a.exprTypes[expr] = invalidType
+		return invalidType
+	}
+	if setType == nil {
+		setType = &SetType{Elem: elemType, SurfaceName: "set"}
+	}
+	if !dictRuntimeBackedKeyType(setType.Elem) {
+		a.errorf(expr.Pos(), "%s", runtimeBackedSetSupportDiagnostic(setType))
+		a.exprTypes[expr] = invalidType
+		return invalidType
+	}
+	if !a.regionAvailableForContainer(setType) && a.currentAllocExpr == nil && a.currentTreeAllocOwner.Kind == treeAllocOwnerNone {
+		a.errorf(expr.Pos(), "set literal requires an active in <arena>: scope")
+	}
+	a.recordAnalyzedExprType(expr, setType)
+	return setType
 }

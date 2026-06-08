@@ -155,6 +155,16 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 			dictRegion = bound
 		}
 		return &DictType{Key: key, Value: value, SurfaceName: n.SurfaceName, Region: dictRegion}
+	case *SetType:
+		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
+		if IsInvalidType(elem) {
+			return invalidType
+		}
+		setRegion := n.Region
+		if bound, ok := regionBindings[n.Region]; ok {
+			setRegion = bound
+		}
+		return &SetType{Elem: elem, SurfaceName: n.SurfaceName, Region: setRegion}
 	case *SViewType:
 		sviewRegion := n.Region
 		if bound, ok := regionBindings[n.Region]; ok {

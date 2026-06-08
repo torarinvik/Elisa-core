@@ -36,6 +36,7 @@ func (*StoreRowsViewType) isType()      {}
 func (*StoreRowViewType) isType()       {}
 func (*DStrType) isType()               {}
 func (*DictType) isType()               {}
+func (*SetType) isType()                {}
 func (*DictEntryType) isType()          {}
 func (*SViewType) isType()              {}
 func (*PackedEnumStoreType) isType()    {}
@@ -454,6 +455,12 @@ func (t *DictType) String() string {
 		return "<invalid-dict>"
 	}
 	return fmt.Sprintf("dict[%s, %s]", t.Key.String(), t.Value.String())
+}
+func (t *SetType) String() string {
+	if t == nil || t.Elem == nil {
+		return "<invalid-set>"
+	}
+	return fmt.Sprintf("set[%s]", t.Elem.String())
 }
 func (t *DictEntryType) String() string {
 	if t == nil || t.Dict == nil {

@@ -38,6 +38,12 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	case builtinDictMethodRewriteInvalid:
 		return invalidType
 	}
+	switch a.rewriteBuiltinSetMethodCall(expr) {
+	case builtinDictMethodRewriteApplied:
+		return a.analyzeCallExpr(expr)
+	case builtinDictMethodRewriteInvalid:
+		return invalidType
+	}
 	if resultType, ok := a.analyzeConstReflectionCall(expr); ok {
 		return resultType
 	}
@@ -51,6 +57,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		return resultType
 	}
 	if resultType, ok := a.analyzeBuiltinDictRegionMutationCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinSetRegionMutationCall(expr); ok {
 		return resultType
 	}
 	if resultType, ok := a.analyzeHashBuiltinCall(expr); ok {
