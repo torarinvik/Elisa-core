@@ -34,6 +34,17 @@ def slice[T](da: mutable darray[T]&) -> Slice[T]:
 def len[T](s: Slice[T]) -> usize:
 	return s.count
 
+# The sub-band `s[start:end]` (clamped to the slice). Used by `parallel for band in s:` to hand
+# each worker its disjoint [start, end) chunk; the bands tile the slice with no overlap, so
+# writing each band on its own worker is race-free by construction.
+def slice_band[T](s: Slice[T], start: usize, end: usize) -> Slice[T]:
+	lo: usize = start if start < s.count else s.count
+	hi: usize = end if end < s.count else s.count
+	if hi <= lo:
+		return Slice[T] { base: s.base, count: 0.usize() }
+	p: mutable T& = s.base.cast[mutable T&]
+	return Slice[T] { base: (&p[lo]).cast[uintptr], count: hi - lo }
+
 # The idx-th of `nbands` disjoint, contiguous sub-bands (ceil split). Bands tile the
 # slice with no overlap, so handing band k to worker k is race-free for writes.
 def split[T](s: Slice[T], nbands: usize, idx: usize) -> Slice[T]:

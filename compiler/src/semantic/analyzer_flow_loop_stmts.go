@@ -591,13 +591,20 @@ func (a *Analyzer) analyzeLetDestructureStmt(stmt *ast.LetDestructureStmt) {
 
 func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
-	itemType, ok := parallelForItemType(sourceType)
-	if !ok {
-		a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType)
-		itemType = invalidType
-	}
-	if ok {
-		if storeType, isStore := sourceType.(*PackedEnumStoreType); isStore {
+	// Band mode: a mutable Slice[T] source binds the loop variable to a disjoint Slice[T] band
+	// (one per worker), so writes through the band are race-free by construction (the bands tile
+	// the slice with no overlap). This is the first-class data-parallel mutable loop.
+	bandElement, bandMode := sliceSourceElementType(sourceType)
+	var itemType Type
+	if bandMode {
+		itemType = sourceType // the loop variable is a Slice[T] band
+	} else {
+		var ok bool
+		itemType, ok = parallelForItemType(sourceType)
+		if !ok {
+			a.errorf(stmt.Source.Pos(), "parallel for requires a mutable Slice[T] (disjoint bands), a frozen packed store, or a readonly dense view, got %s", sourceType)
+			itemType = invalidType
+		} else if storeType, isStore := sourceType.(*PackedEnumStoreType); isStore {
 			if !IsFrozenPackedEnumStoreType(storeType) {
 				a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType)
 			}
@@ -653,10 +660,21 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 		a.parallelForInfo = map[*ast.ParallelForStmt]*ParallelForInfo{}
 	}
 	a.parallelForInfo[stmt] = &ParallelForInfo{
-		SourceType: sourceType,
-		ItemType:   itemType,
-		Captures:   append([]string(nil), captureCollector.captureOrder...),
+		SourceType:  sourceType,
+		ItemType:    itemType,
+		Captures:    append([]string(nil), captureCollector.captureOrder...),
+		BandMode:    bandMode,
+		BandElement: bandElement,
 	}
+}
+
+// sliceSourceElementType reports whether t is a Slice[T] (the runtime data-parallel band view)
+// and returns its element type T. Used to drive parallel-for band mode.
+func sliceSourceElementType(t Type) (Type, bool) {
+	if gi, ok := StripAggregateStateType(t).(*GenericInstanceType); ok && gi != nil && gi.Name == "Slice" && len(gi.Args) == 1 {
+		return gi.Args[0], true
+	}
+	return nil, false
 }
 
 func parallelForItemType(t Type) (Type, bool) {

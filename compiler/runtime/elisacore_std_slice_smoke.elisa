@@ -101,3 +101,27 @@ def std_slice_native_smoke():
 		assert ys[0.usize()] == 1.0
 		assert ys[500.usize()] == 1001.0
 		assert ys[999.usize()] == 1999.0
+
+# `parallel for band in s:` — the first-class data-parallel mutable loop. Each worker binds the
+# loop variable to a disjoint Slice[T] band (one per worker) and runs the body once; writes go
+# through the shared backing and disjointness makes it race-free. Captures are validated for
+# thread-shareability (a darray capture is a compile error; scalars/Slices are fine). This is
+# the inline-body alternative to each(slice, worker) -- no separate worker function needed.
+@test
+def std_parallel_for_band_smoke():
+	can Parallel:
+		ys: mutable darray[f64] = []
+		_ = ys.resize(1000.usize())
+		for k in 0..<1000:
+			ys[k.usize()] <- k.f64()
+		factor: f64 = 2.0
+		whole: Slice[f64] = slice(&ys)
+		pool workers(4):
+			parallel for band in whole:
+				for i in 0..<band.len():
+					band.set_unchecked(i, band.get_unchecked(i) * factor + 1.0)
+		# y[i] = 2i + 1, verified at band boundaries (cross-band correctness)
+		assert ys[0.usize()] == 1.0
+		assert ys[249.usize()] == 499.0
+		assert ys[250.usize()] == 501.0
+		assert ys[999.usize()] == 1999.0

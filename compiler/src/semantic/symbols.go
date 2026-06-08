@@ -106,6 +106,11 @@ type ParallelForInfo struct {
 	SourceType Type
 	ItemType   Type
 	Captures   []string
+	// BandMode is set when the source is a mutable Slice[T]: the loop variable binds to a
+	// disjoint Slice[T] BAND (one per worker) rather than to each element, and the body runs
+	// once per band. BandElement is the band's element type T (for slice_band[T] lowering).
+	BandMode    bool
+	BandElement Type
 }
 
 type DeferInfo struct {

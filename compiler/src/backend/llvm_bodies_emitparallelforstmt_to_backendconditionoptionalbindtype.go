@@ -50,6 +50,9 @@ func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
 	if _, ok := info.SourceType.(*semantic.PackedEnumStoreType); ok {
 		lengthField = "count"
 	}
+	if info.BandMode {
+		lengthField = "count" // Slice[T] exposes its length as `count`
+	}
 	totalExpr := &ast.FieldExpr{Position: stmt.Position, Object: sourceIdent, Field: lengthField}
 	usizeType := s.g.result.NamedTypes["usize"]
 	totalValue, _, err := s.emitExpr(totalExpr, usizeType)
@@ -78,7 +81,7 @@ func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
 	if err != nil {
 		return err
 	}
-	poolSubmit, poolSubmitType, err := s.ensureRuntimeFunction("pool_submit1", map[string]semantic.Type{"A": chunkType, "R": s.g.result.NamedTypes["void"]})
+	poolSubmit, poolSubmitType, err := s.ensureRuntimeFunction("pool_submit1", map[string]semantic.Type{"A": chunkType, "R": s.g.result.NamedTypes["i64"]})
 	if err != nil {
 		return err
 	}
@@ -86,7 +89,7 @@ func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
 	if err != nil {
 		return err
 	}
-	taskGroupAdd, taskGroupAddType, err := s.ensureRuntimeFunction("task_group_add", map[string]semantic.Type{"R": s.g.result.NamedTypes["void"]})
+	taskGroupAdd, taskGroupAddType, err := s.ensureRuntimeFunction("task_group_add", map[string]semantic.Type{"R": s.g.result.NamedTypes["i64"]})
 	if err != nil {
 		return err
 	}
@@ -167,8 +170,10 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 		return nil, nil, nil, err
 	}
 	workerName := prefix + "_worker"
-	voidType := s.g.result.NamedTypes["void"]
-	workerType := &semantic.FuncType{Name: workerName, Params: []semantic.Type{chunkType}, Return: voidType}
+	// The worker returns i64 (not void): pool_submit1 boxes the result type, and boxing a void
+	// value crashes lowering. Workers return a dummy 0 -- matching the each()/nursery convention.
+	i64Type := s.g.result.NamedTypes["i64"]
+	workerType := &semantic.FuncType{Name: workerName, Params: []semantic.Type{chunkType}, Return: i64Type}
 	workerFn, err := s.g.addFunction(workerName, workerType)
 	if err != nil {
 		return nil, nil, nil, err
@@ -198,6 +203,49 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 		Mutable:  true,
 		Type:     &ast.NamedType{Position: stmt.Position, Name: "usize"},
 		Value:    &ast.FieldExpr{Position: stmt.Position, Object: chunkIdent, Field: "start"},
+	}
+
+	// Band mode: the chunk carries this worker's precomputed disjoint Slice[T] band (field
+	// "band") plus its global start offset. Bind the loop variable to the band and run the body
+	// ONCE -- no per-element inner loop. The band points into the shared backing so writes go
+	// through; disjointness across workers (the [start, end) chunks tile the slice) is race-free.
+	if info.BandMode {
+		var bandBody []ast.Stmt
+		for i, name := range info.Captures {
+			bandBody = append(bandBody, &ast.VarDeclStmt{
+				Position: stmt.Position,
+				Name:     name,
+				Value:    &ast.FieldExpr{Position: stmt.Position, Object: chunkIdent, Field: fmt.Sprintf("capture_%d", i)},
+			})
+		}
+		if stmt.IndexName != "" {
+			bandBody = append(bandBody, &ast.VarDeclStmt{
+				Position: stmt.Position,
+				Name:     stmt.IndexName,
+				Type:     &ast.NamedType{Position: stmt.Position, Name: "usize"},
+				Value:    &ast.FieldExpr{Position: stmt.Position, Object: chunkIdent, Field: "start"},
+			})
+		}
+		// No explicit type: the band's Slice[T] type is inferred from the chunk.band field read
+		// (Slice[T] has no resolvable bare-name spelling for a synthesized NamedType).
+		bandBody = append(bandBody, &ast.VarDeclStmt{
+			Position: stmt.Position,
+			Name:     stmt.Name,
+			Value:    &ast.FieldExpr{Position: stmt.Position, Object: chunkIdent, Field: "band"},
+		})
+		bandBody = append(bandBody, stmt.Body...)
+		bandBody = append(bandBody, &ast.ReturnStmt{Position: stmt.Position, Value: &ast.IntLit{Position: stmt.Position, Value: "0"}})
+		workerDecl := &ast.FuncDecl{
+			Position:   stmt.Position,
+			Name:       workerName,
+			Params:     []ast.ParamDecl{{Position: stmt.Position, Name: chunkParamName}},
+			ReturnType: &ast.NamedType{Position: stmt.Position, Name: "i64"},
+			Body:       bandBody,
+		}
+		if err := s.g.defineFunctionBody(workerDecl, workerType, workerFn); err != nil {
+			return nil, nil, nil, err
+		}
+		return workerFn, workerType, chunkType, nil
 	}
 
 	var body []ast.Stmt
@@ -245,6 +293,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 		Value:    &ast.IntLit{Position: stmt.Position, Value: "1"},
 	})
 	body = append(body, &ast.WhileStmt{Position: stmt.Position, Hint: ast.BranchHintNone, Cond: condExpr, Body: loopBody})
+	body = append(body, &ast.ReturnStmt{Position: stmt.Position, Value: &ast.IntLit{Position: stmt.Position, Value: "0"}})
 
 	s.g.result.ExprTypes[condExpr] = s.g.result.NamedTypes["bool"]
 
@@ -252,7 +301,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 		Position:   stmt.Position,
 		Name:       workerName,
 		Params:     []ast.ParamDecl{{Position: stmt.Position, Name: chunkParamName}},
-		ReturnType: &ast.NamedType{Position: stmt.Position, Name: "void"},
+		ReturnType: &ast.NamedType{Position: stmt.Position, Name: "i64"},
 		Body:       body,
 	}
 	if err := s.g.defineFunctionBody(workerDecl, workerType, workerFn); err != nil {
@@ -261,15 +310,30 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 	return workerFn, workerType, chunkType, nil
 }
 func (s *functionState) buildParallelForChunkType(info *semantic.ParallelForInfo, prefix string) (*semantic.StructType, error) {
-	fields := map[string]semantic.Field{
-		"source": {Name: "source", Type: info.SourceType},
-		"start":  {Name: "start", Type: s.g.result.NamedTypes["usize"]},
-		"end":    {Name: "end", Type: s.g.result.NamedTypes["usize"]},
-	}
-	declFields := []ast.FieldDecl{
-		{Position: lexer.Pos{}, Name: "source"},
-		{Position: lexer.Pos{}, Name: "start"},
-		{Position: lexer.Pos{}, Name: "end"},
+	usize := s.g.result.NamedTypes["usize"]
+	var fields map[string]semantic.Field
+	var declFields []ast.FieldDecl
+	if info.BandMode {
+		// Band mode: the chunk carries the precomputed band + its global start offset.
+		fields = map[string]semantic.Field{
+			"band":  {Name: "band", Type: info.SourceType},
+			"start": {Name: "start", Type: usize},
+		}
+		declFields = []ast.FieldDecl{
+			{Position: lexer.Pos{}, Name: "band"},
+			{Position: lexer.Pos{}, Name: "start"},
+		}
+	} else {
+		fields = map[string]semantic.Field{
+			"source": {Name: "source", Type: info.SourceType},
+			"start":  {Name: "start", Type: usize},
+			"end":    {Name: "end", Type: usize},
+		}
+		declFields = []ast.FieldDecl{
+			{Position: lexer.Pos{}, Name: "source"},
+			{Position: lexer.Pos{}, Name: "start"},
+			{Position: lexer.Pos{}, Name: "end"},
+		}
 	}
 	for i, name := range info.Captures {
 		binding, ok := s.lookupBinding(name)
@@ -294,9 +358,39 @@ func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInf
 		return nil, err
 	}
 	chunkValue := C.LLVMGetUndef(chunkLLVMType)
-	chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, sourceValue, 0, cStringFree("parallel.chunk.source"))
-	chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, startValue, 1, cStringFree("parallel.chunk.start"))
-	chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, endValue, 2, cStringFree("parallel.chunk.end"))
+	captureBase := 3
+	if info.BandMode {
+		// Build this worker's band inline: { base: source.base + start*sizeof(T), count: end-start }.
+		// No call (no ABI coercion); mirrors slice_band. The chunk range is already within
+		// [0, source.count], so no clamping is needed. Slice[T] field order is {base, count}.
+		elemSize, err := s.sizeOfType(info.BandElement)
+		if err != nil {
+			return nil, err
+		}
+		sliceLLVM, err := s.g.lowerType(info.SourceType)
+		if err != nil {
+			return nil, err
+		}
+		usizeLLVM, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		if err != nil {
+			return nil, err
+		}
+		srcBase := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree("band.src.base"))
+		elemSizeConst := C.LLVMConstInt(usizeLLVM, C.ulonglong(elemSize), 0)
+		offset := C.LLVMBuildMul(s.builder, startValue, elemSizeConst, cStringFree("band.offset"))
+		bandBase := C.LLVMBuildAdd(s.builder, srcBase, offset, cStringFree("band.base"))
+		bandCount := C.LLVMBuildSub(s.builder, endValue, startValue, cStringFree("band.count"))
+		bandValue := C.LLVMGetUndef(sliceLLVM)
+		bandValue = C.LLVMBuildInsertValue(s.builder, bandValue, bandBase, 0, cStringFree("band.base.ins"))
+		bandValue = C.LLVMBuildInsertValue(s.builder, bandValue, bandCount, 1, cStringFree("band.count.ins"))
+		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, bandValue, 0, cStringFree("parallel.chunk.band"))
+		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, startValue, 1, cStringFree("parallel.chunk.start"))
+		captureBase = 2
+	} else {
+		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, sourceValue, 0, cStringFree("parallel.chunk.source"))
+		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, startValue, 1, cStringFree("parallel.chunk.start"))
+		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, endValue, 2, cStringFree("parallel.chunk.end"))
+	}
 	for i, name := range info.Captures {
 		binding, ok := s.lookupBinding(name)
 		if !ok {
@@ -306,7 +400,7 @@ func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInf
 		if err != nil {
 			return nil, err
 		}
-		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, value, C.unsigned(3+i), cStringFree("parallel.chunk.capture"))
+		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, value, C.unsigned(captureBase+i), cStringFree("parallel.chunk.capture"))
 	}
 	return chunkValue, nil
 }

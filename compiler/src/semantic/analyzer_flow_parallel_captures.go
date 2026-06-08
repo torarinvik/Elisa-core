@@ -119,6 +119,32 @@ func (c *parallelForCaptureCollector) collectStmt(stmt ast.Stmt, locals map[stri
 		for _, innerStmt := range n.Body {
 			c.collectStmt(innerStmt, bodyLocals)
 		}
+	case *ast.ForStmt:
+		c.collectExpr(n.Start, locals)
+		c.collectExpr(n.End, locals)
+		if n.Step != nil {
+			c.collectExpr(n.Step, locals)
+		}
+		bodyLocals := cloneParallelForLocals(locals)
+		bodyLocals[n.Name] = true
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.IterForStmt:
+		c.collectExpr(n.Source, locals)
+		if n.WhereFilter != nil {
+			c.collectExpr(n.WhereFilter, locals)
+		}
+		if n.Filter != nil {
+			c.collectExpr(n.Filter, locals)
+		}
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, name := range parallelForMoveBindNames(n.Pattern) {
+			bodyLocals[name] = true
+		}
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
 	case *ast.ParallelForStmt:
 		c.addError("parallel for body cannot nest another parallel for")
 	case *ast.MatchStmt:
