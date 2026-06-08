@@ -230,26 +230,6 @@ impl MissingBuilder for BuilderTag:
 	}
 }
 
-func TestAnalyzeStaticInterfaceSpellingIsDeprecated(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "static_interface_deprecated.elisa", `
-static interface Builder:
-    type State
-    def state() -> State
-
-struct BuilderTag:
-    tag: int
-
-impl Builder for BuilderTag:
-    type State = int
-    def state() -> int:
-        return 1
-`)
-	deprecations := strings.Join(result.Deprecations(), "\n")
-	if !strings.Contains(deprecations, "`static interface Builder:` is deprecated; use `protocol Builder:`") {
-		t.Fatalf("expected static-interface spelling deprecation, got:\n%s", deprecations)
-	}
-}
-
 func TestAnalyzeProtocolCanRequireCastMethod(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "protocol_cast_requirement.elisa", `
 protocol Str:

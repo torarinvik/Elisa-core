@@ -76,7 +76,7 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Effects: append([]ast.SignatureEffectItem(nil), m.Effects...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
 			}
 		}
-		return &ast.InterfaceDecl{Position: n.Position, Name: n.Name, Protocol: n.Protocol, Members: members}
+		return &ast.InterfaceDecl{Position: n.Position, Name: n.Name, Members: members}
 	case *ast.ImplDecl:
 		members := make([]ast.ImplMember, 0, len(n.Members))
 		for _, member := range n.Members {

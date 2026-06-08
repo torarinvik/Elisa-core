@@ -1,11 +1,25 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"elisacore/src/ast"
 	"elisacore/src/unparse"
 )
+
+func TestParseStaticInterfaceSpellingIsRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, `
+static interface Builder:
+    type Node
+`)
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for removed static interface spelling")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "`static interface` has been removed; use `protocol`") {
+		t.Fatalf("expected removed static interface parser error, got: %v", errs)
+	}
+}
 
 func TestParseStaticInterfaceImplAndBoundedGeneric(t *testing.T) {
 	file, errs := parseSourceFile(t, `

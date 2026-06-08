@@ -41,7 +41,7 @@ That reference covers the currently implemented syntax for:
 - grammar DSL parser features: `token:` blocks, `token family` reusable token unions, `seq:` blocks, comma-free `seq(...)`, `prefix(...)`, readable list/repeat forms, recovery, lookahead/cut, precedence/suffix/postfix helpers, and channel-driven struct result synthesis
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
 - cascade blocks and expressions, lambda literals, `node[span = ...]` tree construction, tree `rewrite`, and canonical `as` casts
-- static interfaces, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
+- protocols, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
 
 ## Syntax cheat sheet
 

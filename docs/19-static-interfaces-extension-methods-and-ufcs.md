@@ -29,7 +29,7 @@ def build[B: Builder](value: int) -> B.Node:
 Current rules:
 
 - `protocol Name:` declares a compile-time capability
-- `static interface Name:` remains accepted as a deprecated compatibility spelling for the same compile-time mechanism
+- `static interface Name:` has been removed; use `protocol Name:`
 - legacy `interface Name:` still parses for compatibility
 - interface members may include associated types and method signatures
 - `impl Name for Type:` provides the associated types and methods for one concrete type

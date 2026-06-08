@@ -10,7 +10,7 @@ rollback can invalidate facts derived from speculative allocations.
 
 ## Interface spelling
 
-Compile-time interfaces use `protocol` for capability-style contracts. The older `static interface` spelling is deprecated but remains accepted as a compatibility alias.
+Compile-time interfaces use `protocol` for capability-style contracts. The older `static interface` spelling has been removed.
 
 ```elisacore
 protocol ParseBuilder:
@@ -21,7 +21,7 @@ protocol ParseBuilder:
     def make_binary(span: Span, left: ExprNode, right: ExprNode) -> ExprNode
 ```
 
-`protocol` is compile-time only; it formats as `protocol` and uses the same implementation machinery as the deprecated `static interface` spelling. The old `interface Name:` spelling remains accepted as a compatibility alias.
+`protocol` is compile-time only and formats as `protocol`. The old `interface Name:` spelling remains accepted as a compatibility alias and normalizes to `protocol`.
 
 Runtime/dynamic interfaces are intentionally left unclaimed by this spelling. If Elisa core grows vtable-like runtime interfaces later, they should use a separate explicit feature instead of overloading the current static system.
 

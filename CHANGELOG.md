@@ -88,7 +88,7 @@ All notable changes to this repository should be documented in this file.
 - Expanded `docs/useful_language_features/18-current-surface-ergonomics.md` with the current implemented surfaces for `do:` blocks, `defer`, index fallback, store/dict sugar, explicit `parallel for`, char literals, and the newer loop/control-flow ergonomics.
 - Expanded `docs/useful_language_features/18-current-surface-ergonomics.md` with tree exact-update syntax and contextual `rewrite ... default` examples.
 - Documented tree `rewrite` as the transform-oriented spelling for same-root bottom-up tree folds.
-- Added `docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md` as the implemented reference for static interfaces, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface.
+- Added `docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md` as the implemented reference for protocols, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface.
 - Added `docs/useful_language_features/20-annotations-and-compile-time-hints.md` as the implemented reference for current layout annotations, packed-layout annotations, function codegen hints, guard annotations, and branch hints.
 - Expanded `docs/useful_language_features/08-region-checkpoints.md` to cover the current `scope`, named checkpoint, grouped checkpoint, and rollback-block statement surface in addition to region-local checkpoints.
 - Updated `docs/useful_language_features/17-iterators-and-for-in-mini-spec.md` so it no longer reads as if the current explicit `parallel for` feature is still purely deferred.

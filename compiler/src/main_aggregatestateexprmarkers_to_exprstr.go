@@ -115,11 +115,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		}
 		fmt.Fprintf(w, "%s%s%sstruct %s%s (%d fields)\n", prefix, affine, layoutPrefix, n.Name, tparams, len(n.Fields))
 	case *ast.InterfaceDecl:
-		kind := "static interface"
-		if n.Protocol {
-			kind = "protocol"
-		}
-		fmt.Fprintf(w, "%s%s %s: (%d members)\n", prefix, kind, n.Name, len(n.Members))
+		fmt.Fprintf(w, "%sprotocol %s: (%d members)\n", prefix, n.Name, len(n.Members))
 	case *ast.ImplDecl:
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))

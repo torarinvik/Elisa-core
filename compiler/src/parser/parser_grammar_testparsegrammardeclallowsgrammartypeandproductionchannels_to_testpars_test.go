@@ -42,7 +42,7 @@ func TestParseGrammarDeclAllowsGrammarTypeAndProductionChannels(t *testing.T) {
 		}
 	}
 }
-func TestParseProtocolAliasForStaticInterface(t *testing.T) {
+func TestParseProtocolDecl(t *testing.T) {
 	file, errs := parseSourceFile(t, `protocol SpanLike:
     type Range
     def combine(left: Range, right: Range) -> Range
@@ -50,12 +50,9 @@ func TestParseProtocolAliasForStaticInterface(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
-	decl, ok := file.Decls[0].(*ast.InterfaceDecl)
+	_, ok := file.Decls[0].(*ast.InterfaceDecl)
 	if !ok {
 		t.Fatalf("expected interface decl, got %T", file.Decls[0])
-	}
-	if !decl.Protocol {
-		t.Fatalf("expected protocol surface to be preserved")
 	}
 	formatted := unparse.FormatFile(file)
 	if !strings.Contains(formatted, "protocol SpanLike:") {

@@ -153,6 +153,34 @@ func (p *Parser) skipNewlines() {
 		p.advance()
 	}
 }
+
+func (p *Parser) skipRejectedDecl() {
+	for p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF {
+		p.advance()
+	}
+	if p.peek() == lexer.TOKEN_NEWLINE {
+		p.advance()
+	}
+	if p.peek() != lexer.TOKEN_INDENT {
+		return
+	}
+	depth := 0
+	for p.peek() != lexer.TOKEN_EOF {
+		switch p.peek() {
+		case lexer.TOKEN_INDENT:
+			depth++
+		case lexer.TOKEN_DEDENT:
+			depth--
+			p.advance()
+			if depth <= 0 {
+				return
+			}
+			continue
+		}
+		p.advance()
+	}
+}
+
 func (p *Parser) ParseFile(filename string) *ast.File {
 	file := &ast.File{Filename: filename, Decls: make([]ast.Decl, 0, p.estimateTopLevelItemCount()), DeclVisibility: p.declVisibility}
 	p.skipNewlines()
@@ -211,10 +239,12 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("protocol") {
 		return p.parseInterfaceDecl()
 	}
-	if p.peekIdentText("interface") {
-		return p.parseInterfaceDecl()
-	}
 	if p.peek() == lexer.TOKEN_STATIC && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "interface" {
+		p.errorf("`static interface` has been removed; use `protocol`")
+		p.skipRejectedDecl()
+		return nil
+	}
+	if p.peekIdentText("interface") {
 		return p.parseInterfaceDecl()
 	}
 	if p.peekIdentText("impl") {

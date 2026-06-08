@@ -300,7 +300,7 @@ func TestAnalyzeFormatsInterfaceBoundTypeArgSViewUsingSurfaceNames(t *testing.T)
 	src := `struct BuilderTag:
 	tag: int
 
-static interface Builder:
+protocol Builder:
 	type State
 	def state() -> State
 

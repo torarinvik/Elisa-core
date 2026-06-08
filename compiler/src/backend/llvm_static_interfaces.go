@@ -39,19 +39,19 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 		}
 	}
 	if receiver == nil {
-		return nil, nil, true, fmt.Errorf("missing receiver type for static interface method %s.%s", ref.InterfaceName, ref.MethodName)
+		return nil, nil, true, fmt.Errorf("missing receiver type for protocol method %s.%s", ref.InterfaceName, ref.MethodName)
 	}
 	impl, subst, ok := semantic.LookupStaticImplUnifying(s.g.result.StaticImpls, ref.InterfaceName, receiver)
 	if !ok || impl == nil {
-		return nil, nil, true, fmt.Errorf("type %s does not implement interface %s", receiver.String(), ref.InterfaceName)
+		return nil, nil, true, fmt.Errorf("type %s does not implement protocol %s", receiver.String(), ref.InterfaceName)
 	}
 	sym, ok := impl.Methods[ref.MethodName]
 	if !ok || sym == nil {
-		return nil, nil, true, fmt.Errorf("impl of interface %s for %s is missing method %s", ref.InterfaceName, receiver.String(), ref.MethodName)
+		return nil, nil, true, fmt.Errorf("impl of protocol %s for %s is missing method %s", ref.InterfaceName, receiver.String(), ref.MethodName)
 	}
 	fnType, ok := sym.Type.(*semantic.FuncType)
 	if !ok || fnType == nil {
-		return nil, nil, true, fmt.Errorf("static interface method %s.%s does not resolve to a function type", ref.InterfaceName, ref.MethodName)
+		return nil, nil, true, fmt.Errorf("protocol method %s.%s does not resolve to a function type", ref.InterfaceName, ref.MethodName)
 	}
 	if len(impl.TypeParams) > 0 && len(subst) > 0 {
 		// Parametric impl: the method body references the impl's type params, so it was not
