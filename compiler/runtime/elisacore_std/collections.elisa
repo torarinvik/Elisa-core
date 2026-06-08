@@ -1477,7 +1477,7 @@ def symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&):
 # (Handle = usize index); dict/pool/packed stores implement the same interface
 # with their own Handle representations. Layout/provenance/usage stay orthogonal:
 # the core surface is read + size only and says nothing about growth or ownership.
-static interface Store:
+protocol Store:
     type Elem
     type Handle
     def store_get(s: Self&, h: Handle) -> Elem&
@@ -1508,7 +1508,7 @@ impl[T] Store for Deque[T]:
 # partial: `store_find` returns an optional element rather than the total `store_get`. This
 # is the orthogonality the core Store preserves — dict is keyed/partial, not a total
 # handle→element store, so it implements KeyedStore instead of distorting the core.
-static interface KeyedStore:
+protocol KeyedStore:
     type Key
     type Elem
     def store_find(s: Self&, k: Key) -> Elem&?

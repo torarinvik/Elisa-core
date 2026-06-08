@@ -10,7 +10,7 @@ rollback can invalidate facts derived from speculative allocations.
 
 ## Interface spelling
 
-Compile-time interfaces are available as `protocol` for capability-style contracts and `static interface` for the explicit low-level spelling.
+Compile-time interfaces use `protocol` for capability-style contracts. The older `static interface` spelling is deprecated but remains accepted as a compatibility alias.
 
 ```elisacore
 protocol ParseBuilder:
@@ -21,7 +21,7 @@ protocol ParseBuilder:
     def make_binary(span: Span, left: ExprNode, right: ExprNode) -> ExprNode
 ```
 
-`protocol` is compile-time only; it formats as `protocol` and uses the same implementation machinery as `static interface`. The old `interface Name:` spelling remains accepted as a compatibility alias.
+`protocol` is compile-time only; it formats as `protocol` and uses the same implementation machinery as the deprecated `static interface` spelling. The old `interface Name:` spelling remains accepted as a compatibility alias.
 
 Runtime/dynamic interfaces are intentionally left unclaimed by this spelling. If Elisa core grows vtable-like runtime interfaces later, they should use a separate explicit feature instead of overloading the current static system.
 
@@ -122,4 +122,4 @@ Use the pyramid deliberately:
 - parser branches snapshot cursor-dependent values before trying alternatives that can consume input
 - helper productions that return plain structs can now live inside tree grammars more comfortably: struct synthesis requires channel names to match struct fields, so unrelated grammar-wide channels such as `node` do not accidentally shape non-tree results
 - when parser code already has a list value in hand, prefer a list comprehension over a one-off helper function that only loops, filters, and returns a `darray`
-- `protocol` / `static interface` express parser-builder variability, not runtime dispatch
+- `protocol` expresses parser-builder variability, not runtime dispatch

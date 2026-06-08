@@ -28,24 +28,24 @@ def build[B: Builder](value: int) -> B.Node:
 
 Current rules:
 
-- `protocol Name:` declares a compile-time capability using the same implementation model as `static interface`
-- `static interface Name:` remains the explicit low-level spelling for the same compile-time mechanism
+- `protocol Name:` declares a compile-time capability
+- `static interface Name:` remains accepted as a deprecated compatibility spelling for the same compile-time mechanism
 - legacy `interface Name:` still parses for compatibility
 - interface members may include associated types and method signatures
 - `impl Name for Type:` provides the associated types and methods for one concrete type
 - generic parameters may be interface-bounded with `T: InterfaceName`
 - associated types are referenced through the bound parameter, for example `B.Node`
-- zero-argument static-interface methods are still called as ordinary field-style calls such as `B.state()`
+- zero-argument protocol methods are still called as ordinary field-style calls such as `B.state()`
 
 Current implementation model:
 
-- static interface use is resolved at compile time and lowered through specialization-style rewriting rather than a runtime vtable carrier
+- protocol use is resolved at compile time and lowered through specialization-style rewriting rather than a runtime vtable carrier
 - interface impl members may also carry annotations such as `@derive(...)`
 - `override def` is accepted inside impls when the source wants to mark an intended override explicitly
 
 ## Span-like protocols
 
-Parser and tree code can make custom span/range types participate in `left.span + right.span` by providing a visible `SpanLike` static-interface impl.
+Parser and tree code can make custom span/range types participate in `left.span + right.span` by providing a visible `SpanLike` protocol impl.
 
 ```elisa
 struct Span:

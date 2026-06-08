@@ -326,7 +326,7 @@ protocol SpanLike:
     def combine(left: Range, right: Range) -> Range
 ```
 
-Use `static interface` only when deliberately showing the low-level spelling or compatibility behavior.
+The older `static interface` spelling is deprecated; use it only when documenting compatibility behavior.
 
 ## When To Drop Down
 

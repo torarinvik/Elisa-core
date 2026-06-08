@@ -10,7 +10,7 @@ func TestAnalyzeStaticInterfaceZeroArgMethodCall(t *testing.T) {
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type State
     def state() -> State
 
@@ -34,7 +34,7 @@ func TestAnalyzeStaticInterfaceZeroArgMethodCallWithAssociatedLocal(t *testing.T
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type State
     def state() -> State
 
@@ -60,7 +60,7 @@ struct Span:
     start: i64
     end: i64
 
-static interface SpanLike:
+protocol SpanLike:
     type Range
     def combine(left: Range, right: Range) -> Range
 
@@ -84,7 +84,7 @@ func TestAnalyzeStaticInterfaceExplicitSpecializationWithBoundTypeParam(t *testi
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type State
     def state() -> State
 
@@ -119,7 +119,7 @@ tree Lua:
 struct LuaAstBuilder:
     tag: int
 
-static interface LuaBuilder:
+protocol LuaBuilder:
     type ExprNode
     def make_integer(alloc: mutable Arena&, span: i64, value: i64) -> ExprNode
     def make_binary(alloc: mutable Arena&, span: i64, left: ExprNode, right: ExprNode) -> ExprNode
@@ -155,7 +155,7 @@ func TestAnalyzeDerivedNullBuilderSynthesizesMissingMethods(t *testing.T) {
 struct SinkBuilder:
     tag: int
 
-static interface Sink:
+protocol Sink:
     type Node
     def make(value: int) -> Node
     def touch(node: Node)
@@ -190,7 +190,7 @@ func TestAnalyzeStaticInterfaceTupleReturnAndDestructure(t *testing.T) {
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type Node
     def make(value: int) -> Node
 
@@ -227,5 +227,25 @@ impl MissingBuilder for BuilderTag:
 	joined := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(joined, UnknownInterfaceMessage("MissingBuilder")) {
 		t.Fatalf("expected unknown interface diagnostic, got:\n%s", joined)
+	}
+}
+
+func TestAnalyzeStaticInterfaceSpellingIsDeprecated(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "static_interface_deprecated.elisa", `
+static interface Builder:
+    type State
+    def state() -> State
+
+struct BuilderTag:
+    tag: int
+
+impl Builder for BuilderTag:
+    type State = int
+    def state() -> int:
+        return 1
+`)
+	deprecations := strings.Join(result.Deprecations(), "\n")
+	if !strings.Contains(deprecations, "`static interface Builder:` is deprecated; use `protocol Builder:`") {
+		t.Fatalf("expected static-interface spelling deprecation, got:\n%s", deprecations)
 	}
 }

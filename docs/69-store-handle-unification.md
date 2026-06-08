@@ -71,7 +71,7 @@ rejected precisely because it would make layout imply provenance imply usage.
 
 ## The surface
 
-Elisa's `static interface` mechanism is the right tool: associated types + methods,
+Elisa's `protocol` mechanism is the right tool: associated types + methods,
 `impl X for Type`, generic bounds `[S: Store]`, associated-type projection `S.Handle`,
 fully monomorphized (zero-overhead static dispatch). See
 `compiler/src/semantic/static_interfaces.go`, `analyzer_generics.go`.
@@ -81,7 +81,7 @@ element type CANNOT be an interface type parameter (`[S: Store[i64]]` is unsuppo
 Therefore element type is an **associated type**, not a parameter:
 
 ```elisa
-static interface Store:
+protocol Store:
     type Elem
     type Handle
     def store_get(self&, h: Handle) -> Elem&        # the defining op: handle -> value
@@ -156,10 +156,10 @@ deemed sufficient.
 ## Staged plan
 
 0. ✅ Map the four backings + the interface mechanism + identify the blocker (this doc).
-1. **Parametric impls** for static interfaces: type-param unification in
+1. **Parametric impls** for protocols: type-param unification in
    `LookupStaticImpl`, associated-type resolution under the matched substitution, monomorph
    at the bound call site. Land with `impl`-for-`darray[T]` tests independent of `Store`.
-2. Define `static interface Store` (core: `Elem`/`Handle`/`store_get`/`store_count`) in the
+2. Define `protocol Store` (core: `Elem`/`Handle`/`store_get`/`store_count`) in the
    stdlib; `impl Store for darray[T]` as the first backing (Handle = usize). Generic
    `[S: Store]` test that consumes a darray.
 3. `impl Store for dict[K,V]` (Handle = K), then the pool and packed store (their Handle

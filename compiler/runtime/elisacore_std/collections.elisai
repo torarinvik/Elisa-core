@@ -637,7 +637,7 @@ extern update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId,
 
 extern symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&)
 
-static interface Store:
+protocol Store:
     type Elem
     type Handle
     def store_get(s: Self&, h: Handle) -> Elem&
@@ -655,7 +655,7 @@ impl[T] Store for Deque[T]:
     def store_get(s: Deque[T]&, h: usize) -> T&
     def store_count(s: Deque[T]&) -> usize
 
-static interface KeyedStore:
+protocol KeyedStore:
     type Key
     type Elem
     def store_find(s: Self&, k: Key) -> Elem&?

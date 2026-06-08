@@ -428,6 +428,9 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			qualifiedName := joinQualifiedName(scoped.Namespace, decl.Name)
+			if !decl.Protocol {
+				a.deprecatedf(decl.Pos(), "`static interface %s:` is deprecated; use `protocol %s:`", decl.Name, decl.Name)
+			}
 			if _, exists := a.staticInterfaces[qualifiedName]; exists {
 				a.errorf(decl.Pos(), "duplicate interface %q", qualifiedName)
 				return

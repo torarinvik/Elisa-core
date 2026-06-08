@@ -75,7 +75,7 @@ Inventory (do not rebuild):
   predictable, zero-copy-growth allocation.
 - **Store/Handle unification** (`docs/69`): handle-into-store (`darray`/`Deque`/packed/
   pool) is first-class and ergonomic — the cache-friendly alternative to pointer chasing.
-- **Monomorphized static interfaces** + **parametric impls**: zero-cost abstraction, no
+- **Monomorphized protocols** + **parametric impls**: zero-cost abstraction, no
   vtables. There is no dynamic dispatch to accidentally pay for.
 - **Value semantics + region escape analysis**: cross-lifetime aliasing and
   use-after-free are already compile errors (`region_containers.go`,

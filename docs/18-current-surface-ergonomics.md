@@ -2864,7 +2864,7 @@ Current implementation notes:
 - `prefix(...)` currently lowers to `seq(op = choice(...), operand = ..., expr(...))`
 - token aliases are rewritten before lowering, so `.IDENT` can map onto the real token kind expression
 - the grammar header can now decouple token value and token-kind names, for example `grammar SMLExprGrammar over SMLToken using SMLParserState:` with `token_kind SMLTokenKind` and `eof SMLTokenKind.EOF`
-- span algebra `left.span + right.span` resolves through a visible `protocol SpanLike` / `static interface SpanLike` impl when available, and still recognizes legacy helper functions such as `combine_span` or `lua_span_union` for compatibility
+- span algebra `left.span + right.span` resolves through a visible `protocol SpanLike` impl when available, and still recognizes legacy helper functions such as `combine_span` or `lua_span_union` for compatibility
 - recovery and required terms depend on the grammar `cursor` declaration to restore or advance parser state correctly
 - tree AST construction remains ordinary Elisa core code, so teams can use canonical `node[span = ...] Tree.Node(...)` sugar or drop to low-level `new[alloc] Tree.Node(span: ..., ...)` when exact control is clearer
 

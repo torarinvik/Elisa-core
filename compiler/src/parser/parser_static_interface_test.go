@@ -12,7 +12,7 @@ func TestParseStaticInterfaceImplAndBoundedGeneric(t *testing.T) {
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type Node
     def make(value: int) -> Node
 
@@ -83,7 +83,7 @@ func TestParseStaticInterfaceZeroArgMethodCall(t *testing.T) {
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type State
     def state() -> State
 
@@ -335,7 +335,7 @@ func TestParseDerivedImplAnnotationAndOverrideMethod(t *testing.T) {
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type Node
     def make(value: int) -> Node
 
@@ -383,7 +383,7 @@ func TestParseStaticInterfaceTupleReturnAndDestructure(t *testing.T) {
 struct BuilderTag:
     tag: int
 
-static interface Builder:
+protocol Builder:
     type Node
     def make(value: int) -> Node
 

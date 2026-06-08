@@ -271,7 +271,7 @@ protocol state of a value.
 ### Generic interface bounds
 
 ```elisacore
-static interface Builder:
+protocol Builder:
     type State
     def state() -> State
 

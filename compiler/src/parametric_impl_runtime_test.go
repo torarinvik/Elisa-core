@@ -19,7 +19,7 @@ func TestRunCLIParametricImplDispatch(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "parametric_impl_fixture.elisa")
-	src := `static interface Builder:
+	src := `protocol Builder:
     type Node
     def make(value: i64) -> Node
 
@@ -69,7 +69,7 @@ func TestRunCLIParametricImplMonomorphizesTReferencingMethod(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "parametric_impl_tref_fixture.elisa")
-	src := `static interface Holder:
+	src := `protocol Holder:
     type Item
     def wrap(value: Item) -> Item
 
