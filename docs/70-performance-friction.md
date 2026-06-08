@@ -76,6 +76,9 @@ prove asymptotic performance.
 ### Strict Performance Concurrency Hazards
 
 These diagnostics are warnings by default and become errors under `-Wperf`.
+Intentional low-level exceptions use `trusted Perf.HotLoop:` as a local,
+greppable acknowledgement; the block suppresses loop performance diagnostics
+inside it without adding a permission requirement to the enclosing function.
 
 | Hazard | Why it is slow | Preferred shape | Accepted exception |
 |--------|----------------|-----------------|--------------------|

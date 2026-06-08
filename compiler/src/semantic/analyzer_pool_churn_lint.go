@@ -14,7 +14,7 @@ func (a *Analyzer) checkPoolChurn(fn *ast.FuncDecl) {
 
 func (a *Analyzer) flagPoolChurn(loopBody []ast.Stmt) {
 	a.forEachStaticStmtInLoopBody(loopBody, a.flagPoolChurnStmt)
-	a.walkStaticStmts(loopBody, func(e ast.Expr) bool {
+	a.walkPerfLintExprsInLoopBody(loopBody, func(e ast.Expr) bool {
 		call, ok := e.(*ast.CallExpr)
 		if !ok || call == nil {
 			return false

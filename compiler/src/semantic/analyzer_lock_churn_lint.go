@@ -14,7 +14,7 @@ func (a *Analyzer) checkLockChurn(fn *ast.FuncDecl) {
 
 func (a *Analyzer) flagLockChurn(loopBody []ast.Stmt) {
 	a.forEachStaticStmtInLoopBody(loopBody, a.flagLockChurnStmt)
-	a.walkStaticStmts(loopBody, func(e ast.Expr) bool {
+	a.walkPerfLintExprsInLoopBody(loopBody, func(e ast.Expr) bool {
 		call, ok := e.(*ast.CallExpr)
 		if !ok || call == nil {
 			return false

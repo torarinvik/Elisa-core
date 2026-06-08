@@ -74,6 +74,10 @@ Source of truth is semantic builtin registration, not proposal docs.
 - `Blocking.RawExtern`
 - `Blocking.UnknownCall`
 
+`Perf`
+
+- `Perf.HotLoop`
+
 `Segment`
 
 - `Segment.Host`

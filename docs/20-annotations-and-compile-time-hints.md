@@ -106,6 +106,30 @@ Current rules:
 - `@hot` and `@cold` take no arguments and are mutually exclusive
 - temperature and recursion annotations propagate through specialization and exported wrapper lowering where applicable
 
+## Performance acknowledgements
+
+Strict performance lints are warnings by default and become errors under
+`-Wperf`. Intentional low-level exceptions should use a local trusted permission
+block rather than disabling the flag globally.
+
+```elisa
+for item in work:
+    trusted Perf.HotLoop:
+        # deliberately bounded/windowed low-level protocol
+        task_group_wait_all(&window)
+```
+
+Current rules:
+
+- `trusted Perf.HotLoop:` suppresses loop-based `-Wperf` diagnostics only inside
+  that trusted block
+- the block is local and greppable; it does not infer a `Perf.HotLoop`
+  requirement for the enclosing function
+- use it only for named protocols, stress tests, benchmarks, or bounded-window
+  concurrency policies whose performance exception is intentional
+- prefer satisfying the lint by batching, sharding, collecting handles, or moving
+  waits to the batch boundary before adding this acknowledgement
+
 ## Guard annotations
 
 Functions that act as proof-producing predicates may carry guard annotations.

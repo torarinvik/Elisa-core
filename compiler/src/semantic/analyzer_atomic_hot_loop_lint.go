@@ -26,7 +26,7 @@ func (a *Analyzer) checkAtomicHotLoops(fn *ast.FuncDecl) {
 }
 
 func (a *Analyzer) flagAtomicHotLoop(loopBody []ast.Stmt) {
-	a.walkStaticStmts(loopBody, func(e ast.Expr) bool {
+	a.walkPerfLintExprsInLoopBody(loopBody, func(e ast.Expr) bool {
 		call, ok := e.(*ast.CallExpr)
 		if !ok || call == nil || isRuntimeStdPermissionInternal(call.Pos().File) {
 			return false

@@ -21,7 +21,7 @@ func (a *Analyzer) checkAllocationChurn(fn *ast.FuncDecl) {
 }
 
 func (a *Analyzer) flagChurnAllocations(loopBody []ast.Stmt) {
-	a.walkStaticStmts(loopBody, func(e ast.Expr) bool {
+	a.walkPerfLintExprsInLoopBody(loopBody, func(e ast.Expr) bool {
 		alloc, ok := e.(*ast.AllocExpr)
 		if !ok || alloc == nil || alloc.NodeSugar {
 			return false
