@@ -154,3 +154,21 @@ def std_stencil_parallel_for_smoke():
 		assert dst[250.usize()] == 250.0
 		assert dst[500.usize()] == 500.0
 		assert dst[750.usize()] == 750.0
+
+# `parallel for` with NO explicit `pool workers(w):` scope: the implicit default pool (perf_cores
+# workers) makes the safe data-parallel loop frictionless -- no pool ceremony, no per-call pool
+# creation. Same race-free band decomposition as the explicit-pool form.
+@test
+def std_parallel_for_default_pool_smoke():
+	can Parallel:
+		ys: mutable darray[i64] = []
+		_ = ys.resize(2000.usize())
+		for k in 0..<2000:
+			ys[k.usize()] <- k.i64()
+		whole: Slice[i64] = slice(&ys)
+		parallel for band in whole:
+			for i in 0..<band.len():
+				band.set_unchecked(i, band.get_unchecked(i) * 3 + 7)
+		assert ys[0.usize()] == 7
+		assert ys[1000.usize()] == 3007
+		assert ys[1999.usize()] == 6004

@@ -210,22 +210,22 @@ def visit(owner: Arena) -> int:
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "visit", "int")
 }
-func TestAnalyzeRejectsParallelForOutsidePool(t *testing.T) {
+// `parallel for` no longer requires an explicit `pool workers(w):` scope: with none, it falls
+// back to the implicit default pool (perf_cores() workers). So an out-of-pool parallel-for is
+// now ACCEPTED, not rejected for a missing pool.
+func TestAnalyzeAcceptsParallelForWithoutPoolScope(t *testing.T) {
 	src := parallelForConcurrencyPrelude + `
 packed enum Expr:
 	Int(value: int)
 
-def bad(store: Expr.Store[Frozen]) -> void:
+def ok(store: Expr.Store[Frozen]) -> void:
 	parallel for node in store:
 		pass
 `
-	_, errs := parseAndAnalyze(t, "parallel_for_outside_pool_reject.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
+	_, errs := parseAndAnalyze(t, "parallel_for_default_pool.elisa", src)
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "parallel for requires an enclosing pool scope") {
-		t.Fatalf("expected missing-pool diagnostic, got:\n%s", all)
+	if strings.Contains(all, "parallel for requires an enclosing pool scope") {
+		t.Fatalf("parallel for should no longer require a pool scope, got:\n%s", all)
 	}
 }
 func TestAnalyzeRejectsParallelForMutatingOuterBinding(t *testing.T) {

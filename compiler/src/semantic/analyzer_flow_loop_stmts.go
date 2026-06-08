@@ -615,9 +615,8 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 			}
 		}
 	}
-	if len(a.currentPoolScopes) == 0 {
-		a.errorf(stmt.Pos(), "parallel for requires an enclosing pool scope")
-	}
+	// No enclosing `pool workers(w):` scope is required: `parallel for` falls back to the implicit
+	// default pool (perf_cores() workers). An explicit pool scope still overrides the worker count.
 	a.validateThreadTransferArg("parallel for", stmt.Source, sourceType)
 
 	loopScope := NewScope(a.currentScope)

@@ -24,8 +24,61 @@ func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
 	}
 	pool, ok := s.currentActivePool()
 	if !ok {
-		return fmt.Errorf("parallel for requires an active pool scope during LLVM lowering")
+		// No explicit `pool workers(w):` scope -> the implicit default pool: a zeroed ThreadPool
+		// (pool_submit_raw ignores the handle, spawning a worker per task) with perf_cores() workers.
+		pool, err := s.defaultParallelForPool(stmt)
+		if err != nil {
+			return err
+		}
+		return s.emitParallelForStmtWithPool(stmt, info, pool)
 	}
+	return s.emitParallelForStmtWithPool(stmt, info, pool)
+}
+
+// defaultParallelForPool builds the implicit pool binding used when `parallel for` has no explicit
+// `pool workers(w):` scope: default_pool() (a cost-free zeroed dispatcher) plus a perf_cores()
+// worker count. Both are runtime calls; the ThreadPool is stored in a fresh alloca for pool_submit1.
+func (s *functionState) defaultParallelForPool(stmt *ast.ParallelForStmt) (activePoolBinding, error) {
+	poolType := s.g.result.NamedTypes["ThreadPool"]
+	usizeType := s.g.result.NamedTypes["usize"]
+	defCallee, defType, err := s.ensureRuntimeFunction("default_pool", nil)
+	if err != nil {
+		return activePoolBinding{}, err
+	}
+	defLLVM, err := s.g.lowerFunctionType(defType)
+	if err != nil {
+		return activePoolBinding{}, err
+	}
+	poolValue := s.buildCall(defLLVM, defCallee, nil, "parallel.default.pool")
+	poolAlloca, err := s.createEntryAlloca("__parallel_default_pool", poolType)
+	if err != nil {
+		return activePoolBinding{}, err
+	}
+	C.LLVMBuildStore(s.builder, poolValue, poolAlloca)
+
+	coresCallee, coresType, err := s.ensureRuntimeFunction("perf_cores", nil)
+	if err != nil {
+		return activePoolBinding{}, err
+	}
+	coresLLVM, err := s.g.lowerFunctionType(coresType)
+	if err != nil {
+		return activePoolBinding{}, err
+	}
+	coresI64 := s.buildCall(coresLLVM, coresCallee, nil, "parallel.default.cores")
+	usizeLLVM, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return activePoolBinding{}, err
+	}
+	// perf_cores() returns i64; usize is the same width on supported targets, so a bitcast/trunc is
+	// unnecessary -- the value is already a non-negative core count in an i64.
+	workers := coresI64
+	if C.LLVMGetIntTypeWidth(C.LLVMTypeOf(coresI64)) != C.LLVMGetIntTypeWidth(usizeLLVM) {
+		workers = C.LLVMBuildTrunc(s.builder, coresI64, usizeLLVM, cStringFree("parallel.default.cores.usize"))
+	}
+	return activePoolBinding{name: "__parallel_default_pool", ptr: poolAlloca, typ: poolType, workers: workers}, nil
+}
+
+func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, info *semantic.ParallelForInfo, pool activePoolBinding) error {
 	sourceValue, _, err := s.emitExpr(stmt.Source, info.SourceType)
 	if err != nil {
 		return err

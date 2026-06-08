@@ -556,6 +556,16 @@ def pool_shutdown(pool: mutable ThreadPool&):
 			free(pool.handle.cast[heap void&])
 			pool.handle <- null
 
+# A zeroed, thread-spawn-per-task pool used as the implicit pool for `parallel for` when there is
+# no explicit `pool workers(w):` scope. pool_submit_raw ignores the pool handle (it spawns a fresh
+# worker per task), so a zeroed ThreadPool is a valid, cost-free dispatcher -- the fast path needs
+# no pool ceremony and pays no per-call pool_new/pool_shutdown. The worker count defaults to
+# perf_cores() (supplied by the backend). NOTE: pool_submit_raw spawns one OS thread per task; a
+# real persistent worker pool (reused threads) is a separate, larger perf win.
+def default_pool() -> ThreadPool:
+	out: ThreadPool = zeroed
+	return move out
+
 def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Task[void&?, Pending]:
 	can Pool.Submit, Thread.Spawn, Abort.Panic:
 		_ = pool
