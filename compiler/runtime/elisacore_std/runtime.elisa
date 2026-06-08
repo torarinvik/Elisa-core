@@ -24,6 +24,24 @@ def char_to_string(value: i64) -> heap u8&:
 def char_to_string_scratch(value: i64) -> heap u8&:
     return char_to_string_into(&scratch_arena, value) can Memory.Allocate, Abort.Panic
 
+def uint_to_string_scratch(value: u64) -> heap u8&:
+    can Memory.Allocate, Console.Format, Abort.Panic:
+        len: int = snprintf(null, 0, "%llu", value)
+        if len < 0:
+            panic("uint_to_string_scratch: snprintf failed")
+        out: heap u8& = alloc_scratch((len + 1).i64()).cast[heap u8&]
+        snprintf(out.cast[u8&?], len.usize() + 1, "%llu", value)
+        return out
+
+def float_to_string_scratch(value: f64) -> heap u8&:
+    can Memory.Allocate, Console.Format, Abort.Panic:
+        len: int = snprintf(null, 0, "%g", value)
+        if len < 0:
+            panic("float_to_string_scratch: snprintf failed")
+        out: heap u8& = alloc_scratch((len + 1).i64()).cast[heap u8&]
+        snprintf(out.cast[u8&?], len.usize() + 1, "%g", value)
+        return out
+
 # ------------------------------------------------------------
 # Basic string predicates
 # ------------------------------------------------------------
@@ -142,15 +160,79 @@ const enum FileDescriptor of int:
 extern runtime_write(fd: FileDescriptor, buf: void&, count: usize) -> isize effects[Console.Write]
 
 protocol Str:
-    def __cast__(self: Self) -> cstr
+    def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]
 
 impl Str for cstr:
-    def __cast__(self: cstr) -> cstr:
+    def __cast__(self: cstr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
         return self
 
 impl Str for bool:
-    def __cast__(self: bool) -> cstr:
+    def __cast__(self: bool) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
         return "true" if self else "false"
+
+impl Str for sview:
+    def __cast__(self: sview) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return string_view_copy(self).cast[u8&]
+
+impl Str for dstr:
+    def __cast__(self: dstr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return string_view_copy(bytes_view(self)).cast[u8&]
+
+impl Str for char:
+    def __cast__(self: char) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return char_to_string_scratch(self.i64())
+
+impl Str for int:
+    def __cast__(self: int) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return int_to_string_scratch(self.i64())
+
+impl Str for i64:
+    def __cast__(self: i64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return int_to_string_scratch(self)
+
+impl Str for i32:
+    def __cast__(self: i32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return int_to_string_scratch(self.i64())
+
+impl Str for i16:
+    def __cast__(self: i16) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return int_to_string_scratch(self.i64())
+
+impl Str for i8:
+    def __cast__(self: i8) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return int_to_string_scratch(self.i64())
+
+impl Str for u32:
+    def __cast__(self: u32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return uint_to_string_scratch(self.u64())
+
+impl Str for u16:
+    def __cast__(self: u16) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return uint_to_string_scratch(self.u64())
+
+impl Str for u8:
+    def __cast__(self: u8) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return uint_to_string_scratch(self.u64())
+
+impl Str for u64:
+    def __cast__(self: u64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return uint_to_string_scratch(self)
+
+impl Str for usize:
+    def __cast__(self: usize) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return uint_to_string_scratch(self.u64())
+
+impl Str for uintptr:
+    def __cast__(self: uintptr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return uint_to_string_scratch(self.u64())
+
+impl Str for f64:
+    def __cast__(self: f64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return float_to_string_scratch(self)
+
+impl Str for f32:
+    def __cast__(self: f32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return float_to_string_scratch(self.f64())
 
 def printr(value: cstr) -> void can[Console.Write]:
     length: usize = runtime_strlen(value)
@@ -162,11 +244,11 @@ def print(value: cstr) -> void can[Console.Write]:
     printr(value) can Console.Write
     _ = runtime_write(FileDescriptor.Output, "\n".cast[void&], 1.usize()) can Console.Write
 
-def printr[T: Str](value: T) -> void can[Console.Write]:
-    printr(T.__cast__(value)) can Console.Write
+def printr[T: Str](value: T) -> void can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    printr(T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic) can Console.Write
 
-def print[T: Str](value: T) -> void can[Console.Write]:
-    print(T.__cast__(value)) can Console.Write
+def print[T: Str](value: T) -> void can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    print(T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic) can Console.Write
 
 def printr(value: dstr) -> void can[Console.Write]:
     if value.count == 0 or value.items == null:

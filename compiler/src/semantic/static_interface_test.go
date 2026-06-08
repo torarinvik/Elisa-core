@@ -253,17 +253,17 @@ impl Builder for BuilderTag:
 func TestAnalyzeProtocolCanRequireCastMethod(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "protocol_cast_requirement.elisa", `
 protocol Str:
-    def __cast__(self: Self) -> cstr
+    def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]
 
 struct Label:
     text: cstr
 
 impl Str for Label:
-    def __cast__(self: Label) -> cstr:
+    def __cast__(self: Label) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
         return self.text
 
-def read[T: Str](value: T) -> cstr:
-    return T.__cast__(value)
+def read[T: Str](value: T) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+    return T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic
 `)
 	if len(result.Errors()) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", result.Errors())

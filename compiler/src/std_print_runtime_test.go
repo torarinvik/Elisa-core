@@ -26,16 +26,25 @@ struct Label:
 	text: cstr
 
 impl Str for Label:
-	def __cast__(self: Label) -> cstr:
+	def __cast__(self: Label) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
 		return self.text
 
 def main() -> int can[Console.Write]:
 	printr("raw") can Console.Write
 	print(" line") can Console.Write
-	print(true) can Console.Write
-	printr(false) can Console.Write
+	print(true) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	printr(false) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print(" bool") can Console.Write
-	print(Label("tagged")) can Console.Write
+	print(Label("tagged")) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print('Z') can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(42) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(-9i64) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(7u32) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(99u64) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(5.usize()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(3.5) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(2.25f32) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(sview("view", 0, -1)) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	region scratch:
 		in scratch:
 			d: mutable dstr = ['d'.u8(), 'y'.u8(), 'n'.u8()]
@@ -73,6 +82,15 @@ def main() -> int can[Console.Write]:
 		"true\n",
 		"false bool\n",
 		"tagged\n",
+		"Z\n",
+		"42\n",
+		"-9\n",
+		"7\n",
+		"99\n",
+		"5\n",
+		"3.5\n",
+		"2.25\n",
+		"view\n",
 		"dyn tail\n",
 		"dyn\n",
 	} {
