@@ -327,14 +327,17 @@ generator argument; `by par` / `by simd` may also follow a consumer’s generato
 
 Each phase ships independently and leaves the tree green.
 
-> **Implementation status (Phase 1, in progress).** DONE: fold/reduce comprehension
-> `(… with acc =)` incl. comma-head bindings (`19a2fc54`, `af0592e4`); dict
-> comprehension `{k:v for …}` (`f146802f`); set comprehension `{x for …}`
-> (`61e6df47`). The fold lowers as a pure parser desugar to an `ExprBlock`; dict/set
-> extend `ListComprehensionExpr` (`Key` field / `Set` flag) and lower to a fused
-> `d.put`/`s.add` loop. List comprehension pre-existed. REMAINING: comma-head
-> bindings on `[…]`/`{…}` (list/dict/set); deprecate the `fold` combinator
-> (confirmed unused). Each shipped with a runtime smoke + Go test.
+> **Implementation status (Phase 1, near-complete).** DONE: fold/reduce comprehension
+> `(… with acc =)` (`19a2fc54`); dict `{k:v for …}` (`f146802f`); set `{x for …}`
+> (`61e6df47`); and comma-head bindings on **all** forms — fold (`af0592e4`),
+> list/dict/set (`e14ddc18`). The fold lowers as a pure parser desugar to an
+> `ExprBlock`; dict/set extend `ListComprehensionExpr` (`Key` field / `Set` flag) and
+> lower to a fused `d.put`/`s.add` loop; head bindings ride a `Bindings` field
+> (untyped inside `{…}` to dodge the dict-key `:` ambiguity, typed elsewhere). List
+> comprehension pre-existed. Each shipped with a runtime smoke + Go test; full suite
+> green. REMAINING: deprecate the `fold` combinator (confirmed unused; needs a
+> deprecation hook). Then Phases 2–4 (lazy `Sequence` protocol + reducers, `by
+> par`, `by simd`).
 
 **Phase 1 — surface + sinks (sequential, no protocol value).** Parse `{…}` set,
 `{k:v …}` dict, `(… with acc =)` fold, and the comma-separated **head bindings**
