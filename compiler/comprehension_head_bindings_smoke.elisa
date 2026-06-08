@@ -1,0 +1,34 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Comma-head bindings across list/dict/set comprehensions (docs/79): `name [:T] = e` items
+# before the body are per-element lets, in scope for the body and the `if` filter. The fold
+# form has them too (covered in fold_comprehension_smoke). `{...}` head bindings are untyped
+# (an `IDENT :` there is a dict key:value); `[...]` head bindings may be typed.
+@test
+def comprehension_head_bindings_smoke():
+	can Memory.Allocate, Abort.Panic:
+		src: mutable darray[i64] = []
+		for k in 0..<6:
+			_ = src.push(k)                        # [0, 1, 2, 3, 4, 5]
+
+		# list: binding referenced by the filter
+		out: darray[i64] = [y = x*x, y + 1 for x in src if y > 4]
+		assert out.count == 3.usize()              # x in {3,4,5} -> {10, 17, 26}
+		assert out[0.usize()] == 10
+		assert out[2.usize()] == 26
+
+		# list: multiple bindings, one typed, later uses earlier
+		out2: darray[i64] = [y = x + 1, n: i64 = y * 2, n for x in src]
+		assert out2.count == 6.usize()
+		assert out2[5.usize()] == 12               # (5 + 1) * 2
+
+		# dict: untyped head binding
+		d: dict[i64, i64] = {y = x*x, x: y for x in src if y > 0}
+		assert d.count == 5.usize()
+		assert d.contains(3)
+
+		# set: head binding (dedups)
+		s: set[i64] = {y = x % 2, y for x in src}
+		assert s.count == 2.usize()                # {0, 1}
+		assert s.contains(0)
+		assert s.contains(1)

@@ -661,6 +661,33 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
 		a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
 	}
+	// Comma-head bindings: per-element `name [:T] = e` lets, declared in the loop scope
+	// before the filter/value/key are checked. Later bindings (and the body/filter) see
+	// earlier ones. Each is recomputed per iteration (the backend emits them in the loop body).
+	if len(expr.Bindings) > 0 {
+		savedScope := a.currentScope
+		a.currentScope = loopScope
+		for _, b := range expr.Bindings {
+			vd, ok := b.(*ast.VarDeclStmt)
+			if !ok {
+				continue
+			}
+			var expectedT Type
+			if vd.Type != nil {
+				expectedT = a.resolveType(vd.Type)
+			}
+			valT := a.analyzeValueExpr(vd.Value, expectedT)
+			declT := valT
+			if expectedT != nil && !IsInvalidType(expectedT) {
+				if !AssignableTo(expectedT, valT) {
+					a.errorf(vd.Value.Pos(), "comprehension binding %s expects %s, got %s", vd.Name, expectedT, valT)
+				}
+				declT = expectedT
+			}
+			a.defineLocalInScope(loopScope, &Symbol{Name: vd.Name, Kind: SymbolLocal, Type: declT, Node: vd, Mutable: false}, vd.Position)
+		}
+		a.currentScope = savedScope
+	}
 	if expr.Filter != nil {
 		condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
 		if !IsBoolType(condType) {

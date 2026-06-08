@@ -608,6 +608,9 @@ type ListComprehensionExpr struct {
 	Key Expr
 	// Set marks a set comprehension `{ Value for ... }`; result is set[ValueType].
 	Set bool
+	// Bindings are comma-head `name [:T] = e` per-element lets, in scope for Key,
+	// Value, and Filter. Each is a *VarDeclStmt; recomputed every iteration.
+	Bindings []Stmt
 }
 type QueryExprKind int
 

@@ -333,40 +333,38 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 		},
 		Args: []ast.Expr{expr.Value},
 	}
-	body := []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: pushCall}}
-	var loopStmt ast.Stmt
-	if expr.RangeEnd != nil {
-		loopStmt = &ast.ForStmt{
-			Position: expr.Position,
-			Name:     expr.Name,
-			Start:    expr.Source,
-			End:      expr.RangeEnd,
-			Step:     expr.RangeStep,
-			Op:       expr.RangeOp,
-			Body:     body,
-		}
-		if expr.Filter != nil {
-			loopStmt.(*ast.ForStmt).Body = []ast.Stmt{&ast.IfStmt{Position: expr.Position, Cond: expr.Filter, Then: body}}
-		}
+	block := comprehensionDesugarBlock(expr, resultName, resultInit, resultIdent, pushCall)
+	return s.emitExprBlock(block, resultType)
+}
+
+// comprehensionLoopStmt builds the fused loop for a comprehension desugar: the per-element
+// head bindings (recomputed each iteration), then the `sink` call wrapped in the `if filter`.
+// The filter is emitted in-body (not the iterator's Filter field) so head bindings are in scope.
+func comprehensionLoopStmt(expr *ast.ListComprehensionExpr, sink ast.Expr) ast.Stmt {
+	loopBody := append([]ast.Stmt{}, expr.Bindings...)
+	sinkStmt := ast.Stmt(&ast.ExprStmt{Position: expr.Position, Expr: sink})
+	if expr.Filter != nil {
+		loopBody = append(loopBody, &ast.IfStmt{Position: expr.Position, Cond: expr.Filter, Then: []ast.Stmt{sinkStmt}})
 	} else {
-		loopStmt = &ast.IterForStmt{
-			Position: expr.Position,
-			Pattern:  &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
-			Mode:     ast.IterBindValue,
-			Source:   expr.Source,
-			Filter:   expr.Filter,
-			Body:     body,
-		}
+		loopBody = append(loopBody, sinkStmt)
 	}
-	block := &ast.ExprBlock{
+	if expr.RangeEnd != nil {
+		return &ast.ForStmt{Position: expr.Position, Name: expr.Name, Start: expr.Source, End: expr.RangeEnd, Step: expr.RangeStep, Op: expr.RangeOp, Body: loopBody}
+	}
+	return &ast.IterForStmt{Position: expr.Position, Pattern: &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name}, Mode: ast.IterBindValue, Source: expr.Source, Body: loopBody}
+}
+
+// comprehensionDesugarBlock wraps the result declaration + fused loop into the ExprBlock
+// `{ result: mutable = init; <loop>; result }` shared by the list/dict/set comprehension paths.
+func comprehensionDesugarBlock(expr *ast.ListComprehensionExpr, resultName string, resultInit ast.Expr, resultIdent *ast.Ident, sink ast.Expr) *ast.ExprBlock {
+	return &ast.ExprBlock{
 		Position: expr.Position,
 		Stmts: []ast.Stmt{
 			&ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: resultInit},
-			loopStmt,
+			comprehensionLoopStmt(expr, sink),
 		},
 		Value: resultIdent,
 	}
-	return s.emitExprBlock(block, resultType)
 }
 
 // emitDictComprehensionExpr lowers `{ key: value for name in source [if filter] }` into
@@ -397,32 +395,7 @@ func (s *functionState) emitDictComprehensionExpr(expr *ast.ListComprehensionExp
 		},
 		Args: []ast.Expr{expr.Key, expr.Value},
 	}
-	body := []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: putCall}}
-	var loopStmt ast.Stmt
-	if expr.RangeEnd != nil {
-		forStmt := &ast.ForStmt{Position: expr.Position, Name: expr.Name, Start: expr.Source, End: expr.RangeEnd, Step: expr.RangeStep, Op: expr.RangeOp, Body: body}
-		if expr.Filter != nil {
-			forStmt.Body = []ast.Stmt{&ast.IfStmt{Position: expr.Position, Cond: expr.Filter, Then: body}}
-		}
-		loopStmt = forStmt
-	} else {
-		loopStmt = &ast.IterForStmt{
-			Position: expr.Position,
-			Pattern:  &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
-			Mode:     ast.IterBindValue,
-			Source:   expr.Source,
-			Filter:   expr.Filter,
-			Body:     body,
-		}
-	}
-	block := &ast.ExprBlock{
-		Position: expr.Position,
-		Stmts: []ast.Stmt{
-			&ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: resultInit},
-			loopStmt,
-		},
-		Value: resultIdent,
-	}
+	block := comprehensionDesugarBlock(expr, resultName, resultInit, resultIdent, putCall)
 	return s.emitExprBlock(block, resultType)
 }
 // emitSetComprehensionExpr lowers `{ value for name in source [if filter] }` into
@@ -451,32 +424,7 @@ func (s *functionState) emitSetComprehensionExpr(expr *ast.ListComprehensionExpr
 		},
 		Args: []ast.Expr{expr.Value},
 	}
-	body := []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: addCall}}
-	var loopStmt ast.Stmt
-	if expr.RangeEnd != nil {
-		forStmt := &ast.ForStmt{Position: expr.Position, Name: expr.Name, Start: expr.Source, End: expr.RangeEnd, Step: expr.RangeStep, Op: expr.RangeOp, Body: body}
-		if expr.Filter != nil {
-			forStmt.Body = []ast.Stmt{&ast.IfStmt{Position: expr.Position, Cond: expr.Filter, Then: body}}
-		}
-		loopStmt = forStmt
-	} else {
-		loopStmt = &ast.IterForStmt{
-			Position: expr.Position,
-			Pattern:  &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
-			Mode:     ast.IterBindValue,
-			Source:   expr.Source,
-			Filter:   expr.Filter,
-			Body:     body,
-		}
-	}
-	block := &ast.ExprBlock{
-		Position: expr.Position,
-		Stmts: []ast.Stmt{
-			&ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: resultInit},
-			loopStmt,
-		},
-		Value: resultIdent,
-	}
+	block := comprehensionDesugarBlock(expr, resultName, resultInit, resultIdent, addCall)
 	return s.emitExprBlock(block, resultType)
 }
 func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, semantic.Type, error) {

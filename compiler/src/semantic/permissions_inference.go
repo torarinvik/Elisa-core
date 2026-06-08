@@ -362,6 +362,11 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			c.collectExpr(elem)
 		}
 	case *ast.ListComprehensionExpr:
+		for _, b := range n.Bindings {
+			if vd, ok := b.(*ast.VarDeclStmt); ok {
+				c.collectExpr(vd.Value)
+			}
+		}
 		c.collectExpr(n.Key)
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Source)

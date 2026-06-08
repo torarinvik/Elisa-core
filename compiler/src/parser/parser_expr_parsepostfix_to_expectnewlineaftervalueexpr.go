@@ -303,6 +303,16 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if p.peek() != lexer.TOKEN_RBRACKET {
 			firstSpread := p.match(lexer.TOKEN_ELLIPSIS)
 			first := p.parseExpr()
+			if ident, ok := first.(*ast.Ident); ok && !firstSpread && (p.peek() == lexer.TOKEN_ASSIGN || p.peek() == lexer.TOKEN_COLON) {
+				// Binding-prefixed list comprehension: `[ name [:T] = e, ... , body for ... ]`.
+				bindings := p.parseComprehensionHeadBindings(pos, ident.Name, true)
+				body := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+				comp := p.parseListComprehensionFromFirst(pos, body)
+				if lc, ok := comp.(*ast.ListComprehensionExpr); ok {
+					lc.Bindings = bindings
+				}
+				return comp
+			}
 			if !firstSpread && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
 				return p.parseListComprehensionFromFirst(pos, first)
 			}
@@ -334,6 +344,22 @@ func (p *Parser) parsePrimary() ast.Expr {
 		var keys []ast.Expr // non-nil => dict literal `{k: v, ...}`
 		if p.peek() != lexer.TOKEN_RBRACE {
 			first := p.parseExpr()
+			if ident, ok := first.(*ast.Ident); ok && p.peek() == lexer.TOKEN_ASSIGN {
+				// Binding-prefixed dict/set comprehension. Only `IDENT =` starts a binding here
+				// (an `IDENT :` is a dict key:value), so head bindings inside {...} are untyped.
+				bindings := p.parseComprehensionHeadBindings(pos, ident.Name, false)
+				bodyOrKey := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+				if p.peek() == lexer.TOKEN_COLON {
+					p.advance()
+					value := p.parseExpr()
+					comp := p.parseDictComprehensionFromFirst(pos, bodyOrKey, value)
+					comp.(*ast.ListComprehensionExpr).Bindings = bindings
+					return comp
+				}
+				comp := p.parseSetComprehensionFromFirst(pos, bodyOrKey)
+				comp.(*ast.ListComprehensionExpr).Bindings = bindings
+				return comp
+			}
 			if p.peek() == lexer.TOKEN_COLON {
 				// Dict literal: `first` is the first key. Parse `key: value` pairs.
 				p.advance()

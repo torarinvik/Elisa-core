@@ -287,6 +287,18 @@ func (p *Parser) parseFoldComprehensionFromFirst(pos lexer.Pos, body ast.Expr) a
 // `firstName` is the already-consumed name of the first binding (its `:`/`=` is next).
 // Bindings are per-element `let`s; an item is a binding iff it is `IDENT [:T] =`.
 func (p *Parser) parseFoldComprehensionWithBindings(pos lexer.Pos, firstName string) ast.Expr {
+	bindings := p.parseComprehensionHeadBindings(pos, firstName, true)
+	body := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	return p.parseFoldComprehensionTail(pos, bindings, body)
+}
+
+// parseComprehensionHeadBindings parses the comma-separated `name [:T] = e` binding
+// prefix of a comprehension head, given the already-consumed `firstName` (its `:`/`=`
+// is next). It consumes through the comma after the last binding, leaving the parser at
+// the body. An item is a binding iff it is `IDENT [:T] =`. When allowColonStart is false
+// (inside `{...}`, where `IDENT :` is a dict key:value), continuation bindings are
+// detected only by `IDENT =`, so a trailing dict key is not mistaken for a typed binding.
+func (p *Parser) parseComprehensionHeadBindings(pos lexer.Pos, firstName string, allowColonStart bool) []ast.Stmt {
 	var bindings []ast.Stmt
 	name := firstName
 	for {
@@ -298,14 +310,14 @@ func (p *Parser) parseFoldComprehensionWithBindings(pos lexer.Pos, firstName str
 		val := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 		bindings = append(bindings, &ast.VarDeclStmt{Position: pos, Name: name, Type: typ, Value: val})
 		p.expect(lexer.TOKEN_COMMA) // a binding is always followed by another head item
-		if p.peek() == lexer.TOKEN_IDENT && (p.peekAt(1) == lexer.TOKEN_ASSIGN || p.peekAt(1) == lexer.TOKEN_COLON) {
+		nextIsBinding := p.peek() == lexer.TOKEN_IDENT && (p.peekAt(1) == lexer.TOKEN_ASSIGN || (allowColonStart && p.peekAt(1) == lexer.TOKEN_COLON))
+		if nextIsBinding {
 			name = p.expect(lexer.TOKEN_IDENT).Text
 			continue
 		}
 		break
 	}
-	body := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
-	return p.parseFoldComprehensionTail(pos, bindings, body)
+	return bindings
 }
 
 // parseFoldComprehensionTail parses `for name in source [if filter] with acc [:T] = seed )`

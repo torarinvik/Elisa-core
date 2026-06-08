@@ -477,6 +477,11 @@ func (c *progressCallCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Start)
 		c.collectExpr(n.End)
 	case *ast.ListComprehensionExpr:
+		for _, b := range n.Bindings {
+			if vd, ok := b.(*ast.VarDeclStmt); ok {
+				c.collectExpr(vd.Value)
+			}
+		}
 		c.collectExpr(n.Key)
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Source)
