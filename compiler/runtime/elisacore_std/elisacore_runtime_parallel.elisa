@@ -13,13 +13,28 @@
 # independent (it is: verified bit-identical across w=1/2/4/8).
 # ============================================================
 
-# Parallel for-each over disjoint bands: `each(s, w, worker)` runs `worker(band)` on each of
-# `w` disjoint bands in parallel and joins them all. The "parallel for band" as one call.
-def each[T](s: Slice[T], w: usize, body: func(Slice[T]) -> i64) -> void:
+# Default worker count for a data-parallel op over `n` elements: the performance-core count
+# (perf_cores), capped at `n` (never more threads than elements) and at least 1. This is the
+# "inference does the plumbing" default so the common case needs no hand-tuned worker count.
+def default_workers_for(n: usize) -> usize:
+	if n == 0.usize():
+		return 1.usize()
+	cores: mutable usize = perf_cores().usize()
+	if cores < 1.usize():
+		cores <- 1.usize()
+	if cores > n:
+		return n
+	return cores
+
+# Parallel for-each over disjoint bands: `each(s, worker)` runs `worker(band)` on each disjoint
+# band in parallel and joins them all -- the "parallel for band" as one call. The worker count
+# is inferred (default_workers_for); pass a trailing `w` only to tune it explicitly.
+def each[T](s: Slice[T], body: func(Slice[T]) -> i64, w: usize = 0.usize()) -> void:
 	can Parallel:
-		nursery workers(w):
-			for t in 0..<w:
-				submit body(s.split(w, t))
+		nw: usize = w if w != 0.usize() else default_workers_for(s.len())
+		nursery workers(nw):
+			for t in 0..<nw:
+				submit body(s.split(nw, t))
 
 struct ReduceArg[T]:
 	band: Slice[T]
@@ -38,20 +53,21 @@ def reduce_worker[T](a: ReduceArg[T]) -> i64:
 	a.partials.set_unchecked(a.id, acc)
 	return 0
 
-# Parallel reduction: `reduce(s, w, identity, op)` folds `s` to a single T using `w` workers.
-# Each worker reduces its disjoint band into a private partial; partials are merged with `op`.
-# `op` must be associative with unit `identity`.
-def reduce[T](s: Slice[T], w: usize, identity: T, op: func(T, T) -> T) -> T:
+# Parallel reduction: `reduce(s, identity, op)` folds `s` to a single T. Each worker reduces its
+# disjoint band into a private partial; partials are merged with `op`. `op` must be associative
+# with unit `identity`. The worker count is inferred; pass a trailing `w` to tune it explicitly.
+def reduce[T](s: Slice[T], identity: T, op: func(T, T) -> T, w: usize = 0.usize()) -> T:
 	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		nw: usize = w if w != 0.usize() else default_workers_for(s.len())
 		partials: mutable darray[T] = []
-		_ = partials.resize(w)
-		for i in 0..<w:
+		_ = partials.resize(nw)
+		for i in 0..<nw:
 			partials[i] <- identity
 		ps: Slice[T] = slice(&partials)
-		nursery workers(w):
-			for t in 0..<w:
-				submit reduce_worker[T](ReduceArg[T] { band: s.split(w, t), partials: ps, id: t, identity: identity, op: op })
+		nursery workers(nw):
+			for t in 0..<nw:
+				submit reduce_worker[T](ReduceArg[T] { band: s.split(nw, t), partials: ps, id: t, identity: identity, op: op })
 		acc: mutable T = identity
-		for i in 0..<w:
+		for i in 0..<nw:
 			acc <- op(acc, partials[i])
 		return acc

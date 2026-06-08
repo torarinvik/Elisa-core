@@ -568,9 +568,9 @@ func (a *Analyzer) warnOnLegacyRawConcurrencyCall(pos lexer.Pos, fnType *FuncTyp
 	case "spawn_raw", "join_raw", "detach_raw":
 		emit("`%s` is legacy raw thread surface; use `nursery:` / `nursery workers(N):`, a `pool` scope, or a linear typed Thread handle that is joined at a clear boundary", fnType.Name)
 	case "spawn1":
-		emit("`spawn1` is low-level escaped-task surface; prefer `nursery:` / `nursery workers(N):` or a pool/task-group batch unless the linear Thread handle intentionally escapes")
+		emit("`spawn1` is low-level escaped-task surface; prefer `nursery:` / `nursery workers(N):`, the data-parallel `each(slice, worker)` / `reduce(slice, identity, op)` combinators, or a pool/task-group batch unless the linear Thread handle intentionally escapes")
 	case "pool_submit1":
-		emit("`pool_submit1` is low-level pool submission surface; prefer `nursery:`, `pool` / `parallel for`, or task-group structure unless the Pending task handle is intentionally managed")
+		emit("`pool_submit1` is low-level pool submission surface; prefer `nursery:`, a `pool` scope, the data-parallel `each(slice, worker)` / `reduce(slice, identity, op)` combinators, or task-group structure unless the Pending task handle is intentionally managed")
 	case "detach":
 		emit("`detach` is a detached-task escape hatch; keep work in `nursery:` / pool scope or prove captured state is static/share-safe before using a detached escape")
 	}

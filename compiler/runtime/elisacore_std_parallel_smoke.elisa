@@ -7,6 +7,8 @@ def add_one(b: Slice[f64]) -> i64:
 
 # each(): parallel map over disjoint bands. reduce(): contention-free parallel fold.
 # Both partition-independent and race-free (verified across worker counts elsewhere).
+# The worker count is inferred by default (perf_cores, capped at the element count); an
+# explicit trailing `w` tunes it when needed.
 @test
 def std_parallel_native_smoke():
 	can Parallel:
@@ -14,13 +16,13 @@ def std_parallel_native_smoke():
 		_ = xs.resize(1000.usize())
 		for k in 0..<1000:
 			xs[k.usize()] <- k.f64()
-		# parallel map: +1 to every element over 4 disjoint bands
-		each(slice(&xs), 4.usize(), add_one)
+		# parallel map: +1 to every element, worker count inferred (no `w` plumbing)
+		each(slice(&xs), add_one)
 		assert xs[0.usize()] == 1.0
 		assert xs[999.usize()] == 1000.0
-		# parallel sum: 1+2+...+1000 = 500500
-		total: f64 = reduce(slice(&xs), 4.usize(), 0.0, lambda(a: f64, b: f64) => a + b)
+		# parallel sum: 1+2+...+1000 = 500500, worker count inferred
+		total: f64 = reduce(slice(&xs), 0.0, lambda(a: f64, b: f64) => a + b)
 		assert total == 500500.0
-		# parallel max
-		mx: f64 = reduce(slice(&xs), 4.usize(), 0.0, lambda(a: f64, b: f64) => (a if a > b else b))
+		# parallel max with an EXPLICIT trailing worker count (tuning still available)
+		mx: f64 = reduce(slice(&xs), 0.0, lambda(a: f64, b: f64) => (a if a > b else b), 4.usize())
 		assert mx == 1000.0
