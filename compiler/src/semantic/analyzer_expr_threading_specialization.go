@@ -249,6 +249,19 @@ func atomicRmwPayloadType(argType Type) (Type, bool) {
 	return instance.Args[0], true
 }
 
+func atomicSlotPayloadType(argType Type) (Type, bool) {
+	return atomicRmwPayloadType(argType)
+}
+
+func isAtomicSlotCallName(name string) bool {
+	switch name {
+	case "load", "store", "exchange", "compare_exchange", "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
+		return true
+	default:
+		return false
+	}
+}
+
 func isAtomicRmwCallName(name string) bool {
 	switch name {
 	case "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
@@ -256,6 +269,34 @@ func isAtomicRmwCallName(name string) bool {
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) warnOnLegacyRawAtomicCall(pos lexer.Pos, callName string, argType Type) {
+	if callName == "" || !isAtomicSlotCallName(callName) || isRuntimeStdPermissionInternal(pos.File) {
+		return
+	}
+	if _, ok := atomicSlotPayloadType(argType); !ok {
+		return
+	}
+	a.emitLegacyRawAtomicDiagnostic(pos, "`%s` is legacy raw atomic surface; strict concurrency should wrap atomics in a named protocol type that owns the memory-ordering invariant", callName)
+}
+
+func (a *Analyzer) warnOnLegacyRawAtomicFenceCall(pos lexer.Pos, fnType *FuncType) {
+	if fnType == nil || fnType.Name != "fence" || isRuntimeStdPermissionInternal(pos.File) {
+		return
+	}
+	if !permissionRefsContainMember(fnType.PermissionRefs, "Atomics", "Fence") {
+		return
+	}
+	a.emitLegacyRawAtomicDiagnostic(pos, "`fence` is legacy raw atomic surface; strict concurrency should keep fences inside a named protocol type that owns the memory-ordering invariant")
+}
+
+func (a *Analyzer) emitLegacyRawAtomicDiagnostic(pos lexer.Pos, format string, args ...interface{}) {
+	if a.enforceStrictConcurrency {
+		a.errorf(pos, "strict concurrency error: "+format, args...)
+		return
+	}
+	a.deprecatedf(pos, format, args...)
 }
 
 func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type) {

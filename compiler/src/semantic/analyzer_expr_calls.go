@@ -363,6 +363,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		if isAtomicRmwCallName(ft.Name) && i == 0 {
 			a.validateAtomicRmwArg(ft.Name, orderedArgs[i], argType)
 		}
+		if i == 0 {
+			a.warnOnLegacyRawAtomicCall(expr.Pos(), ft.Name, argType)
+		}
 	}
 	a.resolveImplicitCallArgs(expr, ft, bindings, shapeBindings, regionBindings, permissionBindings)
 	for _, name := range ft.RegionParams {
@@ -438,6 +441,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		a.validateThreadTransferResultType(ft.Name, expr.Pos(), resultPayload)
 	}
 	a.validateAtomicMemoryOrderArgs(ft.Name, orderedArgs)
+	a.warnOnLegacyRawAtomicFenceCall(expr.Pos(), ft)
 	callAliasArgs := append([]ast.Expr(nil), orderedArgs...)
 	callAliasArgs = append(callAliasArgs, expr.ResolvedImplicitArgs...)
 	a.validateCallArgAliasAccess(expr, appliedType.Params, callAliasArgs)

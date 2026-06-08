@@ -3123,6 +3123,9 @@ Strict-concurrency migration notes:
   ordinary data-parallel work
 - direct `spawn1`, `pool_submit1`, `detach`, raw thread helpers, and raw
   condition-variable helpers are low-level compatibility/runtime surfaces
+- direct atomic helpers over `atomic[T]` (`load`, `store`, `exchange`,
+  `compare_exchange`, RMW helpers, and `fence`) are also low-level surfaces;
+  strict user code should hide them behind named protocol wrappers
 - strict-mode direction is to keep those raw calls available for trusted
   wrappers while nudging user code toward structured task scopes, linear
   escaped handles, typed predicate waits, bounded queues, and domain-protected

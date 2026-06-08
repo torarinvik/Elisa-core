@@ -224,7 +224,9 @@ Legacy raw calls include:
 - `cond_wait`
 - `notify_one`
 - `notify_all`
-- manual atomics outside a protocol wrapper
+- manual atomics outside a protocol wrapper: `load`, `store`, `exchange`,
+  `compare_exchange`, `fetch_add`, `fetch_sub`, `fetch_or`, `fetch_and`,
+  `fetch_xor`, and `fence`
 - unbounded queues or detached workers without a declared lifetime owner
 
 Migration direction:
