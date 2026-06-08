@@ -51,6 +51,21 @@ func runStressProgram(t *testing.T, name, body string, extraArgs ...string) (int
 	return exit, stdout.String(), stderr.String()
 }
 
+func compileStressProgram(t *testing.T, name, body string, extraArgs ...string) (int, string, string) {
+	t.Helper()
+	std := stressStdInclude(t)
+	src := "include \"" + std + "\"\n\n" + body
+	path := filepath.Join(t.TempDir(), name+".elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	args := append([]string{"-emit", "llvm"}, extraArgs...)
+	args = append(args, path)
+	var stdout, stderr bytes.Buffer
+	exit := runCLI(args, &stdout, &stderr)
+	return exit, stdout.String(), stderr.String()
+}
+
 // assertAllPassed asserts a clean run: exit 0, no failures, and every named test OK.
 func assertAllPassed(t *testing.T, exit int, stdout, stderr string, names ...string) {
 	t.Helper()
@@ -136,8 +151,9 @@ global STRESS_SHARED: atomic[i64] = zeroed
 
 def stress_bump(n: i64) -> i64:
     can Atomics.Rmw:
-        for i in 0..<n:
-            _ = fetch_add(STRESS_SHARED.ref[mutable atomic[i64]&], 1, MemoryOrder.SeqCst)
+        trusted Perf.HotLoop:
+            for i in 0..<n:
+                _ = fetch_add(STRESS_SHARED.ref[mutable atomic[i64]&], 1, MemoryOrder.SeqCst)
         return 0
 
 def stress_sq(x: i64) -> i64:
@@ -171,9 +187,10 @@ def atomic_contention() -> void:
 def spawn_churn() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
         acc: mutable i64 = 0
-        for i in 0..<500:
-            t: Thread[i64, Joinable] = spawn1(stress_sq, i.i64())
-            acc <- acc + join(move t)
+        trusted Perf.HotLoop:
+            for i in 0..<500:
+                t: Thread[i64, Joinable] = spawn1(stress_sq, i.i64())
+                acc <- acc + join(move t)
         if acc != 41541750:
             panic("spawn churn sum wrong")
 
@@ -182,9 +199,10 @@ def pool_scale() -> void:
     can Pool.Create, Pool.Submit, Pool.Await, Pool.Shutdown, Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Atomics.Load, Atomics.CompareExchange, Abort.Panic:
         pool: ThreadPool = pool_new(8)
         acc: mutable i64 = 0
-        for i in 0..<500:
-            task: Task[i64, Pending] = pool_submit1(pool.ref[mutable ThreadPool&], stress_sq, i.i64())
-            acc <- acc + pool_await(move task)
+        trusted Perf.HotLoop:
+            for i in 0..<500:
+                task: Task[i64, Pending] = pool_submit1(pool.ref[mutable ThreadPool&], stress_sq, i.i64())
+                acc <- acc + pool_await(move task)
         if acc != 41541750:
             panic("pool scale sum wrong")
         pool_shutdown(pool.ref[mutable ThreadPool&])
@@ -193,9 +211,10 @@ def pool_scale() -> void:
 def mutex_lock_churn() -> void:
     can Memory.Allocate, Memory.Release, Sync.Lock, Sync.Unlock, Abort.Panic:
         mu: Mutex = mutex()
-        for i in 0..<10000:
-            guard: MutexGuard[Held] = mutex_lock(mu.ref[mutable Mutex&])
-            mutex_unlock(move guard)
+        trusted Perf.HotLoop:
+            for i in 0..<10000:
+                guard: MutexGuard[Held] = mutex_lock(mu.ref[mutable Mutex&])
+                mutex_unlock(move guard)
         mutex_dispose(mu.ref[mutable Mutex&])
 `
 
@@ -208,6 +227,24 @@ func TestConcurrencyStress(t *testing.T) {
 	exit, stdout, stderr := runStressProgram(t, "concurrency_stress", concurrencyStressBody)
 	assertAllPassed(t, exit, stdout, stderr,
 		"atomic_contention", "spawn_churn", "pool_scale", "mutex_lock_churn")
+}
+
+func TestConcurrencyStressPerfStrictAcknowledged(t *testing.T) {
+	exit, stdout, stderr := compileStressProgram(t, "concurrency_stress_perf", concurrencyStressBody, "-Wperf")
+	if exit != 0 {
+		t.Fatalf("expected acknowledged concurrency stress fixture to compile under -Wperf, exit=%d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+	for _, marker := range []string{
+		"performs an atomic read-modify-write/compare-exchange on every iteration",
+		"spawns a fresh OS thread on every iteration",
+		"joins a thread on every iteration",
+		"waits for a task on every iteration",
+		"acquires a lock on every iteration",
+	} {
+		if strings.Contains(stderr, marker) {
+			t.Fatalf("expected acknowledged concurrency stress fixture to suppress %q under -Wperf, got:\n%s", marker, stderr)
+		}
+	}
 }
 
 // Best-effort: run the malloc-heavy concurrency fixture under AddressSanitizer. Link-time
