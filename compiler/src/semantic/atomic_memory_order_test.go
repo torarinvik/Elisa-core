@@ -58,6 +58,7 @@ def use_raw(slot: mutable atomic[i64]&):
 	deprecations := strings.Join(result.Deprecations(), "\n")
 	for _, check := range []string{
 		"`load` is legacy raw atomic surface",
+		"AtomicCell[T]",
 		"`store` is legacy raw atomic surface",
 		"`compare_exchange` is legacy raw atomic surface",
 		"`fence` is legacy raw atomic surface",
@@ -82,6 +83,7 @@ def use_raw(slot: mutable atomic[i64]&):
 	errors := strings.Join(result.Errors(), "\n")
 	for _, check := range []string{
 		"strict concurrency error: `load` is legacy raw atomic surface",
+		"AtomicCell[T]",
 		"strict concurrency error: `store` is legacy raw atomic surface",
 		"strict concurrency error: `compare_exchange` is legacy raw atomic surface",
 		"strict concurrency error: `fence` is legacy raw atomic surface",

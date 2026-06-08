@@ -3141,7 +3141,9 @@ Strict-concurrency migration notes:
   state
 - current semantic analysis reports the legacy raw concurrency calls as
   deprecations so projects can start auditing them before promotion to hard
-  strict-mode errors
+  strict-mode errors; the diagnostics name the preferred wrappers such as
+  `predicate_wait`, `predicate_notify_one`, `AtomicCell[T]`, `nursery:`,
+  pool scopes, and task groups
 - `AnalyzeOptions.EnforceStrictConcurrency`, exposed as CLI flag
   `-Wconcurrency`, currently performs that promotion for the legacy raw
   concurrency calls while leaving unrelated deprecations as migration warnings

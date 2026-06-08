@@ -10,10 +10,14 @@ func TestLegacyRawConcurrencyCallsAreDeprecated(t *testing.T) {
 	deprecations := strings.Join(result.Deprecations(), "\n")
 	for _, check := range []string{
 		"`cond_wait` is legacy raw condition-variable surface",
+		"predicate_wait(cv, move guard, predicate)",
 		"`notify_one` is legacy raw notification surface",
+		"predicate_notify_one",
 		"`spawn1` is low-level escaped-task surface",
+		"nursery workers(N)",
 		"`detach` is a detached-task escape hatch",
 		"`pool_submit1` is low-level pool submission surface",
+		"task-group structure",
 	} {
 		if !strings.Contains(deprecations, check) {
 			t.Fatalf("expected deprecation %q, got:\n%s", check, deprecations)
@@ -29,10 +33,14 @@ func TestStrictConcurrencyPromotesLegacyRawConcurrencyCallsToErrors(t *testing.T
 	errors := strings.Join(result.Errors(), "\n")
 	for _, check := range []string{
 		"strict concurrency error: `cond_wait` is legacy raw condition-variable surface",
+		"predicate_wait(cv, move guard, predicate)",
 		"strict concurrency error: `notify_one` is legacy raw notification surface",
+		"predicate_notify_one",
 		"strict concurrency error: `spawn1` is low-level escaped-task surface",
+		"nursery workers(N)",
 		"strict concurrency error: `detach` is a detached-task escape hatch",
 		"strict concurrency error: `pool_submit1` is low-level pool submission surface",
+		"task-group structure",
 	} {
 		if !strings.Contains(errors, check) {
 			t.Fatalf("expected strict concurrency error %q, got:\n%s", check, errors)

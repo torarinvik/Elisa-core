@@ -278,7 +278,7 @@ func (a *Analyzer) warnOnLegacyRawAtomicCall(pos lexer.Pos, callName string, arg
 	if _, ok := atomicSlotPayloadType(argType); !ok {
 		return
 	}
-	a.emitLegacyRawAtomicDiagnostic(pos, "`%s` is legacy raw atomic surface; strict concurrency should wrap atomics in a named protocol type that owns the memory-ordering invariant", callName)
+	a.emitLegacyRawAtomicDiagnostic(pos, "`%s` is legacy raw atomic surface; use `AtomicCell[T]` helpers or a named protocol type that owns the memory-ordering invariant", callName)
 }
 
 func (a *Analyzer) warnOnLegacyRawAtomicFenceCall(pos lexer.Pos, fnType *FuncType) {
@@ -288,7 +288,7 @@ func (a *Analyzer) warnOnLegacyRawAtomicFenceCall(pos lexer.Pos, fnType *FuncTyp
 	if !permissionRefsContainMember(fnType.PermissionRefs, "Atomics", "Fence") {
 		return
 	}
-	a.emitLegacyRawAtomicDiagnostic(pos, "`fence` is legacy raw atomic surface; strict concurrency should keep fences inside a named protocol type that owns the memory-ordering invariant")
+	a.emitLegacyRawAtomicDiagnostic(pos, "`fence` is legacy raw atomic surface; keep fences inside `AtomicCell[T]` helpers or a named protocol type that owns the memory-ordering invariant")
 }
 
 func (a *Analyzer) emitLegacyRawAtomicDiagnostic(pos lexer.Pos, format string, args ...interface{}) {

@@ -562,17 +562,17 @@ func (a *Analyzer) warnOnLegacyRawConcurrencyCall(pos lexer.Pos, fnType *FuncTyp
 	}
 	switch fnType.Name {
 	case "cond_wait":
-		emit("`cond_wait` is legacy raw condition-variable surface; strict concurrency should use a typed predicate wait over protected domain state")
+		emit("`cond_wait` is legacy raw condition-variable surface; use `predicate_wait(cv, move guard, predicate)` or a domain-specific typed predicate wait over protected state")
 	case "notify_one", "notify_all":
-		emit("`%s` is legacy raw notification surface; strict concurrency should derive wakeups from protected state predicates", fnType.Name)
+		emit("`%s` is legacy raw notification surface; use `predicate_notify_one` / `predicate_notify_all` or a domain-specific notifier tied to the protected-state predicate", fnType.Name)
 	case "spawn_raw", "join_raw", "detach_raw":
-		emit("`%s` is legacy raw thread surface; strict concurrency should use structured task scopes or linear typed thread handles", fnType.Name)
+		emit("`%s` is legacy raw thread surface; use `nursery:` / `nursery workers(N):`, a `pool` scope, or a linear typed Thread handle that is joined at a clear boundary", fnType.Name)
 	case "spawn1":
-		emit("`spawn1` is low-level escaped-task surface; prefer structured task scopes unless the linear Thread handle intentionally escapes")
+		emit("`spawn1` is low-level escaped-task surface; prefer `nursery:` / `nursery workers(N):` or a pool/task-group batch unless the linear Thread handle intentionally escapes")
 	case "pool_submit1":
-		emit("`pool_submit1` is low-level pool submission surface; prefer `pool` / `parallel for` / task-group structure unless the Pending task handle is intentional")
+		emit("`pool_submit1` is low-level pool submission surface; prefer `nursery:`, `pool` / `parallel for`, or task-group structure unless the Pending task handle is intentionally managed")
 	case "detach":
-		emit("`detach` is a detached-task escape hatch; strict concurrency should keep work in a structured scope or prove captured state is static/share-safe")
+		emit("`detach` is a detached-task escape hatch; keep work in `nursery:` / pool scope or prove captured state is static/share-safe before using a detached escape")
 	}
 }
 
