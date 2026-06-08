@@ -52,4 +52,7 @@ def catalog() -> i64:
 			t.Fatalf("expected concurrency perf catalog warning containing %q, got:\n%s", marker, out)
 		}
 	}
+	if got := strings.Count(out, "trusted Perf.HotLoop:"); got < 6 {
+		t.Fatalf("expected concurrency perf diagnostics to mention trusted Perf.HotLoop acknowledgement, got %d mention(s):\n%s", got, out)
+	}
 }

@@ -25,7 +25,7 @@ func (a *Analyzer) flagTaskGroupChurn(loopBody []ast.Stmt) {
 		if name != "task_group_new" {
 			return false
 		}
-		a.perfLint(call.Pos(), "`task_group_new` creates a task group on every iteration of this loop. Create one task group around the batch, add per-iteration tasks to it, and wait once at the boundary; per-item groups add coordination overhead without increasing parallelism")
+		a.perfLint(call.Pos(), "`task_group_new` creates a task group on every iteration of this loop. Create one task group around the batch, add per-iteration tasks to it, and wait once at the boundary; per-item groups add coordination overhead without increasing parallelism. If this is an intentional batching/window policy, isolate it in a named helper or wrap only that loop in `trusted Perf.HotLoop:`")
 		return false
 	})
 }

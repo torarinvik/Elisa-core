@@ -26,7 +26,7 @@ func (a *Analyzer) flagLockChurn(loopBody []ast.Stmt) {
 		if name != "mutex_lock" {
 			return false
 		}
-		a.perfLint(call.Pos(), "`mutex_lock` acquires a lock on every iteration of this loop. Prefer batching the locked work, sharding the state, using a reduction/local accumulator, or moving synchronization to a coarser protocol boundary. If each iteration is intentionally long-lived or externally synchronized, this is fine")
+		a.perfLint(call.Pos(), "`mutex_lock` acquires a lock on every iteration of this loop. Prefer batching the locked work, sharding the state, using a reduction/local accumulator, or moving synchronization to a coarser protocol boundary. If this is an intentional protocol boundary, isolate it in a named helper or wrap only that loop in `trusted Perf.HotLoop:`")
 		return false
 	})
 }
@@ -34,6 +34,6 @@ func (a *Analyzer) flagLockChurn(loopBody []ast.Stmt) {
 func (a *Analyzer) flagLockChurnStmt(stmt ast.Stmt) {
 	switch s := stmt.(type) {
 	case *ast.LockStmt:
-		a.perfLint(s.Pos(), "`lock ... as %s` acquires a lock on every iteration of this loop. Prefer batching the locked work, sharding the state, using a reduction/local accumulator, or moving synchronization to a coarser protocol boundary", s.GuardName)
+		a.perfLint(s.Pos(), "`lock ... as %s` acquires a lock on every iteration of this loop. Prefer batching the locked work, sharding the state, using a reduction/local accumulator, or moving synchronization to a coarser protocol boundary. If this is an intentional protocol boundary, isolate it in a named helper or wrap only that loop in `trusted Perf.HotLoop:`", s.GuardName)
 	}
 }

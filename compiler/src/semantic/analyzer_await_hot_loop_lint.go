@@ -29,14 +29,14 @@ func (a *Analyzer) flagAwaitHotLoop(loopBody []ast.Stmt) {
 		}
 		switch name {
 		case "pool_await":
-			a.perfLint(call.Pos(), "`pool_await` waits for a task on every iteration of this loop. Awaiting per item often serializes the batch; collect pending tasks in a task group or array, then wait/await at the boundary. If this is intentionally streaming with bounded in-flight work, isolate that policy in a named helper")
+			a.perfLint(call.Pos(), "`pool_await` waits for a task on every iteration of this loop. Awaiting per item often serializes the batch; collect pending tasks in a task group or array, then wait/await at the boundary. If this is intentionally streaming with bounded in-flight work, isolate that policy in a named helper or wrap only that loop in `trusted Perf.HotLoop:`")
 		case "task_group_wait_all":
-			a.perfLint(call.Pos(), "`task_group_wait_all` waits for a task group on every iteration of this loop. Waiting per item often serializes the batch; add loop tasks to one group and wait once at the boundary. If this is intentionally windowed streaming, isolate that policy in a named helper")
+			a.perfLint(call.Pos(), "`task_group_wait_all` waits for a task group on every iteration of this loop. Waiting per item often serializes the batch; add loop tasks to one group and wait once at the boundary. If this is intentionally windowed streaming, isolate that policy in a named helper or wrap only that loop in `trusted Perf.HotLoop:`")
 		case "join", "join_raw":
 			if name == "join" && !a.isThreadJoinCall(call) {
 				return false
 			}
-			a.perfLint(call.Pos(), "`%s` joins a thread on every iteration of this loop. Joining per item often serializes the batch; collect thread handles and join after spawning the batch, or use a nursery/pool. If this is intentionally bounded streaming, isolate that policy in a named helper", name)
+			a.perfLint(call.Pos(), "`%s` joins a thread on every iteration of this loop. Joining per item often serializes the batch; collect thread handles and join after spawning the batch, or use a nursery/pool. If this is intentionally bounded streaming, isolate that policy in a named helper or wrap only that loop in `trusted Perf.HotLoop:`", name)
 		default:
 			return false
 		}

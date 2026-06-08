@@ -35,7 +35,7 @@ func (a *Analyzer) flagSpawnChurn(loopBody []ast.Stmt) {
 		if !rawThreadSpawnNames[name] {
 			return false
 		}
-		a.perfLint(call.Pos(), "`%s` spawns a fresh OS thread on every iteration of this loop. Spawning per iteration was the dominant cost in fine-grained parallel loops. Prefer a persistent thread pool (`pool_submit1` reuses worker threads) or a nursery; spawn a fixed set of workers once and give each a band of the work. If this loop runs a small fixed number of times and each branch is long-lived, this is fine", name)
+		a.perfLint(call.Pos(), "`%s` spawns a fresh OS thread on every iteration of this loop. Spawning per iteration was the dominant cost in fine-grained parallel loops. Prefer `nursery workers(N):` or create a pool/fixed worker set around the batch and submit work inside the loop. If this is an intentional benchmark or bounded low-level policy, wrap only that loop in `trusted Perf.HotLoop:`", name)
 		return false
 	})
 }

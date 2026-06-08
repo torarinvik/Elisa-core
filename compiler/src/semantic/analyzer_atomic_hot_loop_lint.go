@@ -38,7 +38,7 @@ func (a *Analyzer) flagAtomicHotLoop(loopBody []ast.Stmt) {
 		if !atomicHotLoopNames[name] {
 			return false
 		}
-		a.perfLint(call.Pos(), "`%s` performs an atomic read-modify-write/compare-exchange on every iteration of this loop. Atomic hot loops often serialize on one cache line and scale poorly; prefer per-worker locals plus reduction, sharded counters, batching, or a coarser synchronization protocol. If this is an intentional low-level protocol boundary, isolate it in a named wrapper", name)
+		a.perfLint(call.Pos(), "`%s` performs an atomic read-modify-write/compare-exchange on every iteration of this loop. Atomic hot loops often serialize on one cache line and scale poorly; prefer per-worker locals plus reduction, sharded counters, batching, or a coarser synchronization protocol. If this is an intentional low-level protocol boundary, isolate it in a named wrapper or wrap only that loop in `trusted Perf.HotLoop:`", name)
 		return false
 	})
 }
