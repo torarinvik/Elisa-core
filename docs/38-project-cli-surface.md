@@ -5,7 +5,7 @@ This note documents current Elisa-core project command behavior.
 ## Commands
 
 ```sh
-elisacore init <name> [--path <dir>]
+elisacore init <name> [--path <dir>] [--strict]
 elisacore init-lib <name> [--path <dir>]
 elisacore build [target] [--project <dir|project.json>] [options]
 elisacore run [target] [--project <dir|project.json>] [options]
@@ -26,7 +26,10 @@ elisacore project easm-lint [target] [--project <dir|project.json>] [--json]
 - `lib/`
 - `native/`
 - `test/`
-- `elisacore.project.json` with default `app` target
+- `project.json` with default `app` target
+
+`init --strict` adds `warnings.strict: true` to the generated `app` target so
+new projects start with the unified strict preset enabled.
 
 `init-lib` creates `<name>.elisalib/` with manifest and starter library source.
 

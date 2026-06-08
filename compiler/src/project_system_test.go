@@ -35,6 +35,13 @@ func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
 			t.Fatalf("expected scaffolded path %s: %v", path, err)
 		}
 	}
+	var defaultProject projectDefinition
+	if err := decodeJSONFile(filepath.Join(projectRoot, projectFileName), &defaultProject); err != nil {
+		t.Fatalf("expected scaffolded project json to decode: %v", err)
+	}
+	if target := defaultProject.Targets["app"]; target.Warnings != nil {
+		t.Fatalf("default scaffold should stay low-friction without warning policy, got %#v", target.Warnings)
+	}
 
 	stdout.Reset()
 	stderr.Reset()
@@ -63,6 +70,33 @@ func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
 	}
 	if !strings.Contains(string(manifestBytes), `"interface": "src/mathcore.elisai"`) {
 		t.Fatalf("expected scaffolded manifest to record interface path, got:\n%s", string(manifestBytes))
+	}
+}
+
+func TestRunCLIInitStrictScaffoldsStrictProjectPolicy(t *testing.T) {
+	baseDir := t.TempDir()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"init", "strictdemo", "--path", baseDir, "--strict"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected strict project init to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during strict init, got:\n%s", stderr.String())
+	}
+
+	projectPath := filepath.Join(baseDir, "strictdemo", projectFileName)
+	var project projectDefinition
+	if err := decodeJSONFile(projectPath, &project); err != nil {
+		t.Fatalf("expected strict scaffolded project json to decode: %v", err)
+	}
+	target, ok := project.Targets["app"]
+	if !ok {
+		t.Fatalf("expected strict scaffold to include app target, got %#v", project.Targets)
+	}
+	if target.Warnings == nil || !target.Warnings.Strict {
+		t.Fatalf("expected strict scaffold to enable warnings.strict, got %#v", target.Warnings)
 	}
 }
 

@@ -174,6 +174,7 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	if err != nil {
 		return nil, fmt.Errorf("project target %q: %w", targetName, err)
 	}
+	warnings := projectTargetWarningsFor(definition)
 	return &resolvedProjectTarget{
 		project:               project,
 		name:                  targetName,
@@ -193,10 +194,16 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		hasOptLevel:           hasOptLevel,
 		targetTriple:          targetTriple,
 		packedProfile:         packedProfile,
-		strictPolicy:          definition.Warnings.Strict || options.strictPolicy,
-		perfStrict:            definition.Warnings.Strict || definition.Warnings.Perf || options.perfStrict,
-		concurrencyStrict:     definition.Warnings.Strict || definition.Warnings.Concurrency || options.concurrencyStrict,
+		strictPolicy:          warnings.Strict || options.strictPolicy,
+		perfStrict:            warnings.Strict || warnings.Perf || options.perfStrict,
+		concurrencyStrict:     warnings.Strict || warnings.Concurrency || options.concurrencyStrict,
 	}, nil
+}
+func projectTargetWarningsFor(definition projectTargetDefinition) projectTargetWarnings {
+	if definition.Warnings == nil {
+		return projectTargetWarnings{}
+	}
+	return *definition.Warnings
 }
 func resolveProjectOptLevel(targetValue string, options projectCLIOptions) (backend.OptimizationLevel, bool, error) {
 	if options.hasOptLevel {

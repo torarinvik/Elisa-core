@@ -5,7 +5,7 @@ This document captures current scaffolding behavior for Elisa project bootstrap 
 ## Commands
 
 ```sh
-elisacore init <name> [--path <dir>]
+elisacore init <name> [--path <dir>] [--strict]
 elisacore init-lib <name> [--path <dir>]
 ```
 
@@ -21,6 +21,9 @@ Current `init` scaffolds `<path>/<name>/` with:
 - `test/`
 
 `src/main.elisa` is a starter executable surface and `project.json` includes a default build target.
+
+`init --strict` writes `warnings.strict: true` on the generated `app` target,
+which enables the unified strict preset for the project from the first build.
 
 ## `init-lib` output shape
 

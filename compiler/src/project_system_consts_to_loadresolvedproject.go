@@ -75,21 +75,21 @@ type projectDefinition struct {
 	Targets               map[string]projectTargetDefinition `json:"targets"`
 }
 type projectTargetDefinition struct {
-	Entry                string                `json:"entry"`
-	Emit                 string                `json:"emit,omitempty"`
-	RunEmit              string                `json:"run-emit,omitempty"`
-	Output               string                `json:"output,omitempty"`
-	Dependencies         []string              `json:"dependencies,omitempty"`
-	IncludeDirs          []string              `json:"include-dirs,omitempty"`
-	Foreign              []string              `json:"foreign,omitempty"`
-	EASM                 []string              `json:"easm,omitempty"`
-	LinkFlags            []string              `json:"link-flags,omitempty"`
-	InheritProjectNative *bool                 `json:"inherit-project-native,omitempty"`
-	Exec                 []string              `json:"exec,omitempty"`
-	Opt                  string                `json:"opt,omitempty"`
-	TargetTriple         string                `json:"target-triple,omitempty"`
-	PackedABI            string                `json:"packed-abi,omitempty"`
-	Warnings             projectTargetWarnings `json:"warnings,omitempty"`
+	Entry                string                 `json:"entry"`
+	Emit                 string                 `json:"emit,omitempty"`
+	RunEmit              string                 `json:"run-emit,omitempty"`
+	Output               string                 `json:"output,omitempty"`
+	Dependencies         []string               `json:"dependencies,omitempty"`
+	IncludeDirs          []string               `json:"include-dirs,omitempty"`
+	Foreign              []string               `json:"foreign,omitempty"`
+	EASM                 []string               `json:"easm,omitempty"`
+	LinkFlags            []string               `json:"link-flags,omitempty"`
+	InheritProjectNative *bool                  `json:"inherit-project-native,omitempty"`
+	Exec                 []string               `json:"exec,omitempty"`
+	Opt                  string                 `json:"opt,omitempty"`
+	TargetTriple         string                 `json:"target-triple,omitempty"`
+	PackedABI            string                 `json:"packed-abi,omitempty"`
+	Warnings             *projectTargetWarnings `json:"warnings,omitempty"`
 }
 type projectTargetWarnings struct {
 	Strict      bool `json:"strict,omitempty"`
@@ -334,6 +334,11 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 				return projectCLIOptions{}, fmt.Errorf("missing value after --path")
 			}
 			options.path = strings.TrimSpace(args[i])
+		case arg == "--strict":
+			if options.command != projectCommandInit {
+				return projectCLIOptions{}, fmt.Errorf("--strict is only supported by init; use -Wstrict for build, run, test, and bench")
+			}
+			options.strictPolicy = true
 		case strings.HasPrefix(arg, "--trust="):
 			trust, err := parseTrustLevel(strings.TrimSpace(strings.TrimPrefix(arg, "--trust=")))
 			if err != nil {
@@ -497,7 +502,7 @@ func parseTrustLevel(value string) (trustLevel, error) {
 }
 func printProjectUsage(w io.Writer) {
 	fmt.Fprintln(w, "Project commands:")
-	fmt.Fprintln(w, "  elisacore init <name> [--path <dir>]")
+	fmt.Fprintln(w, "  elisacore init <name> [--path <dir>] [--strict]")
 	fmt.Fprintln(w, "  elisacore init-lib <name> [--path <dir>]")
 	fmt.Fprintln(w, "  elisacore build [target] [--project <dir|project.json>] [-emit <mode>] [-o <output>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>] [-O0|-O2|-O3]")
 	fmt.Fprintln(w, "  elisacore run [target] [--project <dir|project.json>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>]")
@@ -551,6 +556,11 @@ func scaffoldProject(options projectCLIOptions) error {
 				Opt:          "O0",
 			},
 		},
+	}
+	if options.strictPolicy {
+		target := project.Targets["app"]
+		target.Warnings = &projectTargetWarnings{Strict: true}
+		project.Targets["app"] = target
 	}
 	projectData, err := json.MarshalIndent(project, "", "  ")
 	if err != nil {
