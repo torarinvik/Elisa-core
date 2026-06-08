@@ -67,8 +67,30 @@ struct ConcurrencyRawTaskNode:
 	next: mutable heap ConcurrencyRawTaskNode&?
 	handle: mutable uintptr
 
+# A queued unit of work for the persistent pool. Replaces the per-task OS thread:
+# `entry`(`arg`) is run by whichever worker dequeues it, and `done` (guarded by the
+# pool mutex, signaled on `done_cond`) is the completion handshake the awaiter waits on.
+@intrusive
+struct PoolTaskRecord:
+	next: mutable heap PoolTaskRecord&?
+	pool: mutable void&
+	entry: mutable void&
+	arg: mutable void&
+	done: mutable i64
+
 struct ConcurrencyPoolState:
 	worker_count: mutable usize
+	# Persistent-pool machinery. A pool spawns `worker_count` workers once; each parks on
+	# `work_cond` until a task is enqueued, runs it, then signals `done_cond`. The FIFO queue
+	# (qhead/qtail) and `shutdown` are guarded by `mutex`. `workers` lists the spawned worker
+	# handles so pool_shutdown can join them.
+	mutex: mutable void&?
+	work_cond: mutable void&?
+	done_cond: mutable void&?
+	qhead: mutable heap PoolTaskRecord&?
+	qtail: mutable heap PoolTaskRecord&?
+	shutdown: mutable i64
+	workers: mutable void&?
 
 enum MemoryOrder:
 	Relaxed
@@ -106,13 +128,18 @@ static if ELISA_TARGET_OS_POSIX:
 
 	def mutex_init(out: mutable Mutex&) -> void:
 		can Memory.Allocate, Memory.Release:
-			raw: mutable heap void&? = elisa_c_opaque_alloc("PthreadMutexT")
+			# Over-allocate a fixed, generously-sized slot (>= sizeof(pthread_mutex_t) on every
+			# supported platform: 64B macOS, 40B Linux) via plain malloc rather than the per-program
+			# @c_opaque runtime shim. This keeps the concurrency runtime self-contained so it links in
+			# every build mode -- `-emit obj` + external C host included (the shim is only auto-linked
+			# for full native-executable builds).
+			raw: mutable heap void&? = malloc(256.usize())
 			if raw == null:
 				out.handle <- null
 				return
 			status: int = pthread_mutex_init(raw.cast[mutable PthreadMutexT&], null)
 			if status != 0:
-				elisa_c_opaque_free(raw.cast[heap void&])
+				free(raw.cast[heap void&])
 				out.handle <- null
 				return
 			out.handle <- raw.cast[void&]
@@ -123,18 +150,19 @@ static if ELISA_TARGET_OS_POSIX:
 				return
 			raw: mutable heap void& = mu.handle.cast[mutable heap void&]
 			_ = pthread_mutex_destroy(raw.cast[mutable PthreadMutexT&])
-			elisa_c_opaque_free(raw.cast[heap void&])
+			free(raw.cast[heap void&])
 			mu.handle <- null
 
 	def condvar_init(out: mutable CondVar&) -> void:
 		can Memory.Allocate, Memory.Release:
-			raw: mutable heap void&? = elisa_c_opaque_alloc("PthreadCondT")
+			# Fixed-size malloc slot (>= sizeof(pthread_cond_t): 48B macOS/Linux); see mutex_init.
+			raw: mutable heap void&? = malloc(256.usize())
 			if raw == null:
 				out.handle <- null
 				return
 			status: int = pthread_cond_init(raw.cast[mutable PthreadCondT&], null)
 			if status != 0:
-				elisa_c_opaque_free(raw.cast[heap void&])
+				free(raw.cast[heap void&])
 				out.handle <- null
 				return
 			out.handle <- raw.cast[void&]
@@ -145,7 +173,7 @@ static if ELISA_TARGET_OS_POSIX:
 				return
 			raw: mutable heap void& = cv.handle.cast[mutable heap void&]
 			_ = pthread_cond_destroy(raw.cast[mutable PthreadCondT&])
-			elisa_c_opaque_free(raw.cast[heap void&])
+			free(raw.cast[heap void&])
 			cv.handle <- null
 
 	def ctx_platform_mutex_lock(handle: void&) -> int:
@@ -233,7 +261,8 @@ static elif ELISA_TARGET_OS_WINDOWS:
 
 	def mutex_init(out: mutable Mutex&) -> void:
 		can Memory.Allocate:
-			raw: mutable heap void&? = elisa_c_opaque_alloc("Win32CriticalSection")
+			# Fixed-size malloc slot (>= sizeof(CRITICAL_SECTION): 40B); see the POSIX mutex_init note.
+			raw: mutable heap void&? = malloc(256.usize())
 			if raw == null:
 				out.handle <- null
 				return
@@ -246,12 +275,13 @@ static elif ELISA_TARGET_OS_WINDOWS:
 				return
 			raw: mutable heap void& = mu.handle.cast[mutable heap void&]
 			DeleteCriticalSection(raw.cast[mutable Win32CriticalSection&])
-			elisa_c_opaque_free(raw.cast[heap void&])
+			free(raw.cast[heap void&])
 			mu.handle <- null
 
 	def condvar_init(out: mutable CondVar&) -> void:
 		can Memory.Allocate:
-			raw: mutable heap void&? = elisa_c_opaque_alloc("Win32ConditionVariable")
+			# Fixed-size malloc slot (>= sizeof(CONDITION_VARIABLE): 8B); see the POSIX mutex_init note.
+			raw: mutable heap void&? = malloc(256.usize())
 			if raw == null:
 				out.handle <- null
 				return
@@ -262,7 +292,7 @@ static elif ELISA_TARGET_OS_WINDOWS:
 		can Memory.Release:
 			if cv.handle == null:
 				return
-			elisa_c_opaque_free(cv.handle.cast[heap void&])
+			free(cv.handle.cast[heap void&])
 			cv.handle <- null
 
 	def ctx_platform_mutex_lock(handle: void&) -> int:
@@ -541,47 +571,251 @@ def detach_raw(thread: Thread[void&?, Joinable]):
 		if status != 0:
 			panic("thread detach failed")
 
-def pool_new(threads: usize) -> ThreadPool:
-	can Pool.Create, Memory.Allocate, Abort.Panic:
+# ------------------------------------------------------------
+# Persistent worker pool. pool_new spawns `threads` workers ONCE; each parks on
+# the work condvar until a task is enqueued (pool_submit_raw), runs it, and signals
+# the done condvar. The awaiter (pool_await_raw / task_group_wait_all_raw) waits on
+# the per-task completion record. This replaces the old one-OS-thread-per-task model,
+# so fine-grained data-parallel loops (each / parallel for, thousands of submits)
+# pay a single pthread_create per worker instead of one per task.
+# ------------------------------------------------------------
+
+# Narrow a stored (always-non-null after init) sync handle from void&? to void&.
+def ctx_sync_handle(p: void&?) -> void&:
+	can Abort.Panic:
+		if p == null:
+			panic("null sync handle")
+		return p.cast[void&]
+
+# Pool-internal lock/notify helpers. These DROP the Sync.* effect via `trusted`: the
+# persistent pool's synchronization is an encapsulated implementation detail (verified
+# race-free under TSan), so `each` / `parallel for` / `nursery` / pool callers need only
+# the Pool.* effects -- the Sync family never leaks into user effect signatures. (Raw
+# Mutex/CondVar use stays Sync-visible for strict-mode steering; only the trusted pool
+# runtime discharges it.)
+def ctx_pool_lock(m: void&):
+	trusted Sync.Lock:
+		_ = ctx_platform_mutex_lock(m)
+
+def ctx_pool_unlock(m: void&):
+	trusted Sync.Unlock:
+		_ = ctx_platform_mutex_unlock(m)
+
+def ctx_pool_wait(c: void&, m: void&):
+	trusted Sync.Wait:
+		_ = ctx_platform_cond_wait(c, m)
+
+def ctx_pool_signal(c: void&):
+	trusted Sync.Notify:
+		_ = ctx_platform_cond_signal(c)
+
+def ctx_pool_broadcast(c: void&):
+	trusted Sync.Notify:
+		_ = ctx_platform_cond_broadcast(c)
+
+# The worker loop. Runs on a spawned OS thread; `arg` is the ConcurrencyPoolState. It
+# dequeues tasks FIFO under the pool mutex, runs each entry(arg) OUTSIDE the lock (so
+# workers run concurrently), then marks the record done and broadcasts. Exits when
+# `shutdown` is set and the queue is drained.
+def ctx_pool_worker_main(arg: void&?) -> void&?:
+	can Abort.Panic:
+		if arg == null:
+			return null
+		state: mutable heap ConcurrencyPoolState& = arg.cast[mutable heap ConcurrencyPoolState&]
+		mu: void& = ctx_sync_handle(state.mutex)
+		wc: void& = ctx_sync_handle(state.work_cond)
+		dc: void& = ctx_sync_handle(state.done_cond)
+		running: mutable bool = true
+		trusted Unsafe.AssumeProgress:
+			while running:
+				ctx_pool_lock(mu)
+				while state.qhead == null and state.shutdown == 0:
+					ctx_pool_wait(wc, mu)
+				head: mutable heap PoolTaskRecord&? = state.qhead
+				if head != null:
+					# pop the head (narrowed non-null in this branch)
+					state.qhead <- head.next
+					if state.qhead == null:
+						state.qtail <- null
+					ctx_pool_unlock(mu)
+					# run the type-erased work entry outside the lock
+					entry_bits: void& = head.entry
+					arg_bits: void& = head.arg
+					trusted Unsafe.IndirectCall:
+						_ = entry_bits.call_as[func(mutable void&) -> void&](arg_bits)
+					# publish completion and wake any awaiter
+					ctx_pool_lock(mu)
+					head.done <- 1
+					ctx_pool_broadcast(dc)
+					ctx_pool_unlock(mu)
+				else:
+					# shutdown requested and queue drained
+					ctx_pool_unlock(mu)
+					running <- false
+		return null
+
+# Push a spawned worker handle onto the pool's worker list (straight-line, mirrors
+# ctx_task_group_push_state). The list head is stored as void& so the intrusive node is
+# transferred by pointer rather than by an owning typed-field assignment.
+def ctx_pool_push_worker(state: mutable heap ConcurrencyPoolState&, whandle: uintptr):
+	can Memory.Allocate, Abort.Panic:
+		nraw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
+		node: heap ConcurrencyRawTaskNode& = nraw.cast[heap ConcurrencyRawTaskNode&]
+		node.handle <- whandle
+		if state.workers == null:
+			node.next <- null
+		else:
+			node.next <- state.workers.cast[heap ConcurrencyRawTaskNode&]
+		state.workers <- node.cast[void&]
+
+# Allocate + initialize a pool state and spawn its persistent workers. Shared by
+# pool_new and the lazily-created default pool.
+def ctx_pool_state_new(threads: usize) -> mutable heap ConcurrencyPoolState&:
+	can Memory.Allocate, Memory.Release, Thread.Spawn, Abort.Panic:
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyPoolState))
-		state: heap ConcurrencyPoolState& = raw.cast[heap ConcurrencyPoolState&]
-		state.worker_count <- threads
+		state: mutable heap ConcurrencyPoolState& = raw.cast[mutable heap ConcurrencyPoolState&]
+		nworkers: mutable usize = threads
+		if nworkers < 1.usize():
+			nworkers <- 1.usize()
+		state.worker_count <- nworkers
+		state.qhead <- null
+		state.qtail <- null
+		state.shutdown <- 0
+		state.workers <- null
+		mu: mutable Mutex = zeroed
+		mutex_init(&mu)
+		state.mutex <- mu.handle
+		wc: mutable CondVar = zeroed
+		condvar_init(&wc)
+		state.work_cond <- wc.handle
+		dc: mutable CondVar = zeroed
+		condvar_init(&dc)
+		state.done_cond <- dc.handle
+		i: mutable usize = 0.usize()
+		trusted Unsafe.AssumeProgress:
+			while i < nworkers:
+				whandle: mutable uintptr = 0
+				status: int = ctx_thread_create(&whandle, ctx_pool_worker_main.cast[void&], state.cast[void&?])
+				if status != 0:
+					panic("pool worker create failed")
+				ctx_pool_push_worker(state, whandle)
+				i <- i + 1.usize()
+		return state
+
+def pool_new(threads: usize) -> ThreadPool:
+	can Pool.Create, Memory.Allocate, Memory.Release, Thread.Spawn, Abort.Panic:
+		state: mutable heap ConcurrencyPoolState& = ctx_pool_state_new(threads)
 		out: ThreadPool = zeroed
 		out.handle <- state.cast[void&]
 		return move out
 
+# Signal shutdown, wake + join all workers, then dispose the sync primitives and the
+# state. After this the pool handle is null and must not be reused.
 def pool_shutdown(pool: mutable ThreadPool&):
-	can Pool.Shutdown, Memory.Release:
-		if pool.handle != null:
-			free(pool.handle.cast[heap void&])
-			pool.handle <- null
+	can Pool.Shutdown, Thread.Join, Memory.Release, Abort.Panic:
+		if pool.handle == null:
+			return
+		state: mutable heap ConcurrencyPoolState& = pool.handle.cast[mutable heap ConcurrencyPoolState&]
+		mu: void& = ctx_sync_handle(state.mutex)
+		wc: void& = ctx_sync_handle(state.work_cond)
+		ctx_pool_lock(mu)
+		state.shutdown <- 1
+		ctx_pool_broadcast(wc)
+		ctx_pool_unlock(mu)
+		# join every worker, freeing its handle node
+		current: mutable heap ConcurrencyRawTaskNode&? = state.workers.cast[heap ConcurrencyRawTaskNode&?]
+		state.workers <- null
+		trusted Unsafe.AssumeProgress:
+			while current != null:
+				next: mutable heap ConcurrencyRawTaskNode&? = current.next
+				ctx_concurrency_join_handle(current.handle)
+				free(current.cast[heap void&])
+				current <- next
+		mutex_handle: mutable Mutex = zeroed
+		mutex_handle.handle <- state.mutex
+		mutex_destroy(&mutex_handle)
+		wc_handle: mutable CondVar = zeroed
+		wc_handle.handle <- state.work_cond
+		condvar_destroy(&wc_handle)
+		dc_handle: mutable CondVar = zeroed
+		dc_handle.handle <- state.done_cond
+		condvar_destroy(&dc_handle)
+		free(state.cast[heap void&])
+		pool.handle <- null
 
-# A zeroed, thread-spawn-per-task pool used as the implicit pool for `parallel for` when there is
-# no explicit `pool workers(w):` scope. pool_submit_raw ignores the pool handle (it spawns a fresh
-# worker per task), so a zeroed ThreadPool is a valid, cost-free dispatcher -- the fast path needs
-# no pool ceremony and pays no per-call pool_new/pool_shutdown. The worker count defaults to
-# perf_cores() (supplied by the backend). NOTE: pool_submit_raw spawns one OS thread per task; a
-# real persistent worker pool (reused threads) is a separate, larger perf win.
+# The implicit pool for `parallel for` / each / reduce when there is no explicit
+# `pool workers(w):` scope. Lazily creates ONE persistent perf_cores()-wide pool the
+# first time it is needed and caches its state pointer in a global; subsequent calls
+# reuse it (no per-call pool_new/shutdown, no per-task thread spawn). The workers live
+# until process exit (never shut down), so fine-grained loops are cheap. Lazy init is
+# driven from the orchestrating thread (the parallel-for caller), never concurrently.
+global mutable __elisa_default_pool_state: void&? = null
+
 def default_pool() -> ThreadPool:
-	out: ThreadPool = zeroed
-	return move out
-
-def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Task[void&?, Pending]:
-	can Pool.Submit, Thread.Spawn, Abort.Panic:
-		_ = pool
-		thread: Thread[void&?, Joinable] = spawn_raw(entry, arg)
-		out: Task[void&?, Pending] = zeroed
-		out.handle <- thread.handle
-		out.state <- thread.state
-		_ = move thread
+	can Pool.Create, Memory.Allocate, Memory.Release, Thread.Spawn, Abort.Panic:
+		if __elisa_default_pool_state == null:
+			workers: usize = perf_cores().usize()
+			state: mutable heap ConcurrencyPoolState& = ctx_pool_state_new(workers)
+			__elisa_default_pool_state <- state.cast[void&]
+		out: ThreadPool = zeroed
+		out.handle <- __elisa_default_pool_state
 		return move out
 
+# Enqueue (entry, arg) on the pool's FIFO queue and wake one worker. Returns a Task
+# whose `handle` is the completion record (as a uintptr) the awaiter waits on.
+def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Task[void&?, Pending]:
+	can Pool.Submit, Memory.Allocate, Abort.Panic:
+		if pool.handle == null:
+			panic("pool_submit on uninitialized pool")
+		if arg == null:
+			panic("pool_submit with null arg")
+		state: mutable heap ConcurrencyPoolState& = pool.handle.cast[mutable heap ConcurrencyPoolState&]
+		raw: heap void& = ctx_concurrency_alloc(size_of(PoolTaskRecord))
+		rec: heap PoolTaskRecord& = raw.cast[heap PoolTaskRecord&]
+		rec.next <- null
+		rec.pool <- state.cast[void&]
+		rec.entry <- entry
+		rec.arg <- arg.cast[void&]
+		rec.done <- 0
+		mu: void& = ctx_sync_handle(state.mutex)
+		wc: void& = ctx_sync_handle(state.work_cond)
+		ctx_pool_lock(mu)
+		tail_node: mutable heap PoolTaskRecord&? = state.qtail
+		if tail_node != null:
+			tail_node.next <- rec
+			state.qtail <- rec
+		else:
+			state.qhead <- rec
+			state.qtail <- rec
+		ctx_pool_signal(wc)
+		ctx_pool_unlock(mu)
+		out: Task[void&?, Pending] = zeroed
+		out.handle <- rec.cast[uintptr]
+		return move out
+
+# Block until the completion record (passed as a uintptr handle) is marked done by a
+# worker, then free it.
+def ctx_pool_wait_record(handle: uintptr):
+	can Memory.Release, Abort.Panic:
+		if handle == 0:
+			return
+		rec: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&]
+		state: mutable heap ConcurrencyPoolState& = rec.pool.cast[mutable heap ConcurrencyPoolState&]
+		mu: void& = ctx_sync_handle(state.mutex)
+		dc: void& = ctx_sync_handle(state.done_cond)
+		ctx_pool_lock(mu)
+		trusted Unsafe.AssumeProgress:
+			while rec.done == 0:
+				ctx_pool_wait(dc, mu)
+		ctx_pool_unlock(mu)
+		free(rec.cast[heap void&])
+
 def pool_await_raw(task: Task[void&?, Pending]) -> void&?:
-	can Pool.Await, Thread.Join, Abort.Panic:
+	can Pool.Await, Memory.Release, Abort.Panic:
 		handle: uintptr = task.handle
 		state_bits: void&? = task.state
 		_ = move task
-		ctx_concurrency_join_handle(handle)
+		ctx_pool_wait_record(handle)
 		return state_bits
 
 def task_group_new_raw() -> TaskGroup:
@@ -602,13 +836,13 @@ def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending]):
 		group.handle <- node.cast[void&]
 
 def task_group_wait_all_raw(group: mutable TaskGroup&):
-	can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic:
+	can Pool.WaitAll, Memory.Release, Abort.Panic:
 		current: mutable heap ConcurrencyRawTaskNode&? = group.handle.cast[heap ConcurrencyRawTaskNode&?]
 		group.handle <- null
 		trusted Unsafe.AssumeProgress:
 			while current != null:
 				next: mutable heap ConcurrencyRawTaskNode&? = current.next
-				ctx_concurrency_join_handle(current.handle)
+				ctx_pool_wait_record(current.handle)
 				free(current.cast[heap void&])
 				current <- next
 

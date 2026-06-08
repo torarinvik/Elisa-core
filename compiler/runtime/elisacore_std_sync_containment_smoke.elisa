@@ -1,0 +1,30 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+def encaps_bump(slot: uintptr) -> i64:
+	can Atomic:
+		c: mutable atomic[i64]& = slot.cast[mutable atomic[i64]&]
+		_ = fetch_add(c, 1, MemoryOrder.AcqRel)
+		return 0
+
+# Sync-encapsulation: the persistent pool synchronizes internally with mutex/condvar
+# (Sync.Lock/Unlock/Wait/Notify), but those effects are DROPPED at the pool boundary via
+# `trusted`, so they never leak into caller effect signatures. This driver grants ONLY an
+# explicit Pool.* effect list (NO Sync.*) and drives a pool submit + wait-all; if any Sync
+# effect escaped pool_submit1/task_group_wait_all, this would fail with "missing required
+# effect facts" under strict checking. Proves the frictionless contract for manual-list
+# callers (not just `can Pooled:`/`can Parallel:` alias users).
+@test
+def std_sync_containment_smoke():
+	can Pool.Create, Pool.Submit, Pool.WaitAll, Pool.Shutdown, Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		counter: mutable darray[i64] = []
+		_ = counter.resize(1.usize())
+		counter[0.usize()] <- 0
+		cb: uintptr = (&counter[0.usize()]).cast[uintptr]
+		pool: mutable ThreadPool = pool_new(3.usize())
+		group: mutable TaskGroup = task_group_new()
+		for k in 0..<64:
+			task: Task[i64, Pending] = pool_submit1(&pool, encaps_bump, cb)
+			task_group_add(&group, move task)
+		task_group_wait_all(&group)
+		pool_shutdown(&pool)
+		assert counter[0.usize()] == 64
