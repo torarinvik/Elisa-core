@@ -510,6 +510,24 @@ func TestParseArgsAcceptsLinkerFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestParseArgsAcceptsConcurrencyStrictFlag(t *testing.T) {
+	options, err := parseArgs([]string{"-Wconcurrency", "fixture.elisa"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if !options.concurrencyStrict {
+		t.Fatal("expected -Wconcurrency to enable strict concurrency diagnostics")
+	}
+	semanticOptions := semanticOptionsForCLI(options)
+	if !semanticOptions.EnforceStrictConcurrency {
+		t.Fatal("expected CLI semantic options to enforce strict concurrency")
+	}
+	if semanticOptions.EnforcePerfLints {
+		t.Fatal("expected -Wconcurrency not to enable unrelated perf lint enforcement")
+	}
+}
+
 func TestParseArgsRejectsRemovedPackedABI(t *testing.T) {
 	tests := []struct {
 		name string

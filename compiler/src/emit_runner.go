@@ -143,7 +143,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		}
 		return 0
 	case emitIR:
-		file, _, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple, TargetDebug: effectiveOptimizationLevel(options) == backend.OptimizationLevel0, EnforcePerfLints: options.perfStrict})
+		file, _, ok := analyzeLoadedProgramWithOptions(program, stderr, semanticOptionsForCLI(options))
 		if !ok {
 			return 1
 		}
@@ -217,7 +217,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		return 0
 	}
 
-	_, result, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{TargetTriple: options.targetTriple, TargetDebug: effectiveOptimizationLevel(options) == backend.OptimizationLevel0, EnforcePerfLints: options.perfStrict})
+	_, result, ok := analyzeLoadedProgramWithOptions(program, stderr, semanticOptionsForCLI(options))
 	if !ok {
 		return 1
 	}
@@ -495,6 +495,15 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		fmt.Fprintf(stderr, "error: unsupported emit mode %q\n", options.emit)
 		printUsage(stderr)
 		return 1
+	}
+}
+
+func semanticOptionsForCLI(options cliOptions) semantic.AnalyzeOptions {
+	return semantic.AnalyzeOptions{
+		TargetTriple:             options.targetTriple,
+		TargetDebug:              effectiveOptimizationLevel(options) == backend.OptimizationLevel0,
+		EnforcePerfLints:         options.perfStrict,
+		EnforceStrictConcurrency: options.concurrencyStrict,
 	}
 }
 

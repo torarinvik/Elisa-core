@@ -238,11 +238,12 @@ Migration direction:
   unsafe-permission code
 
 The compiler reports these raw calls as deprecations/warnings by default. The
-semantic analyzer's `EnforceStrictConcurrency` option promotes that same
-diagnostic set to hard errors, letting projects audit gradually and then turn on
-the proof-carrying policy for shipped strict-mode code. In full strict mode, the
-raw surface should require explicit unsafe or trusted authority unless the call
-is inside the trusted runtime standard library.
+semantic analyzer's `EnforceStrictConcurrency` option, exposed on the CLI as
+`-Wconcurrency`, promotes that same diagnostic set to hard errors, letting
+projects audit gradually and then turn on the proof-carrying policy for shipped
+strict-mode code. In full strict mode, the raw surface should require explicit
+unsafe or trusted authority unless the call is inside the trusted runtime
+standard library.
 
 ## Examples Of The Intended Strict Shape
 

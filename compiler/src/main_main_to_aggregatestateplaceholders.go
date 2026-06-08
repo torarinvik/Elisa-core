@@ -191,32 +191,33 @@ const (
 )
 
 type cliOptions struct {
-	emit            string
-	filename        string
-	output          string
-	addr            string
-	filter          string
-	unsafeBudget    string
-	foreignFiles    []string
-	linkFlags       []string
-	linkNative      bool
-	runNative       bool
-	targetTriple    string
-	debugInfo       bool
-	recordTrace     bool
-	debug           bool
-	debugBreak      string
-	debugBreakRaise bool
-	debugFormat     string
-	debugTraceLimit int
-	debugFullTrace  bool
-	debugContext    int
-	debugRepl       bool
-	debugSaveTrace  string
-	packedProfile   backend.PackedLoweringProfile
-	optLevel        backend.OptimizationLevel
-	hasOptLevel     bool
-	perfStrict      bool
+	emit              string
+	filename          string
+	output            string
+	addr              string
+	filter            string
+	unsafeBudget      string
+	foreignFiles      []string
+	linkFlags         []string
+	linkNative        bool
+	runNative         bool
+	targetTriple      string
+	debugInfo         bool
+	recordTrace       bool
+	debug             bool
+	debugBreak        string
+	debugBreakRaise   bool
+	debugFormat       string
+	debugTraceLimit   int
+	debugFullTrace    bool
+	debugContext      int
+	debugRepl         bool
+	debugSaveTrace    string
+	packedProfile     backend.PackedLoweringProfile
+	optLevel          backend.OptimizationLevel
+	hasOptLevel       bool
+	perfStrict        bool
+	concurrencyStrict bool
 }
 
 func parseArgs(args []string) (cliOptions, error) {
@@ -285,6 +286,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Graduated strictness (docs/70): promote the performance-friction lints
 			// (pointer-graph, allocation churn) from warnings to hard errors for shipped code.
 			options.perfStrict = true
+		case arg == "-Wconcurrency":
+			// Graduated strictness (docs/09): promote legacy raw-concurrency migration
+			// diagnostics to hard errors for strict-mode code.
+			options.concurrencyStrict = true
 		case arg == "-debug":
 			options.debug = true
 		case arg == "-debug-break-raise":
