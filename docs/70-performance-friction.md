@@ -91,6 +91,110 @@ inside it without adding a permission requirement to the enclosing function.
 | `join` / `join_raw` in a loop | Often joins each thread before spawning enough parallel work | Collect thread handles and join after the batch, or use a nursery/pool | A named bounded in-flight/streaming policy |
 | `task_group_wait_all` / `wait all` in a loop | Waits a whole group at the per-item boundary | Add tasks to one group and wait once at the batch boundary | A named batching/window policy |
 
+### How To Satisfy `-Wperf`
+
+These examples show the intended shape. The exact containers and helper names can vary, but
+the boundary should move from "per item" to "around the batch".
+
+#### Thread Spawn Loop
+
+```elisa
+# flagged: creates one OS thread per item
+for job in jobs:
+    t: Thread[i64, Joinable] = spawn1(work, job)
+    total <- total + join(move t)
+
+# preferred: use a nursery or pool-shaped batch
+nursery workers(8):
+    for job in jobs:
+        submit record_work(job)
+```
+
+Use `trusted Perf.HotLoop:` only when the loop is deliberately measuring or implementing a
+bounded low-level spawning policy.
+
+#### Pool Or Task-Group Creation Loop
+
+```elisa
+# flagged: recreates coordination infrastructure per item
+for job in jobs:
+    pool workers(4):
+        submit work(job)
+
+# preferred: create coordination once around the batch
+pool workers(4):
+    group: mutable TaskGroup = task_group_new()
+    for job in jobs:
+        task: Task[void, Pending] = submit work(job)
+        task_group_add(&group, move task)
+    wait all group
+```
+
+#### Lock Loop
+
+```elisa
+# flagged: synchronizes every item
+for item in items:
+    lock state.mu as guard:
+        state.total <- state.total + item.cost
+
+# preferred: reduce locally, synchronize once
+local_total: mutable i64 = 0
+for item in items:
+    local_total <- local_total + item.cost
+lock state.mu as guard:
+    state.total <- state.total + local_total
+```
+
+#### Atomic Hot Loop
+
+```elisa
+# flagged: every worker serializes on one cache line
+for item in items:
+    _ = atomic_fetch_add_acqrel(&shared_total, item.cost)
+
+# preferred: local reduction plus one publish
+local_total: mutable i64 = 0
+for item in items:
+    local_total <- local_total + item.cost
+_ = atomic_fetch_add_acqrel(&shared_total, local_total)
+```
+
+#### Await Or Join Loop
+
+```elisa
+# flagged: submit-one/wait-one
+for job in jobs:
+    task: Task[i64, Pending] = submit work(job)
+    total <- total + await task
+
+# preferred: collect handles, then complete at the boundary
+tasks: mutable darray[Task[i64, Pending]] = []
+for job in jobs:
+    tasks.push(submit work(job))
+for task in tasks:
+    total <- total + await task
+```
+
+For threads, use the same shape: spawn the batch first, then `join` the collected handles.
+If memory ownership makes handle collection awkward, prefer `nursery:` or task groups.
+
+#### Wait-All Loop
+
+```elisa
+# flagged: waits a group at the per-item boundary
+for job in jobs:
+    group: mutable TaskGroup = task_group_new()
+    task_group_add(&group, submit work(job))
+    wait all group
+
+# preferred: one group owns the batch
+group: mutable TaskGroup = task_group_new()
+for job in jobs:
+    task_group_add(&group, submit work(job))
+wait all group
+```
+
 ## The half that already exists (the frictionless-fast default)
 
 The "easy way" already lands on fast+safe; this design only adds teeth to the slow path.
