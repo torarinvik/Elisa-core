@@ -83,8 +83,9 @@ Boundary and performance hazards:
 - foreign functions that block, spawn, call back, store pointers, or share
   memory without declaring that behavior
 - false sharing, lock convoys, per-iteration pool/thread/task-group creation,
-  per-iteration task awaits that collapse parallel batches, excessive
-  contention, and atomic hot-loop performance cliffs in strict performance mode
+  per-iteration task awaits/joins/wait-all completions that collapse parallel
+  batches, excessive contention, and atomic hot-loop performance cliffs in
+  strict performance mode
 
 This list is intentionally broad. The point is not that every item needs a
 separate feature. The point is that the same few proof axes should cover the
@@ -250,6 +251,8 @@ performing atomic RMW/CAS on every loop iteration instead of
 batching/sharding/reducing the work. Awaiting a task on every loop iteration is
 also flagged because it often serializes a batch that should collect pending
 tasks first and wait at the boundary.
+Joining a thread or waiting a whole task group on every loop iteration is treated
+the same way because it usually has the same submit-one/wait-one shape.
 
 The compiler reports these raw calls as deprecations/warnings by default. The
 semantic analyzer's `EnforceStrictConcurrency` option, exposed on the CLI as
@@ -1105,6 +1108,10 @@ default because it often collapses pool parallelism into submit-one/wait-one
 serial execution. Prefer a task group, a small explicit window of in-flight
 tasks, or collect task handles and await at the batch boundary.
 
+The same strict-performance rule applies to `join(move thread)` in a loop:
+collect joinable thread handles and join after spawning the batch, or use a
+nursery/pool when the work does not need escaped thread handles.
+
 ### Wait-All
 
 ```elisa
@@ -1121,6 +1128,10 @@ task_group_wait_all(&jobs)
 pending tasks. A task group holding pending tasks must be satisfied with
 `wait all group` before scope exit; leaving such a group live is rejected in the
 same way dropping a pending `Task[..., Pending]` is rejected.
+
+Under `-Wperf`, `wait all group` / `task_group_wait_all(&group)` inside a loop is
+also rejected by default. Add per-iteration tasks to one group and wait at the
+batch boundary, unless the loop is a named bounded-window/streaming policy.
 
 ### Lock Scope
 

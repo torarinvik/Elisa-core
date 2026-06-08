@@ -24,6 +24,9 @@ def fetch_add(slot: i64, value: i64, order: i64) -> i64:
 def pool_await(task: i64) -> i64:
     return task
 
+def task_group_wait_all(group: i64):
+    _ = group
+
 def catalog() -> i64:
     acc: mutable i64 = 0
     for i in 0..<4:
@@ -33,6 +36,7 @@ def catalog() -> i64:
         acc <- acc + mutex_lock(i.i64())
         acc <- acc + fetch_add(acc, i.i64(), 0)
         acc <- acc + pool_await(i.i64())
+        task_group_wait_all(i.i64())
     return acc
 `)
 	for _, marker := range []string{
@@ -42,6 +46,7 @@ def catalog() -> i64:
 		"acquires a lock on every iteration",
 		"performs an atomic read-modify-write/compare-exchange on every iteration",
 		"waits for a task on every iteration",
+		"waits for a task group on every iteration",
 	} {
 		if !strings.Contains(out, marker) {
 			t.Fatalf("expected concurrency perf catalog warning containing %q, got:\n%s", marker, out)

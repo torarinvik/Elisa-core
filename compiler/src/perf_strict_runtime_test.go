@@ -149,6 +149,20 @@ def main() -> i64:
 `,
 			marker: "waits for a task on every iteration",
 		},
+		{
+			name: "wait_all_hot_loop.elisa",
+			src: `def task_group_wait_all(group: i64):
+    _ = group
+
+def main() -> i64:
+    acc: mutable i64 = 0
+    for i in 0..<4:
+        task_group_wait_all(i.i64())
+        acc <- acc + i.i64()
+    return acc
+`,
+			marker: "waits for a task group on every iteration",
+		},
 	}
 
 	for _, tc := range cases {

@@ -28,11 +28,11 @@
   are not flagged, single `new` outside a loop is silent. Zero noise (nothing in
   stdlib/fixtures uses `new` in a loop).
 - ✅ **Concurrency performance lints LANDED**: raw thread spawn, thread-pool creation,
-  task-group creation, lock acquisition, atomic RMW/CAS, and task await inside loops are
-  warnings by default and are promoted to errors under `-Wperf`. Pool submission and
-  task-group addition in a loop are deliberately allowed; the bad shape is repeatedly
-  creating coordination objects or waiting per item instead of reusing/waiting around the
-  batch.
+  task-group creation, lock acquisition, atomic RMW/CAS, and task/thread/group completion
+  inside loops are warnings by default and are promoted to errors under `-Wperf`. Pool
+  submission and task-group addition in a loop are deliberately allowed; the bad shape is
+  repeatedly creating coordination objects or waiting per item instead of reusing/waiting
+  around the batch.
 - ✅ **`-Wperf` graduated strictness LANDED** (commit d1636cdb and follow-ups): the
   pointer-graph, allocation-churn, reserve-bound, and concurrency performance lints are
   warnings by default but `-Wperf` promotes them to hard errors (via
@@ -63,7 +63,7 @@ The compiler sees **structure**, not **algorithms**. It can make these painful:
 - raw pointer graphs (cache-hostile pointer chasing),
 - per-iteration thread/pool/task-group creation,
 - per-iteration lock or atomic synchronization hot spots,
-- per-iteration task awaits that serialize a parallel batch,
+- per-iteration task awaits/thread joins/group waits that serialize a parallel batch,
 - hidden O(n) copies,
 - dynamic dispatch / indirection,
 - escaping/cross-lifetime references (already caught).
@@ -85,6 +85,8 @@ These diagnostics are warnings by default and become errors under `-Wperf`.
 | `mutex_lock` or `lock ... as` in a loop | Serializes the loop on a contended boundary | Batch locked work, shard state, or use local reduction | Iterations are coarse-grained and the lock is the intended protocol boundary |
 | Atomic RMW/CAS in a loop | Can serialize on one cache line | Use per-worker locals, sharded counters, batching, or reduction | A named low-level wrapper that owns the protocol invariant |
 | `pool_await` / `await task` in a loop | Often turns parallel work into submit-one/wait-one serial execution | Use a task group, collect handles, or wait at the boundary | A named bounded in-flight/streaming policy |
+| `join` / `join_raw` in a loop | Often joins each thread before spawning enough parallel work | Collect thread handles and join after the batch, or use a nursery/pool | A named bounded in-flight/streaming policy |
+| `task_group_wait_all` / `wait all` in a loop | Waits a whole group at the per-item boundary | Add tasks to one group and wait once at the batch boundary | A named batching/window policy |
 
 ## The half that already exists (the frictionless-fast default)
 
