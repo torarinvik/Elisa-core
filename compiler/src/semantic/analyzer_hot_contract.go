@@ -9,16 +9,14 @@ import (
 // The @hot fast contract (docs/70). @hot already places a function as hot for codegen; on
 // top of that it is a *contract* on what the hot path may do.
 //
-// Default @hot forbids the genuinely slow things — raw-pointer chasing and indirect
-// dispatch (cache-hostile, unpredictable). It ALLOWS region allocation, which is the cheap
-// frictionless default (region alloc carries no effect ceremony — see isAmbientPermission).
-//
-// @hot(noalloc) is the strict variant: it additionally forbids region allocation/growth, for
-// a truly zero-allocation kernel (you preallocate with `reserve` and the loop only computes).
+// Default @hot is the strict fast-path spelling: it forbids raw-pointer chasing, indirect
+// dispatch, and allocation/free. @hot(alloc) is the explicit opt-in for allocation-bearing
+// hot code; it keeps hot codegen metadata but still bans raw-pointer/indirect-dispatch effects.
 //
 // Fast-unsafe ops that REMOVE overhead (Unsafe.UncheckedIndex, AssumeProgress) and cold
 // branches (Abort.Panic) stay allowed in both. The check is transitive — a @hot function
-// that calls anything which chases pointers (or, under noalloc, allocates) is rejected too.
+// that calls anything which chases pointers or allocates is rejected too unless it opted into
+// @hot(alloc) for allocation.
 
 // hotContractBannedEffect reports the effects forbidden by EVERY @hot function: raw-pointer
 // chasing and indirect dispatch.
@@ -34,17 +32,16 @@ func hotContractBannedEffect(ref ast.PermissionRef) (string, bool) {
 	return "", false
 }
 
-// hotNoAllocBannedEffect reports the additional effect forbidden only by @hot(noalloc):
-// allocation/free on the hot path.
-func hotNoAllocBannedEffect(ref ast.PermissionRef) (string, bool) {
+// hotAllocationBannedEffect reports allocation/free effects forbidden by default in @hot.
+func hotAllocationBannedEffect(ref ast.PermissionRef) (string, bool) {
 	if ref.Name == "Memory" && (ref.Member == "Allocate" || ref.Member == "Release") {
 		return "allocates or frees on the hot path", true
 	}
 	return "", false
 }
 
-// hotAnnotationRequestsNoAlloc reports whether a function carries `@hot(noalloc)`.
-func hotAnnotationRequestsNoAlloc(fn *ast.FuncDecl) bool {
+// hotAnnotationAllowsAllocation reports whether a function carries `@hot(alloc)`.
+func hotAnnotationAllowsAllocation(fn *ast.FuncDecl) bool {
 	if fn == nil {
 		return false
 	}
@@ -53,7 +50,7 @@ func hotAnnotationRequestsNoAlloc(fn *ast.FuncDecl) bool {
 			continue
 		}
 		for _, arg := range ann.Args {
-			if strings.EqualFold(strings.TrimSpace(arg), "noalloc") {
+			if strings.EqualFold(strings.TrimSpace(arg), "alloc") {
 				return true
 			}
 		}
@@ -67,15 +64,15 @@ func (a *Analyzer) checkHotContract(fn *ast.FuncDecl, fnType *FuncType) {
 	if fn == nil || fnType == nil || !funcHasAnnotation(fn, "hot") {
 		return
 	}
-	noalloc := hotAnnotationRequestsNoAlloc(fn)
+	allowAllocation := hotAnnotationAllowsAllocation(fn)
 	seen := map[string]bool{}
 	for _, ref := range fnType.PermissionRefs {
 		reason, banned := hotContractBannedEffect(ref)
 		fix := "use a Store/handle instead of raw pointers, or drop @hot"
-		if !banned && noalloc {
-			if r, ok := hotNoAllocBannedEffect(ref); ok {
+		if !banned && !allowAllocation {
+			if r, ok := hotAllocationBannedEffect(ref); ok {
 				reason, banned = r, true
-				fix = "preallocate outside the hot region (reserve), or use plain @hot which permits region allocation"
+				fix = "preallocate outside the hot region (reserve), or use @hot(alloc) if allocation is intentionally part of this hot function"
 			}
 		}
 		if !banned {
@@ -87,8 +84,8 @@ func (a *Analyzer) checkHotContract(fn *ast.FuncDecl, fnType *FuncType) {
 		}
 		seen[key] = true
 		label := "@hot"
-		if noalloc {
-			label = "@hot(noalloc)"
+		if allowAllocation {
+			label = "@hot(alloc)"
 		}
 		a.errorf(fn.Pos(), "%s function %q %s (via the `%s` effect); %s", label, fn.Name, reason, key, fix)
 	}

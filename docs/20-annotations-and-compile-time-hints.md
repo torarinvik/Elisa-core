@@ -103,7 +103,9 @@ Current rules:
 - `@inline(always)` and `@inline(never)` are the current supported inline modes
 - unsupported `@inline(...)` modes are rejected during semantic analysis
 - `@norecurse` takes no arguments and lowers to the corresponding LLVM function attribute
-- `@hot` and `@cold` take no arguments and are mutually exclusive
+- `@hot` is the strict fast-path contract: it rejects allocation/free and raw-pointer/indirect-dispatch effects transitively
+- `@hot(alloc)` keeps hot codegen metadata but explicitly opts into allocation-bearing hot code
+- `@cold` takes no arguments, and `@hot`/`@cold` are mutually exclusive
 - temperature and recursion annotations propagate through specialization and exported wrapper lowering where applicable
 
 ## Performance acknowledgements

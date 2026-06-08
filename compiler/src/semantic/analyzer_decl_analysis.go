@@ -433,11 +433,11 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		return true
 	}
 	if annotation.Name == "hot" {
-		// @hot takes an optional `noalloc` argument: a strict zero-allocation hot kernel
-		// (forbids region allocation too). Plain @hot allows region allocation.
+		// @hot is the strict fast-path contract and forbids allocation by default.
+		// @hot(alloc) is the explicit opt-in for allocation-bearing hot code.
 		for _, arg := range annotation.Args {
-			if strings.ToLower(strings.TrimSpace(arg)) != "noalloc" {
-				a.errorf(annotation.Position, "@hot on function %q only accepts the optional `noalloc` argument", fn.Name)
+			if strings.ToLower(strings.TrimSpace(arg)) != "alloc" {
+				a.errorf(annotation.Position, "@hot on function %q only accepts the optional `alloc` argument", fn.Name)
 				return false
 			}
 		}

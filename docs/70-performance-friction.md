@@ -2,16 +2,16 @@
 
 ## Implementation status
 
-- ✅ **`@hot` fast contract LANDED** (commit a31a8186): a hot function may use no allocation
+- ✅ **`@hot` fast contract LANDED** (commit a31a8186 and follow-ups): a hot function may use no allocation
   (`Memory.Allocate`/`Release`) and no raw-pointer/indirect-dispatch `Unsafe.*` effect,
   transitively; fast-unsafe (`Unsafe.UncheckedIndex`) and cold branches (`Abort.Panic`) stay
-  allowed. Enforced as an effect upper bound at `analyzer_functions.go`.
+  allowed. `@hot(alloc)` is the explicit opt-in for allocation-bearing hot code. Enforced as
+  an effect upper bound at `analyzer_functions.go`.
 - ⚠ **`Memory.Heap` split DROPPED.** Stage 1 assumed a malloc path to gate, but all-region
   Elisa has none — `using malloc` normalizes to chained (`region_backing.go`), so
   `Memory.Allocate` *is* the only allocation effect. `@hot` banning it directly is the real
-  "no allocation on the hot path" guarantee; a separate `Memory.Heap` would gate nothing.
-  The taxonomy table below keeps `Memory.Heap` as a hypothetical for if a raw-heap path is
-  ever added.
+  "no allocation on the hot path" guarantee; a separate `Memory.Heap` would gate nothing
+  today.
 - ✅ **Pointer-graph lint LANDED** (commit 8b054746): a struct with a self-referential ref
   field carrying no region provenance (raw `heap Node&?` / bare `Node&?`) is warned, pointing
   at the packed-enum/`Store` cure. A `@owner`-tracked self-ref (sound single-region graph) is
@@ -220,52 +220,36 @@ bannable, and teach the fast alternative.
 
 ## The cost taxonomy (what we make legible)
 
-Two existing effect families and the proposed additions:
+Existing effect families and later possible additions:
 
 | Family.Member        | Status   | Meaning / cost                                            |
 |----------------------|----------|-----------------------------------------------------------|
-| `Memory.Allocate`    | exists   | allocation — TODAY lumps region + heap together           |
+| `Memory.Allocate`    | exists   | allocation — the current single allocation effect         |
 | `Memory.Release`     | exists   | deallocation                                              |
-| `Memory.Heap` (new)  | proposed | individual / malloc-backed allocation (the slow kind)     |
 | `Unsafe.*`           | exists   | raw pointers, casts, unchecked index, leak, alias, …      |
 | `Perf.Indirect` (new, later) | proposed | dynamic dispatch / indirect call in a hot context |
 | `Perf.Copy` (new, later)     | proposed | a large by-value copy where a ref/handle would do |
 
-The key move: **`Memory.Allocate` stays the cheap, near-invisible default (region/arena),
-and the slow kind (`Memory.Heap`) is split out as a distinct, louder effect.** Because
-effects propagate to signatures, any function that mallocs advertises it in its type.
+The key move today is not a heap/region split. Elisa currently has one allocation effect,
+and ordinary allocation remains low-friction outside hot kernels. The fast-path guarantee
+comes from `@hot`: plain `@hot` bans `Memory.Allocate`/`Memory.Release` transitively, while
+`@hot(alloc)` is the explicit opt-in for allocation-bearing hot code.
 
 ## Mechanisms
 
-### 1. Cost in the effect system — heap-vs-region split (foundation)
+### 1. `@hot` — the fast contract (keystone)
 
-Register `Memory.Heap` (extend `registerBuiltinPermission("Memory", …)` at
-`analyzer_builtins.go:26`). Route the malloc-backed allocator (`region r(N) using malloc`,
-and any global-heap boxing) through `Memory.Heap` instead of plain `Memory.Allocate`.
-Region/arena allocation keeps requiring only `Memory.Allocate` (which inference-by-default
-grants implicitly).
-
-Result: `can Memory.Heap` appears in exactly the signatures that do slow allocation —
-visible at the boundary, propagated to callers. The cheap path is unchanged and unadorned.
-
-Design decision: **subsumption.** `Memory.Heap` should imply `Memory.Allocate` (heap is a
-kind of allocation) so a `can Memory.Allocate` caller isn't surprised — this needs the
-effect-subsumption families noted in the effect-system gap analysis. If subsumption isn't
-ready, treat them as siblings and require both at the malloc site.
-
-### 2. `@hot` — the fast contract (keystone)
-
-A function/block annotation that **forbids the slow effects in its body**: `Memory.Heap`,
-`Unsafe.*` (configurable subset), and later `Perf.*`. The compiler rejects any such effect
-under `@hot`, transitively (a `@hot` function may only call functions provably free of the
-banned effects).
+A function annotation that **forbids slow effects in its body**: allocation/free and
+raw-pointer/indirect-dispatch `Unsafe.*` effects. The compiler rejects those effects under
+plain `@hot`, transitively. `@hot(alloc)` is the explicit opt-in for code that should still
+carry hot codegen metadata but intentionally allocates.
 
 ```elisa
 @hot
 def integrate(bodies: mutable darray[Body]&, dt: f32):
-    for b in bodies:          # region/handle work: fine
+    for b in bodies:          # preallocated region/handle work: fine
         b.pos <- b.pos + b.vel * dt
-    # x: Node& = new[heap] Node(...)   # ← compile error under @hot: Memory.Heap forbidden
+    # tmp: mutable darray[Body] = []   # compile error under @hot: allocation forbidden
 ```
 
 A beginner marks the inner loop `@hot` and **cannot** accidentally make it allocate or
@@ -273,21 +257,7 @@ chase raw pointers. Frictionless if unused; a hard, local guarantee when used. T
 cleanest embodiment of "the hot path is enforced-fast." Implementation reuses the existing
 effect-checking machinery — `@hot` is an effect *upper bound* (the complement of `can`).
 
-### 3. `slow:` quarantine blocks (mirror of `trusted:`)
-
-Exactly the `trusted Unsafe.*:` pattern, for cost. Slow operations (heap alloc, raw
-pointer graph traversal, heavy copy) must sit inside a `slow:` block, making them
-syntactically visible and greppable. `@hot` simply forbids `slow:` blocks in its body.
-
-```elisa
-slow:
-    legacy: Node&? = malloc_node()   # loud, intentional, reviewable
-```
-
-The teaching value: a beginner typing `slow` is being told, in the grammar, to question
-what they're doing.
-
-### 4. Pointer-graph + churn lints (tactical teeth)
+### 2. Pointer-graph + churn lints (tactical teeth)
 
 Static analyzer passes (the precedent is `analyzer_sentinel_index.go`):
 
@@ -301,14 +271,14 @@ Warnings by default; errors under the strict flag (below). Note: a single-region
 ref-graph is **not** flagged — it is sound (shared lifetime). Only *raw / cross-lifetime*
 graphs are.
 
-### 5. Graduated strictness + teaching errors
+### 3. Graduated strictness + teaching errors
 
 - `-Wperf` (or a project setting) selects the severity: **off/warn while prototyping,
   error in production.** Fast iteration stays loose; shipped code gets strict.
-- **Every friction diagnostic names the fast path.** Hitting `Memory.Heap`-required prints
-  "region allocation is cheaper; use `in r:` or rely on inference." A pointer-graph lint
-  links to the `Store`/packed idiom. The beginner is *redirected*, not just blocked — this
-  is the actual pit-of-success mechanism.
+- **Every friction diagnostic names the fast path.** `@hot` allocation errors point toward
+  preallocation/reserve or explicit `@hot(alloc)`. Pointer-graph and churn lints link to
+  the `Store`/packed/batch idioms. The beginner is *redirected*, not just blocked — this is
+  the actual pit-of-success mechanism.
 
 ## How they compose — a worked example
 
@@ -322,26 +292,25 @@ def build_scene() -> darray[Entity]:        # inference gives a region; contiguo
 # Enforced-fast inner loop:
 @hot
 def step(es: mutable darray[Entity]&, dt: f32):
-    for e in es: e.advance(dt)               # compiler guarantees: no heap, no raw chase
+    for e in es: e.advance(dt)               # compiler guarantees: no allocation, no raw chase
 
-# Opt-in slow, loud and quarantined:
-def load_legacy() -> RawGraph can Memory.Heap:   # advertised in the signature
-    slow:
-        return build_raw_pointer_graph()         # greppable, reviewable, never accidental
+# Allocation-bearing hot code must say so:
+@hot(alloc)
+def build_scratch(n: usize) -> darray[Entity] can Memory.Allocate:
+    ...
 ```
 
 The fast path carries no ceremony; every slow choice is a word you had to type.
 
 ## Staged implementation plan
 
-1. **`Memory.Heap` effect** + route malloc/global-heap allocation through it (region alloc
-   unchanged). Subsumption `Heap ⊑ Allocate` if available. *(Foundation; small, additive.)*
-2. **`@hot` contract**: parse the annotation, enforce the banned-effect upper bound via the
+1. **`@hot` contract**: parse the annotation, enforce the banned-effect upper bound via the
    existing effect checker, with a teaching diagnostic. *(Keystone.)*
-3. **`slow:` block**: grammar + grant the cost effects within; `@hot` forbids it.
-4. **Pointer-graph lint** + **churn lint**, warning-level, with fix-it text.
-5. **`-Wperf` graduated severity** wiring + the teaching-error pass over all the above.
-6. *(Later)* `Perf.Indirect` / `Perf.Copy`, SoA-layout nudges.
+2. **`@hot(alloc)` opt-in**: preserve hot codegen metadata while making allocation-bearing
+   hot code visually explicit.
+3. **Pointer-graph lint** + **churn lint**, warning-level, with fix-it text.
+4. **`-Wperf` graduated severity** wiring + the teaching-error pass over all the above.
+5. *(Later)* `Perf.Indirect` / `Perf.Copy`, SoA-layout nudges.
 
 Each stage is independently shippable and the fast path stays untouched throughout.
 
@@ -359,10 +328,6 @@ Each stage is independently shippable and the fast path stays untouched througho
 
 ## Open questions
 
-- Does `Memory.Heap` subsume `Memory.Allocate`, or are they siblings? (Depends on
-  subsumption-family support.)
 - Should `@hot` ban *all* `Unsafe.*` or a configurable subset (raw deref yes, but maybe
   `Unsafe.UncheckedIndex` is *desired* in hot code)?
-- Is `slow:` a new keyword, or sugar for an effect-grant block (`can Memory.Heap:` already
-  grants — `slow:` could be the cost-family analogue)?
 - Default severity: warn or off? (Leaning warn, so the nudge is present but non-blocking.)
