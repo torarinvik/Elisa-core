@@ -3149,7 +3149,8 @@ Strict-concurrency migration notes:
   errors, including concurrency performance hazards such as spawning a fresh OS
   thread in each loop iteration instead of using a persistent pool/nursery
   shape, or acquiring a mutex once per loop iteration instead of batching,
-  sharding, or reducing locally
+  sharding, or reducing locally; atomic RMW/CAS hot loops get the same treatment
+  because they often serialize on one cache line
 
 ## Tuple-bind statements
 

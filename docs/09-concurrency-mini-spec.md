@@ -243,7 +243,8 @@ Performance strictness is a separate lever. `-Wconcurrency` promotes raw-surface
 proof diagnostics; `-Wperf` promotes performance-friction diagnostics, including
 concurrency anti-patterns such as spawning a fresh OS thread on every loop
 iteration instead of using a pool, nursery, or fixed worker set, and acquiring a
-mutex on every loop iteration instead of batching/sharding/reducing the work.
+mutex or performing atomic RMW/CAS on every loop iteration instead of
+batching/sharding/reducing the work.
 
 The compiler reports these raw calls as deprecations/warnings by default. The
 semantic analyzer's `EnforceStrictConcurrency` option, exposed on the CLI as

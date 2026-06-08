@@ -87,6 +87,19 @@ def main() -> i64:
 `,
 			marker: "acquires a lock on every iteration",
 		},
+		{
+			name: "atomic_hot_loop.elisa",
+			src: `def fetch_add(slot: i64, value: i64, order: i64) -> i64:
+    return slot + value + order
+
+def main() -> i64:
+    acc: mutable i64 = 0
+    for i in 0..<4:
+        acc <- acc + fetch_add(acc, i.i64(), 0)
+    return acc
+`,
+			marker: "performs an atomic read-modify-write/compare-exchange on every iteration",
+		},
 	}
 
 	for _, tc := range cases {
