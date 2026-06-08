@@ -125,3 +125,32 @@ def std_parallel_for_band_smoke():
 		assert ys[249.usize()] == 499.0
 		assert ys[250.usize()] == 501.0
 		assert ys[999.usize()] == 1999.0
+
+# Stencil / double-buffer: the canonical data-parallel pattern. Each worker writes its disjoint
+# band of `dst` while reading ANY neighbour (including across band boundaries) from a captured
+# read-only ReadView of `src`. `at base` yields the band's global start offset for neighbour
+# indexing. Race-free: dst bands are disjoint writes, src is read-only and shared by value.
+@test
+def std_stencil_parallel_for_smoke():
+	can Parallel:
+		n: usize = 1000.usize()
+		src: mutable darray[f64] = []
+		_ = src.resize(n)
+		for k in 0..<1000:
+			src[k.usize()] <- k.f64()
+		dst: mutable darray[f64] = []
+		_ = dst.resize(n)
+		src_view: ReadView[f64] = read_view(&src)
+		dst_slice: Slice[f64] = slice(&dst)
+		last: usize = n - 1.usize()
+		pool workers(4):
+			parallel for band at base in dst_slice:
+				for j in 0..<band.len():
+					gi: usize = base + j
+					lo: usize = (gi - 1.usize() if gi > 0.usize() else gi)
+					hi: usize = (gi + 1.usize() if gi < last else gi)
+					band.set_unchecked(j, (src_view.get_unchecked(lo) + src_view.get_unchecked(gi) + src_view.get_unchecked(hi)) / 3.0)
+		# interior dst[i] = (src[i-1]+src[i]+src[i+1])/3 = i; verified across band boundaries
+		assert dst[250.usize()] == 250.0
+		assert dst[500.usize()] == 500.0
+		assert dst[750.usize()] == 750.0
