@@ -1,0 +1,128 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Validation of `parallel for band` on a real workload: the diffusion stencil that dominates the
+# Stable-Fluids solver (lin_solve, 20 Gauss-Seidel iterations per diffuse/project pass). The old
+# hand-rolled parallel fluid used raw `uintptr` Band structs + pool_submit1 + task-group barriers
+# (the manual disjoint-slice escape hatch). Here the SAME stencil is expressed with the new
+# first-class constructs: a Jacobi sweep reads the whole previous field via a read-only ReadView
+# and writes disjoint Slice bands of the next field with `parallel for band` -- src/dst distinct,
+# so it is race-free BY THE TYPE SYSTEM (no discipline, no raw pointers). We prove race-freedom
+# empirically: the result is bit-identical across worker counts AND equal to the serial oracle.
+
+def ix(i: i64, j: i64, n: i64) -> usize:
+	return (i + (n + 2) * j).usize()
+
+# One Jacobi diffusion sweep, parallelized over disjoint bands of the OUTPUT grid `xn`. Each worker
+# owns a band of cells of `xn`; for each interior cell it reads the previous field `x` (a captured
+# read-only ReadView -- a distinct buffer, so reading neighbours across band boundaries is safe)
+# and the source `x0`. Boundary/ring cells are skipped (left at 0). Returns nothing; `xn` holds the
+# next iterate. `parallel for band at base` gives the band's global start so we can decode (i, j).
+def jacobi_sweep(n: i64, w: usize, xn: mutable darray[f64]&, x: ReadView[f64], x0: ReadView[f64], a: f64, c: f64) -> void:
+	can Parallel:
+		stride: i64 = n + 2
+		dst: Slice[f64] = slice(xn)
+		pool workers(w):
+			parallel for band at base in dst:
+				for k in 0..<band.len():
+					gi: i64 = (base + k).i64()
+					i: i64 = gi % stride
+					j: i64 = gi / stride
+					if i >= 1 and i <= n and j >= 1 and j <= n:
+						s: f64 = x.get_unchecked((gi - 1).usize()) + x.get_unchecked((gi + 1).usize()) + x.get_unchecked((gi - stride).usize()) + x.get_unchecked((gi + stride).usize())
+						band.set_unchecked(k, (x0.get_unchecked(gi.usize()) + a * s) / c)
+
+# Serial reference Jacobi sweep (same math, sequential) -- the oracle the parallel result must match.
+def jacobi_sweep_serial(n: i64, xn: mutable darray[f64]&, x: mutable darray[f64]&, x0: mutable darray[f64]&, a: f64, c: f64) -> void:
+	stride: i64 = n + 2
+	for j in 1..<(n + 1):
+		for i in 1..<(n + 1):
+			gi: usize = ix(i, j, n)
+			s: f64 = x[ix(i - 1, j, n)] + x[ix(i + 1, j, n)] + x[ix(i, j - 1, n)] + x[ix(i, j + 1, n)]
+			xn[gi] <- (x0[gi] + a * s) / c
+
+def checksum(x: mutable darray[f64]&, size: i64) -> f64:
+	acc: mutable f64 = 0.0
+	for k in 0..<size:
+		acc <- acc + x[k.usize()] * (k.f64() + 1.0)   # position-weighted: order-sensitive
+	return acc
+
+# Fill x0 with a deterministic source pattern (a few hot spots), zero everything else.
+def init_source(x0: mutable darray[f64]&, n: i64, size: i64) -> void:
+	for k in 0..<size:
+		x0[k.usize()] <- 0.0
+	for j in 1..<(n + 1):
+		for i in 1..<(n + 1):
+			x0[ix(i, j, n)] <- ((i * 7 + j * 13) % 17).f64() * 0.01
+
+# Run `iters` Jacobi iterations on `w` workers, ping-ponging buffers; return the checksum.
+def run_parallel(n: i64, size: i64, iters: i64, w: usize, a: f64, c: f64) -> f64:
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		x0: mutable darray[f64] = []
+		buf_a: mutable darray[f64] = []
+		buf_b: mutable darray[f64] = []
+		_ = x0.resize(size.usize())
+		_ = buf_a.resize(size.usize())
+		_ = buf_b.resize(size.usize())
+		init_source(&x0, n, size)
+		for k in 0..<size:
+			buf_a[k.usize()] <- 0.0
+			buf_b[k.usize()] <- 0.0
+		x0_view: ReadView[f64] = read_view(&x0)
+		# ping-pong: read `cur`, write `nxt`
+		toggle: mutable bool = true
+		for it in 0..<iters:
+			if toggle:
+				jacobi_sweep(n, w, &buf_b, read_view(&buf_a), x0_view, a, c)
+			else:
+				jacobi_sweep(n, w, &buf_a, read_view(&buf_b), x0_view, a, c)
+			toggle <- not toggle
+		if toggle:
+			return checksum(&buf_a, size)
+		return checksum(&buf_b, size)
+
+def run_serial(n: i64, size: i64, iters: i64, a: f64, c: f64) -> f64:
+	can Memory.Allocate, Memory.Release, Abort.Panic:
+		x0: mutable darray[f64] = []
+		buf_a: mutable darray[f64] = []
+		buf_b: mutable darray[f64] = []
+		_ = x0.resize(size.usize())
+		_ = buf_a.resize(size.usize())
+		_ = buf_b.resize(size.usize())
+		init_source(&x0, n, size)
+		for k in 0..<size:
+			buf_a[k.usize()] <- 0.0
+			buf_b[k.usize()] <- 0.0
+		toggle: mutable bool = true
+		for it in 0..<iters:
+			if toggle:
+				jacobi_sweep_serial(n, &buf_b, &buf_a, &x0, a, c)
+			else:
+				jacobi_sweep_serial(n, &buf_a, &buf_b, &x0, a, c)
+			toggle <- not toggle
+		if toggle:
+			return checksum(&buf_a, size)
+		return checksum(&buf_b, size)
+
+@test
+def fluid_parallel_for_validation() -> void:
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		n: i64 = 256
+		size: i64 = (n + 2) * (n + 2)
+		iters: i64 = 200
+		a: f64 = 0.25
+		c: f64 = 1.0 + 4.0 * a
+
+		# Reference (serial) result.
+		ref: f64 = run_serial(n, size, iters, a, c)
+
+		# Race-freedom: the parallel result must be IDENTICAL across worker counts (and to serial,
+		# since Jacobi is order-independent). Thread count changing nothing == no data races.
+		c1: f64 = run_parallel(n, size, iters, 1.usize(), a, c)
+		c2: f64 = run_parallel(n, size, iters, 2.usize(), a, c)
+		c4: f64 = run_parallel(n, size, iters, 4.usize(), a, c)
+		# Bit-identical across worker counts AND equal to the serial oracle: the band decomposition
+		# is exactly the serial algorithm with no data races. (Wall-clock speedup is measured out of
+		# band; this stencil is memory-bandwidth-bound, so the win scales with cores/bandwidth.)
+		assert c1 == ref
+		assert c2 == ref
+		assert c4 == ref
