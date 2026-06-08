@@ -327,6 +327,15 @@ generator argument; `by par` / `by simd` may also follow a consumer’s generato
 
 Each phase ships independently and leaves the tree green.
 
+> **Implementation status (Phase 1, in progress).** DONE: fold/reduce comprehension
+> `(… with acc =)` incl. comma-head bindings (`19a2fc54`, `af0592e4`); dict
+> comprehension `{k:v for …}` (`f146802f`); set comprehension `{x for …}`
+> (`61e6df47`). The fold lowers as a pure parser desugar to an `ExprBlock`; dict/set
+> extend `ListComprehensionExpr` (`Key` field / `Set` flag) and lower to a fused
+> `d.put`/`s.add` loop. List comprehension pre-existed. REMAINING: comma-head
+> bindings on `[…]`/`{…}` (list/dict/set); deprecate the `fold` combinator
+> (confirmed unused). Each shipped with a runtime smoke + Go test.
+
 **Phase 1 — surface + sinks (sequential, no protocol value).** Parse `{…}` set,
 `{k:v …}` dict, `(… with acc =)` fold, and the comma-separated **head bindings**
 (`name [:T] = e, … , body`); lower all comprehensions to fused loops directly
