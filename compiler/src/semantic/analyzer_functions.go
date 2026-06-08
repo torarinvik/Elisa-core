@@ -148,6 +148,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.checkSentinelIndex(fn)
 	a.checkAllocationChurn(fn)
 	a.checkThreadSpawnChurn(fn)
+	a.checkPoolChurn(fn)
 	a.checkLockChurn(fn)
 	a.checkAtomicHotLoops(fn)
 	a.checkUnreservedCountingFills(fn)

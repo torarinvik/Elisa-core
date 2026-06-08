@@ -88,6 +88,24 @@ def main() -> i64:
 			marker: "acquires a lock on every iteration",
 		},
 		{
+			name: "pool_churn.elisa",
+			src: `def pool_new(workers: i64) -> i64:
+    return workers
+
+def pool_shutdown(pool: i64):
+    _ = pool
+
+def main() -> i64:
+    acc: mutable i64 = 0
+    for i in 0..<4:
+        pool: i64 = pool_new(2)
+        acc <- acc + pool + i.i64()
+        pool_shutdown(pool)
+    return acc
+`,
+			marker: "creates a thread pool on every iteration",
+		},
+		{
 			name: "atomic_hot_loop.elisa",
 			src: `def fetch_add(slot: i64, value: i64, order: i64) -> i64:
     return slot + value + order

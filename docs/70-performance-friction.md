@@ -27,8 +27,13 @@
   loop is warned toward batch allocation; precise — `push` accumulation and packed-node sugar
   are not flagged, single `new` outside a loop is silent. Zero noise (nothing in
   stdlib/fixtures uses `new` in a loop).
-- ✅ **`-Wperf` graduated strictness LANDED** (commit d1636cdb): the pointer-graph and churn
-  lints are warnings by default but `-Wperf` promotes them to hard errors (via
+- ✅ **Concurrency performance lints LANDED**: raw thread spawn, thread-pool creation,
+  lock acquisition, and atomic RMW/CAS inside loops are warnings by default and are promoted
+  to errors under `-Wperf`. Pool submission in a loop is deliberately allowed; the bad shape
+  is repeatedly creating or tearing down workers instead of reusing a pool around the batch.
+- ✅ **`-Wperf` graduated strictness LANDED** (commit d1636cdb and follow-ups): the
+  pointer-graph, allocation-churn, reserve-bound, and concurrency performance lints are
+  warnings by default but `-Wperf` promotes them to hard errors (via
   AnalyzeOptions.EnforcePerfLints + the `perfLint` helper), so shipped code can ban the
   anti-patterns outright — the "illegal" half of the goal.
 - The model is now functionally complete: `@hot` (slow effects, always enforced),
@@ -54,6 +59,8 @@ The compiler sees **structure**, not **algorithms**. It can make these painful:
 
 - per-object heap allocation / malloc churn,
 - raw pointer graphs (cache-hostile pointer chasing),
+- per-iteration thread/pool creation,
+- per-iteration lock or atomic synchronization hot spots,
 - hidden O(n) copies,
 - dynamic dispatch / indirection,
 - escaping/cross-lifetime references (already caught).

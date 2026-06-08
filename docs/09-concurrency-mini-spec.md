@@ -82,8 +82,8 @@ Boundary and performance hazards:
 - sync-over-async deadlocks
 - foreign functions that block, spawn, call back, store pointers, or share
   memory without declaring that behavior
-- false sharing, lock convoys, excessive contention, and atomic hot-loop
-  performance cliffs in strict performance mode
+- false sharing, lock convoys, per-iteration pool/thread creation, excessive
+  contention, and atomic hot-loop performance cliffs in strict performance mode
 
 This list is intentionally broad. The point is not that every item needs a
 separate feature. The point is that the same few proof axes should cover the
@@ -242,9 +242,9 @@ Migration direction:
 Performance strictness is a separate lever. `-Wconcurrency` promotes raw-surface
 proof diagnostics; `-Wperf` promotes performance-friction diagnostics, including
 concurrency anti-patterns such as spawning a fresh OS thread on every loop
-iteration instead of using a pool, nursery, or fixed worker set, and acquiring a
-mutex or performing atomic RMW/CAS on every loop iteration instead of
-batching/sharding/reducing the work.
+iteration, creating a fresh thread pool on every loop iteration instead of
+reusing a pool around the batch, and acquiring a mutex or performing atomic
+RMW/CAS on every loop iteration instead of batching/sharding/reducing the work.
 
 The compiler reports these raw calls as deprecations/warnings by default. The
 semantic analyzer's `EnforceStrictConcurrency` option, exposed on the CLI as
