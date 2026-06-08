@@ -3147,7 +3147,9 @@ Strict-concurrency migration notes:
   concurrency calls while leaving unrelated deprecations as migration warnings
 - `-Wperf` is orthogonal: it turns performance-friction diagnostics into hard
   errors, including concurrency performance hazards such as spawning a fresh OS
-  thread in each loop iteration instead of using a persistent pool/nursery shape
+  thread in each loop iteration instead of using a persistent pool/nursery
+  shape, or acquiring a mutex once per loop iteration instead of batching,
+  sharding, or reducing locally
 
 ## Tuple-bind statements
 
