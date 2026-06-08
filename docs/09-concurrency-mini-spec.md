@@ -316,18 +316,39 @@ policy.
 Raw atomics are too easy to misuse in strict code. A protocol wrapper should
 carry the memory-ordering proof.
 
+The current stdlib ships the first small wrapper, `AtomicCell[T]`, whose helpers
+choose common orderings at the API boundary:
+
+```elisa
+counter: mutable AtomicCell[i64] = atomic_cell(0)
+old: i64 = atomic_fetch_add_acqrel(&counter, 1)
+now: i64 = atomic_load_acquire(&counter)
+```
+
+Implemented helpers:
+
+- `atomic_cell(value) -> AtomicCell[T]`
+- `atomic_load_relaxed(cell)` / `atomic_load_acquire(cell)`
+- `atomic_store_relaxed(cell, value)` / `atomic_store_release(cell, value)`
+- `atomic_exchange_acqrel(cell, value)`
+- `atomic_compare_exchange_acqrel(cell, expected, desired)`
+- `atomic_fetch_add_acqrel(cell, value)` / `atomic_fetch_sub_acqrel(cell, value)` for `AtomicCell[i64]`
+
+Higher-level protocol wrappers can build on `AtomicCell[T]` and expose only the
+operations that preserve their invariant:
+
 ```elisa
 struct OnceCell[T, S]:
     storage: mutable T
-    ready: mutable atomic[bool]
+    ready: mutable AtomicCell[bool]
 
 def publish[T](cell: mutable OnceCell[T, Empty]&, value: T) -> OnceCell[T, Ready]:
     cell.storage <- value
-    store(&cell.ready, true, MemoryOrder.Release)
+    atomic_store_release(&cell.ready, true)
     return move cell as OnceCell[T, Ready]
 
 def get[T](cell: OnceCell[T, Ready]&) -> T:
-    assert load(&cell.ready, MemoryOrder.Acquire)
+    assert atomic_load_acquire(&cell.ready)
     return cell.storage
 ```
 
@@ -969,7 +990,7 @@ The rebased forms are provenance contracts, not slice-offset or length proofs.
 
 ## Atomics
 
-Atomics stay explicit and low-level.
+Raw atomics stay explicit and low-level.
 
 ```elisa
 enum MemoryOrder:
@@ -995,7 +1016,9 @@ extern fetch_xor[T](slot: atomic[T]&, value: T, order: MemoryOrder) -> T can[Ato
 extern fence(order: MemoryOrder) -> void can[Atomics.Fence]
 ```
 
-`atomic_safe(T)` and `atomic_numeric(T)` remain compiler predicates.
+`atomic_safe(T)` and `atomic_numeric(T)` remain compiler predicates. In strict
+concurrency, direct calls to these raw helpers are migration diagnostics; prefer
+`AtomicCell[T]` or a domain-specific wrapper that owns the ordering invariant.
 
 ## Structured Syntax
 

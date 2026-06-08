@@ -3126,6 +3126,11 @@ Strict-concurrency migration notes:
 - direct atomic helpers over `atomic[T]` (`load`, `store`, `exchange`,
   `compare_exchange`, RMW helpers, and `fence`) are also low-level surfaces;
   strict user code should hide them behind named protocol wrappers
+- `AtomicCell[T]` is the current stdlib wrapper for ordinary atomic state:
+  use `atomic_cell(value)`, `atomic_load_acquire`, `atomic_store_release`,
+  `atomic_exchange_acqrel`, `atomic_compare_exchange_acqrel`, and the i64
+  `atomic_fetch_add_acqrel` / `atomic_fetch_sub_acqrel` helpers instead of
+  choosing raw memory orders at every call site
 - strict-mode direction is to keep those raw calls available for trusted
   wrappers while nudging user code toward structured task scopes, linear
   escaped handles, typed predicate waits, bounded queues, and domain-protected

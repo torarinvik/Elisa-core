@@ -45,6 +45,9 @@ struct CondVar:
 struct atomic[T]:
 	value: mutable T
 
+struct AtomicCell[T]:
+	slot: mutable atomic[T]
+
 struct ConcurrencyBox[T]:
 	value: mutable T
 
@@ -837,6 +840,51 @@ def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
 def fence(order: MemoryOrder):
 	can Atomics.Fence:
 		_ = order
+
+# ------------------------------------------------------------
+# AtomicCell: proof-carrying atomic protocol wrapper
+#
+# Raw atomics remain the low-level runtime surface. User-facing strict code
+# should prefer a named wrapper like AtomicCell so the memory-ordering choices
+# live with the protocol instead of being repeated at every call site.
+# ------------------------------------------------------------
+
+def atomic_cell[T](value: T) -> AtomicCell[T]:
+	out: AtomicCell[T] = zeroed
+	out.slot.value <- value
+	return out
+
+def atomic_load_relaxed[T](cell: AtomicCell[T]&) -> T:
+	can Atomics.Load:
+		return load(&cell.slot, MemoryOrder.Relaxed)
+
+def atomic_load_acquire[T](cell: AtomicCell[T]&) -> T:
+	can Atomics.Load:
+		return load(&cell.slot, MemoryOrder.Acquire)
+
+def atomic_store_relaxed[T](cell: mutable AtomicCell[T]&, value: T):
+	can Atomics.Store:
+		store(&cell.slot, value, MemoryOrder.Relaxed)
+
+def atomic_store_release[T](cell: mutable AtomicCell[T]&, value: T):
+	can Atomics.Store:
+		store(&cell.slot, value, MemoryOrder.Release)
+
+def atomic_exchange_acqrel[T](cell: mutable AtomicCell[T]&, value: T) -> T:
+	can Atomics.Exchange:
+		return exchange(&cell.slot, value, MemoryOrder.AcqRel)
+
+def atomic_compare_exchange_acqrel[T](cell: mutable AtomicCell[T]&, expected: T, desired: T) -> bool:
+	can Atomics.CompareExchange:
+		return compare_exchange(&cell.slot, expected, desired, MemoryOrder.AcqRel, MemoryOrder.Acquire)
+
+def atomic_fetch_add_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64:
+	can Atomics.Rmw:
+		return fetch_add(&cell.slot, value, MemoryOrder.AcqRel)
+
+def atomic_fetch_sub_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64:
+	can Atomics.Rmw:
+		return fetch_sub(&cell.slot, value, MemoryOrder.AcqRel)
 
 # ------------------------------------------------------------
 # perf_cores: the default nursery worker count — number of performance cores.
