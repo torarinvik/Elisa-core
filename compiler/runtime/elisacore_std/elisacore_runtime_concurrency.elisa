@@ -411,6 +411,30 @@ def notify_all(cv: mutable CondVar&):
 		if status != 0:
 			panic("cond broadcast failed")
 
+# ------------------------------------------------------------
+# Predicate wait wrappers
+#
+# Raw condvar wait/notify is the low-level runtime surface. Strict user code
+# should use a predicate-shaped wrapper so spurious wakeups are handled in one
+# place and the condition being waited on is visible at the call boundary.
+# ------------------------------------------------------------
+
+def predicate_wait[permission P](cv: mutable CondVar&, guard: MutexGuard[Held], predicate: func() -> bool effects[P]) -> MutexGuard[Held]:
+	can P, Sync.Wait, Abort.Panic:
+		g: mutable MutexGuard[Held] = move guard
+		trusted Unsafe.AssumeProgress:
+			while not predicate():
+				g <- cond_wait(cv, move g)
+		return move g
+
+def predicate_notify_one(cv: mutable CondVar&):
+	can Sync.Notify, Abort.Panic:
+		notify_one(cv)
+
+def predicate_notify_all(cv: mutable CondVar&):
+	can Sync.Notify, Abort.Panic:
+		notify_all(cv)
+
 def yield_thread():
 	can Thread.Yield:
 		thread_yield()

@@ -3123,6 +3123,10 @@ Strict-concurrency migration notes:
   ordinary data-parallel work
 - direct `spawn1`, `pool_submit1`, `detach`, raw thread helpers, and raw
   condition-variable helpers are low-level compatibility/runtime surfaces
+- `predicate_wait(cv, move guard, predicate)`, `predicate_notify_one(cv)`, and
+  `predicate_notify_all(cv)` are the current stdlib replacement surface for raw
+  condition-variable waits/notifications; domain-specific wrappers should build
+  on them and expose the protected-state predicate they wait for
 - direct atomic helpers over `atomic[T]` (`load`, `store`, `exchange`,
   `compare_exchange`, RMW helpers, and `fence`) are also low-level surfaces;
   strict user code should hide them behind named protocol wrappers
@@ -3141,6 +3145,9 @@ Strict-concurrency migration notes:
 - `AnalyzeOptions.EnforceStrictConcurrency`, exposed as CLI flag
   `-Wconcurrency`, currently performs that promotion for the legacy raw
   concurrency calls while leaving unrelated deprecations as migration warnings
+- `-Wperf` is orthogonal: it turns performance-friction diagnostics into hard
+  errors, including concurrency performance hazards such as spawning a fresh OS
+  thread in each loop iteration instead of using a persistent pool/nursery shape
 
 ## Tuple-bind statements
 

@@ -239,6 +239,11 @@ Migration direction:
 - keep low-level implementations in narrow `trusted` blocks or explicit
   unsafe-permission code
 
+Performance strictness is a separate lever. `-Wconcurrency` promotes raw-surface
+proof diagnostics; `-Wperf` promotes performance-friction diagnostics, including
+concurrency anti-patterns such as spawning a fresh OS thread on every loop
+iteration instead of using a pool, nursery, or fixed worker set.
+
 The compiler reports these raw calls as deprecations/warnings by default. The
 semantic analyzer's `EnforceStrictConcurrency` option, exposed on the CLI as
 `-Wconcurrency`, promotes that same diagnostic set to hard errors, letting
@@ -310,6 +315,17 @@ def recv[T](q: mutable Queue[T]&) -> T?:
 This one abstraction carries proofs for race freedom, lost-wakeup freedom,
 spurious-wakeup handling, bounded buffering, close protocol, and FIFO wait
 policy.
+
+The current stdlib provides the first wrapper-shaped surface:
+
+```elisa
+guard <- predicate_wait(&cv, move guard, ready)
+predicate_notify_all(&cv)
+```
+
+`predicate_wait` owns the raw `cond_wait` loop and only returns once the
+predicate is true. Domain-specific wait wrappers can build on it and expose a
+named predicate tied to protected state.
 
 ### Atomic protocol wrapper
 

@@ -56,6 +56,19 @@ def main() -> i64:
 `,
 			marker: "cannot infer a safe reserve bound",
 		},
+		{
+			name: "spawn_churn.elisa",
+			src: `def spawn1(f: i64, arg: i64) -> i64:
+    return arg
+
+def main() -> i64:
+    acc: mutable i64 = 0
+    for i in 0..<4:
+        acc <- acc + spawn1(0, i.i64())
+    return acc
+`,
+			marker: "spawns a fresh OS thread on every iteration",
+		},
 	}
 
 	for _, tc := range cases {
