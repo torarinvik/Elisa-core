@@ -401,6 +401,8 @@ Current rules:
 - `frozen[i]` yields the packed enum value at that dense frozen-store index
 - `frozen[a:b]` yields an ordinary readonly `dview[Expr]` slice over the frozen packed nodes
 - `frozen.tags` exposes the packed tag stream as `dview[Expr.Tag]`
+- prefer iterating the view directly, as in `for tag in frozen.tags:`, over
+  indexing `0..<frozen.count` unless the numeric index itself is needed
 - packed-store root index results are readonly; assignment through `frozen[i] <- ...` is rejected
 - slicing a frozen tag view keeps the ordinary readonly `dview[Expr.Tag]` surface
 - packed-store slice index results are readonly; assignment through `chunk[i] <- ...` is rejected
@@ -820,6 +822,14 @@ Current rules:
 
 Use query predicates for compact scans over iterable data when the loop only computes existence, universality, the first matching item, or a count.
 
+Iteration style is intentionally iterable-first. For ordinary traversal, use
+`for item in source:`, query predicates such as `any item in source where ...`,
+or comprehensions such as `[project(item) for item in source]`. When the index
+is part of the logic, use `source.enumerate()` and bind both values:
+`for index, item in source.enumerate():`. Use numeric ranges such as `0..<n`
+for numeric algorithms, fixed-count loops, explicit stride/bounds control, or
+temporary cases where the source has no iterable surface yet.
+
 ```elisa
 def has_name(names: darray[NameId], wanted: NameId) -> bool:
     return any name in names where name == wanted
@@ -873,7 +883,8 @@ Current rules:
 - multi-bind queries and `enumerate()` filters may name the narrowed subject explicitly, as in `index, item ... where item is Expr.Int(value)`; the subject must be one of the query binders
 - `count name in source where predicate` returns `usize`
 - the source uses ordinary iterable expression lowering, such as arrays, dynamic arrays, views, strings, `rows()`, `source.enumerate()`, and tree child views
-- range-loop headers such as `0..<n` and special `rev(...)` loop syntax remain explicit-loop territory for now
+- numeric range-loop headers such as `0..<n` are for numeric/index-only loops, explicit bounds or strides, and cases where no iterable source exists; they are not the idiomatic spelling for ordinary collection traversal
+- reverse traversal should use the iterable source form `rev(source)`, for example `for item in rev(items):`
 - loop-header typed `where` payloads are visible in the loop body
 - query predicates are analyzed in a scope where the query binder is bound to the iterable element type, or each multi-bind name is bound to its tuple/struct field type
 - query pattern-bound names are scoped to the query projection and filter guard; they do not leak after the query expression
@@ -2870,7 +2881,11 @@ Current implementation notes:
 
 ## Filtered iterable `for`
 
-Iterable loops may now include an inline filter after the source expression.
+Iterable loops are the idiomatic spelling for traversing data. Add an inline
+`where` filter after the source expression when the loop should skip items
+without adding a nested `if`. Use a numeric range only when the counter is the
+thing being computed, the loop needs explicit bounds/stride, or the source has
+no iterable category yet.
 
 ```elisa
 for {left, right: value} in items where left != 0:
@@ -2894,6 +2909,8 @@ for decl in block.decls where Pascal.Decl.LabelDecl(labels) for label in labels:
 
 Current rules:
 
+- prefer `for item in source:` for ordinary traversal; use `source.enumerate()`
+  when both index and value are needed
 - the binder runs before the filter, so the filter may reference destructured names such as `left`
 - the loop binder may be a simple name, an irrefutable brace destructure pattern, or a typed variant filter pattern
 - the filter may be an ordinary boolean expression or a pattern predicate

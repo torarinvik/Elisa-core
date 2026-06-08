@@ -12,12 +12,32 @@ surfaces are documented in `18-current-surface-ergonomics.md`.
 The goal is **not** to start with generators, lazy pipelines, or user-authored
 iterator traits.
 
-The goal is to generalize the existing range-shaped loop surface:
+The goal is to make iterable traversal the ordinary loop style and to
+generalize the existing range-shaped loop surface:
 
 ```elisa
 for index in 0..<items.len:
     ...
 ```
+
+into this default shape:
+
+```elisa
+for item in items:
+    ...
+
+for index, item in items.enumerate():
+    ...
+```
+
+Use iterable sources whenever the program is traversing data: arrays, `darray`,
+views, strings, row views, child views, projected tree views, filtered views,
+and other compiler-known iterable categories. Numeric ranges remain important,
+but they are the fallback for numeric algorithms, index-only loops, explicit
+stride/control loops, and cases where no iterable category exists yet. In
+ordinary container traversal, prefer `for item in items:` or
+`for index, item in items.enumerate():` over spelling the loop as
+`for i in 0..<items.count:`.
 
 Current range-shaped loop headers also accept inclusive bounds, descending bounds, and explicit steps:
 
@@ -98,6 +118,16 @@ So the rule is:
 > plain `for` is sequential syntax over builtin iterable categories now, and
 > further parallel forms should reuse that same iterable model rather than
 > inventing a second traversal dialect.
+
+Idiomatic loop choice follows from that rule:
+
+- use `for item in source:` for ordinary traversal
+- use `for index, item in source.enumerate():` when both index and value matter
+- use `for ref item in source:` or `for mutable ref item in source:` when the
+  body needs references rather than copies
+- use `for i in 0..<n:` for numeric ranges, index-only passes, fixed-count
+  loops, explicit strides, and temporary gaps where a source has no iterable
+  surface yet
 
 ## Surface Syntax
 
@@ -252,7 +282,10 @@ for i in 0..<len:
     ...
 ```
 
-Range iteration should remain the simplest category.
+Range iteration should remain the simplest numeric category, not the default
+way to traverse containers. Reach for it when the counter itself is the data,
+when the loop needs custom bounds/stride, or when no iterable source exists.
+When walking a collection, prefer the collection's iterable surface.
 
 Properties:
 

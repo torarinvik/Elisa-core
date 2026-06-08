@@ -206,6 +206,13 @@ decls: darray[Pascal.Decl] @alloc = [build_decl(token) for token in names if tok
 
 Use `empty[T]` for no items, `singleton[T](value)` for one item, `[value for item in items]` for mapped lists, and `[value for item in items if cond]` for filtered list construction.
 
+Use iterable sources as the default traversal shape in grammar helper code too.
+Prefer comprehensions and `for item in items:` over `for i in 0..<items.count:`
+when walking parsed lists, token lists, AST child lists, or row views. Reach for
+numeric ranges only for counter-driven grammar work, explicit lookahead windows,
+manual cursor arithmetic, or places where the source does not yet expose an
+iterator.
+
 Prefer grammar composition over helper functions whose only job is list plumbing:
 
 ```elisa

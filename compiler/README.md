@@ -67,6 +67,12 @@ next: Row = built{flag, right = first}
 for {left, right: value} in items if left != 0:
 ```
 
+Loop style is iterable-first: use `for item in source:` for ordinary traversal,
+`for index, item in source.enumerate():` when the index is part of the logic,
+and numeric ranges such as `0..<n` for numeric algorithms, explicit
+bounds/strides, fixed-count work, or temporary places where no iterable source
+exists yet.
+
 ```text
 cascade report:
   .inner.value <- value
