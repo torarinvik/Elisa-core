@@ -41,24 +41,26 @@ const (
 )
 
 type projectCLIOptions struct {
-	command         projectCommand
-	targetName      string
-	projectPath     string
-	path            string
-	output          string
-	emitOverride    string
-	filter          string
-	linkFlags       []string
-	trust           trustLevel
-	targetTriple    string
-	optLevel        backend.OptimizationLevel
-	hasOptLevel     bool
-	initName        string
-	packedProfile   backend.PackedLoweringProfile
-	jsonOutput      bool
-	strictContracts bool
-	debugInfo       bool
-	recordTrace     bool
+	command           projectCommand
+	targetName        string
+	projectPath       string
+	path              string
+	output            string
+	emitOverride      string
+	filter            string
+	linkFlags         []string
+	trust             trustLevel
+	targetTriple      string
+	optLevel          backend.OptimizationLevel
+	hasOptLevel       bool
+	initName          string
+	packedProfile     backend.PackedLoweringProfile
+	jsonOutput        bool
+	strictContracts   bool
+	debugInfo         bool
+	recordTrace       bool
+	perfStrict        bool
+	concurrencyStrict bool
 }
 type projectDefinition struct {
 	Version               string                             `json:"version,omitempty"`
@@ -72,20 +74,25 @@ type projectDefinition struct {
 	Targets               map[string]projectTargetDefinition `json:"targets"`
 }
 type projectTargetDefinition struct {
-	Entry                string   `json:"entry"`
-	Emit                 string   `json:"emit,omitempty"`
-	RunEmit              string   `json:"run-emit,omitempty"`
-	Output               string   `json:"output,omitempty"`
-	Dependencies         []string `json:"dependencies,omitempty"`
-	IncludeDirs          []string `json:"include-dirs,omitempty"`
-	Foreign              []string `json:"foreign,omitempty"`
-	EASM                 []string `json:"easm,omitempty"`
-	LinkFlags            []string `json:"link-flags,omitempty"`
-	InheritProjectNative *bool    `json:"inherit-project-native,omitempty"`
-	Exec                 []string `json:"exec,omitempty"`
-	Opt                  string   `json:"opt,omitempty"`
-	TargetTriple         string   `json:"target-triple,omitempty"`
-	PackedABI            string   `json:"packed-abi,omitempty"`
+	Entry                string                `json:"entry"`
+	Emit                 string                `json:"emit,omitempty"`
+	RunEmit              string                `json:"run-emit,omitempty"`
+	Output               string                `json:"output,omitempty"`
+	Dependencies         []string              `json:"dependencies,omitempty"`
+	IncludeDirs          []string              `json:"include-dirs,omitempty"`
+	Foreign              []string              `json:"foreign,omitempty"`
+	EASM                 []string              `json:"easm,omitempty"`
+	LinkFlags            []string              `json:"link-flags,omitempty"`
+	InheritProjectNative *bool                 `json:"inherit-project-native,omitempty"`
+	Exec                 []string              `json:"exec,omitempty"`
+	Opt                  string                `json:"opt,omitempty"`
+	TargetTriple         string                `json:"target-triple,omitempty"`
+	PackedABI            string                `json:"packed-abi,omitempty"`
+	Warnings             projectTargetWarnings `json:"warnings,omitempty"`
+}
+type projectTargetWarnings struct {
+	Perf        bool `json:"perf,omitempty"`
+	Concurrency bool `json:"concurrency,omitempty"`
 }
 type manifestDefinition struct {
 	Provides     string   `json:"provides"`
@@ -135,6 +142,8 @@ type resolvedProjectTarget struct {
 	hasOptLevel           bool
 	targetTriple          string
 	packedProfile         backend.PackedLoweringProfile
+	perfStrict            bool
+	concurrencyStrict     bool
 }
 type projectResolver struct {
 	searchPaths []string
@@ -210,18 +219,20 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	cli := cliOptions{
-		emit:          target.emit,
-		filename:      target.entryPath,
-		output:        target.outputPath,
-		filter:        options.filter,
-		foreignFiles:  append([]string(nil), target.foreignFiles...),
-		linkFlags:     append([]string(nil), target.linkFlags...),
-		targetTriple:  target.targetTriple,
-		packedProfile: target.packedProfile,
-		hasOptLevel:   target.hasOptLevel,
-		optLevel:      target.optLevel,
-		debugInfo:     options.debugInfo,
-		recordTrace:   options.recordTrace,
+		emit:              target.emit,
+		filename:          target.entryPath,
+		output:            target.outputPath,
+		filter:            options.filter,
+		foreignFiles:      append([]string(nil), target.foreignFiles...),
+		linkFlags:         append([]string(nil), target.linkFlags...),
+		targetTriple:      target.targetTriple,
+		packedProfile:     target.packedProfile,
+		hasOptLevel:       target.hasOptLevel,
+		optLevel:          target.optLevel,
+		debugInfo:         options.debugInfo,
+		recordTrace:       options.recordTrace,
+		perfStrict:        target.perfStrict,
+		concurrencyStrict: target.concurrencyStrict,
 	}
 
 	switch options.command {
@@ -380,6 +391,10 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			// Force the debug index-bounds watchdog on regardless of optimization level.
 			// The watchdog gate reads this env var at codegen time (build is in-process).
 			_ = os.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "1")
+		case arg == "-Wperf":
+			options.perfStrict = true
+		case arg == "-Wconcurrency":
+			options.concurrencyStrict = true
 		case arg == "-o":
 			i++
 			if i >= len(args) {

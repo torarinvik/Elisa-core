@@ -25,6 +25,7 @@ Selected target block fields:
 - `Target triple: <value-or-<host-default>>`
 - optional `Output: <path>` when configured
 - optional `Optimization: O<n>` when explicitly configured
+- `Warning policy: perf=<warn|error> concurrency=<warn|error>`
 - `Include dirs:` list
 - `Dependency search paths:` list
 - `Resolved dependencies:` list

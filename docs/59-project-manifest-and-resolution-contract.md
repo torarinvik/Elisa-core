@@ -37,7 +37,18 @@ Per-target fields:
 - `exec`
 - `opt`
 - `target-triple`
+- `warnings`
 - `packed-abi` (rejected; removed override)
+
+Per-target `warnings` fields:
+
+- `perf`: when `true`, promotes performance-friction diagnostics to errors
+  like `-Wperf`
+- `concurrency`: when `true`, promotes legacy raw-concurrency migration
+  diagnostics to strict errors like `-Wconcurrency`
+
+These fields are escalation-only policy. CLI `-Wperf` and `-Wconcurrency`
+also enable the corresponding strictness for the current project command.
 
 ## Dependency manifest schema (current)
 
@@ -127,7 +138,11 @@ Each source is include-expanded with configured include directories and concaten
     "app": {
       "entry": "src/main.elisa",
       "emit": "llvm",
-      "run-emit": "interpret"
+      "run-emit": "interpret",
+      "warnings": {
+        "perf": true,
+        "concurrency": true
+      }
     }
   }
 }

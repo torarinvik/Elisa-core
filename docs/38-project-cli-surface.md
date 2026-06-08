@@ -44,6 +44,8 @@ Project target resolution supports:
 - `output`
 - `target-triple`
 - `opt`
+- `warnings.perf`
+- `warnings.concurrency`
 - `foreign`
 - `easm`
 - `link-flags`
@@ -68,7 +70,11 @@ Example project file shape:
       "emit": "llvm",
       "run-emit": "interpret",
       "output": "build/app.ll",
-      "opt": "O0"
+      "opt": "O0",
+      "warnings": {
+        "perf": true,
+        "concurrency": true
+      }
     }
   }
 }
@@ -113,6 +119,12 @@ documented in
 - `-link`, `-L`, and `-l` flags are appended to resolved target link flags
 - `-target-triple` overrides target triple for the current command
 - `-O0`, `-O2`, and `-O3` override target optimization for the current command
+- `-Wperf` and `-Wconcurrency` promote the same warning classes as target
+  `warnings.perf` and `warnings.concurrency`
+- Target warning policy can only make a build stricter: `warnings.perf: true`
+  promotes performance-friction diagnostics to errors and
+  `warnings.concurrency: true` promotes legacy raw-concurrency diagnostics to
+  strict errors
 
 ## Trust gates for hooks
 

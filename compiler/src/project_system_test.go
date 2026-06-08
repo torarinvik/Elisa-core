@@ -912,6 +912,80 @@ func TestRunCLIProjectTargetCanOptOutOfProjectNativeInputs(t *testing.T) {
 	}
 }
 
+func TestRunCLIProjectTargetWarningPolicyPromotesPerfAndConcurrency(t *testing.T) {
+	prevSuppress, hadSuppress := os.LookupEnv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
+	_ = os.Unsetenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
+	t.Cleanup(func() {
+		if hadSuppress {
+			_ = os.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", prevSuppress)
+		} else {
+			_ = os.Unsetenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
+		}
+	})
+
+	projectRoot := t.TempDir()
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), `{
+  "version": "0.1.0",
+  "targets": {
+    "perf": {
+      "entry": "perf.elisa",
+      "emit": "llvm",
+      "warnings": {
+        "perf": true
+      }
+    },
+    "concurrency": {
+      "entry": "concurrency.elisa",
+      "emit": "llvm",
+      "warnings": {
+        "concurrency": true
+      }
+    }
+  }
+}
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "perf.elisa"), `def fetch_add(slot: i64, value: i64, order: i64) -> i64:
+    return slot + value + order
+
+def main() -> i64:
+    acc: mutable i64 = 0
+    for i in 0..<4:
+        acc <- acc + fetch_add(acc, i.i64(), 0)
+    return acc
+`)
+	writeFixtureFile(t, filepath.Join(projectRoot, "concurrency.elisa"), `enum MemoryOrder:
+    Relaxed
+    Acquire
+    Release
+    AcqRel
+    SeqCst
+
+def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
+    return zeroed
+
+def main(slot: atomic[i64]&) -> i64:
+    return load(slot, MemoryOrder.SeqCst)
+`)
+
+	for _, tc := range []struct {
+		target string
+		check  string
+	}{
+		{target: "perf", check: "`fetch_add` performs an atomic read-modify-write/compare-exchange on every iteration"},
+		{target: "concurrency", check: "strict concurrency error: `load` is legacy raw atomic surface"},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := runCLI([]string{"build", tc.target, "--project", projectRoot}, &stdout, &stderr)
+		if exitCode == 0 {
+			t.Fatalf("expected project target %s warning policy to fail build", tc.target)
+		}
+		if !strings.Contains(stderr.String(), tc.check) {
+			t.Fatalf("expected project target %s stderr to contain %q, got:\n%s", tc.target, tc.check, stderr.String())
+		}
+	}
+}
+
 type projectFixtureOptions struct {
 	targetHook string
 }
