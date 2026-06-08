@@ -149,6 +149,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.checkAllocationChurn(fn)
 	a.checkThreadSpawnChurn(fn)
 	a.checkPoolChurn(fn)
+	a.checkTaskGroupChurn(fn)
 	a.checkLockChurn(fn)
 	a.checkAtomicHotLoops(fn)
 	a.checkUnreservedCountingFills(fn)

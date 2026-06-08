@@ -106,6 +106,24 @@ def main() -> i64:
 			marker: "creates a thread pool on every iteration",
 		},
 		{
+			name: "task_group_churn.elisa",
+			src: `def task_group_new() -> i64:
+    return 1
+
+def task_group_wait_all(group: i64):
+    _ = group
+
+def main() -> i64:
+    acc: mutable i64 = 0
+    for i in 0..<4:
+        group: i64 = task_group_new()
+        acc <- acc + group + i.i64()
+        task_group_wait_all(group)
+    return acc
+`,
+			marker: "creates a task group on every iteration",
+		},
+		{
 			name: "atomic_hot_loop.elisa",
 			src: `def fetch_add(slot: i64, value: i64, order: i64) -> i64:
     return slot + value + order

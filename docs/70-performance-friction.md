@@ -28,9 +28,10 @@
   are not flagged, single `new` outside a loop is silent. Zero noise (nothing in
   stdlib/fixtures uses `new` in a loop).
 - ✅ **Concurrency performance lints LANDED**: raw thread spawn, thread-pool creation,
-  lock acquisition, and atomic RMW/CAS inside loops are warnings by default and are promoted
-  to errors under `-Wperf`. Pool submission in a loop is deliberately allowed; the bad shape
-  is repeatedly creating or tearing down workers instead of reusing a pool around the batch.
+  task-group creation, lock acquisition, and atomic RMW/CAS inside loops are warnings by
+  default and are promoted to errors under `-Wperf`. Pool submission and task-group addition
+  in a loop are deliberately allowed; the bad shape is repeatedly creating coordination
+  objects instead of reusing them around the batch.
 - ✅ **`-Wperf` graduated strictness LANDED** (commit d1636cdb and follow-ups): the
   pointer-graph, allocation-churn, reserve-bound, and concurrency performance lints are
   warnings by default but `-Wperf` promotes them to hard errors (via
@@ -59,7 +60,7 @@ The compiler sees **structure**, not **algorithms**. It can make these painful:
 
 - per-object heap allocation / malloc churn,
 - raw pointer graphs (cache-hostile pointer chasing),
-- per-iteration thread/pool creation,
+- per-iteration thread/pool/task-group creation,
 - per-iteration lock or atomic synchronization hot spots,
 - hidden O(n) copies,
 - dynamic dispatch / indirection,
