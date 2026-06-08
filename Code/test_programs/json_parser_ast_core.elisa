@@ -63,9 +63,7 @@ def json_parse_node_result(node: JsonNode, checksum: i64) -> JsonParseNodeResult
 def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -> i64:
     readonly_items: dview[JsonNode] = readonly(items)
     total: mutable i64 = 0
-    for index in 0..<readonly_items.len:
-        item: mutable JsonNode = zeroed
-        arena_memcpy((&item).cast[void&], json_node_view_ref(readonly_items, index).cast[void&], size_of(JsonNode))
+    for item in readonly_items:
         item_count: i64 = json_ast_node_count(item, store)
         if item_count < 0:
             return -1

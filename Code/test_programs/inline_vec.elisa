@@ -40,8 +40,8 @@ def inline_vec8_view_smoke(a: mutable Arena&) -> i32:
 
         view: dview[i32] = values.view()
         sum: mutable i32 = 0
-        for index in 0..<view.len:
-            sum <- sum + view[index]
+        for value in view:
+            sum <- sum + value
         return sum
 
 
