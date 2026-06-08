@@ -606,6 +606,8 @@ type ListComprehensionExpr struct {
 	// Key, when non-nil, marks a dict comprehension `{ Key: Value for ... }`; the
 	// result is dict[KeyType, ValueType] instead of darray[ValueType].
 	Key Expr
+	// Set marks a set comprehension `{ Value for ... }`; result is set[ValueType].
+	Set bool
 }
 type QueryExprKind int
 

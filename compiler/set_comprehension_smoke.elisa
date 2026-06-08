@@ -1,0 +1,29 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Set comprehension (docs/79): `{ value for name in src [if p] }` lowers to a fused loop
+# building a set[V] via `s.add(v)` (the frictionless set insert, parity with darray push) — no
+# intermediate collection. Set=true on ListComprehensionExpr marks the set form; dedups by key.
+@test
+def set_comprehension_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[i64] = []
+		for k in 0..<6:
+			_ = a.push(k % 3)                   # [0, 1, 2, 0, 1, 2]
+
+		# iterable source dedups to {0, 1, 2}
+		uniq: set[i64] = {x for x in a}
+		assert uniq.count == 3.usize()
+		assert uniq.contains(0)
+		assert uniq.contains(2)
+		assert not uniq.contains(5)
+
+		# range source + filter
+		evens: set[i64] = {k for k in 0..<10 if k % 2 == 0}
+		assert evens.count == 5.usize()
+		assert evens.contains(8)
+		assert not evens.contains(7)
+
+		# mapped body
+		sq: set[i64] = {k*k for k in 0..<4}
+		assert sq.count == 4.usize()
+		assert sq.contains(9)

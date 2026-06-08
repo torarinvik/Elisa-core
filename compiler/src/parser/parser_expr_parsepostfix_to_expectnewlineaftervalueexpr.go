@@ -352,6 +352,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 					p.expect(lexer.TOKEN_COLON)
 					elems = append(elems, p.parseExpr())
 				}
+			} else if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
+				// Set comprehension `{ value for name in source [if filter] }`.
+				return p.parseSetComprehensionFromFirst(pos, first)
 			} else {
 				// Set-membership literal: `first` may be a range; remaining are candidates.
 				if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT {

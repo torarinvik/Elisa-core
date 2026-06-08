@@ -611,7 +611,8 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	}
 	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
 	expectedDict, useExpectedDict := contextualDictLiteralType(expected)
-	regionAvailable := (useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) || (useExpectedDict && a.regionAvailableForContainer(expectedDict))
+	expectedSet, useExpectedSet := contextualSetLiteralType(expected)
+	regionAvailable := (useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) || (useExpectedDict && a.regionAvailableForContainer(expectedDict)) || (useExpectedSet && a.regionAvailableForContainer(expectedSet))
 	if expr.Owner != nil {
 		owner, ownerType, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
 		if !ok || owner.Kind != treeAllocOwnerArena {
@@ -697,6 +698,33 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		a.consumeAffineValueExpr(expr.Key, keyType, "move into dict comprehension key")
 		a.consumeAffineValueExpr(expr.Value, valueType, "move into dict comprehension value")
 		result, _ := a.stampContainerRegion(&DictType{Key: keyType, Value: valueType, SurfaceName: "dict"}).(*DictType)
+		a.exprTypes[expr] = result
+		return result
+	}
+	if expr.Set {
+		// Set comprehension: result is set[ValueType].
+		var expectedSetElem Type
+		if useExpectedSet {
+			expectedSetElem = expectedSet.Elem
+		}
+		savedScope := a.currentScope
+		a.currentScope = loopScope
+		valueType := a.analyzeValueExpr(expr.Value, expectedSetElem)
+		a.currentScope = savedScope
+		if useExpectedSet {
+			if !AssignableTo(expectedSet.Elem, valueType) {
+				a.errorf(expr.Value.Pos(), "set comprehension element expects %s, got %s", expectedSet.Elem, valueType)
+			}
+			a.consumeAffineValueExpr(expr.Value, expectedSet.Elem, "move into set comprehension element")
+			a.exprTypes[expr] = expectedSet
+			return expectedSet
+		}
+		if valueType == nil || IsInvalidType(valueType) {
+			a.exprTypes[expr] = invalidType
+			return invalidType
+		}
+		a.consumeAffineValueExpr(expr.Value, valueType, "move into set comprehension element")
+		result, _ := a.stampContainerRegion(&SetType{Elem: valueType, SurfaceName: "set"}).(*SetType)
 		a.exprTypes[expr] = result
 		return result
 	}
