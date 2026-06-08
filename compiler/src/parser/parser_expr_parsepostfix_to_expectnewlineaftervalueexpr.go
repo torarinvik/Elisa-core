@@ -518,6 +518,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		pos := p.cur().Pos
 		p.advance()
 		inner := p.withInMembershipEnabled(p.parseExpr)
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
+			return p.parseFoldComprehensionFromFirst(pos, inner)
+		}
 		if p.peek() == lexer.TOKEN_COMMA {
 			tuple := p.parseTupleExprFromFirst(pos, inner)
 			p.expect(lexer.TOKEN_RPAREN)

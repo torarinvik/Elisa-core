@@ -1,0 +1,31 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Fold / reduce comprehension (docs/79): `( body for x in src [if p] with acc [: T] = seed )`
+# lowers — purely syntactically — to `{ acc = seed; for x in src: (if p:) acc <- body; acc }`,
+# a single fused loop with no intermediate collection. Order-preserving left fold.
+@test
+def fold_comprehension_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[i64] = []
+		for k in 0..<5:
+			_ = a.push(k + 1)                 # [1, 2, 3, 4, 5]
+
+		# classic sum over an iterable
+		total: i64 = (acc + x for x in a with acc = 0)
+		assert total == 15
+
+		# position-weighted checksum over a range, typed accumulator (order-sensitive)
+		checksum: f64 = (acc + (k.f64() + 1.0) * a[k.usize()].f64() for k in 0..<5 with acc: f64 = 0.0)
+		assert checksum == 55.0
+
+		# filtered fold: sum of even elements only
+		evens: i64 = (acc + x for x in a if x % 2 == 0 with acc = 0)
+		assert evens == 6
+
+		# product
+		prod: i64 = (acc * x for x in a with acc = 1)
+		assert prod == 120
+
+		# running max via a conditional body
+		mx: i64 = (acc if acc > x else x for x in a with acc = 0)
+		assert mx == 5

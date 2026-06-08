@@ -213,6 +213,67 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	}
 	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner}
 }
+
+// parseFoldComprehensionFromFirst parses a fold/reduce comprehension
+//
+//	( body  for name in source  [if filter]  with acc [: T] = seed )
+//
+// where `body` (already parsed as `body`) computes the next accumulator. It is
+// lowered here, purely syntactically, into an ExprBlock so no new AST node or
+// analysis/backend dispatch is needed (docs/79 Phase 1):
+//
+//	{ acc: mutable T = seed;  for name in source: (if filter:) acc <- body;  acc }
+func (p *Parser) parseFoldComprehensionFromFirst(pos lexer.Pos, body ast.Expr) ast.Expr {
+	p.expectIdentText("for")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_IN)
+	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	var rangeEnd ast.Expr
+	var rangeStep ast.Expr
+	rangeOp := lexer.TOKEN_EOF
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
+		op := p.advance()
+		rangeOp = op.Kind
+		rangeEnd = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+		if p.match(lexer.TOKEN_RANGE) {
+			rangeStep = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+		}
+	}
+	var filter ast.Expr
+	if p.match(lexer.TOKEN_IF) {
+		filter = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	}
+	p.expect(lexer.TOKEN_WITH)
+	accName := p.expect(lexer.TOKEN_IDENT).Text
+	var accType ast.TypeExpr
+	if p.match(lexer.TOKEN_COLON) {
+		accType = p.parseTypeExprWithoutErrorUnionSuffix()
+	}
+	p.expect(lexer.TOKEN_ASSIGN)
+	accInit := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	p.expect(lexer.TOKEN_RPAREN)
+
+	// loop body: `acc <- body`
+	step := []ast.Stmt{&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body}}
+	var loopStmt ast.Stmt
+	if rangeEnd != nil {
+		forStmt := &ast.ForStmt{Position: pos, Name: name, Start: source, End: rangeEnd, Step: rangeStep, Op: rangeOp, Body: step}
+		if filter != nil {
+			forStmt.Body = []ast.Stmt{&ast.IfStmt{Position: pos, Cond: filter, Then: step}}
+		}
+		loopStmt = forStmt
+	} else {
+		loopStmt = &ast.IterForStmt{Position: pos, Pattern: &ast.MoveBindNamePattern{Position: pos, Name: name}, Mode: ast.IterBindValue, Source: source, Filter: filter, Body: step}
+	}
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			&ast.VarDeclStmt{Position: pos, Name: accName, Mutable: true, Type: accType, Value: accInit},
+			loopStmt,
+		},
+		Value: &ast.Ident{Position: pos, Name: accName},
+	}
+}
 func (p *Parser) parseQueryExpr() ast.Expr {
 	pos := p.cur().Pos
 	kindText := p.expect(lexer.TOKEN_IDENT).Text
