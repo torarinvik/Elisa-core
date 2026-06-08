@@ -9,37 +9,7 @@ func (a *Analyzer) checkTaskGroupChurn(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
-	a.findTaskGroupChurnLoops(fn.Body)
-}
-
-func (a *Analyzer) findTaskGroupChurnLoops(stmts []ast.Stmt) {
-	for _, stmt := range stmts {
-		switch s := stmt.(type) {
-		case *ast.ForStmt:
-			a.flagTaskGroupChurn(s.Body)
-		case *ast.WhileStmt:
-			a.flagTaskGroupChurn(s.Body)
-		case *ast.IterForStmt:
-			a.flagTaskGroupChurn(s.Body)
-		case *ast.IfStmt:
-			a.findTaskGroupChurnLoops(s.Then)
-			a.findTaskGroupChurnLoops(s.Else)
-		case *ast.ScopeStmt:
-			a.findTaskGroupChurnLoops(s.Body)
-		case *ast.CanStmt:
-			a.findTaskGroupChurnLoops(s.Body)
-		case *ast.WithStmt:
-			a.findTaskGroupChurnLoops(s.Body)
-		case *ast.RegionStmt:
-			a.findTaskGroupChurnLoops(s.Body)
-		case *ast.InStoreStmt:
-			a.findTaskGroupChurnLoops(s.Body)
-		case *ast.MatchStmt:
-			for _, arm := range s.Arms {
-				a.findTaskGroupChurnLoops(arm.Body)
-			}
-		}
-	}
+	a.forEachFirstLoopBody(fn.Body, a.flagTaskGroupChurn)
 }
 
 func (a *Analyzer) flagTaskGroupChurn(loopBody []ast.Stmt) {

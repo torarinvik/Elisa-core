@@ -73,6 +73,19 @@ pattern inside otherwise-fine code. So the goal is narrowed and honest: **make t
 *memory patterns* painful** — the ones beginners fall into without realizing — not to
 prove asymptotic performance.
 
+### Strict Performance Concurrency Hazards
+
+These diagnostics are warnings by default and become errors under `-Wperf`.
+
+| Hazard | Why it is slow | Preferred shape | Accepted exception |
+|--------|----------------|-----------------|--------------------|
+| `spawn1` / `spawn_raw` in a loop | Creates a fresh OS thread per item | Use `nursery:`, a pool, or a fixed worker set | A small fixed loop whose branches are intentionally long-lived |
+| `pool_new` or `pool ...:` in a loop | Recreates worker infrastructure per item | Create the pool around the batch and submit inside the loop | A deliberately isolated benchmark or one-shot setup loop |
+| `task_group_new` in a loop | Creates coordination objects per item | Create one task group around the batch, add inside the loop, wait once | A named helper implementing an explicit batching/window policy |
+| `mutex_lock` or `lock ... as` in a loop | Serializes the loop on a contended boundary | Batch locked work, shard state, or use local reduction | Iterations are coarse-grained and the lock is the intended protocol boundary |
+| Atomic RMW/CAS in a loop | Can serialize on one cache line | Use per-worker locals, sharded counters, batching, or reduction | A named low-level wrapper that owns the protocol invariant |
+| `pool_await` / `await task` in a loop | Often turns parallel work into submit-one/wait-one serial execution | Use a task group, collect handles, or wait at the boundary | A named bounded in-flight/streaming policy |
+
 ## The half that already exists (the frictionless-fast default)
 
 The "easy way" already lands on fast+safe; this design only adds teeth to the slow path.

@@ -17,39 +17,7 @@ func (a *Analyzer) checkAllocationChurn(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
-	a.findChurnLoops(fn.Body)
-}
-
-// findChurnLoops descends through non-loop statements; at the first loop it flags every
-// per-iteration `new` anywhere inside that loop (nested loops included).
-func (a *Analyzer) findChurnLoops(stmts []ast.Stmt) {
-	for _, stmt := range stmts {
-		switch s := stmt.(type) {
-		case *ast.ForStmt:
-			a.flagChurnAllocations(s.Body)
-		case *ast.WhileStmt:
-			a.flagChurnAllocations(s.Body)
-		case *ast.IterForStmt:
-			a.flagChurnAllocations(s.Body)
-		case *ast.IfStmt:
-			a.findChurnLoops(s.Then)
-			a.findChurnLoops(s.Else)
-		case *ast.ScopeStmt:
-			a.findChurnLoops(s.Body)
-		case *ast.CanStmt:
-			a.findChurnLoops(s.Body)
-		case *ast.WithStmt:
-			a.findChurnLoops(s.Body)
-		case *ast.RegionStmt:
-			a.findChurnLoops(s.Body)
-		case *ast.InStoreStmt:
-			a.findChurnLoops(s.Body)
-		case *ast.MatchStmt:
-			for _, arm := range s.Arms {
-				a.findChurnLoops(arm.Body)
-			}
-		}
-	}
+	a.forEachFirstLoopBody(fn.Body, a.flagChurnAllocations)
 }
 
 func (a *Analyzer) flagChurnAllocations(loopBody []ast.Stmt) {

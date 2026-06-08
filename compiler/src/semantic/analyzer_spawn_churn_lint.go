@@ -11,7 +11,7 @@ import "elisacore/src/ast"
 
 // rawThreadSpawnNames are the user-facing primitives that each create a new OS thread.
 var rawThreadSpawnNames = map[string]bool{
-	"spawn1":   true,
+	"spawn1":    true,
 	"spawn_raw": true,
 }
 
@@ -19,39 +19,7 @@ func (a *Analyzer) checkThreadSpawnChurn(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
-	a.findSpawnChurnLoops(fn.Body)
-}
-
-// findSpawnChurnLoops descends through non-loop statements; at the first loop it flags every
-// per-iteration raw thread spawn anywhere inside that loop (nested loops included).
-func (a *Analyzer) findSpawnChurnLoops(stmts []ast.Stmt) {
-	for _, stmt := range stmts {
-		switch s := stmt.(type) {
-		case *ast.ForStmt:
-			a.flagSpawnChurn(s.Body)
-		case *ast.WhileStmt:
-			a.flagSpawnChurn(s.Body)
-		case *ast.IterForStmt:
-			a.flagSpawnChurn(s.Body)
-		case *ast.IfStmt:
-			a.findSpawnChurnLoops(s.Then)
-			a.findSpawnChurnLoops(s.Else)
-		case *ast.ScopeStmt:
-			a.findSpawnChurnLoops(s.Body)
-		case *ast.CanStmt:
-			a.findSpawnChurnLoops(s.Body)
-		case *ast.WithStmt:
-			a.findSpawnChurnLoops(s.Body)
-		case *ast.RegionStmt:
-			a.findSpawnChurnLoops(s.Body)
-		case *ast.InStoreStmt:
-			a.findSpawnChurnLoops(s.Body)
-		case *ast.MatchStmt:
-			for _, arm := range s.Arms {
-				a.findSpawnChurnLoops(arm.Body)
-			}
-		}
-	}
+	a.forEachFirstLoopBody(fn.Body, a.flagSpawnChurn)
 }
 
 func (a *Analyzer) flagSpawnChurn(loopBody []ast.Stmt) {

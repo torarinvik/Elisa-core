@@ -22,37 +22,7 @@ func (a *Analyzer) checkAtomicHotLoops(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
-	a.findAtomicHotLoops(fn.Body)
-}
-
-func (a *Analyzer) findAtomicHotLoops(stmts []ast.Stmt) {
-	for _, stmt := range stmts {
-		switch s := stmt.(type) {
-		case *ast.ForStmt:
-			a.flagAtomicHotLoop(s.Body)
-		case *ast.WhileStmt:
-			a.flagAtomicHotLoop(s.Body)
-		case *ast.IterForStmt:
-			a.flagAtomicHotLoop(s.Body)
-		case *ast.IfStmt:
-			a.findAtomicHotLoops(s.Then)
-			a.findAtomicHotLoops(s.Else)
-		case *ast.ScopeStmt:
-			a.findAtomicHotLoops(s.Body)
-		case *ast.CanStmt:
-			a.findAtomicHotLoops(s.Body)
-		case *ast.WithStmt:
-			a.findAtomicHotLoops(s.Body)
-		case *ast.RegionStmt:
-			a.findAtomicHotLoops(s.Body)
-		case *ast.InStoreStmt:
-			a.findAtomicHotLoops(s.Body)
-		case *ast.MatchStmt:
-			for _, arm := range s.Arms {
-				a.findAtomicHotLoops(arm.Body)
-			}
-		}
-	}
+	a.forEachFirstLoopBody(fn.Body, a.flagAtomicHotLoop)
 }
 
 func (a *Analyzer) flagAtomicHotLoop(loopBody []ast.Stmt) {
