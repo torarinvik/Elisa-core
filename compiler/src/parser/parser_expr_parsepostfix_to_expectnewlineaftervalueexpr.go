@@ -331,17 +331,39 @@ func (p *Parser) parsePrimary() ast.Expr {
 		pos := p.cur().Pos
 		p.advance()
 		elems := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
+		var keys []ast.Expr // non-nil => dict literal `{k: v, ...}`
 		if p.peek() != lexer.TOKEN_RBRACE {
-			elems = append(elems, p.parseBraceMembershipCandidateExpr())
-			for p.match(lexer.TOKEN_COMMA) {
-				if p.peek() == lexer.TOKEN_RBRACE {
-					break
+			first := p.parseExpr()
+			if p.peek() == lexer.TOKEN_COLON {
+				// Dict literal: `first` is the first key. Parse `key: value` pairs.
+				p.advance()
+				keys = append(keys, first)
+				elems = append(elems, p.parseExpr())
+				for p.match(lexer.TOKEN_COMMA) {
+					if p.peek() == lexer.TOKEN_RBRACE {
+						break
+					}
+					keys = append(keys, p.parseExpr())
+					p.expect(lexer.TOKEN_COLON)
+					elems = append(elems, p.parseExpr())
 				}
-				elems = append(elems, p.parseBraceMembershipCandidateExpr())
+			} else {
+				// Set-membership literal: `first` may be a range; remaining are candidates.
+				if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT {
+					op := p.advance()
+					first = &ast.MembershipRangeExpr{Position: op.Pos, Start: first, End: p.parseExpr(), Op: op.Kind}
+				}
+				elems = append(elems, first)
+				for p.match(lexer.TOKEN_COMMA) {
+					if p.peek() == lexer.TOKEN_RBRACE {
+						break
+					}
+					elems = append(elems, p.parseBraceMembershipCandidateExpr())
+				}
 			}
 		}
 		p.expect(lexer.TOKEN_RBRACE)
-		return &ast.ListLitExpr{Position: pos, Elems: elems, Brace: true}
+		return &ast.ListLitExpr{Position: pos, Elems: elems, Keys: keys, Brace: true}
 	case lexer.TOKEN_SIZEOF:
 		pos := p.cur().Pos
 		syntax := p.cur().Text

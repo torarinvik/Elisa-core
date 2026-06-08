@@ -149,3 +149,53 @@ func contextualDictLiteralType(expected Type) (*DictType, bool) {
 	}
 	return nil, false
 }
+
+// analyzeDictLiteralExpr type-checks a `{k1: v1, k2: v2, ...}` dict literal. The dict type is
+// taken from the expected type when present, else inferred from the first pair; every key is
+// checked assignable to the key type and every value to the value type. The key type must be
+// runtime-backed (hashable), and an allocation region must be in scope (auto-region inference
+// supplies one for a bare literal). Returns the dict type.
+func (a *Analyzer) analyzeDictLiteralExpr(expr *ast.ListLitExpr, expected Type) Type {
+	dictType, _ := contextualDictLiteralType(expected)
+	var keyType, valueType Type
+	if dictType != nil {
+		keyType = dictType.Key
+		valueType = dictType.Value
+	}
+	for i := range expr.Keys {
+		kt := a.analyzeValueExpr(expr.Keys[i], keyType)
+		var vt Type
+		if i < len(expr.Elems) {
+			vt = a.analyzeValueExpr(expr.Elems[i], valueType)
+		} else {
+			vt = invalidType
+		}
+		if keyType == nil {
+			keyType = kt
+		} else if !IsInvalidType(kt) && !AssignableTo(keyType, kt) {
+			a.errorf(expr.Keys[i].Pos(), "dict literal key %d has type %s, expected %s", i, diagnosticTypeString(kt), diagnosticTypeString(keyType))
+		}
+		if valueType == nil {
+			valueType = vt
+		} else if !IsInvalidType(vt) && !AssignableTo(valueType, vt) {
+			a.errorf(expr.Elems[i].Pos(), "dict literal value %d has type %s, expected %s", i, diagnosticTypeString(vt), diagnosticTypeString(valueType))
+		}
+	}
+	if keyType == nil || valueType == nil || IsInvalidType(keyType) || IsInvalidType(valueType) {
+		a.exprTypes[expr] = invalidType
+		return invalidType
+	}
+	if dictType == nil {
+		dictType = &DictType{Key: keyType, Value: valueType, SurfaceName: "dict"}
+	}
+	if !dictRuntimeBackedKeyType(dictType.Key) {
+		a.errorf(expr.Pos(), "%s", runtimeBackedDictSupportDiagnostic(dictType))
+		a.exprTypes[expr] = invalidType
+		return invalidType
+	}
+	if !a.regionAvailableForContainer(dictType) && a.currentAllocExpr == nil && a.currentTreeAllocOwner.Kind == treeAllocOwnerNone {
+		a.errorf(expr.Pos(), "dict literal requires an active in <arena>: scope")
+	}
+	a.recordAnalyzedExprType(expr, dictType)
+	return dictType
+}

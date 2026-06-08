@@ -470,6 +470,12 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		return invalidType
 	}
 	if expr.Brace {
+		// `{k: v, ...}` is a dict literal: build a populated dict. Like `{}`/`[]` it is an
+		// allocating literal, so it triggers auto-region inference and its key/value types are
+		// either taken from the expected dict type or inferred from the first pair.
+		if len(expr.Keys) > 0 {
+			return a.analyzeDictLiteralExpr(expr, expected)
+		}
 		// An empty `{}` against an expected dict type is an empty (zero-initialized) dict —
 		// the dict analogue of `[]` for darray. It allocates its backing lazily on first
 		// insert, and being a literal it triggers auto-region inference (functionBodyNeedsAutoRegion)

@@ -582,6 +582,10 @@ type ListLitExpr struct {
 	Spreads  []bool
 	Brace    bool
 	Owner    Expr
+	// Keys is non-nil for a brace DICT literal `{k1: v1, k2: v2}`: Keys[i] is the key for the
+	// value Elems[i]. A brace literal with Keys == nil is a set-membership literal (`{a, b}`)
+	// or, when empty, an empty dict initializer disambiguated by the expected type.
+	Keys []Expr
 }
 type MembershipRangeExpr struct {
 	Position lexer.Pos

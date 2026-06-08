@@ -110,6 +110,13 @@ import (
 )
 
 func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	// A `{k: v, ...}` brace literal is a populated dict literal: materialize an empty dict and
+	// insert each pair (arena sourced from the active region scope).
+	if expr.Brace && len(expr.Keys) > 0 {
+		if dictType, ok := s.dictLiteralTargetType(expr, expected); ok {
+			return s.emitDictLiteralExpr(expr, dictType)
+		}
+	}
 	// An empty `{}` against a dict type is an empty (zero-initialized) dict — the dict analogue
 	// of an empty `[]` darray literal. Lower it to the dict's zero value (a zeroed header); the
 	// backing allocates lazily on the first insert.

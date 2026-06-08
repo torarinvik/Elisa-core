@@ -66,6 +66,24 @@ def std_dict_enum_keys_smoke():
 	assert d.contains(Suit.Hearts)
 	assert d.contains(Suit.Spades)
 
+# Populated dict literal `{k: v, ...}` — builds an empty dict and inserts each pair. Like `{}`
+# it triggers auto-region inference (no explicit region scope here). Keys/values are checked
+# against the declared (or inferred) dict type; non-runtime-backed keys are rejected.
+@test
+def std_dict_literal_smoke():
+	d: mutable dict[cstr, i64] = {"alpha": 1, "beta": 2, "gamma": 3}
+	assert d.count.i64() == 3
+	assert d.contains("alpha")
+	assert d.contains("gamma")
+	assert not d.contains("delta")
+	g: i64& = get d.get("gamma") else return
+	assert g[0] == 3
+	# int-keyed literal, value readback
+	nums: mutable dict[i64, i64] = {10: 100, 20: 200, 10: 111}
+	x: i64& = get nums.get(10) else return
+	assert x[0] == 111
+	assert nums.count.i64() == 2
+
 # Open-addressing hash table stress: many entries force repeated resize+rehash; removal
 # leaves tombstones that probing must skip; tombstones are reused on re-insert and cleared on
 # the next rehash. Validates the O(1) table end to end (collisions, growth, delete, reinsert).

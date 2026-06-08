@@ -78,3 +78,52 @@ func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	}
 	return s.buildCall(llvmType, callee, []C.LLVMValueRef{extended}, "hash.u64"), u64Type, true, nil
 }
+
+// emitDictLiteralExpr lowers a `{k1: v1, k2: v2, ...}` dict literal: a zeroed (empty) dict is
+// materialized on the stack and each pair is inserted via the panic-on-OOM put helper, sourcing
+// the arena from the active region scope (the auto-region inference supplies one for a bare
+// literal). The populated dict value is returned. Mirrors the synthetic `dict.put` lowering.
+func (s *functionState) emitDictLiteralExpr(expr *ast.ListLitExpr, dictType *semantic.DictType) (C.LLVMValueRef, semantic.Type, error) {
+	dictPtr, err := s.createEntryAllocaZeroed("dictlit", dictType)
+	if err != nil {
+		return nil, nil, err
+	}
+	owner, ok := s.regionArenaOwner(dictType.Region)
+	if !ok {
+		owner, ok = s.lookupTreeAllocOwner()
+	}
+	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
+		return nil, nil, fmt.Errorf("dict literal requires an active in <arena>: scope")
+	}
+	if owner.arenaRef == nil {
+		arenaRef, err := s.treeOwnerArenaRefValue(owner, "dictlit.owner.arena")
+		if err != nil {
+			return nil, nil, err
+		}
+		owner.arenaRef = arenaRef
+	}
+	putCallee, putType, err := s.ensureRuntimeFunction(s.dictMutationHelperName("arena_dict_put"), map[string]semantic.Type{"K": dictType.Key, "T": dictType.Value})
+	if err != nil {
+		return nil, nil, err
+	}
+	putLLVM, err := s.g.lowerFunctionType(putType)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range expr.Keys {
+		keyValue, _, err := s.emitExpr(expr.Keys[i], dictType.Key)
+		if err != nil {
+			return nil, nil, err
+		}
+		valueValue, _, err := s.emitExpr(expr.Elems[i], dictType.Value)
+		if err != nil {
+			return nil, nil, err
+		}
+		s.buildCall(putLLVM, putCallee, []C.LLVMValueRef{owner.arenaRef, dictPtr, keyValue, valueValue}, "dictlit.put")
+	}
+	dictLLVM, err := s.g.lowerType(dictType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return C.LLVMBuildLoad2(s.builder, dictLLVM, dictPtr, cStringFree("dictlit.value")), dictType, nil
+}
