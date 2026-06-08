@@ -152,6 +152,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.checkTaskGroupChurn(fn)
 	a.checkLockChurn(fn)
 	a.checkAtomicHotLoops(fn)
+	a.checkAwaitHotLoops(fn)
 	a.checkUnreservedCountingFills(fn)
 	a.checkRegionLifetimes(fn)
 	if fnType != nil {

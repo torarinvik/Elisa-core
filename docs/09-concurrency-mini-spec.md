@@ -83,8 +83,8 @@ Boundary and performance hazards:
 - foreign functions that block, spawn, call back, store pointers, or share
   memory without declaring that behavior
 - false sharing, lock convoys, per-iteration pool/thread/task-group creation,
-  excessive contention, and atomic hot-loop performance cliffs in strict
-  performance mode
+  per-iteration task awaits that collapse parallel batches, excessive
+  contention, and atomic hot-loop performance cliffs in strict performance mode
 
 This list is intentionally broad. The point is not that every item needs a
 separate feature. The point is that the same few proof axes should cover the
@@ -247,7 +247,9 @@ iteration, creating a fresh thread pool on every loop iteration instead of
 reusing a pool around the batch, creating a fresh task group per iteration
 instead of collecting the loop's tasks in one group, and acquiring a mutex or
 performing atomic RMW/CAS on every loop iteration instead of
-batching/sharding/reducing the work.
+batching/sharding/reducing the work. Awaiting a task on every loop iteration is
+also flagged because it often serializes a batch that should collect pending
+tasks first and wait at the boundary.
 
 The compiler reports these raw calls as deprecations/warnings by default. The
 semantic analyzer's `EnforceStrictConcurrency` option, exposed on the CLI as
@@ -1097,6 +1099,11 @@ result: i64 = pool_await(move task)
 `await` is the consuming completion surface for a pending task handle. After
 `await task`, that task handle has been moved into the await operation and may
 not be used again.
+
+Under `-Wperf`, awaiting inside the same loop that produces tasks is rejected by
+default because it often collapses pool parallelism into submit-one/wait-one
+serial execution. Prefer a task group, a small explicit window of in-flight
+tasks, or collect task handles and await at the batch boundary.
 
 ### Wait-All
 

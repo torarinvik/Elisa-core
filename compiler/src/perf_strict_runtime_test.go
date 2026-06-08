@@ -136,6 +136,19 @@ def main() -> i64:
 `,
 			marker: "performs an atomic read-modify-write/compare-exchange on every iteration",
 		},
+		{
+			name: "await_hot_loop.elisa",
+			src: `def pool_await(task: i64) -> i64:
+    return task
+
+def main() -> i64:
+    acc: mutable i64 = 0
+    for i in 0..<4:
+        acc <- acc + pool_await(i.i64())
+    return acc
+`,
+			marker: "waits for a task on every iteration",
+		},
 	}
 
 	for _, tc := range cases {
