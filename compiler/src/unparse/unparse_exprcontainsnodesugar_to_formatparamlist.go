@@ -448,7 +448,25 @@ func formatAnnotation(annotation ast.Annotation) string {
 	if len(annotation.Args) == 0 {
 		return "@" + annotation.Name
 	}
-	return "@" + annotation.Name + "(" + strings.Join(annotation.Args, ", ") + ")"
+	args := make([]string, len(annotation.Args))
+	for i, arg := range annotation.Args {
+		args[i] = formatAnnotationArg(arg)
+	}
+	return "@" + annotation.Name + "(" + strings.Join(args, ", ") + ")"
+}
+
+// formatAnnotationArg re-quotes an annotation argument that needs it so the rendered form
+// round-trips through the parser. Bare single-token args (e.g. `winapi`, `pthread.h`) and
+// already-quoted string literals are left as-is; an arg containing whitespace (e.g. a
+// `@deprecated("...")` message) is wrapped in a string literal.
+func formatAnnotationArg(arg string) string {
+	if len(arg) >= 2 && strings.HasPrefix(arg, "\"") && strings.HasSuffix(arg, "\"") {
+		return arg
+	}
+	if strings.ContainsAny(arg, " \t") {
+		return "\"" + strings.ReplaceAll(arg, "\"", "\\\"") + "\""
+	}
+	return arg
 }
 func formatGenericParams(genericParams []ast.GenericParam, typeParams []string, regionParams []string, permissionParams []string) string {
 	parts := make([]string, 0, len(genericParams)+len(typeParams)+len(regionParams)+len(permissionParams))

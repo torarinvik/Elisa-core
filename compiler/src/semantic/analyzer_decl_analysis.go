@@ -475,6 +475,15 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
+	if annotation.Name == "deprecated" {
+		// Pure metadata: applies to any function (generic, permissioned) — just records
+		// a use-site warning. Optional single string message.
+		if len(annotation.Args) > 1 {
+			a.errorf(annotation.Position, "@deprecated on function %q takes at most one message argument", fn.Name)
+			return false
+		}
+		return true
+	}
 	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 {
 		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature)
 		return false
@@ -705,6 +714,27 @@ func funcHasAnnotation(fn *ast.FuncDecl, name string) bool {
 	return annotationsHave(fn.Annotations, name)
 }
 
+// funcDeprecationMessage returns the `@deprecated("...")` message for a function decl,
+// or "" if it carries no @deprecated annotation. A bare `@deprecated` yields a default.
+func funcDeprecationMessage(fn *ast.FuncDecl) string {
+	if fn == nil {
+		return ""
+	}
+	for _, ann := range fn.Annotations {
+		if ann.Name != "deprecated" {
+			continue
+		}
+		if len(ann.Args) > 0 {
+			msg := strings.Trim(strings.TrimSpace(ann.Args[0]), "\"")
+			if msg != "" {
+				return msg
+			}
+		}
+		return "this function is deprecated"
+	}
+	return ""
+}
+
 func externFuncHasAnnotation(fn *ast.ExternFuncDecl, name string) bool {
 	if fn == nil || name == "" {
 		return false
@@ -723,7 +753,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "method", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "method", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated":
 		return true
 	case "boundary_pointer_args":
 		return true

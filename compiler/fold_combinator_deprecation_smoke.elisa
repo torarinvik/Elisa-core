@@ -1,0 +1,15 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# The `fold` combinator is @deprecated (docs/79): superseded by the fold/reduce
+# comprehension `(acc + x for x in da with acc = init)`, which needs no lambda and
+# fuses to the same loop. It still works (deprecation = a warning, not an error); the
+# Go test asserts the warning fires at the call site.
+@test
+def fold_combinator_deprecation_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[i64] = []
+		_ = a.push(10)
+		_ = a.push(20)
+		_ = a.push(30)
+		total: i64 = a.fold(0, lambda(acc: i64, x: i64) => acc + x)
+		assert total == 60

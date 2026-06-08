@@ -441,6 +441,9 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		if !ufcsOK || ufcsSym == nil {
 			return extensionMethodCallRewriteNone
 		}
+		if ufcsSym.Deprecated != "" {
+			a.deprecatedf(expr.Pos(), "%s", ufcsSym.Deprecated)
+		}
 		ufcsType, _ := ufcsSym.Type.(*FuncType)
 		receiverArg := fieldExpr.Object
 		if ufcsType != nil && len(ufcsType.Params) != 0 {

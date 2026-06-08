@@ -270,6 +270,9 @@ type Symbol struct {
 	Mutable    bool
 	UFCSOnly   bool
 	Private    bool
+	// Deprecated, when non-empty, is the `@deprecated("...")` message; calling this
+	// function emits a deprecation diagnostic at the use site.
+	Deprecated string
 }
 
 func symbolAliasRoot(sym *Symbol) *Symbol {

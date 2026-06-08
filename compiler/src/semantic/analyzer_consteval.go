@@ -2340,7 +2340,16 @@ func (a *Analyzer) deprecatedf(pos lexer.Pos, format string, args ...interface{}
 	if a.suppressDiagnostics {
 		return
 	}
-	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityDeprecated, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
+	message := fmt.Sprintf(format, formatDiagnosticArgs(args)...)
+	key := fmt.Sprintf("%s:%d:%d:%s", pos.File, pos.Line, pos.Col, message)
+	if a.deprecatedSeen == nil {
+		a.deprecatedSeen = make(map[string]bool)
+	}
+	if a.deprecatedSeen[key] {
+		return
+	}
+	a.deprecatedSeen[key] = true
+	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityDeprecated, Message: message})
 }
 
 func isNullableRef(t Type) bool {

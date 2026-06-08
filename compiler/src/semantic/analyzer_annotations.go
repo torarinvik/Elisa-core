@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "method", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "method", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated":
 		return true
 	default:
 		return false

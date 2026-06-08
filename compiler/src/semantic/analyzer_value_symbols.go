@@ -84,7 +84,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						symbolName = initHookSymbolName(qualifiedName, fnType, n.Pos())
 					}
 				}
-				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, UFCSOnly: funcHasAnnotation(n, "method"), Private: scoped.Private}
+				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, UFCSOnly: funcHasAnnotation(n, "method"), Private: scoped.Private, Deprecated: funcDeprecationMessage(n)}
 				a.functionTypes[symbolName] = fnType
 				a.funcDeclSymbols[n] = sym
 				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {

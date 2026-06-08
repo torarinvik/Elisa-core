@@ -248,6 +248,9 @@ type Analyzer struct {
 	currentRegionFactTransforms       []FactTransform
 	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
 	suppressDiagnostics               bool
+	// deprecatedSeen dedupes deprecation diagnostics emitted for the same site+message
+	// (a call may be analyzed more than once across passes).
+	deprecatedSeen map[string]bool
 	// Set while analyzing a query/comprehension predicate whose source const-folds (e.g.
 	// `count field in fields(T) where field.name != "x"`). Such a predicate is evaluated at
 	// compile time over interned literals, so a raw-u8&-`==`/`!=` there is not a runtime
