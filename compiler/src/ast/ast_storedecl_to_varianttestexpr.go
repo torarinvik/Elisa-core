@@ -603,6 +603,9 @@ type ListComprehensionExpr struct {
 	RangeOp   lexer.TokenKind
 	Filter    Expr
 	Owner     Expr
+	// Key, when non-nil, marks a dict comprehension `{ Key: Value for ... }`; the
+	// result is dict[KeyType, ValueType] instead of darray[ValueType].
+	Key Expr
 }
 type QueryExprKind int
 

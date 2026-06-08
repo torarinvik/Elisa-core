@@ -362,6 +362,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			c.collectExpr(elem)
 		}
 	case *ast.ListComprehensionExpr:
+		c.collectExpr(n.Key)
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Source)
 		c.collectExpr(n.RangeEnd)

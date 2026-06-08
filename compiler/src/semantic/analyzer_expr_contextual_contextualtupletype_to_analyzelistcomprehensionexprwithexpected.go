@@ -610,13 +610,15 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		return invalidType
 	}
 	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
+	expectedDict, useExpectedDict := contextualDictLiteralType(expected)
+	regionAvailable := (useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) || (useExpectedDict && a.regionAvailableForContainer(expectedDict))
 	if expr.Owner != nil {
 		owner, ownerType, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
 		if !ok || owner.Kind != treeAllocOwnerArena {
-			a.errorf(expr.Owner.Pos(), "list comprehension owner must be an Arena or mutable Arena&, got %s", ownerType)
+			a.errorf(expr.Owner.Pos(), "comprehension owner must be an Arena or mutable Arena&, got %s", ownerType)
 		}
-	} else if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.activeContainerRegionName() == "" && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
-		a.errorf(expr.Pos(), "list comprehension requires an active in <arena>: scope")
+	} else if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.activeContainerRegionName() == "" && !regionAvailable {
+		a.errorf(expr.Pos(), "comprehension requires an active in <arena>: scope")
 	}
 	var itemType Type
 	loopScope := NewScope(a.currentScope)
@@ -661,8 +663,42 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	if expr.Filter != nil {
 		condType := a.analyzeCondExprInScope(expr.Filter, loopScope)
 		if !IsBoolType(condType) {
-			a.errorf(expr.Filter.Pos(), "list comprehension filter must be bool, got %s", condType)
+			a.errorf(expr.Filter.Pos(), "comprehension filter must be bool, got %s", condType)
 		}
+	}
+	if expr.Key != nil {
+		// Dict comprehension: result is dict[KeyType, ValueType].
+		var expectedKey, expectedVal Type
+		if useExpectedDict {
+			expectedKey = expectedDict.Key
+			expectedVal = expectedDict.Value
+		}
+		savedScope := a.currentScope
+		a.currentScope = loopScope
+		keyType := a.analyzeValueExpr(expr.Key, expectedKey)
+		valueType := a.analyzeValueExpr(expr.Value, expectedVal)
+		a.currentScope = savedScope
+		if useExpectedDict {
+			if !AssignableTo(expectedDict.Key, keyType) {
+				a.errorf(expr.Key.Pos(), "dict comprehension key expects %s, got %s", expectedDict.Key, keyType)
+			}
+			if !AssignableTo(expectedDict.Value, valueType) {
+				a.errorf(expr.Value.Pos(), "dict comprehension value expects %s, got %s", expectedDict.Value, valueType)
+			}
+			a.consumeAffineValueExpr(expr.Key, expectedDict.Key, "move into dict comprehension key")
+			a.consumeAffineValueExpr(expr.Value, expectedDict.Value, "move into dict comprehension value")
+			a.exprTypes[expr] = expectedDict
+			return expectedDict
+		}
+		if keyType == nil || IsInvalidType(keyType) || valueType == nil || IsInvalidType(valueType) {
+			a.exprTypes[expr] = invalidType
+			return invalidType
+		}
+		a.consumeAffineValueExpr(expr.Key, keyType, "move into dict comprehension key")
+		a.consumeAffineValueExpr(expr.Value, valueType, "move into dict comprehension value")
+		result, _ := a.stampContainerRegion(&DictType{Key: keyType, Value: valueType, SurfaceName: "dict"}).(*DictType)
+		a.exprTypes[expr] = result
+		return result
 	}
 	var expectedElem Type
 	if useExpectedDArray {

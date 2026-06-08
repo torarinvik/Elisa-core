@@ -308,6 +308,9 @@ func (s *functionState) emitSpreadListLitExpr(expr *ast.ListLitExpr, darrayType 
 	return s.emitExprBlock(block, darrayType)
 }
 func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr.Key != nil {
+		return s.emitDictComprehensionExpr(expr)
+	}
 	resultType, ok := s.exprType(expr).(*semantic.DArrayType)
 	if !ok || resultType == nil {
 		return nil, nil, fmt.Errorf("list comprehension requires a resolved darray result type")
@@ -342,6 +345,63 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 		if expr.Filter != nil {
 			loopStmt.(*ast.ForStmt).Body = []ast.Stmt{&ast.IfStmt{Position: expr.Position, Cond: expr.Filter, Then: body}}
 		}
+	} else {
+		loopStmt = &ast.IterForStmt{
+			Position: expr.Position,
+			Pattern:  &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name},
+			Mode:     ast.IterBindValue,
+			Source:   expr.Source,
+			Filter:   expr.Filter,
+			Body:     body,
+		}
+	}
+	block := &ast.ExprBlock{
+		Position: expr.Position,
+		Stmts: []ast.Stmt{
+			&ast.VarDeclStmt{Position: expr.Position, Name: resultName, Mutable: true, Value: resultInit},
+			loopStmt,
+		},
+		Value: resultIdent,
+	}
+	return s.emitExprBlock(block, resultType)
+}
+
+// emitDictComprehensionExpr lowers `{ key: value for name in source [if filter] }` into
+//
+//	{ result: mutable dict[K,V] = {};  for name in source: (if filter:) result.insert(key, value);  result }
+//
+// — a single fused loop with no intermediate collection (docs/79). Mirrors the darray
+// comprehension path, substituting an empty braced dict literal and `insert` for `push`.
+func (s *functionState) emitDictComprehensionExpr(expr *ast.ListComprehensionExpr) (C.LLVMValueRef, semantic.Type, error) {
+	resultType, ok := s.exprType(expr).(*semantic.DictType)
+	if !ok || resultType == nil {
+		return nil, nil, fmt.Errorf("dict comprehension requires a resolved dict result type")
+	}
+	resultName := s.g.nextSyntheticName("dict.comp.result.")
+	resultInit := &ast.ListLitExpr{Position: expr.Position, Brace: true}
+	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		s.g.result.ExprTypes[resultInit] = resultType
+	}
+	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
+	// `d.put(k, v)` — the frictionless dict-set (parity with darray push: no error
+	// union, no `can` grant, panics on OOM). See collections.elisa arena_dict_put_or_panic.
+	putCall := &ast.CallExpr{
+		Position: expr.Position,
+		Func: &ast.FieldExpr{
+			Position: expr.Position,
+			Object:   resultIdent,
+			Field:    "put",
+		},
+		Args: []ast.Expr{expr.Key, expr.Value},
+	}
+	body := []ast.Stmt{&ast.ExprStmt{Position: expr.Position, Expr: putCall}}
+	var loopStmt ast.Stmt
+	if expr.RangeEnd != nil {
+		forStmt := &ast.ForStmt{Position: expr.Position, Name: expr.Name, Start: expr.Source, End: expr.RangeEnd, Step: expr.RangeStep, Op: expr.RangeOp, Body: body}
+		if expr.Filter != nil {
+			forStmt.Body = []ast.Stmt{&ast.IfStmt{Position: expr.Position, Cond: expr.Filter, Then: body}}
+		}
+		loopStmt = forStmt
 	} else {
 		loopStmt = &ast.IterForStmt{
 			Position: expr.Position,

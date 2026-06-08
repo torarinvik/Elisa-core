@@ -477,6 +477,7 @@ func (c *progressCallCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Start)
 		c.collectExpr(n.End)
 	case *ast.ListComprehensionExpr:
+		c.collectExpr(n.Key)
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Source)
 		c.collectExpr(n.RangeEnd)

@@ -1,0 +1,30 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Dict comprehension (docs/79): `{ key: value for name in src [if p] }` lowers to a fused
+# loop building a dict[K,V] via `d.put(k, v)` (the frictionless dict-set, parity with darray
+# push) — no intermediate collection. Key != nil on ListComprehensionExpr marks the dict form.
+@test
+def dict_comprehension_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[i64] = []
+		for k in 0..<5:
+			_ = a.push(k)                       # [0, 1, 2, 3, 4]
+
+		# range source: k -> k*k
+		squares: dict[i64, i64] = {k: k*k for k in 0..<5}
+		assert squares.count == 5.usize()
+		assert squares.contains(3)
+		assert squares.contains(4)
+		assert not squares.contains(9)
+
+		# filtered: only even keys
+		evensq: dict[i64, i64] = {k: k*k for k in 0..<5 if k % 2 == 0}
+		assert evensq.count == 3.usize()
+		assert evensq.contains(2)
+		assert not evensq.contains(1)
+
+		# iterable source
+		idx: dict[i64, i64] = {x: x + 100 for x in a}
+		assert idx.count == 5.usize()
+		assert idx.contains(0)
+		assert idx.contains(4)

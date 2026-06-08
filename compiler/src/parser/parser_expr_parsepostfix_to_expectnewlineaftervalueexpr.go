@@ -337,8 +337,13 @@ func (p *Parser) parsePrimary() ast.Expr {
 			if p.peek() == lexer.TOKEN_COLON {
 				// Dict literal: `first` is the first key. Parse `key: value` pairs.
 				p.advance()
+				firstValue := p.parseExpr()
+				if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
+					// Dict comprehension `{ key: value for name in source [if filter] }`.
+					return p.parseDictComprehensionFromFirst(pos, first, firstValue)
+				}
 				keys = append(keys, first)
-				elems = append(elems, p.parseExpr())
+				elems = append(elems, firstValue)
 				for p.match(lexer.TOKEN_COMMA) {
 					if p.peek() == lexer.TOKEN_RBRACE {
 						break

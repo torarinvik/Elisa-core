@@ -1805,7 +1805,7 @@ func (a *Analyzer) walkStaticExpr(expr ast.Expr, visitExpr func(ast.Expr) bool) 
 			}
 		}
 	case *ast.ListComprehensionExpr:
-		return a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Source, visitExpr) || a.walkStaticExpr(n.RangeEnd, visitExpr) || a.walkStaticExpr(n.RangeStep, visitExpr) || a.walkStaticExpr(n.Filter, visitExpr) || a.walkStaticExpr(n.Owner, visitExpr)
+		return a.walkStaticExpr(n.Key, visitExpr) || a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Source, visitExpr) || a.walkStaticExpr(n.RangeEnd, visitExpr) || a.walkStaticExpr(n.RangeStep, visitExpr) || a.walkStaticExpr(n.Filter, visitExpr) || a.walkStaticExpr(n.Owner, visitExpr)
 	case *ast.QueryExpr:
 		return a.walkStaticExpr(n.Source, visitExpr) || a.walkStaticExpr(n.Filter, visitExpr) || a.walkStaticExpr(n.Projection, visitExpr) || a.walkStaticExpr(n.Owner, visitExpr)
 	case *ast.CascadeExpr:

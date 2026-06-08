@@ -214,6 +214,36 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner}
 }
 
+// parseDictComprehensionFromFirst parses a dict comprehension
+//
+//	{ key: value  for name in source  [if filter] }
+//
+// where `key`/`value` are already parsed. It produces a ListComprehensionExpr with
+// Key set (Key != nil marks the dict form; result type dict[K,V]).
+func (p *Parser) parseDictComprehensionFromFirst(pos lexer.Pos, key ast.Expr, value ast.Expr) ast.Expr {
+	p.expectIdentText("for")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_IN)
+	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	var rangeEnd ast.Expr
+	var rangeStep ast.Expr
+	rangeOp := lexer.TOKEN_EOF
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
+		op := p.advance()
+		rangeOp = op.Kind
+		rangeEnd = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+		if p.match(lexer.TOKEN_RANGE) {
+			rangeStep = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+		}
+	}
+	var filter ast.Expr
+	if p.match(lexer.TOKEN_IF) {
+		filter = p.parseExpr()
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return &ast.ListComprehensionExpr{Position: pos, Key: key, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter}
+}
+
 // parseFoldComprehensionFromFirst parses a fold/reduce comprehension with no head
 // bindings (the common case): `( body  for name in source [if filter] with acc [:T] = seed )`.
 func (p *Parser) parseFoldComprehensionFromFirst(pos lexer.Pos, body ast.Expr) ast.Expr {

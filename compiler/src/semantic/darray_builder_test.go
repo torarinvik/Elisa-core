@@ -1200,7 +1200,7 @@ func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
 `)
 
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `list comprehension requires an active in <arena>: scope`) {
+	if !strings.Contains(all, `comprehension requires an active in <arena>: scope`) {
 		t.Fatalf("expected list comprehension scope diagnostic, got:\n%s", all)
 	}
 }
