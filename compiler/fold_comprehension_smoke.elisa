@@ -29,3 +29,24 @@ def fold_comprehension_smoke():
 		# running max via a conditional body
 		mx: i64 = (acc if acc > x else x for x in a with acc = 0)
 		assert mx == 5
+
+# Comma-head bindings (docs/79): `name [:T] = e` items before the body, recomputed
+# per element, in scope for the body and the `if` filter. Lowered to per-iteration lets.
+@test
+def fold_head_bindings_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[i64] = []
+		for k in 0..<5:
+			_ = a.push(k + 1)                 # [1, 2, 3, 4, 5]
+
+		# single binding: sum of squares
+		sumsq: i64 = (y = x*x, acc + y for x in a with acc = 0)
+		assert sumsq == 55
+
+		# binding referenced by the filter
+		bigsq: i64 = (y = x*x, acc + y for x in a if y > 9 with acc = 0)
+		assert bigsq == 41                    # 16 + 25
+
+		# multiple bindings, one typed, later binding uses the earlier
+		r: i64 = (y = x + 1, n: i64 = y * 2, acc + n for x in a with acc = 0)
+		assert r == 40

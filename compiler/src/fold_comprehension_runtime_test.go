@@ -24,4 +24,7 @@ func TestRunCLIFoldComprehensionRuntimeSmoke(t *testing.T) {
 	if !strings.Contains(stdout.String(), "[       OK ] fold_comprehension_smoke") {
 		t.Fatalf("expected fold comprehension smoke to pass, got stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
+	if !strings.Contains(stdout.String(), "[       OK ] fold_head_bindings_smoke") {
+		t.Fatalf("expected fold head-bindings smoke to pass, got stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
 }

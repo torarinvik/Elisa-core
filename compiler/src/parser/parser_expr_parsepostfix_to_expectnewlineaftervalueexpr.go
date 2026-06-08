@@ -518,6 +518,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 		pos := p.cur().Pos
 		p.advance()
 		inner := p.withInMembershipEnabled(p.parseExpr)
+		if ident, ok := inner.(*ast.Ident); ok && (p.peek() == lexer.TOKEN_ASSIGN || p.peek() == lexer.TOKEN_COLON) {
+			// Binding-prefixed fold head: `( name [:T] = e, ... , body for ... with acc = seed )`.
+			// `name =`/`name :` can only begin a binding (assignment is not an expression).
+			return p.parseFoldComprehensionWithBindings(pos, ident.Name)
+		}
 		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
 			return p.parseFoldComprehensionFromFirst(pos, inner)
 		}

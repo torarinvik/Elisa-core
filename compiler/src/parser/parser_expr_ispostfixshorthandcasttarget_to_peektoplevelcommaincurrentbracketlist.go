@@ -214,16 +214,50 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner}
 }
 
-// parseFoldComprehensionFromFirst parses a fold/reduce comprehension
+// parseFoldComprehensionFromFirst parses a fold/reduce comprehension with no head
+// bindings (the common case): `( body  for name in source [if filter] with acc [:T] = seed )`.
+func (p *Parser) parseFoldComprehensionFromFirst(pos lexer.Pos, body ast.Expr) ast.Expr {
+	return p.parseFoldComprehensionTail(pos, nil, body)
+}
+
+// parseFoldComprehensionWithBindings handles a fold whose head begins with one or
+// more comma-separated bindings before the body (docs/79):
 //
-//	( body  for name in source  [if filter]  with acc [: T] = seed )
+//	( y = f(x), n: i64 = g(y), acc + y*n  for x in src if y > 0 with acc = 0 )
 //
-// where `body` (already parsed as `body`) computes the next accumulator. It is
-// lowered here, purely syntactically, into an ExprBlock so no new AST node or
+// `firstName` is the already-consumed name of the first binding (its `:`/`=` is next).
+// Bindings are per-element `let`s; an item is a binding iff it is `IDENT [:T] =`.
+func (p *Parser) parseFoldComprehensionWithBindings(pos lexer.Pos, firstName string) ast.Expr {
+	var bindings []ast.Stmt
+	name := firstName
+	for {
+		var typ ast.TypeExpr
+		if p.match(lexer.TOKEN_COLON) {
+			typ = p.parseTypeExprWithoutErrorUnionSuffix()
+		}
+		p.expect(lexer.TOKEN_ASSIGN)
+		val := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+		bindings = append(bindings, &ast.VarDeclStmt{Position: pos, Name: name, Type: typ, Value: val})
+		p.expect(lexer.TOKEN_COMMA) // a binding is always followed by another head item
+		if p.peek() == lexer.TOKEN_IDENT && (p.peekAt(1) == lexer.TOKEN_ASSIGN || p.peekAt(1) == lexer.TOKEN_COLON) {
+			name = p.expect(lexer.TOKEN_IDENT).Text
+			continue
+		}
+		break
+	}
+	body := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	return p.parseFoldComprehensionTail(pos, bindings, body)
+}
+
+// parseFoldComprehensionTail parses `for name in source [if filter] with acc [:T] = seed )`
+// and lowers the whole fold — purely syntactically — into an ExprBlock so no new AST node or
 // analysis/backend dispatch is needed (docs/79 Phase 1):
 //
-//	{ acc: mutable T = seed;  for name in source: (if filter:) acc <- body;  acc }
-func (p *Parser) parseFoldComprehensionFromFirst(pos lexer.Pos, body ast.Expr) ast.Expr {
+//	{ acc: mutable T = seed;  for name in source: (bindings...; if filter:) acc <- body;  acc }
+//
+// The filter is emitted as an in-body `if` (not the iterator's Filter field) so head bindings
+// are in scope for it.
+func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, body ast.Expr) ast.Expr {
 	p.expectIdentText("for")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_IN)
@@ -253,17 +287,18 @@ func (p *Parser) parseFoldComprehensionFromFirst(pos lexer.Pos, body ast.Expr) a
 	accInit := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	p.expect(lexer.TOKEN_RPAREN)
 
-	// loop body: `acc <- body`
-	step := []ast.Stmt{&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body}}
+	assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body})
+	loopBody := append([]ast.Stmt{}, bindings...)
+	if filter != nil {
+		loopBody = append(loopBody, &ast.IfStmt{Position: pos, Cond: filter, Then: []ast.Stmt{assign}})
+	} else {
+		loopBody = append(loopBody, assign)
+	}
 	var loopStmt ast.Stmt
 	if rangeEnd != nil {
-		forStmt := &ast.ForStmt{Position: pos, Name: name, Start: source, End: rangeEnd, Step: rangeStep, Op: rangeOp, Body: step}
-		if filter != nil {
-			forStmt.Body = []ast.Stmt{&ast.IfStmt{Position: pos, Cond: filter, Then: step}}
-		}
-		loopStmt = forStmt
+		loopStmt = &ast.ForStmt{Position: pos, Name: name, Start: source, End: rangeEnd, Step: rangeStep, Op: rangeOp, Body: loopBody}
 	} else {
-		loopStmt = &ast.IterForStmt{Position: pos, Pattern: &ast.MoveBindNamePattern{Position: pos, Name: name}, Mode: ast.IterBindValue, Source: source, Filter: filter, Body: step}
+		loopStmt = &ast.IterForStmt{Position: pos, Pattern: &ast.MoveBindNamePattern{Position: pos, Name: name}, Mode: ast.IterBindValue, Source: source, Body: loopBody}
 	}
 	return &ast.ExprBlock{
 		Position: pos,
