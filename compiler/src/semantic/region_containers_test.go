@@ -149,6 +149,23 @@ def leak_cstr() -> cstr:
 	}
 }
 
+// A plain `view[T]` sliced from a region-backed `darray[T] @r` now carries r
+// (Phase 2: region tracking generalized from sview-only to all views), so the
+// escape checker rejects returning the borrowed window out of the scope-owned
+// region whose bytes are freed at scope exit.
+func TestRegionDarraySliceViewEscapeChecking(t *testing.T) {
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "region_slice_view_escape.elisa", `def leak_view() -> view[i64]:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            d: mutable darray[i64] @a = []
+            d.push(7)
+            return d[0:1]
+`)
+	if all := strings.Join(bad.Errors(), "\n"); !strings.Contains(all, "escapes via return") {
+		t.Fatalf("expected a view sliced from a scope-owned region to be rejected as escaping; got: %s", all)
+	}
+}
+
 // Nested-region escape: pushing a value from an inner (shorter-lived) region
 // into a darray whose element region is an outer (longer-lived) region leaves a
 // dangling reference once the inner region is freed. Rejected by the outlives

@@ -244,6 +244,12 @@ type ViewType struct {
 	Begin       string
 	End         string
 	SurfaceName string
+	// Region is the allocation region a `view @r` points into. A view produced
+	// by slicing a region-backed `darray[T] @r` (or another region-carrying view)
+	// inherits r, so the escape checker proves the borrowed window cannot outlive
+	// r — the same guarantee SViewType.Region gives string views. Inert in
+	// SameType/AssignableTo, like DArrayType/DictType/DStrType/SViewType.Region.
+	Region string
 }
 
 type StoreRowsViewType struct {

@@ -84,6 +84,11 @@ func containerRegion(t Type) string {
 				return ""
 			}
 			return tt.Region
+		case *ViewType:
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
 		case *RefType:
 			if tt == nil {
 				return ""
@@ -285,6 +290,11 @@ func containerOrEntryRegion(t Type) string {
 			}
 			return tt.Region
 		case *SViewType:
+			if tt == nil {
+				return ""
+			}
+			return tt.Region
+		case *ViewType:
 			if tt == nil {
 				return ""
 			}

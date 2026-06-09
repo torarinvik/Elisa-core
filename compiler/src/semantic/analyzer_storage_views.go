@@ -17,9 +17,9 @@ func storageViewInvalidatedMessage(name string, reason string) string {
 // assignment (Phase C1b). sourceDeclOffset is the byte offset of the source darray's declaration —
 // a precise identity (no name collisions) for matching against reserve_commit decls in the post-pass.
 type pendingStorageViewError struct {
-	expr            ast.Expr
-	viewName        string
-	dep             storageViewDependencyState
+	expr             ast.Expr
+	viewName         string
+	dep              storageViewDependencyState
 	sourceDeclOffset int
 	hasSourceDecl    bool
 }

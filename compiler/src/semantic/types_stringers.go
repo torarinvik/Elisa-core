@@ -30,7 +30,7 @@ func (*ConstEnumType) isType()          {}
 func (*RefType) isType()                {}
 func (*ArrayType) isType()              {}
 func (*DArrayType) isType()             {}
-func (*ViewType) isType()         {}
+func (*ViewType) isType()               {}
 func (*StoreRowsViewType) isType()      {}
 func (*StoreRowViewType) isType()       {}
 func (*DStrType) isType()               {}

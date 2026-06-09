@@ -91,6 +91,7 @@ func (a *Analyzer) packedEnumTagExprType(expr *ast.FieldExpr) (Type, bool) {
 	}
 	return enumType.TagType, true
 }
+
 // analyzeEnumColumnExpr types a first-class column scan `Expr of .field`
 // (docs/76 §5). The enum must be declared `layout soa` (columnar), and the
 // selected field must be a *dense* column — the tag, or a common(...) field.

@@ -141,7 +141,11 @@ func MergeTypes(a, b Type) Type {
 			if viewBoundsEqual(av, bv) {
 				return av
 			}
-			return &ViewType{Elem: av.Elem, SurfaceName: "view"}
+			mergedRegion := ""
+			if av.Region == bv.Region {
+				mergedRegion = av.Region
+			}
+			return &ViewType{Elem: av.Elem, SurfaceName: "view", Region: mergedRegion}
 		}
 	}
 	if IsNullType(a) {

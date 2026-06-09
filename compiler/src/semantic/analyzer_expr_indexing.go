@@ -444,13 +444,10 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
 	if view, ok := objType.(*DArrayType); ok {
-		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
+		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view", Region: view.Region}
 	}
 	if view, ok := objType.(*ViewType); ok {
-		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
-	}
-	if view, ok := objType.(*ViewType); ok {
-		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
+		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName, Region: view.Region}
 	}
 	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 		return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
@@ -475,13 +472,10 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*DArrayType); ok {
-			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
+			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view", Region: view.Region}
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
-			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
-		}
-		if view, ok := ref.Elem.(*ViewType); ok {
-			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
+			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName, Region: view.Region}
 		}
 		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 			return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}

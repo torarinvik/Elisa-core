@@ -155,6 +155,8 @@ func containerTypeRegion(typ Type) string {
 		return t.Region
 	case *SViewType:
 		return t.Region
+	case *ViewType:
+		return t.Region
 	case *GenericInstanceType:
 		return t.Region
 	}
@@ -166,7 +168,7 @@ func containerTypeRegion(typ Type) string {
 // resolved on a separate path; this gates the builtin/scalar case (`i32 @r` is rejected).
 func typeCanCarryRegion(typ Type) bool {
 	switch StripAggregateStateType(typ).(type) {
-	case *DArrayType, *DictType, *DStrType, *SViewType, *GenericInstanceType, *RefType:
+	case *DArrayType, *DictType, *DStrType, *SViewType, *ViewType, *GenericInstanceType, *RefType:
 		return true
 	}
 	return false
