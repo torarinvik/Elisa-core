@@ -50,6 +50,11 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if t, ok := s.resolveBareTreeVariantWitnessType(n.Name); ok {
 			return t, nil
 		}
+		// A bare dotted packed-enum-variant name like `Expr.Lit` is a refined packed witness — the
+		// bare-form analogue of `packedview[Expr.Lit]`, matching the bare tree-variant surface.
+		if t, ok := s.resolveBarePackedVariantWitnessType(n.Name); ok {
+			return t, nil
+		}
 		return nil, fmt.Errorf("unknown type %q", n.Name)
 	case *ast.StateSetTypeExpr:
 		return nil, fmt.Errorf("state unions like %q are only valid as named struct state arguments", strings.Join(n.Cases, " | "))

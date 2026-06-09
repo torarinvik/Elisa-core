@@ -271,6 +271,30 @@ func exprSummary(expr ast.Expr) string {
 		return "?"
 	}
 }
+// resolveBarePackedVariantWitnessType resolves a bare dotted packed-enum-variant name like
+// `Expr.Lit` (enum `Expr`, variant `Lit`) to its PackedVariantViewType — the bare-form analogue of
+// `packedview[Expr.Lit]`, mirroring the bare tree-variant form. Returns ok=false for any name that is
+// not a packed enum variant, so the caller falls through to its normal unknown-type handling.
+func (s *functionState) resolveBarePackedVariantWitnessType(name string) (semantic.Type, bool) {
+	lastDot := strings.LastIndex(name, ".")
+	if lastDot <= 0 || lastDot >= len(name)-1 {
+		return nil, false
+	}
+	base, ok := s.g.result.NamedTypes[name[:lastDot]]
+	if !ok {
+		return nil, false
+	}
+	enumType, ok := base.(*semantic.EnumType)
+	if !ok || enumType == nil || !enumType.Packed {
+		return nil, false
+	}
+	variant, ok := enumType.Variant(name[lastDot+1:])
+	if !ok {
+		return nil, false
+	}
+	return s.g.cachedPackedVariantViewType(enumType, variant), true
+}
+
 func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExpr) (semantic.Type, error) {
 	named, ok := expr.(*ast.NamedType)
 	if !ok {

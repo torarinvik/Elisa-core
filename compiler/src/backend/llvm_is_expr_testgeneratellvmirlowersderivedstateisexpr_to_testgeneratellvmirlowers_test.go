@@ -718,3 +718,14 @@ def eval(node: Lua.Expr) -> i64:
 		}
 	}
 }
+
+// A bare packed-enum-variant name (`Expr.Lit`) is the bare-form analogue of `packedview[Expr.Lit]`
+// and must resolve through the backend type resolver — the asymmetry with bare tree variants
+// (`Lua.Expr.Binary`) is gone; packed enums get the same bare-variant surface.
+func TestGenerateLLVMIRResolvesBarePackedVariantWitnessType(t *testing.T) {
+	src := "packed enum Expr:\n\tcommon:\n\t\tspan: int\n\tLit(value: int)\n\tAdd(left: Expr, right: Expr)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n\tif node in store as Expr.Lit(value: value):\n\t\tlit: Expr.Lit = node\n\t\treturn value + lit.span\n\treturn 0\n"
+	result := parseAndAnalyzeBackendTest(t, "backend_bare_packed_variant.elisa", src)
+	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
+		t.Fatalf("expected bare packed-variant witness type to lower, got: %v", err)
+	}
+}
