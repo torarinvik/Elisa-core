@@ -324,6 +324,17 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 		s.g.result.ExprTypes[resultInit] = resultType
 	}
 	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
+
+	// Vectorizable fast path: a no-filter map over a re-evaluable darray source lowers to a
+	// presized indexed-store loop (`result.resize(src.count); for i: result[i] <- value`)
+	// rather than per-element `push`. push carries a per-iteration capacity check + conditional
+	// realloc — a loop-carried control dependency LLVM cannot hoist, so the push build loop stays
+	// scalar. The indexed store into the presized buffer has no such barrier and auto-vectorizes
+	// at -O3 (docs/79; the proven "map into preallocated darray" shape).
+	if block, ok := s.indexedStoreComprehensionBlock(expr, resultName, resultInit, resultIdent); ok {
+		return s.emitExprBlock(block, resultType)
+	}
+
 	pushCall := &ast.CallExpr{
 		Position: expr.Position,
 		Func: &ast.FieldExpr{
@@ -335,6 +346,91 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 	}
 	block := comprehensionDesugarBlock(expr, resultName, resultInit, resultIdent, pushCall)
 	return s.emitExprBlock(block, resultType)
+}
+
+// indexedStoreComprehensionBlock builds the vectorizable presized-indexed-store desugar for a
+// list comprehension, or returns ok=false when the comprehension is not eligible. Eligible when:
+// there is no filter (output length == source length), the source is a re-evaluable plain
+// identifier (no double-eval side effects), and that source is a darray (integer-indexable with a
+// `.count`). Lowers `[ value for name in src ]` to:
+//
+//	{ result: mutable darray[T] = []; result.resize(src.count);
+//	  for __i in 0..<src.count: name = src[__i]; <bindings>; result[__i] <- value;
+//	  result }
+func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensionExpr, resultName string, resultInit ast.Expr, resultIdent *ast.Ident) (*ast.ExprBlock, bool) {
+	if expr.Filter != nil || expr.RangeEnd != nil {
+		return nil, false
+	}
+	srcIdent, ok := expr.Source.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	srcType := s.exprType(srcIdent)
+	if ref, ok := srcType.(*semantic.RefType); ok {
+		srcType = ref.Elem
+	}
+	srcDarray, ok := srcType.(*semantic.DArrayType)
+	if !ok {
+		return nil, false
+	}
+	pos := expr.Position
+	idxName := s.g.nextSyntheticName("list.comp.i.")
+	idxIdent := &ast.Ident{Position: pos, Name: idxName}
+	var usizeType semantic.Type
+	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
+		usizeType = s.g.result.NamedTypes["usize"]
+	}
+	srcCount := func() ast.Expr {
+		fe := &ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}
+		if usizeType != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[fe] = usizeType
+		}
+		return fe
+	}
+	// Register the synthesized index expressions' element type so backend type inference (which
+	// has no structural fallback for IndexExpr) can resolve the element binding and the store.
+	registerElemType := func(e ast.Expr) ast.Expr {
+		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[e] = srcDarray.Elem
+		}
+		return e
+	}
+
+	resultDecl := &ast.VarDeclStmt{Position: pos, Name: resultName, Mutable: true, Value: resultInit}
+	resizeCall := &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.FieldExpr{Position: pos, Object: resultIdent, Field: "resize"},
+		Args:     []ast.Expr{srcCount()},
+	}
+
+	elemDecl := &ast.VarDeclStmt{Position: pos, Name: expr.Name, Value: registerElemType(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent})}
+	store := &ast.AssignStmt{Position: pos, Target: registerElemType(&ast.IndexExpr{Position: pos, Object: resultIdent, Index: idxIdent}), Value: expr.Value}
+	body := []ast.Stmt{ast.Stmt(elemDecl)}
+	body = append(body, expr.Bindings...)
+	body = append(body, ast.Stmt(store))
+
+	startLit := &ast.IntLit{Position: pos, Value: "0"}
+	if usizeType != nil && s.g.result.ExprTypes != nil {
+		s.g.result.ExprTypes[startLit] = usizeType
+	}
+	loop := &ast.ForStmt{
+		Position: pos,
+		Name:     idxName,
+		Start:    startLit,
+		End:      srcCount(),
+		Op:       lexer.TOKEN_RANGE_LT,
+		Body:     body,
+	}
+
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			resultDecl,
+			&ast.ExprStmt{Position: pos, Expr: resizeCall},
+			loop,
+		},
+		Value: resultIdent,
+	}, true
 }
 
 // comprehensionLoopStmt builds the fused loop for a comprehension desugar: the per-element

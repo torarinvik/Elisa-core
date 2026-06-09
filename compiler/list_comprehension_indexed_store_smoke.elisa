@@ -1,0 +1,61 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+struct Pair layout c:
+	a: mutable i64
+	b: mutable i64
+
+def mk_pair(x: i64) -> Pair:
+	p: Pair = zeroed
+	p.a <- x
+	p.b <- x * x
+	return p
+
+# A no-filter list comprehension over a darray source lowers to a presized indexed-store loop
+# (`result.resize(src.count); for i: result[i] <- value`) instead of per-element push, so the
+# fused build loop auto-vectorizes at -O3 (docs/79). This fixture pins the VALUE semantics of
+# that fast path: order, exact contents, head bindings, and that the filter form (which keeps
+# the push fallback) still produces the right result.
+@test
+def list_comprehension_indexed_store_smoke():
+	can Memory.Allocate, Abort.Panic:
+		src: mutable darray[i64] = []
+		for k in 0..<8:
+			_ = src.push(k)                        # [0..7]
+
+		# fast path: plain map, order + values preserved
+		doubled: darray[i64] = [x * 2 for x in src]
+		assert doubled.count == 8.usize()
+		assert doubled[0.usize()] == 0
+		assert doubled[3.usize()] == 6
+		assert doubled[7.usize()] == 14
+
+		# fast path: head binding, body uses it
+		shifted: darray[i64] = [y = x + 10, y * y for x in src]
+		assert shifted.count == 8.usize()
+		assert shifted[0.usize()] == 100          # (0+10)^2
+		assert shifted[7.usize()] == 289          # (7+10)^2
+
+		# fast path: f64 map (the vectorizable case)
+		fsrc: mutable darray[f64] = []
+		for k in 0..<5:
+			_ = fsrc.push(k.f64())
+		scaled: darray[f64] = [v * 1.5 for v in fsrc]
+		assert scaled.count == 5.usize()
+		assert scaled[4.usize()] == 6.0
+
+		# filter form keeps the push fallback — still correct
+		evens: darray[i64] = [x for x in src if x % 2 == 0]
+		assert evens.count == 4.usize()
+		assert evens[0.usize()] == 0
+		assert evens[3.usize()] == 6
+
+		# fast path: struct element (exercises resize zero-fill then overwrite for non-primitive T)
+		pairs: darray[Pair] = [mk_pair(x) for x in src]
+		assert pairs.count == 8.usize()
+		assert pairs[5.usize()].a == 5
+		assert pairs[5.usize()].b == 25
+
+		# empty source: resize(0), no stores
+		empty: mutable darray[i64] = []
+		mapped_empty: darray[i64] = [x * 2 for x in empty]
+		assert mapped_empty.count == 0.usize()
