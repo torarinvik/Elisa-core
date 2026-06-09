@@ -374,9 +374,14 @@ Each phase ships independently and leaves the tree green.
 > error. This completes the Part IV perf markers (`by simd` + `by par`) for folds. **P5b** lifts
 > the `by par` identity-transform restriction via a fused `map_reduce` combinator, so
 > `acc + x*x` / `acc + f(x)` (dot products, sum of squares) parallelize too. **P6** extends
-> `by simd` to list-map comprehensions (full fast-math on the body, reusing the `fastMathScope`);
-> `by par` on maps is reserved with a clear "not yet" error (a parallel map must allocate its
-> banded output, which needs region/inference threading the parser desugar doesn't yet have).
+> `by simd` to list-map comprehensions (full fast-math on the body, reusing the `fastMathScope`).
+> **P7** completes the surface with `by par` on maps: `[f(x) for x in src by par]` is an
+> analyzer-side desugar to a presized output filled by the runtime `par_map` combinator over
+> disjoint bands. It is unblocked by a new conservative `semantic.Type → ast.TypeExpr` converter
+> (needed to declare `out: darray[U]` where U is the analyzer-computed element type); a type it
+> can't faithfully rebuild yields a clear error, and since the synthesis is re-analyzed, any
+> inaccuracy is an ordinary type error rather than a silent miscompile. **The Part IV perf markers
+> (`by simd` + `by par`) are now complete across both folds and maps.**
 
 **Phase 1 — surface + sinks (sequential, no protocol value).** Parse `{…}` set,
 `{k:v …}` dict, `(… with acc =)` fold, and the comma-separated **head bindings**
