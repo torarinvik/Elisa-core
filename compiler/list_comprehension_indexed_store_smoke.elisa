@@ -59,3 +59,28 @@ def list_comprehension_indexed_store_smoke():
 		empty: mutable darray[i64] = []
 		mapped_empty: darray[i64] = [x * 2 for x in empty]
 		assert mapped_empty.count == 0.usize()
+
+		# range fast path: 0..<n, value is the loop var
+		sq: darray[i64] = [i * i for i in 0..<6]
+		assert sq.count == 6.usize()
+		assert sq[0.usize()] == 0
+		assert sq[5.usize()] == 25
+
+		# range fast path: non-zero start (index = i - start)
+		offset: darray[i64] = [i + 100 for i in 3..<7]
+		assert offset.count == 4.usize()
+		assert offset[0.usize()] == 103          # i=3
+		assert offset[3.usize()] == 106          # i=6
+
+		# range fast path: head binding over a range
+		rb: darray[i64] = [y = i * 2, y + 1 for i in 0..<4]
+		assert rb.count == 4.usize()
+		assert rb[0.usize()] == 1                 # 0*2+1
+		assert rb[3.usize()] == 7                 # 3*2+1
+
+		# range fast path: empty range (start >= end) -> resize(0), clamp holds
+		er: darray[i64] = [i for i in 5..<5]
+		assert er.count == 0.usize()
+		# degenerate start > end stays empty (clamped, no underflow allocation)
+		er2: darray[i64] = [i for i in 9..<4]
+		assert er2.count == 0.usize()

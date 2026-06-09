@@ -358,8 +358,11 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 //	  for __i in 0..<src.count: name = src[__i]; <bindings>; result[__i] <- value;
 //	  result }
 func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensionExpr, resultName string, resultInit ast.Expr, resultIdent *ast.Ident) (*ast.ExprBlock, bool) {
-	if expr.Filter != nil || expr.RangeEnd != nil {
+	if expr.Filter != nil {
 		return nil, false
+	}
+	if expr.RangeEnd != nil {
+		return s.indexedStoreRangeComprehensionBlock(expr, resultName, resultInit, resultIdent)
 	}
 	srcIdent, ok := expr.Source.(*ast.Ident)
 	if !ok {
@@ -418,6 +421,112 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		Name:     idxName,
 		Start:    startLit,
 		End:      srcCount(),
+		Op:       lexer.TOKEN_RANGE_LT,
+		Body:     body,
+	}
+
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			resultDecl,
+			&ast.ExprStmt{Position: pos, Expr: resizeCall},
+			loop,
+		},
+		Value: resultIdent,
+	}, true
+}
+
+// comprehensionRangeBoundReEvaluable reports whether a range bound can be evaluated more than
+// once without changing observable behavior (no side effects, no recomputation cost that matters).
+// Plain identifiers and integer literals qualify; anything else (calls, field/index access,
+// arithmetic) is conservatively rejected so the comprehension keeps the push fallback.
+func comprehensionRangeBoundReEvaluable(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return true
+	case *ast.IntLit:
+		return true
+	case *ast.ParenExpr:
+		return comprehensionRangeBoundReEvaluable(n.Inner)
+	default:
+		return false
+	}
+}
+
+// indexedStoreRangeComprehensionBlock is the range-source counterpart of
+// indexedStoreComprehensionBlock: `[ value for name in start..<end ]` (no filter, default step,
+// exclusive `..<`) lowers to a presized indexed-store loop so the fused build loop vectorizes
+// instead of per-element push. The output index is the dense offset `name - start`:
+//
+//	{ result: mutable darray[T] = []; result.resize( (end - start) if end > start else 0 );
+//	  for name in start..<end: <bindings>; result[name - start] <- value;
+//	  result }
+//
+// The resize bound is clamped to a non-negative count via the ternary; the (end - start)
+// branch is only selected when end > start, so its unsigned-domain underflow when start >= end
+// is computed-but-discarded. start/end reuse the comprehension's already-analyzed range nodes,
+// so the synthesized loop and arithmetic inherit their types with no extra registration.
+func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListComprehensionExpr, resultName string, resultInit ast.Expr, resultIdent *ast.Ident) (*ast.ExprBlock, bool) {
+	if expr.RangeStep != nil || expr.RangeOp != lexer.TOKEN_RANGE_LT {
+		return nil, false
+	}
+	// start/end are reused 3x (the clamp ternary evaluates each twice, the loop once), so they
+	// must be side-effect-free and re-evaluable — otherwise we'd change evaluation count vs the
+	// single-evaluation push fallback. Restrict to plain identifiers and integer literals.
+	if !comprehensionRangeBoundReEvaluable(expr.Source) || !comprehensionRangeBoundReEvaluable(expr.RangeEnd) {
+		return nil, false
+	}
+	pos := expr.Position
+	start := expr.Source
+	end := expr.RangeEnd
+
+	// The synthesized arithmetic/ternary nodes have no analyzed types; the backend infers a
+	// TernaryExpr's result from its branches' exprType (nil -> void) and compares operands in
+	// their exprType, so register each. rangeType is the range's numeric type; resize coerces it
+	// to usize. start/end themselves are reused analyzed nodes and need no registration.
+	rangeType := s.exprType(end)
+	if rangeType == nil {
+		rangeType = s.exprType(start)
+	}
+	if rangeType == nil {
+		return nil, false
+	}
+	var boolType semantic.Type
+	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
+		boolType = s.g.result.NamedTypes["bool"]
+	}
+	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[e] = t
+		}
+		return e
+	}
+
+	// count = (end - start) if end > start else 0   — clamped, never negative.
+	count := reg(&ast.TernaryExpr{
+		Position: pos,
+		Value:    reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Left: end, Right: start}, rangeType),
+		Cond:     reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_GT, Left: end, Right: start}, boolType),
+		Alt:      reg(&ast.IntLit{Position: pos, Value: "0"}, rangeType),
+	}, rangeType)
+
+	resultDecl := &ast.VarDeclStmt{Position: pos, Name: resultName, Mutable: true, Value: resultInit}
+	resizeCall := &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.FieldExpr{Position: pos, Object: resultIdent, Field: "resize"},
+		Args:     []ast.Expr{count},
+	}
+
+	storeIndex := reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Left: reg(&ast.Ident{Position: pos, Name: expr.Name}, rangeType), Right: start}, rangeType)
+	store := &ast.AssignStmt{Position: pos, Target: &ast.IndexExpr{Position: pos, Object: resultIdent, Index: storeIndex}, Value: expr.Value}
+	body := append([]ast.Stmt{}, expr.Bindings...)
+	body = append(body, ast.Stmt(store))
+
+	loop := &ast.ForStmt{
+		Position: pos,
+		Name:     expr.Name,
+		Start:    start,
+		End:      end,
 		Op:       lexer.TOKEN_RANGE_LT,
 		Body:     body,
 	}
