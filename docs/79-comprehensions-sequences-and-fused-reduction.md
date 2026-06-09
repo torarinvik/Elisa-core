@@ -202,8 +202,12 @@ is not special; it is a function over the protocol.
 > functions over a not-yet-built `Sequence` protocol — they fold the optionally-filtered
 > numeric elements with + (unit 0) / * (unit 1), result type = element type. `where` is
 > optional for these reducer kinds. No generic-numeric-trait machinery is needed because the
-> query lowers to a monomorphic loop at the use site. `min`/`max` are deferred: they need the
-> empty-sequence → `T?` semantics this section calls out (mirroring `first`'s optional result).
+> query lowers to a monomorphic loop at the use site. **P8b** adds `min`/`max`: they have no
+> identity element, so they return `T?` (null over an empty/fully-filtered sequence) as this
+> section specifies. Their backend body updates the optional accumulator by *matching* it
+> (`null: take it` / `cur: keep the smaller-or-larger`), so the some-payload is unwrapped through
+> the match bind. Remaining Part III consumers: `collect`/`join` (and the short-circuiting
+> `find`/`contains`, on top of the existing `any`/`all`/`first`).
 
 ---
 
