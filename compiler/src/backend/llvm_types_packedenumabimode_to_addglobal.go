@@ -333,6 +333,16 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 			break
 		}
 		_, err = g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Key, tt.Value}})
+	case *semantic.SetType:
+		if err = g.noteType(tt.Elem); err != nil {
+			break
+		}
+		base, ok := g.result.NamedTypes["DynSet"]
+		if !ok {
+			err = fmt.Errorf("missing runtime struct DynSet")
+			break
+		}
+		_, err = g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynSet", Base: base, Args: []semantic.Type{tt.Elem}})
 	case *semantic.EnumType:
 		if tt.Decl != nil {
 			for _, fieldDecl := range tt.Decl.Common {
