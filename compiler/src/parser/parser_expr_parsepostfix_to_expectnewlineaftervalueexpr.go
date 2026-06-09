@@ -749,6 +749,15 @@ func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
 	if exprHasBlockRecovery(expr) {
 		return
 	}
+	// A completed value expression followed by `as` is a removed `expr as T` cast (the legitimate
+	// `as` uses — is/match aliases, visit/fold/rewrite, with/lock/mark/export — are consumed within
+	// their own parsers before reaching here). Point at the modern cast model and recover.
+	if p.peek() == lexer.TOKEN_AS {
+		pos := p.cur().Pos
+		p.advance()
+		_ = p.parseTypeExpr() // discard the cast target for recovery
+		p.errorAt(pos, "the `expr as T` cast has been removed; use `expr.cast[T]` (reinterpret), a constructor `T(expr)` / `expr.T()` (value conversion), or `&expr` (reference)")
+	}
 	p.expectNewline()
 }
 

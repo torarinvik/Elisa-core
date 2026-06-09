@@ -281,8 +281,8 @@ func TestParsePostfixCastWithMutableAnyRefTarget(t *testing.T) {
 }
 func TestAsCastSyntaxIsRejectedInReturn(t *testing.T) {
 	_, errs := parseSourceFile(t, "def keep(x: i64) -> i64:\n    return x as i64\n")
-	if len(errs) == 0 {
-		t.Fatalf("expected `expr as T` to be rejected")
+	if !strings.Contains(strings.Join(errs, "\n"), "the `expr as T` cast has been removed") {
+		t.Fatalf("expected a helpful `expr as T` removal diagnostic, got: %v", errs)
 	}
 }
 func TestAsCastSyntaxIsRejectedInCallArgs(t *testing.T) {
