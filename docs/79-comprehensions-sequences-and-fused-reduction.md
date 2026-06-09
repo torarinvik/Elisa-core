@@ -196,6 +196,15 @@ express. Anything outside the curated set stays inline `(… with acc =)`. Users
 may define their own consumer (`def median[S: Sequence[f64]](s: S) -> f64`) — it
 is not special; it is a function over the protocol.
 
+> **Implementation status (Part III).** **P8** lands the first two named consumers,
+> `sum x in xs [where p]` and `product x in xs [where p]`, as members of the existing
+> query-expression family (alongside `any`/`all`/`first`/`count`/`each`) rather than as
+> functions over a not-yet-built `Sequence` protocol — they fold the optionally-filtered
+> numeric elements with + (unit 0) / * (unit 1), result type = element type. `where` is
+> optional for these reducer kinds. No generic-numeric-trait machinery is needed because the
+> query lowers to a monomorphic loop at the use site. `min`/`max` are deferred: they need the
+> empty-sequence → `T?` semantics this section calls out (mirroring `first`'s optional result).
+
 ---
 
 ## Part IV — Performance: fusion → vectorization → parallelism
