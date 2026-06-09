@@ -784,16 +784,19 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	return result
 }
 
-// lowerParallelListComprehension desugars a `[ value for name in src by par ]` map into a parallel
-// fill over the source's disjoint bands and stashes it on expr.LoweredParallel (the backend emits it
-// in place of the sequential comprehension). The desugar is:
+// lowerParallelListComprehension desugars a `[ value for name in src by par ]` map into a single
+// call to the `par_map_collect` combinator and stashes it on expr.LoweredParallel (the backend emits
+// it in place of the sequential comprehension). The desugar is just:
 //
-//	{ __par_out: mutable darray[U] = []; _ = __par_out.resize(src.count);
-//	  par_map(slice(&src), slice(&__par_out), lambda(name) => value); __par_out }
+//	par_map_collect(slice(&src), lambda(name) => value)
 //
-// par_map fills the caller-allocated `__par_out` (so no darray crosses a call boundary — region
-// correct) over disjoint bands in parallel (race-free). Gated to a no-filter map over a plain darray
-// identifier with no head bindings and a reconstructible element type; otherwise a clear diagnostic.
+// par_map_collect builds the result darray in its own inferred region and returns it; the caller
+// adopts that region (region-return inference), so it lands in the comprehension's enclosing region
+// — no caller-side scratch, no presize/header threading. (This replaced an earlier inline
+// `{ out=[]; out.resize(...); par_map(slice(&src), slice(&out), ...); out }` block that existed only
+// because a function couldn't build-and-return an owned container; now one can.) Gated to a no-filter
+// map over a plain darray identifier with no head bindings and a reconstructible element type;
+// otherwise a clear diagnostic.
 func (a *Analyzer) lowerParallelListComprehension(expr *ast.ListComprehensionExpr, elemType Type, expectedDArray *DArrayType, useExpectedDArray bool) Type {
 	result := Type(invalidType)
 	if useExpectedDArray {
@@ -829,35 +832,19 @@ func (a *Analyzer) lowerParallelListComprehension(expr *ast.ListComprehensionExp
 	}
 
 	pos := expr.Position
-	outName := "__par_out"
-	outIdent := func() ast.Expr { return &ast.Ident{Position: pos, Name: outName} }
-	outDecl := &ast.VarDeclStmt{Position: pos, Name: outName, Mutable: true,
-		Type:  &ast.BuiltinTypeExpr{Position: pos, Name: "darray", TypeArgs: []ast.TypeExpr{elemTypeExpr}},
-		Value: &ast.ListLitExpr{Position: pos}}
-	resizeCall := &ast.CallExpr{Position: pos,
-		Func: &ast.FieldExpr{Position: pos, Object: outIdent(), Field: "resize"},
-		Args: []ast.Expr{&ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}}}
 	transform := &ast.LambdaExpr{Position: pos, Keyword: "lambda", UsesShorthandParams: true,
 		Params: []ast.ParamDecl{{Position: pos, Name: expr.Name}}, BodyExpr: expr.Value}
-	parMapCall := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "par_map"}, Args: []ast.Expr{
-		&ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"}, Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: srcIdent}}},
-		&ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"}, Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: outIdent()}}},
-		transform,
-	}}
-	block := &ast.ExprBlock{Position: pos,
-		Stmts: []ast.Stmt{
-			outDecl,
-			&ast.DiscardStmt{Position: pos, Value: resizeCall},
-			&ast.ExprStmt{Position: pos, Expr: parMapCall},
-		},
-		Value: outIdent()}
+	srcSlice := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"},
+		Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: srcIdent}}}
+	lowered := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "par_map_collect"},
+		Args: []ast.Expr{srcSlice, transform}}
 
-	blockType := a.analyzeValueExpr(block, result)
-	if IsInvalidType(blockType) {
+	loweredType := a.analyzeValueExpr(lowered, result)
+	if IsInvalidType(loweredType) {
 		a.exprTypes[expr] = result
 		return result
 	}
-	expr.LoweredParallel = block
+	expr.LoweredParallel = lowered
 	a.exprTypes[expr] = result
 	return result
 }

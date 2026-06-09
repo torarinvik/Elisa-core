@@ -121,3 +121,35 @@ func TestBuildLocalReturnGenericAdoptedNoUAF(t *testing.T) {
 	}
 	assertAllPassed(t, exit, stdout, stderr, "generic_build_local_return_lives")
 }
+
+// `[ f(x) for x in xs by par ]` now lowers to the generic `par_map_collect` build-local-return
+// combinator (it builds the result in its own region and the caller adopts it) instead of an inline
+// presize+par_map block. This exercises the full stack under ASan — generic region-poly + nursery +
+// region adoption through the comprehension desugar — and reads every element back after the call.
+const byParMapCollectBody = `
+@test
+def by_par_map_collect_lives() -> void:
+    can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: mutable darray[i64] = [k for k in 0..<8000]
+            doubled: darray[i64] = [x * 2 for x in a by par]
+            if doubled.count != 8000:
+                panic("by par map lost elements")
+            ok: mutable bool = true
+            for i in 0..<a.count:
+                if doubled[i] != a[i] * 2:
+                    ok <- false
+            if not ok:
+                panic("by par map element mismatch (UAF?)")
+            if doubled[7999] != 15998:
+                panic("by par map boundary corrupted")
+`
+
+func TestByParMapCollectAdoptedNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "by_par_map_collect", byParMapCollectBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "by_par_map_collect_lives")
+}

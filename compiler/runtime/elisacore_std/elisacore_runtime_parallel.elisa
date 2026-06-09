@@ -61,6 +61,18 @@ def par_map[T, U](src: Slice[T], dst: Slice[U], transform: func(T) -> U, w: usiz
 			for t in 0..<nw:
 				submit par_map_worker[T, U](ParMapArg[T, U] { src: src.split(nw, t), dst: dst.split(nw, t), transform: transform })
 
+# Parallel map-collect: builds and RETURNS a fresh darray holding `transform(src[i])`, filled in
+# parallel over disjoint bands. Unlike `par_map` (caller pre-allocates `dst`), this allocates the
+# result in its own inferred region and the caller adopts it (region-return inference) -- so a
+# `[f(x) for x in xs by par]` map lowers to one call, no caller-side scratch. Equivalent to
+# `out = []; out.resize(src.len()); par_map(src, slice(&out), transform); out`.
+def par_map_collect[T, U](src: Slice[T], transform: func(T) -> U, w: usize = 0.usize()) -> darray[U]:
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		out: mutable darray[U] = []
+		_ = out.resize(src.len())
+		par_map(src, slice(&out), transform, w)
+		return out
+
 struct ReduceArg[T]:
 	band: Slice[T]
 	partials: Slice[T]
