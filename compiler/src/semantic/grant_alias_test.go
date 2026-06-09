@@ -32,6 +32,34 @@ def build() -> i64:
 	}
 }
 
+// The `alias` keyword is the canonical capability-set declaration (replacing
+// `grant`); it behaves identically — used in a local `can` block it satisfies
+// the member requirements it abbreviates.
+func TestAliasKeywordCapabilitySet(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "alias_keyword_ok.elisa", `
+permission Zeg:
+    Host
+    Guest
+
+permission Unsafe2:
+    SegmentMutation
+
+alias HostSeg = Zeg.Host, Unsafe2.SegmentMutation
+
+extern host_write() -> i64 can[Zeg.Host]
+extern mutate() -> i64 can[Unsafe2.SegmentMutation]
+
+def build() -> i64:
+    can HostSeg:
+        _ = host_write()
+        return mutate()
+`)
+	all := allDiagnostics(result)
+	if strings.Contains(all, "host_write") || strings.Contains(all, "mutate") || strings.Contains(all, "explicit local effect grant") {
+		t.Fatalf("expected `can HostSeg:` (declared via `alias`) to satisfy both member calls, got:\n%s", all)
+	}
+}
+
 // A grant alias may reference another grant alias (one level of nesting).
 func TestGrantAliasNesting(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "grant_alias_nested.elisa", `
