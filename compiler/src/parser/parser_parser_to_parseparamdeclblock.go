@@ -277,7 +277,7 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peek() == lexer.TOKEN_CONTEXT {
 		return p.parseContextDecl()
 	}
-	if p.peekIdentText("namespace") || p.peekIdentText("module") {
+	if p.peekIdentText("module") {
 		return p.parseNamespaceDecl()
 	}
 	if p.peekIdentText("using") {

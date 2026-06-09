@@ -40,7 +40,7 @@ def parse() -> int effects[FrontendEffects]:
 
 func TestEffectAliasResolvesThroughUsingAndFuncTypes(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "effect_alias_using.elisa", `
-namespace frontend:
+module frontend:
     effectalias WorkerEffects = can[Abort.Panic]
 
 using frontend

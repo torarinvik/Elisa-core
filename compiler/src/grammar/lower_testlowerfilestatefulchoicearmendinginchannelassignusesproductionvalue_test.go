@@ -286,7 +286,7 @@ func TestLowerFileStatefulConcatMergesListElementTypePastUntypedEmpty(t *testing
 	}
 }
 func TestLowerFileStatefulSynthesizesStructReturnFromNamespacedChannels(t *testing.T) {
-	file := parseGrammarTestFile(t, `namespace PascalFrontend:
+	file := parseGrammarTestFile(t, `module PascalFrontend:
 	struct BuiltSummary:
 		items: darray[i64]
 		checksum_total: i64

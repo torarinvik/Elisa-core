@@ -27,17 +27,12 @@ func (p *Parser) parseQualifiedIdentNameAfterFirst(first string) string {
 }
 func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
 	pos := p.cur().Pos
-	isModule := p.peekIdentText("module")
-	if isModule {
-		p.expectIdentText("module")
-	} else {
-		p.expectIdentText("namespace")
-	}
+	p.expectIdentText("module")
 	name := p.parseQualifiedDeclName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	decls := p.parseDeclBlock()
-	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: isModule}
+	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true}
 }
 func (p *Parser) parseConstModuleDecl() *ast.NamespaceDecl {
 	pos := p.cur().Pos

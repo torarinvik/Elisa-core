@@ -300,7 +300,7 @@ func TestLowerFileLexerImportsQualifiedGrammarTokenAliases(t *testing.T) {
     IDENT = 1
     BEGIN = 2
 
-namespace Pascal:
+module Pascal:
     grammar Frontend:
         token_kind DemoTokenKind
         token:

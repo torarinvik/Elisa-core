@@ -798,14 +798,14 @@ def read(builder: DArrayBuilder[i64]&) -> darray[i64]:
 
 func TestAnalyzeUFCSAmbiguityReportsCandidates(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ufcs_ambiguous.elisa", `
-namespace left:
+module left:
     struct Box:
         value: i64
 
     def score(box: Box) -> i64:
         return box.value
 
-namespace right:
+module right:
     def score(box: left.Box) -> i64:
         return box.value + 1
 

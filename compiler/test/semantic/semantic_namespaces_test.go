@@ -17,7 +17,7 @@ func requireNamedType(t *testing.T, result *semantic.Result, name string) semant
 }
 
 func TestAnalyzeAcceptsNamespaceAndUsingForTypesAndFunctions(t *testing.T) {
-	src := `namespace math:
+	src := `module math:
 	struct Box:
 		value: int
 
@@ -43,13 +43,13 @@ def run() -> int:
 }
 
 func TestAnalyzeAcceptsTopLevelUsingInsideAnotherNamespace(t *testing.T) {
-	src := `namespace math:
+	src := `module math:
 	def inc(value: int) -> int:
 		return value + 1
 
 using math
 
-namespace app:
+module app:
 	def run() -> int:
 		return inc(41)
 `
@@ -61,7 +61,7 @@ namespace app:
 }
 
 func TestAnalyzeNamespacesDoNotLeakWithoutUsing(t *testing.T) {
-	src := `namespace math:
+	src := `module math:
 	def inc(value: int) -> int:
 		return value + 1
 
