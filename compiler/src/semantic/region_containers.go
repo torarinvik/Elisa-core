@@ -132,7 +132,8 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 			// suppression the backend doesn't adopt would be a silent use-after-free. Only `return`
 			// threads the region: a store into longer-lived storage (via != "return") still escapes,
 			// because there is no caller region for the stored value to live in.
-			if via == "return" && a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic {
+			if via == "return" && a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic &&
+				funcTypeHasImplicitParam(a.currentFuncType, regionPolymorphicImplicitParamName) {
 				return
 			}
 			a.errorf(valueExpr.Pos(), "value escapes its `in auto:` scope via %s; the inferred region is freed at scope exit. Give it an explicit lifetime — copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region", via)

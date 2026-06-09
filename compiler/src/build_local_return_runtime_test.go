@@ -84,3 +84,40 @@ func TestBuildLocalReturnMultiPathAdoptedNoUAF(t *testing.T) {
 	}
 	assertAllPassed(t, exit, stdout, stderr, "multi_return_lives")
 }
+
+// GENERIC build-local-return under ASan: region-poly threading must compose with generic
+// specialization. specializeFuncType now carries the RegionPolymorphic flag, so each instance
+// (i64, f64) threads + adopts the caller region. Two distinct specializations also guard against
+// param mis-indexing between the threaded `__region_auto` and substituted params. A regression
+// (dropped flag) would free each instance's own arena -> dangling header -> ASan SEGV on read-back.
+const buildLocalReturnGenericBody = `
+def make_gen[T](n: usize, seed: T) -> darray[T]:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        out: mutable darray[T] = []
+        _ = out.resize(n)
+        i: mutable usize = 0
+        while i < n:
+            out[i] <- seed
+            i <- i + 1
+        return out
+
+@test
+def generic_build_local_return_lives() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            xs: darray[i64] = make_gen[i64](5000.usize(), 7.i64())
+            if xs.count != 5000 or xs[4999] != 7:
+                panic("generic i64 builder corrupted (UAF?)")
+            ys: darray[f64] = make_gen[f64](3000.usize(), 2.5)
+            if ys.count != 3000 or ys[2999] != 2.5:
+                panic("generic f64 builder corrupted (UAF?)")
+`
+
+func TestBuildLocalReturnGenericAdoptedNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "build_local_return_generic", buildLocalReturnGenericBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "generic_build_local_return_lives")
+}

@@ -159,10 +159,16 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		ExplicitParamDefaultExprs:   append([]ast.Expr(nil), base.ExplicitParamDefaultExprs...),
 		ExplicitParamHasDefault:     append([]bool(nil), base.ExplicitParamHasDefault...),
 		ImplicitParamNames:          append([]string(nil), base.ImplicitParamNames...),
-		Return:                      substituteType(base.Return, typeBindings, impls),
-		Variadic:                    base.Variadic,
-		SinkParams:                  append([]bool(nil), base.SinkParams...),
-		SinkParamsKnown:             base.SinkParamsKnown,
+		// A specialization has the SAME region-polymorphism as its template: it threads the caller's
+		// region via the `__region_auto` implicit param (copied above) and its body must adopt it
+		// (regionPolyAutoAdopts checks s.fnType.RegionPolymorphic). Dropping this flag here made every
+		// GENERIC region-polymorphic builder create+free its own arena instead of adopting → the
+		// returned container's buffer dangled → silent use-after-free. Must mirror the template.
+		RegionPolymorphic: base.RegionPolymorphic,
+		Return:            substituteType(base.Return, typeBindings, impls),
+		Variadic:          base.Variadic,
+		SinkParams:        append([]bool(nil), base.SinkParams...),
+		SinkParamsKnown:   base.SinkParamsKnown,
 	}
 	semantic.AppendSpecializedBoundaryTreeStoreParams(specialized)
 	return specialized

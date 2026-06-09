@@ -199,15 +199,6 @@ func functionBuildsAndReturnsLocalContainer(fn *ast.FuncDecl) bool {
 	if fn == nil || !returnTypeIsOwnedContainer(fn.ReturnType) {
 		return false
 	}
-	// SAFETY: region-poly `__region_auto` threading does not yet compose with generic
-	// specialization — a generic build-local-return builder is classified region-poly but the
-	// backend fails to adopt the returned buffer into the caller's region, a silent use-after-free
-	// (the returned darray header points at freed memory). Until generic region-poly is fixed,
-	// EXCLUDE type-parameterized functions: they fall back to the (correct) escape diagnostic rather
-	// than miscompiling. Monomorphic builders (the join/make case) are sound and unaffected.
-	if len(fn.TypeParams) > 0 || len(fn.GenericParams) > 0 {
-		return false
-	}
 	// A function that threads an allocator (`Arena&` param) manages its own allocation: the parser
 	// does NOT wrap its body in a synthesized auto region (maybeWrapFunctionBodyInAutoRegion's
 	// hasArenaParam guard), so its returned container is NOT in an adoptable `__auto_*` region.
