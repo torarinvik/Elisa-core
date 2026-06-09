@@ -615,6 +615,14 @@ type ListComprehensionExpr struct {
 	// FP (so the vectorizer may apply the more aggressive FP transforms), the map analogue of the
 	// per-fold `by simd` marker (docs/79 Part IV).
 	FastMath bool
+	// Parallel marks a `by par` list-map comprehension: a parallel map over the source's disjoint
+	// bands. The analyzer lowers it (LoweredParallel) once the element type is known.
+	Parallel bool
+	// LoweredParallel is the analyzer-synthesized desugar of a `by par` map — a block that presizes
+	// the output and fills it via the runtime `par_map` combinator. Set by the analyzer (which knows
+	// the element type), emitted by the backend in place of the sequential comprehension. nil
+	// otherwise. Mirrors BinaryExpr.LoweredCall.
+	LoweredParallel Expr
 }
 type QueryExprKind int
 

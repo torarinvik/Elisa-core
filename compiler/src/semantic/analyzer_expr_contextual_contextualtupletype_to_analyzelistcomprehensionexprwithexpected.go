@@ -763,6 +763,9 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	a.currentScope = loopScope
 	valueType := a.analyzeValueExpr(expr.Value, expectedElem)
 	a.currentScope = savedScope
+	if expr.Parallel {
+		return a.lowerParallelListComprehension(expr, valueType, expectedDArray, useExpectedDArray)
+	}
 	if useExpectedDArray {
 		if !AssignableTo(expectedDArray.Elem, valueType) {
 			a.errorf(expr.Value.Pos(), "list comprehension element expects %s, got %s", expectedDArray.Elem, valueType)
@@ -777,6 +780,84 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	}
 	a.consumeAffineValueExpr(expr.Value, valueType, "move into list comprehension element")
 	result, _ := a.stampContainerRegion(&DArrayType{Elem: valueType, Shape: &WildcardShape{}, SurfaceName: "darray"}).(*DArrayType)
+	a.exprTypes[expr] = result
+	return result
+}
+
+// lowerParallelListComprehension desugars a `[ value for name in src by par ]` map into a parallel
+// fill over the source's disjoint bands and stashes it on expr.LoweredParallel (the backend emits it
+// in place of the sequential comprehension). The desugar is:
+//
+//	{ __par_out: mutable darray[U] = []; _ = __par_out.resize(src.count);
+//	  par_map(slice(&src), slice(&__par_out), lambda(name) => value); __par_out }
+//
+// par_map fills the caller-allocated `__par_out` (so no darray crosses a call boundary — region
+// correct) over disjoint bands in parallel (race-free). Gated to a no-filter map over a plain darray
+// identifier with no head bindings and a reconstructible element type; otherwise a clear diagnostic.
+func (a *Analyzer) lowerParallelListComprehension(expr *ast.ListComprehensionExpr, elemType Type, expectedDArray *DArrayType, useExpectedDArray bool) Type {
+	result := Type(invalidType)
+	if useExpectedDArray {
+		result = expectedDArray
+	} else if elemType != nil && !IsInvalidType(elemType) {
+		result, _ = a.stampContainerRegion(&DArrayType{Elem: elemType, Shape: &WildcardShape{}, SurfaceName: "darray"}).(*DArrayType)
+	}
+	fail := func(pos lexer.Pos, reason string) Type {
+		a.errorf(pos, "`by par` map %s; it must be `[ f(%s) for %s in <darray> by par ]` (no filter or head bindings, a darray source, and a reconstructible element type)", reason, expr.Name, expr.Name)
+		a.exprTypes[expr] = result
+		return result
+	}
+	if expr.Filter != nil {
+		return fail(expr.Pos(), "does not support an `if` filter")
+	}
+	if len(expr.Bindings) > 0 {
+		return fail(expr.Pos(), "does not support head bindings")
+	}
+	if expr.RangeEnd != nil {
+		return fail(expr.Pos(), "requires a darray source, not a range")
+	}
+	srcIdent, ok := expr.Source.(*ast.Ident)
+	if !ok {
+		return fail(expr.Source.Pos(), "source must be a plain darray variable")
+	}
+	if elemType == nil || IsInvalidType(elemType) {
+		a.exprTypes[expr] = result
+		return result
+	}
+	elemTypeExpr := typeToTypeExpr(elemType, expr.Position)
+	if elemTypeExpr == nil {
+		return fail(expr.Pos(), "over element type "+elemType.String()+" is not yet supported")
+	}
+
+	pos := expr.Position
+	outName := "__par_out"
+	outIdent := func() ast.Expr { return &ast.Ident{Position: pos, Name: outName} }
+	outDecl := &ast.VarDeclStmt{Position: pos, Name: outName, Mutable: true,
+		Type:  &ast.BuiltinTypeExpr{Position: pos, Name: "darray", TypeArgs: []ast.TypeExpr{elemTypeExpr}},
+		Value: &ast.ListLitExpr{Position: pos}}
+	resizeCall := &ast.CallExpr{Position: pos,
+		Func: &ast.FieldExpr{Position: pos, Object: outIdent(), Field: "resize"},
+		Args: []ast.Expr{&ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}}}
+	transform := &ast.LambdaExpr{Position: pos, Keyword: "lambda", UsesShorthandParams: true,
+		Params: []ast.ParamDecl{{Position: pos, Name: expr.Name}}, BodyExpr: expr.Value}
+	parMapCall := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "par_map"}, Args: []ast.Expr{
+		&ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"}, Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: srcIdent}}},
+		&ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"}, Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: outIdent()}}},
+		transform,
+	}}
+	block := &ast.ExprBlock{Position: pos,
+		Stmts: []ast.Stmt{
+			outDecl,
+			&ast.DiscardStmt{Position: pos, Value: resizeCall},
+			&ast.ExprStmt{Position: pos, Expr: parMapCall},
+		},
+		Value: outIdent()}
+
+	blockType := a.analyzeValueExpr(block, result)
+	if IsInvalidType(blockType) {
+		a.exprTypes[expr] = result
+		return result
+	}
+	expr.LoweredParallel = block
 	a.exprTypes[expr] = result
 	return result
 }

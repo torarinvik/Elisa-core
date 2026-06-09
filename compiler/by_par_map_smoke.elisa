@@ -1,0 +1,39 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+struct Pair layout c:
+	a: mutable i64
+	b: mutable i64
+
+def mk(x: i64) -> Pair:
+	p: Pair = zeroed
+	p.a <- x
+	p.b <- x * x
+	return p
+
+# `[ f(x) for x in src by par ]` is a parallel map: the analyzer desugars it to a presized output
+# filled via the runtime `par_map` combinator over the source's disjoint bands (docs/79 Part IV).
+# This fixture proves the parallel result equals the sequential map for an identity-ish transform, a
+# type-changing transform (i64 element -> f64 output), and a struct element type.
+@test
+def by_par_map_smoke():
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		a: mutable darray[i64] = []
+		for k in 0..<3000:
+			_ = a.push(k)
+
+		doubled: darray[i64] = [x * 2 for x in a by par]
+		assert doubled.count == 3000.usize()
+		ok: mutable bool = true
+		for i in 0..<a.count:
+			if doubled[i] != a[i] * 2:
+				ok <- false
+		assert ok
+		assert doubled[2999.usize()] == 5998
+
+		# type-changing transform: i64 element -> f64 output
+		scaled: darray[f64] = [x.f64() * 1.5 for x in a by par]
+		assert scaled[10.usize()] == 15.0
+
+		# struct element type (exercises the semantic.Type -> TypeExpr reconstruction)
+		pairs: darray[Pair] = [mk(x) for x in a by par]
+		assert pairs[9.usize()].b == 81
