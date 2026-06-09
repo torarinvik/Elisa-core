@@ -248,7 +248,7 @@ def build(owner: Arena) -> usize:
 }
 
 func TestGenerateLLVMIRIgnoresEffectsDeclarations(t *testing.T) {
-	src := `effects FrontendEffects = error[Error] can[Abort.Panic, Memory.Allocate]
+	src := `effectalias FrontendEffects = error[Error] can[Abort.Panic, Memory.Allocate]
 
 error Error:
     Bad
