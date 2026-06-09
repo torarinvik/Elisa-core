@@ -574,7 +574,7 @@ func TestRunCLIRejectsArrowCastWhenOnlyPostfixHookExists(t *testing.T) {
 	if exitCode == 0 {
 		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "legacy expression arrow cast `expr -> T` is deprecated") {
+	if !strings.Contains(stderr.String(), "the `expr -> T` cast has been removed") {
 		t.Fatalf("expected legacy arrow cast diagnostic, got:\n%s", stderr.String())
 	}
 }

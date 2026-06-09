@@ -36,7 +36,7 @@ def build_and_read[B: Builder](value: int) -> int:
     return B.value_of(node)
 
 def entry() -> int:
-    return build_and_read.specialize[BuilderTag]()(41)
+    return build_and_read[BuilderTag](41)
 `)
 
 	impl, ok := semantic.LookupStaticImpl(result.StaticImpls, "Builder", result.NamedTypes["BuilderTag"])

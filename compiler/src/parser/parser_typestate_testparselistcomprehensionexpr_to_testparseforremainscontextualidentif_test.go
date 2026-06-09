@@ -146,7 +146,7 @@ func TestParseChildrenToOverrideExpr(t *testing.T) {
 }
 func TestParseRejectsLegacyChildrenToCastSyntax(t *testing.T) {
 	_, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
-	if !strings.Contains(strings.Join(errs, "\n"), "legacy children cast syntax `expr to T` is deprecated") {
+	if !strings.Contains(strings.Join(errs, "\n"), "the `expr to T` cast has been removed") {
 		t.Fatalf("expected legacy children to-cast diagnostic, got %v", errs)
 	}
 }

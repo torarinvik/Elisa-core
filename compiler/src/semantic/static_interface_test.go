@@ -98,7 +98,7 @@ def inner[B: Builder]() -> B.State:
     return B.state()
 
 def outer[B: Builder]() -> B.State:
-    return inner.specialize[B]()()
+    return inner[B]()
 `)
 
 	if len(result.Errors()) != 0 {
@@ -204,7 +204,7 @@ def build_pair[B: Builder](value: int) -> (node: B.Node, checksum: int):
     return B.make(value), value
 
 def use_pair[B: Builder](value: int) -> B.Node:
-    built = build_pair.specialize[B]()(value)
+    built = build_pair[B](value)
     node, checksum = built
     _ = checksum
     return node

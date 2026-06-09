@@ -29,6 +29,21 @@ func TestParseInterfaceSpellingIsRejected(t *testing.T) {
 	}
 }
 
+// The legacy `sizeof` / `alignof` / `offsetof` spellings are removed; use the `_of` forms.
+func TestParseRejectsLegacyLayoutIntrospectionNames(t *testing.T) {
+	_, errs := parseSourceFile(t, "struct Header layout c:\n    tag: u8\n    count: u32\n\ndef read() -> usize:\n    return sizeof(Header) + alignof(Header) + offsetof(Header, count)\n")
+	joined := strings.Join(errs, "\n")
+	for _, want := range []string{
+		"`sizeof` has been removed; use `size_of`",
+		"`alignof` has been removed; use `align_of`",
+		"`offsetof` has been removed; use `offset_of`",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected %q, got: %v", want, errs)
+		}
+	}
+}
+
 func TestParseStaticInterfaceImplAndBoundedGeneric(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 struct BuilderTag:

@@ -300,23 +300,19 @@ def read() -> usize:
 	}
 }
 
+// The modern `size_of` / `align_of` / `offset_of` layout-introspection names analyze cleanly.
+// (The removed `sizeof` / `alignof` / `offsetof` spellings are rejected at parse time; see the
+// parser package's TestParseRejectsLegacyLayoutIntrospectionNames.)
 func TestAnalyzeDeprecatedLegacyLayoutIntrospectionNames(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "layout_introspection_legacy_names.elisa", `struct Header layout c:
+	result := analyzeFunctionAnalysisTestSource(t, "layout_introspection_names.elisa", `struct Header layout c:
 	tag: u8
 	count: u32
 
 def read() -> usize:
-	return sizeof(Header) + alignof(Header) + offsetof(Header, count)
+	return size_of(Header) + align_of(Header) + offset_of(Header, count)
 `)
-	warnings := strings.Join(result.Deprecations(), "\n")
-	for _, check := range []string{
-		"`sizeof` is deprecated; use `size_of`",
-		"`alignof` is deprecated; use `align_of`",
-		"`offsetof` is deprecated; use `offset_of`",
-	} {
-		if !strings.Contains(warnings, check) {
-			t.Fatalf("expected warning %q, got:\n%s", check, warnings)
-		}
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected modern layout-introspection names to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 

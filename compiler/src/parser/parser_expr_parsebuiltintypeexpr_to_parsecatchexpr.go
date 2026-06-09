@@ -554,7 +554,7 @@ func (p *Parser) parseChildrenCallArgs() ([]ast.Expr, []string) {
 			pos := p.cur().Pos
 			p.advance()
 			target := p.parseTypeExpr()
-			p.errorAt(pos, "legacy children cast syntax `expr to T` is deprecated; use `expr as T` instead")
+			p.errorAt(pos, "the `expr to T` cast has been removed; use `expr.cast[T]` (reinterpret), a constructor `T(expr)` / `expr.T()` (value conversion), or `&expr` (reference)")
 			arg = &ast.CastExpr{Position: arg.Pos(), Operand: arg, Target: target, Origin: ast.CastExprOriginToSyntax}
 		}
 		args = append(args, arg)

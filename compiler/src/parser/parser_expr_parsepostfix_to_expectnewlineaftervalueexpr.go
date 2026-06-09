@@ -151,7 +151,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 			pos := p.cur().Pos
 			p.advance()
 			target := p.parseTypeExpr()
-			p.errorAt(pos, "legacy expression arrow cast `expr -> T` is deprecated; use `expr as T`, `expr.T()`, or `expr.cast[T]` instead")
+			p.errorAt(pos, "the `expr -> T` cast has been removed; use `expr.cast[T]` (reinterpret), a constructor `T(expr)` / `expr.T()` (value conversion), or `&expr` (reference)")
 			expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target}
 
 		case lexer.TOKEN_LBRACE:
@@ -406,12 +406,10 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if p.match(lexer.TOKEN_LPAREN) {
 			p.expect(lexer.TOKEN_RPAREN)
 		}
-		expr := &ast.SizeofExpr{Position: pos, Type: typ}
 		if syntax == "sizeof" {
-			expr.DeprecatedSyntax = "sizeof"
-			expr.DeprecatedReplacement = "size_of"
+			p.errorAt(pos, "`sizeof` has been removed; use `size_of`")
 		}
-		return expr
+		return &ast.SizeofExpr{Position: pos, Type: typ}
 	case lexer.TOKEN_ALIGNOF:
 		pos := p.cur().Pos
 		syntax := p.cur().Text
@@ -420,12 +418,10 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if p.match(lexer.TOKEN_LPAREN) {
 			p.expect(lexer.TOKEN_RPAREN)
 		}
-		expr := &ast.AlignofExpr{Position: pos, Type: typ}
 		if syntax == "alignof" {
-			expr.DeprecatedSyntax = "alignof"
-			expr.DeprecatedReplacement = "align_of"
+			p.errorAt(pos, "`alignof` has been removed; use `align_of`")
 		}
-		return expr
+		return &ast.AlignofExpr{Position: pos, Type: typ}
 	case lexer.TOKEN_OFFSETOF:
 		pos := p.cur().Pos
 		syntax := p.cur().Text
@@ -445,12 +441,10 @@ func (p *Parser) parsePrimary() ast.Expr {
 			field = p.parseLayoutIntrospectionFieldArg()
 			p.expect(lexer.TOKEN_RPAREN)
 		}
-		expr := &ast.OffsetofExpr{Position: pos, Type: typ, Field: field.Text}
 		if syntax == "offsetof" {
-			expr.DeprecatedSyntax = "offsetof"
-			expr.DeprecatedReplacement = "offset_of"
+			p.errorAt(pos, "`offsetof` has been removed; use `offset_of`")
 		}
-		return expr
+		return &ast.OffsetofExpr{Position: pos, Type: typ, Field: field.Text}
 	case lexer.TOKEN_TRY:
 		pos := p.cur().Pos
 		p.advance()
