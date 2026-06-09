@@ -362,6 +362,10 @@ Each phase ships independently and leaves the tree green.
 > loop left without `llvm.loop.isvectorized`. It is inlining-robust (marker rides in IR)
 > and false-positive-free (LLVM stamps `isvectorized` on the vector body *and* the scalar
 > remainder), and is gated to call-free bodies to stay low-noise.
+> **P4** adds the per-fold `by simd` marker: `( acc + x … with acc = 0.0 by simd )` scopes
+> the reassociated tree reduction to that one fold (emitting its accumulator update under
+> full fast-math FP) without the program-wide `-ffast-math`. Implemented as
+> `AssignStmt.FastMath` + a `fastMathScope` counter the backend's FP chokepoint honors.
 
 **Phase 1 — surface + sinks (sequential, no protocol value).** Parse `{…}` set,
 `{k:v …}` dict, `(… with acc =)` fold, and the comma-separated **head bindings**
