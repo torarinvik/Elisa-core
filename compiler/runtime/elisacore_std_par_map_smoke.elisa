@@ -1,0 +1,28 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+# `par_map(src, dst, transform)` fills an already-allocated `dst` with `transform(src[i])` over
+# disjoint bands in parallel. Because the caller allocates `dst` (no darray crosses the call
+# boundary), the result lives in the caller's region — race-free by band disjointness. This is the
+# directly-usable parallel-map primitive (the `[... by par]` map sugar, once it lands, lowers to it).
+def doubled(x: i64) -> i64:
+	return x * 2
+
+@test
+def std_par_map_smoke():
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		src: mutable darray[i64] = []
+		for k in 0..<2000:
+			_ = src.push(k)
+
+		out: mutable darray[i64] = []
+		_ = out.resize(src.count)
+		par_map(slice(&src), slice(&out), doubled)
+
+		assert out.count == 2000.usize()
+		# parallel result is identical to the sequential map, every element
+		ok: mutable bool = true
+		for i in 0..<src.count:
+			if out[i] != src[i] * 2:
+				ok <- false
+		assert ok
+		assert out[1999.usize()] == 3998

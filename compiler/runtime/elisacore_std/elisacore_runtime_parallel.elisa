@@ -36,6 +36,31 @@ def each[T](s: Slice[T], body: func(Slice[T]) -> i64, w: usize = 0.usize()) -> v
 			for t in 0..<nw:
 				submit body(s.split(nw, t))
 
+struct ParMapArg[T, U]:
+	src: Slice[T]
+	dst: Slice[U]
+	transform: func(T) -> U
+
+# Worker: fill the dst band with transform(src element) for each index. src and dst bands are the
+# t-th of the same `split(nw, t)` over equal-length slices, so they are aligned and disjoint across
+# workers (race-free writes; in-range -> get/set_unchecked).
+def par_map_worker[T, U](a: ParMapArg[T, U]) -> i64:
+	n: usize = a.src.len()
+	for i in 0..<n:
+		a.dst.set_unchecked(i, a.transform(a.src.get_unchecked(i)))
+	return 0
+
+# Parallel map-into: fills the already-allocated `dst` with `transform(src[i])` over disjoint bands
+# in parallel. `dst` must already have the same length as `src` (the caller allocates it, so the
+# result lives in the caller's region — no darray crosses the call boundary). The `[... by par]`
+# map comprehension lowers to this.
+def par_map[T, U](src: Slice[T], dst: Slice[U], transform: func(T) -> U, w: usize = 0.usize()) -> void:
+	can Parallel:
+		nw: usize = w if w != 0.usize() else default_workers_for(src.len())
+		nursery workers(nw):
+			for t in 0..<nw:
+				submit par_map_worker[T, U](ParMapArg[T, U] { src: src.split(nw, t), dst: dst.split(nw, t), transform: transform })
+
 struct ReduceArg[T]:
 	band: Slice[T]
 	partials: Slice[T]
