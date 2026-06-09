@@ -45,3 +45,42 @@ func TestBuildLocalReturnAdoptedNoUAF(t *testing.T) {
 	}
 	assertAllPassed(t, exit, stdout, stderr, "build_local_return_lives")
 }
+
+// Multi-return / conditional build-local-return: two literal-locals built in the SAME
+// function-body auto region (maybeWrapFunctionBodyInAutoRegion wraps the whole body in one
+// region), each returned on a different path. Both must be adopted into the caller's region —
+// no per-path region to unify. ASan-clean read-back of both.
+const buildLocalReturnMultiBody = `
+def pick(c: bool, n: usize) -> darray[i64]:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        i: mutable usize = 0
+        while i < n:
+            a.push(i.i64())
+            b.push(i.i64() * 10)
+            i <- i + 1
+        if c:
+            return a
+        return b
+
+@test
+def multi_return_lives() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            xs: darray[i64] = pick(true, 1000)
+            ys: darray[i64] = pick(false, 1000)
+            if xs.count != 1000 or ys.count != 1000:
+                panic("multi-return wrong count")
+            if xs[999] != 999 or ys[999] != 9990:
+                panic("multi-return values corrupted (UAF?)")
+`
+
+func TestBuildLocalReturnMultiPathAdoptedNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "build_local_return_multi", buildLocalReturnMultiBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "multi_return_lives")
+}
