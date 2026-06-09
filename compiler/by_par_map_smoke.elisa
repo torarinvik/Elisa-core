@@ -17,9 +17,7 @@ def mk(x: i64) -> Pair:
 @test
 def by_par_map_smoke():
 	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
-		a: mutable darray[i64] = []
-		for k in 0..<3000:
-			_ = a.push(k)
+		a: mutable darray[i64] = [k for k in 0..<3000]
 
 		doubled: darray[i64] = [x * 2 for x in a by par]
 		assert doubled.count == 3000.usize()

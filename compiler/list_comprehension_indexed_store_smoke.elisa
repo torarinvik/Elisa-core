@@ -18,9 +18,7 @@ def mk_pair(x: i64) -> Pair:
 @test
 def list_comprehension_indexed_store_smoke():
 	can Memory.Allocate, Abort.Panic:
-		src: mutable darray[i64] = []
-		for k in 0..<8:
-			_ = src.push(k)                        # [0..7]
+		src: mutable darray[i64] = [k for k in 0..<8]   # [0..7]
 
 		# fast path: plain map, order + values preserved
 		doubled: darray[i64] = [x * 2 for x in src]
@@ -36,9 +34,7 @@ def list_comprehension_indexed_store_smoke():
 		assert shifted[7.usize()] == 289          # (7+10)^2
 
 		# fast path: f64 map (the vectorizable case)
-		fsrc: mutable darray[f64] = []
-		for k in 0..<5:
-			_ = fsrc.push(k.f64())
+		fsrc: mutable darray[f64] = [k.f64() for k in 0..<5]
 		scaled: darray[f64] = [v * 1.5 for v in fsrc]
 		assert scaled.count == 5.usize()
 		assert scaled[4.usize()] == 6.0

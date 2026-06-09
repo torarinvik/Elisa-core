@@ -388,6 +388,12 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		return nil, false
 	}
 	pos := expr.Position
+	// A `_` (discard) element binder can't be declared as a usable local; substitute a synthetic
+	// name (the value never references `_`, so this is safe).
+	bindName := expr.Name
+	if bindName == "_" {
+		bindName = s.g.nextSyntheticName("list.comp.elem.")
+	}
 	idxName := s.g.nextSyntheticName("list.comp.i.")
 	idxIdent := &ast.Ident{Position: pos, Name: idxName}
 	var usizeType semantic.Type
@@ -417,7 +423,7 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		Args:     []ast.Expr{srcCount()},
 	}
 
-	elemDecl := &ast.VarDeclStmt{Position: pos, Name: expr.Name, Value: registerElemType(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent})}
+	elemDecl := &ast.VarDeclStmt{Position: pos, Name: bindName, Value: registerElemType(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent})}
 	store := &ast.AssignStmt{Position: pos, Target: registerElemType(&ast.IndexExpr{Position: pos, Object: resultIdent, Index: idxIdent}), Value: expr.Value}
 	body := []ast.Stmt{ast.Stmt(elemDecl)}
 	body = append(body, expr.Bindings...)
@@ -538,6 +544,13 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 	pos := expr.Position
 	start := expr.Source
 	end := expr.RangeEnd
+	// The index `loopName - start` references the loop variable, so it needs a real name. A `_`
+	// (discard) binder can't be read; substitute a synthetic name (the value never references `_`,
+	// so this is safe). Without this the synthesized `_ - start` reads an unbound discard.
+	loopName := expr.Name
+	if loopName == "_" {
+		loopName = s.g.nextSyntheticName("comp.range.i.")
+	}
 
 	// The synthesized arithmetic/ternary nodes have no analyzed types; the backend infers a
 	// TernaryExpr's result from its branches' exprType (nil -> void) and compares operands in
@@ -576,14 +589,14 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 		Args:     []ast.Expr{count},
 	}
 
-	storeIndex := reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Left: reg(&ast.Ident{Position: pos, Name: expr.Name}, rangeType), Right: start}, rangeType)
+	storeIndex := reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Left: reg(&ast.Ident{Position: pos, Name: loopName}, rangeType), Right: start}, rangeType)
 	store := &ast.AssignStmt{Position: pos, Target: &ast.IndexExpr{Position: pos, Object: resultIdent, Index: storeIndex}, Value: expr.Value}
 	body := append([]ast.Stmt{}, expr.Bindings...)
 	body = append(body, ast.Stmt(store))
 
 	loop := &ast.ForStmt{
 		Position:        pos,
-		Name:            expr.Name,
+		Name:            loopName,
 		Start:           start,
 		End:             end,
 		Op:              lexer.TOKEN_RANGE_LT,

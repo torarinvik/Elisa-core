@@ -8,9 +8,7 @@ include "./runtime/elisacore_std/elisacore_runtime.elisa"
 @test
 def by_par_fold_smoke():
 	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
-		a: mutable darray[i64] = []
-		for k in 0..<5000:
-			_ = a.push(k)
+		a: mutable darray[i64] = [k for k in 0..<5000]
 
 		# parallel sum == sequential sum
 		seq: mutable i64 = 0
@@ -21,16 +19,12 @@ def by_par_fold_smoke():
 		assert par == 12497500
 
 		# parallel product over a small input (avoid overflow)
-		b: mutable darray[i64] = []
-		for k in 1..<9:
-			_ = b.push(k)
+		b: mutable darray[i64] = [k for k in 1..<9]
 		prod: i64 = (acc * x for x in b with acc: i64 = 1 by par)
 		assert prod == 40320                          # 8!
 
 		# float parallel sum (by par reorders the combine — accepted, like by simd)
-		f: mutable darray[f64] = []
-		for k in 0..<1000:
-			_ = f.push(1.0)
+		f: mutable darray[f64] = [1.0 for _ in 0..<1000]
 		fsum: f64 = (acc + x for x in f with acc: f64 = 0.0 by par)
 		assert fsum == 1000.0
 

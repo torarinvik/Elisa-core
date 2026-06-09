@@ -8,9 +8,7 @@ include "./runtime/elisacore_std/elisacore_runtime.elisa"
 @test
 def by_simd_fold_smoke():
 	can Memory.Allocate, Abort.Panic:
-		a: mutable darray[f64] = []
-		for k in 0..<10:
-			_ = a.push(k.f64())                       # [0.0 .. 9.0]
+		a: mutable darray[f64] = [k.f64() for k in 0..<10]   # [0.0 .. 9.0]
 
 		total: f64 = (acc + x for x in a with acc: f64 = 0.0 by simd)
 		assert total == 45.0

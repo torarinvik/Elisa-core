@@ -10,9 +10,7 @@ def doubled(x: i64) -> i64:
 @test
 def std_par_map_smoke():
 	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
-		src: mutable darray[i64] = []
-		for k in 0..<2000:
-			_ = src.push(k)
+		src: mutable darray[i64] = [k for k in 0..<2000]
 
 		out: mutable darray[i64] = []
 		_ = out.resize(src.count)

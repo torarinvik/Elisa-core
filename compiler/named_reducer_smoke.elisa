@@ -8,25 +8,19 @@ include "./runtime/elisacore_std/elisacore_runtime.elisa"
 @test
 def named_reducer_smoke():
 	can Memory.Allocate, Abort.Panic:
-		a: mutable darray[i64] = []
-		for k in 0..<11:
-			_ = a.push(k)                              # 0..10
+		a: mutable darray[i64] = [k for k in 0..<11]     # 0..10
 
 		total: i64 = sum x in a                          # unconditional sum
 		assert total == 55
 		evens: i64 = sum x in a where x % 2 == 0         # filtered: 0+2+4+6+8+10
 		assert evens == 30
 
-		b: mutable darray[i64] = []
-		for k in 1..<6:
-			_ = b.push(k)                              # 1..5
+		b: mutable darray[i64] = [k for k in 1..<6]      # 1..5
 		prod: i64 = product x in b                       # 5!
 		assert prod == 120
 		prod2: i64 = product x in b where x != 3         # 1*2*4*5
 		assert prod2 == 40
 
-		f: mutable darray[f64] = []
-		for k in 0..<4:
-			_ = f.push(1.5)
+		f: mutable darray[f64] = [1.5 for _ in 0..<4]
 		fs: f64 = sum y in f                             # f64 reduction
 		assert fs == 6.0

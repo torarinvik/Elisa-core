@@ -7,9 +7,7 @@ include "./runtime/elisacore_std/elisacore_runtime.elisa"
 @test
 def named_reducer_minmax_smoke():
 	can Memory.Allocate, Abort.Panic:
-		a: mutable darray[i64] = []
-		for v in [5, 2, 8, 1, 9, 3]:
-			_ = a.push(v)
+		a: mutable darray[i64] = [5, 2, 8, 1, 9, 3]
 
 		lo: i64? = min x in a
 		match lo:
@@ -43,9 +41,7 @@ def named_reducer_minmax_smoke():
 				assert false
 
 		# f64 min
-		f: mutable darray[f64] = []
-		for v in [3.5, 1.25, 2.0]:
-			_ = f.push(v)
+		f: mutable darray[f64] = [3.5, 1.25, 2.0]
 		fl: f64? = min y in f
 		match fl:
 			null:
