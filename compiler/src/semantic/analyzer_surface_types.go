@@ -8,9 +8,6 @@ import (
 
 func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 	switch expr.Name {
-	case "Dict":
-		a.errorLegacyBuiltinReplacement(expr.Pos(), "Dict", "dict")
-		return invalidType, true
 	case "view":
 		if len(expr.Args) != 1 {
 			a.errorf(expr.Pos(), "view expects 1 argument, got %d", len(expr.Args))
@@ -23,18 +20,6 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 			return invalidType, true
 		}
 		return &ViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "view"}, true
-	case "DArray":
-		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArray", "darray")
-		return invalidType, true
-	case "DArrayView":
-		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArrayView", "view")
-		return invalidType, true
-	case "DList":
-		a.errorf(expr.Pos(), "DList has been removed from the language; use darray instead")
-		return invalidType, true
-	case "DListView":
-		a.errorf(expr.Pos(), "DListView has been removed from the language; use view instead")
-		return invalidType, true
 	default:
 		return nil, false
 	}

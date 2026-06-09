@@ -345,67 +345,6 @@ def roundtrip(text: cstr[row], raw: u8&) -> cstr[row]:
 	_, errs := parseAndAnalyze(t, "cstr_runtime_bridge_roundtrip.elisa", src)
 	requireNoErrors(t, errs)
 }
-func TestAnalyzeRejectsLegacyUppercaseBuiltinTypes(t *testing.T) {
-	src := `def bad_array(values: DArray[i32]) -> void:
-	pass
-
-def bad_array_view(values: DArrayView[i32]) -> void:
-	pass
-
-def bad_str(text: DStr[row]) -> void:
-	pass
-
-def bad_dict(values: Dict[cstr, i32]) -> void:
-	pass
-`
-	_, errs := parseAndAnalyze(t, "dynamic_shape_arity.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic errors, got none")
-	}
-	all := strings.Join(errs, "\n")
-	for _, want := range []string{
-		"legacy built-in \"DArray\" has been replaced; use \"darray\" instead",
-		"legacy built-in \"DArrayView\" has been replaced; use \"view\" instead",
-		"legacy built-in \"DStr\" has been replaced; use \"cstr\" instead",
-		"legacy built-in \"Dict\" has been replaced; use \"dict\" instead",
-	} {
-		if !strings.Contains(all, want) {
-			t.Fatalf("expected legacy-builtin diagnostic containing %q, got:\n%s", want, all)
-		}
-	}
-}
-func TestAnalyzeRejectsLegacyStringBuiltinAliases(t *testing.T) {
-	src := `def bad_fixed(text: string[5]) -> void:
-	pass
-
-def bad_dynamic(text: cstring[row]) -> void:
-	pass
-`
-	_, errs := parseAndAnalyze(t, "legacy_string_aliases.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic errors, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "legacy built-in \"string\" has been replaced; use \"str\" instead") || !strings.Contains(all, "legacy built-in \"cstring\" has been replaced; use \"cstr\" instead") {
-		t.Fatalf("expected legacy string alias diagnostics, got:\n%s", all)
-	}
-}
-func TestAnalyzeRejectsRemovedDListTypes(t *testing.T) {
-	src := `def bad_list(values: DList[i32, row]) -> void:
-	pass
-
-def bad_list_view(view: DListView[i32]) -> void:
-	pass
-`
-	_, errs := parseAndAnalyze(t, "removed_dlist_surface.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic errors, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "DList has been removed from the language") || !strings.Contains(all, "DListView has been removed from the language") {
-		t.Fatalf("expected removed-DList diagnostics, got:\n%s", all)
-	}
-}
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
 	src := `def non_empty[T](view: view[T]) -> bool:
 	return view.len > 0

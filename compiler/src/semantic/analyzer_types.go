@@ -19,10 +19,6 @@ func astAggregateStates(expr *ast.AggregateStateTypeExpr) []RefState {
 	return []RefState{RefState(expr.State)}
 }
 
-func (a *Analyzer) errorLegacyBuiltinReplacement(pos lexer.Pos, oldName, replacement string) {
-	a.errorf(pos, "legacy built-in %q has been replaced; use %q instead", oldName, replacement)
-}
-
 func (a *Analyzer) defineGlobal(sym *Symbol, pos lexer.Pos) {
 	if existing, ok := a.globalScope.Define(sym); !ok {
 		a.errorf(pos, "%s", DuplicateDeclarationMessage(existing.Name, existing.Kind))

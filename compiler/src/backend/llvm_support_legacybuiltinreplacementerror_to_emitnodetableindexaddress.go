@@ -14,10 +14,6 @@ import (
 	"fmt"
 )
 
-func legacyBuiltinReplacementError(oldName, replacement string) error {
-	return fmt.Errorf("legacy built-in %q has been replaced; use %q instead", oldName, replacement)
-}
-
 // backendIsAddressableLValue reports whether expr denotes a storage location whose
 // address emitAddress can take (mirroring emitAddress's supported node kinds). Used to
 // decide when materializing a `T&` from a value-typed expression should take the

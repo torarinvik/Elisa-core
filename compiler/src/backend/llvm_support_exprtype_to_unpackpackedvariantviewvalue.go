@@ -84,8 +84,6 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 }
 func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic.Type, bool, error) {
 	switch expr.Name {
-	case "Dict":
-		return nil, true, legacyBuiltinReplacementError("Dict", "dict")
 	case "view":
 		if len(expr.Args) != 1 {
 			return nil, true, fmt.Errorf("view expects 1 argument, got %d", len(expr.Args))
@@ -97,14 +95,6 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		return &semantic.ViewType{Elem: elem, SurfaceName: "view"}, true, nil
 	case "packedview":
 		return nil, true, fmt.Errorf("packedview must be written with builtin syntax like packedview[Expr.Lit]")
-	case "DArray":
-		return nil, true, legacyBuiltinReplacementError("DArray", "darray")
-	case "DArrayView":
-		return nil, true, legacyBuiltinReplacementError("DArrayView", "view")
-	case "DList":
-		return nil, true, fmt.Errorf("DList has been removed from the language; use darray instead")
-	case "DListView":
-		return nil, true, fmt.Errorf("DListView has been removed from the language; use view instead")
 	default:
 		return nil, false, nil
 	}
