@@ -102,7 +102,7 @@ func TestParseOneLineIfBodyInsideOneLineFunction(t *testing.T) {
 }
 
 func TestParseOneLineImplMethodBodies(t *testing.T) {
-	file, errs := parseSourceFile(t, "interface Box:\n    def get() -> int\n\nimpl Box for int:\n    def get() -> int: return 1\n")
+	file, errs := parseSourceFile(t, "protocol Box:\n    def get() -> int\n\nimpl Box for int:\n    def get() -> int: return 1\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

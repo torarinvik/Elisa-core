@@ -21,6 +21,14 @@ static interface Builder:
 	}
 }
 
+// The `interface` keyword was a silent alias for `protocol`; it is now rejected outright.
+func TestParseInterfaceSpellingIsRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, "interface Box:\n    def get() -> int\n")
+	if !strings.Contains(strings.Join(errs, "\n"), "`interface` has been removed; use `protocol`") {
+		t.Fatalf("expected removed interface parser error, got: %v", errs)
+	}
+}
+
 func TestParseStaticInterfaceImplAndBoundedGeneric(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 struct BuilderTag:

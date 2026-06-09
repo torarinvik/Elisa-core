@@ -252,7 +252,9 @@ func (p *Parser) parseDecl() ast.Decl {
 		return nil
 	}
 	if p.peekIdentText("interface") {
-		return p.parseInterfaceDecl()
+		p.errorf("`interface` has been removed; use `protocol`")
+		p.skipRejectedDecl()
+		return nil
 	}
 	if p.peekIdentText("impl") {
 		return p.parseImplDecl()
