@@ -42,6 +42,26 @@ func TestBuildLocalReturnDstrIsAccepted(t *testing.T) {
 	}
 }
 
+// SOUNDNESS FLOOR: a GENERIC build-local-return builder must NOT be classified region-poly yet —
+// region-poly `__region_auto` threading does not compose with generic specialization, so accepting
+// it would be a silent use-after-free (the returned darray header dangles). Until generic region-poly
+// is fixed, the generic builder must keep producing the escape diagnostic, not miscompile.
+func TestGenericBuildLocalReturnStillRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "build_local_return_generic.elisa", `def make_gen[T](n: usize, seed: T) -> darray[T]:
+    out: mutable darray[T] = []
+    _ = out.resize(n)
+    i: mutable usize = 0
+    while i < n:
+        out[i] <- seed
+        i <- i + 1
+    return out
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "escapes") {
+		t.Fatalf("expected a generic build-local-return builder to still be rejected (generic region-poly unsupported), got:\n%s", joined)
+	}
+}
+
 // SOUNDNESS FLOOR: the build-local-return relaxation must NOT leak to the
 // store-into-longer-lived-storage path. Building in the inferred region and
 // storing into a caller field is still a use-after-free (only `return` threads
