@@ -228,8 +228,6 @@ func formatExpr(expr ast.Expr) string {
 			}
 		}
 		return formatExpr(n.Operand) + ".cast[" + formatTypeExpr(n.Target) + "]"
-	case *ast.CascadeExpr:
-		return "cascade " + formatExpr(n.Target) + " => " + formatCascadeExprValue(n.Value)
 	case *ast.LambdaExpr:
 		return formatLambdaExpr(n)
 	case *ast.SizeofExpr:

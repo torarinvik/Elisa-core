@@ -483,9 +483,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 			pos := p.cur().Pos
 			p.advance()
 			target := p.parseExpr()
-			p.expect(lexer.TOKEN_FATARROW)
-			value := p.parseExpr()
-			return &ast.CascadeExpr{Position: pos, Target: target, Value: value}
+			p.errorAt(pos, "the `cascade` expression has been removed")
+			if p.match(lexer.TOKEN_FATARROW) {
+				_ = p.parseExpr() // discard the cascade value for recovery
+			}
+			return target
 		}
 		if p.cur().Text == "visit" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
 			return p.parseVisitExpr()

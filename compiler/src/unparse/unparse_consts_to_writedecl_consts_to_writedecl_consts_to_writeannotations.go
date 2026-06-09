@@ -110,16 +110,6 @@ func indentMultilineText(text string, prefix string) string {
 	}
 	return strings.Join(lines, "\n")
 }
-func formatCascadeExprValue(expr ast.Expr) string {
-	text := formatExpr(expr)
-	switch expr.(type) {
-	case *ast.BinaryExpr, *ast.UnaryExpr, *ast.TernaryExpr:
-		if len(text) >= 2 && text[0] == '(' && text[len(text)-1] == ')' {
-			return text[1 : len(text)-1]
-		}
-	}
-	return text
-}
 func formatLexerCharClassTerm(term ast.LexerCharClassTerm) string {
 	if term.Ref {
 		return term.Name

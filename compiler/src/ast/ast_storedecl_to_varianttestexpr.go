@@ -684,11 +684,6 @@ type CastExpr struct {
 	// pointing at the `&x` / `(&x).cast[T]` replacement.
 	RefShorthand bool
 }
-type CascadeExpr struct {
-	Position lexer.Pos
-	Target   Expr
-	Value    Expr
-}
 type LambdaExpr struct {
 	Position            lexer.Pos
 	Keyword             string

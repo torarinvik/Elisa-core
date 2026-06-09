@@ -307,11 +307,6 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
-	case *ast.CascadeStmt:
-		f.writeLine(level, "cascade "+formatExpr(n.Target)+":")
-		for _, stmt := range n.Body {
-			f.writeStmt(level+1, stmt)
-		}
 	case *ast.ScopeStmt:
 		f.writeLine(level, "scope "+formatExpr(n.Guard)+":")
 		for _, stmt := range n.Body {

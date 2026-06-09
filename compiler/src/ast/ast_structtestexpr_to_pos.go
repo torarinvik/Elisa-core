@@ -426,11 +426,6 @@ type ArgsScopeStmt struct {
 	ItemOrder  []ArgsScopeItem
 	Body       []Stmt
 }
-type CascadeStmt struct {
-	Position lexer.Pos
-	Target   Expr
-	Body     []Stmt
-}
 type ScopeStmt struct {
 	Position lexer.Pos
 	Guard    Expr

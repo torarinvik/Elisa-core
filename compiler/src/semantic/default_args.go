@@ -127,13 +127,6 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 			return nil
 		}
 		return &ast.CastExpr{Position: n.Position, Operand: operand, Target: n.Target, Origin: n.Origin}
-	case *ast.CascadeExpr:
-		target := cloneDefaultArgExpr(n.Target)
-		value := cloneDefaultArgExpr(n.Value)
-		if (n.Target != nil && target == nil) || (n.Value != nil && value == nil) {
-			return nil
-		}
-		return &ast.CascadeExpr{Position: n.Position, Target: target, Value: value}
 	case *ast.LambdaExpr:
 		bodyExpr := cloneDefaultArgExpr(n.BodyExpr)
 		if n.BodyExpr != nil && bodyExpr == nil {

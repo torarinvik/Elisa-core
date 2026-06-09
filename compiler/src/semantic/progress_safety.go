@@ -496,9 +496,6 @@ func (c *progressCallCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Owner)
 	case *ast.CastExpr:
 		c.collectExpr(n.Operand)
-	case *ast.CascadeExpr:
-		c.collectExpr(n.Target)
-		c.collectExpr(n.Value)
 	case *ast.TernaryExpr:
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Cond)

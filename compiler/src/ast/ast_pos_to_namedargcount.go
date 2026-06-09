@@ -90,7 +90,6 @@ func (n *ListComprehensionExpr) Pos() lexer.Pos {
 }
 func (n *QueryExpr) Pos() lexer.Pos      { return n.Position }
 func (n *CastExpr) Pos() lexer.Pos       { return n.Position }
-func (n *CascadeExpr) Pos() lexer.Pos    { return n.Position }
 func (n *LambdaExpr) Pos() lexer.Pos     { return n.Position }
 func (n *SizeofExpr) Pos() lexer.Pos     { return n.Position }
 func (n *AlignofExpr) Pos() lexer.Pos    { return n.Position }
@@ -166,7 +165,6 @@ func (n *InStoreStmt) Pos() lexer.Pos                  { return n.Position }
 func (n *CanStmt) Pos() lexer.Pos                      { return n.Position }
 func (n *WithStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *ArgsScopeStmt) Pos() lexer.Pos                { return n.Position }
-func (n *CascadeStmt) Pos() lexer.Pos                  { return n.Position }
 func (n *PoolStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *LockStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *PassStmt) Pos() lexer.Pos                     { return n.Position }
@@ -309,7 +307,6 @@ func (*MembershipRangeExpr) nodeTag()                  {}
 func (*ListComprehensionExpr) nodeTag()                {}
 func (*QueryExpr) nodeTag()                            {}
 func (*CastExpr) nodeTag()                             {}
-func (*CascadeExpr) nodeTag()                          {}
 func (*LambdaExpr) nodeTag()                           {}
 func (*SizeofExpr) nodeTag()                           {}
 func (*AlignofExpr) nodeTag()                          {}
@@ -375,7 +372,6 @@ func (*InStoreStmt) nodeTag()                          {}
 func (*CanStmt) nodeTag()                              {}
 func (*WithStmt) nodeTag()                             {}
 func (*ArgsScopeStmt) nodeTag()                        {}
-func (*CascadeStmt) nodeTag()                          {}
 func (*ScopeStmt) nodeTag()                            {}
 func (*PoolStmt) nodeTag()                             {}
 func (*LockStmt) nodeTag()                             {}
@@ -531,7 +527,6 @@ func (*MoveBindVariantPattern) moveBindPatternTag()    {}
 func (*ListLitExpr) exprTag()                          {}
 func (*MembershipRangeExpr) exprTag()                  {}
 func (*CastExpr) exprTag()                             {}
-func (*CascadeExpr) exprTag()                          {}
 func (*LambdaExpr) exprTag()                           {}
 func (*SizeofExpr) exprTag()                           {}
 func (*AlignofExpr) exprTag()                          {}
@@ -583,7 +578,6 @@ func (*InStoreStmt) stmtTag()                          {}
 func (*CanStmt) stmtTag()                              {}
 func (*WithStmt) stmtTag()                             {}
 func (*ArgsScopeStmt) stmtTag()                        {}
-func (*CascadeStmt) stmtTag()                          {}
 func (*ScopeStmt) stmtTag()                            {}
 func (*PoolStmt) stmtTag()                             {}
 func (*LockStmt) stmtTag()                             {}

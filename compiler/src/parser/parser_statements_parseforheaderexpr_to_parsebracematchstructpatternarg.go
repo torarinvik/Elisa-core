@@ -837,14 +837,18 @@ func (p *Parser) parseWithArenaStmt() *ast.RegionStmt {
 	body := p.parseBlock()
 	return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity, OwnerName: ownerName, Body: body}
 }
-func (p *Parser) parseCascadeStmt() *ast.CascadeStmt {
+// parseCascadeStmt recognizes the removed `cascade <target>:` statement and rejects it. The cascade
+// feature (method-cascade sugar) has been removed; the target and body are consumed for recovery.
+func (p *Parser) parseCascadeStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("cascade")
-	target := p.parseExpr()
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	body := p.parseBlock()
-	return &ast.CascadeStmt{Position: pos, Target: target, Body: body}
+	p.errorAt(pos, "the `cascade` statement has been removed")
+	_ = p.parseExpr()
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		_ = p.parseBlock()
+	}
+	return &ast.PassStmt{Position: pos}
 }
 func (p *Parser) parseMatchArms() []ast.MatchArm {
 	p.expect(lexer.TOKEN_COLON)

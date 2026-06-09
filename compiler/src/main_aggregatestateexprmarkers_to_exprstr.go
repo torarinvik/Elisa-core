@@ -471,8 +471,6 @@ func exprStr(e ast.Expr) string {
 			return fmt.Sprintf("%s as %s", exprStr(n.Operand), typeStr(n.Target))
 		}
 		return fmt.Sprintf("%s.cast[%s]", exprStr(n.Operand), typeStr(n.Target))
-	case *ast.CascadeExpr:
-		return fmt.Sprintf("cascade %s => %s", exprStr(n.Target), exprStr(n.Value))
 	case *ast.CatchExpr:
 		lines := []string{fmt.Sprintf("catch %s:", exprStr(n.Value))}
 		formatArm := func(arm ast.CatchArm) {

@@ -232,7 +232,6 @@ func registerBundleTypes() {
 		gob.Register(&ast.CanStmt{})
 		gob.Register(&ast.WithStmt{})
 		gob.Register(&ast.ArgsScopeStmt{})
-		gob.Register(&ast.CascadeStmt{})
 		gob.Register(&ast.PoolStmt{})
 		gob.Register(&ast.LockStmt{})
 		gob.Register(&ast.PassStmt{})

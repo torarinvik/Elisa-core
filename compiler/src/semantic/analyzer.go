@@ -456,7 +456,6 @@ func Analyze(file *ast.File) *Result {
 }
 
 func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
-	normalizeCascadeStmts(file)
 	loweredFile := grammar.LowerFile(file)
 	activeFile := loweredFile
 	if activeFile == nil {

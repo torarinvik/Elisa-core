@@ -1808,8 +1808,6 @@ func (a *Analyzer) walkStaticExpr(expr ast.Expr, visitExpr func(ast.Expr) bool) 
 		return a.walkStaticStmts(n.Bindings, visitExpr) || a.walkStaticExpr(n.Key, visitExpr) || a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Source, visitExpr) || a.walkStaticExpr(n.RangeEnd, visitExpr) || a.walkStaticExpr(n.RangeStep, visitExpr) || a.walkStaticExpr(n.Filter, visitExpr) || a.walkStaticExpr(n.Owner, visitExpr)
 	case *ast.QueryExpr:
 		return a.walkStaticExpr(n.Source, visitExpr) || a.walkStaticExpr(n.Filter, visitExpr) || a.walkStaticExpr(n.Projection, visitExpr) || a.walkStaticExpr(n.Owner, visitExpr)
-	case *ast.CascadeExpr:
-		return a.walkStaticExpr(n.Target, visitExpr) || a.walkStaticExpr(n.Value, visitExpr)
 	case *ast.LambdaExpr:
 		return a.walkStaticStmts(n.Body, visitExpr) || a.walkStaticExpr(n.BodyExpr, visitExpr)
 	case *ast.AddrOfExpr:
