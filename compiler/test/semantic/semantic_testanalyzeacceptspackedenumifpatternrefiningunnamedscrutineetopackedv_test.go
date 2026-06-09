@@ -365,7 +365,7 @@ def inspect(owner: Arena) -> i32:
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
 	table[key] <- 0
 	again: Expr = frozen[key]
-	values: dview[i32] = table.values
+	values: view[i32] = table.values
 	if values.len == frozen.count:
 		return again.span
 	return 0
@@ -384,7 +384,7 @@ def inspect(owner: Arena) -> i32:
 	requireExprTypeString(t, result, keyExpr, "NodeKey[Expr]")
 	requireExprTypeString(t, result, tableExpr, "NodeTable[Expr, i32]")
 	requireExprTypeString(t, result, againExpr, "Expr")
-	requireExprTypeString(t, result, valuesExpr, "dview[i32]")
+	requireExprTypeString(t, result, valuesExpr, "view[i32]")
 
 	keyInfo, ok := result.DenseNodeKeys[keyExpr]
 	if !ok {
@@ -446,7 +446,7 @@ def inspect(owner: Arena) -> i32:
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1)
 	table[key] <- 0
 	again: Expr = box.store[key]
-	values: dview[i32] = table.values
+	values: view[i32] = table.values
 	if values.len == box.store.count:
 		return again.span
 	return 0

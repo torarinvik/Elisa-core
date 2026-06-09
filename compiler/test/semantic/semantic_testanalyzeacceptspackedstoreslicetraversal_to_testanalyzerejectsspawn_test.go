@@ -20,7 +20,7 @@ def walk(owner: Arena) -> int:
 		_ = new Expr.Add(span: 3, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	chunk: dview[Expr] = frozen[1:frozen.count]
+	chunk: view[Expr] = frozen[1:frozen.count]
 	total: mutable int = 0
 	index: mutable usize = 0
 	while index < chunk.len:
@@ -101,7 +101,7 @@ func TestAnalyzeAcceptsIterableForLoopOverChunksExactView(t *testing.T) {
 	return value + bias
 
 def run(values: darray[i64, 4], bias: i64) -> i64:
-	base: dview[i64] = values[0:4]
+	base: view[i64] = values[0:4]
 	chunks: ChunksExactView[i64] = chunks_exact(readonly(base), 2)
 	total: mutable i64 = 0
 	for chunk in chunks:
@@ -115,7 +115,7 @@ def run(values: darray[i64, 4], bias: i64) -> i64:
 }
 func TestAnalyzeRejectsIterableForLoopRefOverChunksExactView(t *testing.T) {
 	src := `def bad(values: darray[i32, 4]) -> void:
-	base: dview[i32] = values[0:4]
+	base: view[i32] = values[0:4]
 	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2)
 	for ref chunk in chunks:
 		_ = chunk
@@ -197,7 +197,7 @@ def visit(owner: Arena) -> int:
 			right: Expr = new Expr.Int(value: 2)
 			_ = new Expr.Add(left: left, right: right)
 		frozen: Expr.Store[Frozen] = freeze(move store)
-		tags: dview[Expr.Tag] = frozen.tags
+		tags: view[Expr.Tag] = frozen.tags
 		pool workers(2):
 			parallel for tag at i in tags:
 				_ = i
@@ -252,7 +252,7 @@ func TestAnalyzeAcceptsParallelForOverReadonlyChunksExactView(t *testing.T) {
 	src := parallelForConcurrencyPrelude + `
 def visit(values: darray[i32, 4]) -> int:
 	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		full: dview[i32] = values[0:4]
+		full: view[i32] = values[0:4]
 		chunks: ChunksExactView[i32] = chunks_exact(readonly(full), 2)
 		pool workers(2):
 			parallel for chunk in chunks:
@@ -304,7 +304,7 @@ func TestAnalyzeAcceptsReduceSumWithReadonlySourceAndExtraArgs(t *testing.T) {
 	return value + bias
 
 def run(values: darray[i64, 4], bias: i64) -> i64:
-	base: dview[i64] = values[0:4]
+	base: view[i64] = values[0:4]
 	return reduce_sum(readonly(base), add_bias, bias)
 `
 	result, errs := parseAndAnalyze(t, "reduce_sum_ok.elisa", src)
@@ -317,7 +317,7 @@ func TestAnalyzeRejectsReduceSumNonNumericCallbackResult(t *testing.T) {
 	return value > 0
 
 def bad(values: darray[i64, 4]) -> i64:
-	base: dview[i64] = values[0:4]
+	base: view[i64] = values[0:4]
 	return reduce_sum(readonly(base), is_positive)
 `
 	_, errs := parseAndAnalyze(t, "reduce_sum_bool_callback_reject.elisa", src)
@@ -334,7 +334,7 @@ func TestAnalyzeRejectsAssigningPackedStoreSliceIndexResult(t *testing.T) {
 	Int(value: int)
 
 def bad(store: Expr.Store[Frozen], node: Expr) -> void:
-	chunk: dview[Expr] = store[0:store.count]
+	chunk: view[Expr] = store[0:store.count]
 	chunk[0] <- node
 `
 	_, errs := parseAndAnalyze(t, "packed_store_slice_index_assign_reject.elisa", src)
@@ -351,7 +351,7 @@ func TestAnalyzeRejectsAssigningPackedStoreTagViewIndexResult(t *testing.T) {
 	Int(value: int)
 
 def bad(store: Expr.Store[Frozen]) -> void:
-	tags: dview[Expr.Tag] = store.tags
+	tags: view[Expr.Tag] = store.tags
 	tags[0] <- Expr.Tag.Int
 `
 	_, errs := parseAndAnalyze(t, "packed_store_tag_view_index_assign_reject.elisa", src)

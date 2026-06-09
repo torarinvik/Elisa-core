@@ -267,17 +267,17 @@ func TestGenerateLLVMIRMarksDisjointDViewMemcpyCallsNoAlias(t *testing.T) {
 
 extern arena_memcpy(dest: void&?, src: void&?, n: usize) -> void&?
 
-def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
+def arena_da_view_prefix[T](view: view[T], end: usize) -> view[T]:
 	_ = end
 	return view
 
-def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+def arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]:
 	_ = start
 	return view
 
-def split_copy(view: dview[i32]) -> void&?:
-	prefix: dview[i32] = arena_da_view_prefix(view, 2)
-	suffix: dview[i32] = arena_da_view_suffix(view, 2)
+def split_copy(view: view[i32]) -> void&?:
+	prefix: view[i32] = arena_da_view_prefix(view, 2)
+	suffix: view[i32] = arena_da_view_suffix(view, 2)
 	return arena_memcpy(prefix.data, suffix.data, prefix.len * prefix.elem_size)
 `
 	result := parseAndAnalyze(t, "backend_dview_split_memcpy.elisa", src)
@@ -307,41 +307,41 @@ struct DynArrayView:
 
 extern arena_memcpy(dest: void&?, src: void&?, n: usize) -> void&?
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	if dst.len != src.len:
 		return
 	_ = dst
 	_ = src
 
 def copy_split(values: darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
-	right: dview[i32] = base[2:4]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
+	right: view[i32] = base[2:4]
 	arena_da_copy_exact(left, right)
 
 def copy_overlap(values: darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:3]
-	right: dview[i32] = base[1:4]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:3]
+	right: view[i32] = base[1:4]
 	arena_da_copy_exact(left, right)
 
 def copy_overlap_backward(values: darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[1:4]
-	right: dview[i32] = base[0:3]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[1:4]
+	right: view[i32] = base[0:3]
 	arena_da_copy_exact(left, right)
 
 def copy_overlap_unknown(values: darray[i32, shape_in]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0, values.count)
-	left: dview[i32] = base[0:values.count - 1]
-	right: dview[i32] = base[1:values.count]
+	base: view[i32] = arena_da_view(values, 0, values.count)
+	left: view[i32] = base[0:values.count - 1]
+	right: view[i32] = base[1:values.count]
 	arena_da_copy_exact(left, right)
 `
 	result := parseAndAnalyze(t, "backend_dview_copy_exact.elisa", src)

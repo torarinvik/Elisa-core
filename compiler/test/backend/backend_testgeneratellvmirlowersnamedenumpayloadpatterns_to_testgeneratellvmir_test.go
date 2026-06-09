@@ -163,7 +163,7 @@ def inspect(owner: Arena) -> i32:
 	key: NodeKey[Expr] = dense_key(node, frozen)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
 	table[key] <- 0
-	values: dview[i32] = table.values
+	values: view[i32] = table.values
 	if values.len == frozen.count:
 		return frozen[key].span
 	return 0

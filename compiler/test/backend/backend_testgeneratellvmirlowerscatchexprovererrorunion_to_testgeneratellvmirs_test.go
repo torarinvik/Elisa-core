@@ -306,7 +306,7 @@ struct DynArrayView:
 def read_array(values: darray[i32, row]) -> i32:
     return values[1]
 
-def read_view(view: dview[i32]) -> i32:
+def read_view(view: view[i32]) -> i32:
     return view[2]
 `
 	result := parseAndAnalyze(t, "backend_runtime_index.elisa", src)

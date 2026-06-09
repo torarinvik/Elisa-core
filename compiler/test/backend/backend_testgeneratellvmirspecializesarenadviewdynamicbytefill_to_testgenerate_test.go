@@ -19,28 +19,28 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_fill[T](dst: dview[T], value: T):
+def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
-	base: dview[u8] = arena_da_view(values, 0, 4)
-	left: dview[u8] = base[0:2]
+	base: view[u8] = arena_da_view(values, 0, 4)
+	left: view[u8] = base[0:2]
 	arena_da_fill(left, value)
 
 def fill_runtime_wide(values: darray[i32, 4]&, value: i32) -> void:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
 	arena_da_fill(left, value)
 
-def fill_runtime_wide_unknown(view: dview[i32], value: i32) -> void:
+def fill_runtime_wide_unknown(view: view[i32], value: i32) -> void:
 	arena_da_fill(view, value)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte.elisa", src)
@@ -96,25 +96,25 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_fill[T](dst: dview[T], value: T):
+def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_literal_int_to_bytes(values: darray[u8, 4]&) -> void:
-	base: dview[u8] = arena_da_view(values, 0, 4)
-	left: dview[u8] = base[0:2]
+	base: view[u8] = arena_da_view(values, 0, 4)
+	left: view[u8] = base[0:2]
 	arena_da_fill(left, 7)
 
 def fill_runtime_int_to_bytes(values: darray[u8, 4]&, value: int) -> void:
-	base: dview[u8] = arena_da_view(values, 0, 4)
-	left: dview[u8] = base[0:2]
+	base: view[u8] = arena_da_view(values, 0, 4)
+	left: view[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_coerced_byte.elisa", src)
@@ -133,7 +133,7 @@ def fill_runtime_int_to_bytes(values: darray[u8, 4]&, value: int) -> void:
 	if strings.Contains(literalBody, "call ptr @memset(ptr") {
 		t.Fatalf("expected fill_literal_int_to_bytes to use direct byte stores on the tiny exact fast path, got:\n%s", literalBody)
 	}
-	if strings.Count(literalBody, "store i8 7, ptr %dview.fill.elem.ptr") < 2 {
+	if strings.Count(literalBody, "store i8 7, ptr %view.fill.elem.ptr") < 2 {
 		t.Fatalf("expected fill_literal_int_to_bytes to lower through direct byte stores, got:\n%s", literalBody)
 	}
 
@@ -162,20 +162,20 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_fill[T](dst: dview[T], value: T):
+def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
-	base: dview[u8] = arena_da_view(values, 0, 4)
-	left: dview[u8] = base[0:2]
+	base: view[u8] = arena_da_view(values, 0, 4)
+	left: view[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_optimized.elisa", src)
@@ -203,20 +203,20 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_fill[T](dst: dview[T], value: T):
+def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
-	base: dview[u8] = arena_da_view(values, 0, 4)
-	left: dview[u8] = base[0:2]
+	base: view[u8] = arena_da_view(values, 0, 4)
+	left: view[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_object.elisa", src)
@@ -292,38 +292,38 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
+def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	_ = left
 	_ = right
 	return false
 
 def eq_split(values: darray[i32, 4]&) -> bool:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
-	right: dview[i32] = base[2:4]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
+	right: view[i32] = base[2:4]
 	return arena_da_eq_exact(left, right)
 
 def eq_overlap(values: darray[i32, 4]&) -> bool:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:3]
-	right: dview[i32] = base[1:4]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:3]
+	right: view[i32] = base[1:4]
 	return arena_da_eq_exact(left, right)
 
 def eq_same(values: darray[i32, 4]&) -> bool:
-	base: dview[i32] = arena_da_view(values, 0, 4)
+	base: view[i32] = arena_da_view(values, 0, 4)
 	return arena_da_eq_exact(base, base)
 
 def eq_diff_extent(values: darray[i32, 4]&) -> bool:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:1]
-	right: dview[i32] = base[2:4]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:1]
+	right: view[i32] = base[2:4]
 	return arena_da_eq_exact(left, right)
 `
 	result := parseAndAnalyze(t, "backend_dview_eq_exact.elisa", src)

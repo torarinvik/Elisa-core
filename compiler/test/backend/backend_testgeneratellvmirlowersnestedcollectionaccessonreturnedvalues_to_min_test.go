@@ -19,7 +19,7 @@ struct DynArrayView:
 	elem_size: mutable usize
 
 extern make_array() -> darray[i32, row]
-extern make_array_view() -> dview[i32]
+extern make_array_view() -> view[i32]
 
 def read_array_index() -> i32:
 	return make_array()[1]
@@ -348,7 +348,7 @@ func TestGenerateLLVMIRLowersIterableForLoopOverDynamicString(t *testing.T) {
 }
 func TestGenerateLLVMIRLowersIterableForLoopOverChunksExactView(t *testing.T) {
 	src := `def checksum(values: darray[i32, 4]) -> i32:
-	base: dview[i32] = values[0:4]
+	base: view[i32] = values[0:4]
 	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2)
 	total: mutable i32 = 0
 	for chunk in chunks:
@@ -382,11 +382,11 @@ func TestGenerateLLVMIRLowersIterableForLoopOverChunksExactView(t *testing.T) {
 }
 func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 	src := `def run(values: darray[i32, 4]) -> void:
-	base: dview[i32] = values[0:4]
+	base: view[i32] = values[0:4]
 	halves: SplitView[i32] = split_at(base, 2)
-	left: dview[i32] = halves.left
+	left: view[i32] = halves.left
 	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2)
-	first: dview[i32] = chunks[0]
+	first: view[i32] = chunks[0]
 	_ = left
 	_ = first
 `
@@ -416,7 +416,7 @@ func TestGenerateLLVMIRLowersReduceSumHelper(t *testing.T) {
 	return value + bias
 
 def run(values: darray[i64, 4], bias: i64) -> i64:
-	base: dview[i64] = values[0:4]
+	base: view[i64] = values[0:4]
 	return reduce_sum(readonly(base), add_bias, bias)
 `
 	result := parseAndAnalyze(t, "backend_reduce_sum_helper.elisa", src)

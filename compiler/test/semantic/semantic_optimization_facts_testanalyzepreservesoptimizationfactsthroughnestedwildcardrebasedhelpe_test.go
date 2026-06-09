@@ -331,13 +331,13 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 }
 func TestAnalyzeCollectsOptimizationFactsForProofCarryingViewHelpers(t *testing.T) {
 	src := `def inspect(values: darray[i32, 4]) -> int:
-	whole: dview[i32] = values[0:4]
-	readonly_whole: dview[i32] = readonly(whole)
+	whole: view[i32] = values[0:4]
+	readonly_whole: view[i32] = readonly(whole)
 	halves: SplitView[i32] = split_at(whole, 2)
-	left: dview[i32] = halves.left
-	right: dview[i32] = halves.right
+	left: view[i32] = halves.left
+	right: view[i32] = halves.right
 	chunks: ChunksExactView[i32] = chunks_exact(readonly_whole, 2)
-	first_chunk: dview[i32] = chunks[0]
+	first_chunk: view[i32] = chunks[0]
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_proof_carrying_view_helpers.elisa", src)
@@ -358,7 +358,7 @@ func TestAnalyzeCollectsOptimizationFactsForProofCarryingViewHelpers(t *testing.
 	firstChunkFacts := requireExprOptimizationFacts(t, result, firstChunkExpr)
 
 	if !wholeFacts.HasExactExtent() || !wholeFacts.Contiguous || !wholeFacts.UnitStride {
-		t.Fatalf("expected full dview slice to expose dense exact facts, got %#v", wholeFacts)
+		t.Fatalf("expected full view slice to expose dense exact facts, got %#v", wholeFacts)
 	}
 	if !readonlyFacts.ReadOnly || !readonlyFacts.HasExactExtent() {
 		t.Fatalf("expected readonly helper to preserve exact extent and mark readonly, got %#v", readonlyFacts)

@@ -259,25 +259,25 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_from_view[T](a: Arena&, view: dview[T]) -> darray[T, shape_out]:
+def arena_da_from_view[T](a: Arena&, view: view[T]) -> darray[T, shape_out]:
 	_ = a
 	_ = view
 	out: darray[T, shape_out] = zeroed
 	return out
 
 def materialize_split(a: Arena&, values: darray[i32, 4]&) -> darray[i32]:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
 	return arena_da_from_view(a, left)
 
-def materialize_unknown(a: Arena&, view: dview[i32]) -> darray[i32]:
+def materialize_unknown(a: Arena&, view: view[i32]) -> darray[i32]:
 	return arena_da_from_view(a, view)
 `
 	result := parseAndAnalyze(t, "backend_dview_materialize.elisa", src)
@@ -448,10 +448,10 @@ func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
 	}
 }
 func TestGenerateLLVMIRLowersDArrayViewRuntimeFields(t *testing.T) {
-	src := `def non_empty[T](view: dview[T]) -> bool:
+	src := `def non_empty[T](view: view[T]) -> bool:
 	return view.len > 0 and view.elem_size > 0
 
-def probe(view: dview[i64]) -> bool:
+def probe(view: view[i64]) -> bool:
 	return non_empty(view)
 `
 	result := parseAndAnalyze(t, "backend_darray_view_runtime_fields.elisa", src)
@@ -484,11 +484,11 @@ struct DynArrayView:
 	elem_size: mutable usize
 
 def head_owned(values: darray[i32, row]) -> i32:
-	part: dview[i32] = values[1:3]
+	part: view[i32] = values[1:3]
 	return part[0]
 
-def head_view(view: dview[i32]) -> i32:
-	part: dview[i32] = view[0:1]
+def head_view(view: view[i32]) -> i32:
+	part: view[i32] = view[0:1]
 	return part[0]
 `
 	result := parseAndAnalyze(t, "backend_array_slice_syntax.elisa", src)

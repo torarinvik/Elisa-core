@@ -330,28 +330,28 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_fill[T](dst: dview[T], value: T):
+def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
 	_ = value
 
 def zero_split(values: darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
 	arena_da_fill(left, 0)
 
 def fill_split(values: darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
 	arena_da_fill(left, 7)
 
-def fill_unknown(view: dview[i32]) -> void:
+def fill_unknown(view: view[i32]) -> void:
 	arena_da_fill(view, 7)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_zero.elisa", src)
@@ -370,7 +370,7 @@ def fill_unknown(view: dview[i32]) -> void:
 	if strings.Contains(zeroBody, "call ptr @memset(ptr") {
 		t.Fatalf("expected zero_split to use direct zero stores on the tiny exact fast path, got:\n%s", zeroBody)
 	}
-	if strings.Count(zeroBody, "store i32 0, ptr %dview.fill.elem.ptr") < 2 {
+	if strings.Count(zeroBody, "store i32 0, ptr %view.fill.elem.ptr") < 2 {
 		t.Fatalf("expected zero_split to lower through direct zero stores, got:\n%s", zeroBody)
 	}
 
@@ -407,33 +407,33 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_fill[T](dst: dview[T], value: T):
+def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_bytes(values: darray[u8, 4]&) -> void:
-	base: dview[u8] = arena_da_view(values, 0, 4)
-	left: dview[u8] = base[0:2]
+	base: view[u8] = arena_da_view(values, 0, 4)
+	left: view[u8] = base[0:2]
 	arena_da_fill(left, 7)
 
 def fill_all_ones(values: darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
 	arena_da_fill(left, -1)
 
 def fill_nonuniform(values: darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
 	arena_da_fill(left, 7)
 
-def fill_nonuniform_unknown(view: dview[i32]) -> void:
+def fill_nonuniform_unknown(view: view[i32]) -> void:
 	arena_da_fill(view, 7)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_repeated_byte.elisa", src)
@@ -452,7 +452,7 @@ def fill_nonuniform_unknown(view: dview[i32]) -> void:
 	if strings.Contains(byteBody, "call ptr @memset(ptr") {
 		t.Fatalf("expected fill_bytes to use direct byte stores on the tiny exact fast path, got:\n%s", byteBody)
 	}
-	if strings.Count(byteBody, "store i8 7, ptr %dview.fill.elem.ptr") < 2 {
+	if strings.Count(byteBody, "store i8 7, ptr %view.fill.elem.ptr") < 2 {
 		t.Fatalf("expected fill_bytes to lower through direct byte stores, got:\n%s", byteBody)
 	}
 
@@ -466,7 +466,7 @@ def fill_nonuniform_unknown(view: dview[i32]) -> void:
 	if strings.Contains(onesBody, "call ptr @memset(ptr") {
 		t.Fatalf("expected fill_all_ones to use direct stores on the tiny exact fast path, got:\n%s", onesBody)
 	}
-	if strings.Count(onesBody, "store i32 -1, ptr %dview.fill.elem.ptr") < 2 {
+	if strings.Count(onesBody, "store i32 -1, ptr %view.fill.elem.ptr") < 2 {
 		t.Fatalf("expected fill_all_ones to lower through direct stores, got:\n%s", onesBody)
 	}
 

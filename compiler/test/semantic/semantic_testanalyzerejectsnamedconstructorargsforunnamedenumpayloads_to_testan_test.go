@@ -478,10 +478,10 @@ def build() -> int:
 	}
 	viewType, ok := variant.TailPayloadViewType()
 	if !ok || viewType == nil {
-		t.Fatal("expected Expr.Block tail payload to lower as dview")
+		t.Fatal("expected Expr.Block tail payload to lower as view")
 	}
-	if viewType.String() != "dview[int]" {
-		t.Fatalf("expected Expr.Block tail payload type dview[int], got %s", viewType.String())
+	if viewType.String() != "view[int]" {
+		t.Fatalf("expected Expr.Block tail payload type view[int], got %s", viewType.String())
 	}
 }
 func TestAnalyzeRejectsTailPayloadsOnOrdinaryEnums(t *testing.T) {
@@ -529,10 +529,10 @@ def build() -> int:
 	}
 	viewType, ok := variant.TailPayloadViewType()
 	if !ok || viewType == nil {
-		t.Fatal("expected Expr.Block tail payload to lower as dview")
+		t.Fatal("expected Expr.Block tail payload to lower as view")
 	}
-	if viewType.String() != "dview[int]" {
-		t.Fatalf("expected Expr.Block tail payload type dview[int], got %s", viewType.String())
+	if viewType.String() != "view[int]" {
+		t.Fatalf("expected Expr.Block tail payload type view[int], got %s", viewType.String())
 	}
 }
 func TestAnalyzeAcceptsFreezeOfLocalPackedStore(t *testing.T) {

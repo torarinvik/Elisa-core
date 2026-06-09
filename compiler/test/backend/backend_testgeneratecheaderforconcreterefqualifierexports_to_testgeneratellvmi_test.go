@@ -484,7 +484,7 @@ struct DynArrayView:
     count: mutable usize
 
 extern take_array(values: darray[i32, row]) -> void
-extern take_array_view(view: dview[i32]) -> usize
+extern take_array_view(view: view[i32]) -> usize
 extern take_str(text: cstr[row]) -> void
 `
 	result := parseAndAnalyze(t, "backend_runtime_types.elisa", src)

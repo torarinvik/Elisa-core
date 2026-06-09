@@ -139,7 +139,7 @@ struct DynArrayView:
 def read_array(values: darray[i32, row]) -> i32:
 	return values[0]
 
-def read_view(view: dview[i32]) -> i32:
+def read_view(view: view[i32]) -> i32:
 	return view[0]
 `
 	_, errs := parseAndAnalyze(t, "runtime_backed_array_index.elisa", src)
@@ -207,7 +207,7 @@ extern take_window(view: DynArrayView) -> void
 	for _, want := range []string{
 		`internal runtime carrier type "StringView" is not supported in user-facing code; use "sview[...]" instead`,
 		`internal runtime carrier type "DynArray" is not supported in user-facing code; use "darray[T, shape]" instead`,
-		`internal runtime carrier type "DynArrayView" is not supported in user-facing code; use "dview[T]" instead`,
+		`internal runtime carrier type "DynArrayView" is not supported in user-facing code; use "view[T]" instead`,
 	} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("expected runtime carrier rejection %q, got:\n%s", want, all)
@@ -249,9 +249,9 @@ func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
-	src := `def middle(values: darray[i32, row], view: dview[i32]) -> i32:
-	part: dview[i32] = values[1:3]
-	sub: dview[i32] = view[0:1]
+	src := `def middle(values: darray[i32, row], view: view[i32]) -> i32:
+	part: view[i32] = values[1:3]
+	sub: view[i32] = view[0:1]
 	return part[0] + sub[0]
 `
 	_, errs := parseAndAnalyze(t, "array_and_array_view_slice.elisa", src)
@@ -268,7 +268,7 @@ func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
 }
 func TestAnalyzeAcceptsNestedCollectionAccessOnReturnedValues(t *testing.T) {
 	src := `extern make_array() -> darray[i32, row]
-extern make_array_view() -> dview[i32]
+extern make_array_view() -> view[i32]
 
 def read_array_index() -> i32:
 	return make_array()[1]

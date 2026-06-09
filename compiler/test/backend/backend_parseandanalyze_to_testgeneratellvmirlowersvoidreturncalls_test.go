@@ -79,22 +79,22 @@ func requireInstructionLineContainsAll(t *testing.T, output string, needle strin
 func requireTinyExactDViewCopyBody(t *testing.T, body string) {
 	t.Helper()
 	if strings.Contains(body, "call ptr @arena_memcpy(") {
-		t.Fatalf("expected tiny exact dview copy to avoid arena_memcpy, got:\n%s", body)
+		t.Fatalf("expected tiny exact view copy to avoid arena_memcpy, got:\n%s", body)
 	}
-	requireInstructionLineContainsAll(t, body, "load i32, ptr %dview.copy.src.elem.ptr", "!alias.scope", "!noalias")
-	requireInstructionLineContainsAll(t, body, "store i32 %dview.copy.elem, ptr %dview.copy.dst.elem.ptr", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, body, "load i32, ptr %view.copy.src.elem.ptr", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, body, "store i32 %view.copy.elem, ptr %view.copy.dst.elem.ptr", "!alias.scope", "!noalias")
 }
 func requireTinyExactDViewEqBody(t *testing.T, body string, expectAliasMetadata bool) {
 	t.Helper()
 	if strings.Contains(body, "call i64 @memcmp(") || strings.Contains(body, "call i32 @memcmp(") {
-		t.Fatalf("expected tiny exact dview equality to avoid memcmp, got:\n%s", body)
+		t.Fatalf("expected tiny exact view equality to avoid memcmp, got:\n%s", body)
 	}
-	if !strings.Contains(body, "dview.eq.byte.eq = icmp eq i8") {
-		t.Fatalf("expected tiny exact dview equality to compare bytes directly, got:\n%s", body)
+	if !strings.Contains(body, "view.eq.byte.eq = icmp eq i8") {
+		t.Fatalf("expected tiny exact view equality to compare bytes directly, got:\n%s", body)
 	}
 	if expectAliasMetadata {
-		requireInstructionLineContainsAll(t, body, "dview.eq.left.byte = load i8", "!alias.scope", "!noalias")
-		requireInstructionLineContainsAll(t, body, "dview.eq.right.byte = load i8", "!alias.scope", "!noalias")
+		requireInstructionLineContainsAll(t, body, "view.eq.left.byte = load i8", "!alias.scope", "!noalias")
+		requireInstructionLineContainsAll(t, body, "view.eq.right.byte = load i8", "!alias.scope", "!noalias")
 	}
 }
 func requireTinyExactDViewMaterializeBody(t *testing.T, body string) {
@@ -105,9 +105,9 @@ func requireTinyExactDViewMaterializeBody(t *testing.T, body string) {
 	if strings.Contains(body, "call ptr @arena_memcpy(") {
 		t.Fatalf("expected tiny exact arena_da_from_view to avoid arena_memcpy, got:\n%s", body)
 	}
-	requireInstructionLineContainsAll(t, body, "load i32, ptr %dview.materialize.src.elem.ptr", "!alias.scope", "!noalias")
-	requireInstructionLineContainsAll(t, body, "store i32 %dview.materialize.elem, ptr %dview.materialize.dst.elem.ptr", "!alias.scope", "!noalias")
-	if !strings.Contains(body, "dview.materialize.items") {
+	requireInstructionLineContainsAll(t, body, "load i32, ptr %view.materialize.src.elem.ptr", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, body, "store i32 %view.materialize.elem, ptr %view.materialize.dst.elem.ptr", "!alias.scope", "!noalias")
+	if !strings.Contains(body, "view.materialize.items") {
 		t.Fatalf("expected tiny exact arena_da_from_view to still materialize the darray result, got:\n%s", body)
 	}
 }

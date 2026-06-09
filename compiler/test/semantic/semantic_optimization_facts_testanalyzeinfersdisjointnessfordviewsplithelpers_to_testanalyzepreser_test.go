@@ -13,27 +13,27 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
+def arena_da_view_prefix[T](view: view[T], end: usize) -> view[T]:
 	_ = end
 	return view
 
-def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+def arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]:
 	_ = start
 	return view
 
 def inspect(values: darray[i32, row]&) -> int:
-	base: dview[i32] = arena_da_view(values, 0, values.count)
-	prefix: dview[i32] = arena_da_view_prefix(base, 2)
-	suffix: dview[i32] = arena_da_view_suffix(base, 2)
-	full_prefix: dview[i32] = arena_da_view_prefix(base, base.len)
-	full_suffix: dview[i32] = arena_da_view_suffix(base, 0)
+	base: view[i32] = arena_da_view(values, 0, values.count)
+	prefix: view[i32] = arena_da_view_prefix(base, 2)
+	suffix: view[i32] = arena_da_view_suffix(base, 2)
+	full_prefix: view[i32] = arena_da_view_prefix(base, base.len)
+	full_suffix: view[i32] = arena_da_view_suffix(base, 0)
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_dview_split_helpers.elisa", src)
@@ -48,7 +48,7 @@ def inspect(values: darray[i32, row]&) -> int:
 	fullSuffixExpr := requireOptimizationFactsVarInitExpr(t, fn, "full_suffix")
 
 	if !result.ExprsAreDisjoint(prefixExpr, suffixExpr) {
-		t.Fatalf("expected dview prefix/suffix helpers to produce disjoint views")
+		t.Fatalf("expected view prefix/suffix helpers to produce disjoint views")
 	}
 	if !result.ExprsHaveSameExtent(baseExpr, fullPrefixExpr) {
 		t.Fatalf("expected full-span arena_da_view_prefix to preserve exact extent")
@@ -68,22 +68,22 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	return view
 
 def inspect(values: darray[i32, 4]&) -> int:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = arena_da_view_slice(base, 0, 2)
-	right: dview[i32] = arena_da_view_slice(base, 2, 4)
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = arena_da_view_slice(base, 0, 2)
+	right: view[i32] = arena_da_view_slice(base, 2, 4)
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_equal_extent_size.elisa", src)
@@ -115,7 +115,7 @@ struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
@@ -123,10 +123,10 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	return DynArrayView(null, 0, size_of(T))
 
 def inspect(values: darray[i32, 4]&) -> int:
-	base: dview[i32] = arena_da_view(values, 0, 4)
-	left: dview[i32] = base[0:2]
-	right: dview[i32] = base[2:4]
-	full: dview[i32] = base[0:base.len]
+	base: view[i32] = arena_da_view(values, 0, 4)
+	left: view[i32] = base[0:2]
+	right: view[i32] = base[2:4]
+	full: view[i32] = base[0:base.len]
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_direct_dview_slice_syntax.elisa", src)
@@ -141,19 +141,19 @@ def inspect(values: darray[i32, 4]&) -> int:
 
 	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
 	if !leftFacts.HasExactExtent() {
-		t.Fatalf("expected direct dview slice syntax to preserve exact extent, got %#v", leftFacts)
+		t.Fatalf("expected direct view slice syntax to preserve exact extent, got %#v", leftFacts)
 	}
 	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
-		t.Fatalf("expected adjacent direct dview slices to be disjoint")
+		t.Fatalf("expected adjacent direct view slices to be disjoint")
 	}
 	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
-		t.Fatalf("expected adjacent direct dview slices to have equal extent size")
+		t.Fatalf("expected adjacent direct view slices to have equal extent size")
 	}
 	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
-		t.Fatalf("expected adjacent direct dview slices to retain distinct exact bounds")
+		t.Fatalf("expected adjacent direct view slices to retain distinct exact bounds")
 	}
 	if !result.ExprsHaveSameExtent(baseExpr, fullExpr) {
-		t.Fatalf("expected full-span direct dview slice syntax to preserve input extent")
+		t.Fatalf("expected full-span direct view slice syntax to preserve input extent")
 	}
 }
 func TestAnalyzePreservesOptimizationFactsThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {
@@ -397,10 +397,10 @@ def inspect(owner: Arena) -> int:
 		right: Expr = new Expr.Int(value: 2)
 		_ = new Expr.Add(left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	tags_view: dview[Expr.Tag] = frozen.tags
-	full_span: dview[Expr.Tag] = frozen.tags[0:frozen.count]
-	prefix: dview[Expr.Tag] = frozen.tags[0:1]
-	suffix: dview[Expr.Tag] = frozen.tags[1:frozen.count]
+	tags_view: view[Expr.Tag] = frozen.tags
+	full_span: view[Expr.Tag] = frozen.tags[0:frozen.count]
+	prefix: view[Expr.Tag] = frozen.tags[0:1]
+	suffix: view[Expr.Tag] = frozen.tags[1:frozen.count]
 	_ = tags_view
 	_ = full_span
 	_ = prefix

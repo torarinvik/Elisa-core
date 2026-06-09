@@ -176,19 +176,19 @@ struct StringView:
 	data: mutable u8&
 	len: mutable i64
 
-def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
 	return DynArrayView(null, 0, size_of(T))
 
-def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	return view
 
-def arena_da_from_view[T](a: Arena&, view: dview[T]) -> darray[T, shape_out]:
+def arena_da_from_view[T](a: Arena&, view: view[T]) -> darray[T, shape_out]:
 	_ = a
 	_ = view
 	return zeroed
@@ -222,10 +222,10 @@ def ctx_string_slice(value: cstr[shape_in], start: i64, end: i64) -> cstr[shape_
 	return value
 
 def inspect(a: Arena&, values: darray[i32, row]&, other: darray[i32, row]&, text: cstr[row]) -> int:
-	whole_a: dview[i32] = arena_da_view(values, 0, values.count)
-	whole_b: dview[i32] = arena_da_view(other, 0, other.count)
-	sub_a: dview[i32] = arena_da_view_slice(whole_a, 1, 3)
-	sub_b: dview[i32] = arena_da_view_slice(whole_b, 1, 3)
+	whole_a: view[i32] = arena_da_view(values, 0, values.count)
+	whole_b: view[i32] = arena_da_view(other, 0, other.count)
+	sub_a: view[i32] = arena_da_view_slice(whole_a, 1, 3)
+	sub_b: view[i32] = arena_da_view_slice(whole_b, 1, 3)
 	copied: darray[i32] = arena_da_from_view(a, sub_a)
 	text_view: StringView = ctx_string_view(text, 1, 3)
 	text_sub: StringView = ctx_string_view_slice(text_view, 0, text_view.len)
@@ -312,8 +312,8 @@ def inspect(owner: Arena) -> i32:
 	key: NodeKey[Expr] = dense_key(node, frozen)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
 	table[key] <- 0
-	values: dview[i32] = table.values
-	nodes: dview[Expr] = frozen[0:frozen.count]
+	values: view[i32] = table.values
+	nodes: view[Expr] = frozen[0:frozen.count]
 	if values.len == nodes.len:
 		return values[0]
 	return -1
@@ -379,8 +379,8 @@ def inspect(owner: Arena) -> i32:
 	key: NodeKey[Expr] = dense_key(node, box.store)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1)
 	table[key] <- 0
-	values: dview[i32] = table.values
-	nodes: dview[Expr] = box.store[0:box.store.count]
+	values: view[i32] = table.values
+	nodes: view[Expr] = box.store[0:box.store.count]
 	if values.len == nodes.len:
 		return values[0]
 	return -1

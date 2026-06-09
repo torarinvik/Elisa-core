@@ -194,7 +194,7 @@ func TestAnalyzeFormatsWhileConditionSViewUsingSurfaceNames(t *testing.T) {
 	}
 }
 func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
-	src := `def bad(values: dview[i32]) -> int:
+	src := `def bad(values: view[i32]) -> int:
 	match values:
 		Token.Region:
 			return 0
@@ -206,7 +206,7 @@ func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 	}
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, "unsupported top-level sequence match pattern *ast.MatchVariantPattern") {
-		t.Fatalf("expected surface dview match diagnostic, got:\n%s", all)
+		t.Fatalf("expected surface view match diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "DynArrayView") {
 		t.Fatalf("expected DynArrayView to stay out of user-facing flow diagnostics, got:\n%s", all)
@@ -256,8 +256,8 @@ func TestAnalyzeFormatsSafeChainDViewUsingSurfaceNames(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "optional chaining receiver requires an optional or nullable reference (refstate fact nullable), got dview[i32]") {
-		t.Fatalf("expected surface dview safe-chain diagnostic, got:\n%s", all)
+	if !strings.Contains(all, "optional chaining receiver requires an optional or nullable reference (refstate fact nullable), got view[i32]") {
+		t.Fatalf("expected surface view safe-chain diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "DynArrayView") {
 		t.Fatalf("expected DynArrayView to stay out of user-facing expression diagnostics, got:\n%s", all)
@@ -365,7 +365,7 @@ def bad_dict(values: Dict[cstr, i32]) -> void:
 	all := strings.Join(errs, "\n")
 	for _, want := range []string{
 		"legacy built-in \"DArray\" has been replaced; use \"darray\" instead",
-		"legacy built-in \"DArrayView\" has been replaced; use \"dview\" instead",
+		"legacy built-in \"DArrayView\" has been replaced; use \"view\" instead",
 		"legacy built-in \"DStr\" has been replaced; use \"cstr\" instead",
 		"legacy built-in \"Dict\" has been replaced; use \"dict\" instead",
 	} {
@@ -407,7 +407,7 @@ def bad_list_view(view: DListView[i32]) -> void:
 	}
 }
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
-	src := `def non_empty[T](view: dview[T]) -> bool:
+	src := `def non_empty[T](view: view[T]) -> bool:
 	return view.len > 0 and view.elem_size > 0
 `
 	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.elisa", src)

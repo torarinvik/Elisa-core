@@ -241,8 +241,8 @@ func TestAnalyzeContextualIntLiteralUsizeSites(t *testing.T) {
 def contextual_index(items: i32[4]) -> i32:
 	return items[0]
 
-def contextual_slice(items: dview[i32]) -> dview[i32]:
-	window: dview[i32] = items[1:3]
+def contextual_slice(items: view[i32]) -> view[i32]:
+	window: view[i32] = items[1:3]
 	return window
 
 def plain_range() -> int:
