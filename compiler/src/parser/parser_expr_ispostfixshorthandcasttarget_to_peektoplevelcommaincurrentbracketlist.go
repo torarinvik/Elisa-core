@@ -356,17 +356,25 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	accInit := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
-	// Optional `by simd` marker: opt this one fold into the reassociated (vectorizable) tree
-	// reduction by emitting its accumulator update under full fast-math FP (docs/79 Part IV).
-	bySimd := false
+	// Optional `by simd` / `by par` marker (docs/79 Part IV). `by simd` opts this one fold into the
+	// reassociated (vectorizable) tree reduction (full fast-math FP on its accumulator update);
+	// `by par` lowers it to a contention-free parallel reduction over the source's disjoint bands.
+	byMode := ""
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
+		byPos := p.cur().Pos
 		p.advance()
-		p.expectIdentText("simd")
-		bySimd = true
+		byMode = p.expect(lexer.TOKEN_IDENT).Text
+		if byMode != "simd" && byMode != "par" {
+			p.errorAt(byPos, "expected `simd` or `par` after `by`, got %q", byMode)
+		}
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 
-	assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body, FastMath: bySimd})
+	if byMode == "par" {
+		return p.buildParallelFoldReduce(pos, bindings, body, name, source, rangeEnd, filter, accInit)
+	}
+
+	assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body, FastMath: byMode == "simd"})
 	loopBody := append([]ast.Stmt{}, bindings...)
 	if filter != nil {
 		loopBody = append(loopBody, &ast.IfStmt{Position: pos, Cond: filter, Then: []ast.Stmt{assign}})
@@ -388,6 +396,67 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 		Value: &ast.Ident{Position: pos, Name: accName},
 	}
 }
+// buildParallelFoldReduce lowers a `by par` fold to a contention-free parallel reduction over the
+// source's disjoint bands, by desugaring to the runtime `reduce(slice(&src), seed, op)` combinator
+// (which folds each band into a private partial, then merges the partials — verified race-free and
+// partition-independent). Because a parallel reduction reorders the combine, `by par` is gated to
+// an associative-combine fold whose body is exactly `acc <op> x` (op ∈ {+, *}); anything else
+// (filter, head bindings, range source, non-identifier source, or a transformed/non-associative
+// body) is a parser error so the parallel contract is never silently violated.
+func (p *Parser) buildParallelFoldReduce(pos lexer.Pos, bindings []ast.Stmt, body ast.Expr, name string, source ast.Expr, rangeEnd ast.Expr, filter ast.Expr, accInit ast.Expr) ast.Expr {
+	fail := func(reason string) ast.Expr {
+		p.errorAt(pos, "`by par` fold %s; it must be `( acc <op> %s for %s in <darray> with acc = seed by par )` with an associative `op` (+ or *)", reason, name, name)
+		return accInit // keep a valid expression so parsing continues
+	}
+	if len(bindings) > 0 {
+		return fail("does not support head bindings")
+	}
+	if filter != nil {
+		return fail("does not support an `if` filter")
+	}
+	if rangeEnd != nil {
+		return fail("requires a darray source, not a range")
+	}
+	srcIdent, ok := source.(*ast.Ident)
+	if !ok {
+		return fail("source must be a plain darray variable")
+	}
+	bin, ok := body.(*ast.BinaryExpr)
+	if !ok || (bin.Op != lexer.TOKEN_PLUS && bin.Op != lexer.TOKEN_STAR) {
+		return fail("body must combine with an associative operator (+ or *)")
+	}
+	// The body must be `acc <op> x` (element folded directly into the accumulator) so the runtime
+	// `op` applied to raw band elements reproduces it. Accept either operand order (op is commutative).
+	leftName := identName(bin.Left)
+	rightName := identName(bin.Right)
+	if !((leftName == name && rightName != "") || (rightName == name && leftName != "")) {
+		return fail("body must be `acc <op> " + name + "` (a transformed element is not supported yet)")
+	}
+
+	// reduce(slice(&src), seed, (l, r) => l <op> r)
+	sliceCall := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"}, Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: srcIdent}}}
+	opLambda := &ast.LambdaExpr{
+		Position:            pos,
+		Keyword:             "lambda",
+		UsesShorthandParams: true,
+		Params:              []ast.ParamDecl{{Position: pos, Name: "__par_l"}, {Position: pos, Name: "__par_r"}},
+		BodyExpr:            &ast.BinaryExpr{Position: pos, Op: bin.Op, Left: &ast.Ident{Position: pos, Name: "__par_l"}, Right: &ast.Ident{Position: pos, Name: "__par_r"}},
+	}
+	return &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.Ident{Position: pos, Name: "reduce"},
+		Args:     []ast.Expr{sliceCall, accInit, opLambda},
+	}
+}
+
+// identName returns the name of an Ident expression, or "" if expr is not a plain identifier.
+func identName(expr ast.Expr) string {
+	if id, ok := expr.(*ast.Ident); ok {
+		return id.Name
+	}
+	return ""
+}
+
 func (p *Parser) parseQueryExpr() ast.Expr {
 	pos := p.cur().Pos
 	kindText := p.expect(lexer.TOKEN_IDENT).Text

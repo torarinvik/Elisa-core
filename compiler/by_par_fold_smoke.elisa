@@ -1,0 +1,35 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# The per-fold `by par` marker (docs/79 Part IV) lowers an associative-combine fold to a
+# contention-free parallel reduction over the source's disjoint bands (desugars to the runtime
+# `reduce(slice(&src), seed, op)` combinator: each worker folds its band into a private partial,
+# the partials are merged with the same op). This fixture proves the parallel result is identical
+# to the sequential fold (partition-independent) for both + and *, over a large input.
+@test
+def by_par_fold_smoke():
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		a: mutable darray[i64] = []
+		for k in 0..<5000:
+			_ = a.push(k)
+
+		# parallel sum == sequential sum
+		seq: mutable i64 = 0
+		for x in a:
+			seq <- seq + x
+		par: i64 = (acc + x for x in a with acc: i64 = 0 by par)
+		assert par == seq
+		assert par == 12497500
+
+		# parallel product over a small input (avoid overflow)
+		b: mutable darray[i64] = []
+		for k in 1..<9:
+			_ = b.push(k)
+		prod: i64 = (acc * x for x in b with acc: i64 = 1 by par)
+		assert prod == 40320                          # 8!
+
+		# float parallel sum (by par reorders the combine — accepted, like by simd)
+		f: mutable darray[f64] = []
+		for k in 0..<1000:
+			_ = f.push(1.0)
+		fsum: f64 = (acc + x for x in f with acc: f64 = 0.0 by par)
+		assert fsum == 1000.0
