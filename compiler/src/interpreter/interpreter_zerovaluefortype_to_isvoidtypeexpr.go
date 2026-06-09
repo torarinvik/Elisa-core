@@ -21,8 +21,6 @@ func (i *Interpreter) zeroValueForType(typ ast.TypeExpr) (Value, error) {
 			return BoolValue(false), nil
 		case "f32", "f64":
 			return FloatValue(0), nil
-		case "str", "string":
-			return StringValue(""), nil
 		case "Arena":
 			return StructInstanceValue("Arena", []string{"begin", "end", "end_index"}, map[string]Value{
 				"begin":     NullValue(),
@@ -234,8 +232,6 @@ func (i *Interpreter) castValue(value Value, target ast.TypeExpr) (Value, error)
 			default:
 				return VoidValue(), fmt.Errorf("cannot cast %s to %s", value.String(), n.Name)
 			}
-		case "str", "string":
-			return stringifyOrWrap(value)
 		default:
 			if value.kind == valueStruct && value.structVal != nil && value.structVal.Name == n.Name {
 				return value, nil

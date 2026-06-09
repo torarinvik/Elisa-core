@@ -36,16 +36,6 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
 		return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}, ValueArgs: []ast.Expr{size}}
-	case "str":
-		p.advance()
-		size := p.parseExpr()
-		p.expect(lexer.TOKEN_RBRACKET)
-		return &ast.BuiltinTypeExpr{Position: pos, Name: "str", ValueArgs: []ast.Expr{size}}
-	case "string":
-		p.advance()
-		size := p.parseExpr()
-		p.expect(lexer.TOKEN_RBRACKET)
-		return &ast.BuiltinTypeExpr{Position: pos, Name: "string", ValueArgs: []ast.Expr{size}}
 	case "dict":
 		p.advance()
 		key := p.parseTypeExpr()
@@ -63,11 +53,6 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
 		return &ast.BuiltinTypeExpr{Position: pos, Name: "cstr", ValueArgs: []ast.Expr{size}}
-	case "cstring":
-		p.advance()
-		size := p.parseExpr()
-		p.expect(lexer.TOKEN_RBRACKET)
-		return &ast.BuiltinTypeExpr{Position: pos, Name: "cstring", ValueArgs: []ast.Expr{size}}
 	case "treeview":
 		// `treeview[T]` has been removed: it was a redundant compatibility alias for the bare
 		// concrete tree-variant type `T` (both resolve to the same TreeVariantViewType). Reject it

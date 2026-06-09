@@ -414,6 +414,7 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 		Value: &ast.Ident{Position: pos, Name: accName},
 	}
 }
+
 // buildParallelFoldReduce lowers a `by par` fold to a contention-free parallel reduction over the
 // source's disjoint bands, by desugaring to the runtime `map_reduce(slice(&src), seed, transform,
 // op)` combinator (each worker folds `transform(element)` values into a private partial, then the

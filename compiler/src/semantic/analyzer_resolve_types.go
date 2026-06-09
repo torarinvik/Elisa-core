@@ -18,12 +18,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			// (docs/26). It shares darray's {ptr, count, capacity} representation
 			// and every darray operation; the distinct name carries string intent.
 			return &DArrayType{Elem: a.namedTypes["u8"], Shape: &WildcardShape{}, SurfaceName: "dstr"}
-		case "DStr":
-			a.errorLegacyBuiltinReplacement(n.Pos(), "DStr", "cstr")
-			return invalidType
-		case "cstring":
-			a.errorLegacyBuiltinReplacement(n.Pos(), "cstring", "cstr")
-			return invalidType
 		}
 		a.maybeRejectRuntimeCarrierTypeUse(n.Pos(), n.Name)
 		if t, ok := a.lookupTypeParam(n.Name); ok {

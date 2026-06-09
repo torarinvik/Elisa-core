@@ -105,8 +105,6 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		return nil, true, fmt.Errorf("DList has been removed from the language; use darray instead")
 	case "DListView":
 		return nil, true, fmt.Errorf("DListView has been removed from the language; use view instead")
-	case "DStr":
-		return nil, true, legacyBuiltinReplacementError("DStr", "cstr")
 	default:
 		return nil, false, nil
 	}

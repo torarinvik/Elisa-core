@@ -19,10 +19,6 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return &semantic.SViewType{}, nil
 		case "dstr":
 			return &semantic.DArrayType{Elem: s.g.result.NamedTypes["u8"], Shape: &semantic.WildcardShape{}, SurfaceName: "dstr"}, nil
-		case "cstring":
-			return nil, legacyBuiltinReplacementError("cstring", "cstr")
-		case "DStr":
-			return nil, legacyBuiltinReplacementError("DStr", "cstr")
 		}
 		if bound, ok := s.typeMap[n.Name]; ok {
 			return bound, nil
@@ -552,31 +548,11 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, err
 		}
 		return resolveBackendSetType(elemType, "set", expr.Region)
-	case "str":
-		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
-			return nil, fmt.Errorf("str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
-		}
-		resolved, err := s.resolveTypeExpr(&ast.ArrayType{
-			Position: expr.Position,
-			Elem:     &ast.NamedType{Position: expr.Position, Name: "u8"},
-			Size:     expr.ValueArgs[0],
-		})
-		if err != nil {
-			return nil, err
-		}
-		if arrayType, ok := resolved.(*semantic.ArrayType); ok {
-			arrayType.SurfaceName = "str"
-		}
-		return resolved, nil
-	case "string":
-		return nil, legacyBuiltinReplacementError("string", "str")
 	case "cstr":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("cstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
 		return &semantic.DStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "cstr"}, nil
-	case "cstring":
-		return nil, legacyBuiltinReplacementError("cstring", "cstr")
 	case "view":
 		if len(expr.TypeArgs) != 1 {
 			return nil, fmt.Errorf("view expects 1 type argument, got %d", len(expr.TypeArgs))

@@ -837,6 +837,7 @@ func (p *Parser) parseWithArenaStmt() *ast.RegionStmt {
 	body := p.parseBlock()
 	return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity, OwnerName: ownerName, Body: body}
 }
+
 // parseCascadeStmt recognizes the removed `cascade <target>:` statement and rejects it. The cascade
 // feature (method-cascade sugar) has been removed; the target and body are consumed for recovery.
 func (p *Parser) parseCascadeStmt() ast.Stmt {

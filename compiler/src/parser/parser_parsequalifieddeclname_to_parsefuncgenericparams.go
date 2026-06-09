@@ -256,6 +256,7 @@ func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 	return fields
 }
+
 // parseEnumCommonFieldsInline parses the canonical inline shared-field form (docs/76):
 //
 //	common(span: int, metadata: cstr)

@@ -512,7 +512,7 @@ extern take_cstr(text: cstr[row]) -> void
 extern take_view(values: view[i32, 0, 2]) -> void
 extern take_sview(text: sview[1, 4]) -> void
 
-def use(values: array[i32, 4], dyn: darray[i32, row], text: str[5], dyn_text: cstr[row]) -> char:
+def use(values: array[i32, 4], dyn: darray[i32, row], text: u8[5], dyn_text: cstr[row]) -> char:
 	sub_array: view[i32, 0, 2] = values[0:2]
 	sub_text: sview[1, 4] = text[1:4]
 	dyn_sub: sview[0, 1] = dyn_text[0:1]
@@ -528,7 +528,7 @@ def use(values: array[i32, 4], dyn: darray[i32, row], text: str[5], dyn_text: cs
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsCharCastAndComparisonFromStringIndexing(t *testing.T) {
-	src := `def first_code(text: str[4]) -> i64:
+	src := `def first_code(text: u8[4]) -> i64:
 	ch: char = text[0]
 	return ch.i64()
 
