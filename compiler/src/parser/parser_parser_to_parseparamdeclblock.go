@@ -265,8 +265,8 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("effectalias") {
 		return p.parseEffectsDecl()
 	}
-	if p.peekIdentText("grant") || p.peekIdentText("alias") {
-		return p.parseGrantAliasDecl()
+	if p.peekIdentText("alias") {
+		return p.parseAliasDecl()
 	}
 	if p.peekIdentText("params") {
 		return p.parseParamsDecl()
@@ -611,15 +611,11 @@ func (p *Parser) parseEffectsDecl() *ast.EffectsDecl {
 	p.expectNewline()
 	return &ast.EffectsDecl{Position: pos, Name: name, ErrorEffects: errorEffects, Permissions: permissions}
 }
-func (p *Parser) parseGrantAliasDecl() *ast.GrantAliasDecl {
+func (p *Parser) parseAliasDecl() *ast.GrantAliasDecl {
 	pos := p.cur().Pos
-	// `alias Name = …` is the canonical capability-set declaration; `grant` is
-	// the legacy spelling. Both produce a GrantAliasDecl referenced via `can`.
-	if p.peekIdentText("alias") {
-		p.expectIdentText("alias")
-	} else {
-		p.expectIdentText("grant")
-	}
+	// `alias Name = cap1, cap2, …` declares a capability set, referenced via `can`.
+	// (The AST node is still named GrantAliasDecl for historical reasons.)
+	p.expectIdentText("alias")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_ASSIGN)
 	refs := p.parsePermissionRefs(false)

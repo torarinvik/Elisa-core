@@ -9,7 +9,7 @@ import (
 // `grant Name = ref, ref` parses into a GrantAliasDecl with its permission refs.
 func TestParseGrantAliasDecl(t *testing.T) {
 	file, errs := parseSourceFile(t, `
-grant HostSeg = Segment.Host, Unsafe.SegmentMutation
+alias HostSeg = Segment.Host, Unsafe.SegmentMutation
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)

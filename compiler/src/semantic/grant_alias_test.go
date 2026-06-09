@@ -16,7 +16,7 @@ permission Zeg:
 permission Unsafe2:
     SegmentMutation
 
-grant HostSeg = Zeg.Host, Unsafe2.SegmentMutation
+alias HostSeg = Zeg.Host, Unsafe2.SegmentMutation
 
 extern host_write() -> i64 can[Zeg.Host]
 extern mutate() -> i64 can[Unsafe2.SegmentMutation]
@@ -69,8 +69,8 @@ permission Zeg:
 permission Mem:
     Allocate
 
-grant Seg = Zeg.Host
-grant SegMem = Seg, Mem.Allocate
+alias Seg = Zeg.Host
+alias SegMem = Seg, Mem.Allocate
 
 extern host_write() -> i64 can[Zeg.Host]
 extern alloc() -> i64 can[Mem.Allocate]
@@ -93,7 +93,7 @@ func TestGrantAliasInSignature(t *testing.T) {
 permission Zeg:
     Host
 
-grant HostSeg = Zeg.Host
+alias HostSeg = Zeg.Host
 
 extern needs_host() -> i64 can[HostSeg]
 
@@ -113,7 +113,7 @@ func TestGrantAliasConflictsWithPermission(t *testing.T) {
 permission Zeg:
     Host
 
-grant Segment = Zeg.Host
+alias Segment = Zeg.Host
 `)
 	all := allDiagnostics(result)
 	if !strings.Contains(all, "conflicts with a permission family") {
