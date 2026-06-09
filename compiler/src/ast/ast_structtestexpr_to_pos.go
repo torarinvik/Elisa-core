@@ -238,6 +238,11 @@ type AssignStmt struct {
 	Target   Expr
 	Value    Expr
 	Optional bool
+	// FastMath marks an assignment whose value expression should be emitted under full fast-math
+	// FP (reassociation etc.), regardless of the enclosing function's setting. Set on the
+	// accumulator update of a `by simd` fold so that one reduction gets the reassociated tree
+	// reduction without opting the whole program into `-ffast-math` (docs/79 Part IV).
+	FastMath bool
 }
 type AugAssignStmt struct {
 	Position lexer.Pos

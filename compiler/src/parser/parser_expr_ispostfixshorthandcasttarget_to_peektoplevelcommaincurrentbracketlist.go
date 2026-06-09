@@ -356,9 +356,17 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	accInit := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
+	// Optional `by simd` marker: opt this one fold into the reassociated (vectorizable) tree
+	// reduction by emitting its accumulator update under full fast-math FP (docs/79 Part IV).
+	bySimd := false
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
+		p.advance()
+		p.expectIdentText("simd")
+		bySimd = true
+	}
 	p.expect(lexer.TOKEN_RPAREN)
 
-	assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body})
+	assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body, FastMath: bySimd})
 	loopBody := append([]ast.Stmt{}, bindings...)
 	if filter != nil {
 		loopBody = append(loopBody, &ast.IfStmt{Position: pos, Cond: filter, Then: []ast.Stmt{assign}})

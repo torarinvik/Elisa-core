@@ -1,0 +1,25 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# The per-fold `by simd` marker (docs/79 Part IV) opts one fold's reduction into the reassociated
+# (vectorizable) tree form by emitting its accumulator update under full fast-math FP, without
+# opting the whole program into `-ffast-math`. This fixture pins that it parses across every fold
+# shape — plain iterable, filtered, head-binding, and range — and still produces correct results
+# (the test data is integer-valued, so reassociation does not change the sums).
+@test
+def by_simd_fold_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[f64] = []
+		for k in 0..<10:
+			_ = a.push(k.f64())                       # [0.0 .. 9.0]
+
+		total: f64 = (acc + x for x in a with acc: f64 = 0.0 by simd)
+		assert total == 45.0
+
+		evens: f64 = (acc + x for x in a if x.i64() % 2 == 0 with acc: f64 = 0.0 by simd)
+		assert evens == 20.0                          # 0+2+4+6+8
+
+		sq: f64 = (y = x * x, acc + y for x in a with acc: f64 = 0.0 by simd)
+		assert sq == 285.0                            # sum of squares 0..9
+
+		rsum: i64 = (acc + i for i in 0..<5 with acc: i64 = 0 by simd)
+		assert rsum == 10

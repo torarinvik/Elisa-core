@@ -1,0 +1,13 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Exported f64 folds over a runtime darray (so the loop survives -O3 DCE). The plain fold stays the
+# bit-exact ordered reduction; the `by simd` fold gets the reassociated tree reduction. Used by
+# TestBySimdFoldReassociates to observe the codegen difference.
+def sum_plain(a: mutable darray[f64]&) -> f64:
+	return (acc + x for x in a with acc: f64 = 0.0)
+
+def sum_simd(a: mutable darray[f64]&) -> f64:
+	return (acc + x for x in a with acc: f64 = 0.0 by simd)
+
+export func probe_plain(a: mutable darray[f64]&) -> f64 = sum_plain
+export func probe_simd(a: mutable darray[f64]&) -> f64 = sum_simd

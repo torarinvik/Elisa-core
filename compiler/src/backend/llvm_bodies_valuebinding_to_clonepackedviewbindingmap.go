@@ -112,6 +112,10 @@ type functionState struct {
 	loopCleanupFloors            []int
 	cleanupDepth                 int
 	scopePool                    []*codegenScope
+	// fastMathScope counts active `by simd` fast-math scopes (a `by simd` fold's accumulator
+	// update). While > 0, fnFastMath() reports true so FP ops emitted in the scope get full
+	// fast-math (reassociation), scoped to that one reduction rather than program-wide.
+	fastMathScope int
 }
 
 func (s *functionState) currentNamespace() string {

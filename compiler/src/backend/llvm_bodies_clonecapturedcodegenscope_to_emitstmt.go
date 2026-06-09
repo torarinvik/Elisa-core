@@ -710,6 +710,13 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.PromoteStmt:
 		return s.emitPromoteStmt(n)
 	case *ast.AssignStmt:
+		if n.FastMath {
+			// A `by simd` fold's accumulator update: emit its value under full fast-math FP so the
+			// reduction reassociates (the vectorizable tree form), scoped to this statement. The
+			// defer pops when emitStmt returns, i.e. right after this assignment is emitted.
+			s.fastMathScope++
+			defer func() { s.fastMathScope-- }()
+		}
 		if n.Optional {
 			if s.g.trace != nil {
 				s.g.trace.recordStep(s, n.Pos().Line)
