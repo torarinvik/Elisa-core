@@ -64,7 +64,7 @@ func (a *Analyzer) analyzeColumnHelperCall(expr *ast.CallExpr) Type {
 		if rowsType.Category.Layout != TreeLayoutSOA && !treeCategoryHasKindIndex(rowsType.Category) {
 			a.errorf(expr.Args[1].Pos(), "column(\"kind\") requires @layout(soa) or @index(kind) on category %s", rowsType.Category.Name)
 		}
-		return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "view"}
+		return &ViewType{Elem: a.namedTypes["u32"], SurfaceName: "view"}
 	}
 	field, ok := rowsType.Category.Common[fieldName]
 	if !ok {
@@ -74,7 +74,7 @@ func (a *Analyzer) analyzeColumnHelperCall(expr *ast.CallExpr) Type {
 	if rowsType.Category.Layout != TreeLayoutSOA && !treeCategoryHasFieldIndex(rowsType.Category, fieldName) {
 		a.errorf(expr.Args[0].Pos(), "column(%q) requires @layout(soa) or @index(%s) on category %s", fieldName, fieldName, rowsType.Category.Name)
 	}
-	return &DArrayViewType{Elem: field.Type, SurfaceName: "view"}
+	return &ViewType{Elem: field.Type, SurfaceName: "view"}
 }
 
 func (a *Analyzer) analyzeTreeColumnHelperCall(expr *ast.CallExpr) Type {
@@ -121,7 +121,7 @@ func (a *Analyzer) analyzeTreeColumnHelperCall(expr *ast.CallExpr) Type {
 		a.errorf(expr.Args[2].Pos(), "tree_column currently supports common fields only; category %s has no common field %q", category.Name, fieldName)
 		return invalidType
 	}
-	return &DArrayViewType{Elem: field.Type, SurfaceName: "view"}
+	return &ViewType{Elem: field.Type, SurfaceName: "view"}
 }
 
 func (a *Analyzer) analyzeTreeTagsHelperCall(expr *ast.CallExpr) Type {
@@ -158,7 +158,7 @@ func (a *Analyzer) analyzeTreeTagsHelperCall(expr *ast.CallExpr) Type {
 	if category.Layout != TreeLayoutSOA && !treeCategoryHasKindIndex(category) {
 		a.errorf(expr.Args[1].Pos(), "tree_tags requires @layout(soa) or @index(kind) on category %s", category.Name)
 	}
-	return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "view"}
+	return &ViewType{Elem: a.namedTypes["u32"], SurfaceName: "view"}
 }
 
 func treeCategoryHasKindIndex(category *TreeCategoryType) bool {
@@ -487,7 +487,7 @@ func (a *Analyzer) analyzeTreeTraversalHelperCall(expr *ast.CallExpr) (Type, boo
 }
 func proofCarryingViewType(t Type) bool {
 	switch t.(type) {
-	case *DArrayViewType, *DStrType, *SViewType:
+	case *ViewType, *DStrType, *SViewType:
 		return true
 	default:
 		return false
@@ -546,8 +546,8 @@ func (a *Analyzer) analyzeChildrenHelperCall(expr *ast.CallExpr) Type {
 	_ = sourceInfo
 	return &GenericInstanceType{Name: "TreeChildren", Base: base, Args: []Type{carrierSourceType, itemType}}
 }
-func denseDViewType(t Type) (*DArrayViewType, bool) {
-	view, ok := t.(*DArrayViewType)
+func denseDViewType(t Type) (*ViewType, bool) {
+	view, ok := t.(*ViewType)
 	if !ok || view == nil {
 		return nil, false
 	}
@@ -558,7 +558,7 @@ func denseDViewType(t Type) (*DArrayViewType, bool) {
 }
 func zipMapDenseViewType(t Type) (Type, Type, bool) {
 	switch tt := t.(type) {
-	case *DArrayViewType:
+	case *ViewType:
 		if tt == nil || tt.SurfaceName == "packedtags" {
 			return nil, nil, false
 		}

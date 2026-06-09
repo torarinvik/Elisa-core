@@ -34,7 +34,7 @@ func optimizationFactsForType(t Type) OptimizationFacts {
 			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentShape, Shape: tt.Shape}
 		}
 		return facts
-	case *DArrayViewType:
+	case *ViewType:
 		facts := OptimizationFacts{Contiguous: true, UnitStride: true}
 		if tt.SurfaceName == "packedview" || tt.SurfaceName == "packedtags" {
 			facts.ReadOnly = true

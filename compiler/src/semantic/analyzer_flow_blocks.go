@@ -288,7 +288,7 @@ func inferKnownDArrayBuilderExprType(expr ast.Expr, known map[string]Type) Type 
 			if t != nil {
 				return t.Elem
 			}
-		case *DArrayViewType:
+		case *ViewType:
 			if t != nil {
 				return t.Elem
 			}
@@ -326,7 +326,7 @@ func inferDArrayExtendElemTypeFromKnownExpr(expr ast.Expr, known map[string]Type
 		if t != nil {
 			return astTypeExprForBuiltinMethodRewrite(expr.Pos(), t.Elem)
 		}
-	case *DArrayViewType:
+	case *ViewType:
 		if t != nil {
 			return astTypeExprForBuiltinMethodRewrite(expr.Pos(), t.Elem)
 		}

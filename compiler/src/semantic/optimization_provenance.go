@@ -130,7 +130,7 @@ func (a *Analyzer) sliceFullSpanField(expr ast.Expr) string {
 	switch tt := t.(type) {
 	case *DArrayType:
 		return "count"
-	case *DArrayViewType:
+	case *ViewType:
 		return "len"
 	case *DStrType, *SViewType:
 		return "len"

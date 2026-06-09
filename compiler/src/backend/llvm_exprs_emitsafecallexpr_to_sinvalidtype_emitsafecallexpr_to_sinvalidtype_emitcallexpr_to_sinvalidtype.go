@@ -635,11 +635,11 @@ func builtinDArrayExtendSourceType(t semantic.Type) (semantic.Type, bool) {
 		return nil, false
 	}
 	switch tt := t.(type) {
-	case *semantic.DArrayType, *semantic.DArrayViewType, *semantic.ArrayType:
+	case *semantic.DArrayType, *semantic.ViewType, *semantic.ArrayType:
 		return t, true
 	case *semantic.RefType:
 		switch tt.Elem.(type) {
-		case *semantic.DArrayType, *semantic.DArrayViewType, *semantic.ArrayType:
+		case *semantic.DArrayType, *semantic.ViewType, *semantic.ArrayType:
 			return tt.Elem, true
 		}
 	}

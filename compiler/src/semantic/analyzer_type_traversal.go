@@ -62,7 +62,7 @@ func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool
 		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DArrayType:
 		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
-	case *DArrayViewType:
+	case *ViewType:
 		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *OptionalType:
 		return a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1)
@@ -243,7 +243,7 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 		return true
 	case *OptionalType:
 		return a.typeCanContainRegionRefs(tt.Value, seen)
-	case *DArrayViewType:
+	case *ViewType:
 		return true
 	case *DStrType:
 		return true
@@ -433,7 +433,7 @@ func (a *Analyzer) abstractParamBorrowedOwnerRefState(t Type, baseKey affineValu
 		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
 			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
 		}
-	case *DArrayViewType:
+	case *ViewType:
 		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
 			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
 		}
@@ -543,7 +543,7 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 				regionAnyIndexFieldKey(): elemState,
 			}
 		}
-	case *DArrayViewType:
+	case *ViewType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
 			state.Fields = map[string]regionRefState{
 				regionAnyIndexFieldKey(): elemState,

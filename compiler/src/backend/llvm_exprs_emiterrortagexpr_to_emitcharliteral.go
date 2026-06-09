@@ -792,7 +792,7 @@ func (s *functionState) emitSliceSourceLength(slice *ast.SliceExpr) (C.LLVMValue
 		return C.LLVMConstInt(usizeLLVM, C.ulonglong(arr.ConstSize), 0), nil
 	}
 	switch base.(type) {
-	case *semantic.DArrayType, *semantic.DArrayViewType:
+	case *semantic.DArrayType, *semantic.ViewType:
 		containerPtr, _, err := s.emitAddressOrTemp(slice.Object)
 		if err != nil {
 			return nil, err

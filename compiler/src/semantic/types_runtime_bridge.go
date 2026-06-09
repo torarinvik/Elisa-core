@@ -30,7 +30,7 @@ const (
 type runtimeBridgeMatch struct {
 	Kind         runtimeBridgeKind
 	DArray       *DArrayType
-	DArrayView   *DArrayViewType
+	DArrayView   *ViewType
 	DynArray     *GenericInstanceType
 	DynArrayView *StructType
 	DStr         *DStrType
@@ -84,7 +84,7 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
 		}
 	}
-	if dav, ok := a.(*DArrayViewType); ok {
+	if dav, ok := a.(*ViewType); ok {
 		if dynArrayView, ok := dynArrayViewRuntimeType(b); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: dav, DynArrayView: dynArrayView}, true
 		}
@@ -94,7 +94,7 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
 		}
 	}
-	if dav, ok := b.(*DArrayViewType); ok {
+	if dav, ok := b.(*ViewType); ok {
 		if dynArrayView, ok := dynArrayViewRuntimeType(a); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: dav, DynArrayView: dynArrayView}, true
 		}

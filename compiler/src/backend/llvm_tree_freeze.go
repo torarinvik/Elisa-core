@@ -343,7 +343,7 @@ func (s *functionState) emitTreeTagsHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	if !ok {
 		return nil, nil, true, fmt.Errorf("tree family %s has no category %q", storeType.Family.Name, categoryName)
 	}
-	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
+	resultType, ok := s.exprType(expr).(*semantic.ViewType)
 	if !ok || resultType == nil {
 		return nil, nil, true, fmt.Errorf("tree_tags result type is missing view metadata")
 	}
@@ -393,7 +393,7 @@ func (s *functionState) emitTreeColumnHelperCall(expr *ast.CallExpr) (C.LLVMValu
 	if _, ok := category.Common[fieldName]; !ok {
 		return nil, nil, true, fmt.Errorf("tree_column currently supports common fields only; category %s has no common field %q", category.Name, fieldName)
 	}
-	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
+	resultType, ok := s.exprType(expr).(*semantic.ViewType)
 	if !ok || resultType == nil {
 		return nil, nil, true, fmt.Errorf("tree_column result type is missing view metadata")
 	}
@@ -429,7 +429,7 @@ func (s *functionState) emitColumnHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	if !ok {
 		return nil, nil, true, fmt.Errorf("column field argument must be a compile-time string")
 	}
-	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
+	resultType, ok := s.exprType(expr).(*semantic.ViewType)
 	if !ok || resultType == nil {
 		return nil, nil, true, fmt.Errorf("column result type is missing view metadata")
 	}
@@ -612,7 +612,7 @@ func treeCategorySoAColumnIndex(category *semantic.TreeCategoryType, fieldName s
 	return -1
 }
 
-func (s *functionState) buildTreeFrozenColumnDView(dataPtr C.LLVMValueRef, countValue C.LLVMValueRef, viewType *semantic.DArrayViewType, name string) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) buildTreeFrozenColumnDView(dataPtr C.LLVMValueRef, countValue C.LLVMValueRef, viewType *semantic.ViewType, name string) (C.LLVMValueRef, semantic.Type, bool, error) {
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {
 		return nil, nil, true, err

@@ -18,7 +18,7 @@ func sequenceRewriteCarrierElemType(t Type) (Type, bool) {
 	switch tt := StripAggregateStateType(t).(type) {
 	case *DArrayType:
 		return tt.Elem, true
-	case *DArrayViewType:
+	case *ViewType:
 		if tt.SurfaceName != "" && tt.SurfaceName != "view" {
 			return nil, false
 		}

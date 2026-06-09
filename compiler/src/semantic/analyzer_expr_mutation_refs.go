@@ -39,7 +39,7 @@ func containsTypeParam(t Type) bool {
 		return containsTypeParam(n.Elem)
 	case *DArrayType:
 		return containsTypeParam(n.Elem)
-	case *DArrayViewType:
+	case *ViewType:
 		return containsTypeParam(n.Elem)
 	case *TupleType:
 		for _, field := range n.Fields {

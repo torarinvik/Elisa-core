@@ -835,7 +835,7 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 	switch tt := sourceType.(type) {
 	case *DArrayType:
 		return SameType(elemType, tt.Elem)
-	case *DArrayViewType:
+	case *ViewType:
 		return SameType(elemType, tt.Elem)
 	case *ArrayType:
 		return SameType(elemType, tt.Elem)
@@ -846,7 +846,7 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 		switch inner := tt.Elem.(type) {
 		case *DArrayType:
 			return SameType(elemType, inner.Elem)
-		case *DArrayViewType:
+		case *ViewType:
 			return SameType(elemType, inner.Elem)
 		case *ArrayType:
 			return SameType(elemType, inner.Elem)

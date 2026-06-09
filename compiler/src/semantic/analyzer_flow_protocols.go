@@ -200,7 +200,7 @@ func (a *Analyzer) containsTrackedProtocolCarrierValues(t Type, seen map[string]
 		return a.containsTrackedProtocolCarrierValues(tt.Elem, seen)
 	case *DArrayType:
 		return a.containsTrackedProtocolCarrierValues(tt.Elem, seen)
-	case *DArrayViewType:
+	case *ViewType:
 		return a.containsTrackedProtocolCarrierValues(tt.Elem, seen)
 	case *DictType:
 		return a.containsTrackedProtocolCarrierValues(tt.Key, seen) || a.containsTrackedProtocolCarrierValues(tt.Value, seen)
@@ -290,7 +290,7 @@ func (a *Analyzer) protocolKindsInType(t Type, seen map[string]bool) (bool, bool
 		return a.protocolKindsInType(tt.Elem, seen)
 	case *DArrayType:
 		return a.protocolKindsInType(tt.Elem, seen)
-	case *DArrayViewType:
+	case *ViewType:
 		return a.protocolKindsInType(tt.Elem, seen)
 	case *DictType:
 		leftThread, leftTask, leftGuard := a.protocolKindsInType(tt.Key, seen)

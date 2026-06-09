@@ -560,7 +560,7 @@ func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (C.LLVMVa
 		return nil, nil, true, err
 	}
 	valuesPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, tablePtr, 0, cStringFree("node.table.values.ptr"))
-	viewType := &semantic.DArrayViewType{Elem: elemType, SurfaceName: "view"}
+	viewType := &semantic.ViewType{Elem: elemType, SurfaceName: "view"}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {
 		return nil, nil, true, err

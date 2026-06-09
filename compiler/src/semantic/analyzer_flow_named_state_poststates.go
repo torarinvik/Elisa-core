@@ -199,7 +199,7 @@ func (a *Analyzer) projectTrackedValueTypeAtPath(current Type, steps []borrowRet
 			return a.projectTrackedValueTypeAtPath(tt.Elem, steps[1:])
 		case *DArrayType:
 			return a.projectTrackedValueTypeAtPath(tt.Elem, steps[1:])
-		case *DArrayViewType:
+		case *ViewType:
 			return a.projectTrackedValueTypeAtPath(tt.Elem, steps[1:])
 		}
 	}
@@ -252,7 +252,7 @@ func (a *Analyzer) replaceTrackedValueTypeAtPath(current Type, steps []borrowRet
 		cloned := *tt
 		cloned.Elem = nextElem
 		return &cloned, true
-	case *DArrayViewType:
+	case *ViewType:
 		step := steps[0]
 		if !step.Wildcard && step.Index == nil {
 			return nil, false
@@ -440,7 +440,7 @@ func (a *Analyzer) applyRefStatePoststateAtPath(current Type, steps []borrowRetu
 		cloned := *tt
 		cloned.Elem = nextElem
 		return &cloned, true
-	case *DArrayViewType:
+	case *ViewType:
 		step := steps[0]
 		if !step.Wildcard && step.Index == nil {
 			return nil, false

@@ -203,10 +203,10 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 				}
 				childElemType := field.Type
 				if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
-					if viewType, ok := optionalBinding.Value.(*semantic.DArrayViewType); ok {
+					if viewType, ok := optionalBinding.Value.(*semantic.ViewType); ok {
 						childElemType = viewType.Elem
 					}
-				} else if viewType, ok := bindingType.(*semantic.DArrayViewType); ok {
+				} else if viewType, ok := bindingType.(*semantic.ViewType); ok {
 					childElemType = viewType.Elem
 				}
 				countValue, err := s.emitTreeStructuralSequenceCount(sourceFieldValue, field.Type, "tree.default.children.count")
@@ -341,10 +341,10 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 				}
 				childElemType := field.Type
 				if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
-					if viewType, ok := optionalBinding.Value.(*semantic.DArrayViewType); ok {
+					if viewType, ok := optionalBinding.Value.(*semantic.ViewType); ok {
 						childElemType = viewType.Elem
 					}
-				} else if viewType, ok := bindingType.(*semantic.DArrayViewType); ok {
+				} else if viewType, ok := bindingType.(*semantic.ViewType); ok {
 					childElemType = viewType.Elem
 				}
 				countValue, err := s.emitTreeStructuralSequenceCount(sourceFieldValue, field.Type, "tree.default.children.count")
@@ -474,10 +474,10 @@ func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultConte
 				}
 				childElemType := field.Type
 				if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
-					if viewType, ok := optionalBinding.Value.(*semantic.DArrayViewType); ok {
+					if viewType, ok := optionalBinding.Value.(*semantic.ViewType); ok {
 						childElemType = viewType.Elem
 					}
-				} else if viewType, ok := bindingType.(*semantic.DArrayViewType); ok {
+				} else if viewType, ok := bindingType.(*semantic.ViewType); ok {
 					childElemType = viewType.Elem
 				}
 				countValue, err := s.emitTreeStructuralSequenceCount(sourceFieldValue, field.Type, "tree.default.children.count")
@@ -541,12 +541,12 @@ func (s *functionState) coerceTreeRewriteSequenceFieldValue(viewValue C.LLVMValu
 		presentValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
 		return s.buildOptionalValue(optionalType, presentValue, payloadValue)
 	}
-	view, ok := viewType.(*semantic.DArrayViewType)
+	view, ok := viewType.(*semantic.ViewType)
 	if !ok || view == nil {
 		return nil, fmt.Errorf("rewrite default expected view child results, got %s", viewType.String())
 	}
 	switch tt := targetType.(type) {
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		return viewValue, nil
 	case *semantic.DArrayType:
 		return s.materializeTreeOwnerDArrayFromView(viewValue, view, tt, owner, name)

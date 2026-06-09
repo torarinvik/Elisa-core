@@ -52,7 +52,7 @@ func (a *Analyzer) analyzeCopyBuiltinCall(expr *ast.CallExpr) (Type, bool) {
 	}
 	if !a.copyBuiltinCompatible(arrayTarget, sourceType) {
 		switch StripAggregateStateType(sourceType).(type) {
-		case *DArrayType, *DArrayViewType, *SViewType, *DStrType:
+		case *DArrayType, *ViewType, *SViewType, *DStrType:
 			a.errorf(expr.Pos(), "copy requires a statically known size; %s has a runtime length — use clone to copy it into a region-owned darray", sourceType)
 		default:
 			a.errorf(expr.Pos(), "copy cannot copy %s into %s in v1", sourceType, targetType)

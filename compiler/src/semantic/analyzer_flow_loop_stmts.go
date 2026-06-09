@@ -222,7 +222,7 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 	// Column scan `Expr of .field` yields computed scalars, not addressable
 	// elements — value binding only, no ref/mutable-ref.
 	if _, ok := sourceExpr.(*ast.EnumColumnExpr); ok {
-		if view, ok := StripAggregateStateType(sourceType).(*DArrayViewType); ok {
+		if view, ok := StripAggregateStateType(sourceType).(*ViewType); ok {
 			return iterLoopSourceInfo{ItemType: view.Elem}, true
 		}
 		return iterLoopSourceInfo{ItemType: invalidType}, false
@@ -246,7 +246,7 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: true}, true
 	case *DArrayType:
 		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true
-	case *DArrayViewType:
+	case *ViewType:
 		if tt.SurfaceName != "" && tt.SurfaceName != "view" {
 			return iterLoopSourceInfo{}, false
 		}
@@ -680,7 +680,7 @@ func parallelForItemType(t Type) (Type, bool) {
 		if IsFrozenPackedEnumStoreType(tt) {
 			return tt.Enum, true
 		}
-	case *DArrayViewType:
+	case *ViewType:
 		return tt.Elem, true
 	case *GenericInstanceType:
 		if itemType, ok := ChunksExactViewItemType(tt); ok {
@@ -764,7 +764,7 @@ func (a *Analyzer) parallelForCaptureTypeAllowed(t Type, seen map[string]bool) b
 		return true
 	case *PackedEnumStoreType:
 		return IsFrozenPackedEnumStoreType(tt)
-	case *DArrayViewType:
+	case *ViewType:
 		return tt.SurfaceName == "packedview" && a.parallelForCaptureTypeAllowed(tt.Elem, seen)
 	default:
 		return false

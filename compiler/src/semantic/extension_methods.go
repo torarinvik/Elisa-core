@@ -244,7 +244,7 @@ func typeSpecificityScore(t Type) int {
 		return 1 + typeSpecificityScore(n.Elem)
 	case *DArrayType:
 		return 1 + typeSpecificityScore(n.Elem)
-	case *DArrayViewType:
+	case *ViewType:
 		return 1 + typeSpecificityScore(n.Elem)
 	case *TupleType:
 		score := 1

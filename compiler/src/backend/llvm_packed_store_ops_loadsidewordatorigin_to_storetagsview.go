@@ -58,7 +58,7 @@ func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordO
 func (ops *packedStoreOps) loadSideWord(indexValue C.LLVMValueRef, wordOffset C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	return ops.loadSideWordAtOrigin(indexValue, wordOffset, packedReadOriginKey{}, name)
 }
-func (ops *packedStoreOps) storeTagsView(startValue C.LLVMValueRef, endValue C.LLVMValueRef, resultType *semantic.DArrayViewType, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (ops *packedStoreOps) storeTagsView(startValue C.LLVMValueRef, endValue C.LLVMValueRef, resultType *semantic.ViewType, name string) (C.LLVMValueRef, semantic.Type, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
 		return nil, nil, err

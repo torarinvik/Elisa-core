@@ -129,7 +129,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 			value, err := s.loadValue(ptr, elemType, "safe.index.value")
 			return value, elemType, err
 		}, nil
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
 			return nil, nil, err
@@ -177,7 +177,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 				value, err := s.loadValue(ptr, elemType, "safe.index.value")
 				return value, elemType, err
 			}, nil
-		case *semantic.DArrayViewType:
+		case *semantic.ViewType:
 			containerPtr, _, err := s.emitExpr(expr.Object, objectType)
 			if err != nil {
 				return nil, nil, err
@@ -391,11 +391,11 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 			indexType:   usizeType,
 		}, true
 	}
-	if view, ok := objectType.(*semantic.DArrayViewType); ok {
+	if view, ok := objectType.(*semantic.ViewType); ok {
 		return runtimeSliceInfo{
 			helperName:  "arena_da_view_slice",
 			operandType: objectType,
-			resultType:  &semantic.DArrayViewType{Elem: view.Elem},
+			resultType:  &semantic.ViewType{Elem: view.Elem},
 			indexType:   usizeType,
 		}, true
 	}

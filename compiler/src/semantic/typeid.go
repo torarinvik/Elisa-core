@@ -172,7 +172,7 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) || !appendShapeIDKey(b, tt.Shape) {
 			return false
 		}
-	case *DArrayViewType:
+	case *ViewType:
 		appendKeyTag(b, "darrayview")
 		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
 			return false

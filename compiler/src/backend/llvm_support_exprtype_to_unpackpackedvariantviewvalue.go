@@ -217,7 +217,7 @@ func fieldInfoFromOrderedFields(typeName string, decls []ast.FieldDecl, fields m
 	return 0, semantic.Field{}, fmt.Errorf("type %s has no field %s", typeName, fieldName)
 }
 func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
-	if _, ok := t.(*semantic.DArrayViewType); ok {
+	if _, ok := t.(*semantic.ViewType); ok {
 		if base, ok := g.result.NamedTypes["DynArrayView"]; ok {
 			return base
 		}

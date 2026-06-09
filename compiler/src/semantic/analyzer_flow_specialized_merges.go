@@ -144,8 +144,8 @@ func (a *Analyzer) mergeSpecializedValueTypesWithSeen(dst Type, src Type, seen m
 		}
 		mergedOptional.Value = mergedValue
 		return mergedOptional, true
-	case *DArrayViewType:
-		srcView, ok := src.(*DArrayViewType)
+	case *ViewType:
+		srcView, ok := src.(*ViewType)
 		if !ok {
 			return nil, false
 		}

@@ -15,7 +15,7 @@ func TreeStructuralSequenceElemType(t Type) (Type, bool) {
 		return tt.Elem, true
 	case *DArrayType:
 		return tt.Elem, true
-	case *DArrayViewType:
+	case *ViewType:
 		if tt.SurfaceName != "" && tt.SurfaceName != "view" {
 			return nil, false
 		}
@@ -69,7 +69,7 @@ func TreeRewriteChildBindingType(fieldType Type, relation ast.EnumPayloadRelatio
 		}
 		return resultType, true
 	case ast.EnumPayloadRelationChildren:
-		viewType := &DArrayViewType{Elem: resultType, SurfaceName: "view"}
+		viewType := &ViewType{Elem: resultType, SurfaceName: "view"}
 		if optional {
 			return &OptionalType{Value: viewType}, true
 		}
@@ -86,18 +86,18 @@ func OptionalTreeFoldChildBindingType(resultType Type) Type {
 	return &OptionalType{Value: resultType}
 }
 
-func TreeStructuralSequenceViewType(t Type) (*DArrayViewType, bool) {
+func TreeStructuralSequenceViewType(t Type) (*ViewType, bool) {
 	darray, ok := t.(*DArrayType)
 	if !ok || darray == nil {
 		return nil, false
 	}
-	return &DArrayViewType{Elem: darray.Elem, SurfaceName: "view"}, true
+	return &ViewType{Elem: darray.Elem, SurfaceName: "view"}, true
 }
 
 func treeSurfaceSequenceType(t Type) (Type, bool) {
 	switch tt := t.(type) {
 	case *DArrayType:
-		return &DArrayViewType{Elem: tt.Elem, SurfaceName: "view"}, true
+		return &ViewType{Elem: tt.Elem, SurfaceName: "view"}, true
 	case *OptionalType:
 		if tt == nil || tt.Value == nil {
 			return nil, false

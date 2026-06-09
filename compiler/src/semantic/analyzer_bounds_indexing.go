@@ -112,7 +112,7 @@ func (a *Analyzer) recordViewStaticLenBinding(name string, value ast.Expr, bindi
 		return
 	}
 	switch StripAggregateStateType(bindingType).(type) {
-	case *DArrayViewType:
+	case *ViewType:
 	default:
 		delete(a.currentViewStaticLen, name)
 		delete(a.currentViewMutable, name)
@@ -266,7 +266,7 @@ func (a *Analyzer) indexExprHasBoundsProof(expr *ast.IndexExpr, objType Type) bo
 	if base, ok := stripOptimizationParens(expr.Object).(*ast.Ident); ok && base != nil {
 		if length, known := a.currentViewStaticLen[base.Name]; known {
 			switch StripAggregateStateType(stripRefForBounds(objType)).(type) {
-			case *DArrayViewType:
+			case *ViewType:
 				if value, ok := a.evalConstExpr(expr.Index); ok && value.Kind == ConstInt {
 					return value.Int >= 0 && value.Int < length
 				}
@@ -337,7 +337,7 @@ func indexableTypeRequiresBoundsProof(t Type) bool {
 		return true
 	}
 	switch stripRefForBounds(t).(type) {
-	case *ArrayType, *DArrayType, *DArrayViewType, *DStrType, *SViewType:
+	case *ArrayType, *DArrayType, *ViewType, *DStrType, *SViewType:
 		return true
 	}
 	return false
@@ -362,7 +362,7 @@ func indexableUpperBoundString(obj ast.Expr, objType Type) string {
 		}
 	case *DArrayType:
 		return base + ".count"
-	case *DArrayViewType, *DStrType, *SViewType:
+	case *ViewType, *DStrType, *SViewType:
 		return base + ".len"
 	}
 	return ""

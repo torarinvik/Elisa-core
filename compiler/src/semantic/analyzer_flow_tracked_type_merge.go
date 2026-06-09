@@ -85,8 +85,8 @@ func (a *Analyzer) mergeTrackedValueTypesWithSeen(left Type, right Type, seen ma
 		merged.Elem = elem
 		seen[pair] = &merged
 		return &merged, true
-	case *DArrayViewType:
-		rt, ok := right.(*DArrayViewType)
+	case *ViewType:
+		rt, ok := right.(*ViewType)
 		if !ok || lt.SurfaceName != rt.SurfaceName {
 			return nil, false
 		}

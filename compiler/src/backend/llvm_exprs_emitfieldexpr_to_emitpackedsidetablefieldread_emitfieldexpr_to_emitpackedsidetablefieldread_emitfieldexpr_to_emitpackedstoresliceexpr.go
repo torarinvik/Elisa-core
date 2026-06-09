@@ -189,7 +189,7 @@ func (s *functionState) emitPackedStoreTagsExpr(expr *ast.FieldExpr) (C.LLVMValu
 	if !ok || ops.storeType == nil || ops.storeType.Enum == nil || !semantic.IsFrozenPackedEnumStoreType(ops.storeType) {
 		return nil, nil, false, nil
 	}
-	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
+	resultType, ok := s.exprType(expr).(*semantic.ViewType)
 	if !ok || resultType == nil {
 		return nil, nil, true, fmt.Errorf("packed store tags requires view result type")
 	}

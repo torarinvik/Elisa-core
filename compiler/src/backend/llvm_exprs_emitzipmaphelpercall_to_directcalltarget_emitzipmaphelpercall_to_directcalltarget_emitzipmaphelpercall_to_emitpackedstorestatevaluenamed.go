@@ -237,7 +237,7 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 }
 func zipMapViewInfo(t semantic.Type) (semantic.Type, semantic.Type, bool) {
 	switch tt := t.(type) {
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		if tt == nil || tt.SurfaceName == "packedtags" {
 			return nil, nil, false
 		}
@@ -266,7 +266,7 @@ func (s *functionState) emitDenseViewIndexedAddress(dataPtr C.LLVMValueRef, elem
 	indices := []C.LLVMValueRef{indexValue}
 	return C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name+".ptr")), nil
 }
-func (s *functionState) emitArenaViewSliceValue(viewValue C.LLVMValueRef, viewType *semantic.DArrayViewType, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitArenaViewSliceValue(viewValue C.LLVMValueRef, viewType *semantic.ViewType, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	return s.emitDenseViewSliceValue(viewValue, viewType, startValue, endValue, name)
 }
 func (s *functionState) emitDenseViewSliceValue(viewValue C.LLVMValueRef, viewType semantic.Type, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {

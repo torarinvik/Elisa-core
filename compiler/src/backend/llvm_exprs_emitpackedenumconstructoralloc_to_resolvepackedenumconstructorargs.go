@@ -266,7 +266,7 @@ func (s *functionState) emitPackedStoreRecordTag(storeValue C.LLVMValueRef, stor
 
 type packedEnumTailPayloadPlan struct {
 	index         int
-	viewType      *semantic.DArrayViewType
+	viewType      *semantic.ViewType
 	elemSizeValue C.LLVMValueRef
 	lenValue      C.LLVMValueRef
 	byteCount     C.LLVMValueRef
@@ -306,7 +306,7 @@ func (s *functionState) preparePackedEnumTailPayloadPlan(variant *semantic.EnumV
 		return &packedEnumTailPayloadPlan{index: tailIndex, viewType: viewType, elemSizeValue: elemSizeValue, lenValue: lenValue, byteCount: byteCount, literal: literal}, nil
 	}
 	sourceType := s.exprType(arg)
-	if _, ok := sourceType.(*semantic.DArrayViewType); !ok {
+	if _, ok := sourceType.(*semantic.ViewType); !ok {
 		if _, ok := sourceType.(*semantic.ViewType); !ok {
 			return nil, fmt.Errorf("packed enum %s tail payload expects a list literal or view-compatible source, got %s", variant.Name, sourceType.String())
 		}

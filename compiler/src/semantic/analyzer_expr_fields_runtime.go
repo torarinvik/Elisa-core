@@ -225,7 +225,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 }
 
 func (a *Analyzer) runtimeBackedStructType(t Type) Type {
-	if dav, ok := t.(*DArrayViewType); ok {
+	if dav, ok := t.(*ViewType); ok {
 		base, ok := a.namedTypes["DynArrayView"]
 		if !ok {
 			return nil
@@ -275,7 +275,7 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	if _, ok := t.(*PackedEnumStoreType); ok {
 		return "packed store index result", true
 	}
-	if view, ok := t.(*DArrayViewType); ok {
+	if view, ok := t.(*ViewType); ok {
 		if view.SurfaceName == "packedview" {
 			return "packed store view index result", true
 		}
@@ -302,7 +302,7 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	if _, ok := ref.Elem.(*PackedEnumStoreType); ok {
 		return "packed store index result", true
 	}
-	if view, ok := ref.Elem.(*DArrayViewType); ok {
+	if view, ok := ref.Elem.(*ViewType); ok {
 		if view.SurfaceName == "packedview" {
 			return "packed store view index result", true
 		}
@@ -385,7 +385,7 @@ func packedStoreSyntheticField(t Type, fieldName string) (Field, bool) {
 		if !IsFrozenPackedEnumStoreType(storeType) || storeType.Enum == nil || storeType.Enum.TagType == nil {
 			return Field{}, false
 		}
-		return Field{Name: "tags", Type: &DArrayViewType{Elem: storeType.Enum.TagType, SurfaceName: "packedtags"}, Mutable: false}, true
+		return Field{Name: "tags", Type: &ViewType{Elem: storeType.Enum.TagType, SurfaceName: "packedtags"}, Mutable: false}, true
 	}
 	return Field{}, false
 }

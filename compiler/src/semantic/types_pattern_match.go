@@ -78,8 +78,8 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *DArrayType:
 		a, ok := actual.(*DArrayType)
 		return ok && matchTypePattern(p.Elem, a.Elem) && shapeMatchesPattern(p.Shape, a.Shape)
-	case *DArrayViewType:
-		a, ok := actual.(*DArrayViewType)
+	case *ViewType:
+		a, ok := actual.(*ViewType)
 		return ok && matchTypePattern(p.Elem, a.Elem)
 	case *DStrType:
 		a, ok := actual.(*DStrType)

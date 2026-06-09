@@ -16,12 +16,12 @@ func ChunksExactViewInstance(t Type) (*GenericInstanceType, bool) {
 	return gi, true
 }
 
-func ChunksExactViewItemType(t Type) (*DArrayViewType, bool) {
+func ChunksExactViewItemType(t Type) (*ViewType, bool) {
 	gi, ok := ChunksExactViewInstance(t)
 	if !ok {
 		return nil, false
 	}
-	return &DArrayViewType{Elem: gi.Args[0], SurfaceName: "view"}, true
+	return &ViewType{Elem: gi.Args[0], SurfaceName: "view"}, true
 }
 
 func EnumerateViewInstance(t Type) (*GenericInstanceType, bool) {

@@ -474,7 +474,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 		return nil, nil, false, nil
 	}
 }
-func (s *functionState) buildDynArrayViewValue(arrayValue C.LLVMValueRef, arrayType *semantic.DArrayType, viewType *semantic.DArrayViewType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) buildDynArrayViewValue(arrayValue C.LLVMValueRef, arrayType *semantic.DArrayType, viewType *semantic.ViewType, name string) (C.LLVMValueRef, error) {
 	if s == nil || arrayType == nil || viewType == nil {
 		return nil, fmt.Errorf("missing dynamic array view conversion metadata")
 	}
@@ -534,7 +534,7 @@ func (s *functionState) treeFieldSurfaceValue(value C.LLVMValueRef, rawType sema
 	if !ok || rawArray == nil {
 		return nil, nil, fmt.Errorf("unsupported tree field surface conversion from %s to %s", rawType.String(), surfaceType.String())
 	}
-	viewType, ok := surfaceType.(*semantic.DArrayViewType)
+	viewType, ok := surfaceType.(*semantic.ViewType)
 	if !ok || viewType == nil || !semantic.SameType(rawArray.Elem, viewType.Elem) {
 		return nil, nil, fmt.Errorf("unsupported tree field surface conversion from %s to %s", rawType.String(), surfaceType.String())
 	}

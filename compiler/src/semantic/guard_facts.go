@@ -233,7 +233,7 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 		return ok
 	}
 	switch objType.(type) {
-	case *DArrayViewType:
+	case *ViewType:
 		return field == "data" || field == "len" || field == "elem_size"
 	case *SViewType:
 		return field == "data" || field == "len"

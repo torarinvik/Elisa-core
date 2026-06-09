@@ -348,7 +348,7 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 								a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q can only declare one tail payload", enumDecl.Name, variantDecl.Name)
 							}
 							tailElemType := a.resolveType(tailExpr.Elem)
-							payloadType = &DArrayViewType{Elem: tailElemType, SurfaceName: "view"}
+							payloadType = &ViewType{Elem: tailElemType, SurfaceName: "view"}
 							tailIndex = payloadIndex
 						}
 					}

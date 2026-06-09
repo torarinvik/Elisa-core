@@ -118,7 +118,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if view, ok := objType.(*ViewType); ok {
 		return finish(view.Elem)
 	}
-	if view, ok := objType.(*DArrayViewType); ok {
+	if view, ok := objType.(*ViewType); ok {
 		return finish(view.Elem)
 	}
 	if tuple, ok := StripAggregateStateType(objType).(*TupleType); ok {
@@ -159,7 +159,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if view, ok := ref.Elem.(*ViewType); ok {
 			return finish(view.Elem)
 		}
-		if view, ok := ref.Elem.(*DArrayViewType); ok {
+		if view, ok := ref.Elem.(*ViewType); ok {
 			return finish(view.Elem)
 		}
 		if tuple, ok := StripAggregateStateType(ref.Elem).(*TupleType); ok {
@@ -316,14 +316,14 @@ func (a *Analyzer) tupleIndexResultType(tuple *TupleType, indexExpr ast.Expr) (T
 
 func safeIndexFallbackOperandType(t Type) bool {
 	switch tt := StripAggregateStateType(t).(type) {
-	case *ArrayType, *DArrayType, *DArrayViewType, *PackedEnumStoreType:
+	case *ArrayType, *DArrayType, *ViewType, *PackedEnumStoreType:
 		return true
 	case *RefType:
 		if tt.State != RefStateNonNull {
 			return false
 		}
 		switch StripAggregateStateType(tt.Elem).(type) {
-		case *ArrayType, *DArrayType, *DArrayViewType, *PackedEnumStoreType:
+		case *ArrayType, *DArrayType, *ViewType, *PackedEnumStoreType:
 			return true
 		}
 	}
@@ -444,16 +444,16 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
 	if view, ok := objType.(*DArrayType); ok {
-		return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
+		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
 	if view, ok := objType.(*ViewType); ok {
 		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
-	if view, ok := objType.(*DArrayViewType); ok {
-		return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
+	if view, ok := objType.(*ViewType); ok {
+		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
 	}
 	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
-		return &DArrayViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
+		return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
 	}
 	if cstr, ok := objType.(*DStrType); ok {
 		_ = cstr
@@ -475,16 +475,16 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*DArrayType); ok {
-			return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
+			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
 			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
-		if view, ok := ref.Elem.(*DArrayViewType); ok {
-			return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
+		if view, ok := ref.Elem.(*ViewType); ok {
+			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
 		}
 		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
-			return &DArrayViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
+			return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
 		}
 		if _, ok := ref.Elem.(*DStrType); ok {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}

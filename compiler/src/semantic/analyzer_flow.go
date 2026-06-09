@@ -673,11 +673,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 }
 
 func concreteDArrayViewBindingType(declared Type, actual Type) (Type, bool) {
-	declaredView, ok := declared.(*DArrayViewType)
+	declaredView, ok := declared.(*ViewType)
 	if !ok {
 		return nil, false
 	}
-	actualView, ok := actual.(*DArrayViewType)
+	actualView, ok := actual.(*ViewType)
 	if !ok {
 		return nil, false
 	}

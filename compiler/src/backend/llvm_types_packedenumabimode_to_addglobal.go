@@ -316,7 +316,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		err = g.noteType(tt.Elem)
 	case *semantic.DArrayType:
 		_, err = g.ensureRuntimeDynArray(tt.Elem)
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		_, err = g.ensureRuntimeDynArrayView()
 	case *semantic.DictType:
 		if err = g.noteType(tt.Key); err != nil {

@@ -357,8 +357,8 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		if a, ok := actual.(*semantic.DArrayType); ok {
 			collectSpecializationBindings(p.Elem, a.Elem, bindings)
 		}
-	case *semantic.DArrayViewType:
-		if a, ok := actual.(*semantic.DArrayViewType); ok {
+	case *semantic.ViewType:
+		if a, ok := actual.(*semantic.ViewType); ok {
 			collectSpecializationBindings(p.Elem, a.Elem, bindings)
 		}
 	case *semantic.DictType:

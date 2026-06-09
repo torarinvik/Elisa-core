@@ -31,10 +31,10 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 		// shareable (it would be a data race / lifetime hole). Transfer must go through a
 		// frozen packed store, an owned-region move, or a Mutex/CondVar guard. This mirrors
 		// closureCaptureSharesMutableState so the direct-arg and closure-capture paths agree.
-		// (Views — ViewType/DArrayViewType — recurse: their safety is governed by the
+		// (Views — ViewType/ViewType — recurse: their safety is governed by the
 		// region- and packed-store-dependency checks in validateThreadTransferArg.)
 		return false
-	case *DArrayViewType:
+	case *ViewType:
 		return a.typeStructurallyThreadShareable(tt.Elem, seen)
 	case *EnumType:
 		if tt.Packed {
@@ -131,7 +131,7 @@ func (a *Analyzer) closureCaptureSharesMutableState(t Type, seen map[string]bool
 	switch tt := t.(type) {
 	case *RefType:
 		return tt.Storage != RefStorageStatic // a copied non-static ref still aliases its referent
-	case *DArrayType, *DictType, *DArrayViewType:
+	case *DArrayType, *DictType, *ViewType:
 		return true // a copied header aliases the shared backing buffer
 	case *ArrayType:
 		return a.closureCaptureSharesMutableState(tt.Elem, seen) // inline array: shares iff element does
@@ -178,7 +178,7 @@ func threadTransferRequiresUnsafeThreadShareSwitch(t Type, seen map[string]bool)
 		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
 	case *DArrayType:
 		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
-	case *DArrayViewType:
+	case *ViewType:
 		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
 	case *DictType:
 		return threadTransferRequiresUnsafeThreadShare(tt.Key, seen) || threadTransferRequiresUnsafeThreadShare(tt.Value, seen)

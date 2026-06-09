@@ -183,7 +183,7 @@ func (s *functionState) darrayPushUsesBulkAppend(darrayType *semantic.DArrayType
 	switch tt := baseType.(type) {
 	case *semantic.DArrayType:
 		return semantic.SameType(darrayType.Elem, tt.Elem)
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		return semantic.SameType(darrayType.Elem, tt.Elem)
 	case *semantic.ArrayType:
 		return semantic.SameType(darrayType.Elem, tt.Elem)
@@ -317,7 +317,7 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 		data := C.LLVMBuildExtractValue(s.builder, arrayValue, 0, cStringFree("darray.extend.src.data"))
 		count := C.LLVMBuildExtractValue(s.builder, arrayValue, 1, cStringFree("darray.extend.src.count"))
 		return data, count, nil
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		var viewValue C.LLVMValueRef
 		if refType, ok := sourceType.(*semantic.RefType); ok && refType != nil {
 			ptr, _, err := s.emitExpr(arg, sourceType)

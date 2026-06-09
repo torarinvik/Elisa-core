@@ -583,7 +583,7 @@ func (s *functionState) emitTreeFoldChildResultsView(helper *treeFoldHelperInfo,
 	C.LLVMBuildBr(s.builder, loopBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, endBB)
-	viewType := &semantic.DArrayViewType{Elem: helper.resultType, SurfaceName: "view"}
+	viewType := &semantic.ViewType{Elem: helper.resultType, SurfaceName: "view"}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {
 		return nil, err

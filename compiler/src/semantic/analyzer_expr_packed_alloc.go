@@ -119,7 +119,7 @@ func (a *Analyzer) analyzePackedEnumConstructorArg(expr ast.Expr, variant *EnumV
 	}
 	expected := variant.Payload[index]
 	if tailIndex, ok := variant.TailPayloadIndex(); ok && tailIndex == index {
-		if expectedView, ok := expected.(*DArrayViewType); ok {
+		if expectedView, ok := expected.(*ViewType); ok {
 			actual, ok := a.analyzePackedEnumTailPayloadArg(expr, expectedView, a.enumConstructorMoveReason(enumName, variant, index))
 			return expr, actual, ok
 		}
@@ -130,7 +130,7 @@ func (a *Analyzer) analyzePackedEnumConstructorArg(expr ast.Expr, variant *EnumV
 	return rewritten, actual, ok
 }
 
-func (a *Analyzer) analyzePackedEnumTailPayloadArg(expr ast.Expr, expected *DArrayViewType, moveReason string) (Type, bool) {
+func (a *Analyzer) analyzePackedEnumTailPayloadArg(expr ast.Expr, expected *ViewType, moveReason string) (Type, bool) {
 	if expected == nil {
 		actual := a.analyzeExpr(expr)
 		return actual, false
@@ -153,11 +153,11 @@ func (a *Analyzer) analyzePackedEnumTailPayloadArg(expr ast.Expr, expected *DArr
 	return actual, ok
 }
 
-func packedEnumTailPayloadSourceCompatible(expected *DArrayViewType, actual Type) bool {
+func packedEnumTailPayloadSourceCompatible(expected *ViewType, actual Type) bool {
 	if expected == nil || actual == nil {
 		return false
 	}
-	if actualView, ok := actual.(*DArrayViewType); ok {
+	if actualView, ok := actual.(*ViewType); ok {
 		return SameType(expected.Elem, actualView.Elem)
 	}
 	if actualView, ok := actual.(*ViewType); ok {

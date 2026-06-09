@@ -132,7 +132,7 @@ func (a *Analyzer) analyzeEnumColumnExpr(expr *ast.EnumColumnExpr) Type {
 		}
 		elem = field.Type
 	}
-	return &DArrayViewType{Elem: elem, SurfaceName: "view"}
+	return &ViewType{Elem: elem, SurfaceName: "view"}
 }
 
 // enumColumnVariantPayloadField reports whether name is a named payload field

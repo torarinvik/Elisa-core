@@ -81,7 +81,7 @@ import (
 	"strings"
 )
 
-func (s *functionState) materializeTreeOwnerDArrayFromView(viewValue C.LLVMValueRef, viewType *semantic.DArrayViewType, resultType *semantic.DArrayType, owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
+func (s *functionState) materializeTreeOwnerDArrayFromView(viewValue C.LLVMValueRef, viewType *semantic.ViewType, resultType *semantic.DArrayType, owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
 	if viewType == nil || resultType == nil {
 		return nil, fmt.Errorf("missing view materialization metadata")
 	}

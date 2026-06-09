@@ -163,12 +163,12 @@ func (v *EnumVariant) TailPayloadIndex() (int, bool) {
 	return v.TailIndex, true
 }
 
-func (v *EnumVariant) TailPayloadViewType() (*DArrayViewType, bool) {
+func (v *EnumVariant) TailPayloadViewType() (*ViewType, bool) {
 	index, ok := v.TailPayloadIndex()
 	if !ok {
 		return nil, false
 	}
-	viewType, ok := v.Payload[index].(*DArrayViewType)
+	viewType, ok := v.Payload[index].(*ViewType)
 	if !ok {
 		return nil, false
 	}

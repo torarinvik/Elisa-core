@@ -46,7 +46,7 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 			return nil, fmt.Errorf("iterable loop over %s requires constant array extent metadata", sourceType.String())
 		}
 		return C.LLVMConstInt(usizeLLVMType, C.ulonglong(tt.ConstSize), 0), nil
-	case *semantic.DArrayType, *semantic.DArrayViewType:
+	case *semantic.DArrayType, *semantic.ViewType:
 		containerLLVMType, err := s.g.lowerType(sourceType)
 		if err != nil {
 			return nil, err
@@ -150,7 +150,7 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 				return nil, fmt.Errorf("iterable loop over %s requires constant array extent metadata", sourceType.String())
 			}
 			return C.LLVMConstInt(usizeLLVMType, C.ulonglong(elem.ConstSize), 0), nil
-		case *semantic.DArrayType, *semantic.DArrayViewType:
+		case *semantic.DArrayType, *semantic.ViewType:
 			containerLLVMType, err := s.g.lowerType(tt.Elem)
 			if err != nil {
 				return nil, err
@@ -232,7 +232,7 @@ func (s *functionState) emitIterLoopElementAddress(sourceAlloca C.LLVMValueRef, 
 			return nil, nil, err
 		}
 		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, containerLLVMType, tt.Elem, indexValue)
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		containerLLVMType, err := s.g.lowerType(tt)
 		if err != nil {
 			return nil, nil, err
@@ -268,7 +268,7 @@ func (s *functionState) emitIterLoopElementAddress(sourceAlloca C.LLVMValueRef, 
 				return nil, nil, err
 			}
 			return s.emitRuntimePointerIndexedAddressWithType(sourceValue, containerLLVMType, elem.Elem, indexValue)
-		case *semantic.DArrayViewType:
+		case *semantic.ViewType:
 			containerLLVMType, err := s.g.lowerType(tt.Elem)
 			if err != nil {
 				return nil, nil, err
@@ -333,7 +333,7 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 		}
 		value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
 		return value, elemType, err
-	case *semantic.DArrayType, *semantic.DArrayViewType:
+	case *semantic.DArrayType, *semantic.ViewType:
 		ptr, elemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)
 		if err != nil {
 			return nil, nil, err
@@ -419,7 +419,7 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 		return s.emitIterLoopStringIndexValue(sourceValue, sourceType, indexValue, sourceName+".iter.char")
 	case *semantic.RefType:
 		switch elem := tt.Elem.(type) {
-		case *semantic.ArrayType, *semantic.DArrayType, *semantic.DArrayViewType:
+		case *semantic.ArrayType, *semantic.DArrayType, *semantic.ViewType:
 			ptr, elemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)
 			if err != nil {
 				return nil, nil, err

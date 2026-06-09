@@ -235,13 +235,11 @@ type DArrayType struct {
 	Region string
 }
 
-// ViewType and DArrayViewType were two ABI-identical view types (a window into contiguous T
-// memory) distinguished only by static vs dynamic bounds — a parameter, not a capability. They are
-// now ONE type; ViewType is a Go alias kept so the many construction sites read naturally. The
-// SurfaceName field carries the canonical `view` spelling (the legacy `dview` was removed) for diagnostics.
-type ViewType = DArrayViewType
-
-type DArrayViewType struct {
+// ViewType is a borrowed window into contiguous T memory: surface `view[T]`. It carries optional
+// (static-or-dynamic) bounds in Begin/End — a parameter, not a separate type. (It was historically
+// split into a static `view` and a dynamic `dview`; those were unified, and the `dview` spelling and
+// the `DArrayViewType` name were removed.) SurfaceName is the spelling used in diagnostics.
+type ViewType struct {
 	Elem        Type
 	Begin       string
 	End         string

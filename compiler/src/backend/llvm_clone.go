@@ -241,7 +241,7 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 		sourceData := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
 		countValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.count"))
 		return buildMaterializedFromDynamicSource(sourceData, st.Elem, countValue)
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		sourceData := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
 		countValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.len"))
 		return buildMaterializedFromDynamicSource(sourceData, st.Elem, countValue)

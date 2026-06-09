@@ -510,7 +510,7 @@ func (s *functionState) emitSequenceCountValue(expr ast.Expr, actualType semanti
 			return nil, err
 		}
 		return s.emitContainerCountValue(ptr, t, name)
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		ptr, _, err := s.emitAddressOrTemp(expr)
 		if err != nil {
 			return nil, err
@@ -523,7 +523,7 @@ func (s *functionState) emitSequenceCountValue(expr ast.Expr, actualType semanti
 		switch elem := semantic.StripAggregateStateType(t.Elem).(type) {
 		case *semantic.ArrayType:
 			return s.safeIndexArrayCountValue(elem)
-		case *semantic.DArrayType, *semantic.DArrayViewType:
+		case *semantic.DArrayType, *semantic.ViewType:
 			ptr, _, err := s.emitExpr(expr, actualType)
 			if err != nil {
 				return nil, err

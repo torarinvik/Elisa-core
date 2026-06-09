@@ -107,8 +107,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		return &semantic.ArrayType{Elem: elem, Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, ConstParam: tt.ConstParam, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:
 		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst, impls), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
-	case *semantic.DArrayViewType:
-		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst, impls), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
+	case *semantic.ViewType:
+		return &semantic.ViewType{Elem: substituteType(tt.Elem, subst, impls), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
 	case *semantic.TupleType:
 		fields := make([]semantic.TupleField, 0, len(tt.Fields))
 		for _, field := range tt.Fields {

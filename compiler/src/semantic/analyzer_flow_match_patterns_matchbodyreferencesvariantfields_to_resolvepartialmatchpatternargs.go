@@ -464,7 +464,7 @@ func SequenceMatchElementType(actual Type) (Type, bool) {
 		return t.Elem, true
 	case *DArrayType:
 		return t.Elem, true
-	case *DArrayViewType:
+	case *ViewType:
 		return t.Elem, true
 	case *DStrType:
 		return builtinCharType(), true

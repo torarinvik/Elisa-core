@@ -78,7 +78,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 			}
 		}
 		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
 			return nil, nil, err
@@ -152,7 +152,7 @@ func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, c
 		return nil
 	}
 	switch containerType.(type) {
-	case *semantic.DArrayType, *semantic.DArrayViewType:
+	case *semantic.DArrayType, *semantic.ViewType:
 	default:
 		return nil
 	}
@@ -276,7 +276,7 @@ func runtimeIndexedElemType(t semantic.Type) (semantic.Type, bool) {
 	switch tt := t.(type) {
 	case *semantic.DArrayType:
 		return tt.Elem, true
-	case *semantic.DArrayViewType:
+	case *semantic.ViewType:
 		return tt.Elem, true
 	default:
 		return nil, false

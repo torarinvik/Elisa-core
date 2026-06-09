@@ -222,7 +222,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if n.Fallback != nil {
 			return a.regionRefStateForRecoveredExpr(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index}, n.Fallback)
 		}
-		if viewType, ok := a.exprTypes[n.Object].(*DArrayViewType); ok && viewType.SurfaceName == "packedtags" {
+		if viewType, ok := a.exprTypes[n.Object].(*ViewType); ok && viewType.SurfaceName == "packedtags" {
 			return a.regionRefStateForExpr(n.Object)
 		}
 		resultType := a.exprTypes[n]
@@ -240,7 +240,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return cloneRegionRefState(state), true
 	case *ast.SliceExpr:
-		if viewType, ok := a.exprTypes[n.Object].(*DArrayViewType); ok && viewType.SurfaceName == "packedtags" {
+		if viewType, ok := a.exprTypes[n.Object].(*ViewType); ok && viewType.SurfaceName == "packedtags" {
 			return a.regionRefStateForExpr(n.Object)
 		}
 		resultType := a.exprTypes[n]
