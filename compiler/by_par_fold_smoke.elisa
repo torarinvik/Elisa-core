@@ -33,3 +33,15 @@ def by_par_fold_smoke():
 			_ = f.push(1.0)
 		fsum: f64 = (acc + x for x in f with acc: f64 = 0.0 by par)
 		assert fsum == 1000.0
+
+		# transformed element `acc + f(x)` — the worker applies the transform inline (fused
+		# map-reduce), no intermediate collection. Sum of squares matches the sequential fold.
+		sq_seq: mutable i64 = 0
+		for x in a:
+			sq_seq <- sq_seq + x*x
+		sq_par: i64 = (acc + x*x for x in a with acc: i64 = 0 by par)
+		assert sq_par == sq_seq
+
+		# transform that also changes type (i64 element -> f64 accumulator)
+		castsum: f64 = (acc + x.f64() for x in a with acc: f64 = 0.0 by par)
+		assert castsum == 12497500.0

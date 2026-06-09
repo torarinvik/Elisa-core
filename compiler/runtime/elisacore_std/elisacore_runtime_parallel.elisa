@@ -71,3 +71,42 @@ def reduce[T](s: Slice[T], identity: T, op: func(T, T) -> T, w: usize = 0.usize(
 		for i in 0..<nw:
 			acc <- op(acc, partials[i])
 		return acc
+
+struct MapReduceArg[T, U]:
+	band: Slice[T]
+	partials: Slice[U]
+	id: usize
+	identity: U
+	transform: func(T) -> U
+	op: func(U, U) -> U
+
+# Worker: fold one band into the accumulator, applying `transform` to each element on the way in,
+# then write the partial into the worker's own slot (id < w = partials length -> set_unchecked).
+def map_reduce_worker[T, U](a: MapReduceArg[T, U]) -> i64:
+	acc: mutable U = a.identity
+	n: usize = a.band.len()
+	for i in 0..<n:
+		acc <- a.op(acc, a.transform(a.band.get_unchecked(i)))
+	a.partials.set_unchecked(a.id, acc)
+	return 0
+
+# Fused parallel transform-then-reduce: `map_reduce(s, identity, transform, op)` folds `s` to a
+# single U by combining `transform(element)` values with `op` (no intermediate collection). This is
+# the contention-free shape generalised with a per-element transform: each worker reduces its
+# disjoint band into a private partial, partials merged with `op` (which must be associative with
+# unit `identity`). The worker count is inferred; pass a trailing `w` to tune it.
+def map_reduce[T, U](s: Slice[T], identity: U, transform: func(T) -> U, op: func(U, U) -> U, w: usize = 0.usize()) -> U:
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		nw: usize = w if w != 0.usize() else default_workers_for(s.len())
+		partials: mutable darray[U] = []
+		_ = partials.resize(nw)
+		for i in 0..<nw:
+			partials[i] <- identity
+		ps: Slice[U] = slice(&partials)
+		nursery workers(nw):
+			for t in 0..<nw:
+				submit map_reduce_worker[T, U](MapReduceArg[T, U] { band: s.split(nw, t), partials: ps, id: t, identity: identity, transform: transform, op: op })
+		acc: mutable U = identity
+		for i in 0..<nw:
+			acc <- op(acc, partials[i])
+		return acc

@@ -371,7 +371,7 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 	p.expect(lexer.TOKEN_RPAREN)
 
 	if byMode == "par" {
-		return p.buildParallelFoldReduce(pos, bindings, body, name, source, rangeEnd, filter, accInit)
+		return p.buildParallelFoldReduce(pos, bindings, body, name, accName, source, rangeEnd, filter, accInit)
 	}
 
 	assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body, FastMath: byMode == "simd"})
@@ -397,15 +397,17 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 	}
 }
 // buildParallelFoldReduce lowers a `by par` fold to a contention-free parallel reduction over the
-// source's disjoint bands, by desugaring to the runtime `reduce(slice(&src), seed, op)` combinator
-// (which folds each band into a private partial, then merges the partials — verified race-free and
-// partition-independent). Because a parallel reduction reorders the combine, `by par` is gated to
-// an associative-combine fold whose body is exactly `acc <op> x` (op ∈ {+, *}); anything else
-// (filter, head bindings, range source, non-identifier source, or a transformed/non-associative
-// body) is a parser error so the parallel contract is never silently violated.
-func (p *Parser) buildParallelFoldReduce(pos lexer.Pos, bindings []ast.Stmt, body ast.Expr, name string, source ast.Expr, rangeEnd ast.Expr, filter ast.Expr, accInit ast.Expr) ast.Expr {
+// source's disjoint bands, by desugaring to the runtime `map_reduce(slice(&src), seed, transform,
+// op)` combinator (each worker folds `transform(element)` values into a private partial, then the
+// partials are merged with `op` — verified race-free and partition-independent). Because a parallel
+// reduction reorders the combine, `by par` is gated to an associative-combine fold whose body is
+// `acc <op> f(x)` (op ∈ {+, *}); the accumulator must appear as one whole operand of that top-level
+// op, and the other operand `f(x)` is the per-element transform. Anything else (filter, head
+// bindings, range source, non-identifier source, or a non-associative top-level op) is a parser
+// error so the parallel contract is never silently violated.
+func (p *Parser) buildParallelFoldReduce(pos lexer.Pos, bindings []ast.Stmt, body ast.Expr, name string, accName string, source ast.Expr, rangeEnd ast.Expr, filter ast.Expr, accInit ast.Expr) ast.Expr {
 	fail := func(reason string) ast.Expr {
-		p.errorAt(pos, "`by par` fold %s; it must be `( acc <op> %s for %s in <darray> with acc = seed by par )` with an associative `op` (+ or *)", reason, name, name)
+		p.errorAt(pos, "`by par` fold %s; it must be `( acc <op> f(%s) for %s in <darray> with acc = seed by par )` with an associative `op` (+ or *)", reason, name, name)
 		return accInit // keep a valid expression so parsing continues
 	}
 	if len(bindings) > 0 {
@@ -425,16 +427,28 @@ func (p *Parser) buildParallelFoldReduce(pos lexer.Pos, bindings []ast.Stmt, bod
 	if !ok || (bin.Op != lexer.TOKEN_PLUS && bin.Op != lexer.TOKEN_STAR) {
 		return fail("body must combine with an associative operator (+ or *)")
 	}
-	// The body must be `acc <op> x` (element folded directly into the accumulator) so the runtime
-	// `op` applied to raw band elements reproduces it. Accept either operand order (op is commutative).
-	leftName := identName(bin.Left)
-	rightName := identName(bin.Right)
-	if !((leftName == name && rightName != "") || (rightName == name && leftName != "")) {
-		return fail("body must be `acc <op> " + name + "` (a transformed element is not supported yet)")
+	// The accumulator must be one whole operand of the top-level op; the other operand is the
+	// per-element transform `f(x)`. Accept either order (op is commutative). For a bare `acc <op> x`
+	// the transform is just `x` (identity).
+	var transformExpr ast.Expr
+	switch {
+	case identName(bin.Left) == accName:
+		transformExpr = bin.Right
+	case identName(bin.Right) == accName:
+		transformExpr = bin.Left
+	default:
+		return fail("the accumulator `" + accName + "` must be one whole operand of the top-level `<op>`")
 	}
 
-	// reduce(slice(&src), seed, (l, r) => l <op> r)
+	// map_reduce(slice(&src), seed, (x) => f(x), (l, r) => l <op> r)
 	sliceCall := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"}, Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: srcIdent}}}
+	transformLambda := &ast.LambdaExpr{
+		Position:            pos,
+		Keyword:             "lambda",
+		UsesShorthandParams: true,
+		Params:              []ast.ParamDecl{{Position: pos, Name: name}},
+		BodyExpr:            transformExpr,
+	}
 	opLambda := &ast.LambdaExpr{
 		Position:            pos,
 		Keyword:             "lambda",
@@ -444,8 +458,8 @@ func (p *Parser) buildParallelFoldReduce(pos lexer.Pos, bindings []ast.Stmt, bod
 	}
 	return &ast.CallExpr{
 		Position: pos,
-		Func:     &ast.Ident{Position: pos, Name: "reduce"},
-		Args:     []ast.Expr{sliceCall, accInit, opLambda},
+		Func:     &ast.Ident{Position: pos, Name: "map_reduce"},
+		Args:     []ast.Expr{sliceCall, accInit, transformLambda, opLambda},
 	}
 }
 
