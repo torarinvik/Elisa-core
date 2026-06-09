@@ -106,8 +106,6 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "dview"}, true, nil
 	case "packedview":
 		return nil, true, fmt.Errorf("packedview must be written with builtin syntax like packedview[Expr.Lit]")
-	case "treeview":
-		return nil, true, fmt.Errorf("treeview is a builtin alias for refined tree variants; use a bare concrete variant type such as Tree.Expr.Binary")
 	case "DArray":
 		return nil, true, legacyBuiltinReplacementError("DArray", "darray")
 	case "DArrayView":
@@ -302,31 +300,31 @@ func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExp
 	viewType := s.g.cachedPackedVariantViewType(enumType, variant)
 	return viewType, nil
 }
-func (s *functionState) resolveTreeVariantViewSurfaceTypeExpr(expr ast.TypeExpr) (semantic.Type, error) {
-	named, ok := expr.(*ast.NamedType)
-	if !ok {
-		return nil, fmt.Errorf("treeview expects a concrete tree variant type such as Tree.Expr.Binary")
+
+// resolveBareTreeVariantWitnessType resolves a bare dotted tree-variant name like `Lua.Expr.Binary`
+// (category `Lua.Expr`, variant `Binary`) to its TreeVariantViewType — the canonical replacement for
+// the removed `treeview[Lua.Expr.Binary]` alias. Returns ok=false for any name that is not a tree
+// category variant, so the caller falls through to its normal unknown-type handling.
+func (s *functionState) resolveBareTreeVariantWitnessType(name string) (semantic.Type, bool) {
+	lastDot := strings.LastIndex(name, ".")
+	if lastDot <= 0 || lastDot >= len(name)-1 {
+		return nil, false
 	}
-	lastDot := strings.LastIndex(named.Name, ".")
-	if lastDot <= 0 || lastDot >= len(named.Name)-1 {
-		return nil, fmt.Errorf("treeview expects a concrete tree variant type such as Tree.Expr.Binary")
-	}
-	categoryName := named.Name[:lastDot]
-	variantName := named.Name[lastDot+1:]
-	base, ok := s.g.result.NamedTypes[categoryName]
+	base, ok := s.g.result.NamedTypes[name[:lastDot]]
 	if !ok {
-		return nil, fmt.Errorf("unknown tree category %q in treeview type", categoryName)
+		return nil, false
 	}
 	categoryType, ok := base.(*semantic.TreeCategoryType)
 	if !ok || categoryType == nil {
-		return nil, fmt.Errorf("treeview expects a concrete tree variant type such as Tree.Expr.Binary")
+		return nil, false
 	}
-	variant, ok := categoryType.Variant(variantName)
+	variant, ok := categoryType.Variant(name[lastDot+1:])
 	if !ok {
-		return nil, fmt.Errorf("tree category %q has no variant %q", categoryType.Name, variantName)
+		return nil, false
 	}
-	return categoryType.VariantViewType(variant), nil
+	return categoryType.VariantViewType(variant), true
 }
+
 func (s *functionState) materializePackedVariantViewValue(binding packedVariantViewBinding) (C.LLVMValueRef, semantic.Type, error) {
 	if binding.typ == nil {
 		return nil, nil, fmt.Errorf("missing packedview binding type")

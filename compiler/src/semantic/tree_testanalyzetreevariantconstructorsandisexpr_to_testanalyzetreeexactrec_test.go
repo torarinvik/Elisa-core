@@ -184,11 +184,11 @@ func TestAnalyzeTreeViewSurfaceTypeAndRefinedCalls(t *testing.T) {
 		Nil
 		Binary(left: Expr, right: Expr)
 
-def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:
+def keep_binary(view_node: Lua.Expr.Binary) -> Lua.Expr.Binary:
 	return view_node
 
-def score_binary(view_node: treeview[Lua.Expr.Binary]) -> i64:
-	kept: treeview[Lua.Expr.Binary] = keep_binary(view_node)
+def score_binary(view_node: Lua.Expr.Binary) -> i64:
+	kept: Lua.Expr.Binary = keep_binary(view_node)
 	return kept.left.span + kept.right.span + kept.span
 
 def child_span(node: Lua.Expr) -> i64:
@@ -228,7 +228,7 @@ func TestAnalyzeTreeVariantViewTypeStringCanonicalizesToBareVariant(t *testing.T
 		Nil
 		Binary(left: Expr, right: Expr)
 
-def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:
+def keep_binary(view_node: Lua.Expr.Binary) -> Lua.Expr.Binary:
 	return view_node
 `)
 	sym, ok := result.GlobalScope.Lookup("keep_binary")
@@ -307,13 +307,13 @@ func TestAnalyzeTreeIfPatternViewAliasAndNestedPatterns(t *testing.T) {
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)
 
-def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:
+def keep_binary(view_node: Lua.Expr.Binary) -> Lua.Expr.Binary:
 	return view_node
 
 def child_span(node: Lua.Expr) -> i64:
 	if node as Lua.Expr.Binary:
-		binary: treeview[Lua.Expr.Binary] = node
-		kept: treeview[Lua.Expr.Binary] = keep_binary(binary)
+		binary: Lua.Expr.Binary = node
+		kept: Lua.Expr.Binary = keep_binary(binary)
 		return kept.left.span + binary.right.span + node.left.span
 	return node.span
 

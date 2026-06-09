@@ -68,13 +68,22 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
 		return &ast.BuiltinTypeExpr{Position: pos, Name: "cstring", ValueArgs: []ast.Expr{size}}
-	case "view", "dview", "packedview", "treeview":
+	case "treeview":
+		// `treeview[T]` has been removed: it was a redundant compatibility alias for the bare
+		// concrete tree-variant type `T` (both resolve to the same TreeVariantViewType). Reject it
+		// and recover with the bare inner type so the rest of the signature still resolves.
+		p.advance()
+		elem := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		p.errorAt(pos, "`treeview[T]` has been removed; write the bare concrete variant type `T` (e.g. `Lua.Expr.Binary`)")
+		return elem
+	case "view", "dview", "packedview":
 		p.advance()
 		elem := p.parseTypeExpr()
 		if p.match(lexer.TOKEN_RBRACKET) {
 			return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}}
 		}
-		if name == "dview" || name == "packedview" || name == "treeview" {
+		if name == "dview" || name == "packedview" {
 			p.errorf("%s expects 1 argument, got 3", name)
 			for p.peek() != lexer.TOKEN_RBRACKET && p.peek() != lexer.TOKEN_EOF {
 				p.advance()

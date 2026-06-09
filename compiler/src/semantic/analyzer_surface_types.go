@@ -79,24 +79,6 @@ func (a *Analyzer) resolvePackedVariantViewSurfaceType(expr ast.TypeExpr, pos le
 	return viewType
 }
 
-func (a *Analyzer) resolveTreeVariantViewSurfaceType(expr ast.TypeExpr, pos lexer.Pos) Type {
-	named, ok := expr.(*ast.NamedType)
-	if !ok {
-		a.errorf(pos, "treeview expects a concrete tree variant type such as Tree.Expr.Binary")
-		return invalidType
-	}
-	categoryType, variant, ok := a.treeVariantTargetFromNamedType(named)
-	if !ok || categoryType == nil || variant == nil {
-		if categoryType == nil {
-			a.errorf(pos, "treeview expects a concrete tree variant type such as Tree.Expr.Binary")
-			return invalidType
-		}
-		a.errorf(pos, "tree category %q has no variant %q", categoryType.Name, named.Name[strings.LastIndex(named.Name, ".")+1:])
-		return invalidType
-	}
-	return categoryType.VariantViewType(variant)
-}
-
 func (a *Analyzer) resolveNamedVariantWitnessType(named *ast.NamedType) (Type, bool) {
 	if named == nil {
 		return nil, false
@@ -268,12 +250,6 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			return invalidType
 		}
 		return a.resolvePackedVariantViewSurfaceType(expr.TypeArgs[0], expr.Pos())
-	case "treeview":
-		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
-			a.errorf(expr.Pos(), "treeview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
-			return invalidType
-		}
-		return a.resolveTreeVariantViewSurfaceType(expr.TypeArgs[0], expr.Pos())
 	case "sview":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
 			a.errorf(expr.Pos(), "sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

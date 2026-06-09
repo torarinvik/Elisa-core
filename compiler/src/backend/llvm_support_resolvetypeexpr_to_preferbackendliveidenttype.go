@@ -45,6 +45,11 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			}
 			return t, nil
 		}
+		// A bare dotted tree-variant name like `Lua.Expr.Binary` is a refined tree witness (the
+		// canonical replacement for the removed `treeview[Lua.Expr.Binary]` alias).
+		if t, ok := s.resolveBareTreeVariantWitnessType(n.Name); ok {
+			return t, nil
+		}
 		return nil, fmt.Errorf("unknown type %q", n.Name)
 	case *ast.StateSetTypeExpr:
 		return nil, fmt.Errorf("state unions like %q are only valid as named struct state arguments", strings.Join(n.Cases, " | "))
@@ -597,11 +602,6 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, fmt.Errorf("packedview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
 		return s.resolvePackedVariantViewSurfaceTypeExpr(expr.TypeArgs[0])
-	case "treeview":
-		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
-			return nil, fmt.Errorf("treeview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
-		}
-		return s.resolveTreeVariantViewSurfaceTypeExpr(expr.TypeArgs[0])
 	case "sview":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
 			return nil, fmt.Errorf("sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

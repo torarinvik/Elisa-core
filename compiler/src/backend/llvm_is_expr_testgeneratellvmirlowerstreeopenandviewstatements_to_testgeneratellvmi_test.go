@@ -18,13 +18,13 @@ tree Lua:
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)
 
-def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:
+def keep_binary(view_node: Lua.Expr.Binary) -> Lua.Expr.Binary:
 	return view_node
 
 def child_span(node: Lua.Expr) -> i64:
 	if node as Lua.Expr.Binary:
-		binary: treeview[Lua.Expr.Binary] = node
-		kept: treeview[Lua.Expr.Binary] = keep_binary(binary)
+		binary: Lua.Expr.Binary = node
+		kept: Lua.Expr.Binary = keep_binary(binary)
 		return kept.left.span + binary.right.span + node.left.span
 	return node.span
 

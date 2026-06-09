@@ -626,7 +626,7 @@ tree Lua:
 		Nil
 		Binary(left: Expr, right: Expr)
 
-def score_binary(view_node: treeview[Lua.Expr.Binary]) -> i64:
+def score_binary(view_node: Lua.Expr.Binary) -> i64:
 	return view_node.left.span + view_node.right.span + view_node.span
 
 def child_span(node: Lua.Expr) -> i64:
