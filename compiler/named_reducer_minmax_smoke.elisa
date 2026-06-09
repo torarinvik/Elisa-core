@@ -1,0 +1,54 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# `min x in xs [where p]` / `max x in xs [where p]` join the query-expression reducer family. Unlike
+# sum/product they have no identity element, so they return `T?` — null over an empty (or
+# fully-filtered) sequence, otherwise the smallest/largest element (docs/79 Part III). The result is
+# consumed by matching the optional (`null` / bound payload).
+@test
+def named_reducer_minmax_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[i64] = []
+		for v in [5, 2, 8, 1, 9, 3]:
+			_ = a.push(v)
+
+		lo: i64? = min x in a
+		match lo:
+			null:
+				assert false
+			m:
+				assert m == 1
+
+		hi: i64? = max x in a
+		match hi:
+			null:
+				assert false
+			m:
+				assert m == 9
+
+		# filtered max: largest element below 8
+		fm: i64? = max x in a where x < 8
+		match fm:
+			null:
+				assert false
+			m:
+				assert m == 5
+
+		# empty sequence -> null
+		empty: mutable darray[i64] = []
+		em: i64? = min x in empty
+		match em:
+			null:
+				assert true
+			m:
+				assert false
+
+		# f64 min
+		f: mutable darray[f64] = []
+		for v in [3.5, 1.25, 2.0]:
+			_ = f.push(v)
+		fl: f64? = min y in f
+		match fl:
+			null:
+				assert false
+			m:
+				assert m == 1.25

@@ -508,6 +508,10 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 		kind = ast.QueryExprSum
 	case "product":
 		kind = ast.QueryExprProduct
+	case "min":
+		kind = ast.QueryExprMin
+	case "max":
+		kind = ast.QueryExprMax
 	default:
 		p.errorAt(pos, "unknown query expression %q", kindText)
 	}
@@ -521,7 +525,7 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	var filter ast.Expr
 	// `where` is mandatory for the predicate/projection queries but optional for the monoid reducers
 	// (`sum x in xs` / `product x in xs` with no filter is the common case).
-	reducer := kind == ast.QueryExprSum || kind == ast.QueryExprProduct
+	reducer := kind == ast.QueryExprSum || kind == ast.QueryExprProduct || kind == ast.QueryExprMin || kind == ast.QueryExprMax
 	if !reducer || (p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where") {
 		p.expectIdentText("where")
 		if subject, ok := p.peekQueryWhereSubjectPattern(name, pattern); ok {
@@ -552,7 +556,7 @@ func (p *Parser) looksLikeQueryExpr() bool {
 		return false
 	}
 	switch p.cur().Text {
-	case "any", "all", "first", "count", "each", "sum", "product":
+	case "any", "all", "first", "count", "each", "sum", "product", "min", "max":
 	default:
 		return false
 	}

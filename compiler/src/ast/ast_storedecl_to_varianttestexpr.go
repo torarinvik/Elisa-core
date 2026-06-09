@@ -638,6 +638,11 @@ const (
 	// common). Result type is the element type.
 	QueryExprSum
 	QueryExprProduct
+	// QueryExprMin / QueryExprMax: `min x in xs [where p]` / `max x in xs [where p]`. They have no
+	// identity element, so they return `T?` — null over an empty (or fully-filtered) sequence,
+	// otherwise the smallest/largest element. `where` is optional, like the other reducers.
+	QueryExprMin
+	QueryExprMax
 )
 
 type QueryExpr struct {

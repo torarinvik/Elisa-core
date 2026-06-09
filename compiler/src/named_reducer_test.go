@@ -24,6 +24,21 @@ func TestRunCLINamedReducerSmoke(t *testing.T) {
 	}
 }
 
+// `min`/`max` have no identity element, so they return T? (null over empty/fully-filtered),
+// consumed by matching the optional. Pins min/max/filtered/empty/f64 value semantics.
+func TestRunCLINamedReducerMinMaxSmoke(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "compiler", "named_reducer_minmax_smoke.elisa")
+
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); code != 0 {
+		t.Fatalf("named reducer min/max smoke failed (%d):\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[       OK ] named_reducer_minmax_smoke") {
+		t.Fatalf("expected named_reducer_minmax_smoke to pass, got:\n%s", stdout.String())
+	}
+}
+
 // `sum`/`product` require a numeric element; a non-numeric source is a clear error.
 func TestNamedReducerRejectsNonNumeric(t *testing.T) {
 	dir := t.TempDir()

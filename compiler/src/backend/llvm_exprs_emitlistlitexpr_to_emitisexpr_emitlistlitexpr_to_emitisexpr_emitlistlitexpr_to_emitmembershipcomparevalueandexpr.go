@@ -755,6 +755,43 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 			value = &ast.Ident{Position: expr.Position, Name: expr.Name}
 		}
 		body = []ast.Stmt{&ast.AugAssignStmt{Position: expr.Position, Op: op, Target: resultIdent, Value: value}}
+	case ast.QueryExprMin, ast.QueryExprMax:
+		optionalType, ok := resultType.(*semantic.OptionalType)
+		if !ok || optionalType == nil {
+			return nil, nil, fmt.Errorf("min/max query expression requires an optional result type")
+		}
+		init = &ast.NullLit{Position: expr.Position}
+		cmp := lexer.TOKEN_LT
+		if expr.Kind == ast.QueryExprMax {
+			cmp = lexer.TOKEN_GT
+		}
+		value := expr.Projection
+		if value == nil {
+			value = &ast.Ident{Position: expr.Position, Name: expr.Name}
+		}
+		// Bind the (filtered) element once, then update the optional accumulator: take it if the
+		// accumulator is still null, else keep the smaller/larger by matching the some-payload.
+		vName := s.g.nextSyntheticName("query.minmax.v.")
+		curName := s.g.nextSyntheticName("query.minmax.cur.")
+		assignV := func() ast.Stmt {
+			return &ast.AssignStmt{Position: expr.Position, Target: resultIdent, Value: &ast.Ident{Position: expr.Position, Name: vName}}
+		}
+		matchStmt := &ast.MatchStmt{
+			Position: expr.Position,
+			Value:    resultIdent,
+			Arms: []ast.MatchArm{
+				{Position: expr.Position, Pattern: &ast.MatchLiteralPattern{Position: expr.Position, Value: &ast.NullLit{Position: expr.Position}}, Body: []ast.Stmt{assignV()}},
+				{Position: expr.Position, Pattern: &ast.MatchBindPattern{Position: expr.Position, Name: curName}, Body: []ast.Stmt{
+					&ast.IfStmt{Position: expr.Position,
+						Cond: &ast.BinaryExpr{Position: expr.Position, Op: cmp, Left: &ast.Ident{Position: expr.Position, Name: vName}, Right: &ast.Ident{Position: expr.Position, Name: curName}},
+						Then: []ast.Stmt{assignV()}},
+				}},
+			},
+		}
+		body = []ast.Stmt{
+			&ast.VarDeclStmt{Position: expr.Position, Name: vName, Value: value},
+			matchStmt,
+		}
 	case ast.QueryExprEach:
 		darrayType, ok := resultType.(*semantic.DArrayType)
 		if !ok || darrayType == nil {

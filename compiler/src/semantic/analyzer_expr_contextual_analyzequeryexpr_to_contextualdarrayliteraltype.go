@@ -139,6 +139,27 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 		} else {
 			result = valueType
 		}
+	case ast.QueryExprMin, ast.QueryExprMax:
+		valueType := info.ItemType
+		if expr.Projection != nil {
+			savedScope := a.currentScope
+			a.currentScope = loopScope
+			valueType = a.analyzeExpr(expr.Projection)
+			a.currentScope = savedScope
+		}
+		kindName := "min"
+		if expr.Kind == ast.QueryExprMax {
+			kindName = "max"
+		}
+		if valueType == nil || IsInvalidType(valueType) {
+			result = invalidType
+		} else if !IsNumericType(valueType) {
+			a.errorf(expr.Pos(), "%s query requires a numeric element, got %s", kindName, valueType)
+			result = invalidType
+		} else {
+			// No identity element -> optional result (null over an empty/fully-filtered sequence).
+			result = &OptionalType{Value: valueType}
+		}
 	default:
 		result = invalidType
 	}
