@@ -742,6 +742,19 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 	case ast.QueryExprCount:
 		init = &ast.IntLit{Position: expr.Position, Value: "0", Suffix: "usize"}
 		body = []ast.Stmt{&ast.AugAssignStmt{Position: expr.Position, Op: lexer.TOKEN_PLUSEQ, Target: resultIdent, Value: &ast.IntLit{Position: expr.Position, Value: "1", Suffix: "usize"}}}
+	case ast.QueryExprSum, ast.QueryExprProduct:
+		// Monoid reducer: result = unit; for each (filtered) item: result <op>= value.
+		op := lexer.TOKEN_PLUSEQ
+		init = &ast.IntLit{Position: expr.Position, Value: "0"}
+		if expr.Kind == ast.QueryExprProduct {
+			op = lexer.TOKEN_STAREQ
+			init = &ast.IntLit{Position: expr.Position, Value: "1"}
+		}
+		value := expr.Projection
+		if value == nil {
+			value = &ast.Ident{Position: expr.Position, Name: expr.Name}
+		}
+		body = []ast.Stmt{&ast.AugAssignStmt{Position: expr.Position, Op: op, Target: resultIdent, Value: value}}
 	case ast.QueryExprEach:
 		darrayType, ok := resultType.(*semantic.DArrayType)
 		if !ok || darrayType == nil {

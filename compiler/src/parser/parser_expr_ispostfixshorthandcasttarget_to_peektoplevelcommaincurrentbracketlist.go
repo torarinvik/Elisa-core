@@ -504,6 +504,10 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 		kind = ast.QueryExprCount
 	case "each":
 		kind = ast.QueryExprEach
+	case "sum":
+		kind = ast.QueryExprSum
+	case "product":
+		kind = ast.QueryExprProduct
 	default:
 		p.errorAt(pos, "unknown query expression %q", kindText)
 	}
@@ -512,25 +516,30 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	source := p.withInMembershipDisabled(func() ast.Expr {
 		return p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	})
-	p.expectIdentText("where")
 	var patternFilter ast.MatchPattern
 	var patternFilterSubject string
 	var filter ast.Expr
-	if subject, ok := p.peekQueryWhereSubjectPattern(name, pattern); ok {
-		patternFilterSubject = subject
-		p.expect(lexer.TOKEN_IDENT)
-		p.expect(lexer.TOKEN_IS)
-		patternFilter = p.parseMatchPattern()
-		if p.match(lexer.TOKEN_COLON) {
+	// `where` is mandatory for the predicate/projection queries but optional for the monoid reducers
+	// (`sum x in xs` / `product x in xs` with no filter is the common case).
+	reducer := kind == ast.QueryExprSum || kind == ast.QueryExprProduct
+	if !reducer || (p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where") {
+		p.expectIdentText("where")
+		if subject, ok := p.peekQueryWhereSubjectPattern(name, pattern); ok {
+			patternFilterSubject = subject
+			p.expect(lexer.TOKEN_IDENT)
+			p.expect(lexer.TOKEN_IS)
+			patternFilter = p.parseMatchPattern()
+			if p.match(lexer.TOKEN_COLON) {
+				filter = p.parseExpr()
+			}
+		} else if p.peekWhereViewPatternFilter() {
+			patternFilter = p.parseMatchPattern()
+			if p.match(lexer.TOKEN_COLON) {
+				filter = p.parseExpr()
+			}
+		} else {
 			filter = p.parseExpr()
 		}
-	} else if p.peekWhereViewPatternFilter() {
-		patternFilter = p.parseMatchPattern()
-		if p.match(lexer.TOKEN_COLON) {
-			filter = p.parseExpr()
-		}
-	} else {
-		filter = p.parseExpr()
 	}
 	var owner ast.Expr
 	if p.match(lexer.TOKEN_WITH) {
@@ -543,7 +552,7 @@ func (p *Parser) looksLikeQueryExpr() bool {
 		return false
 	}
 	switch p.cur().Text {
-	case "any", "all", "first", "count", "each":
+	case "any", "all", "first", "count", "each", "sum", "product":
 	default:
 		return false
 	}

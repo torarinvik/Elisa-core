@@ -632,6 +632,12 @@ const (
 	QueryExprFirst
 	QueryExprCount
 	QueryExprEach
+	// QueryExprSum / QueryExprProduct are the monoid reducers `sum x in xs [where p]` and
+	// `product x in xs [where p]`: they fold the (optionally filtered) numeric elements with + (unit
+	// 0) or * (unit 1). Unlike the other query kinds, `where` is optional (an unconditional sum is
+	// common). Result type is the element type.
+	QueryExprSum
+	QueryExprProduct
 )
 
 type QueryExpr struct {

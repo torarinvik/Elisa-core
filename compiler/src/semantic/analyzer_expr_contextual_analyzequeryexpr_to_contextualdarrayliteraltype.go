@@ -119,6 +119,26 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 		}
 	case ast.QueryExprCount:
 		result = a.namedTypes["usize"]
+	case ast.QueryExprSum, ast.QueryExprProduct:
+		valueType := info.ItemType
+		if expr.Projection != nil {
+			savedScope := a.currentScope
+			a.currentScope = loopScope
+			valueType = a.analyzeExpr(expr.Projection)
+			a.currentScope = savedScope
+		}
+		kindName := "sum"
+		if expr.Kind == ast.QueryExprProduct {
+			kindName = "product"
+		}
+		if valueType == nil || IsInvalidType(valueType) {
+			result = invalidType
+		} else if !IsNumericType(valueType) {
+			a.errorf(expr.Pos(), "%s query requires a numeric element, got %s", kindName, valueType)
+			result = invalidType
+		} else {
+			result = valueType
+		}
 	default:
 		result = invalidType
 	}
