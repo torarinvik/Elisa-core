@@ -159,7 +159,7 @@ func treeAttributeProjectionSourceType(sourceType Type) (Type, Type, bool) {
 		}
 		return sourceType, tt.Elem, true
 	case *DArrayViewType:
-		if tt == nil || tt.Elem == nil || (tt.SurfaceName != "" && tt.SurfaceName != "dview") {
+		if tt == nil || tt.Elem == nil || (tt.SurfaceName != "" && tt.SurfaceName != "view") {
 			return nil, nil, false
 		}
 		return sourceType, tt.Elem, true

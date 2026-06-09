@@ -158,7 +158,7 @@ def ctx_packed_store_word_handle_at(state_bits: mutable void&, index: usize) -> 
     assert index < state.handles.count
     handles: uintptr& = state.handles.items
     return handles[index]
-def ctx_packed_store_tags_view[T](state_bits: mutable void&, start: usize, end: usize) -> dview[T]:
+def ctx_packed_store_tags_view[T](state_bits: mutable void&, start: usize, end: usize) -> view[T]:
     assert state_bits != null
     state: PackedStoreState& = state_bits.cast[PackedStoreState&]
     tags: darray[u32]& = packed_store_tag_table(state)

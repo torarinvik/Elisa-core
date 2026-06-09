@@ -293,7 +293,7 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 	sourceType := s.exprType(arg)
 	baseType, ok := builtinDArrayExtendSourceType(sourceType)
 	if !ok || baseType == nil {
-		return nil, nil, fmt.Errorf("darray extend expects a compatible darray, dview, or array source")
+		return nil, nil, fmt.Errorf("darray extend expects a compatible darray, view, or array source")
 	}
 	switch tt := baseType.(type) {
 	case *semantic.DArrayType:

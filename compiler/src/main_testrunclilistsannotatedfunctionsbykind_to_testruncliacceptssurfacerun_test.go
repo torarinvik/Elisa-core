@@ -521,13 +521,13 @@ func TestRunCLIAcceptsSurfaceRuntimeBackedLocalAnnotationsInObjectBuild(t *testi
 
 extern make_text() -> cstr
 extern make_bytes() -> darray[u8]
-extern make_window() -> dview[u8]
+extern make_window() -> view[u8]
 extern make_table() -> dict[cstr, i64]
 
 def local_runtime_locals() -> usize:
 	text: cstr = make_text()
 	bytes: darray[u8] = make_bytes()
-	window: dview[u8] = make_window()
+	window: view[u8] = make_window()
 	table: dict[cstr, i64] = make_table()
 	return text.len + bytes.count + window.len + table.count
 `, runtimeInclude)

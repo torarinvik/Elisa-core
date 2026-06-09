@@ -19,7 +19,7 @@ def first_tag(owner: Arena) -> Expr.Tag:
 		right: Expr = new Expr.Int(value: 2)
 		_ = new Expr.Add(left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	tags: dview[Expr.Tag] = frozen.tags
+	tags: view[Expr.Tag] = frozen.tags
 	return tags[0u]
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_tags_index_soa.elisa", src)

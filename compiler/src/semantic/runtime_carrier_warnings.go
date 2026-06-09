@@ -34,7 +34,7 @@ func runtimeCarrierTypeDisplayReplacement(typeName string) (string, bool) {
 	case "StringView":
 		return "sview[...]", true
 	case "DynArrayView":
-		return "dview[T]", true
+		return "view[T]", true
 	case "DynArray":
 		return "darray[T, shape]", true
 	case "DynDict":

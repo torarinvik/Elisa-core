@@ -203,7 +203,7 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
         da.capacity <- new_capacity
         return da
 
-def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if da.items == null or da.count == 0
 
@@ -216,10 +216,10 @@ def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dvie
 
     return DynArrayView(collections_void_from_items_at[T](da.items, lo), hi - lo, elem_size)
 
-def arena_da_view_len[T](view: dview[T]) -> usize:
+def arena_da_view_len[T](view: view[T]) -> usize:
     return view.len
 
-def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
     DynArrayView(null, 0, view.elem_size) return if view.data == null or view.len == 0
 
     lo: mutable usize = start if start < view.len else view.len
@@ -232,13 +232,13 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
     offset: usize = lo * view.elem_size
     return DynArrayView(collections_void_from_data_at(view.data, offset), hi - lo, view.elem_size)
 
-def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
+def arena_da_view_prefix[T](view: view[T], end: usize) -> view[T]:
     return arena_da_view_slice(view, 0, end)
 
-def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+def arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]:
     return arena_da_view_slice(view, start, view.len)
 
-def arena_da_view_get[T](view: dview[T], index: usize) -> T:
+def arena_da_view_get[T](view: view[T], index: usize) -> T:
     assert index < view.len
     assert view.data != null
 
@@ -246,7 +246,7 @@ def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     base: T& = collections_items_from_data_at[T](view.data, offset)
     return base[0]
 
-def arena_da_fill[T](dst: dview[T], value: T):
+def arena_da_fill[T](dst: view[T], value: T):
 	if dst.len == 0:
 		return
 
@@ -256,7 +256,7 @@ def arena_da_fill[T](dst: dview[T], value: T):
     for i in 0..<dst.len:
 		out[i] <- value
 
-def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
     assert dst.len == src.len
     if dst.len == 0:
         return
@@ -269,7 +269,7 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
     for i in 0..<dst.len:
         out[i] <- src_items[i]
 
-def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
+def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
     assert left.len == right.len
     assert left.elem_size == right.elem_size
     true return if left.len == 0
@@ -280,7 +280,7 @@ def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
     byte_count: usize = left.len * left.elem_size
     return arena_memeq(left.data, right.data, byte_count)
 
-def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_out]:
+def arena_da_from_view[T](a: mutable Arena&, view: view[T]) -> darray[T, shape_out]:
     can Memory.Allocate, Abort.Panic:
         zeroed return if view.len == 0
 
@@ -295,22 +295,22 @@ def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_
         return out
 
 
-def darray_view[T](da: darray[T]) -> dview[T]:
+def darray_view[T](da: darray[T]) -> view[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if da.items == null or da.count == 0
     return DynArrayView(collections_void_from_items[T](da.items), da.count, elem_size)
 
 
-def view[T](da: darray[T]) -> dview[T]:
+def view[T](da: darray[T]) -> view[T]:
     return darray_view[T](da)
 
 
-# Build a read-only dview over a fixed-size array (T[N]) with no copy and no
+# Build a read-only view over a fixed-size array (T[N]) with no copy and no
 # arena. Pass the array by reference, e.g. `array_view(TABLE.ref[u32[N]&])`.
 # Works for top-level `const` tables too (they are addressable as read-only
 # globals), so a static table can be handed out as a zero-copy slice. Mirrors
 # inline_vec_view's inline-buffer path.
-def array_view[T, N: usize](arr: T[N]&) -> dview[T]:
+def array_view[T, N: usize](arr: T[N]&) -> view[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if N == 0
     trusted Unsafe.UncheckedIndex:
@@ -391,13 +391,13 @@ def push[T](builder: mutable DArrayBuilder[T]&, item: T):
         darray_builder_push[T](builder, item)
 
 
-def darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]:
+def darray_builder_view[T](builder: DArrayBuilder[T]&) -> view[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if builder.items.items == null or builder.items.count == 0
     return DynArrayView(collections_void_from_items[T](builder.items.items), builder.items.count, elem_size)
 
 
-def view[T](builder: DArrayBuilder[T]&) -> dview[T]:
+def view[T](builder: DArrayBuilder[T]&) -> view[T]:
     return darray_builder_view[T](builder)
 
 
@@ -552,7 +552,7 @@ def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
     return inline_vec_last[T, N](vec)
 
 
-def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
+def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]:
     elem_size: usize = size_of(T)
     DynArrayView(null, 0, elem_size) return if vec.len == 0
     if vec.is_spilled:
@@ -562,7 +562,7 @@ def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
         return DynArrayView(collections_void_from_items[T](&vec.inline_items[0]), vec.len, elem_size)
 
 
-def view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]:
+def view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]:
     return inline_vec_view[T, N](vec)
 
 
@@ -996,7 +996,7 @@ def arena_dict_place_fresh[K, T](m: mutable dict[K, T]&, key: K, value: T) -> vo
     m.used <- m.used + 1.usize()
 
 def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
-    view: dview[DictBucket[K, T]] = DynArrayView(collections_void_from_items[DictBucket[K, T]](items), capacity, size_of(DictBucket[K, T]))
+    view: view[DictBucket[K, T]] = DynArrayView(collections_void_from_items[DictBucket[K, T]](items), capacity, size_of(DictBucket[K, T]))
     arena_da_fill(view, zeroed)
 
 def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
@@ -1242,7 +1242,7 @@ def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
     s.used <- s.used + 1.usize()
 
 def arena_set_zero_buckets[T](items: mutable SetBucket[T]&, capacity: usize):
-    view: dview[SetBucket[T]] = DynArrayView(collections_void_from_items[SetBucket[T]](items), capacity, size_of(SetBucket[T]))
+    view: view[SetBucket[T]] = DynArrayView(collections_void_from_items[SetBucket[T]](items), capacity, size_of(SetBucket[T]))
     arena_da_fill(view, zeroed)
 
 def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
@@ -1443,7 +1443,7 @@ def index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
     return index_map_entry[K, T](map, index).value
 
 
-def index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
+def index_map_entries[K, T](map: IndexMap[K, T]&) -> view[IndexMapEntry[K, T]]:
     return map.entries.view()
 
 
@@ -1455,7 +1455,7 @@ def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
     return index_map_value[K, T](map, index)
 
 
-def entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]:
+def entry_view[K, T](map: IndexMap[K, T]&) -> view[IndexMapEntry[K, T]]:
     return index_map_entries[K, T](map)
 
 
@@ -1591,7 +1591,7 @@ def symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId
     return symbol_table_entry[K, T](table, symbol_id).value
 
 
-def symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]:
+def symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> view[IndexMapEntry[K, T]]:
     return index_map_entries[K, T](table.items)
 
 
@@ -1603,7 +1603,7 @@ def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
     return symbol_table_value[K, T](table, symbol_id)
 
 
-def entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]:
+def entry_view[K, T](table: SymbolTable[K, T]&) -> view[IndexMapEntry[K, T]]:
     return symbol_table_entries[K, T](table)
 
 

@@ -247,7 +247,7 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 	case *DArrayType:
 		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true
 	case *DArrayViewType:
-		if tt.SurfaceName != "" && tt.SurfaceName != "dview" {
+		if tt.SurfaceName != "" && tt.SurfaceName != "view" {
 			return iterLoopSourceInfo{}, false
 		}
 		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true

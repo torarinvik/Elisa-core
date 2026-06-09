@@ -478,7 +478,7 @@ func (s *functionState) emitSplitAtHelperCall(expr *ast.CallExpr) (C.LLVMValueRe
 	}
 	viewType, ok := s.exprType(expr.Args[0]).(*semantic.DArrayViewType)
 	if !ok || viewType == nil {
-		return nil, nil, true, fmt.Errorf("split_at expects a dview source")
+		return nil, nil, true, fmt.Errorf("split_at expects a view source")
 	}
 	resultType := s.exprType(expr)
 	viewValue, _, err := s.emitExpr(expr.Args[0], viewType)
@@ -519,7 +519,7 @@ func (s *functionState) emitChunksExactHelperCall(expr *ast.CallExpr) (C.LLVMVal
 	}
 	viewType, ok := s.exprType(expr.Args[0]).(*semantic.DArrayViewType)
 	if !ok || viewType == nil {
-		return nil, nil, true, fmt.Errorf("chunks_exact expects a dview source")
+		return nil, nil, true, fmt.Errorf("chunks_exact expects a view source")
 	}
 	resultType := s.exprType(expr)
 	viewValue, _, err := s.emitExpr(expr.Args[0], viewType)

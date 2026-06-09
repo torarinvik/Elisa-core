@@ -148,7 +148,7 @@ def mutate_02_nested_local_array_elem() -> int:
 
 
 def seed_array_slice(values: darray[i32, row]) -> i32:
-    part: dview[i32] = values[1:3]
+    part: view[i32] = values[1:3]
     return part[0]
 
 
@@ -169,7 +169,7 @@ def mutate_23_slice_param_twice(values: darray[i32, row]) -> i32:
 
 
 def mutate_24_explicit_view_from_param(values: darray[i32, row]) -> i32:
-    mid: dview[i32] = values[1:4]
+    mid: view[i32] = values[1:4]
     return mid[2]
 
 

@@ -285,31 +285,31 @@ extern arena_box_zeroed[T](a: mutable Arena&) -> mutable heap T&
 
 extern arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, needed: usize) -> mutable darray[T, shape_out]&
 
-extern arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]
+extern arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> view[T]
 
-extern arena_da_view_len[T](view: dview[T]) -> usize
+extern arena_da_view_len[T](view: view[T]) -> usize
 
-extern arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
+extern arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]
 
-extern arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]
+extern arena_da_view_prefix[T](view: view[T], end: usize) -> view[T]
 
-extern arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]
+extern arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]
 
-extern arena_da_view_get[T](view: dview[T], index: usize) -> T
+extern arena_da_view_get[T](view: view[T], index: usize) -> T
 
-extern arena_da_fill[T](dst: dview[T], value: T)
+extern arena_da_fill[T](dst: view[T], value: T)
 
-extern arena_da_copy_exact[T](dst: dview[T], src: dview[T])
+extern arena_da_copy_exact[T](dst: view[T], src: view[T])
 
-extern arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool
+extern arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool
 
-extern arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_out]
+extern arena_da_from_view[T](a: mutable Arena&, view: view[T]) -> darray[T, shape_out]
 
-extern darray_view[T](da: darray[T]) -> dview[T]
+extern darray_view[T](da: darray[T]) -> view[T]
 
-extern view[T](da: darray[T]) -> dview[T]
+extern view[T](da: darray[T]) -> view[T]
 
-extern array_view[T, N: usize](arr: T[N]&) -> dview[T]
+extern array_view[T, N: usize](arr: T[N]&) -> view[T]
 
 extern where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]
 
@@ -339,9 +339,9 @@ extern darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T)
 
 extern push[T](builder: mutable DArrayBuilder[T]&, item: T)
 
-extern darray_builder_view[T](builder: DArrayBuilder[T]&) -> dview[T]
+extern darray_builder_view[T](builder: DArrayBuilder[T]&) -> view[T]
 
-extern view[T](builder: DArrayBuilder[T]&) -> dview[T]
+extern view[T](builder: DArrayBuilder[T]&) -> view[T]
 
 extern darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]
 
@@ -389,9 +389,9 @@ extern inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T
 
 extern last[T, N: usize](vec: InlineVec[T, N]&) -> T
 
-extern inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]
+extern inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]
 
-extern view[T, N: usize](vec: InlineVec[T, N]&) -> dview[T]
+extern view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]
 
 extern inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&)
 
@@ -590,13 +590,13 @@ extern index_map_entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntr
 
 extern index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T
 
-extern index_map_entries[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]
+extern index_map_entries[K, T](map: IndexMap[K, T]&) -> view[IndexMapEntry[K, T]]
 
 extern entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]
 
 extern value[K, T](map: IndexMap[K, T]&, index: usize) -> T
 
-extern entry_view[K, T](map: IndexMap[K, T]&) -> dview[IndexMapEntry[K, T]]
+extern entry_view[K, T](map: IndexMap[K, T]&) -> view[IndexMapEntry[K, T]]
 
 extern index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
 
@@ -644,13 +644,13 @@ extern symbol_table_entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTabl
 
 extern symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
 
-extern symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]
+extern symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> view[IndexMapEntry[K, T]]
 
 extern entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]
 
 extern value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
 
-extern entry_view[K, T](table: SymbolTable[K, T]&) -> dview[IndexMapEntry[K, T]]
+extern entry_view[K, T](table: SymbolTable[K, T]&) -> view[IndexMapEntry[K, T]]
 
 extern symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId
 

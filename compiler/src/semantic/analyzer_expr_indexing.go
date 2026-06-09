@@ -444,7 +444,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
 	if view, ok := objType.(*DArrayType); ok {
-		return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "dview"}
+		return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
 	if view, ok := objType.(*ViewType); ok {
 		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
@@ -475,7 +475,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*DArrayType); ok {
-			return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "dview"}
+			return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
 			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}

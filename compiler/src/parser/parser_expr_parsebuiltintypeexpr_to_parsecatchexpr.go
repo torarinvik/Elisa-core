@@ -77,13 +77,13 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 		p.expect(lexer.TOKEN_RBRACKET)
 		p.errorAt(pos, "`treeview[T]` has been removed; write the bare concrete variant type `T` (e.g. `Lua.Expr.Binary`)")
 		return elem
-	case "view", "dview", "packedview":
+	case "view", "packedview":
 		p.advance()
 		elem := p.parseTypeExpr()
 		if p.match(lexer.TOKEN_RBRACKET) {
 			return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}}
 		}
-		if name == "dview" || name == "packedview" {
+		if name == "view" || name == "packedview" {
 			p.errorf("%s expects 1 argument, got 3", name)
 			for p.peek() != lexer.TOKEN_RBRACKET && p.peek() != lexer.TOKEN_EOF {
 				p.advance()

@@ -129,7 +129,7 @@ global root_continuum: FuzzContinuum = FuzzContinuum([root_cosmos, cosmos_table[
 global continuum_table: FuzzContinuum[2] = [FuzzContinuum([cosmos_table[1], root_cosmos], [galaxy_table[0], root_galaxy], FuzzPair(352, 353)), FuzzContinuum([root_cosmos, cosmos_table[0]], [root_galaxy, galaxy_table[1]], FuzzPair(354, 355))]
 
 extern make_array() -> darray[i32, row]
-extern make_array_view() -> dview[i32]
+extern make_array_view() -> view[i32]
 extern alloc_heap_node() -> heap HeapNode&?
 extern sfree_heap_node(node: heap HeapNode&) -> heap HeapNode!
 extern alloc_heap_pair_node() -> heap HeapPairNode&?

@@ -345,7 +345,7 @@ func (s *functionState) emitTreeTagsHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	}
 	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
 	if !ok || resultType == nil {
-		return nil, nil, true, fmt.Errorf("tree_tags result type is missing dview metadata")
+		return nil, nil, true, fmt.Errorf("tree_tags result type is missing view metadata")
 	}
 	storeValue, _, err := s.emitExpr(expr.Args[0], storeType)
 	if err != nil {
@@ -395,7 +395,7 @@ func (s *functionState) emitTreeColumnHelperCall(expr *ast.CallExpr) (C.LLVMValu
 	}
 	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
 	if !ok || resultType == nil {
-		return nil, nil, true, fmt.Errorf("tree_column result type is missing dview metadata")
+		return nil, nil, true, fmt.Errorf("tree_column result type is missing view metadata")
 	}
 	storeValue, _, err := s.emitExpr(expr.Args[0], storeType)
 	if err != nil {
@@ -431,7 +431,7 @@ func (s *functionState) emitColumnHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	}
 	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
 	if !ok || resultType == nil {
-		return nil, nil, true, fmt.Errorf("column result type is missing dview metadata")
+		return nil, nil, true, fmt.Errorf("column result type is missing view metadata")
 	}
 	rowsValue, _, err := s.emitExpr(expr.Args[0], rowsType)
 	if err != nil {

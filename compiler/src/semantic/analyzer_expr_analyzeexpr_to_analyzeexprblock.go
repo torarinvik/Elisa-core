@@ -443,7 +443,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if n.All {
 			elemType, ok := sequenceRewriteCarrierElemType(valueType)
 			if !ok || elemType == nil {
-				a.errorf(n.Pos(), "emit all expects a darray or dview source, got %s", valueType)
+				a.errorf(n.Pos(), "emit all expects a darray or view source, got %s", valueType)
 				result = invalidType
 				return
 			}

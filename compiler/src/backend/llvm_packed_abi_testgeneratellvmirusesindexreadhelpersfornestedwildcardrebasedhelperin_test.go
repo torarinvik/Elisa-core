@@ -461,7 +461,7 @@ def walk(owner: Arena) -> int:
 		right: Expr = new Expr.Int(span: 2, value: 4)
 		_ = new Expr.Add(span: 3, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	chunk: dview[Expr] = frozen[1u:frozen.count]
+	chunk: view[Expr] = frozen[1u:frozen.count]
 	if chunk.len > 0u:
 		node: Expr = chunk[0u]
 		if node in frozen as Expr.Int(value: value):

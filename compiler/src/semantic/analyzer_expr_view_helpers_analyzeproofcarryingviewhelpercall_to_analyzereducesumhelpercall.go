@@ -64,7 +64,7 @@ func (a *Analyzer) analyzeColumnHelperCall(expr *ast.CallExpr) Type {
 		if rowsType.Category.Layout != TreeLayoutSOA && !treeCategoryHasKindIndex(rowsType.Category) {
 			a.errorf(expr.Args[1].Pos(), "column(\"kind\") requires @layout(soa) or @index(kind) on category %s", rowsType.Category.Name)
 		}
-		return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "dview"}
+		return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "view"}
 	}
 	field, ok := rowsType.Category.Common[fieldName]
 	if !ok {
@@ -74,7 +74,7 @@ func (a *Analyzer) analyzeColumnHelperCall(expr *ast.CallExpr) Type {
 	if rowsType.Category.Layout != TreeLayoutSOA && !treeCategoryHasFieldIndex(rowsType.Category, fieldName) {
 		a.errorf(expr.Args[0].Pos(), "column(%q) requires @layout(soa) or @index(%s) on category %s", fieldName, fieldName, rowsType.Category.Name)
 	}
-	return &DArrayViewType{Elem: field.Type, SurfaceName: "dview"}
+	return &DArrayViewType{Elem: field.Type, SurfaceName: "view"}
 }
 
 func (a *Analyzer) analyzeTreeColumnHelperCall(expr *ast.CallExpr) Type {
@@ -121,7 +121,7 @@ func (a *Analyzer) analyzeTreeColumnHelperCall(expr *ast.CallExpr) Type {
 		a.errorf(expr.Args[2].Pos(), "tree_column currently supports common fields only; category %s has no common field %q", category.Name, fieldName)
 		return invalidType
 	}
-	return &DArrayViewType{Elem: field.Type, SurfaceName: "dview"}
+	return &DArrayViewType{Elem: field.Type, SurfaceName: "view"}
 }
 
 func (a *Analyzer) analyzeTreeTagsHelperCall(expr *ast.CallExpr) Type {
@@ -158,7 +158,7 @@ func (a *Analyzer) analyzeTreeTagsHelperCall(expr *ast.CallExpr) Type {
 	if category.Layout != TreeLayoutSOA && !treeCategoryHasKindIndex(category) {
 		a.errorf(expr.Args[1].Pos(), "tree_tags requires @layout(soa) or @index(kind) on category %s", category.Name)
 	}
-	return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "dview"}
+	return &DArrayViewType{Elem: a.namedTypes["u32"], SurfaceName: "view"}
 }
 
 func treeCategoryHasKindIndex(category *TreeCategoryType) bool {
@@ -596,7 +596,7 @@ func (a *Analyzer) analyzeSplitAtHelperCall(expr *ast.CallExpr) Type {
 		if actual == nil {
 			actual = invalidType
 		}
-		a.errorf(expr.Args[0].Pos(), "split_at expects a dense dview[T], got %s", actual)
+		a.errorf(expr.Args[0].Pos(), "split_at expects a dense view[T], got %s", actual)
 		return invalidType
 	}
 	indexType := a.analyzeValueExpr(expr.Args[1], a.namedTypes["usize"])
@@ -626,7 +626,7 @@ func (a *Analyzer) analyzeChunksExactHelperCall(expr *ast.CallExpr) Type {
 		if actual == nil {
 			actual = invalidType
 		}
-		a.errorf(expr.Args[0].Pos(), "chunks_exact expects a dense dview[T], got %s", actual)
+		a.errorf(expr.Args[0].Pos(), "chunks_exact expects a dense view[T], got %s", actual)
 		return invalidType
 	}
 	chunkSizeType := a.analyzeValueExpr(expr.Args[1], a.namedTypes["usize"])

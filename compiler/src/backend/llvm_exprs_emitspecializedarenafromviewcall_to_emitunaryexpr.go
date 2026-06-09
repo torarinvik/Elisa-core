@@ -128,20 +128,20 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("dview.materialize.src.data"))
-	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("dview.materialize.src.len"))
-	viewElemSize := C.LLVMBuildExtractValue(s.builder, viewValue, 2, cStringFree("dview.materialize.src.elem_size"))
-	byteCount := C.LLVMBuildMul(s.builder, viewLen, viewElemSize, cStringFree("dview.materialize.bytes"))
+	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("view.materialize.src.data"))
+	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("view.materialize.src.len"))
+	viewElemSize := C.LLVMBuildExtractValue(s.builder, viewValue, 2, cStringFree("view.materialize.src.elem_size"))
+	byteCount := C.LLVMBuildMul(s.builder, viewLen, viewElemSize, cStringFree("view.materialize.bytes"))
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
 	zeroBytes := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree("dview.materialize.bytes.zero"))
+	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree("view.materialize.bytes.zero"))
 	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.materialize.alloc"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.materialize.merge"))
+	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.materialize.alloc"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.materialize.merge"))
 	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, allocBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
@@ -161,12 +161,12 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, byteCount}, "dview.materialize.alloc")
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, byteCount}, "view.materialize.alloc")
 	if hasSmallExactMaterializeCount {
 		if exactMaterializeCount != 0 {
 			elemType, ok := runtimeIndexedElemType(viewType)
 			if !ok {
-				return nil, nil, true, fmt.Errorf("arena_da_from_view specialization expected dview element type")
+				return nil, nil, true, fmt.Errorf("arena_da_from_view specialization expected view element type")
 			}
 			elemLLVMType, err := s.g.lowerType(elemType)
 			if err != nil {
@@ -176,16 +176,16 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 			if err != nil {
 				return nil, nil, true, err
 			}
-			domainName := fmt.Sprintf("elisa_core.dview.materialize.%p.domain", expr)
+			domainName := fmt.Sprintf("elisa_core.view.materialize.%p.domain", expr)
 			dstScopeName := domainName + ".dst"
 			srcScopeName := domainName + ".src"
 			for i := uint64(0); i < exactMaterializeCount; i++ {
 				indexValue := C.LLVMConstInt(indexLLVMType, C.ulonglong(i), 0)
 				indices := []C.LLVMValueRef{indexValue}
-				srcPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, viewData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.materialize.src.elem.ptr"))
-				elemValue := C.LLVMBuildLoad2(s.builder, elemLLVMType, srcPtr, cStringFree("dview.materialize.elem"))
+				srcPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, viewData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("view.materialize.src.elem.ptr"))
+				elemValue := C.LLVMBuildLoad2(s.builder, elemLLVMType, srcPtr, cStringFree("view.materialize.elem"))
 				s.attachAliasScopeMetadataWithNames(elemValue, domainName, srcScopeName, []string{dstScopeName})
-				dstPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.materialize.dst.elem.ptr"))
+				dstPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("view.materialize.dst.elem.ptr"))
 				store := C.LLVMBuildStore(s.builder, elemValue, dstPtr)
 				s.attachAliasScopeMetadataWithNames(store, domainName, dstScopeName, []string{srcScopeName})
 			}
@@ -203,20 +203,20 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 		if err != nil {
 			return nil, nil, true, err
 		}
-		memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, byteCount}, "dview.materialize.memcpy")
+		memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, byteCount}, "view.materialize.memcpy")
 		s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
 		s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
 	}
 
 	materialized := C.LLVMGetUndef(llvmResultType)
-	materialized = C.LLVMBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree("dview.materialize.items"))
-	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 1, cStringFree("dview.materialize.count"))
-	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 2, cStringFree("dview.materialize.capacity"))
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree("view.materialize.items"))
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 1, cStringFree("view.materialize.count"))
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 2, cStringFree("view.materialize.capacity"))
 	allocEnd := C.LLVMGetInsertBlock(s.builder)
 	C.LLVMBuildBr(s.builder, mergeBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	phi := C.LLVMBuildPhi(s.builder, llvmResultType, cStringFree("dview.materialize.result"))
+	phi := C.LLVMBuildPhi(s.builder, llvmResultType, cStringFree("view.materialize.result"))
 	values := []C.LLVMValueRef{zeroResult, materialized}
 	blocks := []C.LLVMBasicBlockRef{entryBlock, allocEnd}
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
@@ -270,7 +270,7 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("dview.fill.dst.data"))
+	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("view.fill.dst.data"))
 	if hasSmallExactFillCount {
 		if exactFillCount == 0 {
 			return nil, resultType, true, nil
@@ -286,7 +286,7 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 		for i := uint64(0); i < exactFillCount; i++ {
 			indexValue := C.LLVMConstInt(usizeType, C.ulonglong(i), 0)
 			indices := []C.LLVMValueRef{indexValue}
-			elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dstData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.fill.elem.ptr"))
+			elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dstData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("view.fill.elem.ptr"))
 			C.LLVMBuildStore(s.builder, typedFillValue, elemPtr)
 		}
 		return nil, resultType, true, nil
@@ -300,17 +300,17 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 			return nil, nil, true, err
 		}
 	}
-	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("dview.fill.dst.len"))
-	dstElemSize := C.LLVMBuildExtractValue(s.builder, dstValue, 2, cStringFree("dview.fill.dst.elem_size"))
-	dstBytes := C.LLVMBuildMul(s.builder, dstLen, dstElemSize, cStringFree("dview.fill.dst.bytes"))
+	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("view.fill.dst.len"))
+	dstElemSize := C.LLVMBuildExtractValue(s.builder, dstValue, 2, cStringFree("view.fill.dst.elem_size"))
+	dstBytes := C.LLVMBuildMul(s.builder, dstLen, dstElemSize, cStringFree("view.fill.dst.bytes"))
 	usizeType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, nil, true, err
 	}
 	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
-	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("dview.fill.bytes.zero"))
-	fillBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.fill.fast"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.fill.merge"))
+	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("view.fill.bytes.zero"))
+	fillBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.fill.fast"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.fill.merge"))
 	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, fillBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, fillBB)
@@ -330,7 +330,7 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	_ = s.buildCall(memsetLLVMType, memsetCallee, []C.LLVMValueRef{dstData, fillValue, dstBytes}, "dview.fill.memset")
+	_ = s.buildCall(memsetLLVMType, memsetCallee, []C.LLVMValueRef{dstData, fillValue, dstBytes}, "view.fill.memset")
 	C.LLVMBuildBr(s.builder, mergeBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)

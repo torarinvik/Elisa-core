@@ -56,7 +56,7 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 			}
 			// Aggregate (array) consts are materialized as read-only globals (see
 			// emitIdentValueAddress / emitDeclInNamespace), so their address can be
-			// taken — e.g. TABLE.ref[u32[N]&] to build a zero-copy dview over a
+			// taken — e.g. TABLE.ref[u32[N]&] to build a zero-copy view over a
 			// static const table. Mutating through such a ref is rejected by the
 			// semantic layer (a const yields no writable ref).
 			if sym.Kind == semantic.SymbolConst {
@@ -560,7 +560,7 @@ func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (C.LLVMVa
 		return nil, nil, true, err
 	}
 	valuesPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, tablePtr, 0, cStringFree("node.table.values.ptr"))
-	viewType := &semantic.DArrayViewType{Elem: elemType, SurfaceName: "dview"}
+	viewType := &semantic.DArrayViewType{Elem: elemType, SurfaceName: "view"}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {
 		return nil, nil, true, err

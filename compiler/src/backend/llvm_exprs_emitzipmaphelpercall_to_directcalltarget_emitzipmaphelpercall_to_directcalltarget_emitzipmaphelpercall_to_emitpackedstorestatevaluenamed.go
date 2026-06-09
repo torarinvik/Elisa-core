@@ -271,7 +271,7 @@ func (s *functionState) emitArenaViewSliceValue(viewValue C.LLVMValueRef, viewTy
 }
 func (s *functionState) emitDenseViewSliceValue(viewValue C.LLVMValueRef, viewType semantic.Type, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	if viewType == nil {
-		return nil, fmt.Errorf("missing dview type for slice helper lowering")
+		return nil, fmt.Errorf("missing view type for slice helper lowering")
 	}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {

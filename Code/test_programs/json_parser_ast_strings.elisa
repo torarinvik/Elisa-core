@@ -82,14 +82,14 @@ def json_ast_string_eq_literal(source: u8&, node: JsonNode, literal: u8&, store:
 def json_parser_array_iter_cursor(iter: JsonParserArrayIter&) -> JsonAstArrayIterCursor:
     if not json_parser_array_iter_is_live(iter):
         return json_invalid_array_iter_cursor()
-    items: dview[JsonNode] = json_node_items_view(iter[0].items_ptr.cast[JsonNode&?], iter[0].item_count)
+    items: view[JsonNode] = json_node_items_view(iter[0].items_ptr.cast[JsonNode&?], iter[0].item_count)
     if iter[0].index < items.len:
         return JsonAstArrayIterCursor(items, iter[0].index)
     return json_invalid_array_iter_cursor()
 def json_parser_object_iter_cursor(iter: JsonParserObjectIter&) -> JsonAstObjectIterCursor:
     if not json_parser_object_iter_is_live(iter):
         return json_invalid_object_iter_cursor()
-    fields: dview[JsonField] = json_field_items_view(iter[0].fields_ptr.cast[JsonField&?], iter[0].field_count)
+    fields: view[JsonField] = json_field_items_view(iter[0].fields_ptr.cast[JsonField&?], iter[0].field_count)
     if iter[0].index < fields.len:
         return JsonAstObjectIterCursor(fields, iter[0].index)
     return json_invalid_object_iter_cursor()

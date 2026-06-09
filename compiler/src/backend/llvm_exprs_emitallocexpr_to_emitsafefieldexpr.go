@@ -539,7 +539,7 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 		return nil, nil, true, err
 	}
 	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaPtr, byteCount}, "node.table.alloc.ptr")
-	viewType := &semantic.DArrayViewType{Elem: elemType, SurfaceName: "dview"}
+	viewType := &semantic.DArrayViewType{Elem: elemType, SurfaceName: "view"}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {
 		return nil, nil, true, err

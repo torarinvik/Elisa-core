@@ -1,5 +1,5 @@
 def json_reduce_sum_smoke(values: darray[i64, 4], bias: i64) -> i64:
-    base: dview[i64] = values[0:4]
+    base: view[i64] = values[0:4]
     return reduce_sum(readonly(base), json_reduce_sum_bias, bias)
 def json_expect_checksum(source: static u8&, expected: i64) -> bool:
     return json_parser_checksum_impl(source.cast[u8&]) == expected

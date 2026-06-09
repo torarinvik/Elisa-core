@@ -126,8 +126,8 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "elem_size", typ: namedTypeExpr("usize", false), mutable: true},
 	})
 	a.registerBuiltinStructType("SplitView", []string{"T"}, false, []builtinFieldSpec{
-		{name: "left", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
-		{name: "right", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
+		{name: "left", typ: genericTypeExpr("view", namedTypeExpr("T", false)), mutable: false},
+		{name: "right", typ: genericTypeExpr("view", namedTypeExpr("T", false)), mutable: false},
 	})
 	a.registerBuiltinStructType("EnumerateView", []string{"S", "T"}, false, []builtinFieldSpec{
 		{name: "source", typ: namedTypeExpr("S", false), mutable: false},
@@ -141,7 +141,7 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "tag", typ: namedTypeExpr("u32", false), mutable: false},
 	})
 	a.registerBuiltinStructType("ChunksExactView", []string{"T"}, false, []builtinFieldSpec{
-		{name: "source", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
+		{name: "source", typ: genericTypeExpr("view", namedTypeExpr("T", false)), mutable: false},
 		{name: "chunk_size", typ: namedTypeExpr("usize", false), mutable: false},
 		{name: "len", typ: namedTypeExpr("usize", false), mutable: false},
 	})
@@ -155,7 +155,7 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "index", typ: namedTypeExpr("u32", false), mutable: false},
 	})
 	a.registerBuiltinStructType("NodeTable", []string{"N", "T"}, false, []builtinFieldSpec{
-		{name: "values", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
+		{name: "values", typ: genericTypeExpr("view", namedTypeExpr("T", false)), mutable: false},
 	})
 	a.registerBuiltinStructType("DictBucket", []string{"K", "T"}, false, []builtinFieldSpec{
 		{name: "key", typ: namedTypeExpr("K", false), mutable: true},

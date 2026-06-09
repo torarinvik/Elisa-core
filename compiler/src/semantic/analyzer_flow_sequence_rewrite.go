@@ -19,7 +19,7 @@ func sequenceRewriteCarrierElemType(t Type) (Type, bool) {
 	case *DArrayType:
 		return tt.Elem, true
 	case *DArrayViewType:
-		if tt.SurfaceName != "" && tt.SurfaceName != "dview" {
+		if tt.SurfaceName != "" && tt.SurfaceName != "view" {
 			return nil, false
 		}
 		return tt.Elem, true
@@ -125,7 +125,7 @@ func (a *Analyzer) analyzeSequenceRewriteExprWithExpected(expr *ast.FoldExpr, ex
 	valueType := a.analyzeExpr(expr.Value)
 	elemType, ok := sequenceRewriteCarrierElemType(valueType)
 	if !ok || elemType == nil {
-		a.errorf(expr.Pos(), "sequence rewrite expects a darray or dview source, got %s", valueType)
+		a.errorf(expr.Pos(), "sequence rewrite expects a darray or view source, got %s", valueType)
 		for _, arm := range expr.Arms {
 			a.analyzeSequenceRewriteArmBody(arm.Body, NewScope(a.currentScope))
 		}

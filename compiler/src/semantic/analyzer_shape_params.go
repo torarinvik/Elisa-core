@@ -72,7 +72,7 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 		}
 	case *ast.BuiltinTypeExpr:
 		switch n.Name {
-		case "array", "view", "dview":
+		case "array", "view":
 			for _, arg := range n.TypeArgs {
 				a.collectImplicitShapeParamsFromType(arg, seen, order)
 			}

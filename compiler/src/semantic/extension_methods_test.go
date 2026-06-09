@@ -252,7 +252,7 @@ def read(box: Box) -> i64:
 
 func TestAnalyzeUFCSFreeFunctionMatchesGenericRuntimeSurfaceReceiver(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "ufcs_darray_view.elisa", `
-def view[T](values: darray[T]) -> dview[T]:
+def view[T](values: darray[T]) -> view[T]:
     return zeroed
 
 def read(values: darray[i32]) -> usize:

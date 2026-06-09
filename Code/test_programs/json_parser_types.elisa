@@ -44,10 +44,10 @@ struct JsonField:
     key: mutable JsonNode
     value: mutable JsonNode
 struct JsonAstArrayIterCursor:
-    items: mutable dview[JsonNode]
+    items: mutable view[JsonNode]
     index: mutable usize
 struct JsonAstObjectIterCursor:
-    fields: mutable dview[JsonField]
+    fields: mutable view[JsonField]
     index: mutable usize
 @packed_profile(retained_reads)
 packed enum JsonNode:
@@ -86,7 +86,7 @@ struct JsonParserNumberData:
 error JsonNumberAccessError:
     Invalid
 extern strtod(nptr: u8&, endptr: u8&?) -> f64
-def readonly[T](view: dview[T]) -> dview[T]:
+def readonly[T](view: view[T]) -> view[T]:
     return view
 struct JsonParserDocumentInternal:
     source: mutable u8&

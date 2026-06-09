@@ -280,7 +280,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	}
 	if bulkPush {
 		if !builtinDArrayExtendSourceCompatible(darrayType.Elem, argType) {
-			a.errorf(expr.Args[0].Pos(), "darray push expects %s or a compatible darray, dview, or array source of %s, got %s", darrayType.Elem, darrayType.Elem, argType)
+			a.errorf(expr.Args[0].Pos(), "darray push expects %s or a compatible darray, view, or array source of %s, got %s", darrayType.Elem, darrayType.Elem, argType)
 		}
 		if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
 			a.errorf(expr.Args[0].Pos(), "bulk darray push does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
@@ -353,7 +353,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	}
 	sourceType := a.analyzeValueExpr(expr.Args[0], expectedSource)
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
-		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, dview, or array source of %s, got %s", darrayType.Elem, sourceType)
+		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, view, or array source of %s, got %s", darrayType.Elem, sourceType)
 	}
 	if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
 		a.errorf(expr.Args[0].Pos(), "darray extend does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)

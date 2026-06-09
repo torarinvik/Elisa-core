@@ -18,22 +18,22 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 		}
 		return &ViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "view"}, true
 	case "dview":
+		a.errorf(expr.Pos(), "`dview[T]` has been removed; use `view[T]`")
 		if len(expr.Args) != 1 {
-			a.errorf(expr.Pos(), "dview expects 1 argument, got %d", len(expr.Args))
 			return invalidType, true
 		}
-		return &DArrayViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "dview"}, true
+		return &ViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "view"}, true
 	case "DArray":
 		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArray", "darray")
 		return invalidType, true
 	case "DArrayView":
-		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArrayView", "dview")
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArrayView", "view")
 		return invalidType, true
 	case "DList":
 		a.errorf(expr.Pos(), "DList has been removed from the language; use darray instead")
 		return invalidType, true
 	case "DListView":
-		a.errorf(expr.Pos(), "DListView has been removed from the language; use dview instead")
+		a.errorf(expr.Pos(), "DListView has been removed from the language; use view instead")
 		return invalidType, true
 	case "DStr":
 		a.errorLegacyBuiltinReplacement(expr.Pos(), "DStr", "cstr")
@@ -239,11 +239,11 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 		}
 		return viewType
 	case "dview":
+		a.errorf(expr.Pos(), "`dview[T]` has been removed; use `view[T]`")
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
-			a.errorf(expr.Pos(), "dview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 			return invalidType
 		}
-		return &DArrayViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "dview"}
+		return &ViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "view"}
 	case "packedview":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			a.errorf(expr.Pos(), "packedview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

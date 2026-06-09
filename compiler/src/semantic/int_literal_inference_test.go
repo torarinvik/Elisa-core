@@ -20,7 +20,7 @@ def build(owner: Arena, items: darray[usize]) -> usize:
 		for row in pending.rows():
 			total <- total + row.name_key + row.depth
 		index <- index + 1
-		chunk: dview[usize] = items[0:1]
+		chunk: view[usize] = items[0:1]
 		total <- total + chunk[0]
 		return total
 `)

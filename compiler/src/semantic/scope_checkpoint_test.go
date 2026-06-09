@@ -75,7 +75,7 @@ func TestAnalyzeInvalidatedDArrayViewDiagnosticUsesFactVocabulary(t *testing.T) 
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         items: mutable darray[i32] = [1, 2, 3]
-        view: dview[i32] = items[0:items.count]
+        view: view[i32] = items[0:items.count]
         items.push(4)
         return view[0u]
 `)
@@ -90,8 +90,8 @@ func TestAnalyzeCopiedDArrayViewInvalidatesWithSourceMutation(t *testing.T) {
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         items: mutable darray[i32] = [1, 2, 3]
-        view: dview[i32] = items[0:items.count]
-        copy: dview[i32] = view
+        view: view[i32] = items[0:items.count]
+        copy: view[i32] = view
         items.clear()
         return copy[0u]
 `)
@@ -106,7 +106,7 @@ func TestAnalyzeBranchDArrayMutationInvalidatesViewAfterMerge(t *testing.T) {
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         items: mutable darray[i32] = [1, 2, 3]
-        view: dview[i32] = items[0:items.count]
+        view: view[i32] = items[0:items.count]
         if cond:
             items.push(4)
         return view[0u]

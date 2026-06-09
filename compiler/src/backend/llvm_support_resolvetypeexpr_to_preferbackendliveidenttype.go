@@ -593,15 +593,6 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, fmt.Errorf("view expects either 1 or 3 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
 		return viewType, nil
-	case "dview":
-		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
-			return nil, fmt.Errorf("dview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
-		}
-		elem, err := s.resolveTypeExpr(expr.TypeArgs[0])
-		if err != nil {
-			return nil, err
-		}
-		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "dview"}, nil
 	case "packedview":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("packedview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

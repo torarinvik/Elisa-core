@@ -83,7 +83,7 @@ import (
 
 func (s *functionState) materializeTreeOwnerDArrayFromView(viewValue C.LLVMValueRef, viewType *semantic.DArrayViewType, resultType *semantic.DArrayType, owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
 	if viewType == nil || resultType == nil {
-		return nil, fmt.Errorf("missing dview materialization metadata")
+		return nil, fmt.Errorf("missing view materialization metadata")
 	}
 	llvmResultType, err := s.g.lowerType(resultType)
 	if err != nil {

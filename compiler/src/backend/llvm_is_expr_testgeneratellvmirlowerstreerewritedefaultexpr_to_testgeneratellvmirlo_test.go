@@ -134,7 +134,7 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 	}
 }
 func TestGenerateLLVMIRLowersSequenceRewriteExpr(t *testing.T) {
-	src := `def keep_non_zero(owner: mutable Arena&, items: dview[u32]) -> darray[u32]:
+	src := `def keep_non_zero(owner: mutable Arena&, items: view[u32]) -> darray[u32]:
 	can Abort.Panic, Memory.Allocate:
 		in owner:
 			return rewrite items as sequence[u32]:
@@ -162,7 +162,7 @@ tree Lua:
 		Int(value: i64)
 		Name(name: u32)
 
-def keep_positive_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> darray[i64]:
+def keep_positive_int_values(owner: mutable Arena&, items: view[Lua.Expr]) -> darray[i64]:
 	can Abort.Panic, Memory.Allocate:
 		in owner:
 			return rewrite items as sequence[i64]:
@@ -181,10 +181,10 @@ def keep_positive_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> d
 	}
 }
 func TestGenerateLLVMIRLowersSequenceRewriteEmitAllExpr(t *testing.T) {
-	src := `def concat(owner: mutable Arena&, left: dview[u32], right: dview[u32]) -> darray[u32]:
+	src := `def concat(owner: mutable Arena&, left: view[u32], right: view[u32]) -> darray[u32]:
 	can Abort.Panic, Memory.Allocate:
 		in owner:
-			segments: darray[dview[u32]] = [left, right]
+			segments: darray[view[u32]] = [left, right]
 			return rewrite segments as sequence[u32]:
 				segment:
 					emit all segment

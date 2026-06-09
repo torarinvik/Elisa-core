@@ -38,7 +38,7 @@ def inline_vec8_view_smoke(a: mutable Arena&) -> i32:
         -1 return if values.count() != 9
         -2 return if not values.spilled()
 
-        view: dview[i32] = values.view()
+        view: view[i32] = values.view()
         sum: mutable i32 = 0
         for value in view:
             sum <- sum + value

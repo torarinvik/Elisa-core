@@ -223,7 +223,7 @@ func TestRunCLIRejectsInternalRuntimeCarrierTypes(t *testing.T) {
 	for _, want := range []string{
 		`internal runtime carrier type "StringView" is not supported in user-facing code; use "sview[...]" instead`,
 		`internal runtime carrier type "DynArray" is not supported in user-facing code; use "darray[T, shape]" instead`,
-		`internal runtime carrier type "DynArrayView" is not supported in user-facing code; use "dview[T]" instead`,
+		`internal runtime carrier type "DynArrayView" is not supported in user-facing code; use "view[T]" instead`,
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("expected runtime carrier rejection %q, got:\n%s", want, stderr.String())

@@ -35,7 +35,7 @@ func TestArenaCarrierReplacementSplitDisplayVsWarning(t *testing.T) {
 		{"DynArray", "darray[T, shape]"},
 		{"DynDict", "dict[K, V]"},
 		{"StringView", "sview[...]"},
-		{"DynArrayView", "dview[T]"},
+		{"DynArrayView", "view[T]"},
 	} {
 		if got, ok := runtimeCarrierTypeDisplayReplacement(tc.name); !ok || got != tc.want {
 			t.Fatalf("type-display replacement for %q = (%q, %v); want %q", tc.name, got, ok, tc.want)

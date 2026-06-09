@@ -556,7 +556,7 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 				continue
 			}
 			if !builtinDArrayExtendSourceCompatible(expectedDArray.Elem, sourceType) {
-				a.errorf(elem.Pos(), "spread darray literal element expects a compatible darray, dview, or array source of %s, got %s", expectedDArray.Elem, sourceType)
+				a.errorf(elem.Pos(), "spread darray literal element expects a compatible darray, view, or array source of %s, got %s", expectedDArray.Elem, sourceType)
 			}
 			continue
 		}

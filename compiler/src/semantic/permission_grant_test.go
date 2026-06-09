@@ -717,7 +717,7 @@ def read_at(ptr: u8&, index: usize) -> u8:
 func TestStaleViewRequiresUnsafeStaleRefGrant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "stale_view_requires_unsafe.elisa", `
 def read_stale(items: mutable darray[i32]&) -> i32:
-    view: dview[i32] = items[0:items.count]
+    view: view[i32] = items[0:items.count]
     items.clear()
     trusted Unsafe.UncheckedIndex:
         return view[0u]
@@ -742,7 +742,7 @@ def read_stale(items: mutable darray[i32]&) -> i32:
 func TestTrustedStaleViewDoesNotInferCallerPermission(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_stale_view.elisa", `
 def read_stale(items: mutable darray[i32]&) -> i32:
-    view: dview[i32] = items[0:items.count]
+    view: view[i32] = items[0:items.count]
     items.clear()
     trusted Unsafe.StaleRef:
         trusted Unsafe.UncheckedIndex:

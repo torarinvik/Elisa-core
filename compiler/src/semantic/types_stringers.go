@@ -425,7 +425,7 @@ func (t *DArrayType) String() string {
 func (t *DArrayViewType) String() string {
 	name := t.SurfaceName
 	if name == "" {
-		name = "dview"
+		name = "view"
 	}
 	if t.Begin != "" || t.End != "" {
 		return fmt.Sprintf("%s[%s, %s, %s]", name, t.Elem.String(), t.Begin, t.End)

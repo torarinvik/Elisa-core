@@ -23,7 +23,7 @@ func TestRunCLIExecutesEnumPayloadDArraySlice(t *testing.T) {
 def repeat_len(stmt: MiniStmt) -> usize:
     match stmt:
         MiniStmt.Repeat(body):
-            view: dview[MiniStmt] = body[0:body.count]
+            view: view[MiniStmt] = body[0:body.count]
             return view.len
         _:
             return 0

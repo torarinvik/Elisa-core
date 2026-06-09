@@ -543,7 +543,7 @@ func (s *functionState) coerceTreeRewriteSequenceFieldValue(viewValue C.LLVMValu
 	}
 	view, ok := viewType.(*semantic.DArrayViewType)
 	if !ok || view == nil {
-		return nil, fmt.Errorf("rewrite default expected dview child results, got %s", viewType.String())
+		return nil, fmt.Errorf("rewrite default expected view child results, got %s", viewType.String())
 	}
 	switch tt := targetType.(type) {
 	case *semantic.DArrayViewType:

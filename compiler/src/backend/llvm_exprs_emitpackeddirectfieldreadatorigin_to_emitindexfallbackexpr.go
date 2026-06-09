@@ -367,7 +367,7 @@ func (s *functionState) emitDArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef
 	}
 	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
 	if !ok {
-		return nil, nil, true, fmt.Errorf("dynamic array slice must produce a dview, got %s", s.exprType(expr).String())
+		return nil, nil, true, fmt.Errorf("dynamic array slice must produce a view, got %s", s.exprType(expr).String())
 	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	startValue, _, err := s.emitExpr(expr.Start, usizeType)

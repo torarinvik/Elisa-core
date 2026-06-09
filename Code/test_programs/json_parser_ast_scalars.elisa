@@ -138,7 +138,7 @@ def json_ast_object_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
         return field_count.i64()
     return -1
 def json_ast_array_nth_ref(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode&?:
-    items: dview[JsonNode] = json_ast_array_items_view(node, store)
+    items: view[JsonNode] = json_ast_array_items_view(node, store)
     if index < items.len:
         return json_node_view_ref(items, index)
     return null
@@ -148,7 +148,7 @@ def json_ast_array_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local
         return json_node_copy_ref(node_ref.cast[JsonNode&])
     return json_node_invalid(store)
 def json_ast_array_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
-    items: dview[JsonNode] = json_ast_array_items_view(node, store)
+    items: view[JsonNode] = json_ast_array_items_view(node, store)
     if items.len > 0:
         return JsonAstArrayIterCursor(items, 0)
     return json_invalid_array_iter_cursor()
@@ -166,7 +166,7 @@ def json_ast_array_iter_next(cursor: JsonAstArrayIterCursor, store: JsonNode.Sto
         return JsonAstArrayIterCursor(cursor.items, cursor.index + 1)
     return json_invalid_array_iter_cursor()
 def json_ast_object_get_ref(node: JsonNode, source: u8&, key: u8&, store: JsonNode.Store[Local]) -> JsonNode&?:
-    readonly_fields: dview[JsonField] = json_ast_object_fields_view(node, store)
+    readonly_fields: view[JsonField] = json_ast_object_fields_view(node, store)
     for index in 0..<readonly_fields.len:
         field_ref: JsonField& = json_field_view_ref(readonly_fields, index)
         key_node: JsonNode = json_node_copy_ref(json_field_key_ref(field_ref))
@@ -179,7 +179,7 @@ def json_ast_object_get(node: JsonNode, source: u8&, key: u8&, store: JsonNode.S
         return json_node_copy_ref(node_ref.cast[JsonNode&])
     return json_node_invalid(store)
 def json_ast_object_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
-    fields: dview[JsonField] = json_ast_object_fields_view(node, store)
+    fields: view[JsonField] = json_ast_object_fields_view(node, store)
     if fields.len > 0:
         return JsonAstObjectIterCursor(fields, 0)
     return json_invalid_object_iter_cursor()
@@ -208,12 +208,12 @@ def json_ast_object_iter_next(cursor: JsonAstObjectIterCursor, store: JsonNode.S
         return JsonAstObjectIterCursor(cursor.fields, cursor.index + 1)
     return json_invalid_object_iter_cursor()
 def json_ast_array_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
-    items: dview[JsonNode] = json_ast_array_items_view(node, store)
+    items: view[JsonNode] = json_ast_array_items_view(node, store)
     if index < items.len:
         return JsonAstArrayIterCursor(items, index)
     return json_invalid_array_iter_cursor()
 def json_ast_object_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
-    fields: dview[JsonField] = json_ast_object_fields_view(node, store)
+    fields: view[JsonField] = json_ast_object_fields_view(node, store)
     if index < fields.len:
         return JsonAstObjectIterCursor(fields, index)
     return json_invalid_object_iter_cursor()

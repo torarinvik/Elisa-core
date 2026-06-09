@@ -95,7 +95,7 @@ func (a *Analyzer) packedEnumTagExprType(expr *ast.FieldExpr) (Type, bool) {
 // (docs/76 §5). The enum must be declared `layout soa` (columnar), and the
 // selected field must be a *dense* column — the tag, or a common(...) field.
 // Per-variant payload fields are sparse and deferred to `layout soa(sparse)`.
-// The result is a `dview[fieldType]` so the existing iterable-for machinery
+// The result is a `view[fieldType]` so the existing iterable-for machinery
 // derives the loop element type; the backend special-cases the scan.
 func (a *Analyzer) analyzeEnumColumnExpr(expr *ast.EnumColumnExpr) Type {
 	base, _, ok := a.lookupVisibleType(expr.Enum)
@@ -132,7 +132,7 @@ func (a *Analyzer) analyzeEnumColumnExpr(expr *ast.EnumColumnExpr) Type {
 		}
 		elem = field.Type
 	}
-	return &DArrayViewType{Elem: elem, SurfaceName: "dview"}
+	return &DArrayViewType{Elem: elem, SurfaceName: "view"}
 }
 
 // enumColumnVariantPayloadField reports whether name is a named payload field

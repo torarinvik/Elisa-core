@@ -19,7 +19,7 @@ struct Pair:
 	items: darray[u32]
 	root: Lua.Block
 
-def clone_pair(owner: mutable Arena&, source_items: dview[u32], block: Lua.Block) -> Pair:
+def clone_pair(owner: mutable Arena&, source_items: view[u32], block: Lua.Block) -> Pair:
 	can Abort.Panic, Memory.Allocate:
 		in owner:
 			return Pair{items: clone[darray[u32]](source_items), root: clone[Lua.Block](block)}
@@ -37,7 +37,7 @@ func TestAnalyzeCloneBuiltinUsesRegionParamTarget(t *testing.T) {
 }
 
 func TestAnalyzeCloneBuiltinRejectsAllocatingCloneWithoutOwner(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_owner_required.elisa", `def clone_items(items: dview[u32]) -> darray[u32]:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_owner_required.elisa", `def clone_items(items: view[u32]) -> darray[u32]:
 	return clone[darray[u32]](items)
 `)
 	all := strings.Join(result.Errors(), "\n")

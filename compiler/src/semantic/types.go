@@ -237,8 +237,8 @@ type DArrayType struct {
 
 // ViewType and DArrayViewType were two ABI-identical view types (a window into contiguous T
 // memory) distinguished only by static vs dynamic bounds — a parameter, not a capability. They are
-// now ONE type; ViewType is an alias kept so the many construction sites read naturally. The
-// SurfaceName field carries the spelling (`view` vs the legacy `dview`) for diagnostics.
+// now ONE type; ViewType is a Go alias kept so the many construction sites read naturally. The
+// SurfaceName field carries the canonical `view` spelling (the legacy `dview` was removed) for diagnostics.
 type ViewType = DArrayViewType
 
 type DArrayViewType struct {

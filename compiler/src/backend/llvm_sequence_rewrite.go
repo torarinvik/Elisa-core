@@ -41,7 +41,7 @@ func sequenceRewriteCarrierElemTypeBackend(t semantic.Type) (semantic.Type, bool
 	case *semantic.DArrayType:
 		return tt.Elem, true
 	case *semantic.DArrayViewType:
-		if tt.SurfaceName != "" && tt.SurfaceName != "dview" {
+		if tt.SurfaceName != "" && tt.SurfaceName != "view" {
 			return nil, false
 		}
 		return tt.Elem, true
@@ -127,9 +127,9 @@ func (s *functionState) emitSequenceRewriteEmitExpr(expr *ast.EmitExpr) (C.LLVMV
 		}
 		sequenceElemType, ok := sequenceRewriteCarrierElemTypeBackend(actualType)
 		if !ok || sequenceElemType == nil {
-			return nil, nil, fmt.Errorf("emit all expects a darray or dview source, got %s", actualType.String())
+			return nil, nil, fmt.Errorf("emit all expects a darray or view source, got %s", actualType.String())
 		}
-		sequenceViewType := &semantic.DArrayViewType{Elem: sequenceElemType, SurfaceName: "dview"}
+		sequenceViewType := &semantic.DArrayViewType{Elem: sequenceElemType, SurfaceName: "view"}
 		sequenceViewValue, err := s.coerceValue(sequenceValue, actualType, sequenceViewType)
 		if err != nil {
 			return nil, nil, err
@@ -336,13 +336,13 @@ func (s *functionState) emitSequenceRewriteExpr(expr *ast.FoldExpr) (C.LLVMValue
 	sourceType := s.exprType(expr.Value)
 	sourceElemType, ok := sequenceRewriteCarrierElemTypeBackend(sourceType)
 	if !ok || sourceElemType == nil {
-		return nil, nil, fmt.Errorf("sequence rewrite expects a darray or dview source, got %s", sourceType.String())
+		return nil, nil, fmt.Errorf("sequence rewrite expects a darray or view source, got %s", sourceType.String())
 	}
 	sourceValue, _, err := s.emitExpr(expr.Value, sourceType)
 	if err != nil {
 		return nil, nil, err
 	}
-	sourceViewType := &semantic.DArrayViewType{Elem: sourceElemType, SurfaceName: "dview"}
+	sourceViewType := &semantic.DArrayViewType{Elem: sourceElemType, SurfaceName: "view"}
 	sourceViewValue, err := s.coerceValue(sourceValue, sourceType, sourceViewType)
 	if err != nil {
 		return nil, nil, err

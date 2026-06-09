@@ -108,12 +108,12 @@ func mustAffineExprTerms(t *testing.T, value string, wantConst int64, wantTerms 
 
 func TestOptimizationFactsMarkConstantChunksExactItemsDisjoint(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "chunks_exact_disjoint.elisa", `
-def kernel(buf: dview[i32]) -> void:
-	ro: dview[i32] = readonly(buf)
+def kernel(buf: view[i32]) -> void:
+	ro: view[i32] = readonly(buf)
 	chunks: ChunksExactView[i32] = chunks_exact(ro, 4)
-	first: dview[i32] = chunks[0]
-	second: dview[i32] = chunks[1]
-	third: dview[i32] = chunks[2]
+	first: view[i32] = chunks[0]
+	second: view[i32] = chunks[1]
+	third: view[i32] = chunks[2]
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -157,8 +157,8 @@ func TestAnalyzeZipMapAcceptsDisjointChunksExactItemsFromSharedBuffer(t *testing
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
-def kernel(buf: dview[i32]) -> void:
-	ro: dview[i32] = readonly(buf)
+def kernel(buf: view[i32]) -> void:
+	ro: view[i32] = readonly(buf)
 	ro_chunks: ChunksExactView[i32] = chunks_exact(ro, 4)
 	rw_chunks: ChunksExactView[i32] = chunks_exact(buf, 4)
 	zip_map(rw_chunks[0], ro_chunks[1], ro_chunks[2], add)
@@ -187,16 +187,16 @@ def kernel(buf: dview[i32]) -> void:
 
 func TestOptimizationFactsComposeSplitAtAndChunksExactItemOffsets(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "split_chunks_exact_offsets.elisa", `
-def kernel(buf: dview[i32]) -> void:
-	whole: dview[i32] = buf[0:16]
+def kernel(buf: view[i32]) -> void:
+	whole: view[i32] = buf[0:16]
 	parts: SplitView[i32] = split_at(whole, 8)
-	left_ro: dview[i32] = readonly(parts.left)
-	right_ro: dview[i32] = readonly(parts.right)
+	left_ro: view[i32] = readonly(parts.left)
+	right_ro: view[i32] = readonly(parts.right)
 	left_chunks: ChunksExactView[i32] = chunks_exact(left_ro, 4)
 	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, 4)
-	left0: dview[i32] = left_chunks[0]
-	right0: dview[i32] = right_chunks[0]
-	right1: dview[i32] = right_chunks[1]
+	left0: view[i32] = left_chunks[0]
+	right0: view[i32] = right_chunks[0]
+	right1: view[i32] = right_chunks[1]
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -238,11 +238,11 @@ func TestAnalyzeZipMapAcceptsSplitChunksExactComposition(t *testing.T) {
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
-def kernel(buf: dview[i32]) -> void:
-	whole: dview[i32] = buf[0:16]
+def kernel(buf: view[i32]) -> void:
+	whole: view[i32] = buf[0:16]
 	parts: SplitView[i32] = split_at(whole, 8)
 	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, 4)
-	right_ro: dview[i32] = readonly(parts.right)
+	right_ro: view[i32] = readonly(parts.right)
 	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, 4)
 	zip_map(left_chunks[0], right_chunks[0], right_chunks[1], add)
 `)
@@ -267,16 +267,16 @@ def kernel(buf: dview[i32]) -> void:
 
 func TestOptimizationFactsSupportAffineSplitChunkComposition(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "affine_split_chunks_exact_offsets.elisa", `
-def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	limit: usize = start + (4 * chunk)
-	whole: dview[i32] = buf[start:limit]
+	whole: view[i32] = buf[start:limit]
 	parts: SplitView[i32] = split_at(whole, (2 * chunk))
 	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, chunk)
-	right_ro: dview[i32] = readonly(parts.right)
+	right_ro: view[i32] = readonly(parts.right)
 	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, chunk)
-	left0: dview[i32] = left_chunks[0]
-	right0: dview[i32] = right_chunks[0]
-	right1: dview[i32] = right_chunks[1]
+	left0: view[i32] = left_chunks[0]
+	right0: view[i32] = right_chunks[0]
+	right1: view[i32] = right_chunks[1]
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -330,12 +330,12 @@ func TestAnalyzeZipMapAcceptsAffineSplitChunkComposition(t *testing.T) {
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
-def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	limit: usize = start + (4 * chunk)
-	whole: dview[i32] = buf[start:limit]
+	whole: view[i32] = buf[start:limit]
 	parts: SplitView[i32] = split_at(whole, (2 * chunk))
 	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, chunk)
-	right_ro: dview[i32] = readonly(parts.right)
+	right_ro: view[i32] = readonly(parts.right)
 	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, chunk)
 	zip_map(left_chunks[0], right_chunks[0], right_chunks[1], add)
 `)
@@ -363,13 +363,13 @@ func TestAnalyzeZipMapAcceptsReadonlyDirectSliceComposition(t *testing.T) {
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
-def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	limit: usize = start + (3 * chunk)
-	whole: dview[i32] = buf[start:limit]
-	ro: dview[i32] = readonly(whole)
-	dst: dview[i32] = whole[0:chunk]
-	src1: dview[i32] = ro[chunk:(2 * chunk)]
-	src2: dview[i32] = ro[(2 * chunk):(3 * chunk)]
+	whole: view[i32] = buf[start:limit]
+	ro: view[i32] = readonly(whole)
+	dst: view[i32] = whole[0:chunk]
+	src1: view[i32] = ro[chunk:(2 * chunk)]
+	src2: view[i32] = ro[(2 * chunk):(3 * chunk)]
 	zip_map(dst, src1, src2, add)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -413,18 +413,18 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 
 func TestOptimizationFactsComposeHelperViewSlicesWithAffineBase(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "helper_view_slice_affine.elisa", `
-def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	return view[start:end]
 
-def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+def arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]:
 	return arena_da_view_slice(view, start, view.len)
 
-def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	limit: usize = start + (3 * chunk)
-	whole: dview[i32] = buf[start:limit]
-	rest_view: dview[i32] = arena_da_view_suffix(whole, chunk)
-	first: dview[i32] = arena_da_view_slice(rest_view, 0, chunk)
-	second: dview[i32] = arena_da_view_slice(rest_view, chunk, (2 * chunk))
+	whole: view[i32] = buf[start:limit]
+	rest_view: view[i32] = arena_da_view_suffix(whole, chunk)
+	first: view[i32] = arena_da_view_slice(rest_view, 0, chunk)
+	second: view[i32] = arena_da_view_slice(rest_view, chunk, (2 * chunk))
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -455,19 +455,19 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 
 func TestAnalyzeZipMapAcceptsReadonlyHelperViewSlices(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_readonly_helper_slices.elisa", `
-def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	return view[start:end]
 
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
-def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	limit: usize = start + (3 * chunk)
-	whole: dview[i32] = buf[start:limit]
-	ro: dview[i32] = readonly(whole)
-	dst: dview[i32] = arena_da_view_slice(whole, 0, chunk)
-	src1: dview[i32] = arena_da_view_slice(ro, chunk, (2 * chunk))
-	src2: dview[i32] = arena_da_view_slice(ro, (2 * chunk), (3 * chunk))
+	whole: view[i32] = buf[start:limit]
+	ro: view[i32] = readonly(whole)
+	dst: view[i32] = arena_da_view_slice(whole, 0, chunk)
+	src1: view[i32] = arena_da_view_slice(ro, chunk, (2 * chunk))
+	src2: view[i32] = arena_da_view_slice(ro, (2 * chunk), (3 * chunk))
 	zip_map(dst, src1, src2, add)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -511,20 +511,20 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 
 func TestAnalyzeReduceSumAcceptsReadonlyHelperSuffix(t *testing.T) {
 	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_helper_suffix.elisa", `
-def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	return view[start:end]
 
-def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+def arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]:
 	return arena_da_view_slice(view, start, view.len)
 
 def sum_one(value: i32) -> i32:
 	return value
 
-def kernel(buf: dview[i32], start: usize, chunk: usize) -> i32:
+def kernel(buf: view[i32], start: usize, chunk: usize) -> i32:
 	limit: usize = start + (2 * chunk)
-	whole: dview[i32] = buf[start:limit]
-	ro: dview[i32] = readonly(whole)
-	rest_view: dview[i32] = arena_da_view_suffix(ro, chunk)
+	whole: view[i32] = buf[start:limit]
+	ro: view[i32] = readonly(whole)
+	rest_view: view[i32] = arena_da_view_suffix(ro, chunk)
 	return reduce_sum(rest_view, sum_one)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -537,9 +537,9 @@ func TestAnalyzeReduceSumAcceptsReadonlyEqualSizeTernarySlices(t *testing.T) {
 def sum_one(value: i32) -> i32:
 	return value
 
-def kernel(buf: dview[i32], cond: bool, chunk: usize) -> i32:
-	whole: dview[i32] = readonly(buf[0:(2 * chunk)])
-	picked: dview[i32] = whole[0:chunk] if cond else whole[chunk:(2 * chunk)]
+def kernel(buf: view[i32], cond: bool, chunk: usize) -> i32:
+	whole: view[i32] = readonly(buf[0:(2 * chunk)])
+	picked: view[i32] = whole[0:chunk] if cond else whole[chunk:(2 * chunk)]
 	return reduce_sum(picked, sum_one)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -562,15 +562,15 @@ def kernel(buf: dview[i32], cond: bool, chunk: usize) -> i32:
 
 func TestAnalyzeReduceSumAcceptsReadonlyEqualSizeTernaryHelperSlices(t *testing.T) {
 	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_helper_slices.elisa", `
-def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	return view[start:end]
 
 def sum_one(value: i32) -> i32:
 	return value
 
-def kernel(buf: dview[i32], cond: bool, chunk: usize) -> i32:
-	whole: dview[i32] = readonly(buf[0:(2 * chunk)])
-	picked: dview[i32] = arena_da_view_slice(whole, 0, chunk) if cond else arena_da_view_slice(whole, chunk, (2 * chunk))
+def kernel(buf: view[i32], cond: bool, chunk: usize) -> i32:
+	whole: view[i32] = readonly(buf[0:(2 * chunk)])
+	picked: view[i32] = arena_da_view_slice(whole, 0, chunk) if cond else arena_da_view_slice(whole, chunk, (2 * chunk))
 	return reduce_sum(picked, sum_one)
 `)
 	if errs := result.Errors(); len(errs) > 0 {

@@ -15,7 +15,7 @@ import (
 )
 
 func (s *functionState) emitTreeFoldChildResultsSubview(childViewValue C.LLVMValueRef, sourceType semantic.Type, offsetValue C.LLVMValueRef, countValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
-	viewType := &semantic.DArrayViewType{Elem: sourceType, SurfaceName: "dview"}
+	viewType := &semantic.DArrayViewType{Elem: sourceType, SurfaceName: "view"}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {
 		return nil, nil, err
@@ -203,7 +203,7 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 		}
 	}
 	if arm.ChildResultsName != "" && arm.ChildResultsName != "_" {
-		childViewType := &semantic.DArrayViewType{Elem: helper.childResultsElemType(), SurfaceName: "dview"}
+		childViewType := &semantic.DArrayViewType{Elem: helper.childResultsElemType(), SurfaceName: "view"}
 		if err := s.emitMoveBindLocal(arm.ChildResultsName, childViewType, childViewValue); err != nil {
 			s.popScope()
 			return nil, false, err
@@ -280,7 +280,7 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 			}
 		}
 		if arm.ChildResultsName != "" && arm.ChildResultsName != "_" {
-			childViewType := &semantic.DArrayViewType{Elem: helper.childResultsElemType(), SurfaceName: "dview"}
+			childViewType := &semantic.DArrayViewType{Elem: helper.childResultsElemType(), SurfaceName: "view"}
 			if err := s.emitMoveBindLocal(arm.ChildResultsName, childViewType, childViewValue); err != nil {
 				s.popScope()
 				return nil, false, err

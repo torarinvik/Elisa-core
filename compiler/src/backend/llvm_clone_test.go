@@ -19,7 +19,7 @@ tree Lua:
 	block Block:
 		items: darray[Expr]
 
-def clone_items(owner: mutable Arena&, items: dview[u32], block: Lua.Block) -> Lua.Block:
+def clone_items(owner: mutable Arena&, items: view[u32], block: Lua.Block) -> Lua.Block:
 	can Abort.Panic, Memory.Allocate:
 		in owner:
 			copied: darray[u32] = clone[darray[u32]](items)

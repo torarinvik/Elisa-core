@@ -313,7 +313,7 @@ func TestParseTreeAttributeDecl(t *testing.T) {
 	}
 }
 func TestParseSequenceRewriteExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep_non_zero(owner: mutable Arena&, items: dview[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0u32:\n                    emit item\n")
+	file, errs := parseSourceFile(t, "def keep_non_zero(owner: mutable Arena&, items: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0u32:\n                    emit item\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -364,7 +364,7 @@ func TestParseSequenceRewriteExpr(t *testing.T) {
 	}
 }
 func TestParseTreeTargetSequenceRewriteExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Name(name: u32)\n\ndef keep_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> darray[i64]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[i64]:\n                Lua.Expr.Int(expr) when expr.value > 0:\n                    emit expr.value\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Name(name: u32)\n\ndef keep_int_values(owner: mutable Arena&, items: view[Lua.Expr]) -> darray[i64]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[i64]:\n                Lua.Expr.Int(expr) when expr.value > 0:\n                    emit expr.value\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -401,7 +401,7 @@ func TestParseTreeTargetSequenceRewriteExpr(t *testing.T) {
 	}
 }
 func TestParseSequenceRewriteEmitAllExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "def concat(owner: mutable Arena&, left: dview[u32], right: dview[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            segments: darray[dview[u32]] = [left, right]\n            return rewrite segments as sequence[u32]:\n                segment:\n                    emit all segment\n")
+	file, errs := parseSourceFile(t, "def concat(owner: mutable Arena&, left: view[u32], right: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            segments: darray[view[u32]] = [left, right]\n            return rewrite segments as sequence[u32]:\n                segment:\n                    emit all segment\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

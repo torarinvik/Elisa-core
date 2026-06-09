@@ -191,7 +191,7 @@ func (s *functionState) emitPackedStoreTagsExpr(expr *ast.FieldExpr) (C.LLVMValu
 	}
 	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
 	if !ok || resultType == nil {
-		return nil, nil, true, fmt.Errorf("packed store tags requires dview result type")
+		return nil, nil, true, fmt.Errorf("packed store tags requires view result type")
 	}
 	totalValue, err := ops.storeCount("packed.store.tags.count")
 	if err != nil {

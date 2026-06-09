@@ -1,28 +1,28 @@
-def json_empty_node_view() -> dview[JsonNode]:
+def json_empty_node_view() -> view[JsonNode]:
     return DynArrayView(null, 0, size_of(JsonNode))
-def json_empty_field_view() -> dview[JsonField]:
+def json_empty_field_view() -> view[JsonField]:
     return DynArrayView(null, 0, size_of(JsonField))
-def json_node_items_view(items_ptr: JsonNode&?, item_count: usize) -> dview[JsonNode]:
+def json_node_items_view(items_ptr: JsonNode&?, item_count: usize) -> view[JsonNode]:
     if items_ptr == null or item_count == 0:
         return json_empty_node_view()
     return DynArrayView(items_ptr.cast[void&], item_count, size_of(JsonNode))
-def json_field_items_view(fields_ptr: JsonField&?, field_count: usize) -> dview[JsonField]:
+def json_field_items_view(fields_ptr: JsonField&?, field_count: usize) -> view[JsonField]:
     if fields_ptr == null or field_count == 0:
         return json_empty_field_view()
     return DynArrayView(fields_ptr.cast[void&], field_count, size_of(JsonField))
-def json_ast_array_items_view(node: JsonNode, store: JsonNode.Store[Local]) -> dview[JsonNode]:
+def json_ast_array_items_view(node: JsonNode, store: JsonNode.Store[Local]) -> view[JsonNode]:
     if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
         return json_node_items_view(items_ptr, item_count)
     return json_empty_node_view()
-def json_ast_object_fields_view(node: JsonNode, store: JsonNode.Store[Local]) -> dview[JsonField]:
+def json_ast_object_fields_view(node: JsonNode, store: JsonNode.Store[Local]) -> view[JsonField]:
     if node in store as JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
         return json_field_items_view(fields_ptr, field_count)
     return json_empty_field_view()
-def json_node_view_ref(items: dview[JsonNode], index: usize) -> JsonNode&:
+def json_node_view_ref(items: view[JsonNode], index: usize) -> JsonNode&:
     assert index < items.len
     assert items.data != null
     return (items.data.cast[u8&] + index * items.elem_size).cast[JsonNode&]
-def json_field_view_ref(fields: dview[JsonField], index: usize) -> JsonField&:
+def json_field_view_ref(fields: view[JsonField], index: usize) -> JsonField&:
     assert index < fields.len
     assert fields.data != null
     return (fields.data.cast[u8&] + index * fields.elem_size).cast[JsonField&]
@@ -60,8 +60,8 @@ def json_node_is_invalid(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
     return false
 def json_parse_node_result(node: JsonNode, checksum: i64) -> JsonParseNodeResult:
     return JsonParseNodeResult(node, checksum)
-def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -> i64:
-    readonly_items: dview[JsonNode] = readonly(items)
+def json_ast_nodes_count(items: view[JsonNode], store: JsonNode.Store[Local]) -> i64:
+    readonly_items: view[JsonNode] = readonly(items)
     total: mutable i64 = 0
     for item in readonly_items:
         item_count: i64 = json_ast_node_count(item, store)
@@ -70,8 +70,8 @@ def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -
         total <- total + item_count
 
     return total
-def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]) -> i64:
-    readonly_fields: dview[JsonField] = readonly(fields)
+def json_ast_fields_count(fields: view[JsonField], store: JsonNode.Store[Local]) -> i64:
+    readonly_fields: view[JsonField] = readonly(fields)
     total: mutable i64 = 0
     for index in 0..<readonly_fields.len:
         field_ref: JsonField& = json_field_view_ref(readonly_fields, index)

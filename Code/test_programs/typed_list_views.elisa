@@ -1,5 +1,5 @@
 def head_of_middle(values: darray[i32, row]) -> i32:
-    part: dview[i32] = values[1:3]
+    part: view[i32] = values[1:3]
     return part[0]
 
 

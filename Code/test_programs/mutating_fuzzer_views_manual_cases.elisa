@@ -37,7 +37,7 @@ def mutate_30_list_view_pair_sum() -> i32:
 
 
 def mutate_32_explicit_list_view_temp() -> i32:
-    values: dview[i32] = make_array_view()
+    values: view[i32] = make_array_view()
     return values[0]
 
 

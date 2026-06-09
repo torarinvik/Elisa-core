@@ -295,7 +295,7 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 		if forRewrite && childResultsElemType != nil {
 			elemType = childResultsElemType
 		}
-		childViewType := &DArrayViewType{Elem: elemType, SurfaceName: "dview"}
+		childViewType := &DArrayViewType{Elem: elemType, SurfaceName: "view"}
 		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.ChildResultsName, Kind: SymbolLocal, Type: childViewType, Mutable: false}, armInfo.Arm.Position)
 	}
 	if len(armInfo.Arm.ChildBindings) != 0 {
@@ -373,7 +373,7 @@ func treeFoldArmChildBindingTypes(bindType Type, resultType Type) map[string]Typ
 	if bindType == nil || resultType == nil {
 		return nil
 	}
-	childViewType := &DArrayViewType{Elem: resultType, SurfaceName: "dview"}
+	childViewType := &DArrayViewType{Elem: resultType, SurfaceName: "view"}
 	out := make(map[string]Type)
 	for _, binding := range TreeStructuralChildBindings(bindType) {
 		if binding.Name == "" {
