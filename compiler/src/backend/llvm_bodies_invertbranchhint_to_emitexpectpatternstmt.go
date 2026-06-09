@@ -352,7 +352,10 @@ func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
 		nextDescending := C.LLVMBuildSub(s.builder, currentValue, stepValue, cStringFree("for.next.desc"))
 		nextValue := C.LLVMBuildSelect(s.builder, ascendingValue, nextAscending, nextDescending, cStringFree("for.next"))
 		C.LLVMBuildStore(s.builder, nextValue, currentAlloca)
-		C.LLVMBuildBr(s.builder, condBB)
+		backedge := C.LLVMBuildBr(s.builder, condBB)
+		if stmt.AutovecExpected {
+			s.tagAutovecExpectedLoop(backedge, stmt.Position)
+		}
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)

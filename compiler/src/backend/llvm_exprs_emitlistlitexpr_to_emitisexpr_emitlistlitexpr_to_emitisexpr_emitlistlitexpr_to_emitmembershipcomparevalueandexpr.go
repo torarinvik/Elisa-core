@@ -417,12 +417,13 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		s.g.result.ExprTypes[startLit] = usizeType
 	}
 	loop := &ast.ForStmt{
-		Position: pos,
-		Name:     idxName,
-		Start:    startLit,
-		End:      srcCount(),
-		Op:       lexer.TOKEN_RANGE_LT,
-		Body:     body,
+		Position:        pos,
+		Name:            idxName,
+		Start:           startLit,
+		End:             srcCount(),
+		Op:              lexer.TOKEN_RANGE_LT,
+		Body:            body,
+		AutovecExpected: comprehensionBodyCallFree(expr),
 	}
 
 	return &ast.ExprBlock{
@@ -434,6 +435,53 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		},
 		Value: resultIdent,
 	}, true
+}
+
+// exprContainsCall reports whether an expression contains a function/method call. Used to gate the
+// AutovecExpected marker: a call in the loop body legitimately blocks auto-vectorization (the
+// callee may not inline), so warning about it would be noise rather than a real defect. Unknown
+// node types are treated conservatively as "contains a call" so the marker (and thus the warning)
+// is only set for clearly-simple, call-free bodies — false negatives, never false positives.
+func exprContainsCall(e ast.Expr) bool {
+	switch n := e.(type) {
+	case nil:
+		return false
+	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.StringLit, *ast.Ident:
+		return false
+	case *ast.ParenExpr:
+		return exprContainsCall(n.Inner)
+	case *ast.BinaryExpr:
+		return exprContainsCall(n.Left) || exprContainsCall(n.Right)
+	case *ast.UnaryExpr:
+		return exprContainsCall(n.Operand)
+	case *ast.TernaryExpr:
+		return exprContainsCall(n.Value) || exprContainsCall(n.Cond) || exprContainsCall(n.Alt)
+	case *ast.IndexExpr:
+		return exprContainsCall(n.Object) || exprContainsCall(n.Index)
+	case *ast.FieldExpr:
+		return exprContainsCall(n.Object)
+	case *ast.CastExpr:
+		return exprContainsCall(n.Operand)
+	case *ast.CallExpr:
+		return true
+	default:
+		return true
+	}
+}
+
+// comprehensionBodyCallFree reports whether a comprehension's value expression and all of its
+// per-element head bindings are call-free — the precondition for marking its fused loop as
+// AutovecExpected.
+func comprehensionBodyCallFree(expr *ast.ListComprehensionExpr) bool {
+	if exprContainsCall(expr.Value) {
+		return false
+	}
+	for _, b := range expr.Bindings {
+		if vd, ok := b.(*ast.VarDeclStmt); ok && exprContainsCall(vd.Value) {
+			return false
+		}
+	}
+	return true
 }
 
 // comprehensionRangeBoundReEvaluable reports whether a range bound can be evaluated more than
@@ -523,12 +571,13 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 	body = append(body, ast.Stmt(store))
 
 	loop := &ast.ForStmt{
-		Position: pos,
-		Name:     expr.Name,
-		Start:    start,
-		End:      end,
-		Op:       lexer.TOKEN_RANGE_LT,
-		Body:     body,
+		Position:        pos,
+		Name:            expr.Name,
+		Start:           start,
+		End:             end,
+		Op:              lexer.TOKEN_RANGE_LT,
+		Body:            body,
+		AutovecExpected: comprehensionBodyCallFree(expr),
 	}
 
 	return &ast.ExprBlock{

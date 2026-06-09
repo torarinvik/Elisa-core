@@ -379,11 +379,12 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		}
 		return 0
 	case emitLLVM:
-		output, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfile(result, effectiveOptimizationLevel(options), options.packedProfile)
+		output, perfWarnings, err := backend.GenerateLLVMIRWithWarnings(result, effectiveOptimizationLevel(options), options.packedProfile, "", false, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
+		printPerfWarnings(stderr, perfWarnings)
 		if options.output != "" {
 			if err := writeOutputFile(options.output, []byte(output)); err != nil {
 				fmt.Fprintf(stderr, "error: %s\n", err)
@@ -525,6 +526,14 @@ func writeOutputFile(path string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// printPerfWarnings surfaces the backend's post-optimization performance-friction warnings (the
+// auto-vectorization verifier) to the user, one per line on stderr.
+func printPerfWarnings(stderr io.Writer, warnings []string) {
+	for _, w := range warnings {
+		fmt.Fprintln(stderr, w)
+	}
 }
 
 func ensureOutputParentExists(path string) error {

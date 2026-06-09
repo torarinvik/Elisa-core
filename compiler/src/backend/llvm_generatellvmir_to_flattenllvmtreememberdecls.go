@@ -55,19 +55,29 @@ func GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(result *semanti
 // -ftrace instrumentation when traceInfo is true, so the native build records the
 // execution trace.
 func GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebugTrace(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, error) {
+	output, _, err := GenerateLLVMIRWithWarnings(result, optLevel, profile, targetTriple, debugInfo, traceInfo)
+	return output, err
+}
+
+// GenerateLLVMIRWithWarnings is the full-arg lowering entry point that, in addition to the IR text,
+// returns any performance-friction warnings collected during optimized codegen (the
+// auto-vectorization verifier — docs/79 Part IV). The slice is empty at -O0 or when every eligible
+// loop vectorized. Build/emit drivers surface these to the user; the thinner overloads that don't
+// thread warnings out delegate here and discard them.
+func GenerateLLVMIRWithWarnings(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, []string, error) {
 	g, err := compileLLVMModuleWithTargetDebugTrace(result, optLevel, profile, targetTriple, debugInfo, traceInfo)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer g.dispose()
 	if err := g.optimizeModule(optLevel); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	output := g.printModule()
 	if err := validateSegmentAgnosticLLVMIR(output); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return output, nil
+	return output, g.PerfWarnings(), nil
 }
 func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile) (*llvmGenerator, error) {
 	return compileLLVMModuleWithTarget(result, optLevel, profile, "")
@@ -159,6 +169,7 @@ type llvmGenerator struct {
 	trace                     *traceState
 	forceBoundsCheck          bool
 	globalFastMath            bool
+	perfWarnings              []string
 }
 type typeMemoKey struct {
 	id  semantic.TypeID

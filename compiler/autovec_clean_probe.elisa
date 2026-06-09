@@ -1,0 +1,14 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# A no-filter f64 map over a runtime-provided darray: lowered to the vectorizable indexed-store
+# shape with a call-free body, and f64 multiply vectorizes cleanly, so the -Wperf verifier must NOT
+# warn. Exported so the build loop survives -O3 (an internal fn with constant data folds away).
+def scaled(a: mutable darray[f64]&) -> f64:
+	can Memory.Allocate, Abort.Panic:
+		out: darray[f64] = [x * 2.0 for x in a]
+		s: mutable f64 = 0.0
+		for i in 0..<out.count:
+			s <- s + out[i]
+		return s
+
+export func probe_scaled(a: mutable darray[f64]&) -> f64 = scaled

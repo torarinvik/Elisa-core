@@ -667,9 +667,12 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 	// Default path: generate textual IR and compile it with llc.
 	buildTiming := os.Getenv("ELISACORE_BUILD_TIMING") != ""
 	irStart := time.Now()
-	ir, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebugTrace(result, optLevel, packedProfile, targetTriple, debugInfo, traceInfo)
+	ir, perfWarnings, err := backend.GenerateLLVMIRWithWarnings(result, optLevel, packedProfile, targetTriple, debugInfo, traceInfo)
 	if err != nil {
 		return err
+	}
+	for _, w := range perfWarnings {
+		fmt.Fprintln(stderr, w)
 	}
 	if buildTiming {
 		fmt.Fprintf(stderr, "[build-timing] IR-gen: %v (%d bytes IR)\n", time.Since(irStart).Round(time.Millisecond), len(ir))

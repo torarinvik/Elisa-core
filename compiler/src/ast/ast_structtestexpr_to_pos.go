@@ -338,6 +338,13 @@ type ForStmt struct {
 	// analysis proves a bounded darray fill.
 	PreReserve  Stmt
 	PreReserves []Stmt
+	// AutovecExpected marks a compiler-synthesized fused loop (an indexed-store comprehension
+	// build) whose shape was deliberately lowered to be vectorizer-legal and whose body is
+	// call-free — so if it fails to auto-vectorize at -O2/-O3 that is a real efficiency
+	// regression worth a -Wperf warning (docs/79 Part IV). Set by the comprehension desugars; the
+	// backend tags the loop's latch with `!llvm.loop` metadata carrying the marker + source
+	// position, then a post-optimization pass warns for any marked loop left un-vectorized.
+	AutovecExpected bool
 }
 type IterBindMode int
 

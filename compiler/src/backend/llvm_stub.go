@@ -30,6 +30,18 @@ func GenerateLLVMIRWithOptAndPackedLoweringProfileForTarget(result *semantic.Res
 	return "", fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
 }
 
+func GenerateLLVMIRWithWarnings(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, []string, error) {
+	_ = optLevel
+	_ = profile
+	_ = targetTriple
+	_ = debugInfo
+	_ = traceInfo
+	if result == nil {
+		return "", nil, fmt.Errorf("backend requires a semantic result")
+	}
+	return "", nil, fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
+}
+
 func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
 	return WriteLLVMBitcodeFileWithOpt(result, outputPath, OptimizationLevel3)
 }

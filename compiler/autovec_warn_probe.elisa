@@ -1,0 +1,13 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# A no-filter map over a darray whose body is call-free and simple, so the comprehension is lowered
+# to the vectorizable indexed-store shape and marked AutovecExpected — yet integer remainder by a
+# runtime divisor does not auto-vectorize (no vector idiv), so the -Wperf verifier must warn. `mods`
+# is the only loop in its function and gets inlined into the export wrapper, which is exactly the
+# case the loop-metadata marker (vs a held function reference) is designed to survive.
+def mods(a: mutable darray[i64]&, d: i64) -> usize:
+	can Memory.Allocate, Abort.Panic:
+		out: darray[i64] = [x % d for x in a]
+		return out.count
+
+export func probe_mods(a: mutable darray[i64]&, d: i64) -> usize = mods

@@ -195,8 +195,14 @@ func TestGenerateLLVMIRLowersRangeListComprehensionExpr(t *testing.T) {
 	if !strings.Contains(output, "for.cond") {
 		t.Fatalf("expected range list comprehension to lower through range loop blocks, got:\n%s", output)
 	}
-	if !strings.Contains(output, "darray.push.slot") {
-		t.Fatalf("expected range list comprehension to push elements, got:\n%s", output)
+	// A no-filter range comprehension over re-evaluable bounds now lowers to the vectorizable
+	// presized indexed-store shape (docs/79 P2b): the result is resized to the element count up
+	// front and the loop writes by index, rather than pushing element-by-element.
+	if !strings.Contains(output, "resize") {
+		t.Fatalf("expected range list comprehension to presize the result (indexed-store lowering), got:\n%s", output)
+	}
+	if strings.Contains(output, "darray.push.slot") {
+		t.Fatalf("range list comprehension should no longer push per element (it uses indexed stores), got:\n%s", output)
 	}
 }
 

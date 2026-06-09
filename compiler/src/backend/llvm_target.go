@@ -192,6 +192,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
 	}
+	g.verifyAutovecExpectations()
 	g.optimizedForCodegen = true
 	return nil
 }
