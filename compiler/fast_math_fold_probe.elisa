@@ -1,0 +1,10 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# A float fold over a runtime-provided darray, exported so it survives -O3 DCE (an internal
+# function with compile-time-known data would be constant-folded away, leaving no loop to
+# vectorize). Used by TestFastMathFoldReductionReassociates to observe the codegen difference
+# between the default ordered reduction and the `-ffast-math` reassociated tree reduction.
+def sum_f64(a: mutable darray[f64]&) -> f64:
+	return (acc + x for x in a with acc: f64 = 0.0)
+
+export func probe_sum_f64(a: mutable darray[f64]&) -> f64 = sum_f64

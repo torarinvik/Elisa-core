@@ -283,6 +283,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Force the debug index-bounds watchdog on regardless of optimization level.
 			// The watchdog gate reads this env var at codegen time (build is in-process).
 			_ = os.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "1")
+		case arg == "-ffast-math":
+			// Opt the whole program into full fast-math FP (reassociation etc.), unlocking the
+			// reassociated tree reduction for FP folds. Read at codegen time (in-process build).
+			_ = os.Setenv("ELISACORE_FAST_MATH", "1")
 		case arg == "-Wperf":
 			// Graduated strictness (docs/70): promote the performance-friction lints
 			// (pointer-graph, allocation churn) from warnings to hard errors for shipped code.

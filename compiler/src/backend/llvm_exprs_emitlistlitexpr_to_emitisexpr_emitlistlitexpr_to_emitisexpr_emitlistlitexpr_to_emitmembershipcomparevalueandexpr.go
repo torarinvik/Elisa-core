@@ -1162,9 +1162,16 @@ func fpAllowContractReciprocal(v C.LLVMValueRef) C.LLVMValueRef {
 	return v
 }
 
-// fnFastMath reports whether the enclosing function opted into full fast-math FP (@fast_math).
+// fnFastMath reports whether full fast-math FP applies here: either the enclosing function opted
+// in (@fast_math) or the whole program did (the `-ffast-math` CLI flag / ELISACORE_FAST_MATH).
 func (s *functionState) fnFastMath() bool {
-	return s != nil && s.fnType != nil && s.fnType.FastMath
+	if s == nil {
+		return false
+	}
+	if s.fnType != nil && s.fnType.FastMath {
+		return true
+	}
+	return s.g != nil && s.g.globalFastMath
 }
 
 // fpContract applies contraction (FMA) by default, or full fast-math when the function is @fast_math.

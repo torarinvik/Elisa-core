@@ -93,6 +93,12 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 	// Lets release/cross builds (e.g. the CUSA07399 emulator) trap at the offending
 	// indexing site instead of crashing later on a derived bad pointer.
 	g.forceBoundsCheck = os.Getenv("ELISACORE_FORCE_BOUNDS_CHECK") != ""
+	// ELISACORE_FAST_MATH opts the whole program into full fast-math FP (reassociation,
+	// reciprocals, no-nan/no-inf) — clang's -ffast-math. Set by the `-ffast-math` CLI flag.
+	// This is what unlocks the *tree* (reassociated) horizontal reduction for FP folds, which
+	// changes numerical results, so it stays an explicit program-wide opt-in (the per-function
+	// `@fast_math` annotation and the per-fold `by simd` marker are the narrower opt-ins).
+	g.globalFastMath = os.Getenv("ELISACORE_FAST_MATH") != ""
 	g.optLevel = optLevel
 	g.packedProfile = profile
 	g.packedEnumABI = profile.packedModeForStore(nil)
@@ -152,6 +158,7 @@ type llvmGenerator struct {
 	emitTrace                 bool
 	trace                     *traceState
 	forceBoundsCheck          bool
+	globalFastMath            bool
 }
 type typeMemoKey struct {
 	id  semantic.TypeID
