@@ -103,6 +103,42 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	return false
 }
 
+// isValueConversion reports whether a cast changes a value's numeric representation or domain — a
+// conversion that is the CONSTRUCTOR's job (`T(x)` / `x.T()`), not a bit reinterpret. `.cast[T]` is
+// the canonical reinterpret/bitcast and rejects these; the value forms accept them.
+//
+// It is deliberately width-agnostic: any plain-numeric -> different-plain-numeric counts (even a
+// same-width sign reinterpret like usize -> i64, which `i64(x)` performs losslessly), as does
+// const-enum <-> numeric. Pointer/ref reinterprets are NOT caught — a pointer/ref is not a numeric
+// type, so `ptr.cast[i64]` / `int.cast[T&]` stay valid reinterprets.
+func (a *Analyzer) isValueConversion(src, dst Type) bool {
+	if SameType(src, dst) || IsInvalidType(src) || IsInvalidType(dst) {
+		return false
+	}
+	// IDType / AddressSpaceType are tagged storage: a cast to/from them keeps the bits unchanged and
+	// only adds/removes a phantom tag, so it is a reinterpret (`.cast`), not a value conversion —
+	// even though IsNumericType reports them numeric via their storage.
+	if isStorageTagType(src) || isStorageTagType(dst) {
+		return false
+	}
+	if _, ok := src.(*ConstEnumType); ok {
+		return IsNumericType(dst)
+	}
+	if _, ok := dst.(*ConstEnumType); ok {
+		return IsNumericType(src)
+	}
+	return IsNumericType(src) && IsNumericType(dst)
+}
+
+func isStorageTagType(t Type) bool {
+	switch t.(type) {
+	case *IDType, *AddressSpaceType:
+		return true
+	default:
+		return false
+	}
+}
+
 func isPointerLikeCastType(t Type) bool {
 	switch t.(type) {
 	case *RefType, *DStrType, *FuncType:

@@ -95,7 +95,7 @@ def build(owner: Arena) -> usize:
         view.flags <- 5
         symbols[row].name_id <- 20
         total: mutable usize = view.name_id + symbols.count
-        total <- total + view.flags.cast[usize]
+        total <- total + view.flags.usize()
         for iter_row in symbols.rows:
             total <- total + iter_row.name_id
         return total

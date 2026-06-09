@@ -518,7 +518,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				return
 			}
 		}
-		if !a.validCast(src, dst) {
+		if n.Origin == ast.CastExprOriginExplicitCast && a.isValueConversion(src, dst) {
+			// `.cast[T]` is the canonical reinterpret/bitcast; numeric/enum value conversions go
+			// through a constructor (`T(x)` / `x.T()`).
+			a.errorf(n.Pos(), "`.cast[%s]` is a value conversion, not a reinterpret; use a constructor `%s(x)` or `x.%s()`", dst, dst, dst)
+		} else if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src, dst)
 		}
 		// A cast is the explicit way to truncate, so runtime narrowing stays silent. But a
