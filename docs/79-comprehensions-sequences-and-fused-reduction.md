@@ -335,9 +335,23 @@ Each phase ships independently and leaves the tree green.
 > lower to a fused `d.put`/`s.add` loop; head bindings ride a `Bindings` field
 > (untyped inside `{…}` to dodge the dict-key `:` ambiguity, typed elsewhere). List
 > comprehension pre-existed. Each shipped with a runtime smoke + Go test; full suite
-> green. REMAINING: deprecate the `fold` combinator (confirmed unused; needs a
-> deprecation hook). Then Phases 2–4 (lazy `Sequence` protocol + reducers, `by
-> par`, `by simd`).
+> green. The `fold` combinator deprecation also landed (`7fd98a3e`, via a general
+> `@deprecated` annotation). Then Phases 2–4 (lazy `Sequence` protocol + reducers,
+> `by par`, `by simd`).
+>
+> **Vectorization status (verified, `240fcbb9`).** The fusion guarantee already pays
+> off at `-O3` *without* any `by simd` marker: fold reductions (f64/i64) and maps
+> into a preallocated darray auto-vectorize today (`<2 x double>` +
+> `llvm.vector.reduce.fadd`). The one gap was a map building a **fresh** darray via
+> `push` — the per-element capacity-check + conditional `arena_realloc` is a
+> loop-carried control dependency the vectorizer can't cross, so the build loop
+> stayed scalar. **P2a fixes it:** a no-filter list comprehension over a darray
+> identifier source now lowers to a presized indexed-store loop
+> (`result.resize(src.count); for i: result[i] <- value`), which vectorizes like the
+> preallocated case. Filtered / range / non-darray sources keep the push fallback.
+> (Caveat for whoever inspects this: at `-O3`, internal functions with no retained
+> root are DCE'd, so dump IR through an `export func` wrapper or the module looks
+> empty — an earlier pass mis-concluded "nothing vectorizes" from empty dumps.)
 
 **Phase 1 — surface + sinks (sequential, no protocol value).** Parse `{…}` set,
 `{k:v …}` dict, `(… with acc =)` fold, and the comma-separated **head bindings**
