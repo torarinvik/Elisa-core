@@ -308,6 +308,12 @@ func (s *functionState) emitSpreadListLitExpr(expr *ast.ListLitExpr, darrayType 
 	return s.emitExprBlock(block, darrayType)
 }
 func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr.FastMath {
+		// `by simd` on a list-map: emit the whole comprehension body under full fast-math FP,
+		// covering the value expression on both the indexed-store fast path and the push fallback.
+		s.fastMathScope++
+		defer func() { s.fastMathScope-- }()
+	}
 	if expr.Key != nil {
 		return s.emitDictComprehensionExpr(expr)
 	}

@@ -203,6 +203,23 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	if p.match(lexer.TOKEN_IF) {
 		filter = p.parseExpr()
 	}
+	// Optional `by simd` marker on a list-map comprehension (docs/79 Part IV): emit the body under
+	// full fast-math FP. `by par` is reserved for folds for now (a parallel map needs the output's
+	// element type to allocate its bands, which the parser desugar cannot yet thread).
+	fastMath := false
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
+		byPos := p.cur().Pos
+		p.advance()
+		mode := p.expect(lexer.TOKEN_IDENT).Text
+		switch mode {
+		case "simd":
+			fastMath = true
+		case "par":
+			p.errorAt(byPos, "`by par` is not yet supported on map comprehensions; use it on a fold reduction (`( acc <op> f(x) for ... by par )`)")
+		default:
+			p.errorAt(byPos, "expected `simd` after `by`, got %q", mode)
+		}
+	}
 	p.expect(lexer.TOKEN_RBRACKET)
 	var owner ast.Expr
 	if p.match(lexer.TOKEN_IN) {
@@ -211,7 +228,7 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 		owner = p.withInMembershipDisabled(p.parseExpr)
 		p.errorf("comprehension allocation owner `[...] in <owner>` is no longer supported; annotate the binding type instead (e.g. `xs: darray[T] @<owner> = [...]`)")
 	}
-	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner}
+	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner, FastMath: fastMath}
 }
 
 // parseDictComprehensionFromFirst parses a dict comprehension

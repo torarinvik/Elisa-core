@@ -1,0 +1,22 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# `by simd` on a list-map comprehension (docs/79 Part IV) emits the body under full fast-math FP
+# (the map analogue of the per-fold marker), so the loop vectorizer may apply the more aggressive
+# FP transforms. It does not change integer results and, for these exact-in-binary values, does not
+# change the float results either — this fixture pins correctness across an indexed-store map (darray
+# source) and a range source.
+@test
+def by_simd_map_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[f64] = []
+		for k in 0..<8:
+			_ = a.push(k.f64())
+
+		out: darray[f64] = [x * 2.0 + 1.0 for x in a by simd]
+		assert out.count == 8.usize()
+		assert out[0.usize()] == 1.0
+		assert out[7.usize()] == 15.0
+
+		sq: darray[i64] = [i * i for i in 0..<5 by simd]
+		assert sq.count == 5.usize()
+		assert sq[4.usize()] == 16
