@@ -220,17 +220,18 @@ def arena_da_view_len[T](view: view[T]) -> usize:
     return view.len
 
 def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
-    DynArrayView(null, 0, view.elem_size) return if view.data == null or view.len == 0
+    elem_size: usize = size_of(T)
+    DynArrayView(null, 0, elem_size) return if view.data == null or view.len == 0
 
     lo: mutable usize = start if start < view.len else view.len
     hi: mutable usize = end if end < view.len else view.len
     if hi < lo:
         hi <- lo
 
-    DynArrayView(null, 0, view.elem_size) return if hi == lo
+    DynArrayView(null, 0, elem_size) return if hi == lo
 
-    offset: usize = lo * view.elem_size
-    return DynArrayView(collections_void_from_data_at(view.data, offset), hi - lo, view.elem_size)
+    offset: usize = lo * elem_size
+    return DynArrayView(collections_void_from_data_at(view.data, offset), hi - lo, elem_size)
 
 def arena_da_view_prefix[T](view: view[T], end: usize) -> view[T]:
     return arena_da_view_slice(view, 0, end)
@@ -242,7 +243,7 @@ def arena_da_view_get[T](view: view[T], index: usize) -> T:
     assert index < view.len
     assert view.data != null
 
-    offset: usize = index * view.elem_size
+    offset: usize = index * size_of(T)
     base: T& = collections_items_from_data_at[T](view.data, offset)
     return base[0]
 
@@ -271,13 +272,12 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
     assert left.len == right.len
-    assert left.elem_size == right.elem_size
     true return if left.len == 0
 
     assert left.data != null
     assert right.data != null
 
-    byte_count: usize = left.len * left.elem_size
+    byte_count: usize = left.len * size_of(T)
     return arena_memeq(left.data, right.data, byte_count)
 
 def arena_da_from_view[T](a: mutable Arena&, view: view[T]) -> darray[T, shape_out]:
@@ -286,7 +286,7 @@ def arena_da_from_view[T](a: mutable Arena&, view: view[T]) -> darray[T, shape_o
 
         items: mutable T& = collections_items_from_alloc[T](arena_alloc(a, view.len * size_of(T)))
         assert view.data != null
-        arena_memcpy(collections_mutable_void_from_items[T](items), view.data, view.len * view.elem_size)
+        arena_memcpy(collections_mutable_void_from_items[T](items), view.data, view.len * size_of(T))
 
         out: mutable darray[T, shape_out] = zeroed
         out.items as & <- items
