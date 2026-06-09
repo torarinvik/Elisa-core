@@ -371,7 +371,12 @@ Each phase ships independently and leaves the tree green.
 > existing runtime `reduce(slice(&src), seed, op)` combinator (private partials per band,
 > merged). Gated to `acc <op> x` with op ∈ {+, *} over a darray source (no filter/bindings/
 > range) so the parallel reordering is never silently incorrect — anything else is a parser
-> error. This completes the Part IV perf markers (`by simd` + `by par`).
+> error. This completes the Part IV perf markers (`by simd` + `by par`) for folds. **P5b** lifts
+> the `by par` identity-transform restriction via a fused `map_reduce` combinator, so
+> `acc + x*x` / `acc + f(x)` (dot products, sum of squares) parallelize too. **P6** extends
+> `by simd` to list-map comprehensions (full fast-math on the body, reusing the `fastMathScope`);
+> `by par` on maps is reserved with a clear "not yet" error (a parallel map must allocate its
+> banded output, which needs region/inference threading the parser desugar doesn't yet have).
 
 **Phase 1 — surface + sinks (sequential, no protocol value).** Parse `{…}` set,
 `{k:v …}` dict, `(… with acc =)` fold, and the comma-separated **head bindings**
