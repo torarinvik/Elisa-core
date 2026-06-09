@@ -458,9 +458,6 @@ func SequenceMatchElementType(actual Type) (Type, bool) {
 	actual = StripAggregateStateType(actual)
 	switch t := actual.(type) {
 	case *ArrayType:
-		if isStringArrayType(t) {
-			return builtinCharType(), true
-		}
 		return t.Elem, true
 	case *DArrayType:
 		return t.Elem, true

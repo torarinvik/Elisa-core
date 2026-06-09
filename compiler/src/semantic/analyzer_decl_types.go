@@ -322,7 +322,6 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				a.namedTypes[qualifiedName] = &ErrorSetType{Name: qualifiedName, Tags: resolvedTags, Payloads: payloads}
 				markPrivate(qualifiedName)
 			case *ast.PermissionDecl:
-			case *ast.EffectDecl:
 			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
 		})

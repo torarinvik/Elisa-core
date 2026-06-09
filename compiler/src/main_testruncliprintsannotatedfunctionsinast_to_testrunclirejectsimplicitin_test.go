@@ -293,7 +293,7 @@ func TestRunCLIFmtKeepsPanicGrantBlocksInSurfaceSyntax(t *testing.T) {
 func TestRunCLIFmtKeepsSignalSurfaceSyntax(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_signal.elisa")
-	src := "effect FooEffect:\n    pass\n\neffect ConsoleEffect:\n    Write\n\ndef run() -> void:\n    can FooEffect, ConsoleEffect.Write:\n        signal FooEffect\n        signal ConsoleEffect.Write\n"
+	src := "permission FooEffect:\n    pass\n\npermission ConsoleEffect:\n    Write\n\ndef run() -> void:\n    can FooEffect, ConsoleEffect.Write:\n        signal FooEffect\n        signal ConsoleEffect.Write\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write signal grant fixture: %v", err)
 	}
@@ -308,8 +308,8 @@ func TestRunCLIFmtKeepsSignalSurfaceSyntax(t *testing.T) {
 		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
 	}
 	formatted := stdout.String()
-	if !strings.Contains(formatted, "permission FooEffect:") || strings.Contains(formatted, "effect FooEffect:") {
-		t.Fatalf("expected formatter to canonicalize effect declarations to permission, got:\n%s", formatted)
+	if !strings.Contains(formatted, "permission FooEffect:") {
+		t.Fatalf("expected formatter to preserve permission declarations, got:\n%s", formatted)
 	}
 	for _, check := range []string{"signal FooEffect", "signal ConsoleEffect.Write"} {
 		if !strings.Contains(formatted, check) {

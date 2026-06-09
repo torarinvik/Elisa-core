@@ -240,9 +240,6 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		}
 		return iterLoopSourceInfo{ItemType: &ConstValueType{Value: itemValue}}, true
 	case *ArrayType:
-		if isStringArrayType(tt) {
-			return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
-		}
 		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: true}, true
 	case *DArrayType:
 		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true

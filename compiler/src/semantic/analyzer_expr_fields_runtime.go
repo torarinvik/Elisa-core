@@ -286,9 +286,6 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	if _, ok := t.(*DStrType); ok {
 		return "string index", true
 	}
-	if array, ok := t.(*ArrayType); ok && isStringArrayType(array) {
-		return "string index", true
-	}
 	if isStringViewType(t) {
 		return "string view index", true
 	}
@@ -313,9 +310,6 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	if _, ok := ref.Elem.(*DStrType); ok {
 		return "string index", true
 	}
-	if array, ok := ref.Elem.(*ArrayType); ok && isStringArrayType(array) {
-		return "string index", true
-	}
 	if isStringViewType(ref.Elem) {
 		return "string view index", true
 	}
@@ -323,10 +317,6 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 		return "chunked view index result", true
 	}
 	return "", false
-}
-
-func isStringArrayType(t *ArrayType) bool {
-	return t != nil && (t.SurfaceName == "str" || t.SurfaceName == "string")
 }
 
 func isStringViewType(t Type) bool {

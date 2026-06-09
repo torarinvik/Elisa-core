@@ -268,9 +268,6 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("grant") {
 		return p.parseGrantAliasDecl()
 	}
-	if p.peekIdentText("effect") {
-		return p.parseEffectPermissionCompatDecl()
-	}
 	if p.peekIdentText("effects") {
 		return p.parseEffectsDecl()
 	}
@@ -673,84 +670,6 @@ func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.PermissionDecl{Position: pos, Name: name, Members: members, Includes: includes}
-}
-func (p *Parser) parseEffectDecl() *ast.EffectDecl {
-	pos := p.cur().Pos
-	p.expectIdentText("effect")
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_COLON)
-
-	members := make([]string, 0)
-	if p.peek() == lexer.TOKEN_NEWLINE {
-		p.expectNewline()
-		p.expect(lexer.TOKEN_INDENT)
-		for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
-			p.skipNewlines()
-			if p.peek() == lexer.TOKEN_DEDENT {
-				break
-			}
-			if p.peek() == lexer.TOKEN_PASS {
-				p.advance()
-				p.expectNewline()
-				continue
-			}
-			members = append(members, p.expect(lexer.TOKEN_IDENT).Text)
-			p.expectNewline()
-		}
-		p.expect(lexer.TOKEN_DEDENT)
-		return &ast.EffectDecl{Position: pos, Name: name, Members: members}
-	}
-
-	if p.peek() == lexer.TOKEN_PASS {
-		p.advance()
-		p.expectNewline()
-		return &ast.EffectDecl{Position: pos, Name: name, Members: members}
-	}
-	for p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF {
-		members = append(members, p.expect(lexer.TOKEN_IDENT).Text)
-		p.match(lexer.TOKEN_COMMA)
-	}
-	p.expectNewline()
-	return &ast.EffectDecl{Position: pos, Name: name, Members: members}
-}
-func (p *Parser) parseEffectPermissionCompatDecl() *ast.PermissionDecl {
-	pos := p.cur().Pos
-	p.expectIdentText("effect")
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_COLON)
-
-	members := make([]string, 0)
-	if p.peek() == lexer.TOKEN_NEWLINE {
-		p.expectNewline()
-		p.expect(lexer.TOKEN_INDENT)
-		for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
-			p.skipNewlines()
-			if p.peek() == lexer.TOKEN_DEDENT {
-				break
-			}
-			if p.peek() == lexer.TOKEN_PASS {
-				p.advance()
-				p.expectNewline()
-				continue
-			}
-			members = append(members, p.expect(lexer.TOKEN_IDENT).Text)
-			p.expectNewline()
-		}
-		p.expect(lexer.TOKEN_DEDENT)
-		return &ast.PermissionDecl{Position: pos, Name: name, Members: members, DeprecatedSyntax: "effect " + name + ":", DeprecatedReplacement: "permission " + name + ":"}
-	}
-
-	if p.peek() == lexer.TOKEN_PASS {
-		p.advance()
-		p.expectNewline()
-		return &ast.PermissionDecl{Position: pos, Name: name, Members: members, DeprecatedSyntax: "effect " + name + ":", DeprecatedReplacement: "permission " + name + ":"}
-	}
-	for p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF {
-		members = append(members, p.expect(lexer.TOKEN_IDENT).Text)
-		p.match(lexer.TOKEN_COMMA)
-	}
-	p.expectNewline()
-	return &ast.PermissionDecl{Position: pos, Name: name, Members: members, DeprecatedSyntax: "effect " + name + ":", DeprecatedReplacement: "permission " + name + ":"}
 }
 func (p *Parser) parseContextDecl() *ast.ContextDecl {
 	pos := p.cur().Pos

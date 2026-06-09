@@ -194,7 +194,6 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
 			case *ast.EffectsDecl:
-			case *ast.EffectDecl:
 			case *ast.PermissionDecl:
 			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}

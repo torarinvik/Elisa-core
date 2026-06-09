@@ -72,11 +72,6 @@ type EffectsDecl struct {
 	ErrorEffects *ErrorSetExpr
 	Permissions  []PermissionRef
 }
-type EffectDecl struct {
-	Position lexer.Pos
-	Name     string
-	Members  []string
-}
 
 // GrantAliasDecl names a fixed set of permission refs for reuse in local `can`
 // grant blocks: `grant HostSeg = Segment.Host, Unsafe.SegmentMutation` then

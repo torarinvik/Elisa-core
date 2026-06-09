@@ -107,9 +107,6 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if expr.Fallback == nil {
 			a.checkConstantArrayIndexBounds(arr, expr.Index)
 		}
-		if isStringArrayType(arr) {
-			return finish(a.namedTypes["char"])
-		}
 		return finish(arr.Elem)
 	}
 	if darray, ok := objType.(*DArrayType); ok {
@@ -147,9 +144,6 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if arr, ok := ref.Elem.(*ArrayType); ok {
 			if expr.Fallback == nil {
 				a.checkConstantArrayIndexBounds(arr, expr.Index)
-			}
-			if isStringArrayType(arr) {
-				return finish(a.namedTypes["char"])
 			}
 			return finish(arr.Elem)
 		}
@@ -438,9 +432,6 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	}
 	if array, ok := objType.(*ArrayType); ok {
 		a.checkConstantArraySliceBounds(array, expr.Start, expr.End)
-		if isStringArrayType(array) {
-			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
-		}
 		return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
 	if view, ok := objType.(*DArrayType); ok {
@@ -466,9 +457,6 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		}
 		if array, ok := ref.Elem.(*ArrayType); ok {
 			a.checkConstantArraySliceBounds(array, expr.Start, expr.End)
-			if isStringArrayType(array) {
-				return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
-			}
 			return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*DArrayType); ok {

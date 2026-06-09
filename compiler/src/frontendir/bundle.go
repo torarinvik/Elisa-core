@@ -65,7 +65,6 @@ func registerBundleTypes() {
 		gob.Register(&ast.ConstEnumDecl{})
 		gob.Register(&ast.ErrorDecl{})
 		gob.Register(&ast.EffectsDecl{})
-		gob.Register(&ast.EffectDecl{})
 		gob.Register(&ast.PermissionDecl{})
 		gob.Register(&ast.ContextDecl{})
 		gob.Register(&ast.ParamsDecl{})

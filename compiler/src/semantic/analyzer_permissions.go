@@ -33,13 +33,6 @@ func (a *Analyzer) collectPermissionDecls(decls []scopedDecl) {
 			includes = decl.Includes
 			permDecl = decl
 			pos = decl.Pos()
-		case *ast.EffectDecl:
-			if decl == nil {
-				continue
-			}
-			name = decl.Name
-			members = decl.Members
-			pos = decl.Pos()
 		default:
 			continue
 		}

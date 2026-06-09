@@ -74,7 +74,6 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.ConstEnumDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
-			case *ast.EffectDecl:
 			case *ast.PermissionDecl:
 			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}

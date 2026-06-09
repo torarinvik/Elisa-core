@@ -157,9 +157,13 @@ def f() -> i64:
 	}
 }
 
-func TestParseEffectDeclAndSignalStmt(t *testing.T) {
-	src := `effect FooEffect: pass
-effect ConsoleEffect: Write Flush
+func TestParsePermissionDeclAndSignalStmt(t *testing.T) {
+	src := `permission FooEffect:
+    pass
+
+permission ConsoleEffect:
+    Write
+    Flush
 
 def run() -> void can[FooEffect, ConsoleEffect.Write]:
     signal FooEffect
@@ -171,13 +175,10 @@ def run() -> void can[FooEffect, ConsoleEffect.Write]:
 	}
 	first, ok := file.Decls[0].(*ast.PermissionDecl)
 	if !ok {
-		t.Fatalf("expected compatibility permission decl, got %T", file.Decls[0])
+		t.Fatalf("expected permission decl, got %T", file.Decls[0])
 	}
 	if first.Name != "FooEffect" || len(first.Members) != 0 {
 		t.Fatalf("unexpected marker permission decl: %#v", first)
-	}
-	if first.DeprecatedSyntax == "" || first.DeprecatedReplacement == "" {
-		t.Fatalf("expected effect compatibility decl to carry deprecation metadata: %#v", first)
 	}
 	second, ok := file.Decls[1].(*ast.PermissionDecl)
 	if !ok {
@@ -200,11 +201,11 @@ def run() -> void can[FooEffect, ConsoleEffect.Write]:
 	}
 }
 
-func TestUnparseEffectDeclAndSignalStmt(t *testing.T) {
-	src := `effect FooEffect:
+func TestUnparsePermissionDeclAndSignalStmt(t *testing.T) {
+	src := `permission FooEffect:
     pass
 
-effect ConsoleEffect:
+permission ConsoleEffect:
     Write
     Flush
 

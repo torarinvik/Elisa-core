@@ -12,15 +12,6 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		return
 	}
 	switch n := decl.(type) {
-	case *ast.EffectDecl:
-		f.writeLine(level, "effect "+n.Name+":")
-		if len(n.Members) == 0 {
-			f.writeLine(level+1, "pass")
-			return
-		}
-		for _, member := range n.Members {
-			f.writeLine(level+1, member)
-		}
 	case *ast.PermissionDecl:
 		f.writeLine(level, "permission "+n.Name+":")
 		if len(n.Members) == 0 {

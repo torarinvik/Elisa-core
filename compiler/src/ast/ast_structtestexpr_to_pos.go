@@ -597,7 +597,6 @@ func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 }
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EffectsDecl) Pos() lexer.Pos    { return n.Position }
-func (n *EffectDecl) Pos() lexer.Pos     { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
 func (n *GrantAliasDecl) Pos() lexer.Pos { return n.Position }
 func (n *ContextDecl) Pos() lexer.Pos    { return n.Position }
