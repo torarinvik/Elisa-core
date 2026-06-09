@@ -333,6 +333,13 @@ func isStringViewType(t Type) bool {
 	if _, ok := t.(*SViewType); ok {
 		return true
 	}
+	// view[u8] is the unified string slice (Step 4): a borrowed u8 window
+	// carries string behavior, so it is recognized everywhere sview is.
+	if vt, ok := t.(*ViewType); ok && vt != nil {
+		if b, ok := StripAggregateStateType(vt.Elem).(*BuiltinType); ok && b != nil && b.Name == "u8" {
+			return true
+		}
+	}
 	return isRuntimeStringViewType(t)
 }
 
