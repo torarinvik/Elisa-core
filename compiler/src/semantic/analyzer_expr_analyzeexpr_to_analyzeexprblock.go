@@ -330,9 +330,6 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.TryExpr:
 		recovery := recoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
-		if n.UsesDefaultShorthandForm {
-			a.deprecatedf(n.Pos(), "`try? ... default` is deprecated; use `try ... else ...`")
-		}
 		valueType := a.analyzeExpr(n.Value)
 		if unionType, ok := valueType.(*ErrorUnionType); ok {
 			a.consumeHandledErrorUnionExpr(n.Value, unionType, "try")
@@ -352,16 +349,6 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				a.reportShapeMismatchNotes(n.Pos(), unionType.Value, fallbackType)
 			}
 			result = unionType.Value
-			return
-		}
-		if n.UsesDefaultShorthandForm {
-			a.analyzeRecoveryClause(recovery, invalidType, nil, "try fallback")
-			a.errorf(n.Pos(), "try? ... default requires an error union, got %s", valueType)
-			if optionalType, ok := valueType.(*OptionalType); ok {
-				result = optionalType.Value
-			} else {
-				result = invalidType
-			}
 			return
 		}
 		if optionalType, ok := valueType.(*OptionalType); ok {

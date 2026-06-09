@@ -263,8 +263,10 @@ func TestParseConstEnumAllowsInferredStorage(t *testing.T) {
 		t.Fatalf("expected omitted member values to stay nil for semantic auto-numbering")
 	}
 }
+
+// `return?` (including its pattern-guard form) has been removed: it is a hard parser error.
 func TestParseReturnQuestionPatternGuard(t *testing.T) {
-	file, errs := parseSourceFile(t, `enum Expr:
+	_, errs := parseSourceFile(t, `enum Expr:
     Int(value: i64)
     Missing
 
@@ -272,37 +274,14 @@ def unwrap(node: Expr) -> i64:
     return? value if node is Expr.Int(value)
     return 0
 `)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl, ok := file.Decls[1].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected function decl, got %T", file.Decls[1])
-	}
-	if len(decl.Body) < 2 {
-		t.Fatalf("expected guarded return plus fallback, got %d statements", len(decl.Body))
-	}
-	stmt, ok := decl.Body[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected return? guard to lower to if statement, got %T", decl.Body[0])
-	}
-	if _, ok := stmt.Cond.(*ast.BinaryExpr); !ok {
-		t.Fatalf("expected pattern guard condition, got %T", stmt.Cond)
-	}
-	if len(stmt.Then) != 1 {
-		t.Fatalf("expected one guarded return, got %d", len(stmt.Then))
-	}
-	ret, ok := stmt.Then[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected guarded return body, got %T", stmt.Then[0])
-	}
-	ident, ok := ret.Value.(*ast.Ident)
-	if !ok || ident.Name != "value" {
-		t.Fatalf("expected guarded return value binding, got %T %#v", ret.Value, ret.Value)
+	if !strings.Contains(strings.Join(errs, "\n"), "`return?` is no longer supported") {
+		t.Fatalf("expected `return?` removal diagnostic, got: %v", errs)
 	}
 }
+
+// `match?` has been removed: it is a hard parser error.
 func TestParseOptionalMatchLowersToOptionalBindThenMatch(t *testing.T) {
-	file, errs := parseSourceFile(t, `enum Expr:
+	_, errs := parseSourceFile(t, `enum Expr:
     Int(value: i64)
     Missing
 
@@ -314,38 +293,11 @@ def check(maybe: Expr?) -> i64:
             return 0
     return -1
 `)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl, ok := file.Decls[1].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected function decl, got %T", file.Decls[1])
-	}
-	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected match? to lower to if statement, got %T", decl.Body[0])
-	}
-	cond, ok := ifStmt.Cond.(*ast.OptionalBindExpr)
-	if !ok || cond.Name != "node" {
-		t.Fatalf("expected optional bind condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
-	}
-	if ident, ok := cond.Value.(*ast.Ident); !ok || ident.Name != "maybe" {
-		t.Fatalf("expected optional bind source maybe, got %T %#v", cond.Value, cond.Value)
-	}
-	if len(ifStmt.Then) != 1 {
-		t.Fatalf("expected one guarded match, got %d", len(ifStmt.Then))
-	}
-	matchStmt, ok := ifStmt.Then[0].(*ast.MatchStmt)
-	if !ok {
-		t.Fatalf("expected guarded match statement, got %T", ifStmt.Then[0])
-	}
-	if ident, ok := matchStmt.Value.(*ast.Ident); !ok || ident.Name != "node" {
-		t.Fatalf("expected match over unwrapped value, got %T %#v", matchStmt.Value, matchStmt.Value)
-	}
-	if len(matchStmt.Arms) != 2 {
-		t.Fatalf("expected two match arms, got %d", len(matchStmt.Arms))
+	if !strings.Contains(strings.Join(errs, "\n"), "`match?` is no longer supported") {
+		t.Fatalf("expected `match?` removal diagnostic, got: %v", errs)
 	}
 }
+
 func TestParseStructDeclWithAggregateStateParam(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Holder[?]:\n    value: i32&\n")
 	if len(errs) != 0 {

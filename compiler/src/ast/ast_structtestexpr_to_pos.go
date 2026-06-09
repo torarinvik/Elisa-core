@@ -46,11 +46,10 @@ type RecoveryClause struct {
 	Body     []Stmt
 }
 type TryExpr struct {
-	Position                 lexer.Pos
-	Value                    Expr
-	Fallback                 Expr
-	Recovery                 *RecoveryClause
-	UsesDefaultShorthandForm bool
+	Position lexer.Pos
+	Value    Expr
+	Fallback Expr
+	Recovery *RecoveryClause
 }
 
 // GetExpr is the optional analog of TryExpr: `get expr` unwraps an Optional /

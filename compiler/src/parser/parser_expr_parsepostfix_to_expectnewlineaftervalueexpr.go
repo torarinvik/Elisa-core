@@ -455,16 +455,12 @@ func (p *Parser) parsePrimary() ast.Expr {
 		pos := p.cur().Pos
 		p.advance()
 		if p.match(lexer.TOKEN_QUESTION) {
+			p.errorAt(pos, "`try? ... default` is no longer supported; use `try ... else ...`")
 			value := p.parseOr()
-			p.expectIdentText("default")
-			fallback := p.parseExpr()
-			return &ast.TryExpr{
-				Position:                 pos,
-				Value:                    value,
-				Fallback:                 fallback,
-				Recovery:                 &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryValue, Value: fallback},
-				UsesDefaultShorthandForm: true,
+			if p.matchIdentText("default") {
+				_ = p.parseExpr() // consume and discard the legacy fallback for recovery
 			}
+			return &ast.TryExpr{Position: pos, Value: value}
 		}
 		value := p.parseOr()
 		return &ast.TryExpr{Position: pos, Value: value}

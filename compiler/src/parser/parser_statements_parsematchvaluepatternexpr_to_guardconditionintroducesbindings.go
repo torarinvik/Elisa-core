@@ -229,30 +229,19 @@ func (p *Parser) parseReturn() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_RETURN)
 	if p.match(lexer.TOKEN_QUESTION) {
+		p.errorAt(pos, "`return?` is no longer supported; use `return value else return null`")
+		// Best-effort recovery so the rest of the file still parses. The legacy
+		// `return? with ...:` block form is skipped; the simple forms consume their value.
 		if p.peek() == lexer.TOKEN_WITH {
-			return p.parseOptionalReturnWith(pos)
+			p.skipLegacyReturnQuestionWithBlock()
+			return &ast.ReturnStmt{Position: pos}
 		}
 		value := p.withTernaryDisabled(p.parseValueExprAllowTuple)
 		if p.match(lexer.TOKEN_IF) {
-			cond := p.parseExpr()
-			p.expectNewlineAfterValueExpr(cond)
-			return &ast.IfStmt{
-				Position:              pos,
-				Cond:                  cond,
-				Then:                  []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: value}},
-				DeprecatedSyntax:      "return?",
-				DeprecatedReplacement: "return value else return null",
-			}
+			_ = p.parseExpr() // discard the legacy guard condition
 		}
 		p.expectNewlineAfterValueExpr(value)
-		name := "__return_optional"
-		return &ast.IfStmt{
-			Position:              pos,
-			Cond:                  &ast.OptionalBindExpr{Position: pos, Name: name, Value: value},
-			Then:                  []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: name}}},
-			DeprecatedSyntax:      "return?",
-			DeprecatedReplacement: "return value else return null",
-		}
+		return &ast.ReturnStmt{Position: pos, Value: value}
 	}
 	var value ast.Expr
 	if p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
@@ -267,75 +256,29 @@ type optionalReturnWithBinding struct {
 	value ast.Expr
 }
 
-func (p *Parser) parseOptionalReturnWith(pos lexer.Pos) ast.Stmt {
+// skipLegacyReturnQuestionWithBlock consumes a removed `return? with ...:` form (the `with`
+// keyword, its binding list, and the indented value block) so parsing can resume cleanly after
+// the hard-error diagnostic. It does not build any AST — the legacy desugaring is gone.
+func (p *Parser) skipLegacyReturnQuestionWithBlock() {
 	p.expect(lexer.TOKEN_WITH)
-	bindings := make([]optionalReturnWithBinding, 0, 2)
-	for {
-		name := p.expect(lexer.TOKEN_IDENT).Text
-		p.expect(lexer.TOKEN_ASSIGN)
-		value := p.withTernaryDisabled(p.parseExpr)
-		bindings = append(bindings, optionalReturnWithBinding{name: name, value: value})
-		if !p.match(lexer.TOKEN_COMMA) {
-			break
-		}
-		p.skipOptionalReturnWithBindingTrivia()
-	}
-	if len(bindings) == 0 {
-		p.errorAt(pos, "return? with requires at least one optional binding")
-	}
-	value := p.parseOptionalReturnWithValue(pos)
-	stmt := buildOptionalReturnWithChain(pos, bindings, value, 0)
-	if ifStmt, ok := stmt.(*ast.IfStmt); ok {
-		ifStmt.DeprecatedSyntax = "return?"
-		ifStmt.DeprecatedReplacement = "return value else return null"
-	}
-	return stmt
-}
-func (p *Parser) skipOptionalReturnWithBindingTrivia() {
-	p.skipNewlines()
-	if p.peek() == lexer.TOKEN_INDENT {
+	// The binding list (`name = value, ...`) can span multiple lines; its first `:` is the block
+	// header. Skip everything up to it, then skip the indented value block.
+	for p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_COLON {
 		p.advance()
 	}
-}
-func (p *Parser) parseOptionalReturnWithValue(pos lexer.Pos) ast.Expr {
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	consumedBlockIndent := false
+	p.match(lexer.TOKEN_COLON)
+	p.skipNewlines()
 	if p.match(lexer.TOKEN_INDENT) {
-		consumedBlockIndent = true
-	} else {
-		// Multiline binding lists can leave the lexer unwinding continuation
-		// indentation before the expression body.
-		for p.peek() == lexer.TOKEN_DEDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_EOF {
-			p.advance()
-			if p.peek() != lexer.TOKEN_DEDENT {
-				break
+		depth := 1
+		for depth > 0 && p.peek() != lexer.TOKEN_EOF {
+			switch p.peek() {
+			case lexer.TOKEN_INDENT:
+				depth++
+			case lexer.TOKEN_DEDENT:
+				depth--
 			}
+			p.advance()
 		}
-		if p.match(lexer.TOKEN_INDENT) {
-			consumedBlockIndent = true
-		}
-	}
-	value := p.parseValueExprAllowTuple()
-	p.expectNewlineAfterValueExpr(value)
-	if consumedBlockIndent {
-		p.expect(lexer.TOKEN_DEDENT)
-	}
-	if value == nil {
-		p.errorAt(pos, "return? with requires a value expression body")
-		return &ast.NullLit{Position: pos}
-	}
-	return value
-}
-func buildOptionalReturnWithChain(pos lexer.Pos, bindings []optionalReturnWithBinding, value ast.Expr, index int) ast.Stmt {
-	if index >= len(bindings) {
-		return &ast.ReturnStmt{Position: pos, Value: value}
-	}
-	binding := bindings[index]
-	return &ast.IfStmt{
-		Position: pos,
-		Cond:     &ast.OptionalBindExpr{Position: pos, Name: binding.name, Value: binding.value},
-		Then:     []ast.Stmt{buildOptionalReturnWithChain(pos, bindings, value, index+1)},
 	}
 }
 func (p *Parser) parseValueExprAllowTuple() ast.Expr {

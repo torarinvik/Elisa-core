@@ -258,27 +258,12 @@ func TestParseIfLetWrappedBindingsCanHaveElifLet(t *testing.T) {
 		t.Fatalf("expected actual_fallback optional bind, got %T %#v", elifBranch.Cond, elifBranch.Cond)
 	}
 }
+
+// `return?` (simple optional form) has been removed: it is a hard parser error.
 func TestParseReturnQuestionLowersToIfLetReturn(t *testing.T) {
-	file, errs := parseSourceFile(t, "def first(found: i64?) -> i64?:\n    return? found\n    return null\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl := file.Decls[0].(*ast.FuncDecl)
-	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected return? to lower to if statement, got %T", decl.Body[0])
-	}
-	letExpr, ok := ifStmt.Cond.(*ast.OptionalBindExpr)
-	if !ok || letExpr.Name != "__return_optional" {
-		t.Fatalf("expected optional return condition binding, got %T %#v", ifStmt.Cond, ifStmt.Cond)
-	}
-	ret, ok := ifStmt.Then[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected optional return then-body, got %T", ifStmt.Then[0])
-	}
-	ident, ok := ret.Value.(*ast.Ident)
-	if !ok || ident.Name != "__return_optional" {
-		t.Fatalf("expected optional return payload ident, got %T %#v", ret.Value, ret.Value)
+	_, errs := parseSourceFile(t, "def first(found: i64?) -> i64?:\n    return? found\n    return null\n")
+	if !strings.Contains(strings.Join(errs, "\n"), "`return?` is no longer supported") {
+		t.Fatalf("expected `return?` removal diagnostic, got: %v", errs)
 	}
 }
 func TestParsePostfixReturnIfLowersToGuardReturn(t *testing.T) {
@@ -304,48 +289,18 @@ func TestParsePostfixReturnIfLowersToGuardReturn(t *testing.T) {
 		t.Fatalf("expected returned value ident, got %T %#v", ret.Value, ret.Value)
 	}
 }
+
+// `return? with ...:` (the nested optional-binding block form) has been removed: hard parser error.
 func TestParseReturnQuestionWithOptionalBindingsLowersToNestedIfs(t *testing.T) {
-	file, errs := parseSourceFile(t, `def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
+	_, errs := parseSourceFile(t, `def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
     return? with lower_value = lower,
                  upper_value = upper,
                  value_int = value:
         value_int >= lower_value and value_int <= upper_value
     return null
 `)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl := file.Decls[0].(*ast.FuncDecl)
-	outer, ok := decl.Body[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected return? with to lower to if statement, got %T", decl.Body[0])
-	}
-	outerBind, ok := outer.Cond.(*ast.OptionalBindExpr)
-	if !ok || outerBind.Name != "lower_value" {
-		t.Fatalf("expected lower_value optional bind, got %T %#v", outer.Cond, outer.Cond)
-	}
-	middle, ok := outer.Then[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected nested optional bind, got %T", outer.Then[0])
-	}
-	middleBind, ok := middle.Cond.(*ast.OptionalBindExpr)
-	if !ok || middleBind.Name != "upper_value" {
-		t.Fatalf("expected upper_value optional bind, got %T %#v", middle.Cond, middle.Cond)
-	}
-	inner, ok := middle.Then[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected innermost optional bind, got %T", middle.Then[0])
-	}
-	innerBind, ok := inner.Cond.(*ast.OptionalBindExpr)
-	if !ok || innerBind.Name != "value_int" {
-		t.Fatalf("expected value_int optional bind, got %T %#v", inner.Cond, inner.Cond)
-	}
-	ret, ok := inner.Then[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected final return, got %T", inner.Then[0])
-	}
-	if _, ok := ret.Value.(*ast.BinaryExpr); !ok {
-		t.Fatalf("expected final return expression, got %T %#v", ret.Value, ret.Value)
+	if !strings.Contains(strings.Join(errs, "\n"), "`return?` is no longer supported") {
+		t.Fatalf("expected `return?` removal diagnostic, got: %v", errs)
 	}
 }
 func TestParseGuardElseStatement(t *testing.T) {

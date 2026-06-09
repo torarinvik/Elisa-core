@@ -82,24 +82,8 @@ def bad(maybe: i64?) -> i64:
 	}
 }
 
-func TestAnalyzeDeprecatedQuestionMarkRecoverySyntax(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "deprecated_question_recovery.elisa", `
-error FileError:
-	NotFound
-
-extern read_value() -> i64 error[FileError]
-
-def fallback_value(maybe: i64?) -> i64:
-	return? maybe
-	return try? read_value() default 1
-`)
-	warnings := strings.Join(result.Deprecations(), "\n")
-	for _, check := range []string{"`return?` is deprecated", "`try? ... default` is deprecated"} {
-		if !strings.Contains(warnings, check) {
-			t.Fatalf("expected warning %q, got:\n%s", check, warnings)
-		}
-	}
-}
+// The `return?` / `try? ... default` recovery forms have been removed; rejection is covered by the
+// parser tests (TestParseReturnQuestion*, TestParseTryQuestionDefaultRejected).
 
 func TestAnalyzeOptionalMatchWithNullAndPayloadPatterns(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "optional_match_null_payload.elisa", `

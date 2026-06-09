@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"elisacore/src/ast"
@@ -20,8 +21,7 @@ def fallback_value(maybe: i64?) -> i64:
 		return 1
 	z: i64 = maybe else raise FileError.NotFound
 	maybe else void
-	legacy: i64 = try? read_value() default 2
-	return propagated + x + y + z + legacy
+	return propagated + x + y + z
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -70,12 +70,22 @@ def fallback_value(maybe: i64?) -> i64:
 	if !ok || voidExpr.Recovery == nil || voidExpr.Recovery.Kind != ast.RecoveryVoid {
 		t.Fatalf("expected else void recovery, got %#v", exprStmt.Expr)
 	}
-	legacyDecl, ok := fn.Body[5].(*ast.VarDeclStmt)
-	if !ok {
-		t.Fatalf("expected legacy local declaration, got %T", fn.Body[5])
+}
+
+// The legacy `try? ... default` recovery form has been removed: it is now a hard parser error
+// pointing at the modern `try ... else ...`.
+func TestParseTryQuestionDefaultRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, `
+extern read_value() -> i64
+
+def f() -> i64:
+	return try? read_value() default 2
+`)
+	if len(errs) == 0 {
+		t.Fatalf("expected `try? ... default` to be rejected")
 	}
-	legacyExpr, ok := legacyDecl.Value.(*ast.TryExpr)
-	if !ok || legacyExpr.Recovery == nil || legacyExpr.Recovery.Kind != ast.RecoveryValue || !legacyExpr.UsesDefaultShorthandForm {
-		t.Fatalf("expected legacy try? default recovery expression, got %#v", legacyDecl.Value)
+	joined := strings.Join(errs, "\n")
+	if !strings.Contains(joined, "try? ... default") || !strings.Contains(joined, "try ... else") {
+		t.Fatalf("expected a `try? ... default` removal diagnostic, got: %s", joined)
 	}
 }
