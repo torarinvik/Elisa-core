@@ -352,6 +352,16 @@ Each phase ships independently and leaves the tree green.
 > (Caveat for whoever inspects this: at `-O3`, internal functions with no retained
 > root are DCE'd, so dump IR through an `export func` wrapper or the module looks
 > empty — an earlier pass mis-concluded "nothing vectorizes" from empty dumps.)
+> **P2b** extends the indexed-store lowering to range sources
+> (`[v for i in start..<end]`, simple bounds): `result.resize((end-start) if end>start
+> else 0); for i: result[i-start] <- value`. **P3a** adds a global `-ffast-math` flag
+> that unlocks the reassociated *tree* reduction for FP folds (otherwise the default is
+> the bit-exact ordered reduction). **P3b** lands the Part IV verifier as a default
+> `-Wperf` warning: each indexed-store build loop is tagged with `!llvm.loop`
+> `elisa.autovec.expected` metadata, and a post-optimization scan warns for any marked
+> loop left without `llvm.loop.isvectorized`. It is inlining-robust (marker rides in IR)
+> and false-positive-free (LLVM stamps `isvectorized` on the vector body *and* the scalar
+> remainder), and is gated to call-free bodies to stay low-noise.
 
 **Phase 1 — surface + sinks (sequential, no protocol value).** Parse `{…}` set,
 `{k:v …}` dict, `(… with acc =)` fold, and the comma-separated **head bindings**
