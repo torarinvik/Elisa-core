@@ -395,18 +395,12 @@ func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *se
 	fieldWordOffset := C.LLVMBuildUDiv(ops.s.builder, fieldOffsetBytes, wordBytesValue, cStringFree(name+".field.word.offset"))
 	viewBaseWordOffset := C.LLVMBuildAdd(ops.s.builder, baseWordOffset, fieldWordOffset, cStringFree(name+".field.word.base"))
 	oneWord := C.LLVMConstInt(usizeLLVMType, 1, 0)
-	twoWords := C.LLVMConstInt(usizeLLVMType, 2, 0)
 	dataWord, err := ops.loadPayloadWord(handleValue, enumType, viewBaseWordOffset, name+".data.word")
 	if err != nil {
 		return nil, false, err
 	}
 	lenWordOffset := C.LLVMBuildAdd(ops.s.builder, viewBaseWordOffset, oneWord, cStringFree(name+".len.word.offset"))
 	lenWord, err := ops.loadPayloadWord(handleValue, enumType, lenWordOffset, name+".len.word")
-	if err != nil {
-		return nil, false, err
-	}
-	elemSizeWordOffset := C.LLVMBuildAdd(ops.s.builder, viewBaseWordOffset, twoWords, cStringFree(name+".elem_size.word.offset"))
-	elemSizeWord, err := ops.loadPayloadWord(handleValue, enumType, elemSizeWordOffset, name+".elem_size.word")
 	if err != nil {
 		return nil, false, err
 	}
@@ -419,10 +413,6 @@ func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *se
 	if err != nil {
 		return nil, false, err
 	}
-	elemSizeValue, err := ops.s.coerceValue(elemSizeWord, ops.s.g.result.NamedTypes["uintptr"], usizeType)
-	if err != nil {
-		return nil, false, err
-	}
 	viewLLVMType, err := ops.s.g.lowerType(viewType)
 	if err != nil {
 		return nil, false, err
@@ -430,7 +420,6 @@ func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *se
 	viewValue := C.LLVMGetUndef(viewLLVMType)
 	viewValue = C.LLVMBuildInsertValue(ops.s.builder, viewValue, dataValue, 0, cStringFree(name+".data"))
 	viewValue = C.LLVMBuildInsertValue(ops.s.builder, viewValue, lenValue, 1, cStringFree(name+".len"))
-	viewValue = C.LLVMBuildInsertValue(ops.s.builder, viewValue, elemSizeValue, 2, cStringFree(name+".elem_size"))
 	return viewValue, true, nil
 }
 func (ops *packedStoreOps) storeSlice(startValue C.LLVMValueRef, endValue C.LLVMValueRef, resultType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {

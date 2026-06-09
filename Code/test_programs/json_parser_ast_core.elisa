@@ -1,15 +1,15 @@
 def json_empty_node_view() -> view[JsonNode]:
-    return DynArrayView(null, 0, size_of(JsonNode))
+    return DynArrayView(null, 0)
 def json_empty_field_view() -> view[JsonField]:
-    return DynArrayView(null, 0, size_of(JsonField))
+    return DynArrayView(null, 0)
 def json_node_items_view(items_ptr: JsonNode&?, item_count: usize) -> view[JsonNode]:
     if items_ptr == null or item_count == 0:
         return json_empty_node_view()
-    return DynArrayView(items_ptr.cast[void&], item_count, size_of(JsonNode))
+    return DynArrayView(items_ptr.cast[void&], item_count)
 def json_field_items_view(fields_ptr: JsonField&?, field_count: usize) -> view[JsonField]:
     if fields_ptr == null or field_count == 0:
         return json_empty_field_view()
-    return DynArrayView(fields_ptr.cast[void&], field_count, size_of(JsonField))
+    return DynArrayView(fields_ptr.cast[void&], field_count)
 def json_ast_array_items_view(node: JsonNode, store: JsonNode.Store[Local]) -> view[JsonNode]:
     if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
         return json_node_items_view(items_ptr, item_count)
@@ -21,11 +21,11 @@ def json_ast_object_fields_view(node: JsonNode, store: JsonNode.Store[Local]) ->
 def json_node_view_ref(items: view[JsonNode], index: usize) -> JsonNode&:
     assert index < items.len
     assert items.data != null
-    return (items.data.cast[u8&] + index * items.elem_size).cast[JsonNode&]
+    return (items.data.cast[u8&] + index * size_of(JsonNode)).cast[JsonNode&]
 def json_field_view_ref(fields: view[JsonField], index: usize) -> JsonField&:
     assert index < fields.len
     assert fields.data != null
-    return (fields.data.cast[u8&] + index * fields.elem_size).cast[JsonField&]
+    return (fields.data.cast[u8&] + index * size_of(JsonField)).cast[JsonField&]
 def json_node_copy_ref(node_ref: JsonNode&) -> JsonNode:
     out: mutable JsonNode = zeroed
     arena_memcpy((&out).cast[void&], node_ref.cast[void&], size_of(JsonNode))

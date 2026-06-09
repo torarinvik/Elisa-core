@@ -99,7 +99,7 @@ def array_view_size() -> usize:
 		"define i64 @padded_size()",
 		"ret i64 8",
 		"define i64 @array_view_size()",
-		"ret i64 24",
+		"ret i64 16",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

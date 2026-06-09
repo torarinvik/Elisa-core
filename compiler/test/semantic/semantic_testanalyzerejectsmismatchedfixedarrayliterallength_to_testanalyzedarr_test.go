@@ -408,7 +408,7 @@ def bad_list_view(view: DListView[i32]) -> void:
 }
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
 	src := `def non_empty[T](view: view[T]) -> bool:
-	return view.len > 0 and view.elem_size > 0
+	return view.len > 0
 `
 	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.elisa", src)
 	requireNoErrors(t, errs)

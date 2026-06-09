@@ -257,14 +257,13 @@ struct DynArray[T]:
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_from_view[T](a: Arena&, view: view[T]) -> darray[T, shape_out]:
 	_ = a
@@ -449,7 +448,7 @@ func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
 }
 func TestGenerateLLVMIRLowersDArrayViewRuntimeFields(t *testing.T) {
 	src := `def non_empty[T](view: view[T]) -> bool:
-	return view.len > 0 and view.elem_size > 0
+	return view.len > 0
 
 def probe(view: view[i64]) -> bool:
 	return non_empty(view)
@@ -461,7 +460,7 @@ def probe(view: view[i64]) -> bool:
 	}
 
 	checks := []string{
-		"%DynArrayView = type { ptr, i64, i64 }",
+		"%DynArrayView = type { ptr, i64 }",
 		"define i1 @non_empty__i64(%DynArrayView",
 		"getelementptr inbounds nuw %DynArrayView",
 		"icmp ugt i64",
@@ -481,7 +480,6 @@ func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def head_owned(values: darray[i32, row]) -> i32:
 	part: view[i32] = values[1:3]
@@ -499,7 +497,7 @@ def head_view(view: view[i32]) -> i32:
 
 	checks := []string{
 		"%DynArray__i32 = type { ptr, i64, i64 }",
-		"%DynArrayView = type { ptr, i64, i64 }",
+		"%DynArrayView = type { ptr, i64 }",
 		"define i32 @head_owned(%DynArray__i32",
 		"define i32 @head_view(%DynArrayView",
 		"extractvalue %DynArray__i32",
@@ -520,7 +518,6 @@ func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testi
 	src := `struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def slice_owned(values: i32[4]) -> view[i32]:
 	return values[1:3]
@@ -535,7 +532,7 @@ def head_ref(values: i32[4]&) -> i32:
 	}
 
 	checks := []string{
-		"%DynArrayView = type { ptr, i64, i64 }",
+		"%DynArrayView = type { ptr, i64 }",
 		"define %DynArrayView @slice_owned([4 x i32]",
 		"define i32 @head_ref(ptr",
 		"getelementptr [4 x i32], ptr",

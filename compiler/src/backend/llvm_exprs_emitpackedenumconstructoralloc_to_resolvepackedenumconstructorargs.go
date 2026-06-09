@@ -374,7 +374,6 @@ func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPaylo
 	viewValue := C.LLVMGetUndef(viewLLVMType)
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, tailDataPtr, 0, cStringFree("packed.tail.view.data"))
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, plan.lenValue, 1, cStringFree("packed.tail.view.len"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, plan.elemSizeValue, 2, cStringFree("packed.tail.view.elem_size"))
 	return viewValue, nil
 }
 func (s *functionState) emitPackedEnumTailMemcpy(dstData C.LLVMValueRef, srcData C.LLVMValueRef, byteCount C.LLVMValueRef) error {

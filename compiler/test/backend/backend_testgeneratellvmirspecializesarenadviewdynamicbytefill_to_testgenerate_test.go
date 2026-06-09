@@ -17,14 +17,13 @@ func TestGenerateLLVMIRSpecializesArenaDViewDynamicByteFill(t *testing.T) {
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -94,14 +93,13 @@ func TestGenerateLLVMIRSpecializesArenaDViewCoercedByteFill(t *testing.T) {
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -160,14 +158,13 @@ func TestGenerateOptimizedLLVMIRSupportsArenaDViewByteFillMemsetFastPath(t *test
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -201,14 +198,13 @@ struct DynArray[T]:
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -290,14 +286,13 @@ func TestGenerateLLVMIRSpecializesArenaDViewEqExact(t *testing.T) {
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	_ = left

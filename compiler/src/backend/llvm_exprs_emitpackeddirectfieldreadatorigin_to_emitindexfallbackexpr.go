@@ -462,15 +462,9 @@ func (s *functionState) emitFixedArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValu
 		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, sliceLen, 1, cStringFree("strslice.view.len"))
 		return viewValue, resultType, true, nil
 	}
-	elemSize, err := s.sizeOfType(arrayType.Elem)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
 	viewValue := C.LLVMGetUndef(viewLLVMType)
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("arrayslice.view.data"))
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, sliceLen, 1, cStringFree("arrayslice.view.len"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, elemSizeValue, 2, cStringFree("arrayslice.view.elem_size"))
 	return viewValue, resultType, true, nil
 }
 func (s *functionState) fixedArraySliceBase(object ast.Expr) (*semantic.ArrayType, C.LLVMValueRef, bool, error) {

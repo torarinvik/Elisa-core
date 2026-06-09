@@ -342,7 +342,7 @@ func matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 	if enumType == nil {
 		return false
 	}
-	covered := map[string]bool{}        // bare variant names (flat enum)
+	covered := map[string]bool{}          // bare variant names (flat enum)
 	coveredQualified := map[string]bool{} // Owner.Variant (hierarchy)
 	for _, arm := range arms {
 		switch pattern := arm.Pattern.(type) {

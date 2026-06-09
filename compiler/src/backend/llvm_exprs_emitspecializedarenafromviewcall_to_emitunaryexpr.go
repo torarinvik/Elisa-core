@@ -130,13 +130,21 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	}
 	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("view.materialize.src.data"))
 	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("view.materialize.src.len"))
-	viewElemSize := C.LLVMBuildExtractValue(s.builder, viewValue, 2, cStringFree("view.materialize.src.elem_size"))
-	byteCount := C.LLVMBuildMul(s.builder, viewLen, viewElemSize, cStringFree("view.materialize.bytes"))
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
+	materializeElemType, ok := runtimeIndexedElemType(viewType)
+	if !ok {
+		return nil, nil, true, fmt.Errorf("arena_da_from_view specialization expected a view element type, got %s", viewType)
+	}
+	elemSize, err := s.sizeOfType(materializeElemType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	byteCount := C.LLVMBuildMul(s.builder, viewLen, elemSizeValue, cStringFree("view.materialize.bytes"))
 	zeroBytes := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree("view.materialize.bytes.zero"))
 	entryBlock := C.LLVMGetInsertBlock(s.builder)
@@ -301,12 +309,15 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 		}
 	}
 	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("view.fill.dst.len"))
-	dstElemSize := C.LLVMBuildExtractValue(s.builder, dstValue, 2, cStringFree("view.fill.dst.elem_size"))
-	dstBytes := C.LLVMBuildMul(s.builder, dstLen, dstElemSize, cStringFree("view.fill.dst.bytes"))
 	usizeType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, nil, true, err
 	}
+	fillElemSize, err := s.sizeOfType(fillType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dstBytes := C.LLVMBuildMul(s.builder, dstLen, C.LLVMConstInt(usizeType, C.ulonglong(fillElemSize), 0), cStringFree("view.fill.dst.bytes"))
 	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
 	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("view.fill.bytes.zero"))
 	fillBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.fill.fast"))

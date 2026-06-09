@@ -547,7 +547,7 @@ func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (C.LLVMTypeRef
 	return ty, nil
 }
 func (g *llvmGenerator) ensureRuntimeDynArrayView() (C.LLVMTypeRef, error) {
-	return g.ensureRuntimeSizedStruct("DynArrayView", 3)
+	return g.ensureRuntimeSizedStruct("DynArrayView", 2)
 }
 func (g *llvmGenerator) ensureRuntimeSizedStruct(name string, fieldCount int) (C.LLVMTypeRef, error) {
 	ty, err := g.ensureNamedStructType(name)

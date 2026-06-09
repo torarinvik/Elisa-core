@@ -16,7 +16,6 @@ func TestGenerateLLVMIRLowersNestedCollectionAccessOnReturnedValues(t *testing.T
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 extern make_array() -> darray[i32, row]
 extern make_array_view() -> view[i32]

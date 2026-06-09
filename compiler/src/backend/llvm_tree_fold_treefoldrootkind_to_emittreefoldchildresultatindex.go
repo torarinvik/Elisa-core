@@ -540,10 +540,6 @@ func (s *functionState) emitTreeFoldChildResultsView(helper *treeFoldHelperInfo,
 	if err != nil {
 		return nil, err
 	}
-	elemSize, err := s.sizeOfType(helper.resultType)
-	if err != nil {
-		return nil, err
-	}
 	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
 	isZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), countValue, zero, cStringFree(name+".zero"))
@@ -588,11 +584,9 @@ func (s *functionState) emitTreeFoldChildResultsView(helper *treeFoldHelperInfo,
 	if err != nil {
 		return nil, err
 	}
-	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
 	viewValue := C.LLVMGetUndef(viewLLVMType)
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, bufferPtr, 0, cStringFree(name+".view.data"))
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, countValue, 1, cStringFree(name+".view.len"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, elemSizeValue, 2, cStringFree(name+".view.elem_size"))
 	return viewValue, nil
 }
 func (s *functionState) emitTreeFoldChildResultAtIndex(childViewValue C.LLVMValueRef, sourceType semantic.Type, resultType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {

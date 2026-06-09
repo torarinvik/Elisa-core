@@ -123,7 +123,6 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	a.registerBuiltinStructType("DynArrayView", nil, false, []builtinFieldSpec{
 		{name: "data", typ: refTypeExpr("void", true), mutable: true},
 		{name: "len", typ: namedTypeExpr("usize", false), mutable: true},
-		{name: "elem_size", typ: namedTypeExpr("usize", false), mutable: true},
 	})
 	a.registerBuiltinStructType("SplitView", []string{"T"}, false, []builtinFieldSpec{
 		{name: "left", typ: genericTypeExpr("view", namedTypeExpr("T", false)), mutable: false},

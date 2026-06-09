@@ -617,18 +617,8 @@ func (s *functionState) buildTreeFrozenColumnDView(dataPtr C.LLVMValueRef, count
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
-	usizeLLVMType, err := s.g.lowerType(usizeType)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	elemSize, err := s.sizeOfType(viewType.Elem)
-	if err != nil {
-		return nil, nil, true, err
-	}
 	viewValue := C.LLVMGetUndef(viewLLVMType)
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree(name+".view.data"))
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, countValue, 1, cStringFree(name+".view.len"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0), 2, cStringFree(name+".view.elem_size"))
 	return viewValue, viewType, true, nil
 }

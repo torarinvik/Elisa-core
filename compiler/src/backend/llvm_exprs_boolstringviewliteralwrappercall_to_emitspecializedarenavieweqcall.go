@@ -347,16 +347,25 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	}
 	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("view.copy.dst.data"))
 	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("view.copy.dst.len"))
-	dstElemSize := C.LLVMBuildExtractValue(s.builder, dstValue, 2, cStringFree("view.copy.dst.elem_size"))
 	srcData := C.LLVMBuildExtractValue(s.builder, srcValue, 0, cStringFree("view.copy.src.data"))
 	srcLen := C.LLVMBuildExtractValue(s.builder, srcValue, 1, cStringFree("view.copy.src.len"))
-	srcElemSize := C.LLVMBuildExtractValue(s.builder, srcValue, 2, cStringFree("view.copy.src.elem_size"))
-	dstBytes := C.LLVMBuildMul(s.builder, dstLen, dstElemSize, cStringFree("view.copy.dst.bytes"))
-	srcBytes := C.LLVMBuildMul(s.builder, srcLen, srcElemSize, cStringFree("view.copy.src.bytes"))
 	usizeType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, nil, true, err
 	}
+	var copyElemType semantic.Type
+	if vt, ok := funcType.Params[0].(*semantic.ViewType); ok {
+		copyElemType = vt.Elem
+	} else {
+		return nil, nil, true, fmt.Errorf("arena_da_copy_exact specialization expected view parameter, got %T", funcType.Params[0])
+	}
+	copyElemSize, err := s.sizeOfType(copyElemType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	copyElemSizeConst := C.LLVMConstInt(usizeType, C.ulonglong(copyElemSize), 0)
+	dstBytes := C.LLVMBuildMul(s.builder, dstLen, copyElemSizeConst, cStringFree("view.copy.dst.bytes"))
+	srcBytes := C.LLVMBuildMul(s.builder, srcLen, copyElemSizeConst, cStringFree("view.copy.src.bytes"))
 	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -467,7 +476,6 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	}
 	leftData := C.LLVMBuildExtractValue(s.builder, leftValue, 0, cStringFree("view.eq.left.data"))
 	leftLen := C.LLVMBuildExtractValue(s.builder, leftValue, 1, cStringFree("view.eq.left.len"))
-	leftElemSize := C.LLVMBuildExtractValue(s.builder, leftValue, 2, cStringFree("view.eq.left.elem_size"))
 	rightData := C.LLVMBuildExtractValue(s.builder, rightValue, 0, cStringFree("view.eq.right.data"))
 	if hasSmallExactEqByteCount {
 		if exactEqByteCount == 0 {
@@ -506,12 +514,19 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 		return cmpResult, resultType, true, nil
 	}
 	_ = C.LLVMBuildExtractValue(s.builder, rightValue, 1, cStringFree("view.eq.right.len"))
-	_ = C.LLVMBuildExtractValue(s.builder, rightValue, 2, cStringFree("view.eq.right.elem_size"))
-	byteCount := C.LLVMBuildMul(s.builder, leftLen, leftElemSize, cStringFree("view.eq.bytes"))
 	usizeType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, nil, true, err
 	}
+	eqElemType, ok := runtimeIndexedElemType(leftType)
+	if !ok {
+		return nil, nil, true, fmt.Errorf("arena_da_eq_exact specialization expected a view element type, got %s", leftType)
+	}
+	eqElemSize, err := s.sizeOfType(eqElemType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	byteCount := C.LLVMBuildMul(s.builder, leftLen, C.LLVMConstInt(usizeType, C.ulonglong(eqElemSize), 0), cStringFree("view.eq.bytes"))
 	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
 	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree("view.eq.bytes.zero"))
 	entryBlock := C.LLVMGetInsertBlock(s.builder)

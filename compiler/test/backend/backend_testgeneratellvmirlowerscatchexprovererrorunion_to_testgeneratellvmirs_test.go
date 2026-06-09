@@ -317,7 +317,7 @@ def read_view(view: view[i32]) -> i32:
 
 	checks := []string{
 		"%DynArray__i32 = type { ptr, i64, i64 }",
-		"%DynArrayView = type { ptr, i64, i64 }",
+		"%DynArrayView = type { ptr, i64 }",
 		"define i32 @read_array(%DynArray__i32",
 		"define i32 @read_view(%DynArrayView",
 		"getelementptr inbounds nuw %DynArray__i32",

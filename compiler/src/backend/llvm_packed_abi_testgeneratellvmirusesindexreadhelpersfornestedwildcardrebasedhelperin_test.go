@@ -392,7 +392,6 @@ def fold_view() -> int:
 		"call i64 @ctx_packed_store_read_index_word(",
 		"packed.payload.tail.data",
 		"packed.payload.tail.len",
-		"packed.payload.tail.elem_size",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected frozen packed tail if variant view in index-soa mode to contain %q, got:\n%s", check, output)
@@ -544,7 +543,7 @@ def fold() -> int:
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
 	}
 
-	for _, check := range []string{"call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word(", "packed.payload.tail.data", "packed.payload.tail.len", "packed.payload.tail.elem_size"} {
+	for _, check := range []string{"call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word(", "packed.payload.tail.data", "packed.payload.tail.len"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
@@ -575,7 +574,7 @@ def fold() -> int:
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
 	}
 
-	for _, check := range []string{"call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word(", "packed.payload.tail.data", "packed.payload.tail.len", "packed.payload.tail.elem_size"} {
+	for _, check := range []string{"call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word(", "packed.payload.tail.data", "packed.payload.tail.len"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}

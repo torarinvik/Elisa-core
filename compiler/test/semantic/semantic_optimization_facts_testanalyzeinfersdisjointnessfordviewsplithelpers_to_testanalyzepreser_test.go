@@ -11,14 +11,13 @@ func TestAnalyzeInfersDisjointnessForDViewSplitHelpers(t *testing.T) {
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_view_prefix[T](view: view[T], end: usize) -> view[T]:
 	_ = end
@@ -66,14 +65,13 @@ func TestAnalyzeInfersEqualExtentSizeForSplitDViews(t *testing.T) {
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	_ = start
@@ -113,14 +111,13 @@ func TestAnalyzeInfersFactsForDirectDViewSliceSyntax(t *testing.T) {
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def inspect(values: darray[i32, 4]&) -> int:
 	base: view[i32] = arena_da_view(values, 0, 4)
@@ -160,7 +157,6 @@ func TestAnalyzePreservesOptimizationFactsThroughStandardViewSliceHelperFieldPro
 	src := `struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 struct Views:
 	left: view[i32]
@@ -206,7 +202,6 @@ func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughStandardViewSliceHelp
 	src := `struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 packed enum Expr:
 	Int(value: int)

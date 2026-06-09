@@ -482,22 +482,11 @@ func (s *functionState) buildDynArrayViewValue(arrayValue C.LLVMValueRef, arrayT
 	if err != nil {
 		return nil, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
-	usizeLLVMType, err := s.g.lowerType(usizeType)
-	if err != nil {
-		return nil, err
-	}
-	elemSize, err := s.sizeOfType(viewType.Elem)
-	if err != nil {
-		return nil, err
-	}
 	dataValue := C.LLVMBuildExtractValue(s.builder, arrayValue, 0, cStringFree(name+".data"))
 	lenValue := C.LLVMBuildExtractValue(s.builder, arrayValue, 1, cStringFree(name+".len"))
-	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
 	viewValue := C.LLVMGetUndef(viewLLVMType)
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataValue, 0, cStringFree(name+".view.data"))
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, lenValue, 1, cStringFree(name+".view.len"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, elemSizeValue, 2, cStringFree(name+".view.elem_size"))
 	return viewValue, nil
 }
 func (s *functionState) treeFieldSurfaceValue(value C.LLVMValueRef, rawType semantic.Type, surfaceType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {

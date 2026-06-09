@@ -284,7 +284,15 @@ func (s *functionState) emitDenseViewSliceValue(viewValue C.LLVMValueRef, viewTy
 	}
 	dataValue := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree(name+".data"))
 	lenValue := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree(name+".len"))
-	elemSizeValue := C.LLVMBuildExtractValue(s.builder, viewValue, 2, cStringFree(name+".elem_size"))
+	var elemType semantic.Type = s.g.result.NamedTypes["u8"]
+	if vt, ok := viewType.(*semantic.ViewType); ok {
+		elemType = vt.Elem
+	}
+	elemSize, err := s.sizeOfType(elemType)
+	if err != nil {
+		return nil, err
+	}
+	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
 	lo := s.emitUnsignedMin(startValue, lenValue, usizeLLVMType, name+".lo")
 	endClamped := s.emitUnsignedMin(endValue, lenValue, usizeLLVMType, name+".end.clamped")
 	endAfterStart := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGE), endClamped, lo, cStringFree(name+".end.after.start"))
@@ -297,7 +305,6 @@ func (s *functionState) emitDenseViewSliceValue(viewValue C.LLVMValueRef, viewTy
 	out := C.LLVMGetUndef(viewLLVMType)
 	out = C.LLVMBuildInsertValue(s.builder, out, sliceData, 0, cStringFree(name+".view.data"))
 	out = C.LLVMBuildInsertValue(s.builder, out, sliceLen, 1, cStringFree(name+".view.len"))
-	out = C.LLVMBuildInsertValue(s.builder, out, elemSizeValue, 2, cStringFree(name+".view.elem_size"))
 	return out, nil
 }
 func (s *functionState) emitChunksExactValidation(chunkSizeValue C.LLVMValueRef, totalValue C.LLVMValueRef, prefix string) error {

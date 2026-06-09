@@ -239,6 +239,7 @@ func (s *functionState) emitRegionStructAlloc(expr *ast.AllocExpr, binding value
 	C.LLVMBuildStore(s.builder, value, allocPtr)
 	return allocPtr, s.exprType(expr), nil
 }
+
 // isAutoRegionPackedConstructor reports whether a `new[auto]` value is a packed enum constructor
 // (vs a plain struct). Packed constructors take the region-backed implicit-store path (docs/74);
 // structs take the arena path.
@@ -518,7 +519,6 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
 	byteCount, err := s.emitCheckedElemByteCount(countValue, elemSize, "node.table")
 	if err != nil {
 		return nil, nil, true, err
@@ -547,7 +547,6 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	viewValue := C.LLVMGetUndef(viewLLVMType)
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, allocPtr, 0, cStringFree("node.table.view.data"))
 	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, countValue, 1, cStringFree("node.table.view.len"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, elemSizeValue, 2, cStringFree("node.table.view.elem_size"))
 	initValue, actualInitType, err := s.emitExpr(expr.Args[2], elemType)
 	if err != nil {
 		return nil, nil, true, err

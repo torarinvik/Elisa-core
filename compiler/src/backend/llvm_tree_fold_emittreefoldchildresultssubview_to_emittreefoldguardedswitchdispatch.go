@@ -25,12 +25,10 @@ func (s *functionState) emitTreeFoldChildResultsSubview(childViewValue C.LLVMVal
 		return nil, nil, err
 	}
 	viewData := C.LLVMBuildExtractValue(s.builder, childViewValue, 0, cStringFree(name+".data"))
-	viewElemSize := C.LLVMBuildExtractValue(s.builder, childViewValue, 2, cStringFree(name+".elem_size"))
 	subData := C.LLVMBuildGEP2(s.builder, sourceLLVMType, viewData, llvmValueSlicePtr([]C.LLVMValueRef{offsetValue}), 1, cStringFree(name+".sub.data"))
 	subView := C.LLVMGetUndef(viewLLVMType)
 	subView = C.LLVMBuildInsertValue(s.builder, subView, subData, 0, cStringFree(name+".sub.view.data"))
 	subView = C.LLVMBuildInsertValue(s.builder, subView, countValue, 1, cStringFree(name+".sub.view.len"))
-	subView = C.LLVMBuildInsertValue(s.builder, subView, viewElemSize, 2, cStringFree(name+".sub.view.elem_size"))
 	return subView, viewType, nil
 }
 func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelperInfo, nodeValue C.LLVMValueRef, memberType semantic.Type, childViewValue C.LLVMValueRef, arm ast.VisitArm, name string) error {

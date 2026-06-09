@@ -95,13 +95,17 @@ func (s *functionState) materializeTreeOwnerDArrayFromView(viewValue C.LLVMValue
 	}
 	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree(name+".src.data"))
 	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree(name+".src.len"))
-	viewElemSize := C.LLVMBuildExtractValue(s.builder, viewValue, 2, cStringFree(name+".src.elem_size"))
-	byteCount := C.LLVMBuildMul(s.builder, viewLen, viewElemSize, cStringFree(name+".bytes"))
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
 	}
+	elemSize, err := s.sizeOfType(viewType.Elem)
+	if err != nil {
+		return nil, err
+	}
+	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	byteCount := C.LLVMBuildMul(s.builder, viewLen, elemSizeValue, cStringFree(name+".bytes"))
 	zeroBytes := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree(name+".bytes.zero"))
 	entryBlock := C.LLVMGetInsertBlock(s.builder)

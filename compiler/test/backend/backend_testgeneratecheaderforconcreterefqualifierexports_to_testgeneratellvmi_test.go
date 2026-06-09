@@ -495,7 +495,7 @@ extern take_str(text: cstr[row]) -> void
 
 	checks := []string{
 		"%DynArray__i32 = type { ptr, i64, i64 }",
-		"%DynArrayView = type { ptr, i64, i64 }",
+		"%DynArrayView = type { ptr, i64 }",
 		"declare void @take_array(%DynArray__i32)",
 		"declare i64 @take_array_view(%DynArrayView)",
 		"declare void @take_str(ptr)",

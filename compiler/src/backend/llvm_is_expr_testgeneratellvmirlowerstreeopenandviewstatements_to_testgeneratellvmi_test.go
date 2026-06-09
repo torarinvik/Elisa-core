@@ -1191,7 +1191,7 @@ def elseif_total(stmt: Lua.Stmt.IfStmt) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @block_total(%Lua__TreeHandle ", "define i64 @elseif_total(%Lua__TreeHandle ", "DynArrayView", "tree.field.surface.view.len", "tree.field.surface.view.elem_size", "iter.len.ptr"} {
+	for _, check := range []string{"define i64 @block_total(%Lua__TreeHandle ", "define i64 @elseif_total(%Lua__TreeHandle ", "DynArrayView", "tree.field.surface.view.len", "iter.len.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree sequence field lowering to include %q, got:\n%s", check, output)
 		}

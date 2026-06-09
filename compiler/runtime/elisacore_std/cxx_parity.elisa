@@ -84,7 +84,7 @@ def cxx_byte_buffer_clear(buffer: mutable ByteBuffer&):
     buffer.len <- 0
 
 def cxx_byte_buffer_view(buffer: ByteBuffer&) -> view[u8]:
-    return DynArrayView(null, 0, size_of(u8)) if buffer.data == null or buffer.len == 0 else DynArrayView(arena_void_from_u8(buffer.data), buffer.len, size_of(u8))
+    return DynArrayView(null, 0) if buffer.data == null or buffer.len == 0 else DynArrayView(arena_void_from_u8(buffer.data), buffer.len)
 
 def cxx_heap_byte_buffer_alloc(size: usize) -> HeapByteBuffer:
     can Memory.Allocate, Abort.Panic:

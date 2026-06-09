@@ -263,7 +263,6 @@ func TestGenerateLLVMIRMarksDisjointDViewMemcpyCallsNoAlias(t *testing.T) {
 	src := `struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 extern arena_memcpy(dest: void&?, src: void&?, n: usize) -> void&?
 
@@ -278,7 +277,7 @@ def arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]:
 def split_copy(view: view[i32]) -> void&?:
 	prefix: view[i32] = arena_da_view_prefix(view, 2)
 	suffix: view[i32] = arena_da_view_suffix(view, 2)
-	return arena_memcpy(prefix.data, suffix.data, prefix.len * prefix.elem_size)
+	return arena_memcpy(prefix.data, suffix.data, prefix.len * size_of(i32))
 `
 	result := parseAndAnalyze(t, "backend_dview_split_memcpy.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -303,7 +302,6 @@ func TestGenerateLLVMIRSpecializesArenaDViewCopyExact(t *testing.T) {
 struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 extern arena_memcpy(dest: void&?, src: void&?, n: usize) -> void&?
 
@@ -311,8 +309,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count, size_of(T))
-	return DynArrayView(null, 0, size_of(T))
+		return DynArrayView(values.items.cast[void&], values.count)
+	return DynArrayView(null, 0)
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	if dst.len != src.len:
@@ -475,7 +473,6 @@ func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughStandardViewSliceHel
 	src := `struct DynArrayView:
 	data: mutable void&?
 	len: mutable usize
-	elem_size: mutable usize
 
 struct Views:
 	left: view[i32]

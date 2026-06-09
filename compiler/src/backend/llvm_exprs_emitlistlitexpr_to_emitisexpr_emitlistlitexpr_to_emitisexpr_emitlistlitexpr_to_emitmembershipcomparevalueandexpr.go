@@ -676,6 +676,7 @@ func (s *functionState) emitDictComprehensionExpr(expr *ast.ListComprehensionExp
 	block := comprehensionDesugarBlock(expr, resultName, resultInit, resultIdent, putCall)
 	return s.emitExprBlock(block, resultType)
 }
+
 // emitSetComprehensionExpr lowers `{ value for name in source [if filter] }` into
 //
 //	{ result: mutable set[V] = {};  for name in source: (if filter:) result.add(value);  result }
