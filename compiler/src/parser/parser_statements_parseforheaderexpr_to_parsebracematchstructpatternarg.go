@@ -710,6 +710,13 @@ func isRegionlessContainerType(typ ast.TypeExpr) bool {
 		}
 		typ = mt.Elem
 	}
+	// `dstr` is an owned string (the u8 specialization of darray, docs/26) but parses
+	// as a NamedType, not a BuiltinTypeExpr — so a region-less `out: dstr = []` builder
+	// must be recognized here too, or it never gets its inferred region (the auto-wrap
+	// is what lets a string builder `push` bytes without an explicit `in <arena>:`).
+	if nt, ok := typ.(*ast.NamedType); ok {
+		return nt.Name == "dstr"
+	}
 	bt, ok := typ.(*ast.BuiltinTypeExpr)
 	if !ok {
 		return false

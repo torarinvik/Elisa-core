@@ -31,7 +31,7 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			if fnType == nil || fnType.RegionPolymorphic {
 				continue
 			}
-			if a.functionReturnsRegionAllocatedValue(fn) {
+			if a.functionReturnsRegionAllocatedValue(fn) || functionBuildsAndReturnsLocalContainer(fn) {
 				fnType.RegionPolymorphic = true
 				changed = true
 			}
@@ -177,6 +177,199 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	}
 	walk(fn.Body)
 	return found
+}
+
+// functionBuildsAndReturnsLocalContainer detects the build-local-return shape (Stage 1 of the
+// region-return-inference plan): a function whose SIGNATURE return type is an owned container
+// (`darray`/`dict`/`set`/`dstr`) and which RETURNS a local that was declared as a container literal
+// (`out: darray[T] = []` / `= {}`) built up in the body. Such a function is region-polymorphic: its
+// `out = []` opens a synthesized `__auto_*` region (maybeWrapFunctionBodyInAutoRegion wraps the
+// whole body, the `return out` included), and once classified region-polymorphic the backend's
+// regionPolyAutoAdopts threads+adopts that region into the caller's `__region_auto`, so the result
+// outlives the call. This is the syntactic, pre-pass-safe analogue of the `new[auto]` detection:
+// it needs no type info (return-type annotation + container-literal initializer are both syntactic),
+// so classification precedes all body analysis and every caller threads the region in.
+//
+// It deliberately matches ONLY a returned local Ident declared as a container literal — not a
+// returned param, field, or call result — so it never over-classifies a forwarding function. A
+// false match is in any case safe (an unused threaded arena param), but the conservative shape keeps
+// classification honest. The escape suppression (region_containers.go) is the actual safety gate and
+// only fires for a synthesized `__auto_*` region, mirroring regionPolyAutoAdopts exactly.
+func functionBuildsAndReturnsLocalContainer(fn *ast.FuncDecl) bool {
+	if fn == nil || !returnTypeIsOwnedContainer(fn.ReturnType) {
+		return false
+	}
+	// A function that threads an allocator (`Arena&` param) manages its own allocation: the parser
+	// does NOT wrap its body in a synthesized auto region (maybeWrapFunctionBodyInAutoRegion's
+	// hasArenaParam guard), so its returned container is NOT in an adoptable `__auto_*` region.
+	// Classifying it region-polymorphic would inject a spurious `__region_auto` param and break its
+	// callers (which build into the explicit arena, not an inferred region). Exclude it — mirror the
+	// parser gate exactly.
+	if funcHasArenaParam(fn) {
+		return false
+	}
+	// Collect locals declared as a region-LESS container literal that live in the inferred region:
+	// the bare body or a synthesized `__auto_*` region scope. Deliberately do NOT descend into an
+	// explicit `region NAME:` (a non-auto RegionStmt) or `in <arena>:` (InStoreStmt) — a container
+	// built there belongs to that explicit region, is not adopted, and returning it still (correctly)
+	// escapes. Only the synthesized-auto-region container is threaded+adopted from the caller.
+	literalLocals := map[string]bool{}
+	var collect func(stmts []ast.Stmt)
+	collect = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			switch s := stmt.(type) {
+			case *ast.VarDeclStmt:
+				if _, ok := unwrapParenForRegionPoly(s.Value).(*ast.ListLitExpr); ok && typeExprIsRegionless(s.Type) {
+					literalLocals[s.Name] = true
+				}
+			case *ast.IfStmt:
+				collect(s.Then)
+				for _, elif := range s.Elifs {
+					collect(elif.Body)
+				}
+				collect(s.Else)
+			case *ast.WhileStmt:
+				collect(s.Body)
+			case *ast.ForStmt:
+				collect(s.Body)
+			case *ast.IterForStmt:
+				collect(s.Body)
+			case *ast.ScopeStmt:
+				collect(s.Body)
+			case *ast.MatchStmt:
+				for _, arm := range s.Arms {
+					collect(arm.Body)
+				}
+			case *ast.CanStmt:
+				collect(s.Body)
+			case *ast.WithStmt:
+				collect(s.Body)
+			case *ast.RegionStmt:
+				// Only a synthesized auto region threads+adopts; an explicit `region NAME:` does not.
+				if isSynthesizedAutoRegion(s.Name) {
+					collect(s.Body)
+				}
+			}
+		}
+	}
+	collect(fn.Body)
+	if len(literalLocals) == 0 {
+		return false
+	}
+	found := false
+	var walk func(stmts []ast.Stmt)
+	walk = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			if found {
+				return
+			}
+			switch s := stmt.(type) {
+			case *ast.ReturnStmt:
+				if id, ok := unwrapParenForRegionPoly(s.Value).(*ast.Ident); ok && literalLocals[id.Name] {
+					found = true
+				}
+			case *ast.IfStmt:
+				walk(s.Then)
+				for _, elif := range s.Elifs {
+					walk(elif.Body)
+				}
+				walk(s.Else)
+			case *ast.WhileStmt:
+				walk(s.Body)
+			case *ast.ForStmt:
+				walk(s.Body)
+			case *ast.IterForStmt:
+				walk(s.Body)
+			case *ast.ScopeStmt:
+				walk(s.Body)
+			case *ast.MatchStmt:
+				for _, arm := range s.Arms {
+					walk(arm.Body)
+				}
+			case *ast.CanStmt:
+				walk(s.Body)
+			case *ast.WithStmt:
+				walk(s.Body)
+			case *ast.RegionStmt:
+				walk(s.Body)
+			case *ast.InStoreStmt:
+				walk(s.Body)
+			}
+		}
+	}
+	walk(fn.Body)
+	return found
+}
+
+// funcHasArenaParam reports whether any explicit parameter is an `Arena` (modulo `mutable`/`&`
+// wrappers) — such a function threads its own allocator and is excluded from build-local-return
+// classification, mirroring the parser's maybeWrapFunctionBodyInAutoRegion gate.
+func funcHasArenaParam(fn *ast.FuncDecl) bool {
+	for i := range fn.Params {
+		if typeExprNamedIs(fn.Params[i].Type, "Arena") {
+			return true
+		}
+	}
+	return false
+}
+
+// typeExprNamedIs reports whether a type expression names `name` after stripping `mutable`/`&`.
+func typeExprNamedIs(typ ast.TypeExpr, name string) bool {
+	for {
+		switch t := typ.(type) {
+		case *ast.MutableType:
+			typ = t.Elem
+		case *ast.RefType:
+			typ = t.Elem
+		default:
+			nt, ok := typ.(*ast.NamedType)
+			return ok && nt.Name == name
+		}
+	}
+}
+
+// typeExprIsRegionless reports whether a container local's declared type carries NO explicit `@r`
+// region annotation — only a region-less container literal lands in the inferred (adoptable) region.
+// A nil (untyped) declaration is conservatively NOT treated as region-less build-local-return: the
+// typed `out: darray[T] = []` form is the Stage 1 canonical shape (and matches join/make signatures).
+func typeExprIsRegionless(typ ast.TypeExpr) bool {
+	for {
+		mt, ok := typ.(*ast.MutableType)
+		if !ok {
+			break
+		}
+		typ = mt.Elem
+	}
+	switch t := typ.(type) {
+	case *ast.BuiltinTypeExpr:
+		return t.Region == ""
+	case *ast.NamedType:
+		return t.Name == "dstr" // dstr has no region-annotation surface; always region-less here
+	}
+	return false
+}
+
+// returnTypeIsOwnedContainer reports whether a function's return-type annotation is a growable owned
+// container — `darray`/`dict`/`set` (BuiltinTypeExpr) or `dstr` (NamedType, the u8 darray). Views
+// (`sview`/`cstr`) and `array` (fixed) are excluded: they are not region-owned growables.
+func returnTypeIsOwnedContainer(typ ast.TypeExpr) bool {
+	for {
+		mt, ok := typ.(*ast.MutableType)
+		if !ok {
+			break
+		}
+		typ = mt.Elem
+	}
+	switch t := typ.(type) {
+	case *ast.NamedType:
+		return t.Name == "dstr"
+	case *ast.BuiltinTypeExpr:
+		switch t.Name {
+		case "darray", "dict", "set":
+			return t.Region == ""
+		}
+	}
+	return false
 }
 
 // exprResultIsRegionAllocated reports whether the RESULT of an expression is a fresh region

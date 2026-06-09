@@ -124,6 +124,17 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 	}
 	if sym, _ := a.lookupRegionState(region); sym != nil {
 		if isSynthesizedAutoRegion(region) {
+			// Build-local-return (region-return-inference Stage 1): in a region-polymorphic
+			// function the synthesized `__auto_*` region is threaded from the caller (the hidden
+			// `__region_auto` Arena&) and the backend adopts it (regionPolyAutoAdopts), so a value
+			// RETURNED from it outlives the call — no escape. This MUST mirror regionPolyAutoAdopts
+			// exactly (RegionPolymorphic + return + synthesized-auto-region), or a front-end
+			// suppression the backend doesn't adopt would be a silent use-after-free. Only `return`
+			// threads the region: a store into longer-lived storage (via != "return") still escapes,
+			// because there is no caller region for the stored value to live in.
+			if via == "return" && a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic {
+				return
+			}
 			a.errorf(valueExpr.Pos(), "value escapes its `in auto:` scope via %s; the inferred region is freed at scope exit. Give it an explicit lifetime — copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region", via)
 		} else {
 			a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", region, via)

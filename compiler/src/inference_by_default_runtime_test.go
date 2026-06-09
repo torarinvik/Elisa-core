@@ -313,25 +313,44 @@ def inference_by_default_builders_test() -> void:
 	}
 }
 
-// Inference's slack stays a diagnostic, not a leak: a function that builds a value in its
-// inferred region and then returns it is rejected, because that region is freed at the
-// function's exit. The fix is an explicit lifetime (a `[region r]` param and `-> ... @r`).
-func TestRunCLIRejectsValueEscapingInferredFunctionRegion(t *testing.T) {
+// A function that builds a container in its DEFAULT inferred region and returns it is a sound
+// region-polymorphic builder (region-return-inference Stage 1): the `__auto_*` region is threaded
+// and adopted from the caller, so the result outlives the call. It must compile cleanly — no escape.
+// (Contrast: a value built in an EXPLICIT named local region still escapes, since that region is
+// freed at scope exit and not adopted; verified in the second half.)
+func TestRunCLIBuildLocalReturnInferredRegionAccepted(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "inference_escape_fixture.elisa")
+	fixturePath := filepath.Join(fixtureDir, "inference_builder_fixture.elisa")
 	src := `def build() -> darray[i64]:
     xs: mutable darray[i64] = []
     xs.push(7)
     return xs
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
-		t.Fatalf("failed to write escape fixture: %v", err)
+		t.Fatalf("failed to write builder fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr); code != 0 {
+		t.Fatalf("expected build-local-return builder to compile, got exit %d:\n%s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "escapes") {
+		t.Fatalf("unexpected escape diagnostic for an inferred-region builder:\n%s", stderr.String())
 	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
-	if !strings.Contains(stderr.String(), "escapes its `in auto:` scope") {
-		t.Fatalf("expected an escape diagnostic for a value leaving the inferred region, got:\n%s", stderr.String())
+	// Inference's slack stays a diagnostic, not a leak, for the explicit-region case.
+	escPath := filepath.Join(fixtureDir, "inference_escape_fixture.elisa")
+	escSrc := `def leak() -> darray[i64]:
+    region r(4096):
+        xs: mutable darray[i64] @r = []
+        xs.push(7)
+        return xs
+`
+	if err := os.WriteFile(escPath, []byte(escSrc), 0o644); err != nil {
+		t.Fatalf("failed to write escape fixture: %v", err)
+	}
+	var eout, eerr bytes.Buffer
+	runCLI([]string{"-emit", "llvm", escPath}, &eout, &eerr)
+	if !strings.Contains(eerr.String(), "escapes") {
+		t.Fatalf("expected an escape diagnostic for a value leaving an explicit named region, got:\n%s", eerr.String())
 	}
 }

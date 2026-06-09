@@ -138,25 +138,30 @@ def differing_lifetimes() -> void:
 	assertAllPassed(t, exit, stdout, stderr, "differing_lifetimes")
 }
 
-// Region inference must REJECT a value that outlives its inferred region: returning a
-// darray built in the inferred function-body region would dangle once the region frees.
+// Region inference must REJECT a value that outlives its region when the region is an
+// EXPLICIT, named, function-local region (`region r(...):`) — it is freed at scope exit and
+// is not adopted by the caller, so the returned darray would dangle. (Contrast: a value built
+// in the DEFAULT inferred region and returned is now a sound region-polymorphic builder — the
+// `__auto_*` region is threaded+adopted from the caller; see TestBuildLocalReturnAdoptedNoUAF.
+// Only the synthesized-auto-region return is adopted; an explicit named local region is not.)
 func TestRegionInferenceRejectsEscape(t *testing.T) {
 	if testing.Short() {
 		t.Skip("native build; skipped under -short")
 	}
 	body := `
 def leak() -> darray[i64]:
-    can Memory.Allocate, Abort.Panic:
-        xs: mutable darray[i64] = []
-        xs.push(1)
-        return xs
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region r(4096):
+            xs: mutable darray[i64] @r = []
+            xs.push(1)
+            return xs
 `
 	exit, stdout, stderr := runStressProgram(t, "region_escape", body)
 	if exit == 0 {
-		t.Fatalf("expected a value escaping its inferred region to be rejected, got exit 0\n%s", stdout)
+		t.Fatalf("expected a value escaping its explicit named region to be rejected, got exit 0\n%s", stdout)
 	}
-	if !strings.Contains(stderr, "escapes its `in auto:` scope") && !strings.Contains(stdout, "escapes its `in auto:` scope") {
-		t.Fatalf("expected an `in auto:` escape diagnostic, got:\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	if !strings.Contains(stderr, "escapes") && !strings.Contains(stdout, "escapes") {
+		t.Fatalf("expected a region-escape diagnostic, got:\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
 }
 
