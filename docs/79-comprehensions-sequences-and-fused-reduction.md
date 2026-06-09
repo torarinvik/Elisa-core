@@ -366,6 +366,12 @@ Each phase ships independently and leaves the tree green.
 > the reassociated tree reduction to that one fold (emitting its accumulator update under
 > full fast-math FP) without the program-wide `-ffast-math`. Implemented as
 > `AssignStmt.FastMath` + a `fastMathScope` counter the backend's FP chokepoint honors.
+> **P5** adds the per-fold `by par` marker: `( acc + x … with acc = 0 by par )` lowers an
+> associative-combine fold to a contention-free parallel reduction, by desugaring to the
+> existing runtime `reduce(slice(&src), seed, op)` combinator (private partials per band,
+> merged). Gated to `acc <op> x` with op ∈ {+, *} over a darray source (no filter/bindings/
+> range) so the parallel reordering is never silently incorrect — anything else is a parser
+> error. This completes the Part IV perf markers (`by simd` + `by par`).
 
 **Phase 1 — surface + sinks (sequential, no protocol value).** Parse `{…}` set,
 `{k:v …}` dict, `(… with acc =)` fold, and the comma-separated **head bindings**
