@@ -137,7 +137,7 @@ func (a *Analyzer) hostABILayoutForType(t Type, seen map[string]bool) (hostABILa
 			return hostABILayout{}, false
 		}
 		return a.hostABILayoutForStructType(st, nil, nil, seen)
-	case *ViewType, *DArrayViewType:
+	case *DArrayViewType:
 		st, ok := a.namedTypes["DynArrayView"].(*StructType)
 		if !ok || st == nil {
 			return hostABILayout{}, false

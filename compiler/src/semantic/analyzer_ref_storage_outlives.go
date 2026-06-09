@@ -174,7 +174,7 @@ func isAddrOfRootedBorrow(expr ast.Expr) bool {
 
 func isBorrowLikeType(t Type) bool {
 	switch t.(type) {
-	case *RefType, *ViewType, *SViewType, *DArrayViewType:
+	case *RefType, *SViewType, *DArrayViewType:
 		return true
 	}
 	return false

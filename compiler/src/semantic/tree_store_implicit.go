@@ -307,8 +307,6 @@ func collectTreeFamiliesInType(t Type, out map[string]*TreeStoreType, seenStruct
 		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
 	case *DArrayType:
 		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
-	case *ViewType:
-		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
 	case *DArrayViewType:
 		collectTreeFamiliesInType(tt.Elem, out, seenStructs, seenTrees)
 	case *DictType:
@@ -407,7 +405,7 @@ func collectTreeFamiliesInRefElem(t Type, out map[string]*TreeStoreType, seenStr
 	switch StripAggregateStateType(t).(type) {
 	case *TreeNodeType, *TreeCategoryType, *TreeVariantViewType, *TreeBlockType, *TreeStructType, *TreeStoreType:
 		collectTreeFamiliesInType(t, out, seenStructs, seenTrees)
-	case *ArrayType, *DArrayType, *ViewType, *DArrayViewType, *TupleType, *DictType, *DictEntryType, *GenericInstanceType, *AggregateStateType, *StructType, *EnumType, *PackedVariantViewType:
+	case *ArrayType, *DArrayType, *DArrayViewType, *TupleType, *DictType, *DictEntryType, *GenericInstanceType, *AggregateStateType, *StructType, *EnumType, *PackedVariantViewType:
 		collectTreeFamiliesInType(t, out, seenStructs, seenTrees)
 	}
 }

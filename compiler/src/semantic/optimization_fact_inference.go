@@ -34,12 +34,6 @@ func optimizationFactsForType(t Type) OptimizationFacts {
 			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentShape, Shape: tt.Shape}
 		}
 		return facts
-	case *ViewType:
-		facts := OptimizationFacts{Contiguous: true, UnitStride: true}
-		if tt.Begin != "" || tt.End != "" {
-			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: tt.Begin, End: tt.End}
-		}
-		return facts
 	case *DArrayViewType:
 		facts := OptimizationFacts{Contiguous: true, UnitStride: true}
 		if tt.SurfaceName == "packedview" || tt.SurfaceName == "packedtags" {

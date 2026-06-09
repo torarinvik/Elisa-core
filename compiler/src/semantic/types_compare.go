@@ -174,9 +174,6 @@ func SameType(a, b Type) bool {
 	case *DArrayType:
 		tb, ok := b.(*DArrayType)
 		return ok && SameType(ta.Elem, tb.Elem) && SameShape(ta.Shape, tb.Shape)
-	case *ViewType:
-		tb, ok := b.(*ViewType)
-		return ok && SameType(ta.Elem, tb.Elem) && viewBoundsEqual(ta, tb)
 	case *DArrayViewType:
 		tb, ok := b.(*DArrayViewType)
 		return ok && SameType(ta.Elem, tb.Elem)

@@ -30,7 +30,6 @@ func (*ConstEnumType) isType()          {}
 func (*RefType) isType()                {}
 func (*ArrayType) isType()              {}
 func (*DArrayType) isType()             {}
-func (*ViewType) isType()               {}
 func (*DArrayViewType) isType()         {}
 func (*StoreRowsViewType) isType()      {}
 func (*StoreRowViewType) isType()       {}
@@ -423,14 +422,15 @@ func (t *DArrayType) String() string {
 	}
 	return fmt.Sprintf("darray[%s, %s]", t.Elem.String(), t.Shape.String())
 }
-func (t *ViewType) String() string {
-	if t.Begin != "" || t.End != "" {
-		return fmt.Sprintf("view[%s, %s, %s]", t.Elem.String(), t.Begin, t.End)
-	}
-	return fmt.Sprintf("view[%s]", t.Elem.String())
-}
 func (t *DArrayViewType) String() string {
-	return fmt.Sprintf("dview[%s]", t.Elem.String())
+	name := t.SurfaceName
+	if name == "" {
+		name = "dview"
+	}
+	if t.Begin != "" || t.End != "" {
+		return fmt.Sprintf("%s[%s, %s, %s]", name, t.Elem.String(), t.Begin, t.End)
+	}
+	return fmt.Sprintf("%s[%s]", name, t.Elem.String())
 }
 func (t *StoreRowsViewType) String() string {
 	if t == nil || t.Store == nil {

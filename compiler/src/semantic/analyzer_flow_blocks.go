@@ -296,10 +296,6 @@ func inferKnownDArrayBuilderExprType(expr ast.Expr, known map[string]Type) Type 
 			if t != nil {
 				return t.Elem
 			}
-		case *ViewType:
-			if t != nil {
-				return t.Elem
-			}
 		}
 		return nil
 	default:

@@ -234,8 +234,6 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return nil, fmt.Errorf("array type %s is missing a compile-time constant size", tt.String())
 	case *semantic.DArrayType:
 		return g.ensureRuntimeDynArray(tt.Elem)
-	case *semantic.ViewType:
-		return g.ensureRuntimeDynArrayView()
 	case *semantic.DArrayViewType:
 		return g.ensureRuntimeDynArrayView()
 	case *semantic.StoreRowsViewType:

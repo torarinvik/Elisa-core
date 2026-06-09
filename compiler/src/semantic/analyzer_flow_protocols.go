@@ -200,8 +200,6 @@ func (a *Analyzer) containsTrackedProtocolCarrierValues(t Type, seen map[string]
 		return a.containsTrackedProtocolCarrierValues(tt.Elem, seen)
 	case *DArrayType:
 		return a.containsTrackedProtocolCarrierValues(tt.Elem, seen)
-	case *ViewType:
-		return a.containsTrackedProtocolCarrierValues(tt.Elem, seen)
 	case *DArrayViewType:
 		return a.containsTrackedProtocolCarrierValues(tt.Elem, seen)
 	case *DictType:
@@ -291,8 +289,6 @@ func (a *Analyzer) protocolKindsInType(t Type, seen map[string]bool) (bool, bool
 	case *ArrayType:
 		return a.protocolKindsInType(tt.Elem, seen)
 	case *DArrayType:
-		return a.protocolKindsInType(tt.Elem, seen)
-	case *ViewType:
 		return a.protocolKindsInType(tt.Elem, seen)
 	case *DArrayViewType:
 		return a.protocolKindsInType(tt.Elem, seen)

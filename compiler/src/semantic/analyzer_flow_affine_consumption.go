@@ -298,8 +298,6 @@ func affineIndexedElemType(t Type) (Type, bool) {
 		return tt.Elem, true
 	case *DArrayType:
 		return tt.Elem, true
-	case *ViewType:
-		return tt.Elem, true
 	case *DArrayViewType:
 		return tt.Elem, true
 	case *RefType:

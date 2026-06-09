@@ -15,8 +15,6 @@ func TreeStructuralSequenceElemType(t Type) (Type, bool) {
 		return tt.Elem, true
 	case *DArrayType:
 		return tt.Elem, true
-	case *ViewType:
-		return tt.Elem, true
 	case *DArrayViewType:
 		if tt.SurfaceName != "" && tt.SurfaceName != "dview" {
 			return nil, false

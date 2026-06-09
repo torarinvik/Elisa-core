@@ -585,7 +585,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if err != nil {
 			return nil, err
 		}
-		viewType := &semantic.ViewType{Elem: elem}
+		viewType := &semantic.ViewType{Elem: elem, SurfaceName: "view"}
 		if len(expr.ValueArgs) == 2 {
 			viewType.Begin = exprSummary(expr.ValueArgs[0])
 			viewType.End = exprSummary(expr.ValueArgs[1])

@@ -219,7 +219,7 @@ func (a *Analyzer) exprCanYieldAddressableValue(expr ast.Expr) bool {
 			return true
 		}
 		switch StripAggregateStateType(objType).(type) {
-		case *ArrayType, *DArrayType, *DArrayViewType, *ViewType:
+		case *ArrayType, *DArrayType, *DArrayViewType:
 			return a.exprCanYieldAddressableValue(n.Object)
 		default:
 			return false

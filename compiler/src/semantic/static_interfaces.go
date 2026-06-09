@@ -131,9 +131,6 @@ func unifyTypePattern(pattern, actual Type, freeVars map[string]bool, subst map[
 	case *RefType:
 		a, ok := actual.(*RefType)
 		return ok && unifyTypePattern(p.Elem, a.Elem, freeVars, subst)
-	case *ViewType:
-		a, ok := actual.(*ViewType)
-		return ok && unifyTypePattern(p.Elem, a.Elem, freeVars, subst)
 	default:
 		return SameType(pattern, actual)
 	}
@@ -189,10 +186,6 @@ func substituteTypeParamsByName(t Type, subst map[string]Type) Type {
 		clone.Value = substituteTypeParamsByName(tt.Value, subst)
 		return &clone
 	case *RefType:
-		clone := *tt
-		clone.Elem = substituteTypeParamsByName(tt.Elem, subst)
-		return &clone
-	case *ViewType:
 		clone := *tt
 		clone.Elem = substituteTypeParamsByName(tt.Elem, subst)
 		return &clone

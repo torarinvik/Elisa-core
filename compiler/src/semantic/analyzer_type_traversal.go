@@ -62,8 +62,6 @@ func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool
 		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DArrayType:
 		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
-	case *ViewType:
-		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DArrayViewType:
 		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *OptionalType:
@@ -245,8 +243,6 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 		return true
 	case *OptionalType:
 		return a.typeCanContainRegionRefs(tt.Value, seen)
-	case *ViewType:
-		return true
 	case *DArrayViewType:
 		return true
 	case *DStrType:
@@ -437,10 +433,6 @@ func (a *Analyzer) abstractParamBorrowedOwnerRefState(t Type, baseKey affineValu
 		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
 			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
 		}
-	case *ViewType:
-		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
-			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
-		}
 	case *DArrayViewType:
 		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
 			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
@@ -546,12 +538,6 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 			}
 		}
 	case *DArrayType:
-		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
-			state.Fields = map[string]regionRefState{
-				regionAnyIndexFieldKey(): elemState,
-			}
-		}
-	case *ViewType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
 			state.Fields = map[string]regionRefState{
 				regionAnyIndexFieldKey(): elemState,

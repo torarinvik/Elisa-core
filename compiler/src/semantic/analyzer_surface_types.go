@@ -16,7 +16,7 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 			a.errorf(expr.Pos(), "view expects 1 argument, got %d", len(expr.Args))
 			return invalidType, true
 		}
-		return &ViewType{Elem: a.resolveType(expr.Args[0])}, true
+		return &ViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "view"}, true
 	case "dview":
 		if len(expr.Args) != 1 {
 			a.errorf(expr.Pos(), "dview expects 1 argument, got %d", len(expr.Args))
@@ -229,7 +229,7 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			a.errorf(expr.Pos(), "view expects 1 type argument, got %d", len(expr.TypeArgs))
 			return invalidType
 		}
-		viewType := &ViewType{Elem: a.resolveType(expr.TypeArgs[0])}
+		viewType := &ViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "view"}
 		if len(expr.ValueArgs) == 2 {
 			viewType.Begin = a.exprSummary(expr.ValueArgs[0])
 			viewType.End = a.exprSummary(expr.ValueArgs[1])

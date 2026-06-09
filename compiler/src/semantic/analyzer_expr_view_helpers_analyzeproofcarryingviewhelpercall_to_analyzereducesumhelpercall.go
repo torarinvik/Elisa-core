@@ -487,7 +487,7 @@ func (a *Analyzer) analyzeTreeTraversalHelperCall(expr *ast.CallExpr) (Type, boo
 }
 func proofCarryingViewType(t Type) bool {
 	switch t.(type) {
-	case *ViewType, *DArrayViewType, *DStrType, *SViewType:
+	case *DArrayViewType, *DStrType, *SViewType:
 		return true
 	default:
 		return false
@@ -558,11 +558,6 @@ func denseDViewType(t Type) (*DArrayViewType, bool) {
 }
 func zipMapDenseViewType(t Type) (Type, Type, bool) {
 	switch tt := t.(type) {
-	case *ViewType:
-		if tt == nil {
-			return nil, nil, false
-		}
-		return tt, tt.Elem, true
 	case *DArrayViewType:
 		if tt == nil || tt.SurfaceName == "packedtags" {
 			return nil, nil, false

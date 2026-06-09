@@ -22,7 +22,7 @@ func (s *functionState) emitSequenceCountValueFromPatternValue(actualValue C.LLV
 	switch t := actualType.(type) {
 	case *semantic.ArrayType:
 		return s.safeIndexArrayCountValue(t)
-	case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+	case *semantic.DArrayType, *semantic.DArrayViewType:
 		if actualValue == nil {
 			if originExpr == nil {
 				return nil, fmt.Errorf("count pattern requires a sequence value")
@@ -41,7 +41,7 @@ func (s *functionState) emitSequenceCountValueFromPatternValue(actualValue C.LLV
 		switch elem := semantic.StripAggregateStateType(t.Elem).(type) {
 		case *semantic.ArrayType:
 			return s.safeIndexArrayCountValue(elem)
-		case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+		case *semantic.DArrayType, *semantic.DArrayViewType:
 			if actualValue == nil {
 				return nil, fmt.Errorf("count pattern requires a sequence reference value")
 			}

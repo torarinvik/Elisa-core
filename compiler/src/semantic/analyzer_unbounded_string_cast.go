@@ -106,7 +106,7 @@ func typeWiderThanByte(t Type) bool {
 			// u16/i16/u32/i32/f32/u64/i64/f64/usize/isize/uintptr/int, etc.
 			return true
 		}
-	case *StructType, *ArrayType, *TupleType, *RefType, *DStrType, *DArrayType, *DArrayViewType, *ViewType:
+	case *StructType, *ArrayType, *TupleType, *RefType, *DStrType, *DArrayType, *DArrayViewType:
 		return true
 	}
 	return false
@@ -145,8 +145,6 @@ func sizedBufferKindAndElem(t Type) (string, Type, bool) {
 	case *ArrayType:
 		return "array", tt.Elem, true
 	case *DArrayViewType:
-		return "view", tt.Elem, true
-	case *ViewType:
 		return "view", tt.Elem, true
 	}
 	return "", nil, false

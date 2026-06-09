@@ -94,7 +94,7 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		if err != nil {
 			return nil, true, err
 		}
-		return &semantic.ViewType{Elem: elem}, true, nil
+		return &semantic.ViewType{Elem: elem, SurfaceName: "view"}, true, nil
 	case "dview":
 		if len(expr.Args) != 1 {
 			return nil, true, fmt.Errorf("dview expects 1 argument, got %d", len(expr.Args))
@@ -271,6 +271,7 @@ func exprSummary(expr ast.Expr) string {
 		return "?"
 	}
 }
+
 // resolveBarePackedVariantWitnessType resolves a bare dotted packed-enum-variant name like
 // `Expr.Lit` (enum `Expr`, variant `Lit`) to its PackedVariantViewType — the bare-form analogue of
 // `packedview[Expr.Lit]`, mirroring the bare tree-variant form. Returns ok=false for any name that is

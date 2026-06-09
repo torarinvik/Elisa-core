@@ -78,17 +78,6 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 			}
 		}
 		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
-	case *semantic.ViewType:
-		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
-		if err != nil {
-			return nil, nil, err
-		}
-		if userFacing {
-			if err := s.emitDebugIndexBoundsGuard(containerPtr, t, indexValue); err != nil {
-				return nil, nil, err
-			}
-		}
-		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 	case *semantic.DArrayViewType:
 		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
@@ -163,7 +152,7 @@ func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, c
 		return nil
 	}
 	switch containerType.(type) {
-	case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+	case *semantic.DArrayType, *semantic.DArrayViewType:
 	default:
 		return nil
 	}
@@ -221,9 +210,9 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 }
 
 const (
-	darrayAliasDomain     = "elisa.darray.aa"
-	darrayAliasScopeHdr   = "hdr"
-	darrayAliasScopeElt   = "elt"
+	darrayAliasDomain   = "elisa.darray.aa"
+	darrayAliasScopeHdr = "hdr"
+	darrayAliasScopeElt = "elt"
 )
 
 // tagDarrayHeaderLoad marks a darray header (data-pointer) load as not aliasing scalar element memory.
@@ -286,8 +275,6 @@ func (s *functionState) coercePackedEnumHandleValue(value C.LLVMValueRef, actual
 func runtimeIndexedElemType(t semantic.Type) (semantic.Type, bool) {
 	switch tt := t.(type) {
 	case *semantic.DArrayType:
-		return tt.Elem, true
-	case *semantic.ViewType:
 		return tt.Elem, true
 	case *semantic.DArrayViewType:
 		return tt.Elem, true

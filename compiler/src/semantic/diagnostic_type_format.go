@@ -114,14 +114,6 @@ func diagnosticTypeString(t Type) string {
 			return fmt.Sprintf("darray[%s]", diagnosticTypeString(tt.Elem))
 		}
 		return fmt.Sprintf("darray[%s, %s]", diagnosticTypeString(tt.Elem), tt.Shape.String())
-	case *ViewType:
-		if tt == nil || tt.Elem == nil {
-			return "<invalid-view>"
-		}
-		if tt.Begin != "" || tt.End != "" {
-			return fmt.Sprintf("view[%s, %s, %s]", diagnosticTypeString(tt.Elem), tt.Begin, tt.End)
-		}
-		return fmt.Sprintf("view[%s]", diagnosticTypeString(tt.Elem))
 	case *DArrayViewType:
 		if tt == nil || tt.Elem == nil {
 			return "<invalid-dview>"

@@ -154,7 +154,7 @@ func stripMemcpyOperandExpr(expr ast.Expr) ast.Expr {
 }
 func isMemcpyViewCarrierType(t semantic.Type) bool {
 	switch tt := t.(type) {
-	case *semantic.ViewType, *semantic.DArrayViewType, *semantic.SViewType:
+	case *semantic.DArrayViewType, *semantic.SViewType:
 		return true
 	case *semantic.StructType:
 		return tt != nil && (tt.Name == "DynArrayView" || tt.Name == "StringView")
@@ -164,7 +164,7 @@ func isMemcpyViewCarrierType(t semantic.Type) bool {
 }
 func isDynArrayViewCarrierType(t semantic.Type) bool {
 	switch tt := t.(type) {
-	case *semantic.ViewType, *semantic.DArrayViewType:
+	case *semantic.DArrayViewType:
 		return true
 	case *semantic.StructType:
 		return tt != nil && tt.Name == "DynArrayView"
@@ -302,8 +302,6 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 		}
 		var elemType semantic.Type
 		switch viewType := funcType.Params[0].(type) {
-		case *semantic.ViewType:
-			elemType = viewType.Elem
 		case *semantic.DArrayViewType:
 			elemType = viewType.Elem
 		default:

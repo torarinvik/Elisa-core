@@ -34,8 +34,6 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 		// (Views — ViewType/DArrayViewType — recurse: their safety is governed by the
 		// region- and packed-store-dependency checks in validateThreadTransferArg.)
 		return false
-	case *ViewType:
-		return a.typeStructurallyThreadShareable(tt.Elem, seen)
 	case *DArrayViewType:
 		return a.typeStructurallyThreadShareable(tt.Elem, seen)
 	case *EnumType:
@@ -133,7 +131,7 @@ func (a *Analyzer) closureCaptureSharesMutableState(t Type, seen map[string]bool
 	switch tt := t.(type) {
 	case *RefType:
 		return tt.Storage != RefStorageStatic // a copied non-static ref still aliases its referent
-	case *DArrayType, *DictType, *ViewType, *DArrayViewType:
+	case *DArrayType, *DictType, *DArrayViewType:
 		return true // a copied header aliases the shared backing buffer
 	case *ArrayType:
 		return a.closureCaptureSharesMutableState(tt.Elem, seen) // inline array: shares iff element does
@@ -179,8 +177,6 @@ func threadTransferRequiresUnsafeThreadShareSwitch(t Type, seen map[string]bool)
 	case *ArrayType:
 		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
 	case *DArrayType:
-		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
-	case *ViewType:
 		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)
 	case *DArrayViewType:
 		return threadTransferRequiresUnsafeThreadShare(tt.Elem, seen)

@@ -316,14 +316,14 @@ func (a *Analyzer) tupleIndexResultType(tuple *TupleType, indexExpr ast.Expr) (T
 
 func safeIndexFallbackOperandType(t Type) bool {
 	switch tt := StripAggregateStateType(t).(type) {
-	case *ArrayType, *DArrayType, *ViewType, *DArrayViewType, *PackedEnumStoreType:
+	case *ArrayType, *DArrayType, *DArrayViewType, *PackedEnumStoreType:
 		return true
 	case *RefType:
 		if tt.State != RefStateNonNull {
 			return false
 		}
 		switch StripAggregateStateType(tt.Elem).(type) {
-		case *ArrayType, *DArrayType, *ViewType, *DArrayViewType, *PackedEnumStoreType:
+		case *ArrayType, *DArrayType, *DArrayViewType, *PackedEnumStoreType:
 			return true
 		}
 	}
@@ -441,13 +441,13 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		if isStringArrayType(array) {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
-		return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
+		return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
 	if view, ok := objType.(*DArrayType); ok {
 		return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "dview"}
 	}
 	if view, ok := objType.(*ViewType); ok {
-		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
+		return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 	}
 	if view, ok := objType.(*DArrayViewType); ok {
 		return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
@@ -472,13 +472,13 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			if isStringArrayType(array) {
 				return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 			}
-			return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
+			return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*DArrayType); ok {
 			return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "dview"}
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
-			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
+			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
 			return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}

@@ -141,7 +141,7 @@ func MergeTypes(a, b Type) Type {
 			if viewBoundsEqual(av, bv) {
 				return av
 			}
-			return &ViewType{Elem: av.Elem}
+			return &ViewType{Elem: av.Elem, SurfaceName: "view"}
 		}
 	}
 	if IsNullType(a) {

@@ -168,8 +168,6 @@ func (a *Analyzer) projectExternReturnTargetType(current Type, step borrowReturn
 			return tt.Elem, true
 		case *DArrayType:
 			return tt.Elem, true
-		case *ViewType:
-			return tt.Elem, true
 		case *DArrayViewType:
 			return tt.Elem, true
 		default:

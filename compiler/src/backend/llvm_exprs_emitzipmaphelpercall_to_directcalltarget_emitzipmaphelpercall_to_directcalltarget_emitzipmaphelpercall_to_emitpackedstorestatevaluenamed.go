@@ -237,11 +237,6 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 }
 func zipMapViewInfo(t semantic.Type) (semantic.Type, semantic.Type, bool) {
 	switch tt := t.(type) {
-	case *semantic.ViewType:
-		if tt == nil {
-			return nil, nil, false
-		}
-		return tt, tt.Elem, true
 	case *semantic.DArrayViewType:
 		if tt == nil || tt.SurfaceName == "packedtags" {
 			return nil, nil, false

@@ -27,7 +27,7 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 		// the job of an owned string type, not of clone-on-a-view (which would
 		// silently turn a borrow into an owner while keeping the borrow's type).
 		return false, SameType(target, source)
-	case *TypeParamType, *RefType, *FuncType, *ViewType, *DArrayViewType, *PackedVariantViewType, *StoreRowsViewType, *StoreRowViewType, *DictType, *DictEntryType:
+	case *TypeParamType, *RefType, *FuncType, *DArrayViewType, *PackedVariantViewType, *StoreRowsViewType, *StoreRowViewType, *DictType, *DictEntryType:
 		return false, false
 	case *TreeVariantViewType:
 		return false, false

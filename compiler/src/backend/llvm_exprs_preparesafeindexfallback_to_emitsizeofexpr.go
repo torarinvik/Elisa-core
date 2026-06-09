@@ -129,23 +129,6 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 			value, err := s.loadValue(ptr, elemType, "safe.index.value")
 			return value, elemType, err
 		}, nil
-	case *semantic.ViewType:
-		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
-		if err != nil {
-			return nil, nil, err
-		}
-		countValue, err := s.emitContainerCountValue(containerPtr, t, "safe.index.count")
-		if err != nil {
-			return nil, nil, err
-		}
-		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
-			ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
-			if err != nil {
-				return nil, nil, err
-			}
-			value, err := s.loadValue(ptr, elemType, "safe.index.value")
-			return value, elemType, err
-		}, nil
 	case *semantic.DArrayViewType:
 		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
@@ -178,23 +161,6 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 				return s.loadArrayIndexValue(arrayPtr, elem, indexValue, "safe.index.value")
 			}, nil
 		case *semantic.DArrayType:
-			containerPtr, _, err := s.emitExpr(expr.Object, objectType)
-			if err != nil {
-				return nil, nil, err
-			}
-			countValue, err := s.emitContainerCountValue(containerPtr, elem, "safe.index.count")
-			if err != nil {
-				return nil, nil, err
-			}
-			return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
-				ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, elem, elem.Elem, indexValue)
-				if err != nil {
-					return nil, nil, err
-				}
-				value, err := s.loadValue(ptr, elemType, "safe.index.value")
-				return value, elemType, err
-			}, nil
-		case *semantic.ViewType:
 			containerPtr, _, err := s.emitExpr(expr.Object, objectType)
 			if err != nil {
 				return nil, nil, err
@@ -421,7 +387,7 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 		return runtimeSliceInfo{
 			helperName:  "arena_da_view_slice",
 			operandType: objectType,
-			resultType:  &semantic.ViewType{Elem: view.Elem},
+			resultType:  &semantic.ViewType{Elem: view.Elem, SurfaceName: "view"},
 			indexType:   usizeType,
 		}, true
 	}
@@ -447,7 +413,7 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 		return runtimeSliceInfo{}, false
 	}
 	if view, ok := ref.Elem.(*semantic.ViewType); ok {
-		return runtimeSliceInfo{helperName: "arena_da_view_slice", operandType: ref.Elem, resultType: &semantic.ViewType{Elem: view.Elem}, indexType: usizeType}, true
+		return runtimeSliceInfo{helperName: "arena_da_view_slice", operandType: ref.Elem, resultType: &semantic.ViewType{Elem: view.Elem, SurfaceName: "view"}, indexType: usizeType}, true
 	}
 	if _, ok := ref.Elem.(*semantic.DStrType); ok {
 		return runtimeSliceInfo{helperName: "ctx_string_view", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true

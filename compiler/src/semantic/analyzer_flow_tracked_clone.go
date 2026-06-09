@@ -121,15 +121,6 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 			return invalidType
 		}
 		return &cloned
-	case *ViewType:
-		cloned := *tt
-		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
-		if IsInvalidType(cloned.Elem) {
-			seen[t] = invalidType
-			return invalidType
-		}
-		return &cloned
 	case *DArrayViewType:
 		cloned := *tt
 		seen[t] = &cloned

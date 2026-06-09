@@ -45,8 +45,6 @@ func (a *Analyzer) containsBorrowedOwnerRefValuesWithSeen(t Type, seen map[Type]
 		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *OptionalType:
 		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Value, seen, depth+1)
-	case *ViewType:
-		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DArrayViewType:
 		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DictType:

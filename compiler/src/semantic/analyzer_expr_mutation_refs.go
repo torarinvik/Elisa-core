@@ -39,8 +39,6 @@ func containsTypeParam(t Type) bool {
 		return containsTypeParam(n.Elem)
 	case *DArrayType:
 		return containsTypeParam(n.Elem)
-	case *ViewType:
-		return containsTypeParam(n.Elem)
 	case *DArrayViewType:
 		return containsTypeParam(n.Elem)
 	case *TupleType:
