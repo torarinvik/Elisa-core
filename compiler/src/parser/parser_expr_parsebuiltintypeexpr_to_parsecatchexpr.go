@@ -619,6 +619,16 @@ func (p *Parser) parseComparison() ast.Expr {
 				left = &ast.UnaryExpr{Position: notToken.Pos, Op: lexer.TOKEN_NOT, Operand: test}
 				continue
 			}
+			if name, ok := p.peekIsBareBindingTarget(); ok {
+				// docs/80: `x is value` with a bare, unqualified, lowercase
+				// identifier that is not a builtin type name is a refutable
+				// binding, not a type test. It reuses the `let value = x`
+				// optional-bind node so the whole optional-binding pipeline
+				// (analysis + scoping + lowering) applies unchanged.
+				p.advance()
+				left = &ast.OptionalBindExpr{Position: op.Pos, Name: name, Value: left}
+				continue
+			}
 			right = p.parseIsTestExpr()
 		} else {
 			right = p.parseAs()
@@ -635,6 +645,42 @@ func (p *Parser) notInMembershipAhead() bool {
 }
 func (p *Parser) parseAs() ast.Expr {
 	return p.parseBitwiseOr()
+}
+
+// isBuiltinBareTypeName mirrors the lowercase builtin type names registered in
+// semantic/analyzer_builtins.go (plus the string views cstr/dstr). A bare
+// `is`-target naming one of these is a TYPE test; any other bare unqualified
+// lowercase identifier is a refutable BINDING (docs/80). Keep in sync with the
+// builtin registration; a missing entry turns an `is <builtin>` type test into a
+// binding and the suite's many `is`-type-test fixtures catch it immediately.
+var isBuiltinBareTypeName = map[string]bool{
+	"void": true, "bool": true, "char": true, "int": true,
+	"i8": true, "i16": true, "i32": true, "i64": true, "isize": true,
+	"u8": true, "u16": true, "u32": true, "u64": true, "usize": true, "uintptr": true,
+	"f32": true, "f64": true, "cstr": true, "dstr": true,
+}
+
+// peekIsBareBindingTarget reports whether the upcoming `is`-target is a bare,
+// unqualified, lowercase, non-builtin identifier — i.e. a refutable binding name
+// (docs/80) rather than a type/variant/struct test. It must NOT be continued by a
+// token that would make it a qualified name, a variant/struct payload, a union
+// alternative, or an alias.
+func (p *Parser) peekIsBareBindingTarget() (string, bool) {
+	if p.peek() != lexer.TOKEN_IDENT {
+		return "", false
+	}
+	name := p.cur().Text
+	if name == "" || name[0] < 'a' || name[0] > 'z' || isBuiltinBareTypeName[name] {
+		return "", false
+	}
+	if p.pos+1 < len(p.tokens) {
+		switch p.tokens[p.pos+1].Kind {
+		case lexer.TOKEN_DOT, lexer.TOKEN_SCOPE, lexer.TOKEN_LPAREN,
+			lexer.TOKEN_LBRACE, lexer.TOKEN_LBRACKET, lexer.TOKEN_PIPE, lexer.TOKEN_AS:
+			return "", false
+		}
+	}
+	return name, true
 }
 func (p *Parser) parseIsTestExpr() ast.Expr {
 	pos := p.cur().Pos
