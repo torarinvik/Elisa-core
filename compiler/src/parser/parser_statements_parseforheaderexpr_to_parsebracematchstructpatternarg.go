@@ -793,6 +793,14 @@ func (p *Parser) parseMatchArms() []ast.MatchArm {
 }
 func (p *Parser) parseMatchArm() []ast.MatchArm {
 	pos := p.cur().Pos
+	// A leading `case` is a common habit from other languages; Elisa match arms are
+	// the pattern itself. Diagnose it once and skip the keyword so the arm (pattern,
+	// colon, body) still parses normally instead of cascading recovery errors.
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "case" &&
+		p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_COLON {
+		p.errorAt(pos, "match arms do not use a `case` keyword; write the pattern directly (e.g. `E.A(v: v):`)")
+		p.advance()
+	}
 	patterns := p.parseTopLevelMatchPatterns()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
