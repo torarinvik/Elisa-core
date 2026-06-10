@@ -1,6 +1,8 @@
 # 80 — Refinement binding unified on `is`
 
-Status: design locked 2026-06-10; implementation staged (Phase A not yet landed).
+Status: design locked 2026-06-10. Phases A (optional unwrap-bind), B (`in store
+is Pattern`), and C (irrefutable-bind diagnostic) landed; Phase D (migrate the
+`if let` / store-`as` sites and retire both spellings) remains.
 
 ## Goal
 

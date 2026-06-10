@@ -52,3 +52,26 @@ def is_optional_binding_test() -> void:
 		}
 	}
 }
+
+// docs/80 Phase C: `x is name` on a non-optional value is an irrefutable bind
+// (the match can never fail); it is rejected with a message naming the `is`
+// form the author wrote, not the internal `let condition`.
+func TestRunCLIIsBindingOnNonOptionalRejected(t *testing.T) {
+	fixturePath := filepath.Join(t.TempDir(), "is_irrefutable_fixture.elisa")
+	src := `def foo(x: i64) -> i64:
+    if x is value:
+        return value + 1
+    return 0
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode == 0 {
+		t.Fatalf("expected irrefutable `is` bind to fail, stdout:\n%s", stdout.String())
+	}
+	combined := stdout.String() + stderr.String()
+	if !strings.Contains(combined, "`is` binding requires an optional or nullable reference") {
+		t.Fatalf("expected the `is`-form irrefutable diagnostic, got:\n%s", combined)
+	}
+}

@@ -626,7 +626,7 @@ func (p *Parser) parseComparison() ast.Expr {
 				// optional-bind node so the whole optional-binding pipeline
 				// (analysis + scoping + lowering) applies unchanged.
 				p.advance()
-				left = &ast.OptionalBindExpr{Position: op.Pos, Name: name, Value: left}
+				left = &ast.OptionalBindExpr{Position: op.Pos, Name: name, Value: left, FromIs: true}
 				continue
 			}
 			right = p.parseIsTestExpr()

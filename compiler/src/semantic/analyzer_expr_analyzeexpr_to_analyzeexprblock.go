@@ -412,7 +412,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 		}
 		if _, ok := a.optionalBindBoundType(n.Value, valueType); !ok {
-			a.errorf(n.Pos(), nullableRefRequirementMessage("let condition", valueType.String()))
+			operation := "let condition"
+			if n.FromIs {
+				// docs/80: `x is name` is a refutable bind; on a non-optional value
+				// the match can never fail, so the bind is meaningless.
+				operation = "`is` binding"
+			}
+			a.errorf(n.Pos(), nullableRefRequirementMessage(operation, valueType.String()))
 			result = invalidType
 			return
 		}

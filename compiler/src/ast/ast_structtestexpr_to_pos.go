@@ -85,6 +85,9 @@ type OptionalBindExpr struct {
 	Position lexer.Pos
 	Name     string
 	Value    Expr
+	// FromIs marks a bind produced by the `x is name` refinement spelling (docs/80)
+	// rather than `let name = x`, so diagnostics can name the form the author wrote.
+	FromIs bool
 }
 type AllocExpr struct {
 	Position  lexer.Pos
