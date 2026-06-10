@@ -289,12 +289,49 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 		a.errorf(expr.Pos(), "error[Set.*] is no longer supported; use error[Set] instead")
 		return invalidType
 	}
-	if len(expr.Tags) == 1 && expr.Tags[0].Tag == "" && !expr.Tags[0].Family {
-		if !expr.HasEllipsis && a.lookupErrorSetParam(expr.Tags[0].SetName) {
-			// `error[R]` where R is a generic error-set parameter: an opaque
-			// placeholder, bound to a concrete set at each call site.
-			return &ErrorSetType{Name: expr.Tags[0].SetName, Param: true}
+	// Partition: bare names that resolve to in-scope error-set generic params
+	// become the set's Params component; everything else is the concrete part.
+	// `error[R]` is the pure opaque placeholder; `error[R, Timeout]` carries
+	// both; `error[R, S]` unions two params (docs/64 Phase 5b follow-up).
+	var paramNames []string
+	concreteExprTags := make([]ast.ErrorTagExpr, 0, len(expr.Tags))
+	seenParams := map[string]bool{}
+	for _, tag := range expr.Tags {
+		if tag.Tag == "" && !tag.Family && a.lookupErrorSetParam(tag.SetName) {
+			if seenParams[tag.SetName] {
+				a.errorf(tag.Position, "duplicate error-set parameter %q in error[...]", tag.SetName)
+				return invalidType
+			}
+			seenParams[tag.SetName] = true
+			paramNames = append(paramNames, tag.SetName)
+			continue
 		}
+		concreteExprTags = append(concreteExprTags, tag)
+	}
+	if len(paramNames) != 0 {
+		if len(concreteExprTags) == 0 {
+			if len(paramNames) == 1 {
+				// `error[R]`: an opaque placeholder, bound at each call site.
+				return &ErrorSetType{Name: paramNames[0], Params: paramNames}
+			}
+			return &ErrorSetType{Name: errorSetNameWithParams("", 0, paramNames), Params: paramNames}
+		}
+		concrete := a.resolveErrorSetExpr(&ast.ErrorSetExpr{Position: expr.Position, Tags: concreteExprTags, HasEllipsis: expr.HasEllipsis})
+		concreteSet, ok := concrete.(*ErrorSetType)
+		if !ok || concreteSet == nil {
+			return invalidType
+		}
+		if concreteSet.HasParams() {
+			a.errorf(expr.Pos(), "internal error: nested error-set params in error[...]")
+			return invalidType
+		}
+		mixed := &ErrorSetType{
+			Tags:     append([]string(nil), concreteSet.Tags...),
+			Payloads: concreteSet.Payloads,
+			Params:   paramNames,
+		}
+		mixed.Name = errorSetNameWithParams(concreteSet.Name, len(mixed.Tags), paramNames)
+		return mixed
 	}
 	// Normalize: a bare `Name` that is not a declared set resolves as a single
 	// variant searched across all error sets (family-qualified on conflict). An
@@ -421,7 +458,7 @@ func (a *Analyzer) findErrorVariantOwners(shortName string) []string {
 	var owners []string
 	for _, t := range a.namedTypes {
 		errSet, ok := t.(*ErrorSetType)
-		if !ok || errSet == nil || errSet.Param {
+		if !ok || errSet == nil || errSet.HasParams() {
 			continue
 		}
 		for _, qtag := range errSet.Tags {

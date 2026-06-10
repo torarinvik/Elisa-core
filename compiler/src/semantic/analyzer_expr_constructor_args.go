@@ -400,9 +400,15 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 	case *ErrorUnionType:
 		if act, ok := actual.(*ErrorUnionType); ok {
 			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
-			if p.Errors != nil && p.Errors.Param && act.Errors != nil {
-				if _, exists := bindings[p.Errors.Name]; !exists {
-					bindings[p.Errors.Name] = act.Errors
+			// A single error-set param binds to whatever the argument's set carries
+			// beyond the pattern's own concrete tags (`error[R, Timeout]` matched
+			// against `error[IoErr, Timeout]` binds R := IoErr). Patterns with two
+			// or more params cannot split an argument set unambiguously, so they
+			// bind nothing here and surface as "cannot infer" at validation.
+			if p.Errors != nil && len(p.Errors.Params) == 1 && act.Errors != nil {
+				name := p.Errors.Params[0]
+				if _, exists := bindings[name]; !exists {
+					bindings[name] = SubtractErrorTags(act.Errors, p.Errors)
 				}
 			}
 			return

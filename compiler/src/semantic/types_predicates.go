@@ -107,12 +107,16 @@ func ErrorSetAssignable(dst, src *ErrorSetType) bool {
 	if dst == nil || src == nil {
 		return dst == src
 	}
-	// A polymorphic error-set parameter is opaque: it is only compatible with the
-	// same-named parameter. Concrete binding happens via collectTypeBindings +
-	// substituteType before assignability is ever checked, so by the time we reach
-	// here a Param on either side means a genuinely unresolved set.
-	if dst.Param || src.Param {
-		return dst.Param && src.Param && dst.Name == src.Name
+	// Polymorphic error-set parameters are opaque: a source param is only
+	// covered by the same-named param on the destination side. Concrete binding
+	// happens via collectTypeBindings + substituteType before assignability is
+	// ever checked, so params reaching here are genuinely unresolved. Concrete
+	// source tags must match the destination's concrete component — an opaque
+	// destination param never absorbs a concrete tag.
+	for _, param := range src.Params {
+		if !errorSetHasParam(dst, param) {
+			return false
+		}
 	}
 	for _, tag := range src.Tags {
 		if _, ok := MatchErrorTag(dst, tag); !ok {
@@ -120,6 +124,18 @@ func ErrorSetAssignable(dst, src *ErrorSetType) bool {
 		}
 	}
 	return true
+}
+
+func errorSetHasParam(t *ErrorSetType, name string) bool {
+	if t == nil {
+		return false
+	}
+	for _, param := range t.Params {
+		if param == name {
+			return true
+		}
+	}
+	return false
 }
 
 func IsBoolType(t Type) bool {

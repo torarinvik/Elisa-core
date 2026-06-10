@@ -70,11 +70,23 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		return t
 	case *semantic.ErrorUnionType:
 		errors := tt.Errors
-		if errors != nil && errors.Param {
-			if mapped, ok := subst[errors.Name]; ok {
-				if set, isSet := mapped.(*semantic.ErrorSetType); isSet {
-					errors = set
+		if errors != nil && errors.HasParams() {
+			resolved := &semantic.ErrorSetType{Name: errors.Name, Tags: append([]string(nil), errors.Tags...), Payloads: errors.Payloads}
+			changed := false
+			var residual []string
+			for _, param := range errors.Params {
+				if mapped, ok := subst[param]; ok {
+					if set, isSet := mapped.(*semantic.ErrorSetType); isSet && set != nil {
+						resolved = semantic.UnionErrorSets(resolved, set)
+						changed = true
+						continue
+					}
 				}
+				residual = append(residual, param)
+			}
+			if changed {
+				resolved.Params = residual
+				errors = resolved
 			}
 		}
 		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst, impls), Errors: errors}

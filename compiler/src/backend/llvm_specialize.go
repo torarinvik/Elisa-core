@@ -379,9 +379,10 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 	case *semantic.ErrorUnionType:
 		if a, ok := actual.(*semantic.ErrorUnionType); ok {
 			collectSpecializationBindings(p.Value, a.Value, bindings)
-			if p.Errors != nil && p.Errors.Param && a.Errors != nil {
-				if _, ok := bindings[p.Errors.Name]; !ok {
-					bindings[p.Errors.Name] = a.Errors
+			if p.Errors != nil && len(p.Errors.Params) == 1 && a.Errors != nil {
+				name := p.Errors.Params[0]
+				if _, ok := bindings[name]; !ok {
+					bindings[name] = semantic.SubtractErrorTags(a.Errors, p.Errors)
 				}
 			}
 		} else {

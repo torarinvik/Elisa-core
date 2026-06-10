@@ -266,6 +266,14 @@ func ErrorSetTagsEqual(a *ErrorSetType, b *ErrorSetType) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
+	if len(a.Params) != len(b.Params) {
+		return false
+	}
+	for i := range a.Params {
+		if a.Params[i] != b.Params[i] {
+			return false
+		}
+	}
 	if len(a.Tags) != len(b.Tags) {
 		return false
 	}
@@ -285,6 +293,106 @@ func ErrorSetTagsEqual(a *ErrorSetType, b *ErrorSetType) bool {
 		}
 	}
 	return true
+}
+
+// errorSetNameWithParams composes a diagnostic name for a set carrying
+// unresolved error-set params: the concrete component's name parts followed by
+// the param names. A param-only singleton keeps its bare name (`R`).
+func errorSetNameWithParams(concreteName string, tagCount int, params []string) string {
+	if tagCount == 0 && len(params) == 1 {
+		return params[0]
+	}
+	inner := ""
+	if tagCount > 0 {
+		inner = concreteName
+		if strings.HasPrefix(inner, "error[") && strings.HasSuffix(inner, "]") {
+			inner = inner[len("error[") : len(inner)-1]
+		}
+	}
+	parts := make([]string, 0, 1+len(params))
+	if inner != "" {
+		parts = append(parts, inner)
+	}
+	parts = append(parts, params...)
+	return "error[" + strings.Join(parts, ", ") + "]"
+}
+
+// UnionErrorSets merges two error sets: concrete tags (deduped, payloads
+// carried over) and unresolved params (deduped). Used when substituting a
+// bound error-set param into a mixed set like `error[R, Timeout]`.
+func UnionErrorSets(a *ErrorSetType, b *ErrorSetType) *ErrorSetType {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	out := &ErrorSetType{
+		Tags:   append([]string(nil), a.Tags...),
+		Params: append([]string(nil), a.Params...),
+	}
+	seenTags := make(map[string]bool, len(a.Tags)+len(b.Tags))
+	for _, tag := range a.Tags {
+		seenTags[tag] = true
+	}
+	for _, tag := range b.Tags {
+		if !seenTags[tag] {
+			seenTags[tag] = true
+			out.Tags = append(out.Tags, tag)
+		}
+	}
+	for _, set := range []*ErrorSetType{a, b} {
+		for _, tag := range set.Tags {
+			if payload := set.Payloads[tag]; len(payload) != 0 {
+				if out.Payloads == nil {
+					out.Payloads = map[string][]Type{}
+				}
+				out.Payloads[tag] = payload
+			}
+		}
+	}
+	seenParams := make(map[string]bool, len(a.Params))
+	for _, param := range a.Params {
+		seenParams[param] = true
+	}
+	for _, param := range b.Params {
+		if !seenParams[param] {
+			seenParams[param] = true
+			out.Params = append(out.Params, param)
+		}
+	}
+	concreteName := a.Name
+	if len(a.Tags) == 0 {
+		concreteName = b.Name
+	} else if len(b.Tags) != 0 && a.Name != b.Name {
+		concreteName = "error[" + strings.Join(out.Tags, ", ") + "]"
+	}
+	out.Name = errorSetNameWithParams(concreteName, len(out.Tags), out.Params)
+	return out
+}
+
+// SubtractErrorTags returns src without the tags present in the concrete
+// component of pattern. Used to bind `R` from `error[R, Timeout]` matched
+// against a concrete set: R gets everything the pattern's own tags don't claim.
+func SubtractErrorTags(src *ErrorSetType, pattern *ErrorSetType) *ErrorSetType {
+	if src == nil || pattern == nil || len(pattern.Tags) == 0 {
+		return src
+	}
+	out := &ErrorSetType{Params: append([]string(nil), src.Params...)}
+	for _, tag := range src.Tags {
+		if _, claimed := MatchErrorTag(pattern, tag); claimed {
+			continue
+		}
+		out.Tags = append(out.Tags, tag)
+		if payload := src.Payloads[tag]; len(payload) != 0 {
+			if out.Payloads == nil {
+				out.Payloads = map[string][]Type{}
+			}
+			out.Payloads[tag] = payload
+		}
+	}
+	out.Name = errorSetNameWithParams("error["+strings.Join(out.Tags, ", ")+"]", len(out.Tags), out.Params)
+	return out
 }
 
 func CanonicalizeErrorSetSelections(familySets map[string]*ErrorSetType, fullFamilies map[string]bool, selectedTags map[string]map[string]bool) *ErrorSetType {

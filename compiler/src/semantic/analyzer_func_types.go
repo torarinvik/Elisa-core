@@ -17,7 +17,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 		if !ok {
 			shadowed, _, ok = a.lookupVisibleType(param.Name)
 		}
-		if errSet, isSet := shadowed.(*ErrorSetType); ok && isSet && errSet != nil && !errSet.Param {
+		if errSet, isSet := shadowed.(*ErrorSetType); ok && isSet && errSet != nil && !errSet.HasParams() {
 			a.warnOncef(param.Position, "errorset parameter %q on %q shadows the declared error set %q; every `error[%s]` in this signature means the parameter, not the set — rename the parameter", param.Name, name, param.Name, param.Name)
 		}
 	}

@@ -533,6 +533,9 @@ func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 		a.bindCatchArmPayload(armScope, arm, unionType.Errors, matchedTag)
 		mergeArm(arm.Position, arm.Body, armScope)
 	}
+	if !hasErrorBinding && unionType.Errors.HasParams() {
+		a.errorf(expr.Pos(), "non-exhaustive catch over %s; the error-set parameter component requires a catch-all `error e:` arm", ErrorSetDiagnosticName(unionType.Errors))
+	}
 	if !hasErrorBinding && len(covered) != len(unionType.Errors.Tags) {
 		missing := make([]string, 0, len(unionType.Errors.Tags))
 		for _, tag := range unionType.Errors.Tags {

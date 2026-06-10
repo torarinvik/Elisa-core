@@ -89,11 +89,17 @@ type ErrorSetType struct {
 	Name     string
 	Tags     []string
 	Payloads map[string][]Type
-	// Param marks this as a polymorphic error-set parameter placeholder (e.g. the
-	// `R` in `def f[errorset R](...) -> T error[R]`). A Param set is opaque inside
-	// the function body and is bound to a concrete error set at each call site.
-	Param bool
+	// Params are unresolved error-set generic parameters unioned into this set
+	// (the `R` in `def f[errorset R](...) -> T error[R]`, docs/64 Phase 5b). A
+	// set with only Params is the opaque placeholder; a mixed set such as
+	// `error[R, Timeout]` carries concrete Tags alongside. Params are opaque
+	// inside the function body and bound to concrete sets at each call site.
+	Params []string
 }
+
+// HasParams reports whether the set still carries unresolved error-set
+// generic parameters (it is not fully concrete).
+func (t *ErrorSetType) HasParams() bool { return t != nil && len(t.Params) > 0 }
 
 type ErrorUnionType struct {
 	Value  Type

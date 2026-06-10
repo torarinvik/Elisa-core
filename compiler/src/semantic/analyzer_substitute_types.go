@@ -73,14 +73,7 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if IsInvalidType(value) {
 			return invalidType
 		}
-		errors := n.Errors
-		if errors != nil && errors.Param {
-			if resolved, ok := bindings[errors.Name]; ok {
-				if set, isSet := resolved.(*ErrorSetType); isSet {
-					errors = set
-				}
-			}
-		}
+		errors := substituteErrorSetParams(n.Errors, bindings)
 		return &ErrorUnionType{Value: value, Errors: errors}
 	case *OptionalType:
 		value := a.substituteTypeWithDepth(n.Value, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
@@ -261,4 +254,38 @@ func (a *Analyzer) substituteShape(shape Shape, bindings map[string]Shape) Shape
 		return resolved
 	}
 	return shape
+}
+
+// substituteErrorSetParams resolves the unresolved error-set params of a set
+// against the call-site bindings, unioning each bound set into the concrete
+// component. Unbound params stay symbolic; a fully bound set comes out concrete.
+func substituteErrorSetParams(errors *ErrorSetType, bindings map[string]Type) *ErrorSetType {
+	if errors == nil || !errors.HasParams() {
+		return errors
+	}
+	resolved := &ErrorSetType{
+		Name:     errors.Name,
+		Tags:     append([]string(nil), errors.Tags...),
+		Payloads: errors.Payloads,
+	}
+	changed := false
+	var residual []string
+	for _, param := range errors.Params {
+		if bound, ok := bindings[param]; ok {
+			if set, isSet := bound.(*ErrorSetType); isSet && set != nil {
+				resolved = UnionErrorSets(resolved, set)
+				changed = true
+				continue
+			}
+		}
+		residual = append(residual, param)
+	}
+	if !changed {
+		return errors
+	}
+	resolved.Params = residual
+	if len(residual) != 0 || len(errors.Tags) != 0 {
+		resolved.Name = errorSetNameWithParams(resolved.Name, len(resolved.Tags), residual)
+	}
+	return resolved
 }

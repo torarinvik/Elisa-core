@@ -128,6 +128,7 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 	case *ErrorSetType:
 		appendKeyTag(b, "errorset")
 		appendKeyStringSlice(b, tt.Tags)
+		appendKeyStringSlice(b, tt.Params)
 	case *ErrorUnionType:
 		appendKeyTag(b, "errorunion")
 		if !appendTypeIDKey(b, tt.Value, active, nextCycleID) || !appendTypeIDKey(b, tt.Errors, active, nextCycleID) {

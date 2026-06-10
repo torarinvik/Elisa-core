@@ -9,26 +9,34 @@ import (
 // follow-up). Each test asserts the analyzer's CURRENT behavior so the gap is
 // visible and intentional; the phase that closes a gap flips its assertion.
 
-// GAP 1 (symbolic sets): a param cannot be unioned with anything — neither a
-// concrete set (`error[R, Timeout]`) nor another param (`error[R, S]`). Both
-// forms fall through to variant lookup and fail. Blocks `pair`-style
-// combinators and combinators that add their own failure mode.
-func TestGapErrorSetParamUnionWithConcreteRejected(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_union_concrete.elisa", `
+// CLOSED GAP 1 (symbolic sets): a param unions with concrete sets
+// (`error[R, Timeout]`) and with other params (`error[R, S]`), so combinators
+// can add their own failure mode and `pair`-style combinators are typeable.
+func TestErrorSetParamUnionWithConcrete(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "union_concrete.elisa", `
 error Timeout:
     Expired
 
-def retry[errorset R](f: func() -> i64 error[R]) -> i64 error[R, Timeout]:
-    return try f()
+error IoErr:
+    Bad
+
+extern reader() -> i64 error[IoErr]
+
+def giveUp[errorset R](f: func() -> i64 error[R]) -> i64 error[R, Timeout]:
+    v: i64 = try f() else e:
+        raise Timeout.Expired
+    return v
+
+def use() -> i64 error[IoErr, Timeout]:
+    return giveUp(reader)
 `)
-	all := allDiagnostics(result)
-	if !strings.Contains(all, `unknown error set or variant "R"`) {
-		t.Fatalf("gap moved: error[R, Timeout] no longer rejected as unknown variant; update Phase 1 plan/tests. got:\n%s", all)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("error[R, Timeout] combinator should type-check end to end, got:\n%s", all)
 	}
 }
 
-func TestGapErrorSetParamUnionWithParamRejected(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_union_params.elisa", `
+func TestErrorSetParamUnionWithParam(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "union_params.elisa", `
 error IoErr:
     Bad
 
@@ -40,16 +48,68 @@ extern fetch() -> i64 error[NetErr]
 
 def pair[errorset R, errorset S](f: func() -> i64 error[R], g: func() -> i64 error[S]) -> i64 error[R, S]:
     return (try f()) + (try g())
+
+def use() -> i64 error[IoErr, NetErr]:
+    return pair(reader, fetch)
 `)
-	all := allDiagnostics(result)
-	if !strings.Contains(all, `unknown error set or variant "R"`) {
-		t.Fatalf("gap moved: error[R, S] no longer rejected as unknown variant. got:\n%s", all)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("error[R, S] return union should type-check, got:\n%s", all)
 	}
 }
 
-// GAP 1b: raising a concrete tag inside an `[errorset R]` body is rejected —
-// the function cannot declare `error[R, Timeout]` (gap 1), and raising into a
-// bare `error[R]` is (correctly) refused since R is opaque.
+// Overlap subtraction: when the pattern is `error[R, Timeout]` and the
+// argument raises `error[IoErr, Timeout]`, R binds to IoErr only — the
+// pattern's own concrete tags are not double-counted into R.
+func TestErrorSetParamMixedPatternBindsBySubtraction(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "union_subtract.elisa", `
+error IoErr:
+    Bad
+
+error Timeout:
+    Expired
+
+extern flaky() -> i64 error[IoErr, Timeout]
+
+def giveUp[errorset R](f: func() -> i64 error[R, Timeout]) -> i64 error[R, Timeout]:
+    return try f()
+
+def use() -> i64 error[IoErr, Timeout]:
+    return giveUp(flaky)
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("overlapping mixed pattern should bind R := IoErr via subtraction, got:\n%s", all)
+	}
+}
+
+// An unbound R in a mixed return still surfaces as "cannot infer", and a catch
+// over a set with an unresolved param component demands a catch-all arm.
+func TestErrorSetParamMixedReturnUnboundStillDiagnosed(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "union_unbound.elisa", `
+error IoErr:
+    Bad
+
+def mk[errorset R]() -> i64 error[R, IoErr]:
+    return 1
+
+def use() -> i64:
+    catch mk():
+        n:
+            return n
+        IoErr.Bad:
+            return 1
+`)
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `cannot infer error-set parameter "R"`) {
+		t.Fatalf("expected unbound R in mixed return to be diagnosed, got:\n%s", all)
+	}
+	if !strings.Contains(all, "requires a catch-all") {
+		t.Fatalf("expected the param-component exhaustiveness guard, got:\n%s", all)
+	}
+}
+
+// Raising a concrete tag into a BARE `error[R]` return is (correctly) refused
+// — R is opaque; declaring `error[R, Timeout]` is the way to add an own
+// failure mode (see TestErrorSetParamUnionWithConcrete).
 func TestGapErrorSetParamBodyCannotRaiseConcrete(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_raise_concrete.elisa", `
 error Timeout:
@@ -127,9 +187,10 @@ def use() -> i64:
 	}
 }
 
-// GAP 3 (catch over opaque R): a catch binder arm cannot match a param set —
-// while the equivalent `try ... else e: raise e` recovery form WORKS. The two
-// surfaces should agree once the catch arm learns about param sets.
+// A BARE binder arm is a variant-name arm, not a catch-all — it cannot match
+// a param set (nor a concrete set). The catch-all spelling is `error e:`,
+// which matches and re-raises an opaque param-set error (next test). Remaining
+// polish: this diagnostic could hint at `error e:`.
 func TestGapCatchBinderArmCannotMatchParamSet(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_catch_param.elisa", `
 def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
@@ -142,6 +203,20 @@ def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 	all := allDiagnostics(result)
 	if !strings.Contains(all, "does not match R") {
 		t.Fatalf("gap moved: catch binder arm over a param set no longer rejected. got:\n%s", all)
+	}
+}
+
+func TestCatchAllErrorBindingMatchesParamSet(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "gap_catch_all_param.elisa", `
+def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    catch f():
+        n:
+            return n
+        error e:
+            raise e
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("`error e:` catch-all should match and re-raise an opaque param-set error, got:\n%s", all)
 	}
 }
 
