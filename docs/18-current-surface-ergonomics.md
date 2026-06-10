@@ -1621,7 +1621,7 @@ Current rules:
 - call forwarding `..` copies same-named value bindings from the current scope into matching parameters
 - `..` may appear at most once, must appear before other explicit call arguments, and only combines with named explicit arguments
 - forwarding is currently rejected for variadic callees
-- parameter defaults are not accepted in implicit bundle declarations, implicit bundle signatures, or export wrapper signatures
+- parameter defaults are not accepted in export wrapper signatures
 
 If a shorthand named argument such as `missing:` has no in-scope value named `missing`, semantic analysis reports that directly.
 
@@ -1999,82 +1999,15 @@ Current rules:
 - a callback that supplies nothing to bind reports `cannot infer permission/error-set parameter`
 - monomorphization resolves the parameters to concrete sets per instantiation; effects are erased and error unions reach codegen as values, so there is no runtime cost beyond the existing error-union representation
 
-## Named bundles
+## Named bundles (removed)
 
-Bundles are the canonical model for named groups of inputs. `implicit` bundles are ambient dependencies, while `explicit` bundles are reusable named argument packs.
-
-```elisa
-bundle ParseCtx implicit:
-    parser: i64
-    alloc: i64
-
-bundle Pair explicit:
-    left: i64
-    right: i64 = 7
-
-def inner() with ParseCtx -> i64:
-    return parser + alloc
-
-def add(use Pair) -> i64:
-    return left + right
-
-def outer() with ParseCtx -> i64:
-    return inner()
-
-def drive(width: i64) -> i64:
-    parser: i64 = 7
-    alloc: i64 = 9
-    with args(use Pair(left:), width:):
-        return add(use Pair(right: 5, left:), right: width) + inner() with ParseCtx(..)
-
-def build(left: i64) -> i64:
-    args LocalPair:
-        left: i64 = left
-        right: i64 = 9
-    return add(use LocalPair)
-```
-
-Implicit bundle values have two call-site surfaces:
-
-```elisa
-with ParseCtx(.., alloc = override_alloc):
-    return inner()
-
-return inner() with ParseCtx(.., alloc = override_alloc)
-```
-
-Current rules:
-
-- `bundle Name implicit:` declares an ambient dependency bundle
-- `bundle Name explicit:` declares a reusable top-level explicit argument pack
-- `args Name:` declares a local compile-time-only named argument pack inside a block
-- legacy `context Name:` and top-level `params Name:` still parse, but the formatter emits canonical `bundle` declarations; top-level `params Name:` is deprecated in favor of `bundle Name explicit:`
-- legacy local `params Name:`, `parameters Name:`, and `bundle Name explicit:` still parse with deprecation diagnostics; use `args Name:`
-- `def f(...) with Name -> T` makes implicit bundle fields visible by field name inside the function body
-- `def f(use Name)` expands an explicit bundle into the function's explicit parameter set
-- `call(use Name(...), other: ...)` applies an explicit bundle at a call site
-- `call(use Name)` is the canonical empty bundle application; legacy `use Name()` still parses with a deprecation diagnostic
-- `with args(...)` installs ambient explicit arguments for nested calls inside a block
-- calls auto-forward when the caller already has the same implicit context in scope
-- `with Name(..)` spreads same-named ambient values into the bundle, and explicit overrides win over the spread values
-- calls with implicit parameters also fall back to same-named in-scope values, which lets generated parser functions with an `alloc` parameter call helpers declared `with AllocCtx` without spelling the allocator repeatedly
-- the implicit bundle surface works as a statement block and as a trailing call bundle
-- implicit bundle fields do not accept parameter defaults
-- explicit bundle fields may declare defaults
-
-Current v1 restrictions:
-
-- exported wrappers must not target functions with implicit parameters
-- `__cast__` hooks must not declare implicit parameters
-
-Explicit bundle call rules:
-
-- pack members participate in the same named-argument resolution as ordinary explicit parameters
-- shorthand forms like `left:` work inside pack application just like ordinary named calls
-- explicit named arguments outside the pack may override values supplied by pack defaults or ambient `with args(...)` state
-- ambient args are compile-time call-resolution sugar, not runtime objects
-- top-level explicit bundle declarations are compile-time only and are ignored by code generation when emitting top-level declarations
-- local explicit bundles are visible only within the block that declares them, which makes them useful for parser/compiler helper packs without leaking names across the whole file
+The param-aggregation family — `bundle Name implicit/explicit:`, `context Name:`, top-level and
+local `params`/`parameters`/`args` packs, signature `def f(...) with Ctx`, `def f(use Pack)`,
+call-site `use Pack(...)` / `f(...) with x = v`, the `with name = ...:` scope statement, and
+`with args(...)` ambient-argument scopes — has been removed. There is one way to pass arguments:
+ordinary parameters. Group recurring arguments with a plain `struct` and pass it explicitly.
+(`with arena ...:` statements, fold `... with acc`, and query `... with <owner>` are unrelated
+features and remain.)
 
 ## Brace destructuring, field punning, and record updates
 
