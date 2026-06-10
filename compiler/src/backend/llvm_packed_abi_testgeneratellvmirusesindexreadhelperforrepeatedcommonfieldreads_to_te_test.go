@@ -189,7 +189,7 @@ def fold_child_common_frozen() -> int:
 	child: Expr = new[store] Expr.Int(span: 5, value: 7)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: child)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	if node in frozen as Expr.Wrap(child: child_alias):
+	if node in frozen is Expr.Wrap(child: child_alias):
 		out: int = child_alias.span + child_alias.span
 		destroy scratch
 		return out

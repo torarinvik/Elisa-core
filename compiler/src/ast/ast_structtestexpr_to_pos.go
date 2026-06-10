@@ -379,11 +379,10 @@ type ParallelForStmt struct {
 	Body      []Stmt
 }
 type MatchStmt struct {
-	Position                       lexer.Pos
-	Value                          Expr
-	Store                          Expr
-	Arms                           []MatchArm
-	DeprecatedIfStorePatternBinder bool
+	Position lexer.Pos
+	Value    Expr
+	Store    Expr
+	Arms     []MatchArm
 }
 type ExpectPatternStmt struct {
 	Position lexer.Pos

@@ -48,12 +48,12 @@ func TestGetSlicePropagationRequiresOptionalReturn(t *testing.T) {
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 }
 
-// `if let s = arr[a:b]:` is a bounds-checked slice binding: it typechecks
+// `if arr[a:b] is s:` is a bounds-checked slice binding: it typechecks
 // without an unchecked-slice grant, and inside the block the bounded view's
 // static length makes constant inner indexing zero-cost.
 func TestIfLetSliceBindsBoundedViewAndProvesInnerIndex(t *testing.T) {
 	analyzeFunctionAnalysisTestSourceWithOptions(t, "iflet_slice_ok.elisa", `def f(xs: darray[i32]&) -> i32:
-    if let s = xs[0:3]:
+    if xs[0:3] is s:
         return s[0] + s[1] + s[2]
     else:
         return -1
@@ -63,7 +63,7 @@ func TestIfLetSliceBindsBoundedViewAndProvesInnerIndex(t *testing.T) {
 // A bounded view over a MUTABLE source is writable: `s[i] <- v` is allowed.
 func TestMutableBoundedViewAllowsWriteFromMutableSource(t *testing.T) {
 	analyzeFunctionAnalysisTestSourceWithOptions(t, "mut_view_ok.elisa", `def f(xs: mutable darray[i32]&) -> void:
-    if let s = xs[0:3]:
+    if xs[0:3] is s:
         s[1] <- 25
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 }
@@ -72,7 +72,7 @@ func TestMutableBoundedViewAllowsWriteFromMutableSource(t *testing.T) {
 // be rejected (closes the prior view-mutation soundness hole).
 func TestBoundedViewRejectsWriteFromImmutableSource(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "mut_view_bad.elisa", `def f(xs: darray[i32]&) -> void:
-    if let s = xs[0:3]:
+    if xs[0:3] is s:
         s[1] <- 25
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	if !strings.Contains(allDiagnostics(result), "cannot mutate through readonly ref") {

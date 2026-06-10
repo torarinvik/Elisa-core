@@ -373,10 +373,6 @@ type ifClause struct {
 	Patterns         []ast.MatchPattern
 	OptionalBindings []optionalReturnWithBinding
 	Body             []ast.Stmt
-	// StoreBinderDeprecated marks a store-pattern clause written with the legacy
-	// `value in store as Pattern` spelling (vs the modern `value in store is
-	// Pattern`), so only the legacy form emits the deprecation diagnostic.
-	StoreBinderDeprecated bool
 }
 
 func (p *Parser) parseBranchHint() ast.BranchHint {
@@ -451,17 +447,17 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 			}
 		}
 		// Parse the store with `is` suppressed so `value in store is Pattern`
-		// keeps the trailing `is` for the store-pattern clause (docs/80 Phase B);
-		// the legacy `value in store as Pattern` spelling still works and is the
-		// only one that carries the deprecation.
+		// keeps the trailing `is` for the store-pattern clause (docs/80 Phase B).
 		store := p.withIsComparisonDisabled(p.parseExpr)
-		usedAs := p.peek() == lexer.TOKEN_AS
+		if p.peek() == lexer.TOKEN_AS {
+			p.errorf("`value in store as Pattern` is no longer supported; use `value in store is Pattern:` instead")
+		}
 		if p.match(lexer.TOKEN_AS) || p.match(lexer.TOKEN_IS) {
 			patterns := p.parseTopLevelMatchPatterns()
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()
 			body := p.parseBlock()
-			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Patterns: patterns, Body: body, StoreBinderDeprecated: usedAs}
+			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Patterns: patterns, Body: body}
 		}
 		p.pos = headStart
 		cond := p.parseExpr()
@@ -474,13 +470,7 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 	return ifClause{Position: pos, Hint: hint, Cond: head, Body: body}
 }
 func (p *Parser) parseIfLetClause(pos lexer.Pos, hint ast.BranchHint, isElif bool) ifClause {
-	if hint != ast.BranchHintNone {
-		if isElif {
-			p.errorf("elif likely/unlikely hint cannot be combined with optional binders")
-		} else {
-			p.errorf("if likely/unlikely hint cannot be combined with optional binders")
-		}
-	}
+	p.errorf("`if let` is no longer supported; use `if EXPR is NAME:` instead (e.g. `if v is value:`)")
 	p.expectIdentText("let")
 	bindings := make([]optionalReturnWithBinding, 0, 2)
 	for {

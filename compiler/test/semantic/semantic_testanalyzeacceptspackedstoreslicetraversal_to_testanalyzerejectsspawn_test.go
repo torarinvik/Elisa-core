@@ -25,7 +25,7 @@ def walk(owner: Arena) -> int:
 	index: mutable usize = 0
 	while index < chunk.len:
 		node: Expr = chunk[index]
-		if node in frozen as Expr.Int(value: value):
+		if node in frozen is Expr.Int(value: value):
 			total <- total + value + node.span
 		index <- index + 1
 	return total
@@ -174,7 +174,7 @@ def visit(owner: Arena) -> int:
 		frozen: Expr.Store[Frozen] = freeze(move store)
 		pool workers(2):
 			parallel for node in frozen:
-				if node in frozen as Expr.Int(value: value):
+				if node in frozen is Expr.Int(value: value):
 					_ = value + node.span
 		return 0
 `

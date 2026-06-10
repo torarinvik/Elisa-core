@@ -395,11 +395,11 @@ def json_parse_number_f32_value(source: u8&, source_offset: usize, source_len: u
     parsed: f64 = try json_parse_number_f64_value(source, source_offset, source_len)
     return parsed.f32()
 def json_ast_text_lexeme(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> JsonLexemeResult:
-    if node in store as JsonNode.Text(source_offset: off):
+    if node in store is JsonNode.Text(source_offset: off):
         return json_parse_string_lexeme_at(source, source_len, off)
     return json_invalid_lexeme()
 def json_ast_number_lexeme(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> JsonLexemeResult:
-    if node in store as JsonNode.Num(source_offset: off):
+    if node in store is JsonNode.Num(source_offset: off):
         return json_parse_number_lexeme_at(source, source_len, off)
     return json_invalid_lexeme()
 def json_parse_number_value(source: u8&, source_offset: usize, source_len: usize) -> JsonNumberValue:

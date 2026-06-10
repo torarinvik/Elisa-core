@@ -29,7 +29,7 @@ def total(seed: i64) -> i64:
     items: array[Small, 3] = [Small.Int(1), make_node(seed), Small.Done]
     maybe: Small? = Small.Pair(2, 3)
     total: i64 = score(items[0]) + score(items[1]) + score(items[2])
-    if let node = maybe:
+    if maybe is node:
         total = total + score(node)
     return total
 `

@@ -491,12 +491,12 @@ func TestGenerateLLVMIRLowersVariantAndLetConditionBindings(t *testing.T) {
 
 def score(node: Expr, maybe: i64?, enabled: bool) -> i64:
 	guard enabled else return 0
-	if let value = maybe and node is Expr.Pair(left, right):
+	if maybe is value and node is Expr.Pair(left, right):
 		return value + left + right
 	return 0
 
 def fallback(maybe: i64?) -> i64:
-	if let value = maybe:
+	if maybe is value:
 		return value
 	return 0
 `
@@ -525,7 +525,7 @@ tree Tiny:
 
 def score(stmt: Tiny.Stmt) -> i64:
 	if stmt is Tiny.Stmt.MaybeStep(step):
-		if let step_expr = step:
+		if step is step_expr:
 			if step_expr is Tiny.Expr.IntegerLit(value):
 				return value
 	return 0
@@ -723,7 +723,7 @@ def eval(node: Lua.Expr) -> i64:
 // and must resolve through the backend type resolver — the asymmetry with bare tree variants
 // (`Lua.Expr.Binary`) is gone; packed enums get the same bare-variant surface.
 func TestGenerateLLVMIRResolvesBarePackedVariantWitnessType(t *testing.T) {
-	src := "packed enum Expr:\n\tcommon:\n\t\tspan: int\n\tLit(value: int)\n\tAdd(left: Expr, right: Expr)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n\tif node in store as Expr.Lit(value: value):\n\t\tlit: Expr.Lit = node\n\t\treturn value + lit.span\n\treturn 0\n"
+	src := "packed enum Expr:\n\tcommon:\n\t\tspan: int\n\tLit(value: int)\n\tAdd(left: Expr, right: Expr)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n\tif node in store is Expr.Lit(value: value):\n\t\tlit: Expr.Lit = node\n\t\treturn value + lit.span\n\treturn 0\n"
 	result := parseAndAnalyzeBackendTest(t, "backend_bare_packed_variant.elisa", src)
 	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
 		t.Fatalf("expected bare packed-variant witness type to lower, got: %v", err)

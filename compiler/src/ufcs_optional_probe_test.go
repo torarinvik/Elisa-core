@@ -83,7 +83,7 @@ def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
     return counter.value + delta
 
 def read(maybe_counter: Counter&?) -> i64:
-    if let scored = maybe_counter?.score_ref(2):
+    if maybe_counter?.score_ref(2) is scored:
         return scored
     return 0
 
@@ -110,7 +110,7 @@ func TestRunCLICompilesOptionalTransformCallProbe(t *testing.T) {
     return value + 2
 
 def read(maybe_value: i64?) -> i64:
-    if let value = maybe_value?.(bump):
+    if maybe_value?.(bump) is value:
         return value
     return 0
 
@@ -140,7 +140,7 @@ def adjust(self: Checker&, value: i64) -> i64:
     return value + self.delta
 
 def read(self: Checker&, maybe_value: i64?) -> i64:
-    if let value = maybe_value?.(self.adjust):
+    if maybe_value?.(self.adjust) is value:
         return value
     return 0
 
@@ -166,7 +166,7 @@ func TestRunCLICompilesOptionalFieldProbe(t *testing.T) {
     value: i64
 
 def read(maybe_counter: Counter?) -> i64:
-    if let value = maybe_counter?.value:
+    if maybe_counter?.value is value:
         return value
     return 0
 
@@ -209,7 +209,7 @@ func TestRunCLICompilesOptionalAssignProbe(t *testing.T) {
 
 def write(maybe_counter: mutable Counter&?) -> i64:
     maybe_counter?.value ?= 7
-    if let value = maybe_counter?.value:
+    if maybe_counter?.value is value:
         return value
     return 0
 

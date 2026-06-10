@@ -143,28 +143,28 @@ func TestParseVariantIsConditionWithoutPayloadWithAlias(t *testing.T) {
 		t.Fatalf("expected aliased type target, got %T %#v", alias.Target, alias.Target)
 	}
 }
-func TestParseIfLetCondition(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep(maybe: i64?) -> i64:\n    if let value = maybe and value > 0:\n        return value\n    return 0\n")
+func TestParseIsBindingConditionWithAndGuard(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(maybe: i64?) -> i64:\n    if maybe is value and value > 0:\n        return value\n    return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[0].(*ast.FuncDecl)
 	ifStmt := decl.Body[0].(*ast.IfStmt)
-	letExpr, ok := ifStmt.Cond.(*ast.OptionalBindExpr)
-	if !ok || letExpr.Name != "value" {
-		t.Fatalf("expected let-bind condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
+	and, ok := ifStmt.Cond.(*ast.BinaryExpr)
+	if !ok || and.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected and-expr at top level, got %T %#v", ifStmt.Cond, ifStmt.Cond)
 	}
-	guard, ok := ifStmt.Then[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected let tail condition to lower to nested if, got %T", ifStmt.Then[0])
+	bind, ok := and.Left.(*ast.OptionalBindExpr)
+	if !ok || bind.Name != "value" || !bind.FromIs {
+		t.Fatalf("expected is-bind left of and, got %T %#v", and.Left, and.Left)
 	}
-	if cond, ok := guard.Cond.(*ast.BinaryExpr); !ok || cond.Op != lexer.TOKEN_GT {
-		t.Fatalf("expected tail condition, got %T %#v", guard.Cond, guard.Cond)
+	if guard, ok := and.Right.(*ast.BinaryExpr); !ok || guard.Op != lexer.TOKEN_GT {
+		t.Fatalf("expected > guard right of and, got %T %#v", and.Right, and.Right)
 	}
 }
-func TestParseIfLetMultipleBindingsLowersToNestedIfs(t *testing.T) {
+func TestParseMultipleIsBindingsAsAndChain(t *testing.T) {
 	file, errs := parseSourceFile(t, `def keep(lower: i64?, upper: i64?) -> void:
-    if let actual_lower = lower, actual_upper = upper:
+    if lower is actual_lower and upper is actual_upper:
         actual_lower > actual_upper then:
             return
         return
@@ -175,37 +175,24 @@ func TestParseIfLetMultipleBindingsLowersToNestedIfs(t *testing.T) {
 	decl := file.Decls[0].(*ast.FuncDecl)
 	outer, ok := decl.Body[0].(*ast.IfStmt)
 	if !ok {
-		t.Fatalf("expected outer optional bind if, got %T", decl.Body[0])
+		t.Fatalf("expected if stmt, got %T", decl.Body[0])
 	}
-	outerBind, ok := outer.Cond.(*ast.OptionalBindExpr)
-	if !ok || outerBind.Name != "actual_lower" {
-		t.Fatalf("expected actual_lower optional bind, got %T %#v", outer.Cond, outer.Cond)
+	and, ok := outer.Cond.(*ast.BinaryExpr)
+	if !ok || and.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected and-expr condition, got %T %#v", outer.Cond, outer.Cond)
 	}
-	inner, ok := outer.Then[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected nested optional bind if, got %T", outer.Then[0])
+	left, ok := and.Left.(*ast.OptionalBindExpr)
+	if !ok || left.Name != "actual_lower" {
+		t.Fatalf("expected actual_lower bind left of and, got %T %#v", and.Left, and.Left)
 	}
-	innerBind, ok := inner.Cond.(*ast.OptionalBindExpr)
-	if !ok || innerBind.Name != "actual_upper" {
-		t.Fatalf("expected actual_upper optional bind, got %T %#v", inner.Cond, inner.Cond)
-	}
-	bodyWrapper, ok := inner.Then[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected multi-statement body wrapper, got %T", inner.Then[0])
-	}
-	guard, ok := bodyWrapper.Then[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected condition then block to lower to if, got %T", bodyWrapper.Then[0])
-	}
-	if _, ok := guard.Cond.(*ast.BinaryExpr); !ok {
-		t.Fatalf("expected condition then binary condition, got %T %#v", guard.Cond, guard.Cond)
+	right, ok := and.Right.(*ast.OptionalBindExpr)
+	if !ok || right.Name != "actual_upper" {
+		t.Fatalf("expected actual_upper bind right of and, got %T %#v", and.Right, and.Right)
 	}
 }
-func TestParseIfLetMultipleBindingsMayWrapLines(t *testing.T) {
+func TestParseThreeIsBindingsAsAndChain(t *testing.T) {
 	file, errs := parseSourceFile(t, `def keep(lower: i64?, upper: i64?, value: i64?) -> void:
-    if let actual_lower = lower,
-           actual_upper = upper,
-           actual_value = value:
+    if lower is actual_lower and upper is actual_upper and value is actual_value:
         return
 `)
 	if len(errs) != 0 {
@@ -214,32 +201,22 @@ func TestParseIfLetMultipleBindingsMayWrapLines(t *testing.T) {
 	decl := file.Decls[0].(*ast.FuncDecl)
 	outer, ok := decl.Body[0].(*ast.IfStmt)
 	if !ok {
-		t.Fatalf("expected outer optional bind if, got %T", decl.Body[0])
+		t.Fatalf("expected if stmt, got %T", decl.Body[0])
 	}
-	if bind, ok := outer.Cond.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_lower" {
-		t.Fatalf("expected actual_lower optional bind, got %T %#v", outer.Cond, outer.Cond)
+	// left-associative: (lower is actual_lower and upper is actual_upper) and value is actual_value
+	outerAnd, ok := outer.Cond.(*ast.BinaryExpr)
+	if !ok || outerAnd.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected and-expr, got %T %#v", outer.Cond, outer.Cond)
 	}
-	second, ok := outer.Then[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected second optional bind if, got %T", outer.Then[0])
-	}
-	if bind, ok := second.Cond.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_upper" {
-		t.Fatalf("expected actual_upper optional bind, got %T %#v", second.Cond, second.Cond)
-	}
-	third, ok := second.Then[0].(*ast.IfStmt)
-	if !ok {
-		t.Fatalf("expected third optional bind if, got %T", second.Then[0])
-	}
-	if bind, ok := third.Cond.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_value" {
-		t.Fatalf("expected actual_value optional bind, got %T %#v", third.Cond, third.Cond)
+	if bind, ok := outerAnd.Right.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_value" {
+		t.Fatalf("expected actual_value bind on right, got %T %#v", outerAnd.Right, outerAnd.Right)
 	}
 }
-func TestParseIfLetWrappedBindingsCanHaveElifLet(t *testing.T) {
+func TestParseIsBindingWithElifIsBinding(t *testing.T) {
 	file, errs := parseSourceFile(t, `def keep(lower: i64?, upper: i64?, fallback: i64?) -> void:
-    if let actual_lower = lower,
-           actual_upper = upper:
+    if lower is actual_lower and upper is actual_upper:
         return
-    elif let actual_fallback = fallback:
+    elif fallback is actual_fallback:
         return
 `)
 	if len(errs) != 0 {
@@ -248,14 +225,20 @@ func TestParseIfLetWrappedBindingsCanHaveElifLet(t *testing.T) {
 	decl := file.Decls[0].(*ast.FuncDecl)
 	outer, ok := decl.Body[0].(*ast.IfStmt)
 	if !ok {
-		t.Fatalf("expected outer optional bind if, got %T", decl.Body[0])
+		t.Fatalf("expected outer if stmt, got %T", decl.Body[0])
 	}
 	elifBranch, ok := outer.Else[0].(*ast.IfStmt)
 	if !ok {
-		t.Fatalf("expected failed first binding to branch to elif optional bind, got %T", outer.Else[0])
+		t.Fatalf("expected elif branch, got %T", outer.Else[0])
 	}
 	if bind, ok := elifBranch.Cond.(*ast.OptionalBindExpr); !ok || bind.Name != "actual_fallback" {
-		t.Fatalf("expected actual_fallback optional bind, got %T %#v", elifBranch.Cond, elifBranch.Cond)
+		t.Fatalf("expected actual_fallback bind, got %T %#v", elifBranch.Cond, elifBranch.Cond)
+	}
+}
+func TestParseIfLetRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, "def keep(maybe: i64?) -> i64:\n    if let value = maybe:\n        return value\n    return 0\n")
+	if !strings.Contains(strings.Join(errs, "\n"), "`if let` is no longer supported") {
+		t.Fatalf("expected `if let` rejection, got: %v", errs)
 	}
 }
 
@@ -431,7 +414,7 @@ func TestParseTypedStateIsConditionAndExplicitStatefulStructLiteral(t *testing.T
 	}
 }
 func TestParsePackedIfPayloadDestructureStatement(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Add(left: int, right: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Add(left: lhs, right: rhs):\n        return lhs + rhs + node.span\n    return 0\n")
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Add(left: int, right: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store is Expr.Add(left: lhs, right: rhs):\n        return lhs + rhs + node.span\n    return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

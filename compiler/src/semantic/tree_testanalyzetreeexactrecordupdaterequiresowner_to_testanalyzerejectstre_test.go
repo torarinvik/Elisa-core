@@ -207,12 +207,12 @@ func TestAnalyzeRejectsTreeIfPatternStoreClauses(t *testing.T) {
 		Int(value: i64)
 
 def bad_open(node: Lua.Expr, slot: i64) -> i64:
-	if node in slot as Lua.Expr.Int(value: value):
+	if node in slot is Lua.Expr.Int(value: value):
 		return value
 	return 0
 
 def bad_view(node: Lua.Expr, slot: i64) -> i64:
-	if node in slot as Lua.Expr.Int(value: value):
+	if node in slot is Lua.Expr.Int(value: value):
 		return value + node.value
 	return 0
 `)

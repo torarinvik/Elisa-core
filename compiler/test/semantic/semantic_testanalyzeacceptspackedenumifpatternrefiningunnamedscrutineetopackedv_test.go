@@ -16,7 +16,7 @@ def score(view_node: packedview[Expr.Int]) -> int:
 	return view_node.span
 
 def fold(node: Expr, store: Expr.Store[Local]) -> int:
-	if node in store as Expr.Int(value):
+	if node in store is Expr.Int(value):
 		return score(node) + value + node.span
 	return 0
 `
@@ -51,7 +51,7 @@ func TestAnalyzeAcceptsMatchOnRefinedPackedViewScrutinee(t *testing.T) {
 	Add(left: Expr, right: Expr)
 
 def fold(node: Expr, store: Expr.Store[Local]) -> int:
-	if node in store as Expr.Int(value: value):
+	if node in store is Expr.Int(value: value):
 		match node in store:
 			Expr.Int(value: inner):
 				return inner + value + node.span
@@ -335,7 +335,7 @@ def walk(owner: Arena) -> int:
 	index: mutable usize = 0
 	while index < frozen.count:
 		node: Expr = frozen[index]
-		if node in frozen as Expr.Int(value: value):
+		if node in frozen is Expr.Int(value: value):
 			total <- total + value + node.span
 		index <- index + 1
 	return total

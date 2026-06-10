@@ -1,19 +1,19 @@
 def json_empty_view() -> sview:
     return sview("", 0, 0)
 def json_ast_is_number_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    if node in store as JsonNode.Num:
+    if node in store is JsonNode.Num:
         return true
     return false
 def json_ast_is_text_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    if node in store as JsonNode.Text:
+    if node in store is JsonNode.Text:
         return true
     return false
 def json_ast_is_array_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    if node in store as JsonNode.Array:
+    if node in store is JsonNode.Array:
         return true
     return false
 def json_ast_is_object_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    if node in store as JsonNode.Object:
+    if node in store is JsonNode.Object:
         return true
     return false
 def json_ast_kind(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNodeKind:
@@ -118,23 +118,23 @@ def json_ast_number_f32_value_with_len(source: u8&, source_len: usize, node: Jso
 def json_ast_number_f32_value(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f32 error[JsonNumberAccessError]:
     return try json_ast_number_f32_value_with_len(source, runtime_strlen(source), node, store)
 def json_node_can_materialize_float(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    if node in store as JsonNode.Num:
+    if node in store is JsonNode.Num:
         return true
     return false
 def json_ast_bool_value(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Bool(value: value):
+    if node in store is JsonNode.Bool(value: value):
         return 1 if value else 0
     return -1
 def json_ast_is_null(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    if node in store as JsonNode.Null:
+    if node in store is JsonNode.Null:
         return true
     return false
 def json_ast_array_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Array(items_ptr: _, item_count: item_count):
+    if node in store is JsonNode.Array(items_ptr: _, item_count: item_count):
         return item_count.i64()
     return -1
 def json_ast_object_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Object(fields_ptr: _, field_count: field_count):
+    if node in store is JsonNode.Object(fields_ptr: _, field_count: field_count):
         return field_count.i64()
     return -1
 def json_ast_array_nth_ref(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode&?:

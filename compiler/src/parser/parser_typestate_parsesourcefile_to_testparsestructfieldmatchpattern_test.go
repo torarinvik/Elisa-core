@@ -524,7 +524,7 @@ func TestParseLegacyNullableRefArraySuffixStillWorks(t *testing.T) {
 	}
 }
 func TestParsePackedIfPatternWithViewAliasBinding(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Lit(value: value):\n        lit: packedview[Expr.Lit] = node\n        return value + lit.span\n    return 0\n")
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store is Expr.Lit(value: value):\n        lit: packedview[Expr.Lit] = node\n        return value + lit.span\n    return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -558,7 +558,7 @@ func TestParsePackedIfPatternWithViewAliasBinding(t *testing.T) {
 	}
 }
 func TestParsePackedIfNestedPayloadPattern(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n    Add(left: Expr, right: Expr)\n\ndef left_value(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Add(Expr.Int(value), rhs):\n        return value\n    return 0\n")
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n    Add(left: Expr, right: Expr)\n\ndef left_value(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store is Expr.Add(Expr.Int(value), rhs):\n        return value\n    return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

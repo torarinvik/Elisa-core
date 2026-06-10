@@ -171,11 +171,10 @@ func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
 			}
 			arms = append(arms, ast.MatchArm{Position: clause.Position, Pattern: &ast.MatchWildcardPattern{Position: clause.Position}, Body: tail})
 			tail = []ast.Stmt{&ast.MatchStmt{
-				Position:                       clause.Position,
-				Value:                          clause.Value,
-				Store:                          clause.Store,
-				Arms:                           arms,
-				DeprecatedIfStorePatternBinder: clause.Store != nil && clause.StoreBinderDeprecated,
+				Position: clause.Position,
+				Value:    clause.Value,
+				Store:    clause.Store,
+				Arms:     arms,
 			}}
 			continue
 		}

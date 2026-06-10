@@ -269,7 +269,7 @@ def fold_if_pattern() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	if node in frozen as Expr.Lit(value: value):
+	if node in frozen is Expr.Lit(value: value):
 		out: int = value + node.span
 		destroy scratch
 		return out
@@ -341,7 +341,7 @@ def fold_view() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	if node in frozen as Expr.Lit(value: value):
+	if node in frozen is Expr.Lit(value: value):
 		out: int = node.value + node.span + value
 		destroy scratch
 		return out
@@ -375,7 +375,7 @@ def fold_view() -> int:
 	source_items: array[int, 3] = [1, 2, 3]
 	node: Expr = new[store] Expr.Block(count: 3u, items: source_items[0u:3u])
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	if node in frozen as Expr.Block:
+	if node in frozen is Expr.Block:
 		out: int = node.items[0u] + node.items[2u]
 		destroy scratch
 		return out
@@ -419,7 +419,7 @@ def walk(owner: Arena) -> int:
 	index: mutable usize = 0u
 	while index < frozen.count:
 		node: Expr = frozen[index]
-		if node in frozen as Expr.Int(value: value):
+		if node in frozen is Expr.Int(value: value):
 			total <- total + value + node.value + node.span
 		index <- index + 1u
 	return total
@@ -463,7 +463,7 @@ def walk(owner: Arena) -> int:
 	chunk: view[Expr] = frozen[1u:frozen.count]
 	if chunk.len > 0u:
 		node: Expr = chunk[0u]
-		if node in frozen as Expr.Int(value: value):
+		if node in frozen is Expr.Int(value: value):
 			return value + node.span
 	return 0
 `

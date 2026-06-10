@@ -1,8 +1,8 @@
 # 80 — Refinement binding unified on `is`
 
-Status: design locked 2026-06-10. Phases A (optional unwrap-bind), B (`in store
-is Pattern`), and C (irrefutable-bind diagnostic) landed; Phase D (migrate the
-`if let` / store-`as` sites and retire both spellings) remains.
+Status: complete 2026-06-10. All four phases landed. `if let` and
+`value in store as Pattern` are hard parser errors; `if EXPR is NAME:` and
+`value in store is Pattern:` are the canonical forms.
 
 ## Goal
 

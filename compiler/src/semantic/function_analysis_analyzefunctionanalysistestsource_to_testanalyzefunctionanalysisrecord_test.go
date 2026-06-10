@@ -124,17 +124,17 @@ func TestAnalyzeVariantAndLetConditionBindings(t *testing.T) {
 
 def score(node: Expr, maybe: i64?, enabled: bool) -> i64:
 	guard enabled else return 0
-	if let value = maybe and node is Expr.Pair(left, right):
+	if maybe is value and node is Expr.Pair(left, right):
 		return value + left + right
 	return 0
 `)
 }
-func TestAnalyzeIfLetConditionBindsNullableReferenceAsNonNull(t *testing.T) {
+func TestAnalyzeIsBindingConditionBindsNullableReferenceAsNonNull(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "if_let_nullable_ref_binding.elisa", `struct Node:
 	value: i64
 
 def read(node: Node&?) -> i64:
-	if let present = node:
+	if node is present:
 		return present.value
 	return 0
 `)

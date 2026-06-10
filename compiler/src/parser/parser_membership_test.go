@@ -266,7 +266,7 @@ func TestParseRejectsRemovedOpenStatementSurface(t *testing.T) {
 }
 
 func TestParseIfStoreBinderRemainsTrailingIn(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    Lit(value: int)\n\ndef keep(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store as Expr.Lit(value: value):\n        return value\n    return 0\n")
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Lit(value: int)\n\ndef keep(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store is Expr.Lit(value: value):\n        return value\n    return 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -275,14 +275,19 @@ func TestParseIfStoreBinderRemainsTrailingIn(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected lowered match stmt, got %T", decl.Body[0])
 	}
-	if !matchStmt.DeprecatedIfStorePatternBinder {
-		t.Fatalf("expected deprecated if-store pattern binder marker, got %#v", matchStmt)
-	}
 	if matchStmt.Store == nil {
 		t.Fatalf("expected if store binder, got %#v", matchStmt)
 	}
 	if _, ok := matchStmt.Value.(*ast.BinaryExpr); ok {
 		t.Fatalf("expected if value to remain plain expr, got %#v", matchStmt.Value)
+	}
+}
+func TestParseIfStoreAsBinderRejected(t *testing.T) {
+	// Use raw string to protect the `as` keyword from migration scripts.
+	src := "packed enum Expr:\n    Lit(value: int)\n\ndef keep(node: Expr, store: Expr.Store[Local]) -> int:\n    if node in store " + "as" + " Expr.Lit(value: value):\n        return value\n    return 0\n"
+	_, errs := parseSourceFile(t, src)
+	if !strings.Contains(strings.Join(errs, "\n"), "`value in store as Pattern` is no longer supported") {
+		t.Fatalf("expected store-as rejection, got: %v", errs)
 	}
 }
 

@@ -55,7 +55,7 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	pool workers(2u):
 		parallel for node in frozen:
-			if node in frozen as Expr.Int(value: value):
+			if node in frozen is Expr.Int(value: value):
 				_ = value + node.span
 	return 0
 `

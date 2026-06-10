@@ -11,11 +11,11 @@ def json_field_items_view(fields_ptr: JsonField&?, field_count: usize) -> view[J
         return json_empty_field_view()
     return DynArrayView(fields_ptr.cast[void&], field_count)
 def json_ast_array_items_view(node: JsonNode, store: JsonNode.Store[Local]) -> view[JsonNode]:
-    if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
+    if node in store is JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
         return json_node_items_view(items_ptr, item_count)
     return json_empty_node_view()
 def json_ast_object_fields_view(node: JsonNode, store: JsonNode.Store[Local]) -> view[JsonField]:
-    if node in store as JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
+    if node in store is JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
         return json_field_items_view(fields_ptr, field_count)
     return json_empty_field_view()
 def json_node_view_ref(items: view[JsonNode], index: usize) -> JsonNode&:
@@ -55,7 +55,7 @@ def json_node_store_reserve(arena: mutable Arena&, store: JsonNode.Store[Local]&
 def json_node_null(store: JsonNode.Store[Local]) -> JsonNode:
     return JsonNode.Null
 def json_node_is_invalid(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    if node in store as JsonNode.Invalid:
+    if node in store is JsonNode.Invalid:
         return true
     return false
 def json_parse_node_result(node: JsonNode, checksum: i64) -> JsonParseNodeResult:

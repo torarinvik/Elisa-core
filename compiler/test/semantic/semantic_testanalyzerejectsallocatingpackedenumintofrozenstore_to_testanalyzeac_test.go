@@ -224,7 +224,7 @@ func TestAnalyzeAcceptsPackedEnumIfPatternBinder(t *testing.T) {
 	Add(left: Expr, right: Expr)
 
 def fold(node: Expr, store: Expr.Store[Local]) -> int:
-	if node in store as Expr.Int(value: value):
+	if node in store is Expr.Int(value: value):
 		return value + node.span
 	else:
 		return 0
@@ -232,29 +232,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
-func TestAnalyzeDeprecatesPackedEnumIfStorePatternBinder(t *testing.T) {
-	src := `packed enum Expr:
-	Int(value: int)
-
-def fold(node: Expr, store: Expr.Store[Local]) -> int:
-	if node in store as Expr.Int(value: value):
-		return value
-	return 0
-`
-	result, errs := parseAndAnalyze(t, "packed_enum_if_store_pattern_binder_deprecated.elisa", src)
-	requireNoErrors(t, errs)
-	deprecations := strings.Join(result.Deprecations(), "\n")
-	if !strings.Contains(deprecations, "`if value in store as Pattern` is deprecated") {
-		t.Fatalf("expected if-store pattern binder deprecation, got:\n%s", deprecations)
-	}
-	if !strings.Contains(deprecations, "match value in store") {
-		t.Fatalf("expected match migration hint, got:\n%s", deprecations)
-	}
-	requireNoWarnings(t, result)
-}
-
-// docs/80 Phase B: the modern `if value in store is Pattern` spelling refines a
-// store entry exactly like the legacy `as` form but carries NO deprecation.
+// docs/80 Phase D: `if value in store is Pattern` is the sole form; `as` is hard-rejected.
 func TestAnalyzeAcceptsPackedEnumIfStorePatternBinderIsForm(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
@@ -279,7 +257,7 @@ func TestAnalyzeAcceptsPackedEnumIfPatternBinderWithElif(t *testing.T) {
 	Add(left: Expr, right: Expr)
 
 def classify(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
-	if node in store as Expr.Int(value: value):
+	if node in store is Expr.Int(value: value):
 		return value + node.span
 	elif flag:
 		return 7
@@ -576,7 +554,7 @@ def score(view_node: packedview[Expr.Int]) -> int:
 	return view_node.value + view_node.span
 
 def fold(node: Expr, store: Expr.Store[Local]) -> int:
-	if node in store as Expr.Int(value: value):
+	if node in store is Expr.Int(value: value):
 		return score(node) + value
 	return 0
 `
