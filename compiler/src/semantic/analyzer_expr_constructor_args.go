@@ -402,13 +402,19 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			// A single error-set param binds to whatever the argument's set carries
 			// beyond the pattern's own concrete tags (`error[R, Timeout]` matched
-			// against `error[IoErr, Timeout]` binds R := IoErr). Patterns with two
-			// or more params cannot split an argument set unambiguously, so they
-			// bind nothing here and surface as "cannot infer" at validation.
+			// against `error[IoErr, Timeout]` binds R := IoErr). Repeat encounters
+			// JOIN (set union) instead of pinning to the first one, so inference is
+			// argument-order independent: R is "everything any matched site may
+			// raise", which is exactly what the combinator propagates. Patterns
+			// with two or more params cannot split an argument set unambiguously,
+			// so they bind nothing here and surface as "cannot infer" at validation.
 			if p.Errors != nil && len(p.Errors.Params) == 1 && act.Errors != nil {
 				name := p.Errors.Params[0]
-				if _, exists := bindings[name]; !exists {
-					bindings[name] = SubtractErrorTags(act.Errors, p.Errors)
+				contribution := SubtractErrorTags(act.Errors, p.Errors)
+				if existing, bound := bindings[name].(*ErrorSetType); bound {
+					bindings[name] = UnionErrorSets(existing, contribution)
+				} else if _, exists := bindings[name]; !exists {
+					bindings[name] = contribution
 				}
 			}
 			return

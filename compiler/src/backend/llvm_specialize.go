@@ -381,8 +381,11 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 			collectSpecializationBindings(p.Value, a.Value, bindings)
 			if p.Errors != nil && len(p.Errors.Params) == 1 && a.Errors != nil {
 				name := p.Errors.Params[0]
-				if _, ok := bindings[name]; !ok {
-					bindings[name] = semantic.SubtractErrorTags(a.Errors, p.Errors)
+				contribution := semantic.SubtractErrorTags(a.Errors, p.Errors)
+				if existing, bound := bindings[name].(*semantic.ErrorSetType); bound {
+					bindings[name] = semantic.UnionErrorSets(existing, contribution)
+				} else if _, ok := bindings[name]; !ok {
+					bindings[name] = contribution
 				}
 			}
 		} else {

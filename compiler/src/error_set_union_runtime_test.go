@@ -13,7 +13,8 @@ import (
 // union its error-set param with its OWN failure mode (`error[R, Timeout]`,
 // the retry/give-up shape), re-raise the opaque error via the `error e:`
 // catch-all, and two independent params can union in a return (`error[R, S]`,
-// the pair shape). All monomorphize and round-trip ok/error paths at runtime.
+// the pair shape), and binding joins across arguments so a narrower-set
+// callback may come first. All monomorphize and round-trip at runtime.
 func TestRunCLIErrorSetParamUnions(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
@@ -90,6 +91,21 @@ def runPairOk() -> i64:
         NetErr.Down:
             return -2
 
+def bothOf[errorset R](f: func() -> i64 error[R], g: func() -> i64 error[R]) -> i64 error[R]:
+    return (try f()) + (try g())
+
+def bigFail() -> i64 error[IoErr, NetErr]:
+    raise NetErr.Down
+
+def runJoinNarrowFirst() -> i64:
+    catch bothOf(ioOk, bigFail):
+        n:
+            return n
+        IoErr.Bad:
+            return -1
+        NetErr.Down:
+            return 400
+
 def runPairFail() -> i64:
     catch pair(ioFail, netOk):
         n:
@@ -112,6 +128,8 @@ def error_set_union_test() -> void:
             panic("expected 16")
         if runPairFail() != 300:
             panic("expected IoErr.Bad through pair -> 300")
+        if runJoinNarrowFirst() != 400:
+            panic("expected joined narrow-first NetErr.Down -> 400")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write error-set-union fixture: %v", err)

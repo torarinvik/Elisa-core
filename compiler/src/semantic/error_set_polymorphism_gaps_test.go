@@ -126,10 +126,11 @@ def giveUp[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 	}
 }
 
-// GAP 2 (join-at-bind): inference is order-dependent. R binds to the FIRST
-// argument's set; a later argument with a SUBSET is accepted, but the same
-// call with the arguments swapped is rejected (no least-upper-bound join).
-func TestGapErrorSetParamBindingOrderDependent(t *testing.T) {
+// CLOSED GAP 2 (join-at-bind): inference is argument-order independent. R
+// joins (set union) across every site it binds from — expected-return context
+// and each argument — so `both(small, big)` and `both(big, small)` both bind
+// R := IoErr ∪ NetErr regardless of whether the call site declares a return.
+func TestErrorSetParamBindingOrderIndependent(t *testing.T) {
 	const prelude = `
 error IoErr:
     Bad
@@ -145,45 +146,17 @@ def both[errorset R](f: func() -> i64 error[R], g: func() -> i64 error[R]) -> i6
     b: i64 = try g()
     return a + b
 `
-	// With a declared return union at the call site, R binds from the EXPECTED
-	// type first and both argument orders work — that part is fine today.
-	for i, order := range []string{"both(big, small)", "both(small, big)"} {
-		ctx := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_order_ctx.elisa", prelude+`
-def use`+string(rune('a'+i))+`() -> i64 error[IoErr, NetErr]:
-    return `+order+`
-`)
-		if all := allDiagnostics(ctx); strings.TrimSpace(all) != "" {
-			t.Fatalf("declared-return context should bind R for %s, got:\n%s", order, all)
+	uses := []string{
+		"def usea() -> i64 error[IoErr, NetErr]:\n    return both(big, small)",
+		"def useb() -> i64 error[IoErr, NetErr]:\n    return both(small, big)",
+		"def usec() -> i64:\n    catch both(big, small):\n        n:\n            return n\n        IoErr.Bad:\n            return 1\n        NetErr.Down:\n            return 2",
+		"def used() -> i64:\n    catch both(small, big):\n        n:\n            return n\n        IoErr.Bad:\n            return 1\n        NetErr.Down:\n            return 2",
+	}
+	for i, use := range uses {
+		result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "join_order.elisa", prelude+use+"\n")
+		if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+			t.Fatalf("case %d: argument order must not change typability, got:\n%s", i, all)
 		}
-	}
-	// WITHOUT that context (catch at the call site), R pins to argument 1:
-	// wide-first accepts (arg 2 is a subset), narrow-first rejects arg 2.
-	wide := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_order_wide_first.elisa", prelude+`
-def use() -> i64:
-    catch both(big, small):
-        n:
-            return n
-        IoErr.Bad:
-            return 1
-        NetErr.Down:
-            return 2
-`)
-	if all := allDiagnostics(wide); strings.TrimSpace(all) != "" {
-		t.Fatalf("wide-set-first should bind R and accept the subset second arg, got:\n%s", all)
-	}
-	narrow := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_order_narrow_first.elisa", prelude+`
-def use() -> i64:
-    catch both(small, big):
-        n:
-            return n
-        IoErr.Bad:
-            return 1
-        NetErr.Down:
-            return 2
-`)
-	all := allDiagnostics(narrow)
-	if !strings.Contains(all, "argument 2") {
-		t.Fatalf("gap moved: narrow-set-first no longer rejects argument 2 (join implemented?). got:\n%s", all)
 	}
 }
 
