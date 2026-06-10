@@ -535,6 +535,9 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, allocArgs, "packed.variant_sparse.alloc")
 		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
 		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.alloc.index"))
+		if err := ops.s.emitHandleOverflowGuard(enumType, indexValue); err != nil {
+			return nil, nil, nil, err
+		}
 		enumValue, err := ops.s.coerceValue(indexValue, ops.s.g.result.NamedTypes["u32"], enumType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -573,6 +576,9 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, stateValue}, "packed.aos.alloc")
 		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.aos.alloc.ptr"))
 		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.aos.alloc.index"))
+		if err := ops.s.emitHandleOverflowGuard(enumType, indexValue); err != nil {
+			return nil, nil, nil, err
+		}
 		enumValue, err := ops.s.coerceValue(indexValue, ops.s.g.result.NamedTypes["u32"], enumType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -582,6 +588,34 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		return nil, nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
 }
+
+// emitHandleOverflowGuard is the docs/76/82 loud-overflow check for narrowed handles: when the
+// root's `layout(handle: uN)` width is below the runtime's native u32 index, an allocation whose
+// index reaches the width's null sentinel would silently truncate into a wrong (or null) handle —
+// so it traps at the allocation site instead, the same discipline as reserve_commit exhaustion.
+// Default-width (u32) and wider stores emit nothing: the runtime index can never exceed them.
+func (s *functionState) emitHandleOverflowGuard(enumType *semantic.EnumType, indexValue C.LLVMValueRef) error {
+	if enumType == nil {
+		return nil
+	}
+	root := enumType.Root()
+	bits := root.ResolvedIndexWidthBits()
+	if bits >= 32 {
+		return nil
+	}
+	sentinel := C.LLVMConstInt(C.LLVMTypeOf(indexValue), C.ulonglong(root.NullSentinelValue()), 0)
+	fits := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, sentinel, cStringFree("handle.fits"))
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("handle.ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("handle.overflow"))
+	C.LLVMBuildCondBr(s.builder, fits, okBB, failBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if err := s.emitTrapUnreachable("handle.overflow.trap"); err != nil {
+		return err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	return nil
+}
+
 func (ops *packedStoreOps) recordTag(tagValue C.LLVMValueRef, _ string) error {
 	arenaValue, err := ops.arenaValue("packed.arena")
 	if err != nil {

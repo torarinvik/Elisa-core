@@ -119,6 +119,29 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.Parent != "" {
 			header += " is " + n.Parent // sealed refinement (docs/77)
 		}
+		if n.LayoutSet {
+			header += " layout"
+			switch n.Layout {
+			case ast.StructLayoutAOS:
+				header += " aos"
+			case ast.StructLayoutSOA:
+				header += " soa"
+			case ast.StructLayoutC:
+				header += " c"
+			case ast.StructLayoutPacked:
+				header += " packed"
+			}
+			opts := make([]string, 0, 2)
+			if n.LayoutSparse {
+				opts = append(opts, "sparse")
+			}
+			if n.IndexWidth != "" {
+				opts = append(opts, "handle: "+n.IndexWidth) // canonical key (docs/82); `index:` is the legacy alias
+			}
+			if len(opts) > 0 {
+				header += "(" + strings.Join(opts, ", ") + ")"
+			}
+		}
 		header += ":"
 		f.writeLine(level, header)
 		if len(n.Common) > 0 {

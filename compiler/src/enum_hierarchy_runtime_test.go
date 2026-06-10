@@ -359,6 +359,124 @@ def bt() -> void:
 `)
 }
 
+// docs/82: `layout(handle: u16)` narrows the opaque index handle to 2 bytes per edge. The
+// recursive enum must build and traverse correctly at the narrow width (handle values stay
+// below the u16 null sentinel for this tree size).
+func TestRecursiveEnumNarrowHandleU16(t *testing.T) {
+	runEnumHierarchyProgram(t, "handle_u16.elisa", `
+enum Tree layout(handle: u16):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+
+def make(depth: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Tree.Leaf(value: 1)
+        return Tree.Node(left: make(depth - 1), right: make(depth - 1))
+
+def total(t: Tree) -> i64:
+    match t:
+        Tree.Node(left: l, right: r):
+            return total(l) + total(r)
+        Tree.Leaf(value: v):
+            return v
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            root: Tree = make(8)
+            if total(root) != 256:
+                panic("u16-handle tree built or traversed wrong")
+`)
+}
+
+// docs/82: the narrow handle composes with hierarchies — the width is a ROOT-level fact shared
+// by every sub-category (one store, one shape), and category range tests work unchanged.
+func TestHierarchyNarrowHandleU16(t *testing.T) {
+	runEnumHierarchyProgram(t, "hier_handle_u16.elisa", `
+enum Node layout(handle: u16): pass
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+enum Stmt is Node:
+    Nop
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Node = new[auto] Expr.Lit(value: 5)
+            b: Node = new[auto] Expr.Lit(value: 7)
+            root: Node = new[auto] Expr.Add(left: a, right: b)
+            if not (root is Expr):
+                panic("category test must hold at u16 width")
+            sum: mutable i64 = 0
+            match root:
+                Expr.Add(left: l, right: r):
+                    match l:
+                        Expr.Lit(value: lv):
+                            sum <- sum + lv
+                        _:
+                            pass
+                    match r:
+                        Expr.Lit(value: rv):
+                            sum <- sum + rv
+                        _:
+                            pass
+                _:
+                    pass
+            if sum != 12:
+                panic("u16-handle hierarchy fold produced wrong sum")
+`)
+}
+
+// docs/82: overflowing a narrowed handle is a LOUD trap at the allocation site, never a silent
+// wrap — a u8 store caps at 255 nodes (index 255 is the null sentinel), so allocating 300 leaves
+// must abort the program.
+func TestNarrowHandleOverflowTraps(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := `
+enum Chain layout(handle: u8):
+    Link(next: Chain)
+    End
+
+def chain(depth: i64) -> Chain:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Chain.End
+        return Chain.Link(next: chain(depth - 1))
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            c: Chain = chain(300)
+`
+	full := "include \"" + std + "\"\n" + src
+	dir := t.TempDir()
+	path := filepath.Join(dir, "handle_overflow.elisa")
+	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	// `-emit test` builds AND runs the @test functions; the overflow trap is the expected
+	// outcome, so the run must FAIL with a signal-trap panic (never exit cleanly = silent wrap).
+	var stdout, stderr bytes.Buffer
+	code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("u8-handle overflow must trap, but the test run exited cleanly:\nstdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "PANIC") || !strings.Contains(stdout.String(), "trap") {
+		t.Fatalf("expected a signal-trap panic from the handle-overflow guard, got (exit %d):\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+}
+
 // Payload hierarchy: leaves carry data; the root's record is the union of all leaves' payloads.
 func TestValueEnumHierarchyWithPayload(t *testing.T) {
 	runEnumHierarchyProgram(t, "shape.elisa", `

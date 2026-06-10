@@ -136,12 +136,26 @@ Plug points in docs/81 Phase 3:
 
 ## Implementation order
 
-1. `handle:` option parsing on the `layout` suffix (alias `index:`, deprecation
-   notice); mode-less `layout(...)` form. `HandleKind` on `EnumType` (root-level),
-   validation: `soa + ptr` rejected, hierarchy children inherit the root's kind.
-2. Integer widths end-to-end on the AoS path (docs/76 Phase 2's deferred codegen):
-   `emitHandleToAddr`/`nullSentinel` as the chokepoints, replacing hard-coded u32.
+1. **DONE (2026-06-10).** `handle:` option parsing on the `layout` suffix (`index:` kept
+   as silent alias for now); mode-less `layout(handle: uN)` form (keeps the default
+   mode — `validateEnumLayout` accepts `StructLayoutDefault` with a width); formatter
+   renders the suffix (it previously dropped `layout` on enums entirely); `handle: ptr`
+   is a parse error naming this doc.
+2. **DONE (2026-06-10).** Integer widths end-to-end: `lowerPackedEnumType` derives the
+   handle's LLVM type from `Root().ResolvedIndexWidthBits()` (root-level fact — the
+   whole hierarchy shares it); `coerceValue` gains the integer↔handle boundary resize
+   (zext/trunc, no-op at default width), which the existing store ops (`aosRecordPtr`,
+   `storeTagAt`, payload reads) already route through; `emitHandleOverflowGuard` traps
+   at the allocation site when a narrowed store's index reaches the width's null
+   sentinel (u8 chain >254 nodes verified to trap, never wrap). Default-u32 IR is
+   unchanged (resize no-ops, guard skipped at ≥32 bits).
+   *Honest scoping note:* the dial currently sets the handle's VALUE/ABI width —
+   function signatures, container elements (`darray[Tree]` at u16 = 2 B/elem), struct
+   fields. In-record payload slots remain word-sized (the AoS payload is a uintptr-word
+   array), so the per-edge memory win inside node records needs the tight-payload
+   layout work, tracked separately.
 3. `ptr` kind: construction returns the record address; consumers skip store
    threading; freeze rejection; SoA rejection.
 4. `-Wperf`/memory lint pointing at `u16` for bounded stores stays the docs/76 Phase 6
-   tail.
+   tail. Free null sentinel for optional children (`Tree?` niche) also remains TODO —
+   optionals still use the generic carrier.

@@ -335,9 +335,46 @@ func (s *functionState) emitDebugPointerDerefGuard(ptr C.LLVMValueRef) error {
 	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
 	return nil
 }
+
+// resizeUnsignedInt resizes an integer value to the target integer type (zext when widening,
+// trunc when narrowing, no-op at equal width) — the docs/82 handle-boundary cast.
+func (s *functionState) resizeUnsignedInt(value C.LLVMValueRef, target C.LLVMTypeRef, name string) C.LLVMValueRef {
+	fromBits := C.LLVMGetIntTypeWidth(C.LLVMTypeOf(value))
+	toBits := C.LLVMGetIntTypeWidth(target)
+	switch {
+	case fromBits < toBits:
+		return C.LLVMBuildZExt(s.builder, value, target, cStringFree(name))
+	case fromBits > toBits:
+		return C.LLVMBuildTrunc(s.builder, value, target, cStringFree(name))
+	default:
+		return value
+	}
+}
+
 func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, expected semantic.Type) (C.LLVMValueRef, error) {
 	if expected == nil || actual == nil || semantic.SameType(actual, expected) {
 		return value, nil
+	}
+	// docs/82: a packed enum's opaque handle may be narrower/wider than the u32 the store runtime
+	// traffics in (`layout(handle: uN)`). Coerce integer ↔ handle at the boundary with an
+	// unsigned int resize; same-width is a no-op.
+	if value != nil && C.LLVMGetTypeKind(C.LLVMTypeOf(value)) == C.LLVMIntegerTypeKind {
+		if expectedEnum, ok := semantic.StripAggregateStateType(expected).(*semantic.EnumType); ok && expectedEnum != nil && expectedEnum.Packed && isNumericType(actual) {
+			handleType, err := s.g.lowerType(expectedEnum)
+			if err != nil {
+				return nil, err
+			}
+			return s.resizeUnsignedInt(value, handleType, "handle.resize"), nil
+		}
+		if actualEnum, ok := semantic.StripAggregateStateType(actual).(*semantic.EnumType); ok && actualEnum != nil && actualEnum.Packed && isNumericType(expected) && !isFloatType(expected) {
+			expectedLLVM, err := s.g.lowerType(expected)
+			if err != nil {
+				return nil, err
+			}
+			if C.LLVMGetTypeKind(expectedLLVM) == C.LLVMIntegerTypeKind {
+				return s.resizeUnsignedInt(value, expectedLLVM, "handle.resize"), nil
+			}
+		}
 	}
 	if actualRef, ok := actual.(*semantic.RefType); ok && actualRef != nil {
 		if _, expectedIsRef := expected.(*semantic.RefType); !expectedIsRef && (isNumericType(actualRef.Elem) || semantic.IsBoolType(actualRef.Elem)) {

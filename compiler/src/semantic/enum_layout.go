@@ -171,7 +171,10 @@ func (a *Analyzer) validateEnumLayout(enumDecl *ast.EnumDecl) {
 	if enumDecl.LayoutSparse && enumDecl.Layout != ast.StructLayoutSOA {
 		a.errorf(enumDecl.Pos(), "enum %q: `(sparse)` requires `layout soa` (variant-sparse payload columns)", enumDecl.Name)
 	}
-	if enumDecl.IndexWidth != "" && enumDecl.Layout != ast.StructLayoutSOA && enumDecl.Layout != ast.StructLayoutAOS {
-		a.errorf(enumDecl.Pos(), "enum %q: `(index: %s)` requires `layout soa` or `layout aos`", enumDecl.Name, enumDecl.IndexWidth)
+	// docs/82: the handle width is valid with `aos`, `soa`, or the mode-less `layout(handle: uN)`
+	// form (StructLayoutDefault — keeps the compiler's default mode). Only the struct-FFI modes
+	// (already rejected above) can't carry it.
+	if enumDecl.IndexWidth != "" && enumDecl.Layout != ast.StructLayoutSOA && enumDecl.Layout != ast.StructLayoutAOS && enumDecl.Layout != ast.StructLayoutDefault {
+		a.errorf(enumDecl.Pos(), "enum %q: `(handle: %s)` requires `layout soa`, `layout aos`, or the mode-less `layout(handle: %s)` form", enumDecl.Name, enumDecl.IndexWidth, enumDecl.IndexWidth)
 	}
 }

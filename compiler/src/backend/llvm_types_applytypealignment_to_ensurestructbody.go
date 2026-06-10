@@ -327,7 +327,18 @@ func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVM
 	}
 	switch g.packedModeForEnum(enumType) {
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
-		return g.lowerBuiltin("u32")
+		// docs/82: the opaque handle's width is the ROOT's `layout(handle: uN)` dial (a sealed
+		// hierarchy shares one store and one handle shape; default u32).
+		switch enumType.Root().ResolvedIndexWidthBits() {
+		case 8:
+			return g.lowerBuiltin("u8")
+		case 16:
+			return g.lowerBuiltin("u16")
+		case 64:
+			return g.lowerBuiltin("u64")
+		default:
+			return g.lowerBuiltin("u32")
+		}
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
 	}
